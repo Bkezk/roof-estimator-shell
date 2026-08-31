@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { PlusCircle } from "lucide-react";
 
@@ -24,21 +24,21 @@ export const Route = createFileRoute("/bids")({
       },
     ],
   }),
-  loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData({
-      queryKey: ["bids"],
-      queryFn: listBids,
-    });
-  },
+  // No route loader: it would run during SSR before the browser can attach the
+  // auth token, and listBids requires a signed-in user. Fetch client-side only.
   component: BidsPage,
 });
 
 function BidsPage() {
   const listBidsFn = useServerFn(listBids);
-  const { data: bids } = useSuspenseQuery({
+  const { data: bids, isLoading } = useQuery({
     queryKey: ["bids"],
     queryFn: listBidsFn,
   });
+
+  if (isLoading || !bids) {
+    return <p className="text-sm text-muted-foreground">Loading bids…</p>;
+  }
 
   return (
     <div className="space-y-6">

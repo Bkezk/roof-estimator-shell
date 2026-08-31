@@ -1,7 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type { Database } from "@/integrations/supabase/types";
 
 export type Role = "admin" | "estimator";
 export interface UserProfile {
@@ -12,16 +14,20 @@ export interface UserProfile {
   created_at?: string;
 }
 
-// supabaseAdmin bypasses RLS and must never be imported at module top-level in a
-// file that ships to the client bundle — load it inside the handler.
+// supabaseAdmin bypasses RLS and requires SUPABASE_SERVICE_ROLE_KEY; it is only
+// needed for the auth.admin API (createUser/deleteUser). Everything else runs
+// under RLS through the caller's own client so it works without the key.
+// Must never be imported at module top-level in a file that ships to the
+// client bundle — load it inside the handler.
 async function admin() {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   return supabaseAdmin;
 }
 
-async function assertAdmin(userId: string) {
-  const supabaseAdmin = await admin();
-  const { data, error } = await supabaseAdmin
+// RLS lets every user read their own profiles row, so the caller's client is
+// enough to verify the admin role.
+async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
+  const { data, error } = await supabase
     .from("profiles")
     .select("role")
     .eq("id", userId)
@@ -36,8 +42,7 @@ async function assertAdmin(userId: string) {
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<UserProfile> => {
-    const supabaseAdmin = await admin();
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await context.supabase
       .from("profiles")
       .select("id, email, full_name, role, created_at")
       .eq("id", context.userId)
@@ -49,9 +54,8 @@ export const getMyProfile = createServerFn({ method: "GET" })
 export const listUsers = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<UserProfile[]> => {
-    await assertAdmin(context.userId);
-    const supabaseAdmin = await admin();
-    const { data, error } = await supabaseAdmin
+    await assertAdmin(context.supabase, context.userId);
+    const { data, error } = await context.supabase
       .from("profiles")
       .select("id, email, full_name, role, created_at")
       .order("created_at", { ascending: true });
@@ -72,7 +76,7 @@ export const createUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data) => createUserSchema.parse(data))
   .handler(async ({ data, context }): Promise<UserProfile> => {
-    await assertAdmin(context.userId);
+    await assertAdmin(context.supabase, context.userId);
     const supabaseAdmin = await admin();
 
     const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
@@ -113,16 +117,16 @@ export const updateUserRole = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data) => updateRoleSchema.parse(data))
   .handler(async ({ data, context }): Promise<UserProfile> => {
-    await assertAdmin(context.userId);
-    const supabaseAdmin = await admin();
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
 
     // Never allow demoting the last remaining admin.
     if (data.role !== "admin") {
-      const { count } = await supabaseAdmin
+      const { count } = await sb
         .from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("role", "admin");
-      const { data: target } = await supabaseAdmin
+      const { data: target } = await sb
         .from("profiles")
         .select("role")
         .eq("id", data.id)
@@ -132,7 +136,7 @@ export const updateUserRole = createServerFn({ method: "POST" })
       }
     }
 
-    const { data: profile, error } = await supabaseAdmin
+    const { data: profile, error } = await sb
       .from("profiles")
       .update({ role: data.role })
       .eq("id", data.id)
@@ -148,24 +152,24 @@ export const deleteUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data) => deleteUserSchema.parse(data))
   .handler(async ({ data, context }): Promise<{ id: string }> => {
-    await assertAdmin(context.userId);
+    await assertAdmin(context.supabase, context.userId);
     if (data.id === context.userId) {
       throw new Error("You cannot delete your own account");
     }
-    const supabaseAdmin = await admin();
-    const { data: target } = await supabaseAdmin
+    const { data: target } = await context.supabase
       .from("profiles")
       .select("role")
       .eq("id", data.id)
       .single();
     if (target?.role === "admin") {
-      const { count } = await supabaseAdmin
+      const { count } = await context.supabase
         .from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("role", "admin");
       if ((count ?? 0) <= 1) throw new Error("Cannot delete the last admin");
     }
     // FK cascade removes the profile row.
+    const supabaseAdmin = await admin();
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
     if (error) throw new Error(error.message);
     return { id: data.id };
