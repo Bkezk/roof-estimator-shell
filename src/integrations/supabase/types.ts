@@ -34,6 +34,7 @@ export type Database = {
       };
       profiles: {
         Row: {
+          commission_pct: number;
           created_at: string;
           email: string;
           full_name: string | null;
@@ -42,6 +43,7 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          commission_pct?: number;
           created_at?: string;
           email: string;
           full_name?: string | null;
@@ -50,12 +52,166 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          commission_pct?: number;
           created_at?: string;
           email?: string;
           full_name?: string | null;
           id?: string;
           role?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      company_settings: {
+        Row: {
+          address: string | null;
+          city: string | null;
+          company_name: string | null;
+          dl_account: string | null;
+          hours_per_man_day: number;
+          id: number;
+          labor_display: string;
+          master_elite: boolean;
+          only_tax_material: boolean;
+          phone: string | null;
+          sales_tax_rate: number;
+          shipping_method: string;
+          shipping_percent: number;
+          state: string | null;
+          updated_at: string;
+          zip: string | null;
+        };
+        Insert: {
+          address?: string | null;
+          city?: string | null;
+          company_name?: string | null;
+          dl_account?: string | null;
+          hours_per_man_day?: number;
+          id?: number;
+          labor_display?: string;
+          master_elite?: boolean;
+          only_tax_material?: boolean;
+          phone?: string | null;
+          sales_tax_rate?: number;
+          shipping_method?: string;
+          shipping_percent?: number;
+          state?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Update: {
+          address?: string | null;
+          city?: string | null;
+          company_name?: string | null;
+          dl_account?: string | null;
+          hours_per_man_day?: number;
+          id?: number;
+          labor_display?: string;
+          master_elite?: boolean;
+          only_tax_material?: boolean;
+          phone?: string | null;
+          sales_tax_rate?: number;
+          shipping_method?: string;
+          shipping_percent?: number;
+          state?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Relationships: [];
+      };
+      shipping_steps: {
+        Row: { id: string; material_threshold: number; shipping_cost: number; sort: number };
+        Insert: { id?: string; material_threshold: number; shipping_cost?: number; sort?: number };
+        Update: { id?: string; material_threshold?: number; shipping_cost?: number; sort?: number };
+        Relationships: [];
+      };
+      markup_options: {
+        Row: {
+          created_at: string;
+          hourly_rate: number;
+          id: string;
+          include_commission: boolean;
+          include_per_diem: boolean;
+          is_default: boolean;
+          markup_amount: number;
+          markup_type: string;
+          name: string;
+          sort: number;
+        };
+        Insert: {
+          created_at?: string;
+          hourly_rate?: number;
+          id?: string;
+          include_commission?: boolean;
+          include_per_diem?: boolean;
+          is_default?: boolean;
+          markup_amount?: number;
+          markup_type?: string;
+          name: string;
+          sort?: number;
+        };
+        Update: {
+          created_at?: string;
+          hourly_rate?: number;
+          id?: string;
+          include_commission?: boolean;
+          include_per_diem?: boolean;
+          is_default?: boolean;
+          markup_amount?: number;
+          markup_type?: string;
+          name?: string;
+          sort?: number;
+        };
+        Relationships: [];
+      };
+      warranties: {
+        Row: {
+          id: string;
+          name: string;
+          non_master_elite_surcharge: number;
+          price_per_sqft: number;
+          sort: number;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          non_master_elite_surcharge?: number;
+          price_per_sqft?: number;
+          sort?: number;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          non_master_elite_surcharge?: number;
+          price_per_sqft?: number;
+          sort?: number;
+        };
+        Relationships: [];
+      };
+      high_wind_upcharges: {
+        Row: {
+          adhered_per_sqft: number;
+          id: string;
+          mech_per_sqft: number;
+          sort: number;
+          term_years: number;
+          wind_band: string;
+        };
+        Insert: {
+          adhered_per_sqft?: number;
+          id?: string;
+          mech_per_sqft?: number;
+          sort?: number;
+          term_years: number;
+          wind_band: string;
+        };
+        Update: {
+          adhered_per_sqft?: number;
+          id?: string;
+          mech_per_sqft?: number;
+          sort?: number;
+          term_years?: number;
+          wind_band?: string;
         };
         Relationships: [];
       };
