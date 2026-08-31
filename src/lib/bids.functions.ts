@@ -38,7 +38,7 @@ const createBidSchema = z.object({
 });
 
 export const createBid = createServerFn({ method: "POST" })
-  .inputValidator((data) => createBidSchema.parse(data))
+  .validator((data) => createBidSchema.parse(data))
   .handler(async ({ data }) => {
     const supabase = getSupabase();
     const { data: bid, error } = await supabase
