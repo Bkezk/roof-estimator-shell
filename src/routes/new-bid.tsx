@@ -42,7 +42,7 @@ function NewBidPage() {
 
     setIsSubmitting(true);
     try {
-      await createBidFn({ name: trimmed });
+      await createBidFn({ data: { name: trimmed } });
       queryClient.invalidateQueries({ queryKey: ["bids"] });
       toast.success("Bid created");
       navigate({ to: "/bids" });
