@@ -11,12 +11,8 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
-import { AppSidebar } from "@/components/app-sidebar";
-import {
-  SidebarProvider,
-  SidebarTrigger,
-  SidebarInset,
-} from "@/components/ui/sidebar";
+import { AuthProvider } from "@/lib/auth-context";
+import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
 
 function NotFoundComponent() {
@@ -24,9 +20,7 @@ function NotFoundComponent() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
-        <h2 className="mt-4 text-xl font-semibold text-foreground">
-          Page not found
-        </h2>
+        <h2 className="mt-4 text-xl font-semibold text-foreground">Page not found</h2>
         <p className="mt-2 text-sm text-muted-foreground">
           The page you're looking for doesn't exist or has been moved.
         </p>
@@ -57,8 +51,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
           This page didn't load
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end. You can try refreshing or head back
-          home.
+          Something went wrong on our end. You can try refreshing or head back home.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -90,15 +83,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Duro-Last Estimator" },
       {
         name: "description",
-        content:
-          "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
+        content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
       { name: "author", content: "Lovable" },
       { property: "og:title", content: "Duro-Last Estimator" },
       {
         property: "og:description",
-        content:
-          "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
+        content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -137,21 +128,12 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SidebarProvider>
-        <div className="flex min-h-svh w-full">
-          <AppSidebar />
-          <div className="flex flex-1 flex-col">
-            <header className="flex h-14 items-center gap-3 border-b px-4">
-              <SidebarTrigger />
-              <span className="font-semibold">Duro-Last Estimator</span>
-            </header>
-            <SidebarInset className="p-6">
-              <Outlet />
-            </SidebarInset>
-          </div>
-        </div>
-        <Toaster />
-      </SidebarProvider>
+      <AuthProvider>
+        <AuthGate>
+          <Outlet />
+        </AuthGate>
+      </AuthProvider>
+      <Toaster />
     </QueryClientProvider>
   );
 }
