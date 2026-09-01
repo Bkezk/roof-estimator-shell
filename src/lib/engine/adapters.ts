@@ -631,6 +631,57 @@ export function curbLaborHours(i: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Labor templates (per-category % adjustments; 0 = use default = 100)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RawLaborTemplate {
+  id: string;
+  name: string;
+  sort?: number;
+}
+export interface RawLaborTemplateAdjustment {
+  template_id: string;
+  area: string;
+  value: number | string;
+  sort?: number;
+}
+
+export interface LaborTemplates {
+  /** Template names in sort order. */
+  names: string[];
+  /** byName[template][area] = stored value (0 = use-default sentinel ≡ 100). */
+  byName: Record<string, Record<string, number>>;
+}
+
+export function buildLaborTemplates(
+  templates: RawLaborTemplate[],
+  adjustments: RawLaborTemplateAdjustment[],
+): LaborTemplates {
+  const names: string[] = [];
+  const byId: Record<string, string> = {};
+  const byName: LaborTemplates["byName"] = {};
+  for (const tpl of [...templates].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))) {
+    names.push(tpl.name);
+    byId[tpl.id] = tpl.name;
+    byName[tpl.name] = {};
+  }
+  for (const a of adjustments) {
+    const name = byId[a.template_id];
+    if (name) byName[name]![a.area] = Number(a.value);
+  }
+  return { names, byName };
+}
+
+/** Template factor for one area: 0 (or missing) is the use-default sentinel ≡ ×1; else value/100. */
+export function laborTemplateFactor(
+  areas: Record<string, number> | undefined,
+  area: string,
+): number {
+  const v = areas?.[area];
+  return v === undefined || v === 0 ? 1 : v / 100;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Whole-catalog assembly (pure) — used by the Supabase server fn
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -778,6 +829,8 @@ export interface RawAdminData {
   underlaymentLayout?: RawUnderlaymentLayoutData | null;
   adhesiveTimes?: RawAdhesiveTimesData | null;
   adhesivesScreen?: AdhesivesScreenData | null;
+  laborTemplateRows?: RawLaborTemplate[] | null;
+  laborTemplateAdjustments?: RawLaborTemplateAdjustment[] | null;
 }
 
 export interface EngineSettings {
@@ -815,6 +868,8 @@ export interface EngineAdminData {
   adhesiveTimes?: AdhesiveTimesTables;
   /** Adhesive product name → price per unit (absent if the Adhesives screen wasn't fetched). */
   adhesivePrices?: Record<string, number>;
+  /** Per-category labor templates (absent if labor_templates wasn't fetched). */
+  laborTemplates?: LaborTemplates;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -857,6 +912,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     : undefined;
   const adhesiveTimes = raw.adhesiveTimes ? buildAdhesiveTimes(raw.adhesiveTimes) : undefined;
   const adhesivePrices = raw.adhesivesScreen ? buildAdhesivePrices(raw.adhesivesScreen) : undefined;
+  const laborTemplates = raw.laborTemplateRows?.length
+    ? buildLaborTemplates(raw.laborTemplateRows, raw.laborTemplateAdjustments ?? [])
+    : undefined;
 
   return {
     deckOrder,
@@ -873,5 +931,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(underlaymentLabor ? { underlaymentLabor } : {}),
     ...(adhesiveTimes ? { adhesiveTimes } : {}),
     ...(adhesivePrices ? { adhesivePrices } : {}),
+    ...(laborTemplates ? { laborTemplates } : {}),
   };
 }

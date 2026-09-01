@@ -24,6 +24,8 @@ import {
   underlaymentAdhesive,
   buildAdhesivePrices,
   UNDERLAYMENT_DECK_BY_LABOR_DECK,
+  buildLaborTemplates,
+  laborTemplateFactor,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -757,5 +759,22 @@ describe("underlayment labor (Layout & Mechanical + Adhesive Times)", () => {
     });
     expect(prices["Duro-Grip Adhesive(CR-20)"]).toBe(899);
     expect(prices["Millenium One Step"]).toBe(279);
+  });
+});
+
+describe("buildLaborTemplates / laborTemplateFactor", () => {
+  it("keys areas by template name; 0 (or missing) is the use-default sentinel ≡ ×1", () => {
+    const t = buildLaborTemplates(
+      [{ id: "t1", name: "Standard", sort: 0 }],
+      [
+        { template_id: "t1", area: "Roof Section Labor", value: "0", sort: 0 },
+        { template_id: "t1", area: "Parapets Labor", value: "110", sort: 3 },
+      ],
+    );
+    expect(t.names).toEqual(["Standard"]);
+    expect(laborTemplateFactor(t.byName["Standard"], "Roof Section Labor")).toBe(1); // 0 sentinel
+    expect(laborTemplateFactor(t.byName["Standard"], "Parapets Labor")).toBeCloseTo(1.1, 6);
+    expect(laborTemplateFactor(t.byName["Standard"], "Missing Area")).toBe(1);
+    expect(laborTemplateFactor(undefined, "Anything")).toBe(1);
   });
 });

@@ -187,6 +187,7 @@ function EstimatePage() {
   const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
   const [commissionInMarkup, setCommissionInMarkup] = useState(false);
   const [adjustLaborPct, setAdjustLaborPct] = useState(0);
+  const [laborTemplateName, setLaborTemplateName] = useState("");
   const [warrantyName, setWarrantyName] = useState("");
   const [highWind, setHighWind] = useState(false);
   const [highWindTermYears, setHighWindTermYears] = useState(0);
@@ -243,6 +244,7 @@ function EstimatePage() {
       setPerDiemInMarkup(d.perDiemInMarkup ?? true);
       setCommissionInMarkup(d.commissionInMarkup ?? false);
       setAdjustLaborPct(d.adjustLaborPct ?? 0);
+      setLaborTemplateName(d.laborTemplateName ?? "");
       setWarrantyName(d.warrantyName ?? "");
       setHighWind(d.highWind ?? false);
       setHighWindTermYears(d.highWindTermYears ?? 0);
@@ -277,6 +279,7 @@ function EstimatePage() {
   const substratesFor = (adhesive: string) =>
     Object.keys(admin?.adhesiveTimes?.bySubstrate[adhesive] ?? {});
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
+  const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
   const hwTerms = [...new Set(warrantyData?.highWind.map((h) => h.termYears) ?? [])].sort(
     (a, b) => a - b,
   );
@@ -304,6 +307,7 @@ function EstimatePage() {
     perDiemInMarkup,
     commissionInMarkup,
     adjustLaborPct,
+    laborTemplateName,
     warrantyName,
     highWind,
     highWindTermYears,
@@ -1342,6 +1346,13 @@ function EstimatePage() {
                 type="number"
                 value={adjustLaborPct}
                 onChange={(e) => setAdjustLaborPct(num(e.target.value))}
+              />
+            </Field>
+            <Field label="Labor template">
+              <PickOne
+                value={laborTemplateName || "None"}
+                options={laborTemplateOptions}
+                onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
               />
             </Field>
             <Field label="Per-diem $/man-day">

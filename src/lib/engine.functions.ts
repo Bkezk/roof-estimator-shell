@@ -35,6 +35,8 @@ import {
   type RawUnderlaymentLayoutData,
   type RawAdhesiveTimesData,
   type AdhesivesScreenData,
+  type RawLaborTemplate,
+  type RawLaborTemplateAdjustment,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -69,6 +71,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       uLayoutRes,
       adhTimesRes,
       adhScreenRes,
+      tplRes,
+      tplAdjRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -99,6 +103,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         .eq("id", "underlayment_adhesive_times")
         .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", "duro_last:adhesives").maybeSingle(),
+      sb.from("labor_templates").select("id, name, sort").order("sort"),
+      sb.from("labor_template_adjustments").select("template_id, area, value, sort").order("sort"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -117,6 +123,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (uLayoutRes.error) throw uLayoutRes.error;
     if (adhTimesRes.error) throw adhTimesRes.error;
     if (adhScreenRes.error) throw adhScreenRes.error;
+    if (tplRes.error) throw tplRes.error;
+    if (tplAdjRes.error) throw tplAdjRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -138,6 +146,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const underlaymentLayout = (uLayoutRes.data?.data ?? null) as RawUnderlaymentLayoutData | null;
     const adhesiveTimes = (adhTimesRes.data?.data ?? null) as RawAdhesiveTimesData | null;
     const adhesivesScreen = (adhScreenRes.data?.data ?? null) as AdhesivesScreenData | null;
+    const laborTemplateRows = (tplRes.data ?? null) as RawLaborTemplate[] | null;
+    const laborTemplateAdjustments = (tplAdjRes.data ?? null) as
+      RawLaborTemplateAdjustment[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -156,6 +167,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       underlaymentLayout,
       adhesiveTimes,
       adhesivesScreen,
+      laborTemplateRows,
+      laborTemplateAdjustments,
     });
   });
 

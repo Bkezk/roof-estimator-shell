@@ -55,6 +55,7 @@ import {
   curbLaborHours as curbHoursCalc,
   underlaymentMechanicalHours,
   underlaymentAdhesive,
+  laborTemplateFactor,
   type EngineAdminData,
 } from "./adapters";
 
@@ -185,6 +186,8 @@ export interface BidInput {
   volumeDiscount: boolean;
   taxExempt: boolean;
   adjustLaborPct: number;
+  /** Per-category labor template name (from labor_templates); "" / unset = no template. */
+  laborTemplateName?: string;
 
   // provided extras (seams)
   extraShipping: number;
@@ -246,6 +249,19 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   if (!lt) {
     warnings.push(`No labor table for ${bid.roofSystem} / ${bid.attachment}; labor will be 0.`);
   }
+
+  // Per-category labor template (§3.2): value/100 scales that category's hours; 0 = use default.
+  // Applied via the engine's existing adjust knobs (install/setup/inspection/tear-off) and by
+  // scaling the parapet/curb/underlayment hour seams. The three accessory sub-areas (Pipe Stacks /
+  // Drains / Edge Termination) are NOT applied — the accessory hours are one lump and attributing
+  // them would be a fabricated split (FLAGGED; all-zero in the seeded Standard template anyway).
+  const tplAreas = bid.laborTemplateName
+    ? admin.laborTemplates?.byName[bid.laborTemplateName]
+    : undefined;
+  if (bid.laborTemplateName && admin.laborTemplates && !tplAreas) {
+    warnings.push(`Unknown labor template "${bid.laborTemplateName}" — no adjustment applied.`);
+  }
+  const tf = (area: string) => laborTemplateFactor(tplAreas, area);
 
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
@@ -359,7 +375,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       adheredPerimeterBump: false,
       tearOff: s.tearOff,
       tearOffLaborLookup,
-      tearOffAdditionalPct: 0,
+      tearOffAdditionalPct: (tf("Tear-Off Labor") - 1) * 100,
       toThicknessInches: s.toThicknessInches,
     };
   });
@@ -432,6 +448,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     0,
   );
 
+  // Apply the template factors to the category hour seams.
+  parapetLaborHours *= tf("Parapets Labor");
+  curbLaborHours *= tf("Curbs Labor");
+  underlaymentLaborHours *= tf("Underlayment Labor");
+
   // M0 = membrane + accessories + parapet + metals material (dMaterial[0..6] slots).
   const duroLastMaterial =
     membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial + adhesiveMaterial;
@@ -473,9 +494,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       ...(admin.setupTable ? { setupTable: admin.setupTable } : {}),
       ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },
-    adjustLaborPct: bid.adjustLaborPct,
-    adjustSetupLaborPct: 0,
-    adjustInspectionPct: 0,
+    adjustLaborPct: ((1 + bid.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100,
+    adjustSetupLaborPct: (tf("Setup Time Labor") - 1) * 100,
+    adjustInspectionPct: (tf("Inspection Time Labor") - 1) * 100,
     accessoryLaborHours,
     parapetLaborHours,
     curbLaborHours,

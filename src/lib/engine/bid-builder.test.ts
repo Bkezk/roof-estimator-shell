@@ -484,6 +484,66 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.underlaymentLaborHours).toBeCloseTo(10.0016, 3); // labor now bills (parity behavior)
   });
 
+  it("labor template scales categories: install, setup, tear-off, parapets (0 = default)", () => {
+    const withTpl: EngineAdminData = {
+      ...admin,
+      setupTable: { minimum: 16, bands: [{ upTo: 100000, value: 0.003, multiply: true }] },
+      tearOff: {
+        deckColumns: ["Wood"],
+        tearoffTypes: ['BUR < 2"'],
+        lookup: { Wood: { 'BUR < 2"': 2.4876 / 100 } },
+      },
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': { noDrillNoCant: 2.25, noDrillCanted: 3.375, predrillNoCant: 3.5, predrillCanted: 5.25 },
+          },
+        },
+      },
+      laborTemplates: {
+        names: ["Heavy"],
+        byName: {
+          Heavy: {
+            "Roof Section Labor": 90,
+            "Setup Time Labor": 120,
+            "Tear-Off Labor": 150,
+            "Parapets Labor": 110,
+            "Inspection Time Labor": 0, // use-default sentinel
+          },
+        },
+      },
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        laborTemplateName: "Heavy",
+        sections: [
+          { ...bid().sections[0]!, tearOff: true, tearOffType: 'BUR < 2"', toThicknessInches: 4 },
+        ],
+        parapets: [
+          {
+            id: "p1",
+            name: "Wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 0,
+          },
+        ],
+      }),
+      withTpl,
+    );
+    expect(warnings).toEqual([]);
+    const r = computeEstimate(inputs);
+    expect(r.installHours).toBeCloseTo(15.125 * 0.9, 3); // Roof Section Labor 90
+    expect(r.setupHours).toBeCloseTo(16 * 1.2, 3); // Setup 120 (min 16 x 1.2)
+    // tear-off: base 62.19 x 1.5 (per-section additional %), then Ceiling-to-cent
+    expect(r.tearOffLaborHours).toBeCloseTo(62.19 * 1.5, 1);
+    expect(r.parapetLaborHours).toBeCloseTo(4.5 * 1.1, 3); // Parapets 110
+  });
+
   it("warns when a price or labor combo is missing", () => {
     const noPrice = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, color: "Purple" }] }),
