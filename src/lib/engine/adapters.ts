@@ -358,6 +358,89 @@ export function parapetModeRate(e: ParapetModeRates, predrill: boolean, canted: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Exceptional Metals catalog (master-detail screen → flat pickable list)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MetalRow {
+  description: string;
+  unit_cost?: number | null;
+  labor_per_unit_lf?: number | null;
+  labor_rate?: number | null;
+  price?: number | null; // two_piece_metals rows use `price`
+}
+
+/** The seeded Exceptional Metals master-detail data (pricing_catalog kind: "metals"). */
+export interface MetalsScreenData {
+  kind: string;
+  subscreens?: {
+    gutters?: { rows?: MetalRow[]; captured_for?: { style?: string; size?: string } };
+    downspouts?: {
+      size_grid?: { rows_by_size?: Record<string, MetalRow[]> };
+      general_downspout?: { rows?: MetalRow[] };
+    };
+    pitch_pans?: { rows?: MetalRow[] };
+    collection_boxes?: { rows_by_option?: Record<string, MetalRow[]> };
+    two_piece_metals?: { rows?: MetalRow[] };
+  };
+}
+
+/** One pickable Exceptional Metals line (unit cost + labor/unit at the line's own rate). */
+export interface MetalsCatalogItem {
+  key: string;
+  category: string;
+  description: string;
+  unitCost: number;
+  laborPerUnit: number; // hours per unit / LF
+  laborRate: number; // $/hr for this line's labor
+}
+
+/**
+ * Flatten the Exceptional Metals subscreens (gutters, downspouts by size + general accessories,
+ * pitch pans, collection boxes by scupper option, two-piece metals) into a pickable list. Gutter
+ * rows are mostly $0 in the source (capture-live gap — real prices pending); they're included since
+ * the values are editable in admin. Two-piece rows are price-only (their per-foot labor lives in
+ * the accessory_labor "Two Piece Metals" screen — flagged, entered manually for now).
+ */
+export function buildMetalsCatalog(data: MetalsScreenData | null): MetalsCatalogItem[] {
+  const items: MetalsCatalogItem[] = [];
+  const num = (v: number | null | undefined): number => (typeof v === "number" ? v : 0);
+  const push = (category: string, r: MetalRow) => {
+    if (!r.description) return;
+    items.push({
+      key: `metals::${category}::${r.description}`,
+      category,
+      description: r.description,
+      unitCost: num(r.unit_cost) || num(r.price),
+      laborPerUnit: num(r.labor_per_unit_lf),
+      laborRate: num(r.labor_rate),
+    });
+  };
+  const s = data?.subscreens;
+  if (!s) return items;
+
+  const gutterFor = s.gutters?.captured_for;
+  const gutterCat = gutterFor?.style
+    ? `Gutters — ${gutterFor.style}${gutterFor.size ? ` (${gutterFor.size})` : ""}`
+    : "Gutters";
+  for (const r of s.gutters?.rows ?? []) push(gutterCat, r);
+
+  const bySize = s.downspouts?.size_grid?.rows_by_size ?? {};
+  for (const [size, rows] of Object.entries(bySize))
+    for (const r of rows) push(`Downspouts ${size}`, r);
+  for (const r of s.downspouts?.general_downspout?.rows ?? []) push("Downspout accessories", r);
+
+  for (const r of s.pitch_pans?.rows ?? []) push("Pitch Pans", r);
+
+  const byOption = s.collection_boxes?.rows_by_option ?? {};
+  for (const [option, rows] of Object.entries(byOption))
+    for (const r of rows) push(`Collection Boxes — ${option}`, r);
+
+  for (const r of s.two_piece_metals?.rows ?? []) push("Two-Piece Metals", r);
+
+  return items;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Curb labor (labor_curb setup minutes + labor_curb_deck min/LF × labor_curb_type multiplier)
 // ─────────────────────────────────────────────────────────────────────────────
 

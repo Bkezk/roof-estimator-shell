@@ -17,6 +17,7 @@ import {
   parapetModeRate,
   buildCurbLabor,
   curbLaborHours,
+  buildMetalsCatalog,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -588,5 +589,92 @@ describe("buildCurbLabor / curbLaborHours (§5.3)", () => {
         perimeterFt: 10,
       }),
     ).toBeCloseTo((2 * 83) / 60, 6);
+  });
+});
+
+describe("buildMetalsCatalog (Exceptional Metals master-detail → flat list)", () => {
+  // Real seeded shapes, trimmed.
+  const items = buildMetalsCatalog({
+    kind: "metals",
+    subscreens: {
+      gutters: {
+        rows: [
+          {
+            description: "Lineal Feet of L-5 Gutter",
+            unit_cost: 0,
+            labor_per_unit_lf: 0,
+            labor_rate: 0,
+          },
+        ],
+        captured_for: { style: "L-Style", size: 'A = 7" B = 5" C = 5"' },
+      },
+      downspouts: {
+        size_grid: {
+          rows_by_size: {
+            '4"X4"': [
+              {
+                description: '4"X4" Downspout - Open',
+                unit_cost: 19.2,
+                labor_per_unit_lf: 0.1,
+                labor_rate: 45,
+              },
+            ],
+          },
+        },
+        general_downspout: {
+          rows: [
+            {
+              description: "Downspout Straps",
+              unit_cost: 2.2,
+              labor_per_unit_lf: 0.1,
+              labor_rate: 45,
+            },
+          ],
+        },
+      },
+      pitch_pans: {
+        rows: [
+          {
+            description: 'Pitch Pan 4"X4"X8"',
+            unit_cost: 96.58,
+            labor_per_unit_lf: 1,
+            labor_rate: 45,
+          },
+        ],
+      },
+      collection_boxes: {
+        rows_by_option: {
+          "With Scupper": [
+            {
+              description: '8"X15"X24" Collection Box',
+              unit_cost: 550,
+              labor_per_unit_lf: 1.5,
+              labor_rate: 40,
+            },
+          ],
+        },
+      },
+      two_piece_metals: {
+        rows: [{ description: '3" 2-Piece Compression', price: 2.5, part_no: "2597" } as never],
+      },
+    },
+  });
+
+  it("flattens every subscreen with contextual categories", () => {
+    const cats = [...new Set(items.map((i) => i.category))];
+    expect(cats).toContain('Gutters — L-Style (A = 7" B = 5" C = 5")');
+    expect(cats).toContain('Downspouts 4"X4"');
+    expect(cats).toContain("Downspout accessories");
+    expect(cats).toContain("Pitch Pans");
+    expect(cats).toContain("Collection Boxes — With Scupper");
+    expect(cats).toContain("Two-Piece Metals");
+    expect(items).toHaveLength(6);
+  });
+
+  it("maps cost + labor fields; two-piece `price` rows become material-only lines", () => {
+    const box = items.find((i) => i.description === '8"X15"X24" Collection Box')!;
+    expect(box).toMatchObject({ unitCost: 550, laborPerUnit: 1.5, laborRate: 40 });
+    const tp = items.find((i) => i.description === '3" 2-Piece Compression')!;
+    expect(tp).toMatchObject({ unitCost: 2.5, laborPerUnit: 0, laborRate: 0 });
   });
 });

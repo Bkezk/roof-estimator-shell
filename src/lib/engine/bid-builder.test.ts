@@ -73,6 +73,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
   ],
   accessories: [],
   nonDlLines: [],
+  metals: [],
   parapets: [],
   curbs: [],
   markupMode: 0,
@@ -383,6 +384,30 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // perimeter = 2 x (2 + 3) = 10 ft; (8 + 7.5x1x10)/60 = 83/60 h per curb; x2 = 2.7667 h
     expect(r.curbLaborHours).toBeCloseTo((2 * 83) / 60, 4);
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
+  });
+
+  it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        metals: [
+          {
+            description: '8"X15"X24" Collection Box',
+            price: 550,
+            laborPerUnit: 1.5,
+            laborRate: 40,
+            quantity: 2,
+          },
+        ],
+      }),
+      admin,
+    );
+    // material: 2 x 550 = 1100 -> M0 alongside membrane 3199.23; OtherMaterial untouched
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1100, 2);
+    expect(inputs.otherMaterial).toBeCloseTo(0, 6);
+    // labor: 2 x 1.5 h x $40 = $120 -> services (LaborSubtotal2)
+    expect(inputs.servicesCost).toBeCloseTo(120, 2);
+    const r = computeEstimate(inputs);
+    expect(r.laborSubtotal2).toBeCloseTo(120, 2);
   });
 
   it("warns when a price or labor combo is missing", () => {

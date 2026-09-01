@@ -56,6 +56,8 @@ export interface ProposalCostInputs {
   parapetMaterial?: number;
   parapetLaborHours?: number;
   curbLaborHours?: number;
+  metalsMaterial?: number;
+  metalsLabor?: number; // dollars (metals labor bills at each line's own rate)
   underlaymentMaterial: number;
   warrantyCost: number;
   freight: number;
@@ -78,6 +80,7 @@ export function buildProposalPricing(i: ProposalCostInputs): ProposalGroup[] {
       cost: (i.parapetMaterial ?? 0) + (i.parapetLaborHours ?? 0) * i.crewRate,
     },
     { label: "Curbs & penetrations", cost: (i.curbLaborHours ?? 0) * i.crewRate },
+    { label: "Metals & drainage", cost: (i.metalsMaterial ?? 0) + (i.metalsLabor ?? 0) },
     { label: "Underlayment", cost: i.underlaymentMaterial },
     { label: "Accessories", cost: i.accessoryMaterial + i.accessoryLaborHours * i.crewRate },
     { label: "Additional work", cost: i.nonDlMaterial + i.nonDlServices },

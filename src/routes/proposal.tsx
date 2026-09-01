@@ -78,6 +78,7 @@ function ProposalPage() {
       sections: raw.sections,
       accessories: Array.isArray(raw.accessories) ? raw.accessories : [],
       nonDlLines: Array.isArray(raw.nonDlLines) ? raw.nonDlLines : [],
+      metals: Array.isArray(raw.metals) ? raw.metals : [],
       parapets: Array.isArray(raw.parapets) ? raw.parapets : [],
       curbs: Array.isArray(raw.curbs) ? raw.curbs : [],
       customer: { ...emptyCustomer(), ...(raw.customer ?? {}) },
@@ -87,7 +88,7 @@ function ProposalPage() {
       commission: raw.commission ?? 0,
       taxExempt: raw.taxExempt ?? false,
     };
-    const { inputs, parapetMaterial } = buildEstimateInputs(
+    const { inputs, parapetMaterial, metalsMaterial } = buildEstimateInputs(
       buildBidInput(saved, warrantyData),
       admin,
     );
@@ -99,9 +100,14 @@ function ProposalPage() {
       0,
     );
     const nonDlMaterial = saved.nonDlLines.reduce((s, l) => s + l.price * l.quantity, 0);
+    const metalsLabor = (saved.metals ?? []).reduce(
+      (s, m) => s + m.laborPerUnit * m.laborRate * m.quantity,
+      0,
+    );
     const groups = buildProposalPricing({
       grandTotal: r.money.grandTotal,
-      membraneMaterial: (r.money.dTotals[0] ?? 0) - accessoryMaterial - parapetMaterial,
+      membraneMaterial:
+        (r.money.dTotals[0] ?? 0) - accessoryMaterial - parapetMaterial - metalsMaterial,
       installLaborHours: r.installHours,
       setupHours: r.setupHours,
       inspectionHours: r.inspectionHours,
@@ -111,11 +117,13 @@ function ProposalPage() {
       parapetMaterial,
       parapetLaborHours: r.parapetLaborHours,
       curbLaborHours: r.curbLaborHours,
+      metalsMaterial,
+      metalsLabor,
       underlaymentMaterial: r.money.dTotals[6] ?? 0,
       warrantyCost: r.money.dTotals[5] ?? 0,
       freight: r.money.dTotals[9] ?? 0,
       nonDlMaterial,
-      nonDlServices: r.laborSubtotal2,
+      nonDlServices: r.laborSubtotal2 - metalsLabor,
       crewRate: saved.laborRate,
     });
     return { saved, r, groups, grandTotal: r.money.grandTotal };

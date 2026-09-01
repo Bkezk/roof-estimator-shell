@@ -10,6 +10,7 @@ import {
   getAccessoryCatalog,
   getAccessoryLaborLookup,
   getNonDlCatalog,
+  getMetalsCatalog,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
 import {
@@ -20,6 +21,7 @@ import {
   type NonDlLine,
   type ParapetInput,
   type CurbInput,
+  type MetalLine,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -123,6 +125,7 @@ function EstimatePage() {
   const getAccFn = useServerFn(getAccessoryCatalog);
   const getAccLaborFn = useServerFn(getAccessoryLaborLookup);
   const getNonDlFn = useServerFn(getNonDlCatalog);
+  const getMetalsFn = useServerFn(getMetalsCatalog);
   const getWarrantyFn = useServerFn(getWarrantyData);
   const getPresetsFn = useServerFn(getMarkupPresets);
   const getBidFn = useServerFn(getBid);
@@ -147,6 +150,10 @@ function EstimatePage() {
     queryKey: ["nondl-catalog"],
     queryFn: () => getNonDlFn(),
   });
+  const { data: metalsCatalog } = useQuery({
+    queryKey: ["metals-catalog"],
+    queryFn: () => getMetalsFn(),
+  });
   const { data: warrantyData } = useQuery({
     queryKey: ["warranty-data"],
     queryFn: () => getWarrantyFn(),
@@ -161,6 +168,7 @@ function EstimatePage() {
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
+  const [metals, setMetals] = useState<MetalLine[]>([]);
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
   const [curbs, setCurbs] = useState<CurbInput[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
@@ -212,6 +220,7 @@ function EstimatePage() {
       setSections(d.sections.length ? d.sections : [newSection()]);
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
+      setMetals(Array.isArray(d.metals) ? d.metals : []);
       setParapets(Array.isArray(d.parapets) ? d.parapets : []);
       setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
       setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
@@ -268,6 +277,7 @@ function EstimatePage() {
     sections,
     accessories,
     nonDlLines,
+    metals,
     parapets,
     curbs,
     customer,
@@ -292,8 +302,8 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
-    const { inputs, warnings, parapetMaterial } = buildEstimateInputs(bid, admin);
-    return { r: computeEstimate(inputs), warnings, parapetMaterial };
+    const { inputs, warnings, parapetMaterial, metalsMaterial } = buildEstimateInputs(bid, admin);
+    return { r: computeEstimate(inputs), warnings, parapetMaterial, metalsMaterial };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
 
@@ -305,6 +315,10 @@ function EstimatePage() {
   const nonDlMaterialTotal = nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const nonDlLaborTotal = nonDlLines.reduce(
     (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
+    0,
+  );
+  const metalsLaborTotal = metals.reduce(
+    (sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity,
     0,
   );
 
@@ -970,6 +984,97 @@ function EstimatePage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Metals</CardTitle>
+            <Select
+              value=""
+              onValueChange={(key) => {
+                const item = metalsCatalog?.find((m) => m.key === key);
+                if (item)
+                  setMetals((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      price: item.unitCost,
+                      laborPerUnit: item.laborPerUnit,
+                      laborRate: item.laborRate,
+                      quantity: 1,
+                    },
+                  ]);
+              }}
+            >
+              <SelectTrigger className="w-[240px]">
+                <SelectValue placeholder="Add metals item…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(metalsCatalog ?? []).map((m) => (
+                  <SelectItem key={m.key} value={m.key}>
+                    {m.category} — {m.description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardHeader>
+          <CardContent>
+            {metals.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No metals. Gutters, downspouts, pitch pans, collection boxes — material folds into
+                Duro-Last material; labor into Subs &amp; services.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="w-[80px]">Matl</TableHead>
+                    <TableHead className="w-[80px]">Labor/ea</TableHead>
+                    <TableHead className="w-[80px]">Qty</TableHead>
+                    <TableHead className="w-[100px] text-right">Total</TableHead>
+                    <TableHead className="w-[44px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {metals.map((m, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{m.description}</TableCell>
+                      <TableCell>{money(m.price)}</TableCell>
+                      <TableCell>{money(m.laborPerUnit * m.laborRate)}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="h-8 w-[70px]"
+                          value={m.quantity}
+                          onChange={(e) =>
+                            setMetals((p) =>
+                              p.map((x, j) =>
+                                j === i ? { ...x, quantity: num(e.target.value) } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {money((m.price + m.laborPerUnit * m.laborRate) * m.quantity)}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive"
+                          onClick={() => setMetals((p) => p.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
             <Select
               value=""
@@ -1261,11 +1366,17 @@ function EstimatePage() {
                   <Row
                     label="Membrane material"
                     v={money(
-                      (result.r.money.dTotals[0] ?? 0) - accessoryTotal - result.parapetMaterial,
+                      (result.r.money.dTotals[0] ?? 0) -
+                        accessoryTotal -
+                        result.parapetMaterial -
+                        result.metalsMaterial,
                     )}
                   />
                   {result.parapetMaterial > 0 && (
                     <Row label="Parapet material" v={money(result.parapetMaterial)} />
+                  )}
+                  {result.metalsMaterial > 0 && (
+                    <Row label="Metals material" v={money(result.metalsMaterial)} />
                   )}
                   {accessoryTotal > 0 && <Row label="Accessories" v={money(accessoryTotal)} />}
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
@@ -1291,7 +1402,7 @@ function EstimatePage() {
                     <Row label="Warranty" v={money(result.r.money.dTotals[5] ?? 0)} />
                   )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
-                  {nonDlLaborTotal > 0 && (
+                  {(nonDlLaborTotal > 0 || metalsLaborTotal > 0) && (
                     <Row label="Subs & services" v={money(result.r.laborSubtotal2)} />
                   )}
                   <Row label="Subtotal 1" v={money(result.r.money.subtotal1)} />

@@ -26,6 +26,8 @@
  *    fastener-derived accessory labor is entered manually until a captured bid validates it.
  *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
  *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
+ *  - Exceptional Metals wired: line items (unit cost + labor/unit × own rate); material → M0,
+ *    labor → services. Gutter prices are largely $0 pending live capture (flagged).
  *  - Parapets wired (§5.3): labor = (length/50) × the seeded deck × height-band × drill/cant matrix
  *    → direct labor; material = In2Ft(girth) × length × bid-default membrane $/sqft → M0. Height
  *    band + girth are entered (profile-dims derivation flagged for the validation bid).
@@ -131,12 +133,21 @@ export interface CurbInput {
   deckType: string; // labor deck name, bridged via TEAROFF_DECK_BY_LABOR_DECK
 }
 
+/**
+ * An Exceptional Metals line (gutters, downspouts, pitch pans, collection boxes, two-piece).
+ * Same economics as a non-DL line (unit cost + labor/unit at the line's own rate), but the
+ * MATERIAL belongs to the Duro-Last material subtotal M0 (§4.8 dMaterial metals slot), not
+ * OtherMaterial. Labor $ routes to services (LaborSubtotal2) — FLAGGED FOR BID VALIDATION.
+ */
+export type MetalLine = NonDlLine;
+
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
   nonDlLines: NonDlLine[];
+  metals: MetalLine[];
   parapets: ParapetInput[];
   curbs: CurbInput[];
 
@@ -178,6 +189,8 @@ export interface BuildResult {
   warnings: string[];
   /** Parapet membrane material $ (inside duroLastMaterial/M0); split out for display/proposal. */
   parapetMaterial: number;
+  /** Exceptional Metals material $ (inside duroLastMaterial/M0); split out for display/proposal. */
+  metalsMaterial: number;
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
@@ -325,8 +338,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     });
   }
 
-  // M0 = membrane + accessories + parapet material (dMaterial[0..6] slots).
-  const duroLastMaterial = membraneMaterial + accessoryMaterial + parapetMaterial;
+  // Exceptional Metals: material (price × qty) → M0 (dMaterial metals slot); labor at the line's
+  // own rate → services (LaborSubtotal2), like non-DL labor.
+  const metalsMaterial = bid.metals.reduce((sum, m) => sum + m.price * m.quantity, 0);
+  const metalsServices = bid.metals.reduce(
+    (sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity,
+    0,
+  );
+
+  // M0 = membrane + accessories + parapet + metals material (dMaterial[0..6] slots).
+  const duroLastMaterial = membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
@@ -338,7 +359,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     0,
   );
   const otherMaterial = bid.otherMaterial + nonDlMaterial;
-  const servicesCost = bid.servicesCost + nonDlServices;
+  const servicesCost = bid.servicesCost + nonDlServices + metalsServices;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
 
   // Freight (§4.1 dTotals[9]) — percent-of-material or the stepped "from" table, on the Duro-Last
@@ -404,5 +425,5 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     },
   };
 
-  return { inputs, warnings, parapetMaterial };
+  return { inputs, warnings, parapetMaterial, metalsMaterial };
 }

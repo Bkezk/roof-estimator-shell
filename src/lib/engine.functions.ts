@@ -29,12 +29,16 @@ import {
   type RawParapetRow,
   type RawCurbDeckRow,
   type RawCurbTypeRow,
+  buildMetalsCatalog,
+  type MetalsCatalogItem,
+  type MetalsScreenData,
 } from "@/lib/engine/adapters";
 
 export type {
   EngineAdminData,
   AccessoryCatalogItem,
   NonDlCatalogItem,
+  MetalsCatalogItem,
 } from "@/lib/engine/adapters";
 
 const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
@@ -184,4 +188,17 @@ export const getNonDlCatalog = createServerFn({ method: "GET" })
       data: r.data as unknown as MembraneScreen,
     }));
     return buildNonDlCatalog(rows);
+  });
+
+/** Pickable Exceptional Metals catalog (gutters, downspouts, pitch pans, boxes, two-piece). */
+export const getMetalsCatalog = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MetalsCatalogItem[]> => {
+    const { data, error } = await context.supabase
+      .from("pricing_catalog")
+      .select("data")
+      .eq("id", "duro_last:exceptional_metals")
+      .maybeSingle();
+    if (error) throw error;
+    return buildMetalsCatalog((data?.data ?? null) as MetalsScreenData | null);
   });
