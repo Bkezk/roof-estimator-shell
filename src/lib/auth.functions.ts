@@ -41,14 +41,17 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
 // verified token subject, so a user can only ever read themselves here.
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<UserProfile> => {
+  .handler(async ({ context }): Promise<UserProfile | null> => {
     const { data, error } = await context.supabase
       .from("profiles")
       .select("id, email, full_name, role, created_at")
       .eq("id", context.userId)
-      .single();
-    if (error || !data) throw new Error("Profile not found");
-    return data as UserProfile;
+      .maybeSingle();
+    // A missing row is a state, not a server error: returning null (instead of throwing a 500)
+    // lets the client degrade to no-role and retry — right after login the first read can race
+    // token propagation (seen on mobile) and momentarily see zero rows under RLS.
+    if (error) throw new Error(error.message);
+    return (data as UserProfile | null) ?? null;
   });
 
 export const listUsers = createServerFn({ method: "GET" })

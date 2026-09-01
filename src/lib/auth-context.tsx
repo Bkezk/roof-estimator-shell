@@ -26,7 +26,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      const p = await getMyProfile();
+      let p = await getMyProfile();
+      if (!p) {
+        // One retry: the first read right after login can race token propagation
+        // (mobile especially); a beat later it resolves.
+        await new Promise((r) => setTimeout(r, 1200));
+        p = await getMyProfile();
+      }
       setProfile(p);
     } catch {
       setProfile(null);
