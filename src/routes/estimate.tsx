@@ -71,6 +71,7 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   enhancementWidthFt: 3,
   perimFastenerOc: 12,
   cornerFastenerOc: 6,
+  underlaymentBoard: "",
   sheetSizeLabel: "1500 sf",
   tearOff: false,
   tearOffType: "",
@@ -153,6 +154,7 @@ function EstimatePage() {
     return set.size ? [...set] : ["White"];
   }, [admin]);
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
+  const underlaymentOptions = ["None", ...Object.keys(admin?.underlaymentPrices ?? {})];
 
   const bid: BidInput = {
     roofSystem,
@@ -368,6 +370,13 @@ function EstimatePage() {
                       onChange={(v) => editSection(i, { sheetSizeLabel: v })}
                     />
                   </Field>
+                  <Field label="Underlayment">
+                    <PickOne
+                      value={s.underlaymentBoard || "None"}
+                      options={underlaymentOptions}
+                      onChange={(v) => editSection(i, { underlaymentBoard: v === "None" ? "" : v })}
+                    />
+                  </Field>
                   <Field label="Tab lap (in)">
                     <Input
                       type="number"
@@ -546,6 +555,9 @@ function EstimatePage() {
                 </TableHeader>
                 <TableBody>
                   <Row label="Membrane material" v={money(result.r.money.dTotals[0] ?? 0)} />
+                  {(result.r.money.dTotals[6] ?? 0) > 0 && (
+                    <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
+                  )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
                   <Row label="Subtotal 1" v={money(result.r.money.subtotal1)} />
                   <Row

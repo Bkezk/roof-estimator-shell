@@ -13,7 +13,9 @@
  *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
  *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
  *  - Freight table not wired (0); membrane price tier assumed roll-goods.
- *  - Tear-off labor now wired from the seeded Tearoff Times table (per deck × tear-off type).
+ *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
+ *  - Underlayment material wired from the seeded Underlayment prices (board $/sqft × deck area).
+ *  - Accessory material (dMaterial[4]) still a seam (otherMaterial), pending an accessories UI.
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
@@ -39,6 +41,7 @@ export interface BidSectionInput {
   enhancementWidthFt: number; // zone depth in from the edge (e.g. 3)
   perimFastenerOc: number; // tighter OC in the perimeter zone
   cornerFastenerOc: number; // tighter OC in the corner zone
+  underlaymentBoard: string; // board name (from Underlayment prices); "" = none
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -100,6 +103,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   }
 
   let membraneMaterial = 0;
+  let underlaymentMaterial = 0;
 
   const sections: RoofSection[] = bid.sections.map((s) => {
     const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
@@ -110,6 +114,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
     const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
     membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
+
+    // Underlayment material: board $/sqft × roof-deck area (§ dTotals[6], a separate purchase line).
+    if (s.underlaymentBoard) {
+      const uPrice = admin.underlaymentPrices?.[s.underlaymentBoard];
+      if (uPrice === undefined) {
+        warnings.push(`No underlayment price for "${s.underlaymentBoard}" — section "${s.name}".`);
+      } else {
+        underlaymentMaterial += s.length * s.width * uPrice;
+      }
+    }
 
     let tearOffLaborLookup = 0;
     if (s.tearOff && admin.tearOff) {
@@ -163,7 +177,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   });
 
   const duroLastMaterial = membraneMaterial;
-  const materialTotalBeforeTax = duroLastMaterial + bid.materialUnderlayment + bid.otherMaterial;
+  const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
+  const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + bid.otherMaterial;
   const shipping = shippingTotal(0, bid.extraShipping); // v1: freight table not wired
 
   const inputs: EstimateInputs = {
@@ -183,7 +198,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     dumpsterUnitYardage: 30,
     duroLastMaterial,
     membraneCostBeforeDiscount: membraneMaterial,
-    materialUnderlayment: bid.materialUnderlayment,
+    materialUnderlayment,
     otherMaterial: bid.otherMaterial,
     materialTotalBeforeTax,
     shipping,

@@ -64,6 +64,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
       enhancementWidthFt: 3,
       perimFastenerOc: 18,
       cornerFastenerOc: 18,
+      underlaymentBoard: "",
       sheetSizeLabel: "1500 sf",
       tearOff: false,
       tearOffType: "",
@@ -115,6 +116,26 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     const S = r.money.subtotal1;
     expect(r.money.markupValue).toBeCloseTo(S / (1 - 0.35) - S, 2);
+  });
+
+  it("underlayment material = board $/sqft × deck area, into the underlayment purchase line", () => {
+    const withU: EngineAdminData = { ...admin, underlaymentPrices: { '1/2" ISO': 0.85 } };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
+      withU,
+    );
+    expect(warnings).toEqual([]);
+    // 50×50 = 2500 sf × $0.85 = $2,125 underlayment (separate from membrane material)
+    expect(inputs.materialUnderlayment).toBeCloseTo(2125, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23, 2); // membrane unchanged
+    const r = computeEstimate(inputs);
+    expect(r.money.dTotals[6]).toBeCloseTo(2125, 2);
+    // warns on an unknown board
+    const bad = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: "Unobtainium" }] }),
+      withU,
+    );
+    expect(bad.warnings.some((w) => w.includes("No underlayment price"))).toBe(true);
   });
 
   it("perimeter zone is carved from field and billed at the tighter-OC perimeter rate", () => {

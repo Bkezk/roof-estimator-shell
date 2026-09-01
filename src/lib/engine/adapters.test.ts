@@ -6,6 +6,7 @@ import {
   parseMembraneRow,
   assembleEngineAdminData,
   buildTearOffLookup,
+  buildUnderlaymentPrices,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -194,6 +195,22 @@ describe("buildTearOffLookup (from the seeded Tearoff Times grid)", () => {
     expect(TEAROFF_DECK_BY_LABOR_DECK["Steel"]).toBe("Structural Metal");
     expect(TEAROFF_DECK_BY_LABOR_DECK["Retrofit"]).toBe("Metal Retrofit");
     expect(TEAROFF_DECK_BY_LABOR_DECK["Wood"]).toBe("Wood");
+  });
+});
+
+describe("buildUnderlaymentPrices (from the seeded Underlayment screen)", () => {
+  it("maps board Name → Cost/Sq. Ft.", () => {
+    const prices = buildUnderlaymentPrices({
+      columns: ["Name", "Cost/Sq. Ft."],
+      rows: [
+        { Name: '1/2" ISO', "Cost/Sq. Ft.": 0.85 },
+        { Name: "Duro-Fold", "Cost/Sq. Ft.": 0.3 },
+        { Name: "", "Cost/Sq. Ft.": 1 }, // blank name skipped
+      ],
+    });
+    expect(prices['1/2" ISO']).toBe(0.85);
+    expect(prices["Duro-Fold"]).toBe(0.3);
+    expect(Object.keys(prices)).toEqual(['1/2" ISO', "Duro-Fold"]);
   });
 });
 

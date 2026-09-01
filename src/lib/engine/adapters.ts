@@ -65,6 +65,20 @@ export function buildPriceMatrix(screen: MembraneScreen): PriceMatrix {
   return matrix;
 }
 
+/**
+ * Build the underlayment $/sqft lookup by board name from the seeded Underlayment pricing screen
+ * (columns "Name" / "Cost/Sq. Ft.").
+ */
+export function buildUnderlaymentPrices(screen: MembraneScreen): Record<string, number> {
+  const prices: Record<string, number> = {};
+  for (const row of screen.rows) {
+    const name = String(row["Name"] ?? "");
+    const cost = row["Cost/Sq. Ft."];
+    if (name && typeof cost === "number") prices[name] = cost;
+  }
+  return prices;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Labor multipliers (from a Roof Deck Labor "Membrane Labor" combo)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,6 +228,7 @@ export interface RawAdminData {
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
   settings: RawCompanySettings | null;
   tearOffTimes?: TearOffTimesData | null;
+  underlaymentScreen?: MembraneScreen | null;
 }
 
 export interface EngineSettings {
@@ -233,6 +248,8 @@ export interface EngineAdminData {
   settings: EngineSettings;
   /** Tear-off labor lookup (absent if the Tearoff Times table wasn't fetched). */
   tearOff?: TearOffTables;
+  /** Underlayment $/sqft by board name (absent if the Underlayment screen wasn't fetched). */
+  underlaymentPrices?: Record<string, number>;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -256,6 +273,16 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   };
 
   const tearOff = raw.tearOffTimes ? buildTearOffLookup(raw.tearOffTimes) : undefined;
+  const underlaymentPrices = raw.underlaymentScreen
+    ? buildUnderlaymentPrices(raw.underlaymentScreen)
+    : undefined;
 
-  return { deckOrder, priceMatrix, labor, settings, ...(tearOff ? { tearOff } : {}) };
+  return {
+    deckOrder,
+    priceMatrix,
+    labor,
+    settings,
+    ...(tearOff ? { tearOff } : {}),
+    ...(underlaymentPrices ? { underlaymentPrices } : {}),
+  };
 }
