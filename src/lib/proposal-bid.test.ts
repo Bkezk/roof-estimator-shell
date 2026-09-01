@@ -4,10 +4,12 @@ import {
   savedToBidInput,
   buildBidInput,
   markupTypeToMode,
+  resolveBidComputeData,
   emptyCustomer,
   type SavedBidState,
   type WarrantyData,
 } from "./proposal-bid";
+import type { EngineAdminData } from "./engine/adapters";
 
 const warrantyData: WarrantyData = {
   warranties: [
@@ -115,5 +117,48 @@ describe("markupTypeToMode", () => {
     expect(markupTypeToMode("dollar_manday")).toBe(1);
     expect(markupTypeToMode("gross_profit")).toBe(2);
     expect(markupTypeToMode("something_else")).toBeNull();
+  });
+});
+
+describe("resolveBidComputeData (frozen pricing / Update Pricing & Labor)", () => {
+  const mkAdmin = (salesTax: number): EngineAdminData => ({
+    deckOrder: [],
+    priceMatrix: {},
+    labor: {},
+    settings: {
+      hoursPerDay: 9,
+      masterEliteCont: true,
+      salesTax,
+      taxMaterialOnly: true,
+      shippingMode: "stepped",
+      shippingPercent: 0,
+    },
+  });
+  const frozen = mkAdmin(0.05);
+  const live = mkAdmin(0.0625);
+
+  it("a bid with a snapshot computes against it, ignoring live data", () => {
+    const cd = resolveBidComputeData(
+      { adminSnapshot: frozen, warrantySnapshot: warrantyData, pricingAsOf: "2026-09-01T00:00:00Z" },
+      live,
+      { warranties: [], highWind: [] },
+    );
+    expect(cd.admin).toBe(frozen);
+    expect(cd.warranty).toBe(warrantyData);
+    expect(cd.frozenAsOf).toBe("2026-09-01T00:00:00Z");
+  });
+
+  it("without a snapshot it computes from live data (frozenAsOf null)", () => {
+    const cd = resolveBidComputeData({}, live, warrantyData);
+    expect(cd.admin).toBe(live);
+    expect(cd.warranty).toBe(warrantyData);
+    expect(cd.frozenAsOf).toBeNull();
+  });
+
+  it("a pre-warranty-freeze snapshot falls back to live warranty tables", () => {
+    const cd = resolveBidComputeData({ adminSnapshot: frozen }, live, warrantyData);
+    expect(cd.admin).toBe(frozen);
+    expect(cd.warranty).toBe(warrantyData); // fallback, not dropped
+    expect(cd.frozenAsOf).toBe("");
   });
 });

@@ -15,6 +15,7 @@ import type {
   MetalLine,
 } from "@/lib/engine/bid-builder";
 import type { MarkupMode } from "@/lib/engine/money";
+import type { EngineAdminData } from "@/lib/engine/adapters";
 
 /** Customer / project header, persisted with the bid and printed on the proposal. */
 export interface CustomerInfo {
@@ -76,6 +77,12 @@ export interface SavedBidState {
   highWind?: boolean;
   highWindTermYears?: number;
   highWindBand?: string;
+  // Frozen pricing (legacy "Update Pricing & Labor" semantics): captured at first save; admin
+  // changes never reprice this bid until the estimator explicitly updates the snapshot.
+  adminSnapshot?: EngineAdminData;
+  warrantySnapshot?: WarrantyData;
+  /** ISO timestamp of when the snapshot was captured. */
+  pricingAsOf?: string;
 }
 
 /**
@@ -143,6 +150,35 @@ export function resolveWarrantyInput(
 export function buildBidInput(s: SavedBidState, warrantyData?: WarrantyData | null): BidInput {
   const base = savedToBidInput(s);
   return warrantyData ? { ...base, ...resolveWarrantyInput(s, warrantyData) } : base;
+}
+
+export interface BidComputeData {
+  admin: EngineAdminData | null;
+  warranty: WarrantyData | null;
+  /** ISO timestamp the bid's pricing was frozen at; null = computing from live admin data. */
+  frozenAsOf: string | null;
+}
+
+/**
+ * Resolve which admin/warranty data a bid computes against — the legacy "Update Pricing & Labor"
+ * semantics: a saved bid carries a frozen snapshot and keeps that pricing until it is explicitly
+ * updated; without a snapshot (a new bid, or one saved before snapshots existed) it computes from
+ * live data. Estimator and proposal both resolve through here, so the two stay pinned.
+ */
+export function resolveBidComputeData(
+  s: Pick<SavedBidState, "adminSnapshot" | "warrantySnapshot" | "pricingAsOf">,
+  liveAdmin: EngineAdminData | null | undefined,
+  liveWarranty: WarrantyData | null | undefined,
+): BidComputeData {
+  if (s.adminSnapshot) {
+    return {
+      admin: s.adminSnapshot,
+      // Snapshots from before warranty freezing fall back to live rather than dropping warranty $.
+      warranty: s.warrantySnapshot ?? liveWarranty ?? null,
+      frozenAsOf: s.pricingAsOf ?? "",
+    };
+  }
+  return { admin: liveAdmin ?? null, warranty: liveWarranty ?? null, frozenAsOf: null };
 }
 
 /**

@@ -9,7 +9,12 @@ import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
 import { buildEstimateInputs } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { buildProposalPricing } from "@/lib/engine/proposal";
-import { buildBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal-bid";
+import {
+  buildBidInput,
+  emptyCustomer,
+  resolveBidComputeData,
+  type SavedBidState,
+} from "@/lib/proposal-bid";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/proposal")({
@@ -88,9 +93,13 @@ function ProposalPage() {
       commission: raw.commission ?? 0,
       taxExempt: raw.taxExempt ?? false,
     };
+    // Frozen pricing: compute against the bid's snapshot when it carries one (same resolver as
+    // the estimator, so the proposal price cannot drift), else against live admin data.
+    const cd = resolveBidComputeData(saved, admin, warrantyData);
+    if (!cd.admin) return null;
     const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial } = buildEstimateInputs(
-      buildBidInput(saved, warrantyData),
-      admin,
+      buildBidInput(saved, cd.warranty),
+      cd.admin,
     );
     const r = computeEstimate(inputs);
 

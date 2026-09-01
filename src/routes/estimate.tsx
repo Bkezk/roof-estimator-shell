@@ -3,7 +3,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Save, FileText, Copy, Download } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  AlertTriangle,
+  Save,
+  FileText,
+  Copy,
+  Download,
+  RefreshCw,
+} from "lucide-react";
 
 import {
   getEngineAdminData,
@@ -40,9 +49,12 @@ import {
   buildBidInput,
   emptyCustomer,
   markupTypeToMode,
+  resolveBidComputeData,
   type CustomerInfo,
   type SavedBidState,
+  type WarrantyData,
 } from "@/lib/proposal-bid";
+import type { EngineAdminData } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
@@ -149,7 +161,7 @@ function EstimatePage() {
   const qc = useQueryClient();
   const { bid: bidParam } = Route.useSearch();
 
-  const { data: admin, isLoading } = useQuery({
+  const { data: liveAdmin, isLoading } = useQuery({
     queryKey: ["engine-admin"],
     queryFn: () => getFn(),
   });
@@ -169,7 +181,7 @@ function EstimatePage() {
     queryKey: ["metals-catalog"],
     queryFn: () => getMetalsFn(),
   });
-  const { data: warrantyData } = useQuery({
+  const { data: liveWarrantyData } = useQuery({
     queryKey: ["warranty-data"],
     queryFn: () => getWarrantyFn(),
   });
@@ -177,6 +189,40 @@ function EstimatePage() {
     queryKey: ["markup-presets"],
     queryFn: () => getPresetsFn(),
   });
+
+  // Frozen pricing (legacy "Update Pricing & Labor"): a saved bid carries a snapshot of the admin
+  // + warranty data, captured at first save. All compute/options below resolve through it — admin
+  // changes never touch this bid until the estimator explicitly updates the snapshot.
+  const [snapshot, setSnapshot] = useState<{
+    admin: EngineAdminData;
+    warranty: WarrantyData | null;
+    asOf: string;
+  } | null>(null);
+  const {
+    admin,
+    warranty: warrantyData,
+    frozenAsOf,
+  } = resolveBidComputeData(
+    snapshot
+      ? {
+          adminSnapshot: snapshot.admin,
+          ...(snapshot.warranty ? { warrantySnapshot: snapshot.warranty } : {}),
+          pricingAsOf: snapshot.asOf,
+        }
+      : {},
+    liveAdmin,
+    liveWarrantyData,
+  );
+
+  const refreshPricing = async () => {
+    try {
+      const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
+      setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
+      toast.success("Updated to current pricing & labor — totals recomputed. Save to keep it.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not fetch current pricing");
+    }
+  };
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
@@ -266,6 +312,15 @@ function EstimatePage() {
       setHighWind(d.highWind ?? false);
       setHighWindTermYears(d.highWindTermYears ?? 0);
       setHighWindBand(d.highWindBand ?? "");
+      setSnapshot(
+        d.adminSnapshot
+          ? {
+              admin: d.adminSnapshot,
+              warranty: d.warrantySnapshot ?? null,
+              asOf: d.pricingAsOf ?? loadedBid.updated_at,
+            }
+          : null,
+      );
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
@@ -401,17 +456,35 @@ function EstimatePage() {
     setSaving(true);
     try {
       const grandTotal = result?.r.money.grandTotal ?? 0;
+      // First save freezes the current pricing & labor into the bid; later saves keep the
+      // existing snapshot untouched (only "Update pricing & labor" replaces it).
+      const snap =
+        snapshot ??
+        (liveAdmin
+          ? { admin: liveAdmin, warranty: liveWarrantyData ?? null, asOf: new Date().toISOString() }
+          : null);
+      const payload: SavedBidState = {
+        ...saved,
+        ...(snap
+          ? {
+              adminSnapshot: snap.admin,
+              ...(snap.warranty ? { warrantySnapshot: snap.warranty } : {}),
+              pricingAsOf: snap.asOf,
+            }
+          : {}),
+      };
       const row = await saveBidFn({
         data: {
           ...(bidId ? { id: bidId } : {}),
           name: bidName.trim() || "Untitled bid",
-          data: saved as unknown as Record<string, unknown>,
+          data: payload as unknown as Record<string, unknown>,
           grandTotal,
           status: bidStatus,
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
       toast.success("Bid saved");
+      if (!snapshot && snap) setSnapshot(snap);
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
@@ -480,7 +553,8 @@ function EstimatePage() {
     URL.revokeObjectURL(url);
   };
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading pricing & labor…</p>;
+  if (isLoading && !snapshot)
+    return <p className="text-sm text-muted-foreground">Loading pricing & labor…</p>;
   if (!admin) return <p className="text-sm text-muted-foreground">Could not load engine data.</p>;
 
   return (
@@ -542,6 +616,19 @@ function EstimatePage() {
             </Button>
           </div>
         </div>
+
+        {frozenAsOf !== null && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              Pricing &amp; labor frozen as of{" "}
+              {frozenAsOf ? new Date(frozenAsOf).toLocaleString() : "when this bid was saved"} —
+              admin changes don't affect this bid until you update it.
+            </span>
+            <Button variant="outline" size="sm" onClick={refreshPricing}>
+              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
+            </Button>
+          </div>
+        )}
 
         <Card>
           <CardHeader>
