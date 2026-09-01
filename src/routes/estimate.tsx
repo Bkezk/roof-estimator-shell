@@ -1,10 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
+import { Plus, Trash2, AlertTriangle, Save } from "lucide-react";
 
 import { getEngineAdminData } from "@/lib/engine.functions";
+import { getBid, saveBid } from "@/lib/bids.functions";
 import { buildEstimateInputs, type BidInput, type BidSectionInput } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -31,8 +33,24 @@ import {
 
 export const Route = createFileRoute("/estimate")({
   head: () => ({ meta: [{ title: "Estimator — Bid-O-Matic" }] }),
+  validateSearch: (s: Record<string, unknown>): { bid?: string } => {
+    const b = s["bid"];
+    return typeof b === "string" ? { bid: b } : {};
+  },
   component: EstimatePage,
 });
+
+/** The persisted shape of a saved bid's estimator state. */
+interface SavedBid {
+  roofSystem: string;
+  attachment: "mechanical" | "adhered";
+  sections: BidSectionInput[];
+  markupMode: MarkupMode;
+  markup: number;
+  laborRate: number;
+  commission: number;
+  taxExempt: boolean;
+}
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const num = (v: string) => (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0;
@@ -62,6 +80,12 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
 
 function EstimatePage() {
   const getFn = useServerFn(getEngineAdminData);
+  const getBidFn = useServerFn(getBid);
+  const saveBidFn = useServerFn(saveBid);
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { bid: bidParam } = Route.useSearch();
+
   const { data: admin, isLoading } = useQuery({
     queryKey: ["engine-admin"],
     queryFn: () => getFn(),
@@ -75,6 +99,35 @@ function EstimatePage() {
   const [laborRate, setLaborRate] = useState(50);
   const [commission, setCommission] = useState(3);
   const [taxExempt, setTaxExempt] = useState(false);
+
+  const [bidId, setBidId] = useState<string | undefined>(bidParam);
+  const [bidName, setBidName] = useState("Untitled bid");
+  const [saving, setSaving] = useState(false);
+
+  // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
+  const { data: loadedBid } = useQuery({
+    queryKey: ["bid", bidParam],
+    queryFn: () => getBidFn({ data: { id: bidParam! } }),
+    enabled: !!bidParam,
+  });
+  const hydratedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!loadedBid || hydratedFor.current === loadedBid.id) return;
+    const d = loadedBid.data as unknown as Partial<SavedBid> | null;
+    if (d && Array.isArray(d.sections)) {
+      setRoofSystem(d.roofSystem ?? "Duro-Last");
+      setAttachment(d.attachment ?? "mechanical");
+      setSections(d.sections.length ? d.sections : [newSection()]);
+      setMarkupMode((d.markupMode ?? 2) as MarkupMode);
+      setMarkup(d.markup ?? 35);
+      setLaborRate(d.laborRate ?? 50);
+      setCommission(d.commission ?? 3);
+      setTaxExempt(d.taxExempt ?? false);
+    }
+    setBidId(loadedBid.id);
+    setBidName(loadedBid.name);
+    hydratedFor.current = loadedBid.id;
+  }, [loadedBid]);
 
   const systemOptions = useMemo(() => {
     if (!admin) return [];
@@ -132,18 +185,70 @@ function EstimatePage() {
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const saved: SavedBid = {
+        roofSystem,
+        attachment,
+        sections,
+        markupMode,
+        markup,
+        laborRate,
+        commission,
+        taxExempt,
+      };
+      const grandTotal = result?.r.money.grandTotal ?? 0;
+      const row = await saveBidFn({
+        data: {
+          ...(bidId ? { id: bidId } : {}),
+          name: bidName.trim() || "Untitled bid",
+          data: saved as unknown as Record<string, unknown>,
+          grandTotal,
+        },
+      });
+      qc.invalidateQueries({ queryKey: ["bids"] });
+      toast.success("Bid saved");
+      if (row && !bidId) {
+        setBidId(row.id);
+        hydratedFor.current = row.id;
+        void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading pricing & labor…</p>;
   if (!admin) return <p className="text-sm text-muted-foreground">Could not load engine data.</p>;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
-          <p className="text-sm text-muted-foreground">
-            A live estimate — the bid total recomputes from the seeded pricing and labor data on
-            every change.
-          </p>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
+            <p className="text-sm text-muted-foreground">
+              A live estimate — the bid total recomputes from the seeded pricing and labor data on
+              every change.
+            </p>
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Bid name</Label>
+              <Input
+                className="w-[220px]"
+                value={bidName}
+                onChange={(e) => setBidName(e.target.value)}
+              />
+            </div>
+            <Button onClick={handleSave} disabled={saving}>
+              <Save className="mr-2 h-4 w-4" />
+              {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
+            </Button>
+          </div>
         </div>
 
         <Card>
