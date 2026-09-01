@@ -72,6 +72,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
     },
   ],
   accessories: [],
+  nonDlLines: [],
   markupMode: 0,
   markup: 0,
   crewLaborRatePerHour: 50,
@@ -265,6 +266,29 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const { inputs } = buildEstimateInputs(bid(), pct);
     // 5% of M0 3199.23 = 159.9615 → GoodSingle → 159.96
     expect(inputs.shipping).toBeCloseTo(159.96, 2);
+  });
+
+  it("non-DL lines: material → OtherMaterial (taxable basis), labor $ → services (LaborSubtotal2)", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        nonDlLines: [
+          {
+            description: "Curb Counter Flashing",
+            price: 4,
+            laborPerUnit: 0.0167,
+            laborRate: 45,
+            quantity: 10,
+          },
+        ],
+      }),
+      admin,
+    );
+    expect(inputs.otherMaterial).toBeCloseTo(40, 2); // 10 × $4 material
+    expect(inputs.servicesCost).toBeCloseTo(7.515, 3); // 10 × 0.0167 h × $45/h
+    expect(inputs.materialTotalBeforeTax).toBeCloseTo(3199.23 + 40, 2); // OtherMaterial is taxable
+    const r = computeEstimate(inputs);
+    expect(r.money.dTotals[7]).toBeCloseTo(40, 2); // OtherMaterial row
+    expect(r.laborSubtotal2).toBeCloseTo(7.515, 3); // subs + services
   });
 
   it("warns when a price or labor combo is missing", () => {

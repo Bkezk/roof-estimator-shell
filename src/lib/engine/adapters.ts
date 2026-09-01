@@ -162,6 +162,43 @@ export function buildAccessoryCatalog(
   return items;
 }
 
+/** One pickable non-Duro-Last catalog line (material Price + a labor component at its own rate). */
+export interface NonDlCatalogItem {
+  key: string; // `${screenId}::${description}`
+  category: string;
+  description: string;
+  price: number; // material $/unit
+  laborPerUnit: number; // labor hours/unit
+  laborRate: number; // $/hr for this line's labor
+}
+
+/**
+ * Flatten the non-DL pricing screens (uniform Description / Price / LaborPerUnit / Labor Rate shape:
+ * Roof Edge Blocking, Sheet Metal Work, Masonry, Subcontractors, 3rd Party Services, …) into a
+ * pickable list. Missing numeric cells default to 0.
+ */
+export function buildNonDlCatalog(
+  rows: Array<{ id: string; category: string; data: MembraneScreen }>,
+): NonDlCatalogItem[] {
+  const num = (v: string | number | null | undefined): number => (typeof v === "number" ? v : 0);
+  const items: NonDlCatalogItem[] = [];
+  for (const row of rows) {
+    for (const r of row.data?.rows ?? []) {
+      const description = String(r["Description"] ?? r["Name"] ?? "");
+      if (!description) continue;
+      items.push({
+        key: `${row.id}::${description}`,
+        category: row.category,
+        description,
+        price: num(r["Price"]),
+        laborPerUnit: num(r["LaborPerUnit"]),
+        laborRate: num(r["Labor Rate"]),
+      });
+    }
+  }
+  return items;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Labor multipliers (from a Roof Deck Labor "Membrane Labor" combo)
 // ─────────────────────────────────────────────────────────────────────────────

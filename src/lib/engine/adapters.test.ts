@@ -8,6 +8,7 @@ import {
   buildTearOffLookup,
   buildUnderlaymentPrices,
   buildAccessoryCatalog,
+  buildNonDlCatalog,
   buildShippingSteps,
   buildSetupTable,
   buildInspectionTable,
@@ -314,6 +315,45 @@ describe("buildAccessoryCatalog (flatten price screens incl. color/box variants)
       },
     ]);
     expect(items).toHaveLength(0);
+  });
+});
+
+describe("buildNonDlCatalog (non-DL price + labor screens)", () => {
+  it("maps Description / Price / LaborPerUnit / Labor Rate per row; missing numerics → 0", () => {
+    const items = buildNonDlCatalog([
+      {
+        id: "non_dl:sheet_metal_work",
+        category: "Sheet Metal Work",
+        data: {
+          columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+          rows: [
+            {
+              Description: "Curb Counter Flashing",
+              Price: 4,
+              LaborPerUnit: 0.0167,
+              "Labor Rate": 45,
+            },
+          ],
+        },
+      },
+      {
+        id: "non_dl:subcontractors",
+        category: "Subcontractors",
+        data: {
+          columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+          rows: [{ Description: "HVAC", Price: 0, LaborPerUnit: 0, "Labor Rate": 45 }],
+        },
+      },
+    ]);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      category: "Sheet Metal Work",
+      description: "Curb Counter Flashing",
+      price: 4,
+      laborPerUnit: 0.0167,
+      laborRate: 45,
+    });
+    expect(items[0]!.key).toBe("non_dl:sheet_metal_work::Curb Counter Flashing");
   });
 });
 

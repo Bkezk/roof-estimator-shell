@@ -13,7 +13,9 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   assembleEngineAdminData,
   buildAccessoryCatalog,
+  buildNonDlCatalog,
   type AccessoryCatalogItem,
+  type NonDlCatalogItem,
   type EngineAdminData,
   type LaborCombo,
   type MembraneScreen,
@@ -25,7 +27,11 @@ import {
   type RawInspectionStep,
 } from "@/lib/engine/adapters";
 
-export type { EngineAdminData, AccessoryCatalogItem } from "@/lib/engine/adapters";
+export type {
+  EngineAdminData,
+  AccessoryCatalogItem,
+  NonDlCatalogItem,
+} from "@/lib/engine/adapters";
 
 const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
 const UNDERLAYMENT_SCREEN_ID = "duro_last:underlayment";
@@ -110,4 +116,22 @@ export const getAccessoryCatalog = createServerFn({ method: "GET" })
       data: r.data as unknown as MembraneScreen,
     }));
     return buildAccessoryCatalog(rows);
+  });
+
+/** Pickable non-Duro-Last catalog (blocking, sheet metal, subs, services, …). Authenticated read. */
+export const getNonDlCatalog = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<NonDlCatalogItem[]> => {
+    const { data, error } = await context.supabase
+      .from("pricing_catalog")
+      .select("id, category, data")
+      .eq("branch", "non_dl")
+      .order("sort");
+    if (error) throw error;
+    const rows = (data ?? []).map((r) => ({
+      id: r.id,
+      category: r.category,
+      data: r.data as unknown as MembraneScreen,
+    }));
+    return buildNonDlCatalog(rows);
   });

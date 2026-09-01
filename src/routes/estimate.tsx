@@ -5,13 +5,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Trash2, AlertTriangle, Save } from "lucide-react";
 
-import { getEngineAdminData, getAccessoryCatalog } from "@/lib/engine.functions";
+import { getEngineAdminData, getAccessoryCatalog, getNonDlCatalog } from "@/lib/engine.functions";
 import { getBid, saveBid } from "@/lib/bids.functions";
 import {
   buildEstimateInputs,
   type BidInput,
   type BidSectionInput,
   type AccessoryLine,
+  type NonDlLine,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -51,6 +52,7 @@ interface SavedBid {
   attachment: "mechanical" | "adhered";
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
+  nonDlLines: NonDlLine[];
   markupMode: MarkupMode;
   markup: number;
   laborRate: number;
@@ -94,6 +96,7 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
 function EstimatePage() {
   const getFn = useServerFn(getEngineAdminData);
   const getAccFn = useServerFn(getAccessoryCatalog);
+  const getNonDlFn = useServerFn(getNonDlCatalog);
   const getBidFn = useServerFn(getBid);
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
@@ -108,11 +111,16 @@ function EstimatePage() {
     queryKey: ["accessory-catalog"],
     queryFn: () => getAccFn(),
   });
+  const { data: nonDlCatalog } = useQuery({
+    queryKey: ["nondl-catalog"],
+    queryFn: () => getNonDlFn(),
+  });
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
+  const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
   const [laborRate, setLaborRate] = useState(50);
@@ -138,6 +146,7 @@ function EstimatePage() {
       setAttachment(d.attachment ?? "mechanical");
       setSections(d.sections.length ? d.sections : [newSection()]);
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
+      setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
       setLaborRate(d.laborRate ?? 50);
@@ -174,6 +183,7 @@ function EstimatePage() {
     attachment,
     sections,
     accessories,
+    nonDlLines,
     markupMode,
     markup,
     crewLaborRatePerHour: laborRate,
@@ -205,6 +215,11 @@ function EstimatePage() {
   }, [admin, JSON.stringify(bid)]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+  const nonDlMaterialTotal = nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+  const nonDlLaborTotal = nonDlLines.reduce(
+    (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
+    0,
+  );
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
@@ -217,6 +232,7 @@ function EstimatePage() {
         attachment,
         sections,
         accessories,
+        nonDlLines,
         markupMode,
         markup,
         laborRate,
@@ -576,6 +592,96 @@ function EstimatePage() {
         </Card>
 
         <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
+            <Select
+              value=""
+              onValueChange={(key) => {
+                const item = nonDlCatalog?.find((n) => n.key === key);
+                if (item)
+                  setNonDlLines((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      price: item.price,
+                      laborPerUnit: item.laborPerUnit,
+                      laborRate: item.laborRate,
+                      quantity: 1,
+                    },
+                  ]);
+              }}
+            >
+              <SelectTrigger className="w-[240px]">
+                <SelectValue placeholder="Add non-DL item…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(nonDlCatalog ?? []).map((n) => (
+                  <SelectItem key={n.key} value={n.key}>
+                    {n.category} — {n.description}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardHeader>
+          <CardContent>
+            {nonDlLines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No non-DL items. Material folds into Other material; labor into Subs &amp; services.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="w-[80px]">Matl</TableHead>
+                    <TableHead className="w-[80px]">Labor/ea</TableHead>
+                    <TableHead className="w-[80px]">Qty</TableHead>
+                    <TableHead className="w-[100px] text-right">Total</TableHead>
+                    <TableHead className="w-[44px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {nonDlLines.map((l, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{l.description}</TableCell>
+                      <TableCell>{money(l.price)}</TableCell>
+                      <TableCell>{money(l.laborPerUnit * l.laborRate)}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="h-8 w-[70px]"
+                          value={l.quantity}
+                          onChange={(e) =>
+                            setNonDlLines((p) =>
+                              p.map((x, j) =>
+                                j === i ? { ...x, quantity: num(e.target.value) } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {money((l.price + l.laborPerUnit * l.laborRate) * l.quantity)}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive"
+                          onClick={() => setNonDlLines((p) => p.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
             <CardTitle className="text-base">Pricing controls</CardTitle>
           </CardHeader>
@@ -663,7 +769,13 @@ function EstimatePage() {
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
                     <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
                   )}
+                  {nonDlMaterialTotal > 0 && (
+                    <Row label="Other material (non-DL)" v={money(nonDlMaterialTotal)} />
+                  )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
+                  {nonDlLaborTotal > 0 && (
+                    <Row label="Subs & services" v={money(result.r.laborSubtotal2)} />
+                  )}
                   <Row label="Subtotal 1" v={money(result.r.money.subtotal1)} />
                   <Row
                     label={`Markup (${MARKUP_LABELS[markupMode]})`}

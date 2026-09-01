@@ -22,6 +22,8 @@
  *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
  *    quantity); the total folds into M0. Accessory LABOR (from the Accessory Labor tables) is a
  *    later step.
+ *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
+ *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
@@ -67,11 +69,25 @@ export interface AccessoryLine {
   quantity: number;
 }
 
+/**
+ * A non-Duro-Last catalog line (Sheet Metal Work, Blocking, Subcontractors, Services, …). Each unit
+ * carries a material Price and a labor component (LaborPerUnit hours × its own Labor Rate $/hr),
+ * snapshotted when added. Material folds into OtherMaterial; the labor $ folds into services.
+ */
+export interface NonDlLine {
+  description: string;
+  price: number; // material $/unit
+  laborPerUnit: number; // labor hours/unit
+  laborRate: number; // $/hr for this line's labor
+  quantity: number;
+}
+
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
+  nonDlLines: NonDlLine[];
 
   // money params
   markupMode: MarkupMode;
@@ -200,7 +216,18 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const duroLastMaterial = membraneMaterial + accessoryMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
-  const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + bid.otherMaterial;
+
+  // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
+  // labor $ (LaborPerUnit hours × its own Labor Rate × qty) → services (LaborSubtotal2). Both subs
+  // and services land in row 11, so non-DL labor routes to services (the split is display-only).
+  const nonDlMaterial = bid.nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
+  const nonDlServices = bid.nonDlLines.reduce(
+    (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
+    0,
+  );
+  const otherMaterial = bid.otherMaterial + nonDlMaterial;
+  const servicesCost = bid.servicesCost + nonDlServices;
+  const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
 
   // Freight (§4.1 dTotals[9]) — percent-of-material or the stepped "from" table, on the Duro-Last
   // material subtotal (M0), the "Duro-Last material" the admin Shipping screen bills against.
@@ -235,11 +262,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     duroLastMaterial,
     membraneCostBeforeDiscount: membraneMaterial,
     materialUnderlayment,
-    otherMaterial: bid.otherMaterial,
+    otherMaterial,
     materialTotalBeforeTax,
     shipping,
     subsCost: bid.subsCost,
-    servicesCost: bid.servicesCost,
+    servicesCost,
     prepayDiscount: bid.prepayDiscount,
     stdSizeDiscount: bid.stdSizeDiscount,
     volumeDiscount: bid.volumeDiscount,
