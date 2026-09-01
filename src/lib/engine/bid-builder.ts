@@ -1,0 +1,189 @@
+/**
+ * Bid builder (Phase 5) — maps the estimator UI's simple bid model onto the engine's EstimateInputs,
+ * pulling prices and labor multipliers from the assembled admin data. Pure and tested; the UI holds
+ * the bid state and calls this before computeEstimate.
+ *
+ * v1 SIMPLIFICATIONS (documented, to lift as we go):
+ *  - One roof system + attachment for the whole bid (the orchestrator takes one admin table set).
+ *  - Roll-goods membrane: material sq ft = AreaWithEdgeOverlap (the simple edge-overlap path); the
+ *    full roll-goods perimeter geometry (§2.2) is not applied.
+ *  - Whole section billed as FIELD (perimeter/corner enhancement zones = 0).
+ *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
+ *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
+ *  - Tear-off labor lookup and freight table not wired (0); membrane price tier assumed roll-goods.
+ */
+
+import { areaWithEdgeOverlap } from "./quantities";
+import { membraneMaterialCost, priceMatrixLookup, shippingTotal } from "./pricing";
+import { CURRENT_FORMULAS_VERSION } from "./version";
+import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
+import type { MarkupMode } from "./money";
+import type { EngineAdminData } from "./adapters";
+
+export interface BidSectionInput {
+  id: string;
+  name: string;
+  length: number;
+  width: number;
+  deckType: string; // e.g. "Wood"
+  thickness: number; // 40 / 50 / 60
+  color: string; // e.g. "White"
+  fieldLap: number; // tab lap inches
+  fastenerOc: number; // on-center inches (entered; auto-lookup pending capture)
+  sheetSizeLabel: string; // e.g. "1500 sf"
+  tearOff: boolean;
+  toThicknessInches: number;
+}
+
+export interface BidInput {
+  roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
+  attachment: Attachment;
+  sections: BidSectionInput[];
+
+  // money params
+  markupMode: MarkupMode;
+  markup: number;
+  crewLaborRatePerHour: number;
+  commission: number;
+  commissionInMarkup: boolean;
+  perDiem: number;
+  perDiemInMarkup: boolean;
+  prepayDiscount: boolean;
+  stdSizeDiscount: boolean;
+  volumeDiscount: boolean;
+  taxExempt: boolean;
+  adjustLaborPct: number;
+
+  // provided extras (seams)
+  extraShipping: number;
+  subsCost: number;
+  servicesCost: number;
+  materialUnderlayment: number;
+  otherMaterial: number;
+
+  // warranty
+  warrantyCostPerSqFt: number;
+  warrantyNonEliteMasterCharge: number;
+  warrantyIsHighWind: boolean;
+  warrantyHighWindUpcharge: number;
+}
+
+/** The DB labor combo key uses "adhesive"; the engine attachment enum uses "adhered". */
+const comboKey = (system: string, attachment: Attachment): string =>
+  `${system}|${attachment === "adhered" ? "adhesive" : "mechanical"}`;
+
+export interface BuildResult {
+  inputs: EstimateInputs;
+  /** Warnings for the UI (e.g. missing price / labor combo). */
+  warnings: string[];
+}
+
+/** Build the engine EstimateInputs from a bid + assembled admin data. */
+export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): BuildResult {
+  const warnings: string[] = [];
+  const version = CURRENT_FORMULAS_VERSION;
+  const isDuroRoof = bid.roofSystem === "Duro-Roof";
+
+  const lt = admin.labor[comboKey(bid.roofSystem, bid.attachment)];
+  if (!lt) {
+    warnings.push(`No labor table for ${bid.roofSystem} / ${bid.attachment}; labor will be 0.`);
+  }
+
+  let membraneMaterial = 0;
+
+  const sections: RoofSection[] = bid.sections.map((s) => {
+    const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
+    if (price === null) {
+      warnings.push(
+        `No price for ${s.thickness}mil ${s.color} (roll goods) — section "${s.name}".`,
+      );
+    }
+    const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
+    membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
+
+    return {
+      id: s.id,
+      length: s.length,
+      width: s.width,
+      fieldArea: s.length * s.width, // v1: whole section is field
+      perimArea: 0,
+      cornerArea: 0,
+      membraneWithOverlap,
+      arpSqFt: 0,
+      thickness: s.thickness,
+      thicknessLabor: lt?.thicknessLaborByMil[s.thickness] ?? 1,
+      designTable: 60,
+      pullTest: 0, // unused: fastenerOc supplied directly
+      fieldLap: s.fieldLap,
+      perimLap: s.fieldLap,
+      cornerLap: s.fieldLap,
+      customFieldFastenerSpacing: s.fastenerOc,
+      customPerimFastenerSpacing: s.fastenerOc,
+      customCornerFastenerSpacing: s.fastenerOc,
+      deckTypeId: lt?.deckTypeIds[s.deckType] ?? 0,
+      sheetSizeMulti: lt?.sheetSizeMultiByLabel[s.sheetSizeLabel] ?? 1,
+      complexity: 1,
+      fieldAttachment: bid.attachment,
+      perimAttachment: bid.attachment,
+      adhesiveBaseHoursPer1000: 0,
+      rollGoods: true,
+      rollGoodWidthMulti: 1,
+      adheredPerimeterBump: false,
+      tearOff: s.tearOff,
+      tearOffLaborLookup: 0, // v1: tear-off labor table not wired
+      tearOffAdditionalPct: 0,
+      toThicknessInches: s.toThicknessInches,
+    };
+  });
+
+  const duroLastMaterial = membraneMaterial;
+  const materialTotalBeforeTax = duroLastMaterial + bid.materialUnderlayment + bid.otherMaterial;
+  const shipping = shippingTotal(0, bid.extraShipping); // v1: freight table not wired
+
+  const inputs: EstimateInputs = {
+    formulasVersion: version,
+    sections,
+    admin: {
+      deckTypeMulti: lt?.deckTypeMulti ?? {},
+      tabBands: lt?.tabBands ?? [],
+      onCenterBands: lt?.onCenterBands ?? [],
+      fastenerSpacing: [], // gap — sections supply customFieldFastenerSpacing
+    },
+    adjustLaborPct: bid.adjustLaborPct,
+    adjustSetupLaborPct: 0,
+    adjustInspectionPct: 0,
+    crewLaborRatePerHour: bid.crewLaborRatePerHour,
+    tearOffFillFraction: 1,
+    dumpsterUnitYardage: 30,
+    duroLastMaterial,
+    membraneCostBeforeDiscount: membraneMaterial,
+    materialUnderlayment: bid.materialUnderlayment,
+    otherMaterial: bid.otherMaterial,
+    materialTotalBeforeTax,
+    shipping,
+    subsCost: bid.subsCost,
+    servicesCost: bid.servicesCost,
+    prepayDiscount: bid.prepayDiscount,
+    stdSizeDiscount: bid.stdSizeDiscount,
+    volumeDiscount: bid.volumeDiscount,
+    markupMode: bid.markupMode,
+    markup: bid.markup,
+    salesTax: admin.settings.salesTax,
+    taxMaterialOnly: admin.settings.taxMaterialOnly,
+    taxExempt: bid.taxExempt,
+    perDiem: bid.perDiem,
+    perDiemInMarkup: bid.perDiemInMarkup,
+    commission: bid.commission,
+    commissionInMarkup: bid.commissionInMarkup,
+    hoursPerDay: admin.settings.hoursPerDay,
+    warranty: {
+      costPerSqFt: bid.warrantyCostPerSqFt,
+      nonEliteMasterCharge: bid.warrantyNonEliteMasterCharge,
+      masterEliteCont: admin.settings.masterEliteCont,
+      isHighWind: bid.warrantyIsHighWind,
+      highWindUpcharge: bid.warrantyHighWindUpcharge,
+    },
+  };
+
+  return { inputs, warnings };
+}

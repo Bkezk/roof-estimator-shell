@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
+import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NewBidRouteImport } from './routes/new-bid'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
@@ -33,6 +34,11 @@ const AccountRoute = AccountRouteImport.update({
 const BidsRoute = BidsRouteImport.update({
   id: '/bids',
   path: '/bids',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EstimateRoute = EstimateRouteImport.update({
+  id: '/estimate',
+  path: '/estimate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/estimate'
     | '/login'
     | '/new-bid'
     | '/admin/duro-last'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/estimate'
     | '/login'
     | '/new-bid'
     | '/admin/duro-last'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/estimate'
     | '/login'
     | '/new-bid'
     | '/admin/duro-last'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
   BidsRoute: typeof BidsRoute
+  EstimateRoute: typeof EstimateRoute
   LoginRoute: typeof LoginRoute
   NewBidRoute: typeof NewBidRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
@@ -181,6 +194,13 @@ declare module '@tanstack/react-router' {
       path: '/bids'
       fullPath: '/bids'
       preLoaderRoute: typeof BidsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/estimate': {
+      id: '/estimate'
+      path: '/estimate'
+      fullPath: '/estimate'
+      preLoaderRoute: typeof EstimateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   BidsRoute: BidsRoute,
+  EstimateRoute: EstimateRoute,
   LoginRoute: LoginRoute,
   NewBidRoute: NewBidRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,

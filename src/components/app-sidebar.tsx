@@ -9,6 +9,7 @@ import {
   SlidersHorizontal,
   Package,
   Layers,
+  Calculator,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/sidebar";
 
 const estimatorItems = [
+  { title: "Estimator", url: "/estimate", icon: Calculator },
   { title: "Bids", url: "/bids", icon: FileText },
   { title: "New Bid", url: "/new-bid", icon: PlusCircle },
 ];
