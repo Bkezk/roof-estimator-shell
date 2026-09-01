@@ -11,6 +11,7 @@ import {
   saveInspection,
   saveTemplates,
   saveCurb,
+  saveParapet,
   type LaborEngines,
   type LaborTemplate,
 } from "@/lib/admin-labor.functions";
@@ -75,6 +76,7 @@ function LaborPage() {
           <TabsTrigger value="inspection">Inspection Times</TabsTrigger>
           <TabsTrigger value="templates">Labor Templates</TabsTrigger>
           <TabsTrigger value="curb">Curb Labor</TabsTrigger>
+          <TabsTrigger value="parapet">Parapet Labor</TabsTrigger>
         </TabsList>
         <TabsContent value="setup">
           <SetupTab data={data} onSaved={invalidate} />
@@ -87,6 +89,9 @@ function LaborPage() {
         </TabsContent>
         <TabsContent value="curb">
           <CurbTab data={data} onSaved={invalidate} />
+        </TabsContent>
+        <TabsContent value="parapet">
+          <ParapetTab data={data} onSaved={invalidate} />
         </TabsContent>
       </Tabs>
     </div>
@@ -518,6 +523,94 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
               </Table>
             </div>
           </div>
+        </CardContent>
+      </Card>
+      <SaveBar saving={saving} onSave={save} />
+    </div>
+  );
+}
+
+function ParapetTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void }) {
+  const saveFn = useServerFn(saveParapet);
+  const [rows, setRows] = useState(
+    data.parapet.map((r) => ({
+      deck_type: r.deck_type,
+      wall_height_band: r.wall_height_band,
+      no_drill_no_cant: r.no_drill_no_cant,
+      no_drill_canted: r.no_drill_canted,
+      predrill_no_cant: r.predrill_no_cant,
+      predrill_canted: r.predrill_canted,
+    })),
+  );
+  const [saving, setSaving] = useState(false);
+  const set = (i: number, key: string, v: number) =>
+    setRows((p) => p.map((r, j) => (j === i ? { ...r, [key]: v } : r)));
+  const save = async () => {
+    setSaving(true);
+    try {
+      await saveFn({ data: { rows } });
+      toast.success("Parapet labor saved");
+      onSaved();
+    } catch (e) {
+      toast.error((e as Error).message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Parapet labor</CardTitle>
+          <CardDescription>
+            Man-hours per 50 lineal feet, by deck type and wall height, for each drill/cant
+            combination.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Deck type</TableHead>
+                <TableHead>Wall height</TableHead>
+                <TableHead>No drill, no cant</TableHead>
+                <TableHead>No drill, canted</TableHead>
+                <TableHead>Pre-drill, no cant</TableHead>
+                <TableHead>Pre-drill, canted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r, i) => {
+                const firstOfDeck = i === 0 || rows[i - 1]!.deck_type !== r.deck_type;
+                return (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">{firstOfDeck ? r.deck_type : ""}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {r.wall_height_band}
+                    </TableCell>
+                    {(
+                      [
+                        "no_drill_no_cant",
+                        "no_drill_canted",
+                        "predrill_no_cant",
+                        "predrill_canted",
+                      ] as const
+                    ).map((key) => (
+                      <TableCell key={key}>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={r[key]}
+                          onChange={(e) => set(i, key, num(e.target.value))}
+                          className="w-24"
+                        />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
       <SaveBar saving={saving} onSave={save} />

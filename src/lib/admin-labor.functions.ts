@@ -10,6 +10,7 @@ export type SetupStep = Tables["labor_setup_steps"]["Row"];
 export type InspectionStep = Tables["labor_inspection_steps"]["Row"];
 export type CurbDeck = Tables["labor_curb_deck"]["Row"];
 export type CurbType = Tables["labor_curb_type"]["Row"];
+export type ParapetRow = Tables["labor_parapet"]["Row"];
 export interface LaborTemplate {
   id: string;
   name: string;
@@ -24,6 +25,7 @@ export interface LaborEngines {
   curbSetupMinutes: number;
   curbDeck: CurbDeck[];
   curbType: CurbType[];
+  parapet: ParapetRow[];
 }
 
 const NIL = "00000000-0000-0000-0000-000000000000";
@@ -37,7 +39,7 @@ export const getLaborEngines = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<LaborEngines> => {
     const sb = context.supabase;
-    const [setup, steps, insp, tpls, adj, curb, cdeck, ctype] = await Promise.all([
+    const [setup, steps, insp, tpls, adj, curb, cdeck, ctype, para] = await Promise.all([
       sb.from("labor_setup").select("*").eq("id", 1).maybeSingle(),
       sb.from("labor_setup_steps").select("*").order("sort"),
       sb.from("labor_inspection_steps").select("*").order("sort"),
@@ -46,6 +48,7 @@ export const getLaborEngines = createServerFn({ method: "GET" })
       sb.from("labor_curb").select("*").eq("id", 1).maybeSingle(),
       sb.from("labor_curb_deck").select("*").order("sort"),
       sb.from("labor_curb_type").select("*").order("sort"),
+      sb.from("labor_parapet").select("*").order("sort"),
     ]);
     const templates: LaborTemplate[] = (tpls.data ?? []).map((t) => ({
       id: t.id,
@@ -63,6 +66,7 @@ export const getLaborEngines = createServerFn({ method: "GET" })
       curbSetupMinutes: curb.data?.setup_minutes ?? 8,
       curbDeck: cdeck.data ?? [],
       curbType: ctype.data ?? [],
+      parapet: para.data ?? [],
     };
   });
 
@@ -157,5 +161,29 @@ export const saveCurb = createServerFn({ method: "POST" })
     await sb.from("labor_curb_type").delete().neq("id", NIL);
     if (data.types.length)
       await sb.from("labor_curb_type").insert(data.types.map((t, i) => ({ ...t, sort: i })));
+    return { ok: true };
+  });
+
+const parapetSchema = z.object({
+  rows: z.array(
+    z.object({
+      deck_type: z.string().min(1),
+      wall_height_band: z.string().min(1),
+      no_drill_no_cant: z.number(),
+      no_drill_canted: z.number(),
+      predrill_no_cant: z.number(),
+      predrill_canted: z.number(),
+    }),
+  ),
+});
+export const saveParapet = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => parapetSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    await sb.from("labor_parapet").delete().neq("id", NIL);
+    if (data.rows.length)
+      await sb.from("labor_parapet").insert(data.rows.map((r, i) => ({ ...r, sort: i })));
     return { ok: true };
   });
