@@ -5,9 +5,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Trash2, AlertTriangle, Save } from "lucide-react";
 
-import { getEngineAdminData } from "@/lib/engine.functions";
+import { getEngineAdminData, getAccessoryCatalog } from "@/lib/engine.functions";
 import { getBid, saveBid } from "@/lib/bids.functions";
-import { buildEstimateInputs, type BidInput, type BidSectionInput } from "@/lib/engine/bid-builder";
+import {
+  buildEstimateInputs,
+  type BidInput,
+  type BidSectionInput,
+  type AccessoryLine,
+} from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
 import { Button } from "@/components/ui/button";
@@ -45,6 +50,7 @@ interface SavedBid {
   roofSystem: string;
   attachment: "mechanical" | "adhered";
   sections: BidSectionInput[];
+  accessories: AccessoryLine[];
   markupMode: MarkupMode;
   markup: number;
   laborRate: number;
@@ -87,6 +93,7 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
 
 function EstimatePage() {
   const getFn = useServerFn(getEngineAdminData);
+  const getAccFn = useServerFn(getAccessoryCatalog);
   const getBidFn = useServerFn(getBid);
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
@@ -97,10 +104,15 @@ function EstimatePage() {
     queryKey: ["engine-admin"],
     queryFn: () => getFn(),
   });
+  const { data: accCatalog } = useQuery({
+    queryKey: ["accessory-catalog"],
+    queryFn: () => getAccFn(),
+  });
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
+  const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
   const [laborRate, setLaborRate] = useState(50);
@@ -125,6 +137,7 @@ function EstimatePage() {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
       setSections(d.sections.length ? d.sections : [newSection()]);
+      setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
       setLaborRate(d.laborRate ?? 50);
@@ -160,6 +173,7 @@ function EstimatePage() {
     roofSystem,
     attachment,
     sections,
+    accessories,
     markupMode,
     markup,
     crewLaborRatePerHour: laborRate,
@@ -190,6 +204,8 @@ function EstimatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
 
+  const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
@@ -200,6 +216,7 @@ function EstimatePage() {
         roofSystem,
         attachment,
         sections,
+        accessories,
         markupMode,
         markup,
         laborRate,
@@ -475,6 +492,90 @@ function EstimatePage() {
         </Card>
 
         <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Accessories</CardTitle>
+            <Select
+              value=""
+              onValueChange={(key) => {
+                const item = accCatalog?.find((a) => a.key === key);
+                if (item)
+                  setAccessories((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      price: item.price,
+                      quantity: 1,
+                    },
+                  ]);
+              }}
+            >
+              <SelectTrigger className="w-[240px]">
+                <SelectValue placeholder="Add accessory…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(accCatalog ?? []).map((a) => (
+                  <SelectItem key={a.key} value={a.key}>
+                    {a.category} — {a.description} ({money(a.price)})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </CardHeader>
+          <CardContent>
+            {accessories.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No accessories added.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="w-[90px]">Unit</TableHead>
+                    <TableHead className="w-[90px]">Qty</TableHead>
+                    <TableHead className="w-[100px] text-right">Total</TableHead>
+                    <TableHead className="w-[44px]" />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {accessories.map((a, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{a.description}</TableCell>
+                      <TableCell>{money(a.price)}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          className="h-8 w-[70px]"
+                          value={a.quantity}
+                          onChange={(e) =>
+                            setAccessories((p) =>
+                              p.map((x, j) =>
+                                j === i ? { ...x, quantity: num(e.target.value) } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {money(a.price * a.quantity)}
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="text-destructive"
+                          onClick={() => setAccessories((p) => p.filter((_, j) => j !== i))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader>
             <CardTitle className="text-base">Pricing controls</CardTitle>
           </CardHeader>
@@ -554,7 +655,11 @@ function EstimatePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <Row label="Membrane material" v={money(result.r.money.dTotals[0] ?? 0)} />
+                  <Row
+                    label="Membrane material"
+                    v={money((result.r.money.dTotals[0] ?? 0) - accessoryTotal)}
+                  />
+                  {accessoryTotal > 0 && <Row label="Accessories" v={money(accessoryTotal)} />}
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
                     <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
                   )}

@@ -15,7 +15,9 @@
  *  - Freight table not wired (0); membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Underlayment material wired from the seeded Underlayment prices (board $/sqft × deck area).
- *  - Accessory material (dMaterial[4]) still a seam (otherMaterial), pending an accessories UI.
+ *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
+ *    quantity); the total folds into M0. Accessory LABOR (from the Accessory Labor tables) is a
+ *    later step.
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
@@ -48,10 +50,18 @@ export interface BidSectionInput {
   toThicknessInches: number;
 }
 
+/** An accessory line on a bid: price snapshotted from the catalog when added. */
+export interface AccessoryLine {
+  description: string;
+  price: number;
+  quantity: number;
+}
+
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
   sections: BidSectionInput[];
+  accessories: AccessoryLine[];
 
   // money params
   markupMode: MarkupMode;
@@ -176,7 +186,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     };
   });
 
-  const duroLastMaterial = membraneMaterial;
+  // Accessory material folds into M0 (dMaterial[4] sits within Σ dMaterial[0..6]).
+  const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+  const duroLastMaterial = membraneMaterial + accessoryMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + bid.otherMaterial;
   const shipping = shippingTotal(0, bid.extraShipping); // v1: freight table not wired

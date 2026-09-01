@@ -12,6 +12,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   assembleEngineAdminData,
+  buildAccessoryCatalog,
+  type AccessoryCatalogItem,
   type EngineAdminData,
   type LaborCombo,
   type MembraneScreen,
@@ -19,7 +21,7 @@ import {
   type TearOffTimesData,
 } from "@/lib/engine/adapters";
 
-export type { EngineAdminData } from "@/lib/engine/adapters";
+export type { EngineAdminData, AccessoryCatalogItem } from "@/lib/engine/adapters";
 
 const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
 const UNDERLAYMENT_SCREEN_ID = "duro_last:underlayment";
@@ -60,4 +62,22 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       tearOffTimes,
       underlaymentScreen,
     });
+  });
+
+/** Pickable accessory catalog (flattened single-Price Duro-Last screens). Authenticated read. */
+export const getAccessoryCatalog = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AccessoryCatalogItem[]> => {
+    const { data, error } = await context.supabase
+      .from("pricing_catalog")
+      .select("id, category, data")
+      .eq("branch", "duro_last")
+      .order("sort");
+    if (error) throw error;
+    const rows = (data ?? []).map((r) => ({
+      id: r.id,
+      category: r.category,
+      data: r.data as unknown as MembraneScreen,
+    }));
+    return buildAccessoryCatalog(rows);
   });

@@ -7,6 +7,7 @@ import {
   assembleEngineAdminData,
   buildTearOffLookup,
   buildUnderlaymentPrices,
+  buildAccessoryCatalog,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -211,6 +212,32 @@ describe("buildUnderlaymentPrices (from the seeded Underlayment screen)", () => 
     expect(prices['1/2" ISO']).toBe(0.85);
     expect(prices["Duro-Fold"]).toBe(0.3);
     expect(Object.keys(prices)).toEqual(['1/2" ISO', "Duro-Fold"]);
+  });
+});
+
+describe("buildAccessoryCatalog (flatten single-Price screens)", () => {
+  it("includes items from Price screens; skips screens without a Price column", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:vents",
+        category: "Vents",
+        data: {
+          columns: ["Description", "Part #", "Price"],
+          rows: [{ Description: "White Vent", "Part #": "1231", Price: 25.75 }],
+        },
+      },
+      {
+        id: "duro_last:corners",
+        category: "Corners",
+        data: {
+          columns: ["Description", "Part #", "White", "Tan"], // color-priced, no "Price" → skipped
+          rows: [{ Description: 'Inside 6" x 6"', White: 4.4, Tan: 5.4 }],
+        },
+      },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ category: "Vents", description: "White Vent", price: 25.75 });
+    expect(items[0]!.key).toBe("duro_last:vents::White Vent");
   });
 });
 

@@ -79,6 +79,42 @@ export function buildUnderlaymentPrices(screen: MembraneScreen): Record<string, 
   return prices;
 }
 
+/** One pickable accessory item flattened from the seeded catalog screens. */
+export interface AccessoryCatalogItem {
+  key: string; // `${screenId}::${description}`
+  category: string;
+  description: string;
+  price: number;
+}
+
+/**
+ * Flatten seeded pricing_catalog screens into a pickable accessory list. v1 covers single-"Price"
+ * screens (sealants, vents, washers, drain boots, CDR rings, termination/fascia bars, walk pads, …);
+ * color-priced screens (Corners, Pipe Stacks, Drip Edge, Gravel Stops) and box-priced fasteners are
+ * skipped here and handled in a later pass.
+ */
+export function buildAccessoryCatalog(
+  rows: Array<{ id: string; category: string; data: MembraneScreen }>,
+): AccessoryCatalogItem[] {
+  const items: AccessoryCatalogItem[] = [];
+  for (const row of rows) {
+    if (!row.data?.columns?.includes("Price")) continue;
+    for (const r of row.data.rows) {
+      const description = String(r["Description"] ?? r["Name"] ?? "");
+      const price = r["Price"];
+      if (description && typeof price === "number") {
+        items.push({
+          key: `${row.id}::${description}`,
+          category: row.category,
+          description,
+          price,
+        });
+      }
+    }
+  }
+  return items;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Labor multipliers (from a Roof Deck Labor "Membrane Labor" combo)
 // ─────────────────────────────────────────────────────────────────────────────

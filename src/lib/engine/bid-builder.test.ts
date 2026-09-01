@@ -71,6 +71,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
       toThicknessInches: 0,
     },
   ],
+  accessories: [],
   markupMode: 0,
   markup: 0,
   crewLaborRatePerHour: 50,
@@ -116,6 +117,22 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     const S = r.money.subtotal1;
     expect(r.money.markupValue).toBeCloseTo(S / (1 - 0.35) - S, 2);
+  });
+
+  it("accessory lines (price × qty) fold into the Duro-Last material subtotal M0", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        accessories: [
+          { description: "White Vent", price: 25.75, quantity: 7 },
+          { description: "Duro-Caulk - White", price: 10.2, quantity: 3 },
+        ],
+      }),
+      admin,
+    );
+    // 7×25.75 + 3×10.20 = 180.25 + 30.60 = 210.85, added to membrane 3199.23
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 210.85, 2);
+    // membrane-before-discount stays membrane-only (std-sheet discount basis)
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
   });
 
   it("underlayment material = board $/sqft × deck area, into the underlayment purchase line", () => {
