@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Json } from "@/integrations/supabase/types";
+import { BID_STATUSES } from "@/lib/bid-status";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -40,6 +41,7 @@ const saveBidSchema = z.object({
   name: z.string().min(1).max(200),
   data: z.record(z.string(), z.unknown()),
   grandTotal: z.number(),
+  status: z.enum(BID_STATUSES).optional(),
 });
 
 /** Create a new bid or update an existing one (by id) with the full estimator payload. */
@@ -52,6 +54,7 @@ export const saveBid = createServerFn({ method: "POST" })
       data: data.data as Json,
       grand_total: data.grandTotal,
       updated_at: new Date().toISOString(),
+      ...(data.status ? { status: data.status } : {}),
     };
     if (data.id) {
       const { data: bid, error } = await context.supabase
@@ -65,7 +68,7 @@ export const saveBid = createServerFn({ method: "POST" })
     }
     const { data: bid, error } = await context.supabase
       .from("bids")
-      .insert({ ...payload, status: "draft" })
+      .insert({ ...payload, status: data.status ?? "draft" })
       .select()
       .single();
     if (error) throw new Error(error.message);

@@ -75,6 +75,8 @@ export interface UnderlaymentLayer {
 export interface BidSectionInput {
   id: string;
   name: string;
+  /** Free-text estimator notes for this section (persisted with the bid; not priced). */
+  notes?: string;
   length: number;
   width: number;
   deckType: string; // e.g. "Wood"

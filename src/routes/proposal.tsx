@@ -199,12 +199,18 @@ function ProposalPage() {
             </p>
             <p className="font-medium">{saved.customer.name || "—"}</p>
             {saved.customer.contact && <p>{saved.customer.contact}</p>}
+            {saved.customer.phone && <p>{saved.customer.phone}</p>}
+            {saved.customer.email && <p>{saved.customer.email}</p>}
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
               Project address
             </p>
             <p>{saved.customer.projectAddress || "—"}</p>
+            {saved.customer.jobCityStZip && <p>{saved.customer.jobCityStZip}</p>}
+            {saved.customer.jobNumber && (
+              <p className="text-neutral-500">Job # {saved.customer.jobNumber}</p>
+            )}
           </div>
         </div>
 

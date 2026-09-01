@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Save, FileText } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Save, FileText, Copy } from "lucide-react";
 
 import {
   getEngineAdminData,
@@ -34,6 +34,7 @@ import {
   type CustomerInfo,
   type SavedBidState,
 } from "@/lib/proposal-bid";
+import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,6 +67,7 @@ export const Route = createFileRoute("/estimate")({
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const num = (v: string) => (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0;
+const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
 let seq = 1;
 const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput => ({
@@ -206,6 +208,7 @@ function EstimatePage() {
 
   const [bidId, setBidId] = useState<string | undefined>(bidParam);
   const [bidName, setBidName] = useState("Untitled bid");
+  const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [saving, setSaving] = useState(false);
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
@@ -252,6 +255,7 @@ function EstimatePage() {
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
+    setBidStatus(asBidStatus(loadedBid.status));
     hydratedFor.current = loadedBid.id;
   }, [loadedBid]);
 
@@ -357,6 +361,7 @@ function EstimatePage() {
           name: bidName.trim() || "Untitled bid",
           data: saved as unknown as Record<string, unknown>,
           grandTotal,
+          status: bidStatus,
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
@@ -396,6 +401,21 @@ function EstimatePage() {
                 onChange={(e) => setBidName(e.target.value)}
               />
             </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Status</Label>
+              <Select value={bidStatus} onValueChange={(v) => setBidStatus(v as BidStatus)}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BID_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {STATUS_LABELS[s]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <Button onClick={handleSave} disabled={saving}>
               <Save className="mr-2 h-4 w-4" />
               {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
@@ -416,31 +436,91 @@ function EstimatePage() {
           <CardHeader>
             <CardTitle className="text-base">Customer &amp; project</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
-            <Field label="Customer name">
-              <Input
-                value={customer.name}
-                onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
-              />
-            </Field>
-            <Field label="Contact (phone / email)">
-              <Input
-                value={customer.contact}
-                onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
-              />
-            </Field>
-            <Field label="Project address">
-              <Input
-                value={customer.projectAddress}
-                onChange={(e) => setCustomer((c) => ({ ...c, projectAddress: e.target.value }))}
-              />
-            </Field>
-            <Field label="Scope notes (optional, shown on the proposal)">
-              <Input
-                value={customer.notes}
-                onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
-              />
-            </Field>
+          <CardContent className="space-y-4">
+            <div>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Client</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field label="Customer name">
+                  <Input
+                    value={customer.name}
+                    onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Contact person">
+                  <Input
+                    value={customer.contact}
+                    onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Phone">
+                  <Input
+                    value={customer.phone ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
+                  />
+                </Field>
+                <Field label="E-mail">
+                  <Input
+                    value={customer.email ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Client address (street, city/st/zip)">
+                  <Input
+                    value={customer.clientAddress ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, clientAddress: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            </div>
+            <div>
+              <div className="mb-2 flex items-center gap-3">
+                <p className="text-xs font-medium text-muted-foreground">Job site</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() =>
+                    setCustomer((c) => ({ ...c, projectAddress: c.clientAddress ?? "" }))
+                  }
+                >
+                  <Copy className="mr-1 h-3 w-3" /> Copy client address
+                </Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Field label="Project address (street)">
+                  <Input
+                    value={customer.projectAddress}
+                    onChange={(e) =>
+                      setCustomer((c) => ({ ...c, projectAddress: e.target.value }))
+                    }
+                  />
+                </Field>
+                <Field label="City / St. / Zip">
+                  <Input
+                    value={customer.jobCityStZip ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Job #">
+                  <Input
+                    value={customer.jobNumber ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, jobNumber: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Ship via">
+                  <Input
+                    value={customer.shipVia ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Scope notes (optional, shown on the proposal)">
+                  <Input
+                    value={customer.notes}
+                    onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -502,15 +582,30 @@ function EstimatePage() {
                     value={s.name}
                     onChange={(e) => editSection(i, { name: e.target.value })}
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-destructive"
-                    onClick={() => setSections((p) => p.filter((_, j) => j !== i))}
-                    disabled={sections.length === 1}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Duplicate this section"
+                      onClick={() =>
+                        setSections((p) => [
+                          ...p,
+                          { ...clone(s), id: `s${seq++}`, name: `${s.name} (copy)` },
+                        ])
+                      }
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => setSections((p) => p.filter((_, j) => j !== i))}
+                      disabled={sections.length === 1}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                   <Field label="Length (ft)">
@@ -751,6 +846,15 @@ function EstimatePage() {
                     </>
                   )}
                 </div>
+                <div className="mt-3 border-t pt-3">
+                  <Field label="Section notes">
+                    <Input
+                      value={s.notes ?? ""}
+                      placeholder="Optional notes for this section…"
+                      onChange={(e) => editSection(i, { notes: e.target.value })}
+                    />
+                  </Field>
+                </div>
               </div>
             ))}
           </CardContent>
@@ -791,14 +895,29 @@ function EstimatePage() {
                         )
                       }
                     />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => setParapets((prev) => prev.filter((_, j) => j !== i))}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Duplicate this parapet"
+                        onClick={() =>
+                          setParapets((prev) => [
+                            ...prev,
+                            { ...clone(p), id: `p${pseq++}`, name: `${p.name} (copy)` },
+                          ])
+                        }
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive"
+                        onClick={() => setParapets((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     <Field label="Length (ft)">
@@ -916,14 +1035,29 @@ function EstimatePage() {
                         )
                       }
                     />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => setCurbs((prev) => prev.filter((_, j) => j !== i))}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Duplicate this curb"
+                        onClick={() =>
+                          setCurbs((prev) => [
+                            ...prev,
+                            { ...clone(c), id: `c${cseq++}`, name: `${c.name} (copy)` },
+                          ])
+                        }
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive"
+                        onClick={() => setCurbs((prev) => prev.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                     <Field label="Quantity">

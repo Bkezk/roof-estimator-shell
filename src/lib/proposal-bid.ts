@@ -19,9 +19,17 @@ import type { MarkupMode } from "@/lib/engine/money";
 /** Customer / project header, persisted with the bid and printed on the proposal. */
 export interface CustomerInfo {
   name: string;
-  contact: string; // phone / email
-  projectAddress: string;
+  contact: string; // contact person
+  projectAddress: string; // job-site street address
   notes: string; // optional scope notes for the proposal
+  // Client & job-site details (legacy Client / Job Site tabs, modernized; optional so older
+  // saved bids stay valid).
+  phone?: string;
+  email?: string;
+  clientAddress?: string; // client billing address (street, city/st/zip)
+  jobCityStZip?: string; // job-site city / state / zip (projectAddress carries the street)
+  jobNumber?: string;
+  shipVia?: string;
 }
 
 export const emptyCustomer = (): CustomerInfo => ({
