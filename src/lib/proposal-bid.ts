@@ -44,6 +44,60 @@ export interface SavedBidState {
   perDiemInMarkup?: boolean;
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
+  // Warranty selection (resolved to $/sqft via the warranties + high-wind admin tables).
+  warrantyName?: string;
+  highWind?: boolean;
+  highWindTermYears?: number;
+  highWindBand?: string;
+}
+
+/** Warranty admin data the resolver needs (from the warranties + high_wind_upcharges tables). */
+export interface WarrantyData {
+  warranties: Array<{ name: string; pricePerSqFt: number; nonMasterEliteSurcharge: number }>;
+  highWind: Array<{
+    termYears: number;
+    windBand: string;
+    mechPerSqFt: number;
+    adheredPerSqFt: number;
+  }>;
+}
+
+/** Resolve the selected warranty (+ high-wind) into the engine's numeric warranty inputs. */
+export function resolveWarrantyInput(
+  s: SavedBidState,
+  data: WarrantyData,
+): Pick<
+  BidInput,
+  | "warrantyCostPerSqFt"
+  | "warrantyNonEliteMasterCharge"
+  | "warrantyIsHighWind"
+  | "warrantyHighWindUpcharge"
+> {
+  const w = data.warranties.find((x) => x.name === s.warrantyName);
+  const isHighWind = s.highWind ?? false;
+  let highWindUpcharge = 0;
+  if (isHighWind) {
+    const hw = data.highWind.find(
+      (x) => x.termYears === s.highWindTermYears && x.windBand === s.highWindBand,
+    );
+    highWindUpcharge = hw ? (s.attachment === "adhered" ? hw.adheredPerSqFt : hw.mechPerSqFt) : 0;
+  }
+  return {
+    warrantyCostPerSqFt: w?.pricePerSqFt ?? 0,
+    warrantyNonEliteMasterCharge: w?.nonMasterEliteSurcharge ?? 0,
+    warrantyIsHighWind: isHighWind,
+    warrantyHighWindUpcharge: highWindUpcharge,
+  };
+}
+
+/**
+ * Build the engine BidInput from saved state, resolving the warranty selection against the warranty
+ * admin data when it's available. Estimator and proposal both call this, so their warranty pricing
+ * stays pinned. Without warranty data (or a selection), warranty stays 0.
+ */
+export function buildBidInput(s: SavedBidState, warrantyData?: WarrantyData | null): BidInput {
+  const base = savedToBidInput(s);
+  return warrantyData ? { ...base, ...resolveWarrantyInput(s, warrantyData) } : base;
 }
 
 /**

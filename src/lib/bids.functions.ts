@@ -97,6 +97,37 @@ export interface CompanyInfo {
   phone: string | null;
 }
 
+/** Warranty + high-wind pricing tables for the estimator's warranty picker. Authenticated read. */
+export const getWarrantyData = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const [wRes, hwRes] = await Promise.all([
+      context.supabase
+        .from("warranties")
+        .select("name, price_per_sqft, non_master_elite_surcharge")
+        .order("sort"),
+      context.supabase
+        .from("high_wind_upcharges")
+        .select("term_years, wind_band, mech_per_sqft, adhered_per_sqft")
+        .order("sort"),
+    ]);
+    if (wRes.error) throw wRes.error;
+    if (hwRes.error) throw hwRes.error;
+    return {
+      warranties: (wRes.data ?? []).map((w) => ({
+        name: w.name,
+        pricePerSqFt: Number(w.price_per_sqft),
+        nonMasterEliteSurcharge: Number(w.non_master_elite_surcharge),
+      })),
+      highWind: (hwRes.data ?? []).map((h) => ({
+        termYears: Number(h.term_years),
+        windBand: h.wind_band,
+        mechPerSqFt: Number(h.mech_per_sqft),
+        adheredPerSqFt: Number(h.adhered_per_sqft),
+      })),
+    };
+  });
+
 /** Company header fields for the proposal (any signed-in user; no admin gate). */
 export const getCompanyInfo = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

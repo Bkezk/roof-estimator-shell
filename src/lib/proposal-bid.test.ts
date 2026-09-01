@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
 
-import { savedToBidInput, emptyCustomer, type SavedBidState } from "./proposal-bid";
+import {
+  savedToBidInput,
+  buildBidInput,
+  emptyCustomer,
+  type SavedBidState,
+  type WarrantyData,
+} from "./proposal-bid";
+
+const warrantyData: WarrantyData = {
+  warranties: [
+    { name: "15 + 5 Yr Material & Labor", pricePerSqFt: 0.18, nonMasterEliteSurcharge: 0.03 },
+    { name: "10 Yr Ballast", pricePerSqFt: 0, nonMasterEliteSurcharge: 0 },
+  ],
+  highWind: [{ termYears: 15, windBand: "101-110", mechPerSqFt: 0.13, adheredPerSqFt: 0.14 }],
+};
 
 const base = (over: Partial<SavedBidState> = {}): SavedBidState => ({
   roofSystem: "Duro-Last",
@@ -48,5 +62,48 @@ describe("savedToBidInput money controls pass-through", () => {
     expect(b.perDiemInMarkup).toBe(false);
     expect(b.commissionInMarkup).toBe(true);
     expect(b.adjustLaborPct).toBe(8);
+  });
+});
+
+describe("warranty resolution (buildBidInput)", () => {
+  it("resolves the selected warranty's $/sqft and non-elite surcharge", () => {
+    const b = buildBidInput(base({ warrantyName: "15 + 5 Yr Material & Labor" }), warrantyData);
+    expect(b.warrantyCostPerSqFt).toBe(0.18);
+    expect(b.warrantyNonEliteMasterCharge).toBe(0.03);
+    expect(b.warrantyIsHighWind).toBe(false);
+    expect(b.warrantyHighWindUpcharge).toBe(0);
+  });
+
+  it("adds the high-wind upcharge by term × band × attachment", () => {
+    const mech = buildBidInput(
+      base({
+        warrantyName: "15 + 5 Yr Material & Labor",
+        highWind: true,
+        highWindTermYears: 15,
+        highWindBand: "101-110",
+        attachment: "mechanical",
+      }),
+      warrantyData,
+    );
+    expect(mech.warrantyIsHighWind).toBe(true);
+    expect(mech.warrantyHighWindUpcharge).toBe(0.13);
+    const adhered = buildBidInput(
+      base({
+        warrantyName: "15 + 5 Yr Material & Labor",
+        highWind: true,
+        highWindTermYears: 15,
+        highWindBand: "101-110",
+        attachment: "adhered",
+      }),
+      warrantyData,
+    );
+    expect(adhered.warrantyHighWindUpcharge).toBe(0.14);
+  });
+
+  it("without warranty data (or a selection) warranty stays 0", () => {
+    expect(
+      buildBidInput(base({ warrantyName: "15 + 5 Yr Material & Labor" })).warrantyCostPerSqFt,
+    ).toBe(0);
+    expect(buildBidInput(base(), warrantyData).warrantyCostPerSqFt).toBe(0);
   });
 });

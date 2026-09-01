@@ -5,11 +5,11 @@ import { useServerFn } from "@tanstack/react-start";
 import { Printer, ArrowLeft } from "lucide-react";
 
 import { getEngineAdminData } from "@/lib/engine.functions";
-import { getBid, getCompanyInfo } from "@/lib/bids.functions";
+import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
 import { buildEstimateInputs } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { buildProposalPricing } from "@/lib/engine/proposal";
-import { savedToBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal-bid";
+import { buildBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal-bid";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/proposal")({
@@ -45,6 +45,7 @@ function ProposalPage() {
   const getBidFn = useServerFn(getBid);
   const getAdminFn = useServerFn(getEngineAdminData);
   const getCompanyFn = useServerFn(getCompanyInfo);
+  const getWarrantyFn = useServerFn(getWarrantyData);
 
   const { data: bidRow, isLoading: bidLoading } = useQuery({
     queryKey: ["bid", bidParam],
@@ -58,6 +59,10 @@ function ProposalPage() {
   const { data: company } = useQuery({
     queryKey: ["company-info"],
     queryFn: () => getCompanyFn(),
+  });
+  const { data: warrantyData } = useQuery({
+    queryKey: ["warranty-data"],
+    queryFn: () => getWarrantyFn(),
   });
 
   const model = useMemo(() => {
@@ -77,7 +82,7 @@ function ProposalPage() {
       commission: raw.commission ?? 0,
       taxExempt: raw.taxExempt ?? false,
     };
-    const { inputs } = buildEstimateInputs(savedToBidInput(saved), admin);
+    const { inputs } = buildEstimateInputs(buildBidInput(saved, warrantyData), admin);
     const r = computeEstimate(inputs);
 
     const accessoryMaterial = saved.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
@@ -103,7 +108,7 @@ function ProposalPage() {
       crewRate: saved.laborRate,
     });
     return { saved, r, groups, grandTotal: r.money.grandTotal };
-  }, [bidRow, admin]);
+  }, [bidRow, admin, warrantyData]);
 
   if (!bidParam) {
     return <p className="text-sm text-muted-foreground">No bid selected.</p>;

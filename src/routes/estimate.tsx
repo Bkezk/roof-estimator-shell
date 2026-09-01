@@ -11,7 +11,7 @@ import {
   getAccessoryLaborLookup,
   getNonDlCatalog,
 } from "@/lib/engine.functions";
-import { getBid, saveBid } from "@/lib/bids.functions";
+import { getBid, saveBid, getWarrantyData } from "@/lib/bids.functions";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -22,7 +22,7 @@ import {
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
-  savedToBidInput,
+  buildBidInput,
   emptyCustomer,
   type CustomerInfo,
   type SavedBidState,
@@ -95,6 +95,7 @@ function EstimatePage() {
   const getAccFn = useServerFn(getAccessoryCatalog);
   const getAccLaborFn = useServerFn(getAccessoryLaborLookup);
   const getNonDlFn = useServerFn(getNonDlCatalog);
+  const getWarrantyFn = useServerFn(getWarrantyData);
   const getBidFn = useServerFn(getBid);
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
@@ -117,6 +118,10 @@ function EstimatePage() {
     queryKey: ["nondl-catalog"],
     queryFn: () => getNonDlFn(),
   });
+  const { data: warrantyData } = useQuery({
+    queryKey: ["warranty-data"],
+    queryFn: () => getWarrantyFn(),
+  });
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
@@ -136,6 +141,10 @@ function EstimatePage() {
   const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
   const [commissionInMarkup, setCommissionInMarkup] = useState(false);
   const [adjustLaborPct, setAdjustLaborPct] = useState(0);
+  const [warrantyName, setWarrantyName] = useState("");
+  const [highWind, setHighWind] = useState(false);
+  const [highWindTermYears, setHighWindTermYears] = useState(0);
+  const [highWindBand, setHighWindBand] = useState("");
 
   const [bidId, setBidId] = useState<string | undefined>(bidParam);
   const [bidName, setBidName] = useState("Untitled bid");
@@ -170,6 +179,10 @@ function EstimatePage() {
       setPerDiemInMarkup(d.perDiemInMarkup ?? true);
       setCommissionInMarkup(d.commissionInMarkup ?? false);
       setAdjustLaborPct(d.adjustLaborPct ?? 0);
+      setWarrantyName(d.warrantyName ?? "");
+      setHighWind(d.highWind ?? false);
+      setHighWindTermYears(d.highWindTermYears ?? 0);
+      setHighWindBand(d.highWindBand ?? "");
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
@@ -195,6 +208,11 @@ function EstimatePage() {
   }, [admin]);
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
   const underlaymentOptions = ["None", ...Object.keys(admin?.underlaymentPrices ?? {})];
+  const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
+  const hwTerms = [...new Set(warrantyData?.highWind.map((h) => h.termYears) ?? [])].sort(
+    (a, b) => a - b,
+  );
+  const hwBands = [...new Set(warrantyData?.highWind.map((h) => h.windBand) ?? [])];
 
   const saved: SavedBidState = {
     roofSystem,
@@ -215,8 +233,12 @@ function EstimatePage() {
     perDiemInMarkup,
     commissionInMarkup,
     adjustLaborPct,
+    warrantyName,
+    highWind,
+    highWindTermYears,
+    highWindBand,
   };
-  const bid: BidInput = savedToBidInput(saved);
+  const bid: BidInput = buildBidInput(saved, warrantyData);
 
   const result = useMemo(() => {
     if (!admin) return null;
@@ -862,6 +884,45 @@ function EstimatePage() {
                 </Label>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Warranty</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-end gap-4">
+            <Field label="Warranty type">
+              <PickOne
+                value={warrantyName || "None"}
+                options={warrantyOptions}
+                onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
+              />
+            </Field>
+            <div className="flex items-center gap-2 pb-1">
+              <Switch id="hw" checked={highWind} onCheckedChange={setHighWind} />
+              <Label htmlFor="hw" className="text-xs">
+                High wind
+              </Label>
+            </div>
+            {highWind && (
+              <>
+                <Field label="Term (years)">
+                  <PickOne
+                    value={highWindTermYears ? String(highWindTermYears) : ""}
+                    options={hwTerms.map(String)}
+                    onChange={(v) => setHighWindTermYears(Number(v))}
+                  />
+                </Field>
+                <Field label="Max wind (mph band)">
+                  <PickOne
+                    value={highWindBand}
+                    options={hwBands}
+                    onChange={(v) => setHighWindBand(v)}
+                  />
+                </Field>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
