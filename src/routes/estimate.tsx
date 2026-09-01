@@ -56,6 +56,7 @@ import {
 } from "@/lib/proposal-bid";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
+import { useAuth } from "@/lib/auth-context";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,34 +161,45 @@ function EstimatePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { bid: bidParam } = Route.useSearch();
+  // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
+  // browser whose token expired while backgrounded); AuthGate redirects to /login.
+  const { session } = useAuth();
+  const authed = !!session;
 
   const { data: liveAdmin, isLoading } = useQuery({
     queryKey: ["engine-admin"],
     queryFn: () => getFn(),
+    enabled: authed,
   });
   const { data: accCatalog } = useQuery({
     queryKey: ["accessory-catalog"],
     queryFn: () => getAccFn(),
+    enabled: authed,
   });
   const { data: accLaborLookup } = useQuery({
     queryKey: ["accessory-labor-lookup"],
     queryFn: () => getAccLaborFn(),
+    enabled: authed,
   });
   const { data: nonDlCatalog } = useQuery({
     queryKey: ["nondl-catalog"],
     queryFn: () => getNonDlFn(),
+    enabled: authed,
   });
   const { data: metalsCatalog } = useQuery({
     queryKey: ["metals-catalog"],
     queryFn: () => getMetalsFn(),
+    enabled: authed,
   });
   const { data: liveWarrantyData } = useQuery({
     queryKey: ["warranty-data"],
     queryFn: () => getWarrantyFn(),
+    enabled: authed,
   });
   const { data: presets } = useQuery({
     queryKey: ["markup-presets"],
     queryFn: () => getPresetsFn(),
+    enabled: authed,
   });
 
   // Frozen pricing (legacy "Update Pricing & Labor"): a saved bid carries a snapshot of the admin
@@ -273,7 +285,7 @@ function EstimatePage() {
   const { data: loadedBid } = useQuery({
     queryKey: ["bid", bidParam],
     queryFn: () => getBidFn({ data: { id: bidParam! } }),
-    enabled: !!bidParam,
+    enabled: authed && !!bidParam,
   });
   const hydratedFor = useRef<string | null>(null);
   useEffect(() => {

@@ -15,6 +15,7 @@ import {
   resolveBidComputeData,
   type SavedBidState,
 } from "@/lib/proposal-bid";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/proposal")({
@@ -51,23 +52,28 @@ function ProposalPage() {
   const getAdminFn = useServerFn(getEngineAdminData);
   const getCompanyFn = useServerFn(getCompanyInfo);
   const getWarrantyFn = useServerFn(getWarrantyData);
+  const { session } = useAuth();
+  const authed = !!session;
 
   const { data: bidRow, isLoading: bidLoading } = useQuery({
     queryKey: ["bid", bidParam],
     queryFn: () => getBidFn({ data: { id: bidParam! } }),
-    enabled: !!bidParam,
+    enabled: authed && !!bidParam,
   });
   const { data: admin, isLoading: adminLoading } = useQuery({
     queryKey: ["engine-admin"],
     queryFn: () => getAdminFn(),
+    enabled: authed,
   });
   const { data: company } = useQuery({
     queryKey: ["company-info"],
     queryFn: () => getCompanyFn(),
+    enabled: authed,
   });
   const { data: warrantyData } = useQuery({
     queryKey: ["warranty-data"],
     queryFn: () => getWarrantyFn(),
+    enabled: authed,
   });
 
   const model = useMemo(() => {

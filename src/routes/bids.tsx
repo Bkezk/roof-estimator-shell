@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { PlusCircle } from "lucide-react";
 
 import { listBids } from "@/lib/bids.functions";
+import { useAuth } from "@/lib/auth-context";
 import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,12 +43,24 @@ export const Route = createFileRoute("/bids")({
 
 function BidsPage() {
   const listBidsFn = useServerFn(listBids);
-  const { data: bids, isLoading } = useQuery({
+  const { session } = useAuth();
+  // Only fetch with a live session — otherwise the server fn 401s (e.g. a mobile browser whose
+  // token expired while backgrounded); AuthGate handles the redirect to /login.
+  const { data: bids, isLoading, error } = useQuery({
     queryKey: ["bids"],
     queryFn: listBidsFn,
+    enabled: !!session,
   });
   const [statusFilter, setStatusFilter] = useState("all");
 
+  if (error) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Couldn't load bids ({error instanceof Error ? error.message : "unknown error"}). Try
+        refreshing, or sign in again.
+      </p>
+    );
+  }
   if (isLoading || !bids) {
     return <p className="text-sm text-muted-foreground">Loading bids…</p>;
   }
