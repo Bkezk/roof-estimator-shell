@@ -11,7 +11,7 @@
  * fastener spacing, or that table must be captured, before the OC lookup resolves).
  */
 
-import type { PriceMatrix, PriceTier } from "./pricing";
+import type { PriceMatrix, PriceTier, FreightStep } from "./pricing";
 import type { Band, DualValue } from "./labor";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,12 +259,29 @@ export function buildTearOffLookup(data: TearOffTimesData): TearOffTables {
   };
 }
 
+/** A seeded shipping_steps row (numeric columns arrive from Supabase as strings). */
+export interface RawShippingStep {
+  material_threshold: number | string;
+  shipping_cost: number | string;
+}
+
+/**
+ * Build the stepped freight table from the seeded shipping_steps rows. Thresholds are lower-bound
+ * "from" edges (row 0 = Minimum); sorted ascending for the lower-bound lookup in `freightStepped`.
+ */
+export function buildShippingSteps(rows: RawShippingStep[]): FreightStep[] {
+  return rows
+    .map((r) => ({ fromThreshold: Number(r.material_threshold), cost: Number(r.shipping_cost) }))
+    .sort((a, b) => a.fromThreshold - b.fromThreshold);
+}
+
 export interface RawAdminData {
   membraneScreen: MembraneScreen | null;
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
   settings: RawCompanySettings | null;
   tearOffTimes?: TearOffTimesData | null;
   underlaymentScreen?: MembraneScreen | null;
+  shippingSteps?: RawShippingStep[] | null;
 }
 
 export interface EngineSettings {
@@ -286,6 +303,8 @@ export interface EngineAdminData {
   tearOff?: TearOffTables;
   /** Underlayment $/sqft by board name (absent if the Underlayment screen wasn't fetched). */
   underlaymentPrices?: Record<string, number>;
+  /** Stepped freight table (absent if shipping_steps wasn't fetched); used in stepped mode. */
+  shippingSteps?: FreightStep[];
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -312,6 +331,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const underlaymentPrices = raw.underlaymentScreen
     ? buildUnderlaymentPrices(raw.underlaymentScreen)
     : undefined;
+  const shippingSteps = raw.shippingSteps ? buildShippingSteps(raw.shippingSteps) : undefined;
 
   return {
     deckOrder,
@@ -320,5 +340,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     settings,
     ...(tearOff ? { tearOff } : {}),
     ...(underlaymentPrices ? { underlaymentPrices } : {}),
+    ...(shippingSteps ? { shippingSteps } : {}),
   };
 }

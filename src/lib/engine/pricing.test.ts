@@ -77,14 +77,25 @@ describe("freight / shipping (dMaterial[22], dTotals[9])", () => {
   it("percent mode: materialTotal × percent (fraction)", () => {
     expect(freightPercent(10000, 0.05)).toBeCloseTo(500, 4);
   });
-  it("stepped mode: first step whose upTo ≥ materialTotal, else top step", () => {
+  it("stepped mode: lower-bound 'from' table — highest threshold ≤ materialTotal", () => {
+    // Real seeded shipping_steps shape (material $ 'from' → shipping cost); row 0 = Minimum.
     const steps = [
-      { upTo: 5000, cost: 100 },
-      { upTo: 20000, cost: 250 },
+      { fromThreshold: 0, cost: 800 },
+      { fromThreshold: 5001, cost: 975 },
+      { fromThreshold: 7500, cost: 1050 },
+      { fromThreshold: 10000, cost: 1100 },
     ];
-    expect(freightStepped(3000, steps)).toBe(100);
-    expect(freightStepped(10000, steps)).toBe(250);
-    expect(freightStepped(50000, steps)).toBe(250); // above top → top step
+    expect(freightStepped(0, steps)).toBe(800); // minimum band
+    expect(freightStepped(6000, steps)).toBe(975); // 5001 ≤ 6000 < 7500
+    expect(freightStepped(7500, steps)).toBe(1050); // inclusive lower edge
+    expect(freightStepped(999999, steps)).toBe(1100); // above top → top step
+  });
+  it("below the first threshold falls back to the first (minimum) row", () => {
+    const steps = [
+      { fromThreshold: 100, cost: 50 },
+      { fromThreshold: 500, cost: 90 },
+    ];
+    expect(freightStepped(0, steps)).toBe(50);
   });
   it("shippingTotal = GoodSingle(freight + extraShipping)", () => {
     expect(shippingTotal(250, 50)).toBeCloseTo(300, 2);

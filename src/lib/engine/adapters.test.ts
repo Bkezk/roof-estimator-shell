@@ -8,9 +8,11 @@ import {
   buildTearOffLookup,
   buildUnderlaymentPrices,
   buildAccessoryCatalog,
+  buildShippingSteps,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
+import { freightStepped } from "./pricing";
 import { priceMatrixLookup } from "./pricing";
 import { bandLookup, directLookup, mechLaborRate } from "./labor";
 
@@ -238,6 +240,20 @@ describe("buildAccessoryCatalog (flatten single-Price screens)", () => {
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ category: "Vents", description: "White Vent", price: 25.75 });
     expect(items[0]!.key).toBe("duro_last:vents::White Vent");
+  });
+});
+
+describe("buildShippingSteps (from the seeded shipping_steps rows)", () => {
+  it("coerces string numerics, sorts ascending, and feeds the lower-bound freight lookup", () => {
+    // Real seeded shape: Supabase returns numeric columns as strings, out of sort order.
+    const steps = buildShippingSteps([
+      { material_threshold: "7500", shipping_cost: "1050" },
+      { material_threshold: "0", shipping_cost: "800" },
+      { material_threshold: "5001", shipping_cost: "975" },
+    ]);
+    expect(steps.map((s) => s.fromThreshold)).toEqual([0, 5001, 7500]);
+    expect(freightStepped(6000, steps)).toBe(975);
+    expect(freightStepped(0, steps)).toBe(800);
   });
 });
 

@@ -75,18 +75,28 @@ export const freightPercent = (materialTotal: number, percent: number): number =
   materialTotal * percent;
 
 export interface FreightStep {
-  upTo: number; // material-total upper edge for this step
+  fromThreshold: number; // material-total lower bound ("from") this step's cost applies at
   cost: number;
 }
 
-/** Stepped freight table (sLookupFreightCosts): first step whose upTo ≥ materialTotal; else top step. */
+/**
+ * Stepped freight table (`sLookupFreightCosts`): freight = the cost of the highest threshold
+ * ≤ materialTotal; below the first threshold uses the first (Minimum) row.
+ *
+ * PREMISE CORRECTION (Phase 5g): the Phase 4f version modeled these as upper edges (`upTo`, first
+ * step ≥ materialTotal). The seeded `shipping_steps` and the admin Shipping editor both enter them
+ * as "Material $ (from)" lower bounds with row 0 = Minimum, so the real lookup is a lower-bound
+ * step. (Engine-truth §8.2 names the table but not the IL direction; the seeded-data + admin-UI
+ * shape is the authority here.)
+ */
 export function freightStepped(materialTotal: number, steps: FreightStep[]): number {
-  const sorted = [...steps].sort((a, b) => a.upTo - b.upTo);
+  const sorted = [...steps].sort((a, b) => a.fromThreshold - b.fromThreshold);
+  let cost = sorted[0]?.cost ?? 0;
   for (const s of sorted) {
-    if (materialTotal <= s.upTo) return s.cost;
+    if (materialTotal >= s.fromThreshold) cost = s.cost;
+    else break;
   }
-  const top = sorted[sorted.length - 1];
-  return top ? top.cost : 0;
+  return cost;
 }
 
 /** dTotals[9] shipping = GoodSingle(DL freight + hand-entered ExtraShipping). */

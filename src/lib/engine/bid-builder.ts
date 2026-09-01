@@ -12,7 +12,8 @@
  *    geometry (which edges, corner sizing) is entered by the estimator rather than derived.
  *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
  *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
- *  - Freight table not wired (0); membrane price tier assumed roll-goods.
+ *  - Freight wired: percent-of-material or the stepped "from" table, on the DL material subtotal
+ *    (M0). Membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Underlayment material wired from the seeded Underlayment prices (board $/sqft × deck area).
  *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
@@ -21,7 +22,13 @@
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
-import { membraneMaterialCost, priceMatrixLookup, shippingTotal } from "./pricing";
+import {
+  membraneMaterialCost,
+  priceMatrixLookup,
+  shippingTotal,
+  freightStepped,
+  freightPercent,
+} from "./pricing";
 import { CURRENT_FORMULAS_VERSION } from "./version";
 import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
 import type { MarkupMode } from "./money";
@@ -191,7 +198,19 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   const duroLastMaterial = membraneMaterial + accessoryMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + bid.otherMaterial;
-  const shipping = shippingTotal(0, bid.extraShipping); // v1: freight table not wired
+
+  // Freight (§4.1 dTotals[9]) — percent-of-material or the stepped "from" table, on the Duro-Last
+  // material subtotal (M0), the "Duro-Last material" the admin Shipping screen bills against.
+  // FLAGGED FOR BID VALIDATION (Phase 6): the exact freight basis (M0 vs membrane-only vs
+  // material-before-tax) and the stored scale of shipping_percent (whole percent vs fraction) both
+  // need a captured bid to confirm; percent mode divides by 100 (admin enters e.g. 5 for 5%).
+  let freight = 0;
+  if (admin.settings.shippingMode === "percent") {
+    freight = freightPercent(duroLastMaterial, admin.settings.shippingPercent / 100);
+  } else if (admin.shippingSteps) {
+    freight = freightStepped(duroLastMaterial, admin.shippingSteps);
+  }
+  const shipping = shippingTotal(freight, bid.extraShipping);
 
   const inputs: EstimateInputs = {
     formulasVersion: version,

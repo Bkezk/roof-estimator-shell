@@ -209,6 +209,35 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.disposalUnits).toBe(2);
   });
 
+  it("freight: stepped 'from' table on the DL material subtotal (M0) flows into shipping", () => {
+    const withShip: EngineAdminData = {
+      ...admin,
+      shippingSteps: [
+        { fromThreshold: 0, cost: 800 },
+        { fromThreshold: 5001, cost: 975 },
+      ],
+    };
+    // base bid M0 = membrane 3199.23 (no accessories) → 0 ≤ 3199.23 < 5001 → 800 freight
+    const { inputs } = buildEstimateInputs(bid(), withShip);
+    expect(inputs.shipping).toBeCloseTo(800, 2);
+    // an accessory line pushes M0 over 5001 → next band
+    const { inputs: hi } = buildEstimateInputs(
+      bid({ accessories: [{ description: "Big", price: 2000, quantity: 1 }] }),
+      withShip,
+    );
+    expect(hi.shipping).toBeCloseTo(975, 2); // M0 = 3199.23 + 2000 = 5199.23 ≥ 5001
+  });
+
+  it("freight: percent mode multiplies M0 by shipping_percent/100", () => {
+    const pct: EngineAdminData = {
+      ...admin,
+      settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },
+    };
+    const { inputs } = buildEstimateInputs(bid(), pct);
+    // 5% of M0 3199.23 = 159.9615 → GoodSingle → 159.96
+    expect(inputs.shipping).toBeCloseTo(159.96, 2);
+  });
+
   it("warns when a price or labor combo is missing", () => {
     const noPrice = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, color: "Purple" }] }),
