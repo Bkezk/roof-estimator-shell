@@ -418,6 +418,27 @@ export type Database = {
         }
         Relationships: []
       }
+      rdl_labor_tables: {
+        Row: {
+          data: Json
+          id: string
+          sort: number
+          title: string
+        }
+        Insert: {
+          data?: Json
+          id: string
+          sort?: number
+          title: string
+        }
+        Update: {
+          data?: Json
+          id?: string
+          sort?: number
+          title?: string
+        }
+        Relationships: []
+      }
       shipping_steps: {
         Row: {
           id: string

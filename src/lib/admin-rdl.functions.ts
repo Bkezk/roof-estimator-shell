@@ -66,3 +66,34 @@ export const saveRdlCombo = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export type RdlLaborTableRow = Database["public"]["Tables"]["rdl_labor_tables"]["Row"];
+
+export const getLaborTables = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<RdlLaborTableRow[]> => {
+    const { data, error } = await context.supabase
+      .from("rdl_labor_tables")
+      .select("*")
+      .order("sort");
+    if (error) throw error;
+    return data ?? [];
+  });
+
+const saveTableSchema = z.object({
+  id: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
+
+export const saveLaborTable = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => saveTableSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { error } = await context.supabase
+      .from("rdl_labor_tables")
+      .update({ data: data.data as Json })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

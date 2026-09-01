@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Save } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UnderlaymentEditor, TearoffEditor } from "@/components/rdl-underlayment-tearoff";
 
 import { getRdlCombos, saveRdlCombo, type RdlData } from "@/lib/admin-rdl.functions";
 import { Button } from "@/components/ui/button";
@@ -28,7 +30,7 @@ import {
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
-export function RoofDeckTab() {
+function MembraneEditor() {
   const qc = useQueryClient();
   const getFn = useServerFn(getRdlCombos);
   const saveFn = useServerFn(saveRdlCombo);
@@ -475,5 +477,26 @@ function ObjectGrid({
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+export function RoofDeckTab() {
+  return (
+    <Tabs defaultValue="membrane" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="membrane">Membrane Labor</TabsTrigger>
+        <TabsTrigger value="underlayment">Underlayment Times</TabsTrigger>
+        <TabsTrigger value="tearoff">Tearoff Times</TabsTrigger>
+      </TabsList>
+      <TabsContent value="membrane">
+        <MembraneEditor />
+      </TabsContent>
+      <TabsContent value="underlayment">
+        <UnderlaymentEditor />
+      </TabsContent>
+      <TabsContent value="tearoff">
+        <TearoffEditor />
+      </TabsContent>
+    </Tabs>
   );
 }
