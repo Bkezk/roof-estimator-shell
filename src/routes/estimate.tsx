@@ -19,6 +19,7 @@ import {
   type AccessoryLine,
   type NonDlLine,
   type ParapetInput,
+  type CurbInput,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -99,6 +100,18 @@ const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   ...defaults,
 });
 
+let cseq = 1;
+const newCurb = (defaults: Partial<CurbInput> = {}): CurbInput => ({
+  id: `c${cseq++}`,
+  name: `Curb ${cseq - 1}`,
+  quantity: 1,
+  widthIn: 24,
+  lengthIn: 36,
+  curbType: "",
+  deckType: "Wood",
+  ...defaults,
+});
+
 const MARKUP_LABELS: Record<MarkupMode, string> = {
   0: "% of cost",
   1: "$ / man-day",
@@ -149,6 +162,7 @@ function EstimatePage() {
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
+  const [curbs, setCurbs] = useState<CurbInput[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
@@ -199,6 +213,7 @@ function EstimatePage() {
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setParapets(Array.isArray(d.parapets) ? d.parapets : []);
+      setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
       setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
@@ -254,6 +269,7 @@ function EstimatePage() {
     accessories,
     nonDlLines,
     parapets,
+    curbs,
     customer,
     markupMode,
     markup,
@@ -737,6 +753,116 @@ function EstimatePage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Curbs</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setCurbs((p) => [...p, newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" })])
+              }
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add curb
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {curbs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No curbs. Labor bills per curb: setup + minutes/LF for the deck × curb-type
+                multiplier × perimeter.
+              </p>
+            ) : (
+              curbs.map((c, i) => (
+                <div key={c.id} className="rounded-md border p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <Input
+                      className="h-8 w-[200px] font-medium"
+                      value={c.name}
+                      onChange={(e) =>
+                        setCurbs((prev) =>
+                          prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                        )
+                      }
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => setCurbs((prev) => prev.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                    <Field label="Quantity">
+                      <Input
+                        type="number"
+                        value={c.quantity}
+                        onChange={(e) =>
+                          setCurbs((prev) =>
+                            prev.map((x, j) =>
+                              j === i ? { ...x, quantity: num(e.target.value) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="A (in)">
+                      <Input
+                        type="number"
+                        value={c.widthIn}
+                        onChange={(e) =>
+                          setCurbs((prev) =>
+                            prev.map((x, j) =>
+                              j === i ? { ...x, widthIn: num(e.target.value) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="B (in)">
+                      <Input
+                        type="number"
+                        value={c.lengthIn}
+                        onChange={(e) =>
+                          setCurbs((prev) =>
+                            prev.map((x, j) =>
+                              j === i ? { ...x, lengthIn: num(e.target.value) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Type">
+                      <PickOne
+                        value={c.curbType}
+                        options={admin.curbLabor?.curbTypes ?? []}
+                        onChange={(v) =>
+                          setCurbs((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, curbType: v } : x)),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Deck">
+                      <PickOne
+                        value={c.deckType}
+                        options={admin.deckOrder}
+                        onChange={(v) =>
+                          setCurbs((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
+                          )
+                        }
+                      />
+                    </Field>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Accessories</CardTitle>
             <Select
               value=""
@@ -1206,6 +1332,12 @@ function EstimatePage() {
                   <div className="flex justify-between">
                     <span>Parapet hours</span>
                     <span>{result.r.parapetLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.r.curbLaborHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Curb hours</span>
+                    <span>{result.r.curbLaborHours.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

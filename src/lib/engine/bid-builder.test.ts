@@ -74,6 +74,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
   accessories: [],
   nonDlLines: [],
   parapets: [],
+  curbs: [],
   markupMode: 0,
   markup: 0,
   crewLaborRatePerHour: 50,
@@ -349,6 +350,39 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.parapetLaborHours).toBeCloseTo(4.5, 6); // 100/50 x 2.25
     // rolls into direct labor alongside install 15.125
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
+  });
+
+  it("curbs: setup + min/LF x type x perimeter, x qty, /60 -> direct labor", () => {
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1, Scupper: 4 },
+        curbTypes: ["Closed", "Scupper"],
+      },
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        curbs: [
+          {
+            id: "c1",
+            name: "RTU curb",
+            quantity: 2,
+            widthIn: 24,
+            lengthIn: 36,
+            curbType: "Closed",
+            deckType: "Wood",
+          },
+        ],
+      }),
+      withCurb,
+    );
+    expect(warnings).toEqual([]);
+    const r = computeEstimate(inputs);
+    // perimeter = 2 x (2 + 3) = 10 ft; (8 + 7.5x1x10)/60 = 83/60 h per curb; x2 = 2.7667 h
+    expect(r.curbLaborHours).toBeCloseTo((2 * 83) / 60, 4);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
   });
 
   it("warns when a price or labor combo is missing", () => {

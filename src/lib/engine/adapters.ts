@@ -358,6 +358,62 @@ export function parapetModeRate(e: ParapetModeRates, predrill: boolean, canted: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Curb labor (labor_curb setup minutes + labor_curb_deck min/LF × labor_curb_type multiplier)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RawCurbDeckRow {
+  deck_type: string;
+  minutes: number | string;
+}
+export interface RawCurbTypeRow {
+  curb_type: string;
+  multiplier: number | string;
+}
+
+export interface CurbLaborTables {
+  /** Setup minutes per curb (labor_curb.setup_minutes). */
+  setupMinutes: number;
+  /** Minutes per lineal foot by tear-off-taxonomy deck name. */
+  minutesByDeck: Record<string, number>;
+  /** Curb-type multiplier (Open 1.1, Closed 1, Scupper 4, …). */
+  multiplierByType: Record<string, number>;
+  /** Curb type names in sort order, for the picker. */
+  curbTypes: string[];
+}
+
+/** Build the curb labor tables. Deck names use the tear-off taxonomy (TEAROFF_DECK_BY_LABOR_DECK). */
+export function buildCurbLabor(
+  setupMinutes: number | string | null | undefined,
+  deckRows: RawCurbDeckRow[],
+  typeRows: RawCurbTypeRow[],
+): CurbLaborTables {
+  const minutesByDeck: Record<string, number> = {};
+  for (const d of deckRows) minutesByDeck[d.deck_type] = Number(d.minutes);
+  const multiplierByType: Record<string, number> = {};
+  const curbTypes: string[] = [];
+  for (const t of typeRows) {
+    multiplierByType[t.curb_type] = Number(t.multiplier);
+    curbTypes.push(t.curb_type);
+  }
+  return { setupMinutes: Number(setupMinutes ?? 0), minutesByDeck, multiplierByType, curbTypes };
+}
+
+/**
+ * Curb labor hours (§5.3): per curb, setup minutes + (min/LF for the deck × curb-type multiplier)
+ * × curb perimeter LF; total = quantity × that, converted to hours.
+ */
+export function curbLaborHours(i: {
+  quantity: number;
+  setupMinutes: number;
+  minutesPerLF: number;
+  typeMultiplier: number;
+  perimeterFt: number;
+}): number {
+  const minutesPerCurb = i.setupMinutes + i.minutesPerLF * i.typeMultiplier * i.perimeterFt;
+  return (i.quantity * minutesPerCurb) / 60;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Whole-catalog assembly (pure) — used by the Supabase server fn
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -499,6 +555,9 @@ export interface RawAdminData {
   setupSteps?: RawSetupStep[] | null;
   inspectionSteps?: RawInspectionStep[] | null;
   parapetRows?: RawParapetRow[] | null;
+  curbSetupMinutes?: number | string | null;
+  curbDeckRows?: RawCurbDeckRow[] | null;
+  curbTypeRows?: RawCurbTypeRow[] | null;
 }
 
 export interface EngineSettings {
@@ -528,6 +587,8 @@ export interface EngineAdminData {
   inspectionTable?: InspectionBandTable;
   /** Parapet labor matrix (absent if labor_parapet wasn't fetched). */
   parapetLabor?: ParapetLaborTables;
+  /** Curb labor tables (absent if the labor_curb tables weren't fetched). */
+  curbLabor?: CurbLaborTables;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -562,6 +623,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ? buildInspectionTable(raw.inspectionSteps)
     : undefined;
   const parapetLabor = raw.parapetRows?.length ? buildParapetLabor(raw.parapetRows) : undefined;
+  const curbLabor = raw.curbDeckRows?.length
+    ? buildCurbLabor(raw.curbSetupMinutes, raw.curbDeckRows, raw.curbTypeRows ?? [])
+    : undefined;
 
   return {
     deckOrder,
@@ -574,5 +638,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(setupTable ? { setupTable } : {}),
     ...(inspectionTable ? { inspectionTable } : {}),
     ...(parapetLabor ? { parapetLabor } : {}),
+    ...(curbLabor ? { curbLabor } : {}),
   };
 }

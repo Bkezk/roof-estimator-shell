@@ -27,6 +27,8 @@ import {
   type RawSetupStep,
   type RawInspectionStep,
   type RawParapetRow,
+  type RawCurbDeckRow,
+  type RawCurbTypeRow,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -54,6 +56,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       setupStepsRes,
       inspectionStepsRes,
       parapetRes,
+      curbRes,
+      curbDeckRes,
+      curbTypeRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -70,6 +75,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
           "deck_type, wall_height_band, no_drill_no_cant, no_drill_canted, predrill_no_cant, predrill_canted, sort",
         )
         .order("sort"),
+      sb.from("labor_curb").select("setup_minutes").eq("id", 1).maybeSingle(),
+      sb.from("labor_curb_deck").select("deck_type, minutes").order("sort"),
+      sb.from("labor_curb_type").select("curb_type, multiplier").order("sort"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -82,6 +90,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (setupStepsRes.error) throw setupStepsRes.error;
     if (inspectionStepsRes.error) throw inspectionStepsRes.error;
     if (parapetRes.error) throw parapetRes.error;
+    if (curbRes.error) throw curbRes.error;
+    if (curbDeckRes.error) throw curbDeckRes.error;
+    if (curbTypeRes.error) throw curbTypeRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -97,6 +108,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const setupSteps = (setupStepsRes.data ?? null) as RawSetupStep[] | null;
     const inspectionSteps = (inspectionStepsRes.data ?? null) as RawInspectionStep[] | null;
     const parapetRows = (parapetRes.data ?? null) as RawParapetRow[] | null;
+    const curbSetupMinutes = curbRes.data?.setup_minutes ?? null;
+    const curbDeckRows = (curbDeckRes.data ?? null) as RawCurbDeckRow[] | null;
+    const curbTypeRows = (curbTypeRes.data ?? null) as RawCurbTypeRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -109,6 +123,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       setupSteps,
       inspectionSteps,
       parapetRows,
+      curbSetupMinutes,
+      curbDeckRows,
+      curbTypeRows,
     });
   });
 

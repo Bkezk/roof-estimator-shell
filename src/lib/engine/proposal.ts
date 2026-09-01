@@ -55,6 +55,7 @@ export interface ProposalCostInputs {
   accessoryLaborHours: number;
   parapetMaterial?: number;
   parapetLaborHours?: number;
+  curbLaborHours?: number;
   underlaymentMaterial: number;
   warrantyCost: number;
   freight: number;
@@ -76,6 +77,7 @@ export function buildProposalPricing(i: ProposalCostInputs): ProposalGroup[] {
       label: "Parapet walls",
       cost: (i.parapetMaterial ?? 0) + (i.parapetLaborHours ?? 0) * i.crewRate,
     },
+    { label: "Curbs & penetrations", cost: (i.curbLaborHours ?? 0) * i.crewRate },
     { label: "Underlayment", cost: i.underlaymentMaterial },
     { label: "Accessories", cost: i.accessoryMaterial + i.accessoryLaborHours * i.crewRate },
     { label: "Additional work", cost: i.nonDlMaterial + i.nonDlServices },

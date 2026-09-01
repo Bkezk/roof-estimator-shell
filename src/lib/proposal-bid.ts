@@ -11,6 +11,7 @@ import type {
   AccessoryLine,
   NonDlLine,
   ParapetInput,
+  CurbInput,
 } from "@/lib/engine/bid-builder";
 import type { MarkupMode } from "@/lib/engine/money";
 
@@ -38,6 +39,8 @@ export interface SavedBidState {
   nonDlLines: NonDlLine[];
   /** Parapet walls (optional so older saved bids stay valid). */
   parapets?: ParapetInput[];
+  /** Curbs (optional so older saved bids stay valid). */
+  curbs?: CurbInput[];
   customer: CustomerInfo;
   markupMode: MarkupMode;
   markup: number;
@@ -140,6 +143,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     accessories: s.accessories,
     nonDlLines: s.nonDlLines,
     parapets: s.parapets ?? [],
+    curbs: s.curbs ?? [],
     markupMode: s.markupMode,
     markup: s.markup,
     crewLaborRatePerHour: s.laborRate,

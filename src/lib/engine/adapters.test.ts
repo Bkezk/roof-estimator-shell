@@ -15,6 +15,8 @@ import {
   buildInspectionTable,
   buildParapetLabor,
   parapetModeRate,
+  buildCurbLabor,
+  curbLaborHours,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -550,5 +552,41 @@ describe("buildParapetLabor (deck × wall-height band × drill/cant → hrs per 
     expect(parapetModeRate(e, false, true)).toBe(6.75);
     expect(parapetModeRate(e, true, false)).toBe(7);
     expect(parapetModeRate(e, true, true)).toBe(10.5);
+  });
+});
+
+describe("buildCurbLabor / curbLaborHours (§5.3)", () => {
+  const t = buildCurbLabor(
+    "8",
+    [
+      { deck_type: "Wood", minutes: "7.5" },
+      { deck_type: "Concrete", minutes: "10.5" },
+    ],
+    [
+      { curb_type: "Open", multiplier: "1.1" },
+      { curb_type: "Closed", multiplier: "1" },
+      { curb_type: "Scupper", multiplier: "4" },
+    ],
+  );
+
+  it("coerces string numerics and keeps curb types in order", () => {
+    expect(t.setupMinutes).toBe(8);
+    expect(t.minutesByDeck["Wood"]).toBe(7.5);
+    expect(t.multiplierByType["Scupper"]).toBe(4);
+    expect(t.curbTypes).toEqual(["Open", "Closed", "Scupper"]);
+  });
+
+  it("curb hours = qty × (setup + min/LF × type multi × perimeter) / 60", () => {
+    // 24"×36" curb → perimeter 2×(2+3)=10 ft; Wood 7.5 min/LF, Closed ×1:
+    // (8 + 7.5×1×10)/60 = 83/60 h per curb; ×2 curbs = 2.7667 h
+    expect(
+      curbLaborHours({
+        quantity: 2,
+        setupMinutes: t.setupMinutes,
+        minutesPerLF: t.minutesByDeck["Wood"]!,
+        typeMultiplier: t.multiplierByType["Closed"]!,
+        perimeterFt: 10,
+      }),
+    ).toBeCloseTo((2 * 83) / 60, 6);
   });
 });

@@ -43,7 +43,12 @@ import {
 import { CURRENT_FORMULAS_VERSION } from "./version";
 import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
 import type { MarkupMode } from "./money";
-import { TEAROFF_DECK_BY_LABOR_DECK, parapetModeRate, type EngineAdminData } from "./adapters";
+import {
+  TEAROFF_DECK_BY_LABOR_DECK,
+  parapetModeRate,
+  curbLaborHours as curbHoursCalc,
+  type EngineAdminData,
+} from "./adapters";
 
 export interface BidSectionInput {
   id: string;
@@ -109,6 +114,23 @@ export interface ParapetInput {
   girthInches: number; // membrane girth over the wall profile, for material area
 }
 
+/**
+ * A curb on a bid (§4.5/§5.3). Labor is exact per the seeded tables: per curb, setup minutes +
+ * (min/LF for the deck × curb-type multiplier) × perimeter, × quantity. Perimeter derives from the
+ * A × B footprint (inches → In2Ft). FLAGGED FOR BID VALIDATION: curb MEMBRANE MATERIAL is not
+ * auto-computed (the legacy curb-wrap material model needs a captured bid) — cover it via an
+ * accessory/extra line for now.
+ */
+export interface CurbInput {
+  id: string;
+  name: string;
+  quantity: number;
+  widthIn: number; // footprint A (inches)
+  lengthIn: number; // footprint B (inches)
+  curbType: string; // from the seeded curb types (Open / Closed / …)
+  deckType: string; // labor deck name, bridged via TEAROFF_DECK_BY_LABOR_DECK
+}
+
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
@@ -116,6 +138,7 @@ export interface BidInput {
   accessories: AccessoryLine[];
   nonDlLines: NonDlLine[];
   parapets: ParapetInput[];
+  curbs: CurbInput[];
 
   // money params
   markupMode: MarkupMode;
@@ -278,6 +301,30 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
   }
 
+  // Curbs (§5.3): qty × (setup min + min/LF[deck] × type multiplier × perimeter LF) / 60 → direct
+  // labor. Perimeter = 2 × (In2Ft(A) + In2Ft(B)). Curb membrane material is NOT auto-computed
+  // (flagged for the validation bid).
+  let curbLaborHours = 0;
+  for (const c of bid.curbs) {
+    if (c.quantity <= 0) continue;
+    const tDeck = TEAROFF_DECK_BY_LABOR_DECK[c.deckType] ?? c.deckType;
+    const minutesPerLF = admin.curbLabor?.minutesByDeck[tDeck];
+    const typeMultiplier = admin.curbLabor?.multiplierByType[c.curbType];
+    if (minutesPerLF === undefined || typeMultiplier === undefined) {
+      warnings.push(
+        `No curb labor for ${c.deckType} / ${c.curbType || "(no type)"} — "${c.name}".`,
+      );
+      continue;
+    }
+    curbLaborHours += curbHoursCalc({
+      quantity: c.quantity,
+      setupMinutes: admin.curbLabor?.setupMinutes ?? 0,
+      minutesPerLF,
+      typeMultiplier,
+      perimeterFt: 2 * (in2Ft(c.widthIn) + in2Ft(c.lengthIn)),
+    });
+  }
+
   // M0 = membrane + accessories + parapet material (dMaterial[0..6] slots).
   const duroLastMaterial = membraneMaterial + accessoryMaterial + parapetMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
@@ -323,6 +370,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustInspectionPct: 0,
     accessoryLaborHours,
     parapetLaborHours,
+    curbLaborHours,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage: 30,
