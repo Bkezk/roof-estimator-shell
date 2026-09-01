@@ -220,8 +220,8 @@ describe("buildUnderlaymentPrices (from the seeded Underlayment screen)", () => 
   });
 });
 
-describe("buildAccessoryCatalog (flatten single-Price screens)", () => {
-  it("includes items from Price screens; skips screens without a Price column", () => {
+describe("buildAccessoryCatalog (flatten price screens incl. color/box variants)", () => {
+  it("single-Price screen → one base item, no variant suffix (existing behavior preserved)", () => {
     const items = buildAccessoryCatalog([
       {
         id: "duro_last:vents",
@@ -231,18 +231,89 @@ describe("buildAccessoryCatalog (flatten single-Price screens)", () => {
           rows: [{ Description: "White Vent", "Part #": "1231", Price: 25.75 }],
         },
       },
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      category: "Vents",
+      description: "White Vent",
+      price: 25.75,
+      variant: "",
+    });
+    expect(items[0]!.key).toBe("duro_last:vents::White Vent");
+  });
+
+  it("color-priced screens → one variant per color column (bare and ' Price'-suffixed)", () => {
+    const items = buildAccessoryCatalog([
       {
         id: "duro_last:corners",
         category: "Corners",
         data: {
-          columns: ["Description", "Part #", "White", "Tan"], // color-priced, no "Price" → skipped
-          rows: [{ Description: 'Inside 6" x 6"', White: 4.4, Tan: 5.4 }],
+          columns: ["Description", "Part #", "White", "Tan"], // bare color columns
+          rows: [{ Description: 'Inside 6" x 6"', "Part #": "1311", White: 4.4, Tan: 5.4 }],
+        },
+      },
+      {
+        id: "duro_last:drip_edge",
+        category: "Drip Edge",
+        data: {
+          columns: ["Description", "Part #", "White Price", "Gray Price"], // ' Price' suffix
+          rows: [{ Description: 'Drip Edge 2"', "White Price": 8.4, "Gray Price": 9.98 }],
         },
       },
     ]);
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ category: "Vents", description: "White Vent", price: 25.75 });
-    expect(items[0]!.key).toBe("duro_last:vents::White Vent");
+    const white = items.find((i) => i.key === 'duro_last:corners::Inside 6" x 6"::White');
+    expect(white).toMatchObject({
+      description: 'Inside 6" x 6" — White',
+      price: 4.4,
+      variant: "White",
+    });
+    expect(
+      items.find((i) => i.key.startsWith("duro_last:corners") && i.variant === "Tan"),
+    ).toMatchObject({
+      price: 5.4,
+    });
+    // ' Price' suffix stripped to the color name
+    expect(
+      items.find((i) => i.key.startsWith("duro_last:drip_edge") && i.variant === "Gray"),
+    ).toMatchObject({ description: 'Drip Edge 2" — Gray', price: 9.98 });
+    expect(items).toHaveLength(4); // corners ×2 + drip edge ×2
+  });
+
+  it("box-priced screen: 'Price/Box' is the price; the 'Fasteners/Box' count is not", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:fasteners_and_bits",
+        category: "Fasteners & Bits",
+        data: {
+          columns: ["Part #", "Subtype", "Description", "Price/Box", "Fasteners/Box"],
+          rows: [
+            {
+              "Part #": "1241",
+              Subtype: "",
+              Description: "Metal Anchors",
+              "Price/Box": 255,
+              "Fasteners/Box": 1000,
+            },
+          ],
+        },
+      },
+    ]);
+    expect(items).toHaveLength(1); // Fasteners/Box excluded → not a second item
+    expect(items[0]).toMatchObject({ description: "Metal Anchors", price: 255, variant: "" });
+  });
+
+  it("skips screens with no price column (e.g. a Multiplier-only usages screen)", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "x:usages",
+        category: "Pipe Stack Usages",
+        data: {
+          columns: ["Description", "Multiplier"],
+          rows: [{ Description: "Plumbing", Multiplier: 0.5 }],
+        },
+      },
+    ]);
+    expect(items).toHaveLength(0);
   });
 });
 

@@ -82,34 +82,80 @@ export function buildUnderlaymentPrices(screen: MembraneScreen): Record<string, 
 
 /** One pickable accessory item flattened from the seeded catalog screens. */
 export interface AccessoryCatalogItem {
-  key: string; // `${screenId}::${description}`
+  key: string; // `${screenId}::${description}` (+ `::${variant}` when the screen is variant-priced)
   category: string;
-  description: string;
+  description: string; // includes the color/variant suffix when the screen is variant-priced
   price: number;
+  /** Price-column variant (a color); "" for a plain "Price" or "Price/Box" (per-box) column. */
+  variant: string;
+}
+
+/** Columns that are never a price (identifiers, counts, sizes) even when they hold numbers. */
+const NON_PRICE_COLUMNS = new Set([
+  "description",
+  "name",
+  "part #",
+  "size",
+  "subtype",
+  "open part #",
+  "closed part #",
+  "fasteners/box",
+  "multiplier",
+]);
+
+/** Bare color-named price columns seen in the seeded catalog. */
+const KNOWN_COLORS = new Set([
+  "White",
+  "Tan",
+  "Gray",
+  "Dark Gray",
+  "Terra Cotta",
+  "Rock Ply",
+  "Rock-Ply",
+]);
+
+/**
+ * Derive a price column's variant label from its name, or null if the column isn't a price column.
+ * `Price` / `Price/Box` → "" (base, no suffix); `White Price` → "White"; a bare known color → itself.
+ * This keys off column NAMES and value types in the seeded admin data — not model/user prose.
+ */
+function priceColumnVariant(col: string): string | null {
+  const c = col.trim();
+  if (NON_PRICE_COLUMNS.has(c.toLowerCase())) return null;
+  if (c === "Price" || c === "Price/Box") return "";
+  if (/ Price$/i.test(c)) return c.replace(/ Price$/i, "").trim();
+  if (KNOWN_COLORS.has(c)) return c;
+  return null;
 }
 
 /**
- * Flatten seeded pricing_catalog screens into a pickable accessory list. v1 covers single-"Price"
- * screens (sealants, vents, washers, drain boots, CDR rings, termination/fascia bars, walk pads, …);
- * color-priced screens (Corners, Pipe Stacks, Drip Edge, Gravel Stops) and box-priced fasteners are
- * skipped here and handled in a later pass.
+ * Flatten seeded pricing_catalog screens into a pickable accessory list. Handles plain single-"Price"
+ * screens (sealants, vents, …), color-priced screens (Corners, Drip Edge, Gravel Stops, Pipe Stacks —
+ * one item per color column), and box-priced fasteners ("Price/Box", with the "Fasteners/Box" count
+ * left out). A screen with no recognizable price column is skipped.
+ *
+ * NOTE: accessory LABOR is not attached here — that is a separate table (accessory_labor) with its
+ * own per-unit / per-foot / drill-variant columns; wiring it is a later pass.
  */
 export function buildAccessoryCatalog(
   rows: Array<{ id: string; category: string; data: MembraneScreen }>,
 ): AccessoryCatalogItem[] {
   const items: AccessoryCatalogItem[] = [];
   for (const row of rows) {
-    if (!row.data?.columns?.includes("Price")) continue;
+    const cols = row.data?.columns ?? [];
+    const priceCols = cols
+      .map((c) => ({ col: c, variant: priceColumnVariant(c) }))
+      .filter((p): p is { col: string; variant: string } => p.variant !== null);
+    if (priceCols.length === 0) continue;
     for (const r of row.data.rows) {
-      const description = String(r["Description"] ?? r["Name"] ?? "");
-      const price = r["Price"];
-      if (description && typeof price === "number") {
-        items.push({
-          key: `${row.id}::${description}`,
-          category: row.category,
-          description,
-          price,
-        });
+      const baseDesc = String(r["Description"] ?? r["Name"] ?? "");
+      if (!baseDesc) continue;
+      for (const { col, variant } of priceCols) {
+        const price = r[col];
+        if (typeof price !== "number") continue; // skip null / N/A cells
+        const description = variant ? `${baseDesc} — ${variant}` : baseDesc;
+        const key = variant ? `${row.id}::${baseDesc}::${variant}` : `${row.id}::${baseDesc}`;
+        items.push({ key, category: row.category, description, price, variant });
       }
     }
   }
