@@ -18,6 +18,12 @@ import {
   buildCurbLabor,
   curbLaborHours,
   buildMetalsCatalog,
+  buildUnderlaymentLabor,
+  underlaymentMechanicalHours,
+  buildAdhesiveTimes,
+  underlaymentAdhesive,
+  buildAdhesivePrices,
+  UNDERLAYMENT_DECK_BY_LABOR_DECK,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -676,5 +682,80 @@ describe("buildMetalsCatalog (Exceptional Metals master-detail → flat list)", 
     expect(box).toMatchObject({ unitCost: 550, laborPerUnit: 1.5, laborRate: 40 });
     const tp = items.find((i) => i.description === '3" 2-Piece Compression')!;
     expect(tp).toMatchObject({ unitCost: 2.5, laborPerUnit: 0, laborRate: 0 });
+  });
+});
+
+describe("underlayment labor (Layout & Mechanical + Adhesive Times)", () => {
+  const layout = buildUnderlaymentLabor({
+    rows: [
+      { underlayment: '1/2" ISO', layout_hours_per_2500sqft: 7.775 },
+      { underlayment: "Duro-Fold", layout_hours_per_2500sqft: 6.9 },
+    ],
+    fasteners_per_4x8_options: [
+      { count: 5, per_sqft: 0.15625, selected: true },
+      { count: 6, per_sqft: 0.1875 },
+      { count: 8, per_sqft: 0.25 },
+    ],
+    fastening_times_min_per_fastener_by_deck: { Wood: 0.342, Concrete: 2.185 },
+  });
+
+  it("maps layout hours, puts the selected fastener count first, keeps deck minutes", () => {
+    expect(layout.layoutHoursByProduct['1/2" ISO']).toBe(7.775);
+    expect(layout.fastenerCounts[0]).toBe(5); // the app's selected default leads
+    expect(layout.fastenerCounts).toEqual([5, 6, 8]);
+    expect(layout.fastenerMinutesByDeck["Wood"]).toBe(0.342);
+    expect(UNDERLAYMENT_DECK_BY_LABOR_DECK["LWC/Steel"]).toBe("LWC / Steel");
+    expect(UNDERLAYMENT_DECK_BY_LABOR_DECK["Purlin"]).toBe("Purlin Fastened");
+  });
+
+  it("mechanical hours = layout×(area/2500) + (min/60)×(count/32)×area (the app's header formula)", () => {
+    // 2500 sqft of 1/2" ISO on Wood, 5 fasteners/board:
+    // layout 7.775 + (0.342/60)×(5/32)×2500 = 7.775 + 2.2266 = 10.0016 h
+    const h = underlaymentMechanicalHours({
+      areaSqFt: 2500,
+      layoutHoursPer2500: 7.775,
+      minutesPerFastener: 0.342,
+      fastenersPerBoard: 5,
+    });
+    expect(h).toBeCloseTo(7.775 + (0.342 / 60) * (5 / 32) * 2500, 6);
+    expect(h).toBeCloseTo(10.0016, 3);
+  });
+
+  it("adhesive: units = area ÷ coverage; hours = area × labor ÷ 1000; 0-coverage rows inert", () => {
+    const times = buildAdhesiveTimes({
+      adhesives: [
+        {
+          adhesive: "Duro-Grip Adhesive(CR-20)",
+          unit_type: "5-gal. Box Set",
+          rows: [
+            { substrate: "Wood", coverage_sqft: 2000, labor: 6.5 },
+            { substrate: "Tapered ISO", coverage_sqft: 0, labor: 0 },
+          ],
+        },
+      ],
+    });
+    expect(times.adhesives).toEqual(["Duro-Grip Adhesive(CR-20)"]);
+    const wood = times.bySubstrate["Duro-Grip Adhesive(CR-20)"]!["Wood"]!;
+    const r = underlaymentAdhesive({
+      areaSqFt: 2500,
+      coverageSqFt: wood.coverageSqFt,
+      laborPer1000SqFt: wood.labor,
+    });
+    expect(r.units).toBeCloseTo(1.25, 6); // 2500 / 2000
+    expect(r.hours).toBeCloseTo(16.25, 6); // 2500 × 6.5 / 1000
+    const na = underlaymentAdhesive({ areaSqFt: 2500, coverageSqFt: 0, laborPer1000SqFt: 0 });
+    expect(na).toEqual({ units: 0, hours: 0 });
+  });
+
+  it("adhesive prices join by exact product name", () => {
+    const prices = buildAdhesivePrices({
+      kind: "adhesives",
+      products: [
+        { name: "Duro-Grip Adhesive(CR-20)", price: 899 },
+        { name: "Millenium One Step", price: 279 },
+      ],
+    });
+    expect(prices["Duro-Grip Adhesive(CR-20)"]).toBe(899);
+    expect(prices["Millenium One Step"]).toBe(279);
   });
 });

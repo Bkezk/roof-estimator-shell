@@ -13,7 +13,7 @@
  *    resolved upstream) and membrane-with-overlap sq ft (roll-goods geometry is still unvalidated).
  *
  * FLAGGED FOR BID VALIDATION (Phase 6): the exact membership of the direct-labor subtotal
- * (LaborSubtotal1) — here modeled as install + setup + inspection + tear-off + accessory + parapet + curb hours at
+ * (LaborSubtotal1) — here modeled as install + setup + inspection + underlayment + tear-off + accessory + parapet + curb hours at
  * one crew rate — must be confirmed against a captured bid, along with the roll-goods geometry and
  * .NET rounding.
  */
@@ -122,6 +122,8 @@ export interface EstimateInputs {
   parapetLaborHours?: number;
   /** Curb install labor hours (qty × (setup + min/LF × type × perimeter) / 60); direct labor. */
   curbLaborHours?: number;
+  /** Underlayment install labor hours (layout + fastener time, or adhesive labor); direct labor. */
+  underlaymentLaborHours?: number;
 
   // tear-off / disposal
   tearOffFillFraction: number; // Estimate.TearOff_VolumeMod
@@ -163,6 +165,7 @@ export interface EstimateResult {
   inspectionHours: number;
   parapetLaborHours: number;
   curbLaborHours: number;
+  underlaymentLaborHours: number;
   tearOffLaborHours: number;
   disposalUnits: number;
   installHours: number;
@@ -331,7 +334,7 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
 
   // Direct-labor hours & cost. SEAM — FLAGGED FOR BID VALIDATION (Phase 6):
   //  (a) which hours belong to the direct-labor subtotal (here: install + setup + inspection +
-  //      tear-off + accessory + parapet + curb) and whether each bills at one crew rate;
+  //      tear-off + accessory + parapet + curb + underlayment) and whether each bills at one crew rate;
   //  (b) whether the money chain's row 11 (LaborSubtotal2, "labor+subs+services") re-includes the
   //      direct labor already in row 10 — the doc's literal 8+9+10+11 would then double-add it.
   //      We feed row 11 as subs + services ONLY (the non-double-counting reading) until a captured
@@ -343,7 +346,8 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
     tearOffLaborHours +
     (e.accessoryLaborHours ?? 0) +
     (e.parapetLaborHours ?? 0) +
-    (e.curbLaborHours ?? 0);
+    (e.curbLaborHours ?? 0) +
+    (e.underlaymentLaborHours ?? 0);
   const laborSubtotal1 = goodSingle(calcLaborCost(e.crewLaborRatePerHour, laborSubtotal1Hours));
   const laborSubtotal2 = e.subsCost + e.servicesCost;
 
@@ -383,6 +387,7 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
     inspectionHours,
     parapetLaborHours: e.parapetLaborHours ?? 0,
     curbLaborHours: e.curbLaborHours ?? 0,
+    underlaymentLaborHours: e.underlaymentLaborHours ?? 0,
     tearOffLaborHours,
     disposalUnits,
     installHours,

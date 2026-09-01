@@ -22,6 +22,8 @@ import {
   type ParapetInput,
   type CurbInput,
   type MetalLine,
+  type UnderlaymentLayer,
+  sectionLayers,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -82,6 +84,7 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   perimFastenerOc: 12,
   cornerFastenerOc: 6,
   underlaymentBoard: "",
+  layers: [],
   sheetSizeLabel: "1500 sf",
   tearOff: false,
   tearOffType: "",
@@ -217,7 +220,11 @@ function EstimatePage() {
     if (d && Array.isArray(d.sections)) {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
-      setSections(d.sections.length ? d.sections : [newSection()]);
+      setSections(
+        d.sections.length
+          ? d.sections.map((s) => ({ ...s, layers: sectionLayers(s) }))
+          : [newSection()],
+      );
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setMetals(Array.isArray(d.metals) ? d.metals : []);
@@ -264,7 +271,11 @@ function EstimatePage() {
     return set.size ? [...set] : ["White"];
   }, [admin]);
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
-  const underlaymentOptions = ["None", ...Object.keys(admin?.underlaymentPrices ?? {})];
+  const boardOptions = Object.keys(admin?.underlaymentPrices ?? {});
+  const fastenerOptions = admin?.underlaymentLabor?.fastenerCounts ?? [5];
+  const adhesiveOptions = admin?.adhesiveTimes?.adhesives ?? [];
+  const substratesFor = (adhesive: string) =>
+    Object.keys(admin?.adhesiveTimes?.bySubstrate[adhesive] ?? {});
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
   const hwTerms = [...new Set(warrantyData?.highWind.map((h) => h.termYears) ?? [])].sort(
     (a, b) => a - b,
@@ -302,8 +313,15 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
-    const { inputs, warnings, parapetMaterial, metalsMaterial } = buildEstimateInputs(bid, admin);
-    return { r: computeEstimate(inputs), warnings, parapetMaterial, metalsMaterial };
+    const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial } =
+      buildEstimateInputs(bid, admin);
+    return {
+      r: computeEstimate(inputs),
+      warnings,
+      parapetMaterial,
+      metalsMaterial,
+      adhesiveMaterial,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
 
@@ -533,13 +551,6 @@ function EstimatePage() {
                       onChange={(v) => editSection(i, { sheetSizeLabel: v })}
                     />
                   </Field>
-                  <Field label="Underlayment">
-                    <PickOne
-                      value={s.underlaymentBoard || "None"}
-                      options={underlaymentOptions}
-                      onChange={(v) => editSection(i, { underlaymentBoard: v === "None" ? "" : v })}
-                    />
-                  </Field>
                   <Field label="Tab lap (in)">
                     <Input
                       type="number"
@@ -598,6 +609,110 @@ function EstimatePage() {
                       />
                     </Field>
                   </div>
+                </div>
+                <div className="mt-3 border-t pt-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Insulation layers (up to 4)
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={(s.layers?.length ?? 0) >= 4}
+                      onClick={() =>
+                        editSection(i, {
+                          layers: [
+                            ...(s.layers ?? []),
+                            {
+                              board: boardOptions[0] ?? "",
+                              attachment: "mechanical",
+                              fastenersPerBoard: fastenerOptions[0] ?? 5,
+                              adhesiveName: adhesiveOptions[0] ?? "",
+                              substrate: "",
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      <Plus className="mr-1 h-4 w-4" /> Add layer
+                    </Button>
+                  </div>
+                  {(s.layers?.length ?? 0) === 0 ? (
+                    <p className="text-xs text-muted-foreground">No insulation layers.</p>
+                  ) : (
+                    (s.layers ?? []).map((layer, li) => {
+                      const editLayer = (patch: Partial<UnderlaymentLayer>) =>
+                        editSection(i, {
+                          layers: (s.layers ?? []).map((x, j) =>
+                            j === li ? { ...x, ...patch } : x,
+                          ),
+                        });
+                      return (
+                        <div
+                          key={li}
+                          className="mb-2 grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
+                        >
+                          <Field label={`Layer ${li + 1} board`}>
+                            <PickOne
+                              value={layer.board}
+                              options={boardOptions}
+                              onChange={(v) => editLayer({ board: v })}
+                            />
+                          </Field>
+                          <Field label="Attach">
+                            <PickOne
+                              value={layer.attachment}
+                              options={["mechanical", "adhesive"]}
+                              onChange={(v) =>
+                                editLayer({ attachment: v as UnderlaymentLayer["attachment"] })
+                              }
+                            />
+                          </Field>
+                          {layer.attachment === "mechanical" ? (
+                            <Field label="Fasteners / 4×8 board">
+                              <PickOne
+                                value={String(layer.fastenersPerBoard || fastenerOptions[0] || 5)}
+                                options={fastenerOptions.map(String)}
+                                onChange={(v) => editLayer({ fastenersPerBoard: Number(v) })}
+                              />
+                            </Field>
+                          ) : (
+                            <>
+                              <Field label="Adhesive">
+                                <PickOne
+                                  value={layer.adhesiveName}
+                                  options={adhesiveOptions}
+                                  onChange={(v) => editLayer({ adhesiveName: v, substrate: "" })}
+                                />
+                              </Field>
+                              <Field label="Substrate">
+                                <PickOne
+                                  value={layer.substrate}
+                                  options={substratesFor(layer.adhesiveName)}
+                                  onChange={(v) => editLayer({ substrate: v })}
+                                />
+                              </Field>
+                            </>
+                          )}
+                          <div className="flex items-end justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() =>
+                                editSection(i, {
+                                  layers: (s.layers ?? []).filter((_, j) => j !== li),
+                                  underlaymentBoard: "",
+                                })
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
                   <div className="flex items-center gap-2">
@@ -1369,7 +1484,8 @@ function EstimatePage() {
                       (result.r.money.dTotals[0] ?? 0) -
                         accessoryTotal -
                         result.parapetMaterial -
-                        result.metalsMaterial,
+                        result.metalsMaterial -
+                        result.adhesiveMaterial,
                     )}
                   />
                   {result.parapetMaterial > 0 && (
@@ -1377,6 +1493,9 @@ function EstimatePage() {
                   )}
                   {result.metalsMaterial > 0 && (
                     <Row label="Metals material" v={money(result.metalsMaterial)} />
+                  )}
+                  {result.adhesiveMaterial > 0 && (
+                    <Row label="Adhesive material" v={money(result.adhesiveMaterial)} />
                   )}
                   {accessoryTotal > 0 && <Row label="Accessories" v={money(accessoryTotal)} />}
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
@@ -1449,6 +1568,12 @@ function EstimatePage() {
                   <div className="flex justify-between">
                     <span>Curb hours</span>
                     <span>{result.r.curbLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.r.underlaymentLaborHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Underlayment hours</span>
+                    <span>{result.r.underlaymentLaborHours.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

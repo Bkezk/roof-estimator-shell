@@ -410,6 +410,80 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal2).toBeCloseTo(120, 2);
   });
 
+  it("insulation layers: mechanical layout+fastener labor and adhesive coverage flow", () => {
+    const withU: EngineAdminData = {
+      ...admin,
+      underlaymentPrices: { '1/2" ISO': 0.85, "Duro-Fold": 0.3 },
+      underlaymentLabor: {
+        layoutHoursByProduct: { '1/2" ISO': 7.775, "Duro-Fold": 6.9 },
+        fastenerCounts: [5, 6, 8],
+        fastenerMinutesByDeck: { Wood: 0.342 },
+      },
+      adhesiveTimes: {
+        adhesives: ["Duro-Grip Adhesive(CR-20)"],
+        bySubstrate: {
+          "Duro-Grip Adhesive(CR-20)": { "ISO 4'x8'": { coverageSqFt: 2000, labor: 6.5 } },
+        },
+      },
+      adhesivePrices: { "Duro-Grip Adhesive(CR-20)": 899 },
+    };
+    const { inputs, warnings, adhesiveMaterial } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [
+              {
+                board: '1/2" ISO',
+                attachment: "mechanical",
+                fastenersPerBoard: 5,
+                adhesiveName: "",
+                substrate: "",
+              },
+              {
+                board: "Duro-Fold",
+                attachment: "adhesive",
+                fastenersPerBoard: 0,
+                adhesiveName: "Duro-Grip Adhesive(CR-20)",
+                substrate: "ISO 4'x8'",
+              },
+            ],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(warnings).toEqual([]);
+    // board material: 2500 x (0.85 + 0.30) = 2875 -> underlayment purchase line
+    expect(inputs.materialUnderlayment).toBeCloseTo(2875, 2);
+    // adhesive material: 2500/2000 = 1.25 units x $899 = $1123.75 -> M0
+    expect(adhesiveMaterial).toBeCloseTo(1123.75, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1123.75, 2);
+    const r = computeEstimate(inputs);
+    // mech: 7.775 + (0.342/60)(5/32)(2500) = 10.0016 h; adhesive: 2500 x 6.5/1000 = 16.25 h
+    expect(r.underlaymentLaborHours).toBeCloseTo(10.0016 + 16.25, 3);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 10.0016 + 16.25, 3);
+  });
+
+  it("legacy underlaymentBoard converts to one mechanical layer at 5 fasteners/board", () => {
+    const withU: EngineAdminData = {
+      ...admin,
+      underlaymentPrices: { '1/2" ISO': 0.85 },
+      underlaymentLabor: {
+        layoutHoursByProduct: { '1/2" ISO': 7.775 },
+        fastenerCounts: [5],
+        fastenerMinutesByDeck: { Wood: 0.342 },
+      },
+    };
+    const { inputs } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
+      withU,
+    );
+    const r = computeEstimate(inputs);
+    expect(inputs.materialUnderlayment).toBeCloseTo(2125, 2); // unchanged material
+    expect(r.underlaymentLaborHours).toBeCloseTo(10.0016, 3); // labor now bills (parity behavior)
+  });
+
   it("warns when a price or labor combo is missing", () => {
     const noPrice = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, color: "Purple" }] }),

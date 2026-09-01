@@ -88,7 +88,7 @@ function ProposalPage() {
       commission: raw.commission ?? 0,
       taxExempt: raw.taxExempt ?? false,
     };
-    const { inputs, parapetMaterial, metalsMaterial } = buildEstimateInputs(
+    const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial } = buildEstimateInputs(
       buildBidInput(saved, warrantyData),
       admin,
     );
@@ -107,7 +107,11 @@ function ProposalPage() {
     const groups = buildProposalPricing({
       grandTotal: r.money.grandTotal,
       membraneMaterial:
-        (r.money.dTotals[0] ?? 0) - accessoryMaterial - parapetMaterial - metalsMaterial,
+        (r.money.dTotals[0] ?? 0) -
+        accessoryMaterial -
+        parapetMaterial -
+        metalsMaterial -
+        adhesiveMaterial,
       installLaborHours: r.installHours,
       setupHours: r.setupHours,
       inspectionHours: r.inspectionHours,
@@ -120,6 +124,8 @@ function ProposalPage() {
       metalsMaterial,
       metalsLabor,
       underlaymentMaterial: r.money.dTotals[6] ?? 0,
+      underlaymentLaborHours: r.underlaymentLaborHours,
+      adhesiveMaterial,
       warrantyCost: r.money.dTotals[5] ?? 0,
       freight: r.money.dTotals[9] ?? 0,
       nonDlMaterial,

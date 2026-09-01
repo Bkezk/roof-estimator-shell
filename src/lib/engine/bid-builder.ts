@@ -15,7 +15,10 @@
  *  - Freight wired: percent-of-material or the stepped "from" table, on the DL material subtotal
  *    (M0). Membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
- *  - Underlayment material wired from the seeded Underlayment prices (board $/sqft × deck area).
+ *  - Insulation layers wired (§4.3, up to 4 per section): board material → dTotals[6]; mechanical
+ *    labor per the app's header formula (layout hrs/2500 + fastener min × count/board); adhesive
+ *    units = area ÷ coverage → material into M0, labor at hrs/1000 sqft (§3.3 scale, flagged).
+ *    A legacy single underlaymentBoard converts to one mechanical layer (5 fasteners/board).
  *  - Setup & inspection hours wired from the seeded band tables (§2.4/§2.5) when present; they roll
  *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs stay 0 until the UI adds
  *    them (the engine already accepts them).
@@ -47,10 +50,26 @@ import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
 import type { MarkupMode } from "./money";
 import {
   TEAROFF_DECK_BY_LABOR_DECK,
+  UNDERLAYMENT_DECK_BY_LABOR_DECK,
   parapetModeRate,
   curbLaborHours as curbHoursCalc,
+  underlaymentMechanicalHours,
+  underlaymentAdhesive,
   type EngineAdminData,
 } from "./adapters";
+
+/**
+ * One insulation/underlayment layer on a section (§4.3, up to 4). Mechanical bills the app's own
+ * header formula (layout hrs/2500 + fastener minutes × count); adhesive bills area ÷ coverage units
+ * of adhesive (material → M0) + labor (scale per engine-truth §3.3, hrs/1000 sqft — flagged).
+ */
+export interface UnderlaymentLayer {
+  board: string; // from the Underlayment prices screen
+  attachment: "mechanical" | "adhesive";
+  fastenersPerBoard: number; // mechanical: fasteners per 4×8 board (app default 5)
+  adhesiveName: string; // adhesive: from the Adhesive Times table
+  substrate: string; // adhesive: substrate row in that adhesive's grid
+}
 
 export interface BidSectionInput {
   id: string;
@@ -68,7 +87,9 @@ export interface BidSectionInput {
   enhancementWidthFt: number; // zone depth in from the edge (e.g. 3)
   perimFastenerOc: number; // tighter OC in the perimeter zone
   cornerFastenerOc: number; // tighter OC in the corner zone
-  underlaymentBoard: string; // board name (from Underlayment prices); "" = none
+  underlaymentBoard: string; // LEGACY single board ("" = none); superseded by `layers`
+  /** Insulation layers (up to 4). When absent, a legacy underlaymentBoard converts to one layer. */
+  layers?: UnderlaymentLayer[];
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -179,6 +200,26 @@ export interface BidInput {
   warrantyHighWindUpcharge: number;
 }
 
+/**
+ * A section's insulation layers, converting the legacy single `underlaymentBoard` into one
+ * mechanical layer at the app's default 5 fasteners/board. Used by the compute path AND the UI
+ * hydration so old saved bids read identically everywhere.
+ */
+export function sectionLayers(s: BidSectionInput): UnderlaymentLayer[] {
+  if (s.layers && s.layers.length > 0) return s.layers.slice(0, 4);
+  if (s.underlaymentBoard)
+    return [
+      {
+        board: s.underlaymentBoard,
+        attachment: "mechanical",
+        fastenersPerBoard: 5,
+        adhesiveName: "",
+        substrate: "",
+      },
+    ];
+  return [];
+}
+
 /** The DB labor combo key uses "adhesive"; the engine attachment enum uses "adhered". */
 const comboKey = (system: string, attachment: Attachment): string =>
   `${system}|${attachment === "adhered" ? "adhesive" : "mechanical"}`;
@@ -191,6 +232,8 @@ export interface BuildResult {
   parapetMaterial: number;
   /** Exceptional Metals material $ (inside duroLastMaterial/M0); split out for display/proposal. */
   metalsMaterial: number;
+  /** Adhesive material $ (inside duroLastMaterial/M0); split out for display/proposal. */
+  adhesiveMaterial: number;
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
@@ -206,6 +249,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
 
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
+  let underlaymentLaborHours = 0;
+  let adhesiveMaterial = 0;
 
   const sections: RoofSection[] = bid.sections.map((s) => {
     const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
@@ -217,13 +262,54 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
     membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
 
-    // Underlayment material: board $/sqft × roof-deck area (§ dTotals[6], a separate purchase line).
-    if (s.underlaymentBoard) {
-      const uPrice = admin.underlaymentPrices?.[s.underlaymentBoard];
+    // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
+    // labor and adhesive labor → direct labor; adhesive units × price → M0.
+    for (const layer of sectionLayers(s)) {
+      const area = s.length * s.width;
+      const uPrice = admin.underlaymentPrices?.[layer.board];
       if (uPrice === undefined) {
-        warnings.push(`No underlayment price for "${s.underlaymentBoard}" — section "${s.name}".`);
+        warnings.push(`No underlayment price for "${layer.board}" — section "${s.name}".`);
       } else {
-        underlaymentMaterial += s.length * s.width * uPrice;
+        underlaymentMaterial += area * uPrice;
+      }
+      if (layer.attachment === "mechanical") {
+        if (admin.underlaymentLabor) {
+          const layout = admin.underlaymentLabor.layoutHoursByProduct[layer.board];
+          const uDeck = UNDERLAYMENT_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
+          const minPerFast = admin.underlaymentLabor.fastenerMinutesByDeck[uDeck];
+          if (layout === undefined || minPerFast === undefined) {
+            warnings.push(
+              `No underlayment labor for "${layer.board}" on ${s.deckType} — section "${s.name}".`,
+            );
+          } else {
+            underlaymentLaborHours += underlaymentMechanicalHours({
+              areaSqFt: area,
+              layoutHoursPer2500: layout,
+              minutesPerFastener: minPerFast,
+              fastenersPerBoard: layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5,
+            });
+          }
+        }
+      } else if (admin.adhesiveTimes) {
+        const entry = admin.adhesiveTimes.bySubstrate[layer.adhesiveName]?.[layer.substrate];
+        if (!entry || entry.coverageSqFt <= 0) {
+          warnings.push(
+            `No adhesive coverage for ${layer.adhesiveName || "(no adhesive)"} / ${layer.substrate || "(no substrate)"} — section "${s.name}".`,
+          );
+        } else {
+          const a = underlaymentAdhesive({
+            areaSqFt: area,
+            coverageSqFt: entry.coverageSqFt,
+            laborPer1000SqFt: entry.labor,
+          });
+          underlaymentLaborHours += a.hours;
+          const aPrice = admin.adhesivePrices?.[layer.adhesiveName];
+          if (aPrice === undefined) {
+            warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+          } else {
+            adhesiveMaterial += a.units * aPrice;
+          }
+        }
       }
     }
 
@@ -347,7 +433,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   );
 
   // M0 = membrane + accessories + parapet + metals material (dMaterial[0..6] slots).
-  const duroLastMaterial = membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial;
+  const duroLastMaterial =
+    membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial + adhesiveMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
@@ -392,6 +479,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     accessoryLaborHours,
     parapetLaborHours,
     curbLaborHours,
+    underlaymentLaborHours,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage: 30,
@@ -425,5 +513,5 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     },
   };
 
-  return { inputs, warnings, parapetMaterial, metalsMaterial };
+  return { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial };
 }

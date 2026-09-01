@@ -32,6 +32,9 @@ import {
   buildMetalsCatalog,
   type MetalsCatalogItem,
   type MetalsScreenData,
+  type RawUnderlaymentLayoutData,
+  type RawAdhesiveTimesData,
+  type AdhesivesScreenData,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -63,6 +66,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       curbRes,
       curbDeckRes,
       curbTypeRes,
+      uLayoutRes,
+      adhTimesRes,
+      adhScreenRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -82,6 +88,17 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("labor_curb").select("setup_minutes").eq("id", 1).maybeSingle(),
       sb.from("labor_curb_deck").select("deck_type, minutes").order("sort"),
       sb.from("labor_curb_type").select("curb_type, multiplier").order("sort"),
+      sb
+        .from("rdl_labor_tables")
+        .select("data")
+        .eq("id", "underlayment_layout_mechanical")
+        .maybeSingle(),
+      sb
+        .from("rdl_labor_tables")
+        .select("data")
+        .eq("id", "underlayment_adhesive_times")
+        .maybeSingle(),
+      sb.from("pricing_catalog").select("data").eq("id", "duro_last:adhesives").maybeSingle(),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -97,6 +114,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (curbRes.error) throw curbRes.error;
     if (curbDeckRes.error) throw curbDeckRes.error;
     if (curbTypeRes.error) throw curbTypeRes.error;
+    if (uLayoutRes.error) throw uLayoutRes.error;
+    if (adhTimesRes.error) throw adhTimesRes.error;
+    if (adhScreenRes.error) throw adhScreenRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -115,6 +135,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const curbSetupMinutes = curbRes.data?.setup_minutes ?? null;
     const curbDeckRows = (curbDeckRes.data ?? null) as RawCurbDeckRow[] | null;
     const curbTypeRows = (curbTypeRes.data ?? null) as RawCurbTypeRow[] | null;
+    const underlaymentLayout = (uLayoutRes.data?.data ?? null) as RawUnderlaymentLayoutData | null;
+    const adhesiveTimes = (adhTimesRes.data?.data ?? null) as RawAdhesiveTimesData | null;
+    const adhesivesScreen = (adhScreenRes.data?.data ?? null) as AdhesivesScreenData | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -130,6 +153,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       curbSetupMinutes,
       curbDeckRows,
       curbTypeRows,
+      underlaymentLayout,
+      adhesiveTimes,
+      adhesivesScreen,
     });
   });
 

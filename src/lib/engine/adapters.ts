@@ -358,6 +358,140 @@ export function parapetModeRate(e: ParapetModeRates, predrill: boolean, canted: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Underlayment labor (Layout & Mechanical + Adhesive Times) and adhesive prices
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The Layout & Mechanical tab uses its own deck-name variant ("Steel", "LWC / Steel", …).
+ * Map the estimator's labor deck names onto it (a third taxonomy beside labor and tear-off).
+ */
+export const UNDERLAYMENT_DECK_BY_LABOR_DECK: Record<string, string> = {
+  Wood: "Wood",
+  Steel: "Steel",
+  Retrofit: "Metal Retrofit",
+  Concrete: "Concrete",
+  Gypsum: "Gypsum",
+  "LWC/Steel": "LWC / Steel",
+  "LWC/Concrete": "LWC / Concrete",
+  "LWC/Other": "LWC / Other",
+  Tectum: "Tectum",
+  Purlin: "Purlin Fastened",
+};
+
+/** Seeded rdl_labor_tables id "underlayment_layout_mechanical". */
+export interface RawUnderlaymentLayoutData {
+  rows: Array<{ underlayment: string; layout_hours_per_2500sqft: number }>;
+  fasteners_per_4x8_options?: Array<{ count: number; per_sqft: number; selected?: boolean }>;
+  fastening_times_min_per_fastener_by_deck?: Record<string, number>;
+}
+
+export interface UnderlaymentLaborTables {
+  /** Product name → layout hours per 2,500 sq ft. */
+  layoutHoursByProduct: Record<string, number>;
+  /** Fasteners-per-4×8-board options (5..20), first = the app's selected default. */
+  fastenerCounts: number[];
+  /** Minutes per fastener by (underlayment-taxonomy) deck name. */
+  fastenerMinutesByDeck: Record<string, number>;
+}
+
+export function buildUnderlaymentLabor(data: RawUnderlaymentLayoutData): UnderlaymentLaborTables {
+  const layoutHoursByProduct: Record<string, number> = {};
+  for (const r of data.rows ?? [])
+    layoutHoursByProduct[r.underlayment] = Number(r.layout_hours_per_2500sqft);
+  const opts = data.fasteners_per_4x8_options ?? [];
+  const selected = opts.find((o) => o.selected);
+  const fastenerCounts = [
+    ...(selected ? [selected.count] : []),
+    ...opts.filter((o) => !o.selected).map((o) => o.count),
+  ];
+  return {
+    layoutHoursByProduct,
+    fastenerCounts,
+    fastenerMinutesByDeck: { ...(data.fastening_times_min_per_fastener_by_deck ?? {}) },
+  };
+}
+
+/**
+ * Mechanical underlayment labor (the app's own header formula: "Labor = Layout Time + (Time for
+ * One Fastener by Deck Type) × # Fasteners in 2500 SqFt", scaled by area):
+ * hours = (area/2500) × layoutHoursPer2500 + (minutesPerFastener/60) × (fastenersPerBoard/32) × area
+ * (a 4×8 board is 32 sq ft, so fasteners/sqft = count/32).
+ */
+export function underlaymentMechanicalHours(i: {
+  areaSqFt: number;
+  layoutHoursPer2500: number;
+  minutesPerFastener: number;
+  fastenersPerBoard: number;
+}): number {
+  return (
+    (i.areaSqFt / 2500) * i.layoutHoursPer2500 +
+    (i.minutesPerFastener / 60) * (i.fastenersPerBoard / 32) * i.areaSqFt
+  );
+}
+
+/** Seeded rdl_labor_tables id "underlayment_adhesive_times". */
+export interface RawAdhesiveTimesData {
+  adhesives: Array<{
+    adhesive: string;
+    unit_type?: string;
+    rows: Array<{ substrate: string; coverage_sqft: number; labor: number }>;
+  }>;
+}
+
+export interface AdhesiveTimesTables {
+  /** Adhesive names in table order. */
+  adhesives: string[];
+  /** bySubstrate[adhesive][substrate] = { coverageSqFt, labor } (0/0 rows = not applicable). */
+  bySubstrate: Record<string, Record<string, { coverageSqFt: number; labor: number }>>;
+}
+
+export function buildAdhesiveTimes(data: RawAdhesiveTimesData): AdhesiveTimesTables {
+  const adhesives: string[] = [];
+  const bySubstrate: AdhesiveTimesTables["bySubstrate"] = {};
+  for (const a of data.adhesives ?? []) {
+    adhesives.push(a.adhesive);
+    const subs: Record<string, { coverageSqFt: number; labor: number }> = {};
+    for (const r of a.rows ?? [])
+      subs[r.substrate] = { coverageSqFt: Number(r.coverage_sqft), labor: Number(r.labor) };
+    bySubstrate[a.adhesive] = subs;
+  }
+  return { adhesives, bySubstrate };
+}
+
+/**
+ * Adhesive underlayment attachment (§5.3): units = area ÷ coverage (sq ft per unit, by substrate);
+ * labor hours = area × labor ÷ 1000. LABOR SCALE FLAGGED FOR BID VALIDATION: engine-truth §3.3
+ * names the admin Adhesive Times table as GetAdhesiveBaseHours, "hrs per 1000 sq ft" — that scale
+ * is applied here. Units are NOT rounded up (the spec states the bare formula; whole-unit
+ * purchasing rounding is a validation question). Zero coverage (not-applicable row) → 0 units/hours.
+ */
+export function underlaymentAdhesive(i: {
+  areaSqFt: number;
+  coverageSqFt: number;
+  laborPer1000SqFt: number;
+}): { units: number; hours: number } {
+  if (i.coverageSqFt <= 0) return { units: 0, hours: 0 };
+  return {
+    units: i.areaSqFt / i.coverageSqFt,
+    hours: (i.areaSqFt * i.laborPer1000SqFt) / 1000,
+  };
+}
+
+/** The seeded Adhesives master-detail (pricing_catalog kind "adhesives"), trimmed to what we read. */
+export interface AdhesivesScreenData {
+  kind: string;
+  products?: Array<{ name: string; price?: number | null }>;
+}
+
+/** Adhesive product name → price per unit (exact-name join; all 6 Times-table names match). */
+export function buildAdhesivePrices(data: AdhesivesScreenData | null): Record<string, number> {
+  const prices: Record<string, number> = {};
+  for (const p of data?.products ?? [])
+    if (p.name && typeof p.price === "number") prices[p.name] = p.price;
+  return prices;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exceptional Metals catalog (master-detail screen → flat pickable list)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -641,6 +775,9 @@ export interface RawAdminData {
   curbSetupMinutes?: number | string | null;
   curbDeckRows?: RawCurbDeckRow[] | null;
   curbTypeRows?: RawCurbTypeRow[] | null;
+  underlaymentLayout?: RawUnderlaymentLayoutData | null;
+  adhesiveTimes?: RawAdhesiveTimesData | null;
+  adhesivesScreen?: AdhesivesScreenData | null;
 }
 
 export interface EngineSettings {
@@ -672,6 +809,12 @@ export interface EngineAdminData {
   parapetLabor?: ParapetLaborTables;
   /** Curb labor tables (absent if the labor_curb tables weren't fetched). */
   curbLabor?: CurbLaborTables;
+  /** Underlayment Layout & Mechanical labor tables (absent if not fetched). */
+  underlaymentLabor?: UnderlaymentLaborTables;
+  /** Adhesive Times (coverage + labor per substrate per adhesive; absent if not fetched). */
+  adhesiveTimes?: AdhesiveTimesTables;
+  /** Adhesive product name → price per unit (absent if the Adhesives screen wasn't fetched). */
+  adhesivePrices?: Record<string, number>;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -709,6 +852,11 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const curbLabor = raw.curbDeckRows?.length
     ? buildCurbLabor(raw.curbSetupMinutes, raw.curbDeckRows, raw.curbTypeRows ?? [])
     : undefined;
+  const underlaymentLabor = raw.underlaymentLayout
+    ? buildUnderlaymentLabor(raw.underlaymentLayout)
+    : undefined;
+  const adhesiveTimes = raw.adhesiveTimes ? buildAdhesiveTimes(raw.adhesiveTimes) : undefined;
+  const adhesivePrices = raw.adhesivesScreen ? buildAdhesivePrices(raw.adhesivesScreen) : undefined;
 
   return {
     deckOrder,
@@ -722,5 +870,8 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(inspectionTable ? { inspectionTable } : {}),
     ...(parapetLabor ? { parapetLabor } : {}),
     ...(curbLabor ? { curbLabor } : {}),
+    ...(underlaymentLabor ? { underlaymentLabor } : {}),
+    ...(adhesiveTimes ? { adhesiveTimes } : {}),
+    ...(adhesivePrices ? { adhesivePrices } : {}),
   };
 }
