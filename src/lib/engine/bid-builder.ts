@@ -8,8 +8,10 @@
  *  - Roll-goods membrane: material sq ft = AreaWithEdgeOverlap (the simple edge-overlap path); the
  *    full roll-goods perimeter geometry (§2.2) is not applied.
  *  - Perimeter/corner enhancement zones: areas are carved from the field by
- *    length × enhancement-width (§2), billed at the perimeter/corner rate; the exact perimeter
- *    geometry (which edges, corner sizing) is entered by the estimator rather than derived.
+ *    length × enhancement-width (§2), billed at the perimeter/corner rate. With per-side edge
+ *    definitions the perimeter length derives from the perimeter-marked edges, and ARP edges feed
+ *    the §2.3 ARPSqFt slot; corner sizing is still entered. Termination hardware footage is a
+ *    display-only ordering summary (no auto-pricing until a captured bid validates the join).
  *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
  *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
  *  - Freight wired: percent-of-material or the stepped "from" table, on the DL material subtotal
@@ -20,8 +22,8 @@
  *    units = area ÷ coverage → material into M0, labor at hrs/1000 sqft (§3.3 scale, flagged).
  *    A legacy single underlaymentBoard converts to one mechanical layer (5 fasteners/board).
  *  - Setup & inspection hours wired from the seeded band tables (§2.4/§2.5) when present; they roll
- *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs stay 0 until the UI adds
- *    them (the engine already accepts them).
+ *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs are exposed and composed
+ *    multiplicatively with the labor-template factors.
  *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
  *    quantity); the total folds into M0. Accessory LABOR is wired too: each line carries per-unit
  *    hours (prefilled from the accessory_labor single-hours screens where an exact description
@@ -38,6 +40,7 @@
 
 import { areaWithEdgeOverlap } from "./quantities";
 import { in2Ft } from "./rounding";
+import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
   membraneMaterialCost,
   priceMatrixLookup,
@@ -93,6 +96,12 @@ export interface BidSectionInput {
   underlaymentBoard: string; // LEGACY single board ("" = none); superseded by `layers`
   /** Insulation layers (up to 4). When absent, a legacy underlaymentBoard converts to one layer. */
   layers?: UnderlaymentLayer[];
+  /**
+   * Per-side edge definitions (A–D). When present: perimeter-marked edges drive the perimeter
+   * length (kept in sync with perimLengthFt by the UI) and ARP edges feed the §2.3 ARPSqFt slot.
+   * Termination/blocking footage is an ordering summary only (no auto-pricing until validated).
+   */
+  edges?: EdgeInput[];
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -188,6 +197,10 @@ export interface BidInput {
   volumeDiscount: boolean;
   taxExempt: boolean;
   adjustLaborPct: number;
+  /** Per-bid setup-time adjustment % (legacy "Setup 16 h (100%)" override); composed with templates. */
+  adjustSetupPct?: number;
+  /** Per-bid inspection-time adjustment %; composed with templates. */
+  adjustInspectionPct?: number;
   /** Per-category labor template name (from labor_templates); "" / unset = no template. */
   laborTemplateName?: string;
 
@@ -343,7 +356,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
 
     // Carve the perimeter/corner enhancement zones out of the field area (§2, _230 subtracts both).
-    const perimArea = s.perimLengthFt * s.enhancementWidthFt;
+    // When per-side edges are defined, the perimeter-marked edges are the source of truth for the
+    // perimeter length (the UI keeps perimLengthFt in sync; recomputed here so saved bids agree).
+    const perimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+    const perimArea = perimLengthFt * s.enhancementWidthFt;
     const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
     const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
 
@@ -355,7 +371,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       perimArea,
       cornerArea,
       membraneWithOverlap,
-      arpSqFt: 0,
+      // §2.3: ARP-covered edges are subtracted from the bid's total membrane sq ft.
+      arpSqFt: edgesArpSqFt(s.edges ?? []),
       thickness: s.thickness,
       thicknessLabor: lt?.thicknessLaborByMil[s.thickness] ?? 1,
       designTable: 60,
@@ -497,8 +514,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },
     adjustLaborPct: ((1 + bid.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100,
-    adjustSetupLaborPct: (tf("Setup Time Labor") - 1) * 100,
-    adjustInspectionPct: (tf("Inspection Time Labor") - 1) * 100,
+    adjustSetupLaborPct:
+      ((1 + (bid.adjustSetupPct ?? 0) / 100) * tf("Setup Time Labor") - 1) * 100,
+    adjustInspectionPct:
+      ((1 + (bid.adjustInspectionPct ?? 0) / 100) * tf("Inspection Time Labor") - 1) * 100,
     accessoryLaborHours,
     parapetLaborHours,
     curbLaborHours,

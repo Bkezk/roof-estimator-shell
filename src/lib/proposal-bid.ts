@@ -66,6 +66,9 @@ export interface SavedBidState {
   perDiemInMarkup?: boolean;
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
+  /** Per-bid setup / inspection time adjustments % (legacy per-item overrides). */
+  adjustSetupPct?: number;
+  adjustInspectionPct?: number;
   /** Per-category labor template name ("" / unset = none). */
   laborTemplateName?: string;
   // Warranty selection (resolved to $/sqft via the warranties + high-wind admin tables).
@@ -170,6 +173,8 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     volumeDiscount: s.volumeDiscount ?? false,
     taxExempt: s.taxExempt,
     adjustLaborPct: s.adjustLaborPct ?? 0,
+    adjustSetupPct: s.adjustSetupPct ?? 0,
+    adjustInspectionPct: s.adjustInspectionPct ?? 0,
     ...(s.laborTemplateName ? { laborTemplateName: s.laborTemplateName } : {}),
     extraShipping: 0,
     subsCost: 0,

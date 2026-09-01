@@ -28,6 +28,15 @@ import {
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
+  defaultEdges,
+  perimeterFromEdges,
+  summarizeEdges,
+  TERMINATION_OPTIONS,
+  ARP_SIZE_OPTIONS,
+  type EdgeInput,
+} from "@/lib/engine/edges";
+import { SectionCalcDialog } from "@/components/section-calc-dialog";
+import {
   buildBidInput,
   emptyCustomer,
   markupTypeToMode,
@@ -189,6 +198,8 @@ function EstimatePage() {
   const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
   const [commissionInMarkup, setCommissionInMarkup] = useState(false);
   const [adjustLaborPct, setAdjustLaborPct] = useState(0);
+  const [adjustSetupPct, setAdjustSetupPct] = useState(0);
+  const [adjustInspectionPct, setAdjustInspectionPct] = useState(0);
   const [laborTemplateName, setLaborTemplateName] = useState("");
   const [warrantyName, setWarrantyName] = useState("");
   const [highWind, setHighWind] = useState(false);
@@ -247,6 +258,8 @@ function EstimatePage() {
       setPerDiemInMarkup(d.perDiemInMarkup ?? true);
       setCommissionInMarkup(d.commissionInMarkup ?? false);
       setAdjustLaborPct(d.adjustLaborPct ?? 0);
+      setAdjustSetupPct(d.adjustSetupPct ?? 0);
+      setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
       setLaborTemplateName(d.laborTemplateName ?? "");
       setWarrantyName(d.warrantyName ?? "");
       setHighWind(d.highWind ?? false);
@@ -311,6 +324,8 @@ function EstimatePage() {
     perDiemInMarkup,
     commissionInMarkup,
     adjustLaborPct,
+    adjustSetupPct,
+    adjustInspectionPct,
     laborTemplateName,
     warrantyName,
     highWind,
@@ -347,6 +362,36 @@ function EstimatePage() {
     (sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity,
     0,
   );
+
+  // Ordering summary (display-only): termination/blocking footage and ARP from the edge
+  // definitions, plus insulation board / fastener / adhesive-unit counts from the known rules
+  // (4×8 board = 32 sf; fasteners = count/32 × area; adhesive units = area ÷ coverage).
+  const edgeSummary = summarizeEdges(sections.map((s) => s.edges ?? []));
+  let insulationBoards = 0;
+  let insulationFasteners = 0;
+  const adhesiveUnitTotals: Record<string, number> = {};
+  for (const s of sections) {
+    const area = s.length * s.width;
+    for (const layer of sectionLayers(s)) {
+      if (layer.attachment === "mechanical") {
+        insulationBoards += Math.ceil(area / 32);
+        const count = layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5;
+        insulationFasteners += Math.ceil((count / 32) * area);
+      } else {
+        const entry = admin?.adhesiveTimes?.bySubstrate[layer.adhesiveName]?.[layer.substrate];
+        if (entry && entry.coverageSqFt > 0) {
+          adhesiveUnitTotals[layer.adhesiveName] =
+            (adhesiveUnitTotals[layer.adhesiveName] ?? 0) + area / entry.coverageSqFt;
+        }
+      }
+    }
+  }
+  const hasOrderingSummary =
+    edgeSummary.terminations.length > 0 ||
+    edgeSummary.blockingFt > 0 ||
+    edgeSummary.arpSqFtTotal > 0 ||
+    insulationBoards > 0 ||
+    Object.keys(adhesiveUnitTotals).length > 0;
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
@@ -582,7 +627,8 @@ function EstimatePage() {
                     value={s.name}
                     onChange={(e) => editSection(i, { name: e.target.value })}
                   />
-                  <div className="flex items-center">
+                  <div className="flex items-center gap-1">
+                    <SectionCalcDialog section={s} admin={admin} roofSystem={roofSystem} />
                     <Button
                       variant="ghost"
                       size="icon"
@@ -666,14 +712,106 @@ function EstimatePage() {
                   </Field>
                 </div>
                 <div className="mt-3 border-t pt-3">
-                  <p className="mb-2 text-xs font-medium text-muted-foreground">
-                    Perimeter / corner zones (leave length 0 to bill the whole section as field)
-                  </p>
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Edges &amp; perimeter / corner zones (leave length 0 to bill the whole section
+                      as field)
+                    </p>
+                    {(s.edges?.length ?? 0) === 0 ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const edges = defaultEdges(s.length, s.width);
+                          editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
+                        }}
+                      >
+                        Define edges A–D
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => editSection(i, { edges: [] })}
+                      >
+                        Remove edges
+                      </Button>
+                    )}
+                  </div>
+                  {(s.edges?.length ?? 0) > 0 && (
+                    <div className="mb-3 space-y-2">
+                      {(s.edges ?? []).map((e, ei) => {
+                        const editEdge = (patch: Partial<EdgeInput>) => {
+                          const edges = (s.edges ?? []).map((x, j) =>
+                            j === ei ? { ...x, ...patch } : x,
+                          );
+                          editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
+                        };
+                        return (
+                          <div
+                            key={e.side}
+                            className="grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
+                          >
+                            <Field label={`Side ${e.side} length (ft)`}>
+                              <Input
+                                type="number"
+                                value={e.lengthFt}
+                                onChange={(ev) => editEdge({ lengthFt: num(ev.target.value) })}
+                              />
+                            </Field>
+                            <Field label="Termination (ordering)">
+                              <PickOne
+                                value={e.termination}
+                                options={TERMINATION_OPTIONS}
+                                onChange={(v) => editEdge({ termination: v })}
+                              />
+                            </Field>
+                            <Field label="Blocking (ft)">
+                              <Input
+                                type="number"
+                                value={e.blockingFt}
+                                onChange={(ev) => editEdge({ blockingFt: num(ev.target.value) })}
+                              />
+                            </Field>
+                            <Field label="ARP">
+                              <PickOne
+                                value={e.arpSizeIn === 0 ? "None" : `${e.arpSizeIn}"`}
+                                options={ARP_SIZE_OPTIONS.map((a) => (a === 0 ? "None" : `${a}"`))}
+                                onChange={(v) =>
+                                  editEdge({ arpSizeIn: v === "None" ? 0 : Number(v.slice(0, -1)) })
+                                }
+                              />
+                            </Field>
+                            <div className="flex items-end gap-2 pb-1">
+                              <Switch
+                                id={`pe-${s.id}-${e.side}`}
+                                checked={e.isPerimeter}
+                                onCheckedChange={(v) => editEdge({ isPerimeter: v })}
+                              />
+                              <Label htmlFor={`pe-${s.id}-${e.side}`} className="text-xs">
+                                Perimeter edge
+                              </Label>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                    <Field label="Perim len (ft)">
+                    <Field
+                      label={
+                        (s.edges?.length ?? 0) > 0 ? "Perim len (from edges)" : "Perim len (ft)"
+                      }
+                    >
                       <Input
                         type="number"
                         value={s.perimLengthFt}
+                        disabled={(s.edges?.length ?? 0) > 0}
+                        title={
+                          (s.edges?.length ?? 0) > 0
+                            ? "Derived from the edges marked Perimeter edge"
+                            : undefined
+                        }
                         onChange={(e) => editSection(i, { perimLengthFt: num(e.target.value) })}
                       />
                     </Field>
@@ -859,6 +997,59 @@ function EstimatePage() {
             ))}
           </CardContent>
         </Card>
+
+        {hasOrderingSummary && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {edgeSummary.terminations.map((t) => (
+                <div key={t.termination} className="flex justify-between">
+                  <span className="text-muted-foreground">{t.termination}</span>
+                  <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
+                </div>
+              ))}
+              {edgeSummary.blockingFt > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Wood blocking</span>
+                  <span className="tabular-nums">{edgeSummary.blockingFt.toLocaleString()} ft</span>
+                </div>
+              )}
+              {edgeSummary.arpSqFtTotal > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
+                  <span className="tabular-nums">
+                    {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
+                  </span>
+                </div>
+              )}
+              {insulationBoards > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Insulation boards (4×8)</span>
+                  <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
+                </div>
+              )}
+              {insulationFasteners > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Insulation fasteners</span>
+                  <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
+                </div>
+              )}
+              {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
+                <div key={name} className="flex justify-between">
+                  <span className="text-muted-foreground">{name}</span>
+                  <span className="tabular-nums">{units.toFixed(2)} units</span>
+                </div>
+              ))}
+              <p className="border-t pt-2 text-xs text-muted-foreground">
+                For ordering only — termination hardware, blocking and ARP material are priced by
+                adding Accessory / Non-DL lines until the legacy auto-pricing is validated against a
+                captured bid.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -1480,6 +1671,20 @@ function EstimatePage() {
                 type="number"
                 value={adjustLaborPct}
                 onChange={(e) => setAdjustLaborPct(num(e.target.value))}
+              />
+            </Field>
+            <Field label="Adjust setup %">
+              <Input
+                type="number"
+                value={adjustSetupPct}
+                onChange={(e) => setAdjustSetupPct(num(e.target.value))}
+              />
+            </Field>
+            <Field label="Adjust inspection %">
+              <Input
+                type="number"
+                value={adjustInspectionPct}
+                onChange={(e) => setAdjustInspectionPct(num(e.target.value))}
               />
             </Field>
             <Field label="Labor template">

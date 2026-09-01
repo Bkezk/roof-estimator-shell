@@ -544,6 +544,59 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.parapetLaborHours).toBeCloseTo(4.5 * 1.1, 3); // Parapets 110
   });
 
+  it("edges: perimeter-marked sides drive the perimeter zone; ARP edges reduce membrane sqft (§2.3)", () => {
+    const mkEdge = (side: string, lengthFt: number, over = {}) => ({
+      side,
+      lengthFt,
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+      ...over,
+    });
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            perimLengthFt: 0, // stale manual value — edges are the source of truth
+            enhancementWidthFt: 3,
+            edges: [
+              mkEdge("A", 50, { isPerimeter: true, arpSizeIn: 12 }),
+              mkEdge("B", 50),
+              mkEdge("C", 50, { isPerimeter: true }),
+              mkEdge("D", 50),
+            ],
+          },
+        ],
+      }),
+      admin,
+    );
+    const s0 = inputs.sections[0]!;
+    // perimeter from the two marked 50 ft sides: 100 ft × 3 ft zone = 300 sf carved from field
+    expect(s0.perimArea).toBe(300);
+    expect(s0.fieldArea).toBe(2200);
+    // ARP on side A: 1.03 × ((12+6)/12) × 50 = 77.25 sf, subtracted from total membrane
+    expect(s0.arpSqFt).toBeCloseTo(77.25, 6);
+    const r = computeEstimate(inputs);
+    expect(r.sqFtTotalMembrane).toBe(Math.ceil(s0.membraneWithOverlap - 77.25));
+  });
+
+  it("per-bid setup/inspection adjust % flow through (composed with template factors)", () => {
+    const withBands: EngineAdminData = {
+      ...admin,
+      setupTable: { minimum: 16, bands: [{ upTo: 100000, value: 0.003, multiply: true }] },
+      inspectionTable: { minimum: 5, bands: [{ edge: 0, value: 5 }] },
+    };
+    const { inputs } = buildEstimateInputs(
+      bid({ adjustSetupPct: 50, adjustInspectionPct: 20 }),
+      withBands,
+    );
+    const r = computeEstimate(inputs);
+    expect(r.setupHours).toBeCloseTo(16 * 1.5, 6); // min-16 base × +50%
+    expect(r.inspectionHours).toBeCloseTo(5 * 1.2, 6); // 5 h band × +20%
+  });
+
   it("warns when a price or labor combo is missing", () => {
     const noPrice = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, color: "Purple" }] }),
