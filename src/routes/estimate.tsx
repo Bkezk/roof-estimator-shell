@@ -68,6 +68,7 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   fastenerOc: 18,
   sheetSizeLabel: "1500 sf",
   tearOff: false,
+  tearOffType: "",
   toThicknessInches: 0,
   ...defaults,
 });
@@ -377,6 +378,39 @@ function EstimatePage() {
                     />
                   </Field>
                 </div>
+                <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id={`to-${s.id}`}
+                      checked={s.tearOff}
+                      onCheckedChange={(v) => editSection(i, { tearOff: v })}
+                    />
+                    <Label htmlFor={`to-${s.id}`} className="text-xs">
+                      Tear-off
+                    </Label>
+                  </div>
+                  {s.tearOff && (
+                    <>
+                      <Field label="Tear-off type">
+                        <PickOne
+                          value={s.tearOffType}
+                          options={admin.tearOff?.tearoffTypes ?? []}
+                          onChange={(v) => editSection(i, { tearOffType: v })}
+                        />
+                      </Field>
+                      <Field label="Debris depth (in)">
+                        <Input
+                          type="number"
+                          className="w-[120px]"
+                          value={s.toThicknessInches}
+                          onChange={(e) =>
+                            editSection(i, { toThicknessInches: num(e.target.value) })
+                          }
+                        />
+                      </Field>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </CardContent>
@@ -493,6 +527,18 @@ function EstimatePage() {
                   <span>Man-days</span>
                   <span>{result.r.money.totalManDays.toFixed(2)}</span>
                 </div>
+                {result.r.tearOffLaborHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Tear-off hours</span>
+                    <span>{result.r.tearOffLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.r.disposalUnits > 0 && (
+                  <div className="flex justify-between">
+                    <span>Disposal units</span>
+                    <span>{result.r.disposalUnits}</span>
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

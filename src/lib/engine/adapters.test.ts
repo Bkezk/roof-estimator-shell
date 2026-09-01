@@ -5,6 +5,8 @@ import {
   buildLaborTables,
   parseMembraneRow,
   assembleEngineAdminData,
+  buildTearOffLookup,
+  TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
 import { priceMatrixLookup } from "./pricing";
@@ -168,6 +170,30 @@ describe("buildLaborTables (from a Roof Deck Labor combo)", () => {
       complexity: 1,
     });
     expect(rate * 2500).toBeCloseTo(15.125, 6); // engine-truth §9: 10 × 1 × 1.5125 × 1
+  });
+});
+
+describe("buildTearOffLookup (from the seeded Tearoff Times grid)", () => {
+  const data = {
+    deck_columns: ["Wood", "Structural Metal", "Concrete"],
+    rows: [
+      {
+        tearoff_type: 'BUR < 2"',
+        by_deck: { Wood: 2.4876, "Structural Metal": 1.2438, Concrete: 1.2438 },
+      },
+      { tearoff_type: "Ballasted Single", by_deck: { Wood: 1.2438 } },
+    ],
+  };
+  it("keys by [tearoff deck][type] and divides the Hours/100SqFt grid by 100", () => {
+    const t = buildTearOffLookup(data);
+    expect(t.tearoffTypes).toEqual(['BUR < 2"', "Ballasted Single"]);
+    expect(t.lookup["Wood"]!['BUR < 2"']).toBeCloseTo(0.024876, 9);
+    expect(t.lookup["Structural Metal"]!['BUR < 2"']).toBeCloseTo(0.012438, 9);
+  });
+  it("the labor→tearoff deck-name map bridges the two taxonomies", () => {
+    expect(TEAROFF_DECK_BY_LABOR_DECK["Steel"]).toBe("Structural Metal");
+    expect(TEAROFF_DECK_BY_LABOR_DECK["Retrofit"]).toBe("Metal Retrofit");
+    expect(TEAROFF_DECK_BY_LABOR_DECK["Wood"]).toBe("Wood");
   });
 });
 

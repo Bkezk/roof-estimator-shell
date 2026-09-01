@@ -16,6 +16,7 @@ import {
   type LaborCombo,
   type MembraneScreen,
   type RawCompanySettings,
+  type TearOffTimesData,
 } from "@/lib/engine/adapters";
 
 export type { EngineAdminData } from "@/lib/engine/adapters";
@@ -27,15 +28,17 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<EngineAdminData> => {
     const sb = context.supabase;
 
-    const [membraneRes, combosRes, settingsRes] = await Promise.all([
+    const [membraneRes, combosRes, settingsRes, tearOffRes] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
       sb.from("company_settings").select("*").eq("id", 1).maybeSingle(),
+      sb.from("rdl_labor_tables").select("data").eq("id", "tearoff_times").maybeSingle(),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
     if (combosRes.error) throw combosRes.error;
     if (settingsRes.error) throw settingsRes.error;
+    if (tearOffRes.error) throw tearOffRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -44,6 +47,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       data: c.data as unknown as LaborCombo,
     }));
     const settings = (settingsRes.data ?? null) as RawCompanySettings | null;
+    const tearOffTimes = (tearOffRes.data?.data ?? null) as TearOffTimesData | null;
 
-    return assembleEngineAdminData({ membraneScreen, combos, settings });
+    return assembleEngineAdminData({ membraneScreen, combos, settings, tearOffTimes });
   });

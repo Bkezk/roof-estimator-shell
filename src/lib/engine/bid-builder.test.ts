@@ -60,6 +60,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
       fastenerOc: 18,
       sheetSizeLabel: "1500 sf",
       tearOff: false,
+      tearOffType: "",
       toThicknessInches: 0,
     },
   ],
@@ -108,6 +109,38 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     const S = r.money.subtotal1;
     expect(r.money.markupValue).toBeCloseTo(S / (1 - 0.35) - S, 2);
+  });
+
+  it("tear-off wires the seeded rate: deck→tearoff-deck map, ÷100 scale, adds disposal + hours", () => {
+    const withTearOff: EngineAdminData = {
+      ...admin,
+      tearOff: {
+        deckColumns: ["Wood"],
+        tearoffTypes: ['BUR < 2"'],
+        lookup: { Wood: { 'BUR < 2"': 2.4876 / 100 } }, // grid Hours/100SqFt ÷ 100
+      },
+    };
+    const { inputs } = buildEstimateInputs(
+      bid({
+        crewLaborRatePerHour: 50,
+        sections: [
+          {
+            ...bid().sections[0]!,
+            tearOff: true,
+            tearOffType: 'BUR < 2"',
+            toThicknessInches: 4,
+          },
+        ],
+      }),
+      withTearOff,
+    );
+    const r = computeEstimate(inputs);
+    // tear-off labor: 2500 sf × 0.024876 = 62.19 hrs → Round(3dp)=62.19, Ceiling(×100)/100 = 62.19
+    expect(r.tearOffLaborHours).toBeCloseTo(62.19, 2);
+    // it rolls into the direct-labor hours (install 15.125 + tear-off 62.19)
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 62.19, 2);
+    // disposal: (4/36)(2500/9)/1 = 30.86 yd / 30 → ceil = 2 units
+    expect(r.disposalUnits).toBe(2);
   });
 
   it("warns when a price or labor combo is missing", () => {

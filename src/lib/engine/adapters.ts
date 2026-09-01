@@ -162,10 +162,58 @@ export interface RawCompanySettings {
   shipping_percent?: number | null;
 }
 
+/** Seeded Tearoff Times (rdl_labor_tables id "tearoff_times"): types × deck grid, Hours/100SqFt. */
+export interface TearOffTimesData {
+  deck_columns: string[];
+  rows: Array<{ tearoff_type: string; by_deck: Record<string, number> }>;
+}
+
+export interface TearOffTables {
+  deckColumns: string[];
+  tearoffTypes: string[];
+  /** Per-sqft labor: lookup[tearoffDeckName][tearoffType] = grid Hours/100SqFt ÷ 100. */
+  lookup: Record<string, Record<string, number>>;
+}
+
+/** Map a labor deck-type name to the Tearoff Times table's deck column name (different taxonomy). */
+export const TEAROFF_DECK_BY_LABOR_DECK: Record<string, string> = {
+  Wood: "Wood",
+  Steel: "Structural Metal",
+  Retrofit: "Metal Retrofit",
+  Concrete: "Concrete",
+  Gypsum: "Gypsum",
+  "LWC/Steel": "LWC over Steel",
+  "LWC/Concrete": "LWC over Concrete",
+  "LWC/Other": "LWC over Other",
+  Tectum: "Tectum",
+  Purlin: "Purlin Fastened",
+};
+
+/**
+ * Build the per-sqft tear-off labor lookup. The seeded grid is entered as Hours/100SqFt, and the
+ * engine multiplies raw area with no ÷100, so we divide by 100 here (scale flagged in the checklist
+ * for confirmation against a real bid).
+ */
+export function buildTearOffLookup(data: TearOffTimesData): TearOffTables {
+  const lookup: Record<string, Record<string, number>> = {};
+  for (const deck of data.deck_columns) lookup[deck] = {};
+  for (const row of data.rows) {
+    for (const [deck, v] of Object.entries(row.by_deck)) {
+      (lookup[deck] ??= {})[row.tearoff_type] = v / 100;
+    }
+  }
+  return {
+    deckColumns: data.deck_columns,
+    tearoffTypes: data.rows.map((r) => r.tearoff_type),
+    lookup,
+  };
+}
+
 export interface RawAdminData {
   membraneScreen: MembraneScreen | null;
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
   settings: RawCompanySettings | null;
+  tearOffTimes?: TearOffTimesData | null;
 }
 
 export interface EngineSettings {
@@ -183,6 +231,8 @@ export interface EngineAdminData {
   /** Labor tables keyed by `${roof_system}|${attachment}` (e.g. "Duro-Last|mechanical"). */
   labor: Record<string, LaborTables>;
   settings: EngineSettings;
+  /** Tear-off labor lookup (absent if the Tearoff Times table wasn't fetched). */
+  tearOff?: TearOffTables;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -205,5 +255,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     shippingPercent: s?.shipping_percent ?? 0,
   };
 
-  return { deckOrder, priceMatrix, labor, settings };
+  const tearOff = raw.tearOffTimes ? buildTearOffLookup(raw.tearOffTimes) : undefined;
+
+  return { deckOrder, priceMatrix, labor, settings, ...(tearOff ? { tearOff } : {}) };
 }

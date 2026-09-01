@@ -10,7 +10,8 @@
  *  - Whole section billed as FIELD (perimeter/corner enhancement zones = 0).
  *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
  *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
- *  - Tear-off labor lookup and freight table not wired (0); membrane price tier assumed roll-goods.
+ *  - Freight table not wired (0); membrane price tier assumed roll-goods.
+ *  - Tear-off labor now wired from the seeded Tearoff Times table (per deck × tear-off type).
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
@@ -18,7 +19,7 @@ import { membraneMaterialCost, priceMatrixLookup, shippingTotal } from "./pricin
 import { CURRENT_FORMULAS_VERSION } from "./version";
 import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
 import type { MarkupMode } from "./money";
-import type { EngineAdminData } from "./adapters";
+import { TEAROFF_DECK_BY_LABOR_DECK, type EngineAdminData } from "./adapters";
 
 export interface BidSectionInput {
   id: string;
@@ -32,6 +33,7 @@ export interface BidSectionInput {
   fastenerOc: number; // on-center inches (entered; auto-lookup pending capture)
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
+  tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
   toThicknessInches: number;
 }
 
@@ -101,6 +103,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
     membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
 
+    let tearOffLaborLookup = 0;
+    if (s.tearOff && admin.tearOff) {
+      const tDeck = TEAROFF_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
+      tearOffLaborLookup = admin.tearOff.lookup[tDeck]?.[s.tearOffType] ?? 0;
+      if (tearOffLaborLookup === 0) {
+        warnings.push(
+          `No tear-off rate for ${s.deckType} / ${s.tearOffType || "(no type)"} — section "${s.name}".`,
+        );
+      }
+    }
+
     return {
       id: s.id,
       length: s.length,
@@ -130,7 +143,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       rollGoodWidthMulti: 1,
       adheredPerimeterBump: false,
       tearOff: s.tearOff,
-      tearOffLaborLookup: 0, // v1: tear-off labor table not wired
+      tearOffLaborLookup,
       tearOffAdditionalPct: 0,
       toThicknessInches: s.toThicknessInches,
     };
