@@ -307,6 +307,57 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Parapet labor (labor_parapet: deck × wall-height band × drill/cant → hrs per 50 LF)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A seeded labor_parapet row (numerics arrive from Supabase as strings). */
+export interface RawParapetRow {
+  deck_type: string;
+  wall_height_band: string;
+  no_drill_no_cant: number | string;
+  no_drill_canted: number | string;
+  predrill_no_cant: number | string;
+  predrill_canted: number | string;
+  sort: number;
+}
+
+export interface ParapetModeRates {
+  noDrillNoCant: number;
+  noDrillCanted: number;
+  predrillNoCant: number;
+  predrillCanted: number;
+}
+
+export interface ParapetLaborTables {
+  /** Wall-height band labels in sort order (e.g. 0"-30", 31"-48", …) — picked, not parsed. */
+  bands: string[];
+  /** lookup[tearoffDeckName][band] → hrs per 50 lineal ft by install mode. */
+  lookup: Record<string, Record<string, ParapetModeRates>>;
+}
+
+/** Build the parapet labor lookup. Deck names use the tear-off taxonomy (TEAROFF_DECK_BY_LABOR_DECK). */
+export function buildParapetLabor(rows: RawParapetRow[]): ParapetLaborTables {
+  const bands: string[] = [];
+  const lookup: ParapetLaborTables["lookup"] = {};
+  for (const r of [...rows].sort((a, b) => a.sort - b.sort)) {
+    if (!bands.includes(r.wall_height_band)) bands.push(r.wall_height_band);
+    (lookup[r.deck_type] ??= {})[r.wall_height_band] = {
+      noDrillNoCant: Number(r.no_drill_no_cant),
+      noDrillCanted: Number(r.no_drill_canted),
+      predrillNoCant: Number(r.predrill_no_cant),
+      predrillCanted: Number(r.predrill_canted),
+    };
+  }
+  return { bands, lookup };
+}
+
+/** Pick the install-mode rate (hrs per 50 LF) from a parapet matrix entry. */
+export function parapetModeRate(e: ParapetModeRates, predrill: boolean, canted: boolean): number {
+  if (predrill) return canted ? e.predrillCanted : e.predrillNoCant;
+  return canted ? e.noDrillCanted : e.noDrillNoCant;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Whole-catalog assembly (pure) — used by the Supabase server fn
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -447,6 +498,7 @@ export interface RawAdminData {
   setup?: RawSetup | null;
   setupSteps?: RawSetupStep[] | null;
   inspectionSteps?: RawInspectionStep[] | null;
+  parapetRows?: RawParapetRow[] | null;
 }
 
 export interface EngineSettings {
@@ -474,6 +526,8 @@ export interface EngineAdminData {
   setupTable?: SetupBandTable;
   /** Inspection-time band table (absent if labor_inspection_steps wasn't fetched). */
   inspectionTable?: InspectionBandTable;
+  /** Parapet labor matrix (absent if labor_parapet wasn't fetched). */
+  parapetLabor?: ParapetLaborTables;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -507,6 +561,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const inspectionTable = raw.inspectionSteps
     ? buildInspectionTable(raw.inspectionSteps)
     : undefined;
+  const parapetLabor = raw.parapetRows?.length ? buildParapetLabor(raw.parapetRows) : undefined;
 
   return {
     deckOrder,
@@ -518,5 +573,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(shippingSteps ? { shippingSteps } : {}),
     ...(setupTable ? { setupTable } : {}),
     ...(inspectionTable ? { inspectionTable } : {}),
+    ...(parapetLabor ? { parapetLabor } : {}),
   };
 }

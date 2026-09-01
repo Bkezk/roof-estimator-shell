@@ -26,9 +26,13 @@
  *    fastener-derived accessory labor is entered manually until a captured bid validates it.
  *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
  *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
+ *  - Parapets wired (§5.3): labor = (length/50) × the seeded deck × height-band × drill/cant matrix
+ *    → direct labor; material = In2Ft(girth) × length × bid-default membrane $/sqft → M0. Height
+ *    band + girth are entered (profile-dims derivation flagged for the validation bid).
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
+import { in2Ft } from "./rounding";
 import {
   membraneMaterialCost,
   priceMatrixLookup,
@@ -39,7 +43,7 @@ import {
 import { CURRENT_FORMULAS_VERSION } from "./version";
 import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
 import type { MarkupMode } from "./money";
-import { TEAROFF_DECK_BY_LABOR_DECK, type EngineAdminData } from "./adapters";
+import { TEAROFF_DECK_BY_LABOR_DECK, parapetModeRate, type EngineAdminData } from "./adapters";
 
 export interface BidSectionInput {
   id: string;
@@ -86,12 +90,32 @@ export interface NonDlLine {
   quantity: number;
 }
 
+/**
+ * A parapet wall on a bid (§4.4/§5.3). SIMPLIFIED GEOMETRY, FLAGGED FOR BID VALIDATION: the
+ * height BAND is picked from the seeded band list and the membrane girth (skirt+cant+vertical+
+ * top+drop) is entered directly in inches — the legacy profile-dims→band/girth derivation and the
+ * exact parapet membrane overlap model need a captured bid. Labor is exact per the seeded matrix:
+ * (length/50) × hrs-per-50-LF[deck][band][drill×cant]. Material prices at the bid's default
+ * (first section's) membrane thickness/color, roll-goods tier.
+ */
+export interface ParapetInput {
+  id: string;
+  name: string;
+  lengthFt: number;
+  heightBand: string; // picked from the seeded wall-height bands
+  deckType: string; // labor deck name (Wood/Steel/…), bridged via TEAROFF_DECK_BY_LABOR_DECK
+  predrill: boolean;
+  canted: boolean;
+  girthInches: number; // membrane girth over the wall profile, for material area
+}
+
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
   nonDlLines: NonDlLine[];
+  parapets: ParapetInput[];
 
   // money params
   markupMode: MarkupMode;
@@ -129,6 +153,8 @@ export interface BuildResult {
   inputs: EstimateInputs;
   /** Warnings for the UI (e.g. missing price / labor combo). */
   warnings: string[];
+  /** Parapet membrane material $ (inside duroLastMaterial/M0); split out for display/proposal. */
+  parapetMaterial: number;
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
@@ -218,13 +244,42 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
 
   // Accessory material folds into M0 (dMaterial[4] sits within Σ dMaterial[0..6]).
   const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
-  const duroLastMaterial = membraneMaterial + accessoryMaterial;
 
   // Accessory install labor (Σ per-unit hrs × qty) → direct labor (LaborSubtotal1) at the crew rate.
   const accessoryLaborHours = bid.accessories.reduce(
     (sum, a) => sum + (a.laborHoursPerUnit ?? 0) * a.quantity,
     0,
   );
+
+  // Parapets (§5.3): labor = (length/50) × hrs-per-50-LF[deck][band][drill×cant] → direct labor;
+  // material = In2Ft(girth) × length × the bid-default membrane $/sqft → M0 (dMaterial[1] slot).
+  let parapetLaborHours = 0;
+  let parapetMaterial = 0;
+  if (bid.parapets.length > 0) {
+    const first = bid.sections[0];
+    const pPrice = first
+      ? (priceMatrixLookup(admin.priceMatrix, first.thickness, "rollGoods", first.color) ?? 0)
+      : 0;
+    if (bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0) && pPrice === 0) {
+      warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
+    }
+    for (const p of bid.parapets) {
+      const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
+      const entry = admin.parapetLabor?.lookup[tDeck]?.[p.heightBand];
+      if (!entry) {
+        if (p.lengthFt > 0)
+          warnings.push(
+            `No parapet labor for ${p.deckType} / ${p.heightBand || "(no band)"} — "${p.name}".`,
+          );
+      } else {
+        parapetLaborHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
+      }
+      parapetMaterial += in2Ft(p.girthInches) * p.lengthFt * pPrice;
+    }
+  }
+
+  // M0 = membrane + accessories + parapet material (dMaterial[0..6] slots).
+  const duroLastMaterial = membraneMaterial + accessoryMaterial + parapetMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
@@ -267,6 +322,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustSetupLaborPct: 0,
     adjustInspectionPct: 0,
     accessoryLaborHours,
+    parapetLaborHours,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage: 30,
@@ -300,5 +356,5 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     },
   };
 
-  return { inputs, warnings };
+  return { inputs, warnings, parapetMaterial };
 }

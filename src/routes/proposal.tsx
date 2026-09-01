@@ -69,12 +69,16 @@ function ProposalPage() {
     if (!bidRow || !admin) return null;
     const raw = bidRow.data as unknown as Partial<SavedBidState> | null;
     if (!raw || !Array.isArray(raw.sections)) return null;
+    // Spread raw FIRST so every optional field (discounts, per-diem, warranty selection, …) carries
+    // through to the same buildBidInput path the estimator uses — the price pin depends on it.
     const saved: SavedBidState = {
+      ...(raw as SavedBidState),
       roofSystem: raw.roofSystem ?? "Duro-Last",
       attachment: raw.attachment ?? "mechanical",
       sections: raw.sections,
       accessories: Array.isArray(raw.accessories) ? raw.accessories : [],
       nonDlLines: Array.isArray(raw.nonDlLines) ? raw.nonDlLines : [],
+      parapets: Array.isArray(raw.parapets) ? raw.parapets : [],
       customer: { ...emptyCustomer(), ...(raw.customer ?? {}) },
       markupMode: (raw.markupMode ?? 2) as SavedBidState["markupMode"],
       markup: raw.markup ?? 0,
@@ -82,7 +86,10 @@ function ProposalPage() {
       commission: raw.commission ?? 0,
       taxExempt: raw.taxExempt ?? false,
     };
-    const { inputs } = buildEstimateInputs(buildBidInput(saved, warrantyData), admin);
+    const { inputs, parapetMaterial } = buildEstimateInputs(
+      buildBidInput(saved, warrantyData),
+      admin,
+    );
     const r = computeEstimate(inputs);
 
     const accessoryMaterial = saved.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
@@ -93,13 +100,15 @@ function ProposalPage() {
     const nonDlMaterial = saved.nonDlLines.reduce((s, l) => s + l.price * l.quantity, 0);
     const groups = buildProposalPricing({
       grandTotal: r.money.grandTotal,
-      membraneMaterial: (r.money.dTotals[0] ?? 0) - accessoryMaterial,
+      membraneMaterial: (r.money.dTotals[0] ?? 0) - accessoryMaterial - parapetMaterial,
       installLaborHours: r.installHours,
       setupHours: r.setupHours,
       inspectionHours: r.inspectionHours,
       tearOffLaborHours: r.tearOffLaborHours,
       accessoryMaterial,
       accessoryLaborHours,
+      parapetMaterial,
+      parapetLaborHours: r.parapetLaborHours,
       underlaymentMaterial: r.money.dTotals[6] ?? 0,
       warrantyCost: r.money.dTotals[5] ?? 0,
       freight: r.money.dTotals[9] ?? 0,

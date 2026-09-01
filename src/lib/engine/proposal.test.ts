@@ -71,3 +71,29 @@ describe("buildProposalPricing", () => {
     expect(groups.reduce((s, g) => s + g.price, 0)).toBeCloseTo(5000, 2);
   });
 });
+
+describe("buildProposalPricing parapet group", () => {
+  it("adds a Parapet walls group when parapet material/labor are present, else drops it", () => {
+    const base = {
+      grandTotal: 4000,
+      membraneMaterial: 3000,
+      installLaborHours: 10,
+      setupHours: 0,
+      inspectionHours: 0,
+      tearOffLaborHours: 0,
+      accessoryMaterial: 0,
+      accessoryLaborHours: 0,
+      underlaymentMaterial: 0,
+      warrantyCost: 0,
+      freight: 0,
+      nonDlMaterial: 0,
+      nonDlServices: 0,
+      crewRate: 50,
+    };
+    const withP = buildProposalPricing({ ...base, parapetMaterial: 300, parapetLaborHours: 4 });
+    expect(withP.map((g) => g.label)).toContain("Parapet walls");
+    expect(withP.reduce((s, g) => s + g.price, 0)).toBeCloseTo(4000, 2);
+    const withoutP = buildProposalPricing(base);
+    expect(withoutP.map((g) => g.label)).not.toContain("Parapet walls");
+  });
+});

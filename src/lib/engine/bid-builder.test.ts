@@ -73,6 +73,7 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
   ],
   accessories: [],
   nonDlLines: [],
+  parapets: [],
   markupMode: 0,
   markup: 0,
   crewLaborRatePerHour: 50,
@@ -304,6 +305,50 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     expect(r.money.dTotals[7]).toBeCloseTo(40, 2); // OtherMaterial row
     expect(r.laborSubtotal2).toBeCloseTo(7.515, 3); // subs + services
+  });
+
+  it("parapets: matrix labor rolls into direct labor; girth × length × membrane $ into M0", () => {
+    const withParapet: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"', '31"-48"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        parapets: [
+          {
+            id: "p1",
+            name: "North wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 30,
+          },
+        ],
+      }),
+      withParapet,
+    );
+    expect(warnings).toEqual([]);
+    // material: In2Ft(30) = 2.5 ft girth x 100 ft x $1.23 = $307.50 into M0
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 307.5, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2); // membrane-only basis unchanged
+    const r = computeEstimate(inputs);
+    expect(r.parapetLaborHours).toBeCloseTo(4.5, 6); // 100/50 x 2.25
+    // rolls into direct labor alongside install 15.125
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
   });
 
   it("warns when a price or labor combo is missing", () => {

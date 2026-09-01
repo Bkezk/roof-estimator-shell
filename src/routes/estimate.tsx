@@ -18,6 +18,7 @@ import {
   type BidSectionInput,
   type AccessoryLine,
   type NonDlLine,
+  type ParapetInput,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -85,6 +86,19 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   ...defaults,
 });
 
+let pseq = 1;
+const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
+  id: `p${pseq++}`,
+  name: `Parapet ${pseq - 1}`,
+  lengthFt: 50,
+  heightBand: "",
+  deckType: "Wood",
+  predrill: false,
+  canted: false,
+  girthInches: 36,
+  ...defaults,
+});
+
 const MARKUP_LABELS: Record<MarkupMode, string> = {
   0: "% of cost",
   1: "$ / man-day",
@@ -134,6 +148,7 @@ function EstimatePage() {
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
+  const [parapets, setParapets] = useState<ParapetInput[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
@@ -183,6 +198,7 @@ function EstimatePage() {
       setSections(d.sections.length ? d.sections : [newSection()]);
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
+      setParapets(Array.isArray(d.parapets) ? d.parapets : []);
       setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
@@ -237,6 +253,7 @@ function EstimatePage() {
     sections,
     accessories,
     nonDlLines,
+    parapets,
     customer,
     markupMode,
     markup,
@@ -259,8 +276,8 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
-    const { inputs, warnings } = buildEstimateInputs(bid, admin);
-    return { r: computeEstimate(inputs), warnings };
+    const { inputs, warnings, parapetMaterial } = buildEstimateInputs(bid, admin);
+    return { r: computeEstimate(inputs), warnings, parapetMaterial };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
 
@@ -587,6 +604,134 @@ function EstimatePage() {
                 </div>
               </div>
             ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <CardTitle className="text-base">Parapets</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setParapets((p) => [
+                  ...p,
+                  newParapet({ heightBand: admin.parapetLabor?.bands[0] ?? "" }),
+                ])
+              }
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add parapet
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {parapets.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No parapet walls. Labor bills from the deck × wall-height matrix; membrane girth ×
+                length prices at the bid's default membrane.
+              </p>
+            ) : (
+              parapets.map((p, i) => (
+                <div key={p.id} className="rounded-md border p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <Input
+                      className="h-8 w-[200px] font-medium"
+                      value={p.name}
+                      onChange={(e) =>
+                        setParapets((prev) =>
+                          prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                        )
+                      }
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive"
+                      onClick={() => setParapets((prev) => prev.filter((_, j) => j !== i))}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                    <Field label="Length (ft)">
+                      <Input
+                        type="number"
+                        value={p.lengthFt}
+                        onChange={(e) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) =>
+                              j === i ? { ...x, lengthFt: num(e.target.value) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Wall height">
+                      <PickOne
+                        value={p.heightBand}
+                        options={admin.parapetLabor?.bands ?? []}
+                        onChange={(v) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, heightBand: v } : x)),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Deck">
+                      <PickOne
+                        value={p.deckType}
+                        options={admin.deckOrder}
+                        onChange={(v) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
+                          )
+                        }
+                      />
+                    </Field>
+                    <Field label="Membrane girth (in)">
+                      <Input
+                        type="number"
+                        value={p.girthInches}
+                        onChange={(e) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) =>
+                              j === i ? { ...x, girthInches: num(e.target.value) } : x,
+                            ),
+                          )
+                        }
+                      />
+                    </Field>
+                    <div className="flex items-end gap-2 pb-1">
+                      <Switch
+                        id={`pd-${p.id}`}
+                        checked={p.predrill}
+                        onCheckedChange={(v) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
+                          )
+                        }
+                      />
+                      <Label htmlFor={`pd-${p.id}`} className="text-xs">
+                        Pre-drill
+                      </Label>
+                    </div>
+                    <div className="flex items-end gap-2 pb-1">
+                      <Switch
+                        id={`ct-${p.id}`}
+                        checked={p.canted}
+                        onCheckedChange={(v) =>
+                          setParapets((prev) =>
+                            prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
+                          )
+                        }
+                      />
+                      <Label htmlFor={`ct-${p.id}`} className="text-xs">
+                        Canted
+                      </Label>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -989,8 +1134,13 @@ function EstimatePage() {
                 <TableBody>
                   <Row
                     label="Membrane material"
-                    v={money((result.r.money.dTotals[0] ?? 0) - accessoryTotal)}
+                    v={money(
+                      (result.r.money.dTotals[0] ?? 0) - accessoryTotal - result.parapetMaterial,
+                    )}
                   />
+                  {result.parapetMaterial > 0 && (
+                    <Row label="Parapet material" v={money(result.parapetMaterial)} />
+                  )}
                   {accessoryTotal > 0 && <Row label="Accessories" v={money(accessoryTotal)} />}
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
                     <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
@@ -1050,6 +1200,12 @@ function EstimatePage() {
                   <div className="flex justify-between">
                     <span>Accessory hours</span>
                     <span>{accessoryLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.r.parapetLaborHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Parapet hours</span>
+                    <span>{result.r.parapetLaborHours.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

@@ -5,7 +5,13 @@
  * live estimate (the two are pinned to one code path — they cannot drift).
  */
 
-import type { BidInput, BidSectionInput, AccessoryLine, NonDlLine } from "@/lib/engine/bid-builder";
+import type {
+  BidInput,
+  BidSectionInput,
+  AccessoryLine,
+  NonDlLine,
+  ParapetInput,
+} from "@/lib/engine/bid-builder";
 import type { MarkupMode } from "@/lib/engine/money";
 
 /** Customer / project header, persisted with the bid and printed on the proposal. */
@@ -30,6 +36,8 @@ export interface SavedBidState {
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
   nonDlLines: NonDlLine[];
+  /** Parapet walls (optional so older saved bids stay valid). */
+  parapets?: ParapetInput[];
   customer: CustomerInfo;
   markupMode: MarkupMode;
   markup: number;
@@ -131,6 +139,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     sections: s.sections,
     accessories: s.accessories,
     nonDlLines: s.nonDlLines,
+    parapets: s.parapets ?? [],
     markupMode: s.markupMode,
     markup: s.markup,
     crewLaborRatePerHour: s.laborRate,

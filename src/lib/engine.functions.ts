@@ -26,6 +26,7 @@ import {
   type RawSetup,
   type RawSetupStep,
   type RawInspectionStep,
+  type RawParapetRow,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -52,6 +53,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       setupRes,
       setupStepsRes,
       inspectionStepsRes,
+      parapetRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -62,6 +64,12 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("labor_setup").select("minimum_hours").eq("id", 1).maybeSingle(),
       sb.from("labor_setup_steps").select("sqft, multiplier").order("sort"),
       sb.from("labor_inspection_steps").select("sqft, hours").order("sort"),
+      sb
+        .from("labor_parapet")
+        .select(
+          "deck_type, wall_height_band, no_drill_no_cant, no_drill_canted, predrill_no_cant, predrill_canted, sort",
+        )
+        .order("sort"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -73,6 +81,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (setupRes.error) throw setupRes.error;
     if (setupStepsRes.error) throw setupStepsRes.error;
     if (inspectionStepsRes.error) throw inspectionStepsRes.error;
+    if (parapetRes.error) throw parapetRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -87,6 +96,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const setup = (setupRes.data ?? null) as RawSetup | null;
     const setupSteps = (setupStepsRes.data ?? null) as RawSetupStep[] | null;
     const inspectionSteps = (inspectionStepsRes.data ?? null) as RawInspectionStep[] | null;
+    const parapetRows = (parapetRes.data ?? null) as RawParapetRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -98,6 +108,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       setup,
       setupSteps,
       inspectionSteps,
+      parapetRows,
     });
   });
 

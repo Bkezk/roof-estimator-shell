@@ -53,6 +53,8 @@ export interface ProposalCostInputs {
   tearOffLaborHours: number;
   accessoryMaterial: number;
   accessoryLaborHours: number;
+  parapetMaterial?: number;
+  parapetLaborHours?: number;
   underlaymentMaterial: number;
   warrantyCost: number;
   freight: number;
@@ -70,6 +72,10 @@ export function buildProposalPricing(i: ProposalCostInputs): ProposalGroup[] {
         i.membraneMaterial + (i.installLaborHours + i.setupHours + i.inspectionHours) * i.crewRate,
     },
     { label: "Tear-off & disposal", cost: i.tearOffLaborHours * i.crewRate },
+    {
+      label: "Parapet walls",
+      cost: (i.parapetMaterial ?? 0) + (i.parapetLaborHours ?? 0) * i.crewRate,
+    },
     { label: "Underlayment", cost: i.underlaymentMaterial },
     { label: "Accessories", cost: i.accessoryMaterial + i.accessoryLaborHours * i.crewRate },
     { label: "Additional work", cost: i.nonDlMaterial + i.nonDlServices },

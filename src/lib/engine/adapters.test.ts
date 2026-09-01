@@ -13,6 +13,8 @@ import {
   buildShippingSteps,
   buildSetupTable,
   buildInspectionTable,
+  buildParapetLabor,
+  parapetModeRate,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
@@ -500,5 +502,53 @@ describe("assembleEngineAdminData (whole-catalog transform)", () => {
     expect(d.settings.hoursPerDay).toBe(9);
     expect(d.settings.masterEliteCont).toBe(true);
     expect(d.settings.salesTax).toBe(0);
+  });
+});
+
+describe("buildParapetLabor (deck × wall-height band × drill/cant → hrs per 50 LF)", () => {
+  // Real seeded shape (string numerics), tear-off deck taxonomy.
+  const rows = [
+    {
+      deck_type: "Wood",
+      wall_height_band: '0"-30"',
+      no_drill_no_cant: "2.25",
+      no_drill_canted: "3.375",
+      predrill_no_cant: "3.5",
+      predrill_canted: "5.25",
+      sort: 0,
+    },
+    {
+      deck_type: "Wood",
+      wall_height_band: '31"-48"',
+      no_drill_no_cant: "4.5",
+      no_drill_canted: "6.75",
+      predrill_no_cant: "7",
+      predrill_canted: "10.5",
+      sort: 1,
+    },
+    {
+      deck_type: "Structural Metal",
+      wall_height_band: '0"-30"',
+      no_drill_no_cant: "2.25",
+      no_drill_canted: "3.375",
+      predrill_no_cant: "3.5",
+      predrill_canted: "5.25",
+      sort: 5,
+    },
+  ];
+  const t = buildParapetLabor(rows);
+
+  it("collects bands in sort order and keys the matrix by tear-off deck name", () => {
+    expect(t.bands).toEqual(['0"-30"', '31"-48"']);
+    expect(t.lookup["Wood"]!['0"-30"']!.noDrillNoCant).toBe(2.25);
+    expect(t.lookup["Structural Metal"]!['0"-30"']!.predrillCanted).toBe(5.25);
+  });
+
+  it("parapetModeRate picks the drill × cant cell", () => {
+    const e = t.lookup["Wood"]!['31"-48"']!;
+    expect(parapetModeRate(e, false, false)).toBe(4.5);
+    expect(parapetModeRate(e, false, true)).toBe(6.75);
+    expect(parapetModeRate(e, true, false)).toBe(7);
+    expect(parapetModeRate(e, true, true)).toBe(10.5);
   });
 });
