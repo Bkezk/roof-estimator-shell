@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table";
 
 export const Route = createFileRoute("/admin/settings")({
-  head: () => ({ meta: [{ title: "Settings — Duro-Last Estimator" }] }),
+  head: () => ({ meta: [{ title: "General — Duro-Last Estimator" }] }),
   component: SettingsPage,
 });
 
@@ -63,7 +63,7 @@ function SettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <h1 className="text-2xl font-bold tracking-tight">General</h1>
         <p className="text-sm text-muted-foreground">
           Company defaults, shipping, labor &amp; markup, and warranty pricing. These feed every
           bid. Values are pre-filled from your current system.

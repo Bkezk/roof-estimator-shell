@@ -29,7 +29,7 @@ const estimatorItems = [
 ];
 
 const adminItems = [
-  { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "General", url: "/admin/settings", icon: Settings },
   { title: "Labor", url: "/admin/labor", icon: SlidersHorizontal },
   { title: "Users", url: "/admin/users", icon: Users },
 ];
