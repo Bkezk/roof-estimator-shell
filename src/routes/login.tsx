@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
-    meta: [{ title: "Sign in — Duro-Last Estimator" }],
+    meta: [{ title: "Sign in — Bid-O-Matic" }],
   }),
   component: LoginPage,
 });
@@ -48,7 +48,7 @@ function LoginPage() {
     <div className="flex min-h-svh items-center justify-center bg-muted/30 px-4">
       <div className="w-full max-w-sm rounded-xl border bg-card p-8 shadow-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-xl font-semibold tracking-tight">Duro-Last Estimator</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Bid-O-Matic</h1>
           <p className="mt-1 text-sm text-muted-foreground">Sign in to continue</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">

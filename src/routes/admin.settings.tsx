@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table";
 
 export const Route = createFileRoute("/admin/settings")({
-  head: () => ({ meta: [{ title: "General — Duro-Last Estimator" }] }),
+  head: () => ({ meta: [{ title: "General — Bid-O-Matic" }] }),
   component: SettingsPage,
 });
 

@@ -9,14 +9,14 @@ import { Button } from "@/components/ui/button";
 export const Route = createFileRoute("/bids")({
   head: () => ({
     meta: [
-      { title: "Saved Bids — Duro-Last Estimator" },
+      { title: "Saved Bids — Bid-O-Matic" },
       {
         name: "description",
         content: "View and manage saved Duro-Last roofing estimates.",
       },
       {
         property: "og:title",
-        content: "Saved Bids — Duro-Last Estimator",
+        content: "Saved Bids — Bid-O-Matic",
       },
       {
         property: "og:description",

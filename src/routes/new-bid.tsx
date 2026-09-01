@@ -12,12 +12,12 @@ import { Label } from "@/components/ui/label";
 export const Route = createFileRoute("/new-bid")({
   head: () => ({
     meta: [
-      { title: "New Bid — Duro-Last Estimator" },
+      { title: "New Bid — Bid-O-Matic" },
       {
         name: "description",
         content: "Start a new Duro-Last roofing estimate.",
       },
-      { property: "og:title", content: "New Bid — Duro-Last Estimator" },
+      { property: "og:title", content: "New Bid — Bid-O-Matic" },
       {
         property: "og:description",
         content: "Start a new Duro-Last roofing estimate.",

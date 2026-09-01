@@ -18,7 +18,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
         <div className="flex flex-1 flex-col">
           <header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
-            <span className="font-semibold">Duro-Last Estimator</span>
+            <span className="font-semibold">Bid-O-Matic</span>
           </header>
           <SidebarInset className="p-6">{children}</SidebarInset>
         </div>

@@ -33,7 +33,7 @@ import {
 } from "@/components/ui/table";
 
 export const Route = createFileRoute("/admin/labor")({
-  head: () => ({ meta: [{ title: "Labor Engines — Duro-Last Estimator" }] }),
+  head: () => ({ meta: [{ title: "Labor Engines — Bid-O-Matic" }] }),
   component: LaborPage,
 });
 

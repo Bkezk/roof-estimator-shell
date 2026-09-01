@@ -80,13 +80,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Duro-Last Estimator" },
+      { title: "Bid-O-Matic" },
       {
         name: "description",
         content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Duro-Last Estimator" },
+      { property: "og:title", content: "Bid-O-Matic" },
       {
         property: "og:description",
         content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",

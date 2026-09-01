@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const Route = createFileRoute("/account")({
-  head: () => ({ meta: [{ title: "Account — Duro-Last Estimator" }] }),
+  head: () => ({ meta: [{ title: "Account — Bid-O-Matic" }] }),
   component: AccountPage,
 });
 
