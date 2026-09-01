@@ -1,5 +1,13 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { FileText, PlusCircle, Settings, Users, LogOut, KeyRound } from "lucide-react";
+import {
+  FileText,
+  PlusCircle,
+  Settings,
+  Users,
+  LogOut,
+  KeyRound,
+  SlidersHorizontal,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -22,6 +30,7 @@ const estimatorItems = [
 
 const adminItems = [
   { title: "Settings", url: "/admin/settings", icon: Settings },
+  { title: "Labor", url: "/admin/labor", icon: SlidersHorizontal },
   { title: "Users", url: "/admin/users", icon: Users },
 ];
 

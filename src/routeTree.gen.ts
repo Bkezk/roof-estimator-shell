@@ -14,6 +14,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NewBidRouteImport } from './routes/new-bid'
+import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 
@@ -42,6 +43,11 @@ const NewBidRoute = NewBidRouteImport.update({
   path: '/new-bid',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminLaborRoute = AdminLaborRouteImport.update({
+  id: '/admin/labor',
+  path: '/admin/labor',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/admin/settings',
   path: '/admin/settings',
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/bids': typeof BidsRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
+  '/admin/labor': typeof AdminLaborRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -68,6 +75,7 @@ export interface FileRoutesByTo {
   '/bids': typeof BidsRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
+  '/admin/labor': typeof AdminLaborRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -78,6 +86,7 @@ export interface FileRoutesById {
   '/bids': typeof BidsRoute
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
+  '/admin/labor': typeof AdminLaborRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/bids'
     | '/login'
     | '/new-bid'
+    | '/admin/labor'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesByTo: FileRoutesByTo
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/bids'
     | '/login'
     | '/new-bid'
+    | '/admin/labor'
     | '/admin/settings'
     | '/admin/users'
   id:
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/bids'
     | '/login'
     | '/new-bid'
+    | '/admin/labor'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesById: FileRoutesById
@@ -117,6 +129,7 @@ export interface RootRouteChildren {
   BidsRoute: typeof BidsRoute
   LoginRoute: typeof LoginRoute
   NewBidRoute: typeof NewBidRoute
+  AdminLaborRoute: typeof AdminLaborRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
 }
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NewBidRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/labor': {
+      id: '/admin/labor'
+      path: '/admin/labor'
+      fullPath: '/admin/labor'
+      preLoaderRoute: typeof AdminLaborRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/settings': {
       id: '/admin/settings'
       path: '/admin/settings'
@@ -181,6 +201,7 @@ const rootRouteChildren: RootRouteChildren = {
   BidsRoute: BidsRoute,
   LoginRoute: LoginRoute,
   NewBidRoute: NewBidRoute,
+  AdminLaborRoute: AdminLaborRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
 }
