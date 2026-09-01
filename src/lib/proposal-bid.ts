@@ -36,13 +36,21 @@ export interface SavedBidState {
   laborRate: number;
   commission: number;
   taxExempt: boolean;
+  // Money controls (optional so older saved bids stay valid; default off).
+  prepayDiscount?: boolean;
+  stdSizeDiscount?: boolean;
+  volumeDiscount?: boolean;
+  perDiem?: number;
+  perDiemInMarkup?: boolean;
+  commissionInMarkup?: boolean;
+  adjustLaborPct?: number;
 }
 
 /**
- * Turn the saved estimator state into the engine's BidInput. The fixed values here are the bid
- * fields the estimator UI doesn't expose yet (commission-in-markup, per-diem, discounts, warranty
- * inputs, …); keeping them in ONE place is what pins the estimator and the proposal to the same
- * computation.
+ * Turn the saved estimator state into the engine's BidInput. The remaining fixed values are the
+ * seam inputs the estimator folds in elsewhere (extra shipping, subs/services and other material
+ * come from the non-DL lines) and the warranty inputs (wired separately). Keeping this in ONE place
+ * is what pins the estimator and the proposal to the same computation.
  */
 export function savedToBidInput(s: SavedBidState): BidInput {
   return {
@@ -55,14 +63,14 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     markup: s.markup,
     crewLaborRatePerHour: s.laborRate,
     commission: s.commission,
-    commissionInMarkup: false,
-    perDiem: 0,
-    perDiemInMarkup: true,
-    prepayDiscount: false,
-    stdSizeDiscount: false,
-    volumeDiscount: false,
+    commissionInMarkup: s.commissionInMarkup ?? false,
+    perDiem: s.perDiem ?? 0,
+    perDiemInMarkup: s.perDiemInMarkup ?? true,
+    prepayDiscount: s.prepayDiscount ?? false,
+    stdSizeDiscount: s.stdSizeDiscount ?? false,
+    volumeDiscount: s.volumeDiscount ?? false,
     taxExempt: s.taxExempt,
-    adjustLaborPct: 0,
+    adjustLaborPct: s.adjustLaborPct ?? 0,
     extraShipping: 0,
     subsCost: 0,
     servicesCost: 0,

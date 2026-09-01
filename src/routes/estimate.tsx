@@ -129,6 +129,13 @@ function EstimatePage() {
   const [laborRate, setLaborRate] = useState(50);
   const [commission, setCommission] = useState(3);
   const [taxExempt, setTaxExempt] = useState(false);
+  const [prepayDiscount, setPrepayDiscount] = useState(false);
+  const [stdSizeDiscount, setStdSizeDiscount] = useState(false);
+  const [volumeDiscount, setVolumeDiscount] = useState(false);
+  const [perDiem, setPerDiem] = useState(0);
+  const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
+  const [commissionInMarkup, setCommissionInMarkup] = useState(false);
+  const [adjustLaborPct, setAdjustLaborPct] = useState(0);
 
   const [bidId, setBidId] = useState<string | undefined>(bidParam);
   const [bidName, setBidName] = useState("Untitled bid");
@@ -156,6 +163,13 @@ function EstimatePage() {
       setLaborRate(d.laborRate ?? 50);
       setCommission(d.commission ?? 3);
       setTaxExempt(d.taxExempt ?? false);
+      setPrepayDiscount(d.prepayDiscount ?? false);
+      setStdSizeDiscount(d.stdSizeDiscount ?? false);
+      setVolumeDiscount(d.volumeDiscount ?? false);
+      setPerDiem(d.perDiem ?? 0);
+      setPerDiemInMarkup(d.perDiemInMarkup ?? true);
+      setCommissionInMarkup(d.commissionInMarkup ?? false);
+      setAdjustLaborPct(d.adjustLaborPct ?? 0);
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
@@ -194,6 +208,13 @@ function EstimatePage() {
     laborRate,
     commission,
     taxExempt,
+    prepayDiscount,
+    stdSizeDiscount,
+    volumeDiscount,
+    perDiem,
+    perDiemInMarkup,
+    commissionInMarkup,
+    adjustLaborPct,
   };
   const bid: BidInput = savedToBidInput(saved);
 
@@ -770,11 +791,76 @@ function EstimatePage() {
                 onChange={(e) => setCommission(num(e.target.value))}
               />
             </Field>
-            <div className="flex items-end gap-2 pb-1">
-              <Switch id="taxex" checked={taxExempt} onCheckedChange={setTaxExempt} />
-              <Label htmlFor="taxex" className="text-xs">
-                Tax exempt
-              </Label>
+            <Field label="Adjust labor %">
+              <Input
+                type="number"
+                value={adjustLaborPct}
+                onChange={(e) => setAdjustLaborPct(num(e.target.value))}
+              />
+            </Field>
+            <Field label="Per-diem $/man-day">
+              <Input
+                type="number"
+                value={perDiem}
+                onChange={(e) => setPerDiem(num(e.target.value))}
+              />
+            </Field>
+            <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 pt-1">
+              <div className="flex items-center gap-2">
+                <Switch id="taxex" checked={taxExempt} onCheckedChange={setTaxExempt} />
+                <Label htmlFor="taxex" className="text-xs">
+                  Tax exempt
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch id="pdim" checked={perDiemInMarkup} onCheckedChange={setPerDiemInMarkup} />
+                <Label htmlFor="pdim" className="text-xs">
+                  Per-diem in markup
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="commim"
+                  checked={commissionInMarkup}
+                  onCheckedChange={setCommissionInMarkup}
+                />
+                <Label htmlFor="commim" className="text-xs">
+                  Commission in markup
+                </Label>
+              </div>
+            </div>
+            <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2">
+              <span className="text-xs font-medium text-muted-foreground">Discounts:</span>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="disc-prepay"
+                  checked={prepayDiscount}
+                  onCheckedChange={setPrepayDiscount}
+                />
+                <Label htmlFor="disc-prepay" className="text-xs">
+                  Prepay (−5%)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="disc-std"
+                  checked={stdSizeDiscount}
+                  onCheckedChange={setStdSizeDiscount}
+                />
+                <Label htmlFor="disc-std" className="text-xs">
+                  Standard sheet (−4%, ≥50k sf)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="disc-vol"
+                  checked={volumeDiscount}
+                  onCheckedChange={setVolumeDiscount}
+                />
+                <Label htmlFor="disc-vol" className="text-xs">
+                  Volume (−5%, &gt;100k sf)
+                </Label>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -818,6 +904,22 @@ function EstimatePage() {
                   {nonDlMaterialTotal > 0 && (
                     <Row label="Other material (non-DL)" v={money(nonDlMaterialTotal)} />
                   )}
+                  {result.r.money.dTotals[1]! +
+                    result.r.money.dTotals[2]! +
+                    result.r.money.dTotals[3]! <
+                    0 && (
+                    <Row
+                      label="Discounts"
+                      v={money(
+                        result.r.money.dTotals[1]! +
+                          result.r.money.dTotals[2]! +
+                          result.r.money.dTotals[3]!,
+                      )}
+                    />
+                  )}
+                  {(result.r.money.dTotals[5] ?? 0) > 0 && (
+                    <Row label="Warranty" v={money(result.r.money.dTotals[5] ?? 0)} />
+                  )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
                   {nonDlLaborTotal > 0 && (
                     <Row label="Subs & services" v={money(result.r.laborSubtotal2)} />
@@ -829,6 +931,9 @@ function EstimatePage() {
                   />
                   <Row label="Subtotal 2" v={money(result.r.money.subtotal2)} />
                   <Row label="Commission" v={money(result.r.money.commissionValue)} />
+                  {perDiem > 0 && !perDiemInMarkup && (
+                    <Row label="Per-diem" v={money(result.r.money.dTotals[17] ?? 0)} />
+                  )}
                   <Row label="Sales tax" v={money(result.r.money.salesTaxValue)} />
                   <TableRow className="font-semibold">
                     <TableCell>Bid total</TableCell>
