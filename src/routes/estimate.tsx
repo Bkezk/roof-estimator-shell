@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Save, FileText, Copy } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Save, FileText, Copy, Download } from "lucide-react";
 
 import {
   getEngineAdminData,
@@ -44,6 +44,7 @@ import {
   type SavedBidState,
 } from "@/lib/proposal-bid";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
+import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -423,6 +424,62 @@ function EstimatePage() {
     }
   };
 
+  // Estimate Review export (legacy "Export To Excel"): the same figures as the Bid-total panel,
+  // as a CSV download the spreadsheet apps open directly.
+  const exportReview = () => {
+    if (!result) return;
+    const d = result.r.money.dTotals;
+    const rows = buildReviewRows({
+      bidName: bidName.trim() || "Untitled bid",
+      statusLabel: STATUS_LABELS[bidStatus],
+      membraneMaterial:
+        (d[0] ?? 0) -
+        accessoryTotal -
+        result.parapetMaterial -
+        result.metalsMaterial -
+        result.adhesiveMaterial,
+      parapetMaterial: result.parapetMaterial,
+      metalsMaterial: result.metalsMaterial,
+      adhesiveMaterial: result.adhesiveMaterial,
+      accessoryMaterial: accessoryTotal,
+      underlaymentMaterial: d[6] ?? 0,
+      otherMaterial: d[7] ?? 0,
+      discounts: (d[1] ?? 0) + (d[2] ?? 0) + (d[3] ?? 0),
+      warrantyCost: d[5] ?? 0,
+      shipping: d[9] ?? 0,
+      laborCost: result.r.laborSubtotal1,
+      subsServices: result.r.laborSubtotal2,
+      subtotal1: result.r.money.subtotal1,
+      markupLabel: MARKUP_LABELS[markupMode],
+      markupValue: result.r.money.markupValue,
+      subtotal2: result.r.money.subtotal2,
+      commissionValue: result.r.money.commissionValue,
+      perDiemCharge: perDiemInMarkup ? 0 : (d[17] ?? 0),
+      salesTaxValue: result.r.money.salesTaxValue,
+      grandTotal: result.r.money.grandTotal,
+      installHours: result.r.installHours,
+      setupHours: result.r.setupHours,
+      inspectionHours: result.r.inspectionHours,
+      tearOffHours: result.r.tearOffLaborHours,
+      accessoryHours: accessoryLaborHours,
+      parapetHours: result.r.parapetLaborHours,
+      curbHours: result.r.curbLaborHours,
+      underlaymentHours: result.r.underlaymentLaborHours,
+      totalManDays: result.r.money.totalManDays,
+      disposalUnits: result.r.disposalUnits,
+      roofSqFt: sections.reduce((sum, s) => sum + s.length * s.width, 0),
+      membraneSqFt: result.r.sqFtTotalMembrane,
+    });
+    // UTF-8 BOM so Excel opens it with the right encoding.
+    const blob = new Blob(["﻿" + toCsv(rows)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(bidName.trim() || "estimate").replace(/[^\w.-]+/g, "_")}-review.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading pricing & labor…</p>;
   if (!admin) return <p className="text-sm text-muted-foreground">Could not load engine data.</p>;
 
@@ -473,6 +530,15 @@ function EstimatePage() {
             >
               <FileText className="mr-2 h-4 w-4" />
               Proposal
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!result}
+              title="Download the estimate review (cost, labor and unit metrics) as CSV"
+              onClick={exportReview}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Export
             </Button>
           </div>
         </div>
