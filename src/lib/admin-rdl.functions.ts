@@ -97,3 +97,34 @@ export const saveLaborTable = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+export type AccessoryLaborRow = Database["public"]["Tables"]["accessory_labor"]["Row"];
+
+export const getAccessoryLabor = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AccessoryLaborRow[]> => {
+    const { data, error } = await context.supabase
+      .from("accessory_labor")
+      .select("*")
+      .order("sort");
+    if (error) throw error;
+    return data ?? [];
+  });
+
+const saveAccessorySchema = z.object({
+  id: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
+
+export const saveAccessoryCategory = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => saveAccessorySchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const { error } = await context.supabase
+      .from("accessory_labor")
+      .update({ data: data.data as Json })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });

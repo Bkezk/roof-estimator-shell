@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      accessory_labor: {
+        Row: {
+          category: string
+          data: Json
+          id: string
+          sort: number
+        }
+        Insert: {
+          category: string
+          data?: Json
+          id: string
+          sort?: number
+        }
+        Update: {
+          category?: string
+          data?: Json
+          id?: string
+          sort?: number
+        }
+        Relationships: []
+      }
       bids: {
         Row: {
           created_at: string

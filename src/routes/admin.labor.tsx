@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RoofDeckTab } from "@/components/rdl-editor";
+import { AccessoryLaborTab } from "@/components/accessory-labor-editor";
 import {
   Table,
   TableBody,
@@ -79,6 +80,7 @@ function LaborPage() {
           <TabsTrigger value="curb">Curb Labor</TabsTrigger>
           <TabsTrigger value="roofdeck">Roof Deck Labor</TabsTrigger>
           <TabsTrigger value="parapet">Parapet Labor</TabsTrigger>
+          <TabsTrigger value="accessory">Accessory Labor</TabsTrigger>
         </TabsList>
         <TabsContent value="setup">
           <SetupTab data={data} onSaved={invalidate} />
@@ -97,6 +99,9 @@ function LaborPage() {
         </TabsContent>
         <TabsContent value="parapet">
           <ParapetTab data={data} onSaved={invalidate} />
+        </TabsContent>
+        <TabsContent value="accessory">
+          <AccessoryLaborTab />
         </TabsContent>
       </Tabs>
     </div>
