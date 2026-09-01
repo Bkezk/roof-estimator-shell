@@ -7,6 +7,7 @@ import {
   LogOut,
   KeyRound,
   SlidersHorizontal,
+  Package,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -31,6 +32,7 @@ const estimatorItems = [
 const adminItems = [
   { title: "General", url: "/admin/settings", icon: Settings },
   { title: "Labor", url: "/admin/labor", icon: SlidersHorizontal },
+  { title: "Non-DL Pricing", url: "/admin/non-dl", icon: Package },
   { title: "Users", url: "/admin/users", icon: Users },
 ];
 

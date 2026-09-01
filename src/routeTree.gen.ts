@@ -15,6 +15,7 @@ import { Route as BidsRouteImport } from './routes/bids'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NewBidRouteImport } from './routes/new-bid'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
+import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 
@@ -48,6 +49,11 @@ const AdminLaborRoute = AdminLaborRouteImport.update({
   path: '/admin/labor',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminNonDlRoute = AdminNonDlRouteImport.update({
+  id: '/admin/non-dl',
+  path: '/admin/non-dl',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/admin/settings',
   path: '/admin/settings',
@@ -66,6 +72,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/labor': typeof AdminLaborRoute
+  '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -76,6 +83,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/labor': typeof AdminLaborRoute
+  '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -87,6 +95,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/new-bid': typeof NewBidRoute
   '/admin/labor': typeof AdminLaborRoute
+  '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -99,6 +108,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/new-bid'
     | '/admin/labor'
+    | '/admin/non-dl'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesByTo: FileRoutesByTo
@@ -109,6 +119,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/new-bid'
     | '/admin/labor'
+    | '/admin/non-dl'
     | '/admin/settings'
     | '/admin/users'
   id:
@@ -119,6 +130,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/new-bid'
     | '/admin/labor'
+    | '/admin/non-dl'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesById: FileRoutesById
@@ -130,6 +142,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   NewBidRoute: typeof NewBidRoute
   AdminLaborRoute: typeof AdminLaborRoute
+  AdminNonDlRoute: typeof AdminNonDlRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
 }
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminLaborRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/non-dl': {
+      id: '/admin/non-dl'
+      path: '/admin/non-dl'
+      fullPath: '/admin/non-dl'
+      preLoaderRoute: typeof AdminNonDlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/settings': {
       id: '/admin/settings'
       path: '/admin/settings'
@@ -202,6 +222,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   NewBidRoute: NewBidRoute,
   AdminLaborRoute: AdminLaborRoute,
+  AdminNonDlRoute: AdminNonDlRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
 }

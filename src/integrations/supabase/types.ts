@@ -382,6 +382,30 @@ export type Database = {
         }
         Relationships: []
       }
+      pricing_catalog: {
+        Row: {
+          branch: string
+          category: string
+          data: Json
+          id: string
+          sort: number
+        }
+        Insert: {
+          branch: string
+          category: string
+          data?: Json
+          id: string
+          sort?: number
+        }
+        Update: {
+          branch?: string
+          category?: string
+          data?: Json
+          id?: string
+          sort?: number
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           commission_pct: number
