@@ -140,11 +140,11 @@
   /*
    * Compact density: the app sizes everything in rem (text, padding, gaps, control heights,
    * icons), so shrinking the root font size scales the whole UI down proportionally — a denser,
-   * desktop-app feel closer to the original Bid-Advantage. 14px ≈ 87.5% of the 16px browser
+   * desktop-app feel closer to the original Bid-Advantage. 13px ≈ 81% of the 16px browser
    * default. Adjust this one value to tune overall density.
    */
   html {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   body {

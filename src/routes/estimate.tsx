@@ -12,6 +12,8 @@ import {
   Copy,
   Download,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import {
@@ -148,6 +150,19 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
   2: "Gross profit %",
 };
 
+/** The legacy ribbon, modernized: one screen per step with Previous / Next. */
+const STEPS = [
+  { key: "setup", label: "Setup" },
+  { key: "sections", label: "Sections" },
+  { key: "parapets", label: "Parapets" },
+  { key: "curbs", label: "Curbs" },
+  { key: "accessories", label: "Accessories" },
+  { key: "metals", label: "Metals" },
+  { key: "nondl", label: "Non-DL" },
+  { key: "pricing", label: "Pricing & Warranty" },
+  { key: "review", label: "Review" },
+] as const;
+
 function EstimatePage() {
   const getFn = useServerFn(getEngineAdminData);
   const getAccFn = useServerFn(getAccessoryCatalog);
@@ -280,6 +295,7 @@ function EstimatePage() {
   const [bidName, setBidName] = useState("Untitled bid");
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [saving, setSaving] = useState(false);
+  const [step, setStep] = useState(0);
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({
@@ -464,6 +480,31 @@ function EstimatePage() {
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
+  // Legacy-style stepped workflow: one screen per tab with Previous / Next, like the
+  // Bid-Advantage ribbon. Steps stay mounted (hidden) so nothing is lost when switching.
+  const goStep = (i: number) => {
+    setStep(Math.min(STEPS.length - 1, Math.max(0, i)));
+    window.scrollTo(0, 0);
+  };
+  const stepCount = (key: string): number | null => {
+    switch (key) {
+      case "sections":
+        return sections.length;
+      case "parapets":
+        return parapets.length;
+      case "curbs":
+        return curbs.length;
+      case "accessories":
+        return accessories.length;
+      case "metals":
+        return metals.length;
+      case "nondl":
+        return nonDlLines.length;
+      default:
+        return null;
+    }
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -642,6 +683,28 @@ function EstimatePage() {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-1 rounded-md border bg-muted/40 p-1">
+          {STEPS.map((st, i) => {
+            const n = stepCount(st.key);
+            return (
+              <button
+                key={st.key}
+                type="button"
+                onClick={() => goStep(i)}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  step === i
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {st.label}
+                {n !== null && n > 0 ? ` (${n})` : ""}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className={step === 0 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Customer &amp; project</CardTitle>
@@ -771,7 +834,9 @@ function EstimatePage() {
             </div>
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 1 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Roof sections</CardTitle>
@@ -1162,60 +1227,9 @@ function EstimatePage() {
             ))}
           </CardContent>
         </Card>
+        </div>
 
-        {hasOrderingSummary && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 text-sm">
-              {edgeSummary.terminations.map((t) => (
-                <div key={t.termination} className="flex justify-between">
-                  <span className="text-muted-foreground">{t.termination}</span>
-                  <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
-                </div>
-              ))}
-              {edgeSummary.blockingFt > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Wood blocking</span>
-                  <span className="tabular-nums">{edgeSummary.blockingFt.toLocaleString()} ft</span>
-                </div>
-              )}
-              {edgeSummary.arpSqFtTotal > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
-                  <span className="tabular-nums">
-                    {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
-                  </span>
-                </div>
-              )}
-              {insulationBoards > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Insulation boards (4×8)</span>
-                  <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
-                </div>
-              )}
-              {insulationFasteners > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Insulation fasteners</span>
-                  <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
-                </div>
-              )}
-              {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
-                <div key={name} className="flex justify-between">
-                  <span className="text-muted-foreground">{name}</span>
-                  <span className="tabular-nums">{units.toFixed(2)} units</span>
-                </div>
-              ))}
-              <p className="border-t pt-2 text-xs text-muted-foreground">
-                For ordering only — termination hardware, blocking and ARP material are priced by
-                adding Accessory / Non-DL lines until the legacy auto-pricing is validated against a
-                captured bid.
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
+        <div className={step === 2 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Parapets</CardTitle>
@@ -1358,7 +1372,9 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 3 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Curbs</CardTitle>
@@ -1483,7 +1499,9 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 4 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Accessories</CardTitle>
@@ -1590,7 +1608,9 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 5 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Metals</CardTitle>
@@ -1681,7 +1701,9 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 6 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
@@ -1771,7 +1793,9 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
 
+        <div className={step === 7 ? "space-y-6" : "hidden"}>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Pricing controls</CardTitle>
@@ -1964,6 +1988,121 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        </div>
+
+        <div className={step === 8 ? "space-y-6" : "hidden"}>
+                {hasOrderingSummary && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      {edgeSummary.terminations.map((t) => (
+                        <div key={t.termination} className="flex justify-between">
+                          <span className="text-muted-foreground">{t.termination}</span>
+                          <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
+                        </div>
+                      ))}
+                      {edgeSummary.blockingFt > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Wood blocking</span>
+                          <span className="tabular-nums">{edgeSummary.blockingFt.toLocaleString()} ft</span>
+                        </div>
+                      )}
+                      {edgeSummary.arpSqFtTotal > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
+                          <span className="tabular-nums">
+                            {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
+                          </span>
+                        </div>
+                      )}
+                      {insulationBoards > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Insulation boards (4×8)</span>
+                          <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {insulationFasteners > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Insulation fasteners</span>
+                          <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
+                        <div key={name} className="flex justify-between">
+                          <span className="text-muted-foreground">{name}</span>
+                          <span className="tabular-nums">{units.toFixed(2)} units</span>
+                        </div>
+                      ))}
+                      <p className="border-t pt-2 text-xs text-muted-foreground">
+                        For ordering only — termination hardware, blocking and ARP material are priced by
+                        adding Accessory / Non-DL lines until the legacy auto-pricing is validated against a
+                        captured bid.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Review &amp; finish</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              The full cost and hours breakdown is in the Bid total panel{" "}
+              <span className="lg:hidden">below</span>
+              <span className="hidden lg:inline">on the right</span>.{" "}
+              {result?.warnings.length
+                ? "Resolve the warnings shown there before finalizing."
+                : "No input warnings."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={handleSave} disabled={saving}>
+                <Save className="mr-2 h-4 w-4" />
+                {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!bidId}
+                title={bidId ? "Open the printable proposal" : "Save the bid first"}
+                onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Proposal
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!result}
+                title="Download the estimate review as CSV"
+                onClick={exportReview}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Export
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        </div>
+
+        <div className="flex items-center justify-between border-t pt-4">
+          <Button variant="outline" disabled={step === 0} onClick={() => goStep(step - 1)}>
+            <ChevronLeft className="mr-1 h-4 w-4" /> Previous
+          </Button>
+          <span className="text-xs text-muted-foreground">
+            Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
+          </span>
+          {step < STEPS.length - 1 ? (
+            <Button onClick={() => goStep(step + 1)}>
+              Next <ChevronRight className="ml-1 h-4 w-4" />
+            </Button>
+          ) : (
+            <Button onClick={handleSave} disabled={saving}>
+              <Save className="mr-2 h-4 w-4" />
+              {saving ? "Saving…" : "Save bid"}
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="lg:sticky lg:top-4 lg:self-start">
