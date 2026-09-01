@@ -13,6 +13,7 @@
 
 import type { PriceMatrix, PriceTier, FreightStep } from "./pricing";
 import type { Band, DualValue } from "./labor";
+import type { SetupBandTable, InspectionBandTable } from "./quantities";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Membrane price matrix (from pricing_catalog id "duro_last:duro_last_membrane")
@@ -275,6 +276,47 @@ export function buildShippingSteps(rows: RawShippingStep[]): FreightStep[] {
     .sort((a, b) => a.fromThreshold - b.fromThreshold);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Setup / inspection band tables (§2.4 / §2.5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** labor_setup: the Minimum-row hours the base setup time is floored to. */
+export interface RawSetup {
+  minimum_hours?: number | string | null;
+}
+/** labor_setup_steps: a setup band (sqft edge × multiplier). Mode-1 (×Ceiling(sqft)) throughout. */
+export interface RawSetupStep {
+  sqft: number | string;
+  multiplier: number | string;
+}
+/** labor_inspection_steps: a flat-hours inspection band keyed by its lower-bound sqft edge. */
+export interface RawInspectionStep {
+  sqft: number | string;
+  hours: number | string;
+}
+
+/**
+ * Build the setup band table (§2.4). Seeded steps are all mode-1 multiplier bands
+ * (BaseSetup = Ceiling(sqft) × multiplier), floored to labor_setup.minimum_hours.
+ */
+export function buildSetupTable(setup: RawSetup | null, steps: RawSetupStep[]): SetupBandTable {
+  const bands = steps
+    .map((s) => ({ upTo: Number(s.sqft), value: Number(s.multiplier), multiply: true }))
+    .sort((a, b) => a.upTo - b.upTo);
+  return { minimum: Number(setup?.minimum_hours ?? 0), bands };
+}
+
+/**
+ * Build the inspection band table (§2.5) — flat hours per lower-bound sqft band. The lowest-edge
+ * row's hours double as the Minimum (value for sqft below the first band edge).
+ */
+export function buildInspectionTable(steps: RawInspectionStep[]): InspectionBandTable {
+  const bands = steps
+    .map((s) => ({ edge: Number(s.sqft), value: Number(s.hours) }))
+    .sort((a, b) => a.edge - b.edge);
+  return { minimum: bands[0]?.value ?? 0, bands };
+}
+
 export interface RawAdminData {
   membraneScreen: MembraneScreen | null;
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
@@ -282,6 +324,9 @@ export interface RawAdminData {
   tearOffTimes?: TearOffTimesData | null;
   underlaymentScreen?: MembraneScreen | null;
   shippingSteps?: RawShippingStep[] | null;
+  setup?: RawSetup | null;
+  setupSteps?: RawSetupStep[] | null;
+  inspectionSteps?: RawInspectionStep[] | null;
 }
 
 export interface EngineSettings {
@@ -305,6 +350,10 @@ export interface EngineAdminData {
   underlaymentPrices?: Record<string, number>;
   /** Stepped freight table (absent if shipping_steps wasn't fetched); used in stepped mode. */
   shippingSteps?: FreightStep[];
+  /** Setup-time band table (absent if labor_setup wasn't fetched). */
+  setupTable?: SetupBandTable;
+  /** Inspection-time band table (absent if labor_inspection_steps wasn't fetched). */
+  inspectionTable?: InspectionBandTable;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -332,6 +381,12 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ? buildUnderlaymentPrices(raw.underlaymentScreen)
     : undefined;
   const shippingSteps = raw.shippingSteps ? buildShippingSteps(raw.shippingSteps) : undefined;
+  const setupTable = raw.setupSteps
+    ? buildSetupTable(raw.setup ?? null, raw.setupSteps)
+    : undefined;
+  const inspectionTable = raw.inspectionSteps
+    ? buildInspectionTable(raw.inspectionSteps)
+    : undefined;
 
   return {
     deckOrder,
@@ -341,5 +396,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(tearOff ? { tearOff } : {}),
     ...(underlaymentPrices ? { underlaymentPrices } : {}),
     ...(shippingSteps ? { shippingSteps } : {}),
+    ...(setupTable ? { setupTable } : {}),
+    ...(inspectionTable ? { inspectionTable } : {}),
   };
 }

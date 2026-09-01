@@ -209,6 +209,35 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.disposalUnits).toBe(2);
   });
 
+  it("setup & inspection hours flow from the seeded band tables into direct labor", () => {
+    const withBands: EngineAdminData = {
+      ...admin,
+      setupTable: {
+        minimum: 16,
+        bands: [
+          { upTo: 6000, value: 0.003, multiply: true },
+          { upTo: 20000, value: 0.003, multiply: true },
+          { upTo: 100000, value: 0.003, multiply: true },
+        ],
+      },
+      inspectionTable: {
+        minimum: 5,
+        bands: [
+          { edge: 0, value: 5 },
+          { edge: 5001, value: 7 },
+          { edge: 10001, value: 10 },
+        ],
+      },
+    };
+    // base bid = 50×50 = 2500 roof sqft
+    const { inputs } = buildEstimateInputs(bid(), withBands);
+    const r = computeEstimate(inputs);
+    expect(r.setupHours).toBeCloseTo(16, 6); // Ceiling(2500)×0.003 = 7.5, floored to min 16
+    expect(r.inspectionHours).toBeCloseTo(5, 6); // 2500 < 5001 → first band = 5
+    // they roll into direct-labor hours alongside install (15.125)
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 16 + 5, 3);
+  });
+
   it("freight: stepped 'from' table on the DL material subtotal (M0) flows into shipping", () => {
     const withShip: EngineAdminData = {
       ...admin,

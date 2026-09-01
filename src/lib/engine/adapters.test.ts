@@ -9,10 +9,13 @@ import {
   buildUnderlaymentPrices,
   buildAccessoryCatalog,
   buildShippingSteps,
+  buildSetupTable,
+  buildInspectionTable,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
 } from "./adapters";
 import { freightStepped } from "./pricing";
+import { setupTime, inspectionTime } from "./quantities";
 import { priceMatrixLookup } from "./pricing";
 import { bandLookup, directLookup, mechLaborRate } from "./labor";
 
@@ -254,6 +257,32 @@ describe("buildShippingSteps (from the seeded shipping_steps rows)", () => {
     expect(steps.map((s) => s.fromThreshold)).toEqual([0, 5001, 7500]);
     expect(freightStepped(6000, steps)).toBe(975);
     expect(freightStepped(0, steps)).toBe(800);
+  });
+});
+
+describe("buildSetupTable / buildInspectionTable (from the seeded labor tables)", () => {
+  it("setup: multiplier bands floored to the Minimum row, feeding the §2.4 setup lookup", () => {
+    // Real seeded shape (all-string numerics, out of order): minimum 16, all bands ×0.003.
+    const table = buildSetupTable({ minimum_hours: "16" }, [
+      { sqft: "100000", multiplier: "0.003" },
+      { sqft: "6000", multiplier: "0.003" },
+      { sqft: "20000", multiplier: "0.003" },
+    ]);
+    expect(table.minimum).toBe(16);
+    expect(table.bands.map((b) => b.upTo)).toEqual([6000, 20000, 100000]);
+    expect(setupTime(2500, table, 0)).toBeCloseTo(16, 6); // 2500×0.003=7.5 → floored to 16
+    expect(setupTime(10000, table, 0)).toBeCloseTo(30, 6); // 10000×0.003=30 > min
+  });
+  it("inspection: flat bands, lowest edge doubles as the Minimum, feeding the §2.5 lookup", () => {
+    const table = buildInspectionTable([
+      { sqft: "5001", hours: "7" },
+      { sqft: "0", hours: "5" },
+      { sqft: "10001", hours: "10" },
+    ]);
+    expect(table.minimum).toBe(5);
+    expect(table.bands.map((b) => b.edge)).toEqual([0, 5001, 10001]);
+    expect(inspectionTime(2500, table, 0)).toBeCloseTo(5, 6); // < 5001 → 5
+    expect(inspectionTime(8000, table, 0)).toBeCloseTo(7, 6); // [5001,10001) → 7
   });
 });
 

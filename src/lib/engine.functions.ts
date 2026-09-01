@@ -20,6 +20,9 @@ import {
   type RawCompanySettings,
   type TearOffTimesData,
   type RawShippingStep,
+  type RawSetup,
+  type RawSetupStep,
+  type RawInspectionStep,
 } from "@/lib/engine/adapters";
 
 export type { EngineAdminData, AccessoryCatalogItem } from "@/lib/engine/adapters";
@@ -32,15 +35,27 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<EngineAdminData> => {
     const sb = context.supabase;
 
-    const [membraneRes, combosRes, settingsRes, tearOffRes, underlaymentRes, shippingRes] =
-      await Promise.all([
-        sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
-        sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
-        sb.from("company_settings").select("*").eq("id", 1).maybeSingle(),
-        sb.from("rdl_labor_tables").select("data").eq("id", "tearoff_times").maybeSingle(),
-        sb.from("pricing_catalog").select("data").eq("id", UNDERLAYMENT_SCREEN_ID).maybeSingle(),
-        sb.from("shipping_steps").select("material_threshold, shipping_cost").order("sort"),
-      ]);
+    const [
+      membraneRes,
+      combosRes,
+      settingsRes,
+      tearOffRes,
+      underlaymentRes,
+      shippingRes,
+      setupRes,
+      setupStepsRes,
+      inspectionStepsRes,
+    ] = await Promise.all([
+      sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
+      sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
+      sb.from("company_settings").select("*").eq("id", 1).maybeSingle(),
+      sb.from("rdl_labor_tables").select("data").eq("id", "tearoff_times").maybeSingle(),
+      sb.from("pricing_catalog").select("data").eq("id", UNDERLAYMENT_SCREEN_ID).maybeSingle(),
+      sb.from("shipping_steps").select("material_threshold, shipping_cost").order("sort"),
+      sb.from("labor_setup").select("minimum_hours").eq("id", 1).maybeSingle(),
+      sb.from("labor_setup_steps").select("sqft, multiplier").order("sort"),
+      sb.from("labor_inspection_steps").select("sqft, hours").order("sort"),
+    ]);
 
     if (membraneRes.error) throw membraneRes.error;
     if (combosRes.error) throw combosRes.error;
@@ -48,6 +63,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (tearOffRes.error) throw tearOffRes.error;
     if (underlaymentRes.error) throw underlaymentRes.error;
     if (shippingRes.error) throw shippingRes.error;
+    if (setupRes.error) throw setupRes.error;
+    if (setupStepsRes.error) throw setupStepsRes.error;
+    if (inspectionStepsRes.error) throw inspectionStepsRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -59,6 +77,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const tearOffTimes = (tearOffRes.data?.data ?? null) as TearOffTimesData | null;
     const underlaymentScreen = (underlaymentRes.data?.data ?? null) as MembraneScreen | null;
     const shippingSteps = (shippingRes.data ?? null) as RawShippingStep[] | null;
+    const setup = (setupRes.data ?? null) as RawSetup | null;
+    const setupSteps = (setupStepsRes.data ?? null) as RawSetupStep[] | null;
+    const inspectionSteps = (inspectionStepsRes.data ?? null) as RawInspectionStep[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -67,6 +88,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       tearOffTimes,
       underlaymentScreen,
       shippingSteps,
+      setup,
+      setupSteps,
+      inspectionSteps,
     });
   });
 

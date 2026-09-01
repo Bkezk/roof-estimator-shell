@@ -16,6 +16,9 @@
  *    (M0). Membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Underlayment material wired from the seeded Underlayment prices (board $/sqft × deck area).
+ *  - Setup & inspection hours wired from the seeded band tables (§2.4/§2.5) when present; they roll
+ *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs stay 0 until the UI adds
+ *    them (the engine already accepts them).
  *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
  *    quantity); the total folds into M0. Accessory LABOR (from the Accessory Labor tables) is a
  *    later step.
@@ -220,6 +223,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       tabBands: lt?.tabBands ?? [],
       onCenterBands: lt?.onCenterBands ?? [],
       fastenerSpacing: [], // gap — sections supply customFieldFastenerSpacing
+      ...(admin.setupTable ? { setupTable: admin.setupTable } : {}),
+      ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },
     adjustLaborPct: bid.adjustLaborPct,
     adjustSetupLaborPct: 0,
