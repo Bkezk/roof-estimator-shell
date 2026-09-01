@@ -97,6 +97,38 @@ export interface CompanyInfo {
   phone: string | null;
 }
 
+export interface MarkupPreset {
+  name: string;
+  hourlyRate: number;
+  markupAmount: number;
+  markupType: string;
+  includePerDiem: boolean;
+  includeCommission: boolean;
+  isDefault: boolean;
+}
+
+/** Labor & markup presets for the estimator's preset picker. Authenticated read. */
+export const getMarkupPresets = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MarkupPreset[]> => {
+    const { data, error } = await context.supabase
+      .from("markup_options")
+      .select(
+        "name, hourly_rate, markup_amount, markup_type, include_per_diem, include_commission, is_default",
+      )
+      .order("sort");
+    if (error) throw error;
+    return (data ?? []).map((m) => ({
+      name: m.name,
+      hourlyRate: Number(m.hourly_rate),
+      markupAmount: Number(m.markup_amount),
+      markupType: m.markup_type,
+      includePerDiem: !!m.include_per_diem,
+      includeCommission: !!m.include_commission,
+      isDefault: !!m.is_default,
+    }));
+  });
+
 /** Warranty + high-wind pricing tables for the estimator's warranty picker. Authenticated read. */
 export const getWarrantyData = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   savedToBidInput,
   buildBidInput,
+  markupTypeToMode,
   emptyCustomer,
   type SavedBidState,
   type WarrantyData,
@@ -105,5 +106,14 @@ describe("warranty resolution (buildBidInput)", () => {
       buildBidInput(base({ warrantyName: "15 + 5 Yr Material & Labor" })).warrantyCostPerSqFt,
     ).toBe(0);
     expect(buildBidInput(base(), warrantyData).warrantyCostPerSqFt).toBe(0);
+  });
+});
+
+describe("markupTypeToMode", () => {
+  it("maps the stored preset enums to engine modes; unknown → null", () => {
+    expect(markupTypeToMode("percent_cost")).toBe(0);
+    expect(markupTypeToMode("dollar_manday")).toBe(1);
+    expect(markupTypeToMode("gross_profit")).toBe(2);
+    expect(markupTypeToMode("something_else")).toBeNull();
   });
 });

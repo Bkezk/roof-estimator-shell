@@ -51,6 +51,24 @@ export interface SavedBidState {
   highWindBand?: string;
 }
 
+/**
+ * Map a markup-preset's stored markup_type enum to the engine's MarkupMode (engine-truth §4.3:
+ * 0 = % of cost, 1 = flat $/man-day, 2 = gross-profit %). Returns null for an unrecognized value so
+ * the caller can leave the current mode unchanged rather than guess.
+ */
+export function markupTypeToMode(t: string): MarkupMode | null {
+  switch (t) {
+    case "percent_cost":
+      return 0;
+    case "dollar_manday":
+      return 1;
+    case "gross_profit":
+      return 2;
+    default:
+      return null;
+  }
+}
+
 /** Warranty admin data the resolver needs (from the warranties + high_wind_upcharges tables). */
 export interface WarrantyData {
   warranties: Array<{ name: string; pricePerSqFt: number; nonMasterEliteSurcharge: number }>;

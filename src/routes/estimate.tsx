@@ -11,7 +11,7 @@ import {
   getAccessoryLaborLookup,
   getNonDlCatalog,
 } from "@/lib/engine.functions";
-import { getBid, saveBid, getWarrantyData } from "@/lib/bids.functions";
+import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -24,6 +24,7 @@ import type { MarkupMode } from "@/lib/engine/money";
 import {
   buildBidInput,
   emptyCustomer,
+  markupTypeToMode,
   type CustomerInfo,
   type SavedBidState,
 } from "@/lib/proposal-bid";
@@ -96,6 +97,7 @@ function EstimatePage() {
   const getAccLaborFn = useServerFn(getAccessoryLaborLookup);
   const getNonDlFn = useServerFn(getNonDlCatalog);
   const getWarrantyFn = useServerFn(getWarrantyData);
+  const getPresetsFn = useServerFn(getMarkupPresets);
   const getBidFn = useServerFn(getBid);
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
@@ -122,6 +124,10 @@ function EstimatePage() {
     queryKey: ["warranty-data"],
     queryFn: () => getWarrantyFn(),
   });
+  const { data: presets } = useQuery({
+    queryKey: ["markup-presets"],
+    queryFn: () => getPresetsFn(),
+  });
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
@@ -145,6 +151,17 @@ function EstimatePage() {
   const [highWind, setHighWind] = useState(false);
   const [highWindTermYears, setHighWindTermYears] = useState(0);
   const [highWindBand, setHighWindBand] = useState("");
+
+  const applyPreset = (name: string) => {
+    const p = presets?.find((x) => x.name === name);
+    if (!p) return;
+    setLaborRate(p.hourlyRate);
+    setMarkup(p.markupAmount);
+    const mode = markupTypeToMode(p.markupType);
+    if (mode !== null) setMarkupMode(mode);
+    setPerDiemInMarkup(p.includePerDiem);
+    setCommissionInMarkup(p.includeCommission);
+  };
 
   const [bidId, setBidId] = useState<string | undefined>(bidParam);
   const [bidName, setBidName] = useState("Untitled bid");
@@ -775,6 +792,22 @@ function EstimatePage() {
             <CardTitle className="text-base">Pricing controls</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-4">
+            {(presets?.length ?? 0) > 0 && (
+              <Field label="Preset">
+                <Select value="" onValueChange={applyPreset}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Apply preset…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(presets ?? []).map((p) => (
+                      <SelectItem key={p.name} value={p.name}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             <Field label="Markup type">
               <Select
                 value={String(markupMode)}
