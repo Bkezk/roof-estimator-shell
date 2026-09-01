@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -28,6 +28,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
@@ -59,6 +69,9 @@ export function CatalogEditor({
   const [draft, setDraft] = useState<CatalogScreenData | null>(null);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const draftIdRef = useRef<string | null>(null);
+  draftIdRef.current = draftId;
 
   const selected = useMemo(
     () => screens?.find((s) => s.id === (selId ?? screens?.[0]?.id)),
@@ -83,6 +96,40 @@ export function CatalogEditor({
       n.rows[ri]![col] = v;
       return n;
     });
+
+  // Delete a row after the confirm dialog, with a toast Undo that restores it in place.
+  // Edits (deletes included) only persist on "Save changes", so Undo before saving is exact.
+  const deleteRow = () => {
+    if (confirmDelete === null) return;
+    const ri = confirmDelete;
+    const removed = draft.rows[ri];
+    const screenId = selected.id;
+    setConfirmDelete(null);
+    if (!removed) return;
+    setDraft((p) => {
+      const n = clone(p!);
+      n.rows.splice(ri, 1);
+      return n;
+    });
+    toast("Row deleted", {
+      description: String(removed["Description"] ?? "") || undefined,
+      duration: 8000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (draftIdRef.current !== screenId) {
+            toast.error("Switch back to that category to undo this deletion.");
+            return;
+          }
+          setDraft((p) => {
+            const n = clone(p!);
+            n.rows.splice(Math.min(ri, n.rows.length), 0, removed);
+            return n;
+          });
+        },
+      },
+    });
+  };
 
   const save = async () => {
     setSaving(true);
@@ -205,17 +252,7 @@ export function CatalogEditor({
                         <Lock className="h-3.5 w-3.5" />
                       </span>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          setDraft((p) => {
-                            const n = clone(p!);
-                            n.rows.splice(ri, 1);
-                            return n;
-                          })
-                        }
-                      >
+                      <Button variant="ghost" size="icon" onClick={() => setConfirmDelete(ri)}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     )}
@@ -256,6 +293,35 @@ export function CatalogEditor({
           {saving ? "Saving…" : "Save changes"}
         </Button>
       </div>
+
+      <AlertDialog
+        open={confirmDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this row?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmDelete !== null &&
+              String(draft.rows[confirmDelete]?.["Description"] ?? "").trim()
+                ? `"${String(draft.rows[confirmDelete]!["Description"])}" will be removed from ${selected.category}.`
+                : `This row will be removed from ${selected.category}.`}{" "}
+              You can undo right after, and nothing is permanent until you save changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={deleteRow}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
