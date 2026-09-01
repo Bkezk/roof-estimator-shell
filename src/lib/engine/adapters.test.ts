@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { buildPriceMatrix, buildLaborTables, parseMembraneRow, type LaborCombo } from "./adapters";
+import {
+  buildPriceMatrix,
+  buildLaborTables,
+  parseMembraneRow,
+  assembleEngineAdminData,
+  type LaborCombo,
+} from "./adapters";
 import { priceMatrixLookup } from "./pricing";
 import { bandLookup, directLookup, mechLaborRate } from "./labor";
 
@@ -162,5 +168,37 @@ describe("buildLaborTables (from a Roof Deck Labor combo)", () => {
       complexity: 1,
     });
     expect(rate * 2500).toBeCloseTo(15.125, 6); // engine-truth §9: 10 × 1 × 1.5125 × 1
+  });
+});
+
+describe("assembleEngineAdminData (whole-catalog transform)", () => {
+  const raw = {
+    membraneScreen,
+    combos: [{ roof_system: "Duro-Last", attachment: "mechanical", data: duroLastMechCombo }],
+    settings: {
+      hours_per_man_day: 9,
+      master_elite: true,
+      sales_tax_rate: 0.0625,
+      only_tax_material: true,
+      shipping_method: "stepped",
+      shipping_percent: 0,
+    },
+  };
+
+  it("assembles price matrix, labor-by-combo, and settings from the raw rows", () => {
+    const d = assembleEngineAdminData(raw);
+    expect(d.priceMatrix[40]?.rollGoods?.["White"]).toBe(1.23);
+    expect(d.labor["Duro-Last|mechanical"]?.deckTypeIds["Wood"]).toBe(0);
+    expect(d.settings.hoursPerDay).toBe(9);
+    expect(d.settings.salesTax).toBe(0.0625);
+    expect(d.settings.taxMaterialOnly).toBe(true);
+    expect(d.deckOrder[0]).toBe("Wood");
+  });
+
+  it("falls back to sane defaults when settings are missing", () => {
+    const d = assembleEngineAdminData({ ...raw, settings: null });
+    expect(d.settings.hoursPerDay).toBe(9);
+    expect(d.settings.masterEliteCont).toBe(true);
+    expect(d.settings.salesTax).toBe(0);
   });
 });

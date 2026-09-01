@@ -134,3 +134,76 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     thicknessLaborByMil,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Whole-catalog assembly (pure) — used by the Supabase server fn
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The standard Roof Deck Labor deck-type column order; a deck's index in it is its id. */
+export const STANDARD_DECK_ORDER = [
+  "Wood",
+  "Steel",
+  "Retrofit",
+  "Concrete",
+  "Gypsum",
+  "LWC/Steel",
+  "LWC/Concrete",
+  "LWC/Other",
+  "Tectum",
+  "Purlin",
+] as const;
+
+export interface RawCompanySettings {
+  hours_per_man_day?: number | null;
+  master_elite?: boolean | null;
+  sales_tax_rate?: number | null;
+  only_tax_material?: boolean | null;
+  shipping_method?: string | null;
+  shipping_percent?: number | null;
+}
+
+export interface RawAdminData {
+  membraneScreen: MembraneScreen | null;
+  combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
+  settings: RawCompanySettings | null;
+}
+
+export interface EngineSettings {
+  hoursPerDay: number;
+  masterEliteCont: boolean;
+  salesTax: number;
+  taxMaterialOnly: boolean;
+  shippingMode: string;
+  shippingPercent: number;
+}
+
+export interface EngineAdminData {
+  deckOrder: string[];
+  priceMatrix: PriceMatrix;
+  /** Labor tables keyed by `${roof_system}|${attachment}` (e.g. "Duro-Last|mechanical"). */
+  labor: Record<string, LaborTables>;
+  settings: EngineSettings;
+}
+
+/** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
+export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
+  const deckOrder = [...STANDARD_DECK_ORDER];
+  const priceMatrix = raw.membraneScreen ? buildPriceMatrix(raw.membraneScreen) : {};
+
+  const labor: Record<string, LaborTables> = {};
+  for (const c of raw.combos) {
+    labor[`${c.roof_system}|${c.attachment}`] = buildLaborTables(c.data, deckOrder);
+  }
+
+  const s = raw.settings;
+  const settings: EngineSettings = {
+    hoursPerDay: s?.hours_per_man_day ?? 9,
+    masterEliteCont: s?.master_elite ?? true,
+    salesTax: s?.sales_tax_rate ?? 0,
+    taxMaterialOnly: s?.only_tax_material ?? false,
+    shippingMode: s?.shipping_method ?? "stepped",
+    shippingPercent: s?.shipping_percent ?? 0,
+  };
+
+  return { deckOrder, priceMatrix, labor, settings };
+}
