@@ -1,7 +1,6 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   FileText,
-  PlusCircle,
   Settings,
   Users,
   LogOut,
@@ -27,9 +26,8 @@ import {
 } from "@/components/ui/sidebar";
 
 const estimatorItems = [
-  { title: "Estimator", url: "/estimate", icon: Calculator },
+  { title: "New Estimate", url: "/estimate", icon: Calculator },
   { title: "Bids", url: "/bids", icon: FileText },
-  { title: "New Bid", url: "/new-bid", icon: PlusCircle },
 ];
 
 const adminItems = [

@@ -18,24 +18,6 @@ export const listBids = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
-const createBidSchema = z.object({
-  name: z.string().min(1).max(200),
-  status: z.enum(["draft", "sent", "won", "lost"]).optional(),
-});
-
-export const createBid = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator((data) => createBidSchema.parse(data))
-  .handler(async ({ data, context }) => {
-    const { data: bid, error } = await context.supabase
-      .from("bids")
-      .insert({ name: data.name, status: data.status ?? "draft" })
-      .select()
-      .single();
-    if (error) throw error;
-    return bid;
-  });
-
 const saveBidSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(200),

@@ -14,7 +14,6 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
 import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as NewBidRouteImport } from './routes/new-bid'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
@@ -45,11 +44,6 @@ const EstimateRoute = EstimateRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const NewBidRoute = NewBidRouteImport.update({
-  id: '/new-bid',
-  path: '/new-bid',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProposalRoute = ProposalRouteImport.update({
@@ -89,7 +83,6 @@ export interface FileRoutesByFullPath {
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
-  '/new-bid': typeof NewBidRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -103,7 +96,6 @@ export interface FileRoutesByTo {
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
-  '/new-bid': typeof NewBidRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -118,7 +110,6 @@ export interface FileRoutesById {
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
   '/login': typeof LoginRoute
-  '/new-bid': typeof NewBidRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -134,7 +125,6 @@ export interface FileRouteTypes {
     | '/bids'
     | '/estimate'
     | '/login'
-    | '/new-bid'
     | '/proposal'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -148,7 +138,6 @@ export interface FileRouteTypes {
     | '/bids'
     | '/estimate'
     | '/login'
-    | '/new-bid'
     | '/proposal'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -162,7 +151,6 @@ export interface FileRouteTypes {
     | '/bids'
     | '/estimate'
     | '/login'
-    | '/new-bid'
     | '/proposal'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -177,7 +165,6 @@ export interface RootRouteChildren {
   BidsRoute: typeof BidsRoute
   EstimateRoute: typeof EstimateRoute
   LoginRoute: typeof LoginRoute
-  NewBidRoute: typeof NewBidRoute
   ProposalRoute: typeof ProposalRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
@@ -221,13 +208,6 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/new-bid': {
-      id: '/new-bid'
-      path: '/new-bid'
-      fullPath: '/new-bid'
-      preLoaderRoute: typeof NewBidRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/proposal': {
@@ -281,7 +261,6 @@ const rootRouteChildren: RootRouteChildren = {
   BidsRoute: BidsRoute,
   EstimateRoute: EstimateRoute,
   LoginRoute: LoginRoute,
-  NewBidRoute: NewBidRoute,
   ProposalRoute: ProposalRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
