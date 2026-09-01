@@ -70,7 +70,7 @@ function BidsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Saved Bids</h1>
         <div className="flex items-center gap-2">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -115,7 +115,7 @@ function BidsPage() {
             return (
               <div
                 key={bid.id}
-                className="flex items-center justify-between rounded-lg border p-4"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-4"
               >
                 <div>
                   <div className="flex items-center gap-2">

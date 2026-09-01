@@ -156,7 +156,7 @@ export function CatalogEditor({
       <div className="space-y-2">
         <Label className="text-sm">Category</Label>
         <Select value={selected.id} onValueChange={(v) => setSelId(v)}>
-          <SelectTrigger className="w-[320px]">
+          <SelectTrigger className="w-[320px] max-w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

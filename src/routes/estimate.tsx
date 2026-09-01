@@ -611,7 +611,7 @@ function EstimatePage() {
   if (!admin) return <p className="text-sm text-muted-foreground">Could not load engine data.</p>;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_320px] lg:pb-0">
       <div className="space-y-6">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -621,11 +621,11 @@ function EstimatePage() {
               every change.
             </p>
           </div>
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Bid name</Label>
               <Input
-                className="w-[220px]"
+                className="w-[220px] max-w-full"
                 value={bidName}
                 onChange={(e) => setBidName(e.target.value)}
               />
@@ -838,7 +838,7 @@ function EstimatePage() {
 
         <div className={step === 1 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Roof sections</CardTitle>
             <Button
               variant="outline"
@@ -1231,7 +1231,7 @@ function EstimatePage() {
 
         <div className={step === 2 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Parapets</CardTitle>
             <Button
               variant="outline"
@@ -1376,7 +1376,7 @@ function EstimatePage() {
 
         <div className={step === 3 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Curbs</CardTitle>
             <Button
               variant="outline"
@@ -1503,7 +1503,7 @@ function EstimatePage() {
 
         <div className={step === 4 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Accessories</CardTitle>
             <Select
               value=""
@@ -1527,7 +1527,7 @@ function EstimatePage() {
                 }
               }}
             >
-              <SelectTrigger className="w-[240px]">
+              <SelectTrigger className="w-[240px] max-w-full">
                 <SelectValue placeholder="Add accessory…" />
               </SelectTrigger>
               <SelectContent>
@@ -1612,7 +1612,7 @@ function EstimatePage() {
 
         <div className={step === 5 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Metals</CardTitle>
             <Select
               value=""
@@ -1631,7 +1631,7 @@ function EstimatePage() {
                   ]);
               }}
             >
-              <SelectTrigger className="w-[240px]">
+              <SelectTrigger className="w-[240px] max-w-full">
                 <SelectValue placeholder="Add metals item…" />
               </SelectTrigger>
               <SelectContent>
@@ -1705,7 +1705,7 @@ function EstimatePage() {
 
         <div className={step === 6 ? "space-y-6" : "hidden"}>
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
             <Select
               value=""
@@ -1724,7 +1724,7 @@ function EstimatePage() {
                   ]);
               }}
             >
-              <SelectTrigger className="w-[240px]">
+              <SelectTrigger className="w-[240px] max-w-full">
                 <SelectValue placeholder="Add non-DL item…" />
               </SelectTrigger>
               <SelectContent>
@@ -2089,7 +2089,7 @@ function EstimatePage() {
           <Button variant="outline" disabled={step === 0} onClick={() => goStep(step - 1)}>
             <ChevronLeft className="mr-1 h-4 w-4" /> Previous
           </Button>
-          <span className="text-xs text-muted-foreground">
+          <span className="hidden text-xs text-muted-foreground sm:inline">
             Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
           </span>
           {step < STEPS.length - 1 ? (
@@ -2105,7 +2105,7 @@ function EstimatePage() {
         </div>
       </div>
 
-      <div className="lg:sticky lg:top-4 lg:self-start">
+      <div id="bid-total-panel" className="lg:sticky lg:top-4 lg:self-start">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Bid total</CardTitle>
@@ -2251,6 +2251,27 @@ function EstimatePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Mobile: the live total stays in reach on every step (the panel itself sits at the
+          bottom of the page on small screens). */}
+      {result && (
+        <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t bg-background/95 px-4 py-2 backdrop-blur lg:hidden">
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            Bid total
+            {result.warnings.length > 0 && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
+          </span>
+          <span className="font-semibold tabular-nums">{money(result.r.money.grandTotal)}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              document.getElementById("bid-total-panel")?.scrollIntoView({ behavior: "smooth" })
+            }
+          >
+            Details
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
