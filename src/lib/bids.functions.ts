@@ -87,3 +87,34 @@ export const getBid = createServerFn({ method: "GET" })
     if (error) throw error;
     return bid;
   });
+
+export interface CompanyInfo {
+  company_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  phone: string | null;
+}
+
+/** Company header fields for the proposal (any signed-in user; no admin gate). */
+export const getCompanyInfo = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<CompanyInfo> => {
+    const { data, error } = await context.supabase
+      .from("company_settings")
+      .select("company_name, address, city, state, zip, phone")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error) throw error;
+    return (
+      data ?? {
+        company_name: null,
+        address: null,
+        city: null,
+        state: null,
+        zip: null,
+        phone: null,
+      }
+    );
+  });

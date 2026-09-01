@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Save } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Save, FileText } from "lucide-react";
 
 import {
   getEngineAdminData,
@@ -21,6 +21,12 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
+import {
+  savedToBidInput,
+  emptyCustomer,
+  type CustomerInfo,
+  type SavedBidState,
+} from "@/lib/proposal-bid";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,20 +56,6 @@ export const Route = createFileRoute("/estimate")({
   },
   component: EstimatePage,
 });
-
-/** The persisted shape of a saved bid's estimator state. */
-interface SavedBid {
-  roofSystem: string;
-  attachment: "mechanical" | "adhered";
-  sections: BidSectionInput[];
-  accessories: AccessoryLine[];
-  nonDlLines: NonDlLine[];
-  markupMode: MarkupMode;
-  markup: number;
-  laborRate: number;
-  commission: number;
-  taxExempt: boolean;
-}
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const num = (v: string) => (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0;
@@ -131,6 +123,7 @@ function EstimatePage() {
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
+  const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
   const [laborRate, setLaborRate] = useState(50);
@@ -150,13 +143,14 @@ function EstimatePage() {
   const hydratedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!loadedBid || hydratedFor.current === loadedBid.id) return;
-    const d = loadedBid.data as unknown as Partial<SavedBid> | null;
+    const d = loadedBid.data as unknown as Partial<SavedBidState> | null;
     if (d && Array.isArray(d.sections)) {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
       setSections(d.sections.length ? d.sections : [newSection()]);
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
+      setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
       setLaborRate(d.laborRate ?? 50);
@@ -188,34 +182,20 @@ function EstimatePage() {
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
   const underlaymentOptions = ["None", ...Object.keys(admin?.underlaymentPrices ?? {})];
 
-  const bid: BidInput = {
+  const saved: SavedBidState = {
     roofSystem,
     attachment,
     sections,
     accessories,
     nonDlLines,
+    customer,
     markupMode,
     markup,
-    crewLaborRatePerHour: laborRate,
+    laborRate,
     commission,
-    commissionInMarkup: false,
-    perDiem: 0,
-    perDiemInMarkup: true,
-    prepayDiscount: false,
-    stdSizeDiscount: false,
-    volumeDiscount: false,
     taxExempt,
-    adjustLaborPct: 0,
-    extraShipping: 0,
-    subsCost: 0,
-    servicesCost: 0,
-    materialUnderlayment: 0,
-    otherMaterial: 0,
-    warrantyCostPerSqFt: 0,
-    warrantyNonEliteMasterCharge: 0,
-    warrantyIsHighWind: false,
-    warrantyHighWindUpcharge: 0,
   };
+  const bid: BidInput = savedToBidInput(saved);
 
   const result = useMemo(() => {
     if (!admin) return null;
@@ -241,18 +221,6 @@ function EstimatePage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const saved: SavedBid = {
-        roofSystem,
-        attachment,
-        sections,
-        accessories,
-        nonDlLines,
-        markupMode,
-        markup,
-        laborRate,
-        commission,
-        taxExempt,
-      };
       const grandTotal = result?.r.money.grandTotal ?? 0;
       const row = await saveBidFn({
         data: {
@@ -303,8 +271,49 @@ function EstimatePage() {
               <Save className="mr-2 h-4 w-4" />
               {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
             </Button>
+            <Button
+              variant="outline"
+              disabled={!bidId}
+              title={bidId ? "Open the printable proposal" : "Save the bid first"}
+              onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Proposal
+            </Button>
           </div>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Customer &amp; project</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <Field label="Customer name">
+              <Input
+                value={customer.name}
+                onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+              />
+            </Field>
+            <Field label="Contact (phone / email)">
+              <Input
+                value={customer.contact}
+                onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
+              />
+            </Field>
+            <Field label="Project address">
+              <Input
+                value={customer.projectAddress}
+                onChange={(e) => setCustomer((c) => ({ ...c, projectAddress: e.target.value }))}
+              />
+            </Field>
+            <Field label="Scope notes (optional, shown on the proposal)">
+              <Input
+                value={customer.notes}
+                onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
+              />
+            </Field>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
