@@ -319,6 +319,34 @@ describe("buildAccessoryCatalog (flatten price screens incl. color/box variants)
   });
 });
 
+describe("the _locked seed marker is invisible to the engine", () => {
+  it("buildAccessoryCatalog ignores a reserved _locked row key (it isn't a column)", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:vents",
+        category: "Vents",
+        data: {
+          columns: ["Description", "Part #", "Price"],
+          rows: [
+            { Description: "White Vent", "Part #": "1231", Price: 25.75, _locked: true } as never,
+          ],
+        },
+      },
+    ]);
+    expect(items).toHaveLength(1); // no phantom item from the marker
+    expect(items[0]).toMatchObject({ description: "White Vent", price: 25.75, variant: "" });
+  });
+
+  it("buildPriceMatrix ignores a reserved _locked row key", () => {
+    const matrix = buildPriceMatrix({
+      columns: ["Description", "White"],
+      rows: [{ Description: "Duro-Last - 40mil Roll Goods", White: 1.23, _locked: true } as never],
+    });
+    expect(matrix[40]?.rollGoods?.["White"]).toBe(1.23);
+    expect(matrix[40]?.rollGoods).not.toHaveProperty("_locked");
+  });
+});
+
 describe("buildAccessoryLaborLookup (best-effort per-unit hours prefill)", () => {
   it("maps single-'Labor(Hrs)' screens; skips multi-column screens; drops ambiguous keys", () => {
     const lookup = buildAccessoryLaborLookup([

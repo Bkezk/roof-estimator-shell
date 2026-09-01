@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, Save } from "lucide-react";
+import { Plus, Trash2, Save, Lock } from "lucide-react";
 
 import {
   getPricingCatalog,
@@ -31,6 +31,10 @@ import {
 
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
+
+/** Pre-loaded (seeded) rows carry `_locked: true`: name + delete are locked, prices stay editable. */
+const LOCK_KEY = "_locked";
+const isLocked = (row: Record<string, string | number | boolean>) => row[LOCK_KEY] === true;
 
 export function CatalogEditor({
   branch,
@@ -168,11 +172,18 @@ export function CatalogEditor({
               {draft.rows.map((row, ri) => (
                 <TableRow key={ri}>
                   <TableCell>
-                    <Input
-                      value={String(row["Description"] ?? "")}
-                      onChange={(e) => setCell(ri, "Description", e.target.value)}
-                      className="min-w-[220px]"
-                    />
+                    {isLocked(row) ? (
+                      <div className="flex min-w-[220px] items-center gap-1.5 text-sm">
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span>{String(row["Description"] ?? "")}</span>
+                      </div>
+                    ) : (
+                      <Input
+                        value={String(row["Description"] ?? "")}
+                        onChange={(e) => setCell(ri, "Description", e.target.value)}
+                        className="min-w-[220px]"
+                      />
+                    )}
                   </TableCell>
                   {valueCols.map((c) => (
                     <TableCell key={c}>
@@ -186,19 +197,28 @@ export function CatalogEditor({
                     </TableCell>
                   ))}
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        setDraft((p) => {
-                          const n = clone(p!);
-                          n.rows.splice(ri, 1);
-                          return n;
-                        })
-                      }
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {isLocked(row) ? (
+                      <span
+                        className="flex justify-center text-muted-foreground"
+                        title="Loaded item — can't be deleted; edit its prices only"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                      </span>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          setDraft((p) => {
+                            const n = clone(p!);
+                            n.rows.splice(ri, 1);
+                            return n;
+                          })
+                        }
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -219,6 +239,10 @@ export function CatalogEditor({
           >
             <Plus className="mr-1 h-4 w-4" /> Add row
           </Button>
+          <p className="text-xs text-muted-foreground">
+            Loaded items (<Lock className="inline h-3 w-3 align-[-1px]" />) keep their name and
+            can't be deleted — you can still edit their prices. Rows you add are fully editable.
+          </p>
         </CardContent>
       </Card>
 

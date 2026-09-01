@@ -9,7 +9,9 @@ export type PricingRow = Database["public"]["Tables"]["pricing_catalog"]["Row"];
 
 export interface CatalogScreenData {
   columns: string[];
-  rows: Record<string, string | number>[];
+  // Rows may carry a reserved `_locked: true` marker on pre-loaded (seeded) items — its name
+  // can't be edited and it can't be deleted, but its prices stay editable. User-added rows omit it.
+  rows: Record<string, string | number | boolean>[];
   help?: string;
   extras?: Record<string, string | number> | null;
 }
