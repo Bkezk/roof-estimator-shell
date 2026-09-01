@@ -31,7 +31,27 @@ export const getPricingCatalog = createServerFn({ method: "GET" })
       .eq("branch", data.branch)
       .order("sort");
     if (error) throw error;
-    return rows ?? [];
+    // Exclude master-detail screens (they carry a "kind" discriminator and have
+    // their own editors); the flat CatalogEditor only handles columns/rows screens.
+    return (rows ?? []).filter((r) => {
+      const d = r.data as { kind?: string } | null;
+      return !(d && typeof d === "object" && d.kind);
+    });
+  });
+
+const idSchema = z.object({ id: z.string() });
+
+export const getPricingScreen = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => idSchema.parse(d))
+  .handler(async ({ data, context }): Promise<PricingRow | null> => {
+    const { data: row, error } = await context.supabase
+      .from("pricing_catalog")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw error;
+    return row ?? null;
   });
 
 const saveSchema = z.object({

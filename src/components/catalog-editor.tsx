@@ -36,10 +36,12 @@ export function CatalogEditor({
   branch,
   title,
   intro,
+  hideHeader,
 }: {
   branch: string;
   title: string;
   intro?: string;
+  hideHeader?: boolean;
 }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getPricingCatalog);
@@ -93,10 +95,12 @@ export function CatalogEditor({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-        {intro && <p className="text-sm text-muted-foreground">{intro}</p>}
-      </div>
+      {!hideHeader && (
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          {intro && <p className="text-sm text-muted-foreground">{intro}</p>}
+        </div>
+      )}
 
       <div className="space-y-2">
         <Label className="text-sm">Category</Label>
