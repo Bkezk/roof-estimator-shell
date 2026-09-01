@@ -24,6 +24,7 @@ const combo: LaborCombo = {
   deck_multipliers: { Wood: 1, Concrete: 2 },
   fastener_spacing_multipliers: [
     { spacing_in: 18, multiplier: 1 },
+    { spacing_in: 12, multiplier: 1.1 },
     { spacing_in: 6, multiplier: 1.41 },
   ],
   sheet_size_multipliers: [{ label: "1500 sf", roof_section: 1, underlayment: 1 }],
@@ -58,6 +59,11 @@ const bid = (over: Partial<BidInput> = {}): BidInput => ({
       color: "White",
       fieldLap: 28,
       fastenerOc: 18,
+      perimLengthFt: 0,
+      cornerLengthFt: 0,
+      enhancementWidthFt: 3,
+      perimFastenerOc: 18,
+      cornerFastenerOc: 18,
       sheetSizeLabel: "1500 sf",
       tearOff: false,
       tearOffType: "",
@@ -109,6 +115,28 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     const S = r.money.subtotal1;
     expect(r.money.markupValue).toBeCloseTo(S / (1 - 0.35) - S, 2);
+  });
+
+  it("perimeter zone is carved from field and billed at the tighter-OC perimeter rate", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            perimLengthFt: 200, // 2×(50+50)
+            enhancementWidthFt: 3, // → 600 sf perimeter zone
+            perimFastenerOc: 12, // tighter than the 18" field
+          },
+        ],
+      }),
+      admin,
+    );
+    const s0 = inputs.sections[0]!;
+    expect(s0.perimArea).toBe(600);
+    expect(s0.fieldArea).toBe(1900); // 2500 − 600
+    const r = computeEstimate(inputs);
+    // field 1900 × 0.00605 (OC 18) + perim 600 × 0.006655 (OC 12 → ×1.1) = 11.495 + 3.993
+    expect(r.installHours).toBeCloseTo(15.488, 3);
   });
 
   it("tear-off wires the seeded rate: deck→tearoff-deck map, ÷100 scale, adds disposal + hours", () => {

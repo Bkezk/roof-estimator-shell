@@ -7,7 +7,9 @@
  *  - One roof system + attachment for the whole bid (the orchestrator takes one admin table set).
  *  - Roll-goods membrane: material sq ft = AreaWithEdgeOverlap (the simple edge-overlap path); the
  *    full roll-goods perimeter geometry (§2.2) is not applied.
- *  - Whole section billed as FIELD (perimeter/corner enhancement zones = 0).
+ *  - Perimeter/corner enhancement zones: areas are carved from the field by
+ *    length × enhancement-width (§2), billed at the perimeter/corner rate; the exact perimeter
+ *    geometry (which edges, corner sizing) is entered by the estimator rather than derived.
  *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
  *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
  *  - Freight table not wired (0); membrane price tier assumed roll-goods.
@@ -30,7 +32,13 @@ export interface BidSectionInput {
   thickness: number; // 40 / 50 / 60
   color: string; // e.g. "White"
   fieldLap: number; // tab lap inches
-  fastenerOc: number; // on-center inches (entered; auto-lookup pending capture)
+  fastenerOc: number; // field on-center inches (entered; auto-lookup pending capture)
+  // perimeter / corner enhancement zones (§2)
+  perimLengthFt: number; // total perimeter enhancement edge length
+  cornerLengthFt: number; // total corner enhancement length
+  enhancementWidthFt: number; // zone depth in from the edge (e.g. 3)
+  perimFastenerOc: number; // tighter OC in the perimeter zone
+  cornerFastenerOc: number; // tighter OC in the corner zone
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -114,13 +122,18 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
     }
 
+    // Carve the perimeter/corner enhancement zones out of the field area (§2, _230 subtracts both).
+    const perimArea = s.perimLengthFt * s.enhancementWidthFt;
+    const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
+    const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
+
     return {
       id: s.id,
       length: s.length,
       width: s.width,
-      fieldArea: s.length * s.width, // v1: whole section is field
-      perimArea: 0,
-      cornerArea: 0,
+      fieldArea,
+      perimArea,
+      cornerArea,
       membraneWithOverlap,
       arpSqFt: 0,
       thickness: s.thickness,
@@ -131,8 +144,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       perimLap: s.fieldLap,
       cornerLap: s.fieldLap,
       customFieldFastenerSpacing: s.fastenerOc,
-      customPerimFastenerSpacing: s.fastenerOc,
-      customCornerFastenerSpacing: s.fastenerOc,
+      customPerimFastenerSpacing: s.perimFastenerOc,
+      customCornerFastenerSpacing: s.cornerFastenerOc,
       deckTypeId: lt?.deckTypeIds[s.deckType] ?? 0,
       sheetSizeMulti: lt?.sheetSizeMultiByLabel[s.sheetSizeLabel] ?? 1,
       complexity: 1,

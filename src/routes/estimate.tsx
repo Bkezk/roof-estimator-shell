@@ -66,6 +66,11 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   color: "White",
   fieldLap: 28,
   fastenerOc: 18,
+  perimLengthFt: 0,
+  cornerLengthFt: 0,
+  enhancementWidthFt: 3,
+  perimFastenerOc: 12,
+  cornerFastenerOc: 6,
   sheetSizeLabel: "1500 sf",
   tearOff: false,
   tearOffType: "",
@@ -377,6 +382,50 @@ function EstimatePage() {
                       onChange={(e) => editSection(i, { fastenerOc: num(e.target.value) })}
                     />
                   </Field>
+                </div>
+                <div className="mt-3 border-t pt-3">
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">
+                    Perimeter / corner zones (leave length 0 to bill the whole section as field)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                    <Field label="Perim len (ft)">
+                      <Input
+                        type="number"
+                        value={s.perimLengthFt}
+                        onChange={(e) => editSection(i, { perimLengthFt: num(e.target.value) })}
+                      />
+                    </Field>
+                    <Field label="Corner len (ft)">
+                      <Input
+                        type="number"
+                        value={s.cornerLengthFt}
+                        onChange={(e) => editSection(i, { cornerLengthFt: num(e.target.value) })}
+                      />
+                    </Field>
+                    <Field label="Zone width (ft)">
+                      <Input
+                        type="number"
+                        value={s.enhancementWidthFt}
+                        onChange={(e) =>
+                          editSection(i, { enhancementWidthFt: num(e.target.value) })
+                        }
+                      />
+                    </Field>
+                    <Field label="Perim OC (in)">
+                      <Input
+                        type="number"
+                        value={s.perimFastenerOc}
+                        onChange={(e) => editSection(i, { perimFastenerOc: num(e.target.value) })}
+                      />
+                    </Field>
+                    <Field label="Corner OC (in)">
+                      <Input
+                        type="number"
+                        value={s.cornerFastenerOc}
+                        onChange={(e) => editSection(i, { cornerFastenerOc: num(e.target.value) })}
+                      />
+                    </Field>
+                  </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
                   <div className="flex items-center gap-2">
