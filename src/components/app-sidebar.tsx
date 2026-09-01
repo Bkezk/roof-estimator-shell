@@ -8,6 +8,7 @@ import {
   KeyRound,
   SlidersHorizontal,
   Package,
+  Layers,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
@@ -32,6 +33,7 @@ const estimatorItems = [
 const adminItems = [
   { title: "General", url: "/admin/settings", icon: Settings },
   { title: "Labor", url: "/admin/labor", icon: SlidersHorizontal },
+  { title: "Duro-Last Pricing", url: "/admin/duro-last", icon: Layers },
   { title: "Non-DL Pricing", url: "/admin/non-dl", icon: Package },
   { title: "Users", url: "/admin/users", icon: Users },
 ];
