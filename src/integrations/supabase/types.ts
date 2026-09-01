@@ -391,6 +391,33 @@ export type Database = {
         }
         Relationships: []
       }
+      rdl_combos: {
+        Row: {
+          attachment: string
+          data: Json
+          formula: string | null
+          id: string
+          roof_system: string
+          sort: number
+        }
+        Insert: {
+          attachment: string
+          data?: Json
+          formula?: string | null
+          id?: string
+          roof_system: string
+          sort?: number
+        }
+        Update: {
+          attachment?: string
+          data?: Json
+          formula?: string | null
+          id?: string
+          roof_system?: string
+          sort?: number
+        }
+        Relationships: []
+      }
       shipping_steps: {
         Row: {
           id: string
