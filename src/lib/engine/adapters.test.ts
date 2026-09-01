@@ -8,6 +8,7 @@ import {
   buildTearOffLookup,
   buildUnderlaymentPrices,
   buildAccessoryCatalog,
+  buildAccessoryLaborLookup,
   buildNonDlCatalog,
   buildShippingSteps,
   buildSetupTable,
@@ -315,6 +316,51 @@ describe("buildAccessoryCatalog (flatten price screens incl. color/box variants)
       },
     ]);
     expect(items).toHaveLength(0);
+  });
+});
+
+describe("buildAccessoryLaborLookup (best-effort per-unit hours prefill)", () => {
+  it("maps single-'Labor(Hrs)' screens; skips multi-column screens; drops ambiguous keys", () => {
+    const lookup = buildAccessoryLaborLookup([
+      {
+        id: "acc:corners",
+        category: "Corners",
+        data: {
+          columns: ["Description", "Labor(Hrs)"],
+          rows: [
+            { Description: 'Inside 6" x 6"', "Labor(Hrs)": 0.1667 },
+            { Description: 'Outside 18" x 12"', "Labor(Hrs)": 0.3333 },
+          ],
+        },
+      },
+      {
+        id: "acc:fascia_bars",
+        category: "Fascia Bars",
+        data: {
+          // multi-column drill screen → skipped entirely (which column applies is unknown)
+          columns: ["Description", "PreDrill Labor(Hrs)", "NoDrill Labor (Hrs)"],
+          rows: [
+            {
+              Description: '4" Fascia Bar',
+              "PreDrill Labor(Hrs)": 0.0395,
+              "NoDrill Labor (Hrs)": 0.0197,
+            },
+          ],
+        },
+      },
+      {
+        id: "acc:conflict",
+        category: "Other",
+        data: {
+          // same description, different hours as an earlier screen → ambiguous → dropped
+          columns: ["Description", "Labor (Hrs)"],
+          rows: [{ Description: 'Inside 6" x 6"', "Labor (Hrs)": 0.9 }],
+        },
+      },
+    ]);
+    expect(lookup['Outside 18" x 12"']).toBe(0.3333);
+    expect(lookup['4" Fascia Bar']).toBeUndefined(); // drill screen skipped
+    expect(lookup['Inside 6" x 6"']).toBeUndefined(); // 0.1667 vs 0.9 → ambiguous, dropped
   });
 });
 

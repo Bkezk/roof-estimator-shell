@@ -13,8 +13,9 @@
  *    resolved upstream) and membrane-with-overlap sq ft (roll-goods geometry is still unvalidated).
  *
  * FLAGGED FOR BID VALIDATION (Phase 6): the exact membership of the direct-labor subtotal
- * (LaborSubtotal1) — here modeled as install + setup + inspection + tear-off hours at one crew rate
- * — must be confirmed against a captured bid, along with the roll-goods geometry and .NET rounding.
+ * (LaborSubtotal1) — here modeled as install + setup + inspection + tear-off + accessory hours at
+ * one crew rate — must be confirmed against a captured bid, along with the roll-goods geometry and
+ * .NET rounding.
  */
 
 import { calcLaborCost, goodSingle } from "./rounding";
@@ -115,6 +116,8 @@ export interface EstimateInputs {
   adjustSetupLaborPct: number;
   adjustInspectionPct: number;
   crewLaborRatePerHour: number;
+  /** Accessory install labor hours (Σ per-unit hrs × qty); billed as direct labor at the crew rate. */
+  accessoryLaborHours?: number;
 
   // tear-off / disposal
   tearOffFillFraction: number; // Estimate.TearOff_VolumeMod
@@ -322,12 +325,13 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
 
   // Direct-labor hours & cost. SEAM — FLAGGED FOR BID VALIDATION (Phase 6):
   //  (a) which hours belong to the direct-labor subtotal (here: install + setup + inspection +
-  //      tear-off) and whether each bills at one crew rate;
+  //      tear-off + accessory) and whether each bills at one crew rate;
   //  (b) whether the money chain's row 11 (LaborSubtotal2, "labor+subs+services") re-includes the
   //      direct labor already in row 10 — the doc's literal 8+9+10+11 would then double-add it.
   //      We feed row 11 as subs + services ONLY (the non-double-counting reading) until a captured
   //      bid settles it.
-  const laborSubtotal1Hours = installHours + setupHours + inspectionHours + tearOffLaborHours;
+  const laborSubtotal1Hours =
+    installHours + setupHours + inspectionHours + tearOffLaborHours + (e.accessoryLaborHours ?? 0);
   const laborSubtotal1 = goodSingle(calcLaborCost(e.crewLaborRatePerHour, laborSubtotal1Hours));
   const laborSubtotal2 = e.subsCost + e.servicesCost;
 

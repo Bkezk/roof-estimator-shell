@@ -13,6 +13,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
   assembleEngineAdminData,
   buildAccessoryCatalog,
+  buildAccessoryLaborLookup,
   buildNonDlCatalog,
   type AccessoryCatalogItem,
   type NonDlCatalogItem,
@@ -116,6 +117,27 @@ export const getAccessoryCatalog = createServerFn({ method: "GET" })
       data: r.data as unknown as MembraneScreen,
     }));
     return buildAccessoryCatalog(rows);
+  });
+
+/**
+ * Best-effort accessory install-labor prefill (description → hours/unit) from the accessory_labor
+ * screens. Partial by design (single-"Labor(Hrs)" screens only); the estimator can edit any value.
+ * Authenticated read.
+ */
+export const getAccessoryLaborLookup = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<Record<string, number>> => {
+    const { data, error } = await context.supabase
+      .from("accessory_labor")
+      .select("id, category, data")
+      .order("sort");
+    if (error) throw error;
+    const rows = (data ?? []).map((r) => ({
+      id: r.id,
+      category: r.category,
+      data: r.data as unknown as MembraneScreen,
+    }));
+    return buildAccessoryLaborLookup(rows);
   });
 
 /** Pickable non-Duro-Last catalog (blocking, sheet metal, subs, services, …). Authenticated read. */

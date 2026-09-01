@@ -20,8 +20,10 @@
  *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs stay 0 until the UI adds
  *    them (the engine already accepts them).
  *  - Accessory material wired: a bid carries accessory line items (description + snapshot price +
- *    quantity); the total folds into M0. Accessory LABOR (from the Accessory Labor tables) is a
- *    later step.
+ *    quantity); the total folds into M0. Accessory LABOR is wired too: each line carries per-unit
+ *    hours (prefilled from the accessory_labor single-hours screens where an exact description
+ *    matches, else entered); Σ(hrs × qty) folds into direct labor. Per-foot / drill-variant /
+ *    fastener-derived accessory labor is entered manually until a captured bid validates it.
  *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
  *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
  */
@@ -67,6 +69,8 @@ export interface AccessoryLine {
   description: string;
   price: number;
   quantity: number;
+  /** Install labor hours per unit (prefilled where known, else entered); folds into direct labor. */
+  laborHoursPerUnit?: number;
 }
 
 /**
@@ -215,6 +219,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // Accessory material folds into M0 (dMaterial[4] sits within Σ dMaterial[0..6]).
   const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const duroLastMaterial = membraneMaterial + accessoryMaterial;
+
+  // Accessory install labor (Σ per-unit hrs × qty) → direct labor (LaborSubtotal1) at the crew rate.
+  const accessoryLaborHours = bid.accessories.reduce(
+    (sum, a) => sum + (a.laborHoursPerUnit ?? 0) * a.quantity,
+    0,
+  );
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
@@ -256,6 +266,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustLaborPct: bid.adjustLaborPct,
     adjustSetupLaborPct: 0,
     adjustInspectionPct: 0,
+    accessoryLaborHours,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage: 30,

@@ -5,7 +5,12 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Trash2, AlertTriangle, Save } from "lucide-react";
 
-import { getEngineAdminData, getAccessoryCatalog, getNonDlCatalog } from "@/lib/engine.functions";
+import {
+  getEngineAdminData,
+  getAccessoryCatalog,
+  getAccessoryLaborLookup,
+  getNonDlCatalog,
+} from "@/lib/engine.functions";
 import { getBid, saveBid } from "@/lib/bids.functions";
 import {
   buildEstimateInputs,
@@ -96,6 +101,7 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
 function EstimatePage() {
   const getFn = useServerFn(getEngineAdminData);
   const getAccFn = useServerFn(getAccessoryCatalog);
+  const getAccLaborFn = useServerFn(getAccessoryLaborLookup);
   const getNonDlFn = useServerFn(getNonDlCatalog);
   const getBidFn = useServerFn(getBid);
   const saveBidFn = useServerFn(saveBid);
@@ -110,6 +116,10 @@ function EstimatePage() {
   const { data: accCatalog } = useQuery({
     queryKey: ["accessory-catalog"],
     queryFn: () => getAccFn(),
+  });
+  const { data: accLaborLookup } = useQuery({
+    queryKey: ["accessory-labor-lookup"],
+    queryFn: () => getAccLaborFn(),
   });
   const { data: nonDlCatalog } = useQuery({
     queryKey: ["nondl-catalog"],
@@ -215,6 +225,10 @@ function EstimatePage() {
   }, [admin, JSON.stringify(bid)]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+  const accessoryLaborHours = accessories.reduce(
+    (sum, a) => sum + (a.laborHoursPerUnit ?? 0) * a.quantity,
+    0,
+  );
   const nonDlMaterialTotal = nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
   const nonDlLaborTotal = nonDlLines.reduce(
     (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
@@ -514,15 +528,22 @@ function EstimatePage() {
               value=""
               onValueChange={(key) => {
                 const item = accCatalog?.find((a) => a.key === key);
-                if (item)
+                if (item) {
+                  // Prefill labor from the base description (before the " — color" suffix), if known.
+                  const baseDesc = item.variant
+                    ? item.description.slice(0, -` — ${item.variant}`.length)
+                    : item.description;
+                  const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
                   setAccessories((p) => [
                     ...p,
                     {
                       description: `${item.category} — ${item.description}`,
                       price: item.price,
                       quantity: 1,
+                      laborHoursPerUnit,
                     },
                   ]);
+                }
               }}
             >
               <SelectTrigger className="w-[240px]">
@@ -545,8 +566,9 @@ function EstimatePage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Item</TableHead>
-                    <TableHead className="w-[90px]">Unit</TableHead>
-                    <TableHead className="w-[90px]">Qty</TableHead>
+                    <TableHead className="w-[80px]">Unit</TableHead>
+                    <TableHead className="w-[90px]">Labor h/ea</TableHead>
+                    <TableHead className="w-[80px]">Qty</TableHead>
                     <TableHead className="w-[100px] text-right">Total</TableHead>
                     <TableHead className="w-[44px]" />
                   </TableRow>
@@ -556,6 +578,21 @@ function EstimatePage() {
                     <TableRow key={i}>
                       <TableCell>{a.description}</TableCell>
                       <TableCell>{money(a.price)}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.0001"
+                          className="h-8 w-[80px]"
+                          value={a.laborHoursPerUnit ?? 0}
+                          onChange={(e) =>
+                            setAccessories((p) =>
+                              p.map((x, j) =>
+                                j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
+                              ),
+                            )
+                          }
+                        />
+                      </TableCell>
                       <TableCell>
                         <Input
                           type="number"
@@ -801,6 +838,12 @@ function EstimatePage() {
                   <span>Install hours</span>
                   <span>{result.r.installHours.toFixed(2)}</span>
                 </div>
+                {accessoryLaborHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Accessory hours</span>
+                    <span>{accessoryLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span>Man-days</span>
                   <span>{result.r.money.totalManDays.toFixed(2)}</span>

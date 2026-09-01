@@ -268,6 +268,21 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.shipping).toBeCloseTo(159.96, 2);
   });
 
+  it("accessory labor (per-unit hrs × qty) folds into direct labor (LaborSubtotal1)", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        accessories: [
+          { description: 'Inside 6" x 6"', price: 4.4, quantity: 6, laborHoursPerUnit: 0.1667 },
+        ],
+      }),
+      admin,
+    );
+    expect(inputs.accessoryLaborHours).toBeCloseTo(1.0002, 4); // 6 × 0.1667
+    const r = computeEstimate(inputs);
+    // install 15.125 + accessory 1.0002 = 16.1252 direct-labor hours
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 1.0002, 3);
+  });
+
   it("non-DL lines: material → OtherMaterial (taxable basis), labor $ → services (LaborSubtotal2)", () => {
     const { inputs } = buildEstimateInputs(
       bid({

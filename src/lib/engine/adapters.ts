@@ -162,6 +162,43 @@ export function buildAccessoryCatalog(
   return items;
 }
 
+/**
+ * Build a best-effort accessory install-labor lookup (description → hours per unit) from the
+ * accessory_labor screens. DELIBERATELY PARTIAL: only screens whose single labor column is exactly
+ * "Labor(Hrs)" / "Labor (Hrs)" are mapped — the multi-column screens (PreDrill/NoDrill, Hr/Ft,
+ * Multiplier, Area-Prep/Reinstallation) are left out because which column applies isn't determinable
+ * without a captured bid. A description that resolves to two different hour values across screens is
+ * dropped (ambiguous → manual entry). This is a UI prefill only; every value stays editable, and it
+ * never fabricates a mapping (exact string equality on curated admin data, no fuzzy matching).
+ *
+ * FLAGGED FOR BID VALIDATION (Phase 6): per-foot / drill-variant / fastener-derived accessory labor,
+ * and items whose pricing- and labor-screen descriptions differ, are not prefilled here.
+ */
+export function buildAccessoryLaborLookup(
+  rows: Array<{ id: string; category: string; data: MembraneScreen }>,
+): Record<string, number> {
+  const HOURS_COLS = ["Labor(Hrs)", "Labor (Hrs)"];
+  const seen: Record<string, number | null> = {}; // null marks an ambiguous (conflicting) key
+  for (const row of rows) {
+    const cols = row.data?.columns ?? [];
+    const hoursCol = HOURS_COLS.find((c) => cols.includes(c));
+    if (!hoursCol) continue; // skip multi-column / non-simple labor screens
+    for (const r of row.data.rows ?? []) {
+      const desc = String(r["Description"] ?? "");
+      const h = r[hoursCol];
+      if (!desc || typeof h !== "number") continue;
+      if (desc in seen) {
+        if (seen[desc] !== h) seen[desc] = null; // conflict → drop
+      } else {
+        seen[desc] = h;
+      }
+    }
+  }
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(seen)) if (v !== null) out[k] = v;
+  return out;
+}
+
 /** One pickable non-Duro-Last catalog line (material Price + a labor component at its own rate). */
 export interface NonDlCatalogItem {
   key: string; // `${screenId}::${description}`
