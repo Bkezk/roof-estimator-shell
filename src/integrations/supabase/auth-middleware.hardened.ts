@@ -1,0 +1,133 @@
+// Hand-maintained copy of the Lovable-generated auth middleware — this file is OURS
+// and must NOT be regenerated or replaced by integration scaffolding.
+//
+// Why it exists: the generated auth-middleware.ts validates JWTs with getClaims(),
+// which checks the token locally against this server's clock. Preview/sandbox
+// containers can run behind real time, so freshly issued tokens fail with
+// "JWT issued at future" and every server function 500s. This version falls back
+// to auth.getUser() — validated on Supabase's servers, immune to local clock skew.
+// All *.functions.ts files import requireSupabaseAuth from HERE, not from the
+// generated auth-middleware.ts, so a Lovable regeneration can't drop the fix.
+import { createMiddleware } from '@tanstack/react-start'
+import { getRequest } from '@tanstack/react-start/server'
+import { createClient } from '@supabase/supabase-js'
+import type { Database } from './types'
+
+function isNewSupabaseApiKey(value: string): boolean {
+  return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
+}
+
+function createSupabaseFetch(supabaseKey: string): typeof fetch {
+  return (input, init) => {
+    const headers = new Headers(
+      typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
+    );
+
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+    }
+
+    // New Supabase API keys are opaque strings, not bearer JWTs.
+    if (isNewSupabaseApiKey(supabaseKey) && headers.get('Authorization') === `Bearer ${supabaseKey}`) {
+      headers.delete('Authorization');
+    }
+
+    headers.set('apikey', supabaseKey);
+    return fetch(input, { ...init, headers });
+  };
+}
+
+export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
+  async ({ next }) => {
+
+    const SUPABASE_URL = process.env['SUPABASE_URL'];
+    const SUPABASE_PUBLISHABLE_KEY = process.env['SUPABASE_PUBLISHABLE_KEY'];
+
+    if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+      const missing = [
+        ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
+        ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
+      ];
+      const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
+      console.error(`[Supabase] ${message}`);
+      throw new Error(message);
+    }
+
+    const request = getRequest();
+
+    if (!request?.headers) {
+      throw new Error('Unauthorized: No request headers available');
+    }
+
+    const authHeader = request.headers.get('authorization');
+
+    if (!authHeader) {
+      throw new Error('Unauthorized: No authorization header provided');
+    }
+
+    if (!authHeader.startsWith('Bearer ')) {
+      throw new Error('Unauthorized: Only Bearer tokens are supported');
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    if (!token) {
+      throw new Error('Unauthorized: No token provided');
+    }
+
+    if (token.split('.').length !== 3) {
+      throw new Error('Unauthorized: Invalid token');
+    }
+
+    const supabase = createClient<Database>(
+      SUPABASE_URL!,
+      SUPABASE_PUBLISHABLE_KEY!,
+      {
+        global: {
+          fetch: createSupabaseFetch(SUPABASE_PUBLISHABLE_KEY!),
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        auth: {
+          storage: undefined,
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      }
+    );
+
+    // getClaims() verifies the JWT locally against this server's clock; preview/sandbox
+    // containers can run behind real time, making fresh tokens fail as "JWT issued at
+    // future". When local verification fails, fall back to auth.getUser(), which
+    // validates the token on Supabase's servers and is immune to local clock skew.
+    const { data, error } = await supabase.auth.getClaims(token);
+    let claims = !error && data?.claims ? data.claims : null;
+
+    if (!claims) {
+      const { data: userData, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !userData?.user) {
+        throw new Error('Unauthorized: Invalid token');
+      }
+      // Token is server-verified at this point; decode the payload for the claims.
+      let decoded: Record<string, unknown> = {};
+      try {
+        decoded = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
+      } catch {
+        // Fall through with minimal claims below.
+      }
+      claims = { ...decoded, sub: userData.user.id } as NonNullable<typeof claims>;
+    }
+
+    if (!claims.sub) {
+      throw new Error('Unauthorized: No user ID found in token');
+    }
+
+    return next({
+      context: {
+        supabase,
+        userId: claims.sub,
+        claims,
+      },
+    });
+  },
+);

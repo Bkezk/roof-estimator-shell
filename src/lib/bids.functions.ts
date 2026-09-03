@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
 import { BID_STATUSES } from "@/lib/bid-status";
 

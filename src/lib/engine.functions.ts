@@ -9,7 +9,7 @@
 
 import { createServerFn } from "@tanstack/react-start";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import {
   assembleEngineAdminData,
   buildAccessoryCatalog,
