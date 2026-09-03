@@ -8,6 +8,12 @@
 import type { BidSectionInput } from "./bid-builder";
 import { sectionLayers } from "./bid-builder";
 import { perimeterFromEdges } from "./edges";
+import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
+
+/** Row-style tab systems whose membrane screws come from the DLRowStyle port (§2.2). */
+const ROW_STYLE_SYSTEMS = new Set(["Duro-Last", "Duro-Roof", "Duro-Tuff"]);
+/** RoofSystem.OverlapWidth — 6" for the DL families (legacy_roof_system.lap_over). */
+const OVERLAP_WIDTH_IN = 6;
 
 /** §2.1 — 21 fasteners per 10-ft bar (term bar, fascia, drip edge, gravel stop). */
 export const edgeBarScrews = (lengthFt: number): number =>
@@ -90,6 +96,7 @@ export interface NeededQuantities {
   breakdown: {
     edgeBarScrews: number;
     twoPieceScrews: number;
+    membraneScrews: number;
     insulationScrews: number;
     parapetDeckScrews: number;
   };
@@ -116,9 +123,41 @@ export function computeNeededQuantities(args: {
   );
 
   const membraneAdheredOrBond = args.attachment === "adhered" || args.roofSystem === "Duro-Bond";
+  // §2.2 — membrane screws (DLRowStyle port) for mechanical row-style tab systems; poly plates
+  // are 1 per membrane screw. Duro-Bond membrane welds to the insulation plates (induction) and
+  // is excluded here.
+  const rowStyle = args.attachment === "mechanical" && ROW_STYLE_SYSTEMS.has(args.roofSystem);
+  let membraneScrews = 0;
   let insulationScrews = 0;
   const adhesiveRaw: Record<string, number> = {};
   for (const s of args.sections) {
+    if (rowStyle && s.fastenerOc > 0 && s.fieldLap > OVERLAP_WIDTH_IN) {
+      // Sides A–D map to legacy 0–3 (A/C are the length-run tab sides that carve the width).
+      const bySide = (side: string) => (s.edges ?? []).find((e) => e.side === side);
+      const sideIsPerim = (["A", "B", "C", "D"] as const).map(
+        (side) => bySide(side)?.isPerimeter ?? false,
+      ) as [boolean, boolean, boolean, boolean];
+      membraneScrews += dlRowStyleFastenersField({
+        lengthFt: s.length,
+        widthFt: s.width,
+        fieldLapIn: s.fieldLap,
+        fieldSpacingIn: s.fastenerOc,
+        overlapWidthIn: OVERLAP_WIDTH_IN,
+        perimLapIn: -1, // legacy default section
+        perimEnhancementWidthFt: 0, // quick-bid default — the strip term vanishes
+        sideIsPerim,
+        useCustomSettings: false,
+        quickBid: true,
+      });
+      membraneScrews += dlRowStyleFastenersPerim({
+        fieldLapIn: s.fieldLap,
+        spacingIn: s.fastenerOc, // legacy divides by the FIELD-column spacing (port note)
+        perimSideLengthsFt: (["A", "B", "C", "D"] as const).map(
+          (side) => bySide(side)?.lengthFt ?? 0,
+        ) as [number, number, number, number],
+        sideIsPerim,
+      });
+    }
     const roofArea = s.length * s.width;
     const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
     const perimArea = Math.min(roofArea, perimLen * s.enhancementWidthFt);
@@ -154,14 +193,15 @@ export function computeNeededQuantities(args: {
   for (const [name, units] of Object.entries(adhesiveRaw)) adhesiveUnits[name] = Math.ceil(units);
 
   return {
-    screws: barScrews + twoPc + insulationScrews + parapetScrews,
-    polyPlates: parapetScrews,
+    screws: barScrews + twoPc + membraneScrews + insulationScrews + parapetScrews,
+    polyPlates: membraneScrews + parapetScrews,
     insulationPlates: insulationScrews,
     caulkTubes: caulkTubes(bars.termBarLf + bars.fasciaLf),
     adhesiveUnits,
     breakdown: {
       edgeBarScrews: barScrews,
       twoPieceScrews: twoPc,
+      membraneScrews,
       insulationScrews,
       parapetDeckScrews: parapetScrews,
     },

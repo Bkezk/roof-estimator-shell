@@ -80,6 +80,28 @@ describe("consumption rules (§2 port)", () => {
     expect(parapetDeckFasteners(48.4)).toBe(48);
   });
 
+  it("membrane screws (DLRowStyle port): quick-bid field rows + perim rows on row-style systems", () => {
+    // Matches membrane-fasteners.test: 100×80, lap 60, oc 18, no perim sides → 1200 field screws.
+    const r = computeNeededQuantities({
+      sections: [section({ length: 100, width: 80, fieldLap: 60, fastenerOc: 18 })],
+      parapets: [],
+      attachment: "mechanical",
+      roofSystem: "Duro-Last",
+    });
+    expect(r.breakdown.membraneScrews).toBe(1200);
+    expect(r.screws).toBe(1200);
+    expect(r.polyPlates).toBe(1200); // 1 poly plate per membrane screw
+    // Adhered membrane and Duro-Bond are not row-style paths.
+    expect(
+      computeNeededQuantities({
+        sections: [section({ length: 100, width: 80, fieldLap: 60, fastenerOc: 18 })],
+        parapets: [],
+        attachment: "adhered",
+        roofSystem: "Duro-Last",
+      }).breakdown.membraneScrews,
+    ).toBe(0);
+  });
+
   it("aggregates a bid: terminated edges + insulation + parapets; adhesive ceilinged once per estimate", () => {
     const s1 = section({
       edges: [
@@ -111,13 +133,18 @@ describe("consumption rules (§2 port)", () => {
     // Bars: T-Bar 100 + Drip 100 → ceil(200/10*21)=420; two-piece 4" → ceil(100/10*63)=630.
     expect(r.breakdown.edgeBarScrews).toBe(420);
     expect(r.breakdown.twoPieceScrews).toBe(630);
+    // Membrane screws (lap 28, oc 18, side A perim):
+    // s1 field: strip[0]=30 → fieldW=70, rows=Ceil(70/In2Ft(22)=1.83)=39, 3900/1.5=2600;
+    // s1 perim (lap<120, side A): 100/1.5 → 67; s2 (50×50, no edges): rows=Ceil(50/1.83)=28,
+    // 1400/1.5 → 933. Total 3600.
+    expect(r.breakdown.membraneScrews).toBe(2600 + 67 + 933);
     // Insulation (s1): perim 100ft(edge A only? perimeterFromEdges counts isPerimeter edges)=100*3=300 perim area.
     // field 10000-300=9700 → round(9700/32)*5=1515; perim round(300/32)*5... mechanical membrane → 5/32 both.
     expect(r.breakdown.insulationScrews).toBe(
       Math.round(9700 / 32) * 5 + Math.round(300 / 32) * 5,
     );
     expect(r.breakdown.parapetDeckScrews).toBe(40);
-    expect(r.polyPlates).toBe(40);
+    expect(r.polyPlates).toBe(40 + 3600); // parapet decks + 1 per membrane screw
     expect(r.insulationPlates).toBe(r.breakdown.insulationScrews);
     // Adhesive: 10000/1700 + 2500/1700 = 7.35... → ceil once = 8 (NOT ceil(5.88)+ceil(1.47)=7+2=9).
     expect(r.adhesiveUnits["OlyBond500 Bag-in-Box"]).toBe(8);

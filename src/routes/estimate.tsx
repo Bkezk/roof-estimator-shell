@@ -2180,12 +2180,12 @@ function EstimatePage() {
             {(() => {
               const rows: { label: string; needed: number; entered: number | null }[] = [
                 {
-                  label: `Screws (bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
+                  label: `Screws (membrane ${neededQty.breakdown.membraneScrews} + bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
                   needed: neededQty.screws,
                   entered: enteredQty.screws,
                 },
                 {
-                  label: "Poly plates (parapet deck fasteners)",
+                  label: "Poly plates (1 per membrane screw + parapet decks)",
                   needed: neededQty.polyPlates,
                   entered: enteredQty.polyPlates,
                 },
@@ -2257,12 +2257,14 @@ function EstimatePage() {
               );
             })()}
             <p className="text-xs text-muted-foreground">
-              Rules from the extracted legacy engine: 21 screws per 10-ft bar (42/63 for
-              two-piece), insulation fasteners per board density (doubled under
-              adhered/Duro-Bond membranes), plates 1-per-screw, adhesive units area ÷ coverage
-              ceilinged once per adhesive. Not yet included: membrane field/perimeter fastener
-              rows and their poly plates (row-style count port pending), washer/drain caulk
-              adders, and pipe-stack sealant — add those manually for now.
+              Rules from the extracted legacy engine: membrane screws from the row-style
+              field/perimeter count (mark perimeter edges in Sections for the perimeter rows;
+              the legacy 30-ft perimeter strip constant is flagged for bid validation), 21
+              screws per 10-ft bar (42/63 for two-piece), insulation fasteners per board
+              density (doubled under adhered/Duro-Bond membranes), plates 1-per-screw,
+              adhesive units area ÷ coverage ceilinged once per adhesive. Not included:
+              washer/drain caulk adders, pipe-stack sealant, and custom-layout sheets — add
+              those manually for now.
             </p>
           </CardContent>
         </Card>
