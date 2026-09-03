@@ -89,20 +89,37 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       }
     );
 
+    // getClaims() verifies the JWT locally against this server's clock; preview/sandbox
+    // containers can run behind real time, making fresh tokens fail as "JWT issued at
+    // future". When local verification fails, fall back to auth.getUser(), which
+    // validates the token on Supabase's servers and is immune to local clock skew.
     const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims) {
-      throw new Error('Unauthorized: Invalid token');
+    let claims = !error && data?.claims ? data.claims : null;
+
+    if (!claims) {
+      const { data: userData, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !userData?.user) {
+        throw new Error('Unauthorized: Invalid token');
+      }
+      // Token is server-verified at this point; decode the payload for the claims.
+      let decoded: Record<string, unknown> = {};
+      try {
+        decoded = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
+      } catch {
+        // Fall through with minimal claims below.
+      }
+      claims = { ...decoded, sub: userData.user.id } as NonNullable<typeof claims>;
     }
 
-    if (!data.claims.sub) {
+    if (!claims.sub) {
       throw new Error('Unauthorized: No user ID found in token');
     }
 
     return next({
       context: {
         supabase,
-        userId: data.claims.sub,
-        claims: data.claims,
+        userId: claims.sub,
+        claims,
       },
     });
   },
