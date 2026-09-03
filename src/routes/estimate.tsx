@@ -690,7 +690,8 @@ function EstimatePage() {
       accessoryMaterial: accessoryTotal,
       underlaymentMaterial: d[6] ?? 0,
       otherMaterial: d[7] ?? 0,
-      discounts: (d[1] ?? 0) + (d[2] ?? 0) + (d[3] ?? 0),
+      // Applied discounts only (d[4]−d[0]); d[1..3] are candidates computed regardless of toggles.
+      discounts: (d[4] ?? 0) - (d[0] ?? 0),
       warrantyCost: d[5] ?? 0,
       shipping: d[9] ?? 0,
       laborCost: result.r.laborSubtotal1,
