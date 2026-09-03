@@ -302,38 +302,103 @@ function MembraneEditor() {
         </Card>
       )}
 
-      {/* Duro-Bond base labor */}
-      {d.duro_bond_base_labor && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Base labor (Duro-Bond)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="max-w-[220px] space-y-2">
-              <Label>Sheet layout (hours)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={d.duro_bond_base_labor.sheet_layout_hr}
-                onChange={(e) =>
-                  update((x) => {
-                    x.duro_bond_base_labor!.sheet_layout_hr = num(e.target.value);
-                  })
-                }
-              />
-            </div>
-            <ObjectGrid
-              title="Fastener time (min per fastener) by deck"
-              obj={d.duro_bond_base_labor.single_fastener_time_min_per_fastener_by_deck}
-              onChange={(k, v) =>
-                update((x) => {
-                  x.duro_bond_base_labor!.single_fastener_time_min_per_fastener_by_deck[k] = v;
-                })
-              }
-            />
-          </CardContent>
-        </Card>
-      )}
+      {/* Duro-Bond base labor — legacy-style: editable sheet layout + min/fastener row,
+          computed hours per fastener-density row below. */}
+      {d.duro_bond_base_labor &&
+        (() => {
+          const db = d.duro_bond_base_labor;
+          const dbDecks =
+            db.deck_column_order ??
+            orderedDeckKeys(db.single_fastener_time_min_per_fastener_by_deck);
+          const densities = (db as { fastener_density_rows_computed_only?: number[] })
+            .fastener_density_rows_computed_only ?? [20, 18, 16, 14, 12, 10, 8, 6];
+          return (
+            <Card>
+              <CardHeader>
+                <CardTitle>1. Base labor</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="whitespace-nowrap">Sheet layout (hr)</TableHead>
+                        <TableHead className="whitespace-nowrap">Fasteners / 32 sq ft</TableHead>
+                        {dbDecks.map((k) => (
+                          <TableHead key={k} className="whitespace-nowrap text-center">
+                            {k}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                      <TableRow>
+                        <TableHead>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            value={db.sheet_layout_hr}
+                            onChange={(e) =>
+                              update((x) => {
+                                x.duro_bond_base_labor!.sheet_layout_hr = num(e.target.value);
+                              })
+                            }
+                            className="w-20"
+                          />
+                        </TableHead>
+                        <TableHead className="whitespace-nowrap text-muted-foreground">
+                          min / fastener →
+                        </TableHead>
+                        {dbDecks.map((k) => (
+                          <TableHead key={k} className="text-center">
+                            <Input
+                              type="number"
+                              step="0.001"
+                              value={db.single_fastener_time_min_per_fastener_by_deck[k] ?? 0}
+                              onChange={(e) =>
+                                update((x) => {
+                                  x.duro_bond_base_labor!.single_fastener_time_min_per_fastener_by_deck[
+                                    k
+                                  ] = num(e.target.value);
+                                })
+                              }
+                              className="mx-auto w-20 text-center"
+                            />
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {densities.map((density) => (
+                        <TableRow key={density}>
+                          <TableCell />
+                          <TableCell className="font-medium">{density}</TableCell>
+                          {dbDecks.map((k) => (
+                            <TableCell
+                              key={k}
+                              className="text-center tabular-nums text-muted-foreground"
+                            >
+                              {(
+                                db.sheet_layout_hr +
+                                ((2500 * density) / 32) *
+                                  ((db.single_fastener_time_min_per_fastener_by_deck[k] ?? 0) /
+                                    60)
+                              ).toFixed(2)}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Gray hours are calculated live per 2,500 sq ft: sheet layout + fasteners ×
+                  min/fastener. Edit the sheet layout or a deck's minutes-per-fastener and the
+                  preview updates; sheet-size and thickness multipliers apply on top, per the
+                  formula.
+                </p>
+              </CardContent>
+            </Card>
+          );
+        })()}
 
       {/* Deck multipliers (fallback when the matrix isn't shown) */}
       {!hasMatrix && d.deck_multipliers && (
@@ -393,13 +458,53 @@ function MembraneEditor() {
         </Card>
       )}
 
-      {/* Side-by-side multiplier panels (legacy shows these next to the matrix) */}
+      {/* Side-by-side panels (legacy shows these next to each other with × between) */}
       <div className="grid items-start gap-6 lg:grid-cols-2">
+      {/* Adhesive base labor — panel 1 on adhesive combos */}
+      {d.adhesive && (
+        <Card>
+          <CardHeader>
+            <CardTitle>1. Base labor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Substrate / adhesive</TableHead>
+                  <TableHead>Labor / 1,000 sq ft</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {d.adhesive.base_hours_per_1000_sqft_by_substrate.map((r, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">{r.substrate}</TableCell>
+                    <TableCell>
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        value={r.labor_per_1000_sqft}
+                        onChange={(e) =>
+                          update((x) => {
+                            x.adhesive!.base_hours_per_1000_sqft_by_substrate[
+                              i
+                            ]!.labor_per_1000_sqft = num(e.target.value);
+                          })
+                        }
+                        className="max-w-[140px]"
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
       {/* Complexity factors */}
       {d.complexity_factors && (
         <Card>
           <CardHeader>
-            <CardTitle>Complexity factors</CardTitle>
+            <CardTitle>2. Complexity factors</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -438,10 +543,7 @@ function MembraneEditor() {
       {d.sheet_size_multipliers && (
         <Card>
           <CardHeader>
-            <CardTitle>
-              {hasMatrix ? "2. " : ""}
-              {d.sheet_size_label ?? "Sheet-size labor multipliers"}
-            </CardTitle>
+            <CardTitle>2. {d.sheet_size_label ?? "Sheet-size labor multipliers"}</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -484,52 +586,11 @@ function MembraneEditor() {
         </Card>
       )}
 
-      {/* Adhesive base labor */}
-      {d.adhesive && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Adhesive base labor (per 1,000 sq ft)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Substrate / adhesive</TableHead>
-                  <TableHead>Labor / 1,000 sq ft</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {d.adhesive.base_hours_per_1000_sqft_by_substrate.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{r.substrate}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="0.0001"
-                        value={r.labor_per_1000_sqft}
-                        onChange={(e) =>
-                          update((x) => {
-                            x.adhesive!.base_hours_per_1000_sqft_by_substrate[
-                              i
-                            ]!.labor_per_1000_sqft = num(e.target.value);
-                          })
-                        }
-                        className="max-w-[140px]"
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Thickness multipliers */}
       {d.thickness_multipliers && (
         <Card>
           <CardHeader>
-            <CardTitle>{hasMatrix ? "3. " : ""}Membrane thickness multipliers</CardTitle>
+            <CardTitle>3. Membrane thickness multipliers</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
