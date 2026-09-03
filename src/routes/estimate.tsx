@@ -44,6 +44,7 @@ import {
   DESIGN_TABLE_OPTIONS,
   type SpacingError,
 } from "@/lib/engine/fastener-spacing";
+import { computeNeededQuantities } from "@/lib/engine/consumption";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
   defaultEdges,
@@ -463,6 +464,47 @@ function EstimatePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
+
+  // Legacy red "needed" quantities (§2 consumption rules; display-only ordering guidance).
+  const neededQty = useMemo(
+    () =>
+      computeNeededQuantities({
+        sections,
+        parapets,
+        attachment,
+        roofSystem,
+        adhesiveCoverage: admin?.adhesiveTimes?.bySubstrate,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(sections), JSON.stringify(parapets), attachment, roofSystem, admin],
+  );
+  const enteredQty = useMemo(() => {
+    let screws = 0;
+    let polyPlates = 0;
+    let insulationPlates = 0;
+    let caulk = 0;
+    for (const line of accessories) {
+      const item = accCatalog?.find(
+        (a) => `${a.category} — ${a.description}` === line.description,
+      );
+      if (!item) continue;
+      if (item.category.includes("Fasteners") && item.fastenersPerBox) {
+        const d = item.description;
+        if (d.includes("Poly Plates")) polyPlates += line.quantity * item.fastenersPerBox;
+        else if (d.includes("Insulation Plates"))
+          insulationPlates += line.quantity * item.fastenersPerBox;
+        else if (d.includes("Plates") || d.includes("Cleat")) {
+          // other plate rows (induction/cleat) — not netted against a bucket yet
+        } else if (item.fastenersPerBox >= 50) {
+          // >= 50/box keeps drill bits & driver tips (1/box) out of the screw bucket
+          screws += line.quantity * item.fastenersPerBox;
+        }
+      } else if (item.category.includes("Sealant") && item.description.startsWith("Duro-Caulk")) {
+        caulk += line.quantity;
+      }
+    }
+    return { screws, polyPlates, insulationPlates, caulk };
+  }, [accessories, accCatalog]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -2121,6 +2163,107 @@ function EstimatePage() {
                 </TableBody>
               </Table>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Legacy red/green "needed" quantities (docs/legacy-consumption-rules.md §2). */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Calculated needs (legacy ordering rules)</CardTitle>
+            <CardDescription>
+              Computed from your sections, edges, insulation and parapets — red means still
+              needed after what you&apos;ve added above, green means covered. Display only;
+              never changes the bid total.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(() => {
+              const rows: { label: string; needed: number; entered: number | null }[] = [
+                {
+                  label: `Screws (bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
+                  needed: neededQty.screws,
+                  entered: enteredQty.screws,
+                },
+                {
+                  label: "Poly plates (parapet deck fasteners)",
+                  needed: neededQty.polyPlates,
+                  entered: enteredQty.polyPlates,
+                },
+                {
+                  label: "Insulation plates (1 per insulation screw)",
+                  needed: neededQty.insulationPlates,
+                  entered: enteredQty.insulationPlates,
+                },
+                {
+                  label: "Duro-Caulk tubes (1 per 12 LF of term bar/fascia)",
+                  needed: neededQty.caulkTubes,
+                  entered: enteredQty.caulk,
+                },
+                ...Object.entries(neededQty.adhesiveUnits).map(([name, units]) => ({
+                  label: `${name} (units, whole-unit per estimate)`,
+                  needed: units,
+                  entered: null,
+                })),
+              ].filter((r) => r.needed > 0 || (r.entered ?? 0) > 0);
+              if (rows.length === 0) {
+                return (
+                  <p className="text-sm text-muted-foreground">
+                    Nothing to calculate yet — add edge terminations, insulation layers, or
+                    parapets and the needed fasteners, plates, caulk and adhesive units appear
+                    here.
+                  </p>
+                );
+              }
+              return (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="text-right">Needed</TableHead>
+                      <TableHead className="text-right">Entered</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((r) => {
+                      const remaining = r.needed - (r.entered ?? 0);
+                      return (
+                        <TableRow key={r.label}>
+                          <TableCell className="whitespace-normal">{r.label}</TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.needed.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {r.entered === null ? "—" : r.entered.toLocaleString()}
+                          </TableCell>
+                          <TableCell
+                            className={`text-right font-semibold tabular-nums ${
+                              r.entered !== null && remaining > 0
+                                ? "text-destructive"
+                                : "text-green-700 dark:text-green-500"
+                            }`}
+                          >
+                            {r.entered === null
+                              ? "order"
+                              : remaining > 0
+                                ? `−${remaining.toLocaleString()} needed`
+                                : "covered"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              );
+            })()}
+            <p className="text-xs text-muted-foreground">
+              Rules from the extracted legacy engine: 21 screws per 10-ft bar (42/63 for
+              two-piece), insulation fasteners per board density (doubled under
+              adhered/Duro-Bond membranes), plates 1-per-screw, adhesive units area ÷ coverage
+              ceilinged once per adhesive. Not yet included: membrane field/perimeter fastener
+              rows and their poly plates (row-style count port pending), washer/drain caulk
+              adders, and pipe-stack sealant — add those manually for now.
+            </p>
           </CardContent>
         </Card>
         </div>

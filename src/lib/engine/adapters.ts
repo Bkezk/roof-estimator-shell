@@ -88,6 +88,8 @@ export interface AccessoryCatalogItem {
   price: number;
   /** Price-column variant (a color); "" for a plain "Price" or "Price/Box" (per-box) column. */
   variant: string;
+  /** Fasteners per box (Fasteners & Bits rows) — used by the needed-quantities netting. */
+  fastenersPerBox?: number;
 }
 
 /** Columns that are never a price (identifiers, counts, sizes) even when they hold numbers. */
@@ -155,7 +157,15 @@ export function buildAccessoryCatalog(
         if (typeof price !== "number") continue; // skip null / N/A cells
         const description = variant ? `${baseDesc} — ${variant}` : baseDesc;
         const key = variant ? `${row.id}::${baseDesc}::${variant}` : `${row.id}::${baseDesc}`;
-        items.push({ key, category: row.category, description, price, variant });
+        const perBox = r["Fasteners/Box"];
+        items.push({
+          key,
+          category: row.category,
+          description,
+          price,
+          variant,
+          ...(typeof perBox === "number" && perBox > 0 ? { fastenersPerBox: perBox } : {}),
+        });
       }
     }
   }
