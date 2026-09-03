@@ -286,6 +286,8 @@ function EstimatePage() {
     sheetSizeLabel: "1500 sf",
   });
   const [selSection, setSelSection] = useState(0);
+  const [selParapet, setSelParapet] = useState(0);
+  const [selCurb, setSelCurb] = useState(0);
   const [highWind, setHighWind] = useState(false);
   const [highWindTermYears, setHighWindTermYears] = useState(0);
   const [highWindBand, setHighWindBand] = useState("");
@@ -1486,14 +1488,15 @@ function EstimatePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
+              onClick={() => {
                 setParapets((p) => [
                   ...p,
                   newParapet({ heightBand: admin.parapetLabor?.bands[0] ?? "" }),
-                ])
-              }
+                ]);
+                setSelParapet(parapets.length);
+              }}
             >
-              <Plus className="mr-1 h-4 w-4" /> Add parapet
+              <Plus className="mr-1 h-4 w-4" /> New parapet
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1503,8 +1506,12 @@ function EstimatePage() {
                 length prices at the bid's default membrane.
               </p>
             ) : (
-              parapets.map((p, i) => (
-                <div key={p.id} className="rounded-md border p-3">
+              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              {(() => {
+                const i = Math.min(selParapet, parapets.length - 1);
+                const p = parapets[i]!;
+                return (
+                <div key={p.id} className="min-w-0 rounded-md border p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <Input
                       className="h-8 w-[200px] font-medium"
@@ -1520,12 +1527,13 @@ function EstimatePage() {
                         variant="ghost"
                         size="icon"
                         title="Duplicate this parapet"
-                        onClick={() =>
+                        onClick={() => {
                           setParapets((prev) => [
                             ...prev,
                             { ...clone(p), id: `p${pseq++}`, name: `${p.name} (copy)` },
-                          ])
-                        }
+                          ]);
+                          setSelParapet(parapets.length);
+                        }}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -1533,7 +1541,10 @@ function EstimatePage() {
                         variant="ghost"
                         size="icon"
                         className="text-destructive"
-                        onClick={() => setParapets((prev) => prev.filter((_, j) => j !== i))}
+                        onClick={() => {
+                          setParapets((prev) => prev.filter((_, j) => j !== i));
+                          setSelParapet((v) => Math.max(0, Math.min(v, parapets.length - 2)));
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -1618,7 +1629,53 @@ function EstimatePage() {
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })()}
+
+              {/* Right rail: parapet summary */}
+              <div className="space-y-2">
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Parapet</TableHead>
+                        <TableHead className="text-right">Len (ft)</TableHead>
+                        <TableHead>Height</TableHead>
+                        <TableHead>Deck</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {parapets.map((p2, i2) => (
+                        <TableRow
+                          key={p2.id}
+                          onClick={() => setSelParapet(i2)}
+                          className={
+                            i2 === Math.min(selParapet, parapets.length - 1)
+                              ? "cursor-pointer bg-muted/60"
+                              : "cursor-pointer"
+                          }
+                        >
+                          <TableCell className="font-medium">{p2.name}</TableCell>
+                          <TableCell className="text-right tabular-nums">{p2.lengthFt}</TableCell>
+                          <TableCell className="whitespace-nowrap">{p2.heightBand}</TableCell>
+                          <TableCell>{p2.deckType}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell className="font-semibold">Total LF</TableCell>
+                        <TableCell
+                          colSpan={3}
+                          className="text-right font-semibold tabular-nums"
+                        >
+                          {parapets.reduce((s2, p2) => s2 + p2.lengthFt, 0).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+                <p className="text-xs text-muted-foreground">Click a row to edit that parapet.</p>
+              </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -1631,11 +1688,12 @@ function EstimatePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                setCurbs((p) => [...p, newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" })])
-              }
+              onClick={() => {
+                setCurbs((p) => [...p, newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" })]);
+                setSelCurb(curbs.length);
+              }}
             >
-              <Plus className="mr-1 h-4 w-4" /> Add curb
+              <Plus className="mr-1 h-4 w-4" /> New curb
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1645,8 +1703,12 @@ function EstimatePage() {
                 multiplier × perimeter.
               </p>
             ) : (
-              curbs.map((c, i) => (
-                <div key={c.id} className="rounded-md border p-3">
+              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+              {(() => {
+                const i = Math.min(selCurb, curbs.length - 1);
+                const c = curbs[i]!;
+                return (
+                <div key={c.id} className="min-w-0 rounded-md border p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <Input
                       className="h-8 w-[200px] font-medium"
@@ -1662,12 +1724,13 @@ function EstimatePage() {
                         variant="ghost"
                         size="icon"
                         title="Duplicate this curb"
-                        onClick={() =>
+                        onClick={() => {
                           setCurbs((prev) => [
                             ...prev,
                             { ...clone(c), id: `c${cseq++}`, name: `${c.name} (copy)` },
-                          ])
-                        }
+                          ]);
+                          setSelCurb(curbs.length);
+                        }}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -1675,7 +1738,10 @@ function EstimatePage() {
                         variant="ghost"
                         size="icon"
                         className="text-destructive"
-                        onClick={() => setCurbs((prev) => prev.filter((_, j) => j !== i))}
+                        onClick={() => {
+                          setCurbs((prev) => prev.filter((_, j) => j !== i));
+                          setSelCurb((v) => Math.max(0, Math.min(v, curbs.length - 2)));
+                        }}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -1745,7 +1811,53 @@ function EstimatePage() {
                     </Field>
                   </div>
                 </div>
-              ))
+                );
+              })()}
+
+              {/* Right rail: curb summary */}
+              <div className="space-y-2">
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Curb</TableHead>
+                        <TableHead className="text-right">Qty</TableHead>
+                        <TableHead className="text-right">A (in)</TableHead>
+                        <TableHead className="text-right">B (in)</TableHead>
+                        <TableHead>Type</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {curbs.map((c2, i2) => (
+                        <TableRow
+                          key={c2.id}
+                          onClick={() => setSelCurb(i2)}
+                          className={
+                            i2 === Math.min(selCurb, curbs.length - 1)
+                              ? "cursor-pointer bg-muted/60"
+                              : "cursor-pointer"
+                          }
+                        >
+                          <TableCell className="font-medium">{c2.name}</TableCell>
+                          <TableCell className="text-right tabular-nums">{c2.quantity}</TableCell>
+                          <TableCell className="text-right tabular-nums">{c2.widthIn}</TableCell>
+                          <TableCell className="text-right tabular-nums">{c2.lengthIn}</TableCell>
+                          <TableCell className="whitespace-nowrap">{c2.curbType}</TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow>
+                        <TableCell className="font-semibold">Total curbs</TableCell>
+                        <TableCell className="text-right font-semibold tabular-nums">
+                          {curbs.reduce((s2, c2) => s2 + c2.quantity, 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell colSpan={3} />
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+                <p className="text-xs text-muted-foreground">Click a row to edit that curb.</p>
+              </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -2577,8 +2689,11 @@ function EdgeDiagram({ section }: { section: BidSectionInput }) {
           <span className="absolute inset-x-0 bottom-1 text-center text-[10px] text-muted-foreground">
             Length ⟷
           </span>
-          <span className="absolute left-0 top-1/2 origin-left -rotate-90 text-[10px] text-muted-foreground">
-            Width
+          <span
+            className="absolute inset-y-0 left-0.5 flex items-center text-[10px] text-muted-foreground"
+            style={{ writingMode: "vertical-rl" }}
+          >
+            Width ↕
           </span>
         </div>
         <SideInfo side="B" fallbackLen={section.width} />
