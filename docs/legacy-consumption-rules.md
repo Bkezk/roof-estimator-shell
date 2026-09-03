@@ -146,6 +146,26 @@ multiplier 1 / 1.1 / 1.2 at 12" / 6" / 4" ribbons), `adhesive_labor_per_ksqft`,
   (PerimLF + CornerLF)`; `CalcQty = Round(seamLF / 30 / 5)`.
 - Capstone parapets (option ID 2): `Ceiling(Ceil(length)/40)` units per parapet.
 
+### 2.7 Edge-hardware auto-lengths (term bar / fascia / drip edge / gravel stop)
+The legacy accessory screens derive each bar's length from the estimate's geometry; the estimator
+then adjusts. Mechanism (TermBar.GetRoofEdgeLength rva 0x24ef0, GetParapetLength rva 0x253fc,
+GetCurbEdgeLength rva 0x25144; FaciaBar / GenericEdgeItem follow the same shape):
+
+- **Roof edges**: each section side 0–3 carries a `Termination` TYPE and a `TerminationWidth`
+  (that side's hardware footage). A term bar accumulates
+  `Σ sections Σ sides: Termination(side).ID == 2 && colorMatch → TerminationWidth(side)`,
+  where colorMatch = `RoofColorToTermBarColor(section color) == bar color`. Fascia bars and
+  generic edges (drip edge / gravel stop) run the same per-side scan filtered on their own
+  Termination IDs (the ID ↔ hardware-family mapping lives in the MySQL ref tables — IDs beyond
+  term bar = 2 not captured; the web app's per-edge termination picks can drive this directly).
+- **Parapets**: parapets with `TermOption.ID == 2` (term bar) and matching color add
+  `Parapet.TermLength`; `WallType == 1` parapets route the same footage into the bar's
+  NO-DRILL length split (other wall types → pre-drill).
+- **Curbs**: curbs with `TermOption ∈ {3, 4}` and matching color add
+  `Round((2×dimA_in + 2×dimB_in + 12) / 12 × qty, 4)` feet — the curb footprint perimeter plus a
+  12-inch allowance, per curb; the curb footage rolls into the bar's no-drill length.
+- Strip mastic per bar and the fastener counts for these lengths are §2.5 / §2.1.
+
 ### 2.6 Which catalog items satisfy which "needed" bucket (UpdateTotals)
 Special ref_Fasteners IDs: **255** → Poly Plates, **256** → parapet-only fasteners,
 **257** → Insulation Plates, **303** → Induction Plates (display names live in the MySQL
