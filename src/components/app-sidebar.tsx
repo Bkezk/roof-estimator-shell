@@ -3,7 +3,6 @@ import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   FileText,
   Settings,
-  Users,
   LogOut,
   KeyRound,
   SlidersHorizontal,
@@ -45,8 +44,10 @@ const estimatorItems = [
 // tab via ?tab= (the first sub is the page's default tab). Tab keys must match
 // the route's validateSearch list and the on-page <TabsTrigger> values.
 type AdminTab =
-  | "company"
+  | "contractor"
   | "shipping"
+  | "salestax"
+  | "basiclabor"
   | "markup"
   | "warranties"
   | "setup"
@@ -60,33 +61,45 @@ type AdminTab =
   | "adhesives"
   | "metals";
 
+// A sub links to a tab on the parent page (`tab`), a catalog category on it
+// (`cat`, matched by name), or its own page (`url` — e.g. Estimators).
+type AdminSub = { title: string; tab?: AdminTab; cat?: string; url?: string };
+
+// Mirrors the legacy Bid-Advantage admin tree (labels and order), flattened to
+// one submenu level. Category names must match the seeded pricing_catalog rows.
 const adminItems: {
   title: string;
   url: string;
   icon: typeof Settings;
-  sub?: { title: string; tab: AdminTab }[];
+  defaultTab?: AdminTab;
+  sub?: AdminSub[];
 }[] = [
   {
     title: "General",
     url: "/admin/settings",
     icon: Settings,
+    defaultTab: "contractor",
     sub: [
-      { title: "Company & Bid", tab: "company" },
-      { title: "Shipping", tab: "shipping" },
-      { title: "Labor & Markup", tab: "markup" },
+      { title: "Contractor Information", tab: "contractor" },
+      { title: "Shipping Costs", tab: "shipping" },
+      { title: "Sales Tax", tab: "salestax" },
+      { title: "Basic Labor Settings", tab: "basiclabor" },
+      { title: "Labor & Markup Options", tab: "markup" },
+      { title: "Estimators", url: "/admin/users" },
       { title: "Warranties", tab: "warranties" },
     ],
   },
   {
-    title: "Labor",
+    title: "Advanced Labor",
     url: "/admin/labor",
     icon: SlidersHorizontal,
+    defaultTab: "setup",
     sub: [
       { title: "Setup Times", tab: "setup" },
       { title: "Inspection Times", tab: "inspection" },
       { title: "Labor Templates", tab: "templates" },
-      { title: "Curb Labor", tab: "curb" },
       { title: "Roof Deck Labor", tab: "roofdeck" },
+      { title: "Curb Labor", tab: "curb" },
       { title: "Parapet Labor", tab: "parapet" },
       { title: "Accessory Labor", tab: "accessory" },
     ],
@@ -96,13 +109,43 @@ const adminItems: {
     url: "/admin/duro-last",
     icon: Layers,
     sub: [
-      { title: "Catalog", tab: "catalog" },
+      { title: "Duro-Last Membrane", cat: "Duro-Last Membrane" },
+      { title: "Underlayment", cat: "Underlayment" },
+      { title: "Fasteners & Bits", cat: "Fasteners & Bits" },
+      { title: "Sealants", cat: "Sealants" },
       { title: "Adhesives", tab: "adhesives" },
-      { title: "Exceptional Metals", tab: "metals" },
+      { title: "Corners", cat: "Corners" },
+      { title: "Conduit Washers", cat: "Conduit Washers" },
+      { title: "Pipe Stacks", cat: "Pipe Stacks" },
+      { title: "Panduit", cat: "Panduit" },
+      { title: "Drain Boots", cat: "Drain Boots" },
+      { title: "CDR Rings", cat: "CDR Rings" },
+      { title: "Drain Boot Accessories", cat: "Drain Boot Accessories" },
+      { title: "Vents", cat: "Vents" },
+      { title: "Termination Bars", cat: "Termination Bars" },
+      { title: "Facia Bars/Vinyl Covers", cat: "Facia Bars/Vinyl Covers" },
+      { title: "Drip Edge", cat: "Drip Edge" },
+      { title: "Gravel Stops", cat: "Gravel Stops" },
+      { title: "Walk Pads & Wall Vents", cat: "Walk Pads & Wall Vents" },
+      { title: "Membrane Accs", cat: "Membrane Accs" },
+      { title: "EXCEPTIONAL Metals", tab: "metals" },
     ],
   },
-  { title: "Non-DL Pricing", url: "/admin/non-dl", icon: Package },
-  { title: "Users", url: "/admin/users", icon: Users },
+  {
+    title: "Non Duro-Last Pricing",
+    url: "/admin/non-dl",
+    icon: Package,
+    sub: [
+      { title: "Roof Edge Blocking", cat: "Roof Edge Blocking" },
+      { title: "Parapet Wall Blocking", cat: "Parapet Wall Blocking" },
+      { title: "Structural Deck Materials", cat: "Structural Deck Materials" },
+      { title: "Sheet Metal Work", cat: "Sheet Metal Work" },
+      { title: "Masonry", cat: "Masonry" },
+      { title: "Subcontractors", cat: "Subcontractors" },
+      { title: "3rd Party Services", cat: "3rd Party Services" },
+      { title: "Preset Custom Applications", cat: "Preset Custom Applications" },
+    ],
+  },
 ];
 
 export function AppSidebar() {
@@ -118,6 +161,12 @@ export function AppSidebar() {
     select: (router) => {
       const s = router.location.search as Record<string, unknown>;
       return typeof s["tab"] === "string" ? s["tab"] : undefined;
+    },
+  });
+  const searchCat = useRouterState({
+    select: (router) => {
+      const s = router.location.search as Record<string, unknown>;
+      return typeof s["cat"] === "string" ? s["cat"] : undefined;
     },
   });
   const isActive = (path: string) =>
@@ -162,7 +211,11 @@ export function AppSidebar() {
                     <Collapsible
                       key={item.title}
                       asChild
-                      open={openMenus[item.title] ?? isActive(item.url)}
+                      open={
+                        openMenus[item.title] ??
+                        (isActive(item.url) ||
+                          item.sub.some((s) => s.url && isActive(s.url)))
+                      }
                       onOpenChange={(open) =>
                         setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
                       }
@@ -186,21 +239,35 @@ export function AppSidebar() {
                         </CollapsibleTrigger>
                         <CollapsibleContent>
                           <SidebarMenuSub>
-                            {item.sub.map((sub) => (
-                              <SidebarMenuSubItem key={sub.tab}>
-                                <SidebarMenuSubButton
-                                  asChild
-                                  isActive={
-                                    isActive(item.url) &&
-                                    (searchTab ?? item.sub![0]!.tab) === sub.tab
-                                  }
-                                >
-                                  <Link to={item.url} search={{ tab: sub.tab }}>
-                                    <span>{sub.title}</span>
-                                  </Link>
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                            ))}
+                            {item.sub.map((sub) => {
+                              const active = sub.url
+                                ? isActive(sub.url)
+                                : isActive(item.url) &&
+                                  (sub.cat
+                                    ? searchCat === sub.cat
+                                    : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
+                              // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
+                              const search = sub.cat
+                                ? item.url === "/admin/duro-last"
+                                  ? { tab: "catalog" as const, cat: sub.cat }
+                                  : { cat: sub.cat }
+                                : { tab: sub.tab! };
+                              return (
+                                <SidebarMenuSubItem key={sub.title}>
+                                  <SidebarMenuSubButton asChild isActive={active}>
+                                    {sub.url ? (
+                                      <Link to={sub.url}>
+                                        <span>{sub.title}</span>
+                                      </Link>
+                                    ) : (
+                                      <Link to={item.url} search={search}>
+                                        <span>{sub.title}</span>
+                                      </Link>
+                                    )}
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              );
+                            })}
                           </SidebarMenuSub>
                         </CollapsibleContent>
                       </SidebarMenuItem>

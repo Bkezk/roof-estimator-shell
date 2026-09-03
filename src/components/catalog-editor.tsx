@@ -51,11 +51,17 @@ export function CatalogEditor({
   title,
   intro,
   hideHeader,
+  category,
+  onCategoryChange,
 }: {
   branch: string;
   title: string;
   intro?: string;
   hideHeader?: boolean;
+  /** When set (e.g. from a ?cat= URL param), selects the screen with this category name. */
+  category?: string;
+  /** Called when the user picks a category in the dropdown, so the URL can follow. */
+  onCategoryChange?: (category: string) => void;
 }) {
   const qc = useQueryClient();
   const getFn = useServerFn(getPricingCatalog);
@@ -73,10 +79,13 @@ export function CatalogEditor({
   const draftIdRef = useRef<string | null>(null);
   draftIdRef.current = draftId;
 
-  const selected = useMemo(
-    () => screens?.find((s) => s.id === (selId ?? screens?.[0]?.id)),
-    [screens, selId],
-  );
+  const selected = useMemo(() => {
+    if (category) {
+      const byCat = screens?.find((s) => s.category === category);
+      if (byCat) return byCat;
+    }
+    return screens?.find((s) => s.id === (selId ?? screens?.[0]?.id));
+  }, [screens, selId, category]);
   if (selected && selected.id !== draftId) {
     setDraft(clone(selected.data as unknown as CatalogScreenData));
     setDraftId(selected.id);
@@ -155,7 +164,14 @@ export function CatalogEditor({
 
       <div className="space-y-2">
         <Label className="text-sm">Category</Label>
-        <Select value={selected.id} onValueChange={(v) => setSelId(v)}>
+        <Select
+          value={selected.id}
+          onValueChange={(v) => {
+            setSelId(v);
+            const scr = screens.find((s) => s.id === v);
+            if (scr && onCategoryChange) onCategoryChange(scr.category);
+          }}
+        >
           <SelectTrigger className="w-[320px] max-w-full">
             <SelectValue />
           </SelectTrigger>

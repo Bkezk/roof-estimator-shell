@@ -46,7 +46,7 @@ type LaborTab = (typeof LABOR_TABS)[number];
 export const Route = createFileRoute("/admin/labor")({
   validateSearch: (search: Record<string, unknown>): { tab?: LaborTab } =>
     LABOR_TABS.includes(search["tab"] as LaborTab) ? { tab: search["tab"] as LaborTab } : {},
-  head: () => ({ meta: [{ title: "Labor Engines — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Advanced Labor — Bid-O-Matic" }] }),
   component: LaborPage,
 });
 
@@ -81,7 +81,7 @@ function LaborPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Labor Engines</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Advanced Labor</h1>
         <p className="text-sm text-muted-foreground">
           Setup and inspection times, labor templates, and curb labor. These drive the man-hours
           calculated on every bid.
@@ -96,8 +96,8 @@ function LaborPage() {
           <TabsTrigger value="setup">Setup Times</TabsTrigger>
           <TabsTrigger value="inspection">Inspection Times</TabsTrigger>
           <TabsTrigger value="templates">Labor Templates</TabsTrigger>
-          <TabsTrigger value="curb">Curb Labor</TabsTrigger>
           <TabsTrigger value="roofdeck">Roof Deck Labor</TabsTrigger>
+          <TabsTrigger value="curb">Curb Labor</TabsTrigger>
           <TabsTrigger value="parapet">Parapet Labor</TabsTrigger>
           <TabsTrigger value="accessory">Accessory Labor</TabsTrigger>
         </TabsList>

@@ -41,7 +41,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const SETTINGS_TABS = ["company", "shipping", "markup", "warranties"] as const;
+const SETTINGS_TABS = [
+  "contractor",
+  "shipping",
+  "salestax",
+  "basiclabor",
+  "markup",
+  "warranties",
+] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 export const Route = createFileRoute("/admin/settings")({
@@ -80,19 +87,33 @@ function SettingsPage() {
       </div>
 
       <Tabs
-        value={tab ?? "company"}
+        value={tab ?? "contractor"}
         onValueChange={(v) => navigate({ search: { tab: v as SettingsTab }, replace: true })}
         className="space-y-4"
       >
         <TabsList className="flex-wrap">
-          <TabsTrigger value="company">Company &amp; Bid</TabsTrigger>
-          <TabsTrigger value="shipping">Shipping</TabsTrigger>
-          <TabsTrigger value="markup">Labor &amp; Markup</TabsTrigger>
+          <TabsTrigger value="contractor">Contractor Information</TabsTrigger>
+          <TabsTrigger value="shipping">Shipping Costs</TabsTrigger>
+          <TabsTrigger value="salestax">Sales Tax</TabsTrigger>
+          <TabsTrigger value="basiclabor">Basic Labor Settings</TabsTrigger>
+          <TabsTrigger value="markup">Labor &amp; Markup Options</TabsTrigger>
           <TabsTrigger value="warranties">Warranties</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="company">
-          <CompanyTab
+        <TabsContent value="contractor">
+          <ContractorTab
+            initial={data.company}
+            onSaved={() => qc.invalidateQueries({ queryKey: ["general-settings"] })}
+          />
+        </TabsContent>
+        <TabsContent value="salestax">
+          <SalesTaxTab
+            initial={data.company}
+            onSaved={() => qc.invalidateQueries({ queryKey: ["general-settings"] })}
+          />
+        </TabsContent>
+        <TabsContent value="basiclabor">
+          <BasicLaborTab
             initial={data.company}
             onSaved={() => qc.invalidateQueries({ queryKey: ["general-settings"] })}
           />
@@ -143,13 +164,11 @@ function blankCompany(): CompanySettings {
   };
 }
 
-function CompanyTab({
-  initial,
-  onSaved,
-}: {
-  initial: CompanySettings | null;
-  onSaved: () => void;
-}) {
+// Shared draft + save for the company settings row. Each of the three tabs below
+// (Contractor Information / Sales Tax / Basic Labor Settings — split to mirror the
+// legacy Bid-Advantage nav) edits its own slice but saves the whole row, exactly
+// like the legacy per-screen saves.
+function useCompanyDraft(initial: CompanySettings | null, onSaved: () => void, savedMsg: string) {
   const saveFn = useServerFn(saveCompanySettings);
   const [c, setC] = useState<CompanySettings>(initial ?? blankCompany());
   const [saving, setSaving] = useState(false);
@@ -181,7 +200,7 @@ function CompanyTab({
           shipping_percent: c.shipping_percent,
         },
       });
-      toast.success("Company settings saved");
+      toast.success(savedMsg);
       onSaved();
     } catch (e) {
       toast.error((e as Error).message || "Save failed");
@@ -189,6 +208,14 @@ function CompanyTab({
       setSaving(false);
     }
   };
+
+  return { c, set, save, saving };
+}
+
+type CompanyTabProps = { initial: CompanySettings | null; onSaved: () => void };
+
+function ContractorTab({ initial, onSaved }: CompanyTabProps) {
+  const { c, set, save, saving } = useCompanyDraft(initial, onSaved, "Contractor information saved");
 
   return (
     <div className="space-y-6">
@@ -235,9 +262,20 @@ function CompanyTab({
         </CardContent>
       </Card>
 
+      <SaveBar saving={saving} onSave={save} />
+    </div>
+  );
+}
+
+function SalesTaxTab({ initial, onSaved }: CompanyTabProps) {
+  const { c, set, save, saving } = useCompanyDraft(initial, onSaved, "Sales tax saved");
+
+  return (
+    <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Sales tax &amp; labor basis</CardTitle>
+          <CardTitle>Sales tax</CardTitle>
+          <CardDescription>Applied to every bid per the setting below.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6 sm:grid-cols-2">
           <Field label="Sales tax rate (e.g. 0.0625 = 6.25%)">
@@ -261,6 +299,25 @@ function CompanyTab({
               )}
             </Label>
           </div>
+        </CardContent>
+      </Card>
+
+      <SaveBar saving={saving} onSave={save} />
+    </div>
+  );
+}
+
+function BasicLaborTab({ initial, onSaved }: CompanyTabProps) {
+  const { c, set, save, saving } = useCompanyDraft(initial, onSaved, "Basic labor settings saved");
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Basic labor settings</CardTitle>
+          <CardDescription>How labor is displayed and converted on bids.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-6 sm:grid-cols-2">
           <div>
             <Label className="mb-2 block">Display labor in</Label>
             <RadioGroup
