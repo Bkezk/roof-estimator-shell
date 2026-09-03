@@ -743,6 +743,12 @@ function EstimatePage() {
                     onChange={(e) => setCustomer((c) => ({ ...c, clientAddress: e.target.value }))}
                   />
                 </Field>
+                <Field label="Estimator's name">
+                  <Input
+                    value={customer.estimatorName ?? ""}
+                    onChange={(e) => setCustomer((c) => ({ ...c, estimatorName: e.target.value }))}
+                  />
+                </Field>
               </div>
             </div>
             <div>
@@ -834,6 +840,39 @@ function EstimatePage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Legacy Home shows labor & markup at a glance ("Click here to edit"); the
+            actual controls live on the Pricing & Warranty step. */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Labor &amp; markup</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span>
+              Labor: <span className="font-semibold">${laborRate.toFixed(2)} / hr</span>
+            </span>
+            <span>
+              Markup:{" "}
+              <span className="font-semibold">
+                {markup}% ({MARKUP_LABELS[markupMode]})
+              </span>
+            </span>
+            <span>
+              Commission: <span className="font-semibold">{commission}%</span>
+            </span>
+            <span>
+              Labor template:{" "}
+              <span className="font-semibold">{laborTemplateName || "None"}</span>
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => goStep(STEPS.findIndex((s) => s.key === "pricing"))}
+            >
+              Click here to edit
+            </Button>
+          </CardContent>
+        </Card>
         </div>
 
         <div className={step === 1 ? "space-y-6" : "hidden"}>
@@ -843,12 +882,83 @@ function EstimatePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSections((p) => [...p, newSection()])}
+              onClick={() =>
+                setSections((p) => {
+                  // Like the legacy Defaults panel: a new section starts from the
+                  // previous section's material settings (dimensions reset).
+                  const last = p[p.length - 1];
+                  return [
+                    ...p,
+                    newSection(
+                      last
+                        ? {
+                            deckType: last.deckType,
+                            thickness: last.thickness,
+                            color: last.color,
+                            fieldLap: last.fieldLap,
+                            fastenerOc: last.fastenerOc,
+                            sheetSizeLabel: last.sheetSizeLabel,
+                          }
+                        : {},
+                    ),
+                  ];
+                })
+              }
             >
               <Plus className="mr-1 h-4 w-4" /> Add section
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Legacy "Roof Sections Summary" table */}
+            {sections.length > 1 && (
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Section</TableHead>
+                      <TableHead className="text-right">L (ft)</TableHead>
+                      <TableHead className="text-right">W (ft)</TableHead>
+                      <TableHead className="text-right">Sq ft</TableHead>
+                      <TableHead>Deck</TableHead>
+                      <TableHead className="text-right">Mil</TableHead>
+                      <TableHead>Color</TableHead>
+                      <TableHead>Sheet</TableHead>
+                      <TableHead className="text-right">Lap (in)</TableHead>
+                      <TableHead className="text-right">OC (in)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sections.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="font-medium">{s.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.length}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.width}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {(s.length * s.width).toLocaleString()}
+                        </TableCell>
+                        <TableCell>{s.deckType}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.thickness}</TableCell>
+                        <TableCell>{s.color}</TableCell>
+                        <TableCell>{s.sheetSizeLabel}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.fieldLap}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s.fastenerOc}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow>
+                      <TableCell className="font-semibold">Total</TableCell>
+                      <TableCell />
+                      <TableCell />
+                      <TableCell className="text-right font-semibold tabular-nums">
+                        {sections
+                          .reduce((sum, s) => sum + s.length * s.width, 0)
+                          .toLocaleString()}
+                      </TableCell>
+                      <TableCell colSpan={6} />
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            )}
             {sections.map((s, i) => (
               <div key={s.id} className="rounded-md border p-3">
                 <div className="mb-2 flex items-center justify-between">

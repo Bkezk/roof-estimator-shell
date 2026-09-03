@@ -216,6 +216,9 @@ function ProposalPage() {
             {saved.customer.contact && <p>{saved.customer.contact}</p>}
             {saved.customer.phone && <p>{saved.customer.phone}</p>}
             {saved.customer.email && <p>{saved.customer.email}</p>}
+            {saved.customer.estimatorName && (
+              <p className="text-neutral-500">Estimator: {saved.customer.estimatorName}</p>
+            )}
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">

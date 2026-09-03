@@ -77,3 +77,34 @@ accessory/non-DL lines if BA bills them) · curb membrane material (add as an ex
 Saved web bids freeze their pricing at first save. For the validation, either use an
 unsaved estimate, or click **Update pricing & labor** before comparing, so both apps
 compute from the same (current) admin data.
+
+## Legacy Setup/Sections screen reconciliation (Sep 2026)
+
+Comparison of the legacy Home + Roof Sections screens against the web estimator.
+Equivalent but relocated (no gap): labor rate / markup preset / markup mode,
+commission, tax exempt, per diem, discounts, and labor template all live on the
+**Pricing & Warranty** step (legacy showed them on Home); the Setup step now shows a
+read-only "Labor & markup" summary with a Click-here-to-edit jump, like legacy's.
+Warranty type + max expected wind: Pricing & Warranty step. Update Pricing & Labor:
+appears on saved (frozen) bids. Reports/Start!: Review step + Export.
+
+Closed in the web app: Estimator's name (Setup, printed on the proposal), Roof
+Sections Summary table with total sq ft (Sections step, shown at 2+ sections), new
+sections inherit the previous section's material settings (legacy Defaults panel
+effect), section notes / copy / Show Calculations, edges A–D with termination /
+blocking / ARP / is-perimeter.
+
+Known deliberate differences (revisit at validation):
+- **Pull Test (lbs) + Design Table (psf)** — the web app takes Fastener OC directly;
+  the legacy pull-test→OC lookup is not modeled (enter the OC BA shows). Engine pins
+  designTable 60.
+- **Defaults panel scope** — legacy sets bid-wide defaults for deck/wall type,
+  membrane, "attached with", underlayment attach, and parapet material that apply to
+  new items; the web app covers the membrane portion by inheriting from the previous
+  section. Wall type + parapet/underlayment attach defaults are per-item entries on
+  their steps.
+- **Per-section Man Hours / Labor Cost inline** (legacy summary grid): available via
+  each section's Show Calculations; not shown inline.
+- **Section edge diagram** (legacy A/B/C/D drawing): not drawn; edges editor is
+  form-based.
+- **Date Created** display: web shows Updated on Saved Bids instead.

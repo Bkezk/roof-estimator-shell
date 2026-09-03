@@ -31,6 +31,7 @@ export interface CustomerInfo {
   jobCityStZip?: string; // job-site city / state / zip (projectAddress carries the street)
   jobNumber?: string;
   shipVia?: string;
+  estimatorName?: string; // legacy Home > General Info "Estimator's Name"
 }
 
 export const emptyCustomer = (): CustomerInfo => ({
