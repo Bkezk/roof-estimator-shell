@@ -12,14 +12,17 @@
  *    definitions the perimeter length derives from the perimeter-marked edges, and ARP edges feed
  *    the §2.3 ARPSqFt slot; corner sizing is still entered. Termination hardware footage is a
  *    display-only ordering summary (no auto-pricing until a captured bid validates the join).
- *  - On-center spacing is entered per section (fastenerOc) because the pull-test→spacing table isn't
- *    captured yet; it feeds customFieldFastenerSpacing so the OC lookup is bypassed.
+ *  - On-center spacing per section (fastenerOc) is entered or auto-filled from the extracted
+ *    pull-test lookup (fastener-spacing.ts); it feeds customFieldFastenerSpacing so the engine's
+ *    OC lookup is bypassed.
  *  - Freight wired: percent-of-material or the stepped "from" table, on the DL material subtotal
  *    (M0). Membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Insulation layers wired (§4.3, up to 4 per section): board material → dTotals[6]; mechanical
  *    labor per the app's header formula (layout hrs/2500 + fastener min × count/board); adhesive
- *    units = area ÷ coverage → material into M0, labor at hrs/1000 sqft (§3.3 scale, flagged).
+ *    units = area ÷ coverage, summed per adhesive across the estimate and Ceilinged ONCE per
+ *    adhesive (legacy AggregateCalcQtys) → whole units × price into M0; labor at hrs/1000 sqft
+ *    (scale CONFIRMED from the binary — RSAdhesiveCoverage.HoursPerKSqFt).
  *    A legacy single underlaymentBoard converts to one mechanical layer (5 fasteners/board).
  *  - Setup & inspection hours wired from the seeded band tables (§2.4/§2.5) when present; they roll
  *    into direct labor. The per-estimate Adjust Setup/Inspection % knobs are exposed and composed
@@ -65,7 +68,8 @@ import {
 /**
  * One insulation/underlayment layer on a section (§4.3, up to 4). Mechanical bills the app's own
  * header formula (layout hrs/2500 + fastener minutes × count); adhesive bills area ÷ coverage units
- * of adhesive (material → M0) + labor (scale per engine-truth §3.3, hrs/1000 sqft — flagged).
+ * of adhesive (whole-unit rounding happens per adhesive at the estimate level) + labor at
+ * hrs/1000 sqft (confirmed scale).
  */
 export interface UnderlaymentLayer {
   board: string; // from the Underlayment prices screen
@@ -285,7 +289,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
   let underlaymentLaborHours = 0;
-  let adhesiveMaterial = 0;
+  /** Fractional adhesive units by adhesive name, summed across every section's layers. */
+  const adhesiveUnitsByName: Record<string, number> = {};
 
   const sections: RoofSection[] = bid.sections.map((s) => {
     const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
@@ -338,12 +343,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             laborPer1000SqFt: entry.labor,
           });
           underlaymentLaborHours += a.hours;
-          const aPrice = admin.adhesivePrices?.[layer.adhesiveName];
-          if (aPrice === undefined) {
+          if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
             warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
-          } else {
-            adhesiveMaterial += a.units * aPrice;
           }
+          // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
+          // adhesive after all sections (legacy AggregateCalcQtys), below.
+          adhesiveUnitsByName[layer.adhesiveName] =
+            (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units;
         }
       }
     }
@@ -402,6 +408,15 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       toThicknessInches: s.toThicknessInches,
     };
   });
+
+  // Adhesive whole units (legacy AdheredSystems.AggregateCalcQtys, docs/legacy-consumption-rules
+  // §2.4): fractional units summed per adhesive across the WHOLE estimate, then Ceiling ONCE per
+  // adhesive; the whole units price into M0. (Membrane and parapet-wall adhesive join this same
+  // aggregate in the legacy app — those unit sources aren't computed here yet.)
+  let adhesiveMaterial = 0;
+  for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
+    adhesiveMaterial += Math.ceil(units) * (admin.adhesivePrices?.[name] ?? 0);
+  }
 
   // Accessory material folds into M0 (dMaterial[4] sits within Σ dMaterial[0..6]).
   const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
@@ -518,8 +533,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },
     adjustLaborPct: ((1 + bid.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100,
-    adjustSetupLaborPct:
-      ((1 + (bid.adjustSetupPct ?? 0) / 100) * tf("Setup Time Labor") - 1) * 100,
+    adjustSetupLaborPct: ((1 + (bid.adjustSetupPct ?? 0) / 100) * tf("Setup Time Labor") - 1) * 100,
     adjustInspectionPct:
       ((1 + (bid.adjustInspectionPct ?? 0) / 100) * tf("Inspection Time Labor") - 1) * 100,
     accessoryLaborHours,

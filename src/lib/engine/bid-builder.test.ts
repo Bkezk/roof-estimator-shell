@@ -456,13 +456,52 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(warnings).toEqual([]);
     // board material: 2500 x (0.85 + 0.30) = 2875 -> underlayment purchase line
     expect(inputs.materialUnderlayment).toBeCloseTo(2875, 2);
-    // adhesive material: 2500/2000 = 1.25 units x $899 = $1123.75 -> M0
-    expect(adhesiveMaterial).toBeCloseTo(1123.75, 2);
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1123.75, 2);
+    // adhesive material (legacy AggregateCalcQtys): 2500/2000 = 1.25 units, ceilinged once per
+    // adhesive across the estimate -> 2 whole units x $899 = $1798 -> M0
+    expect(adhesiveMaterial).toBeCloseTo(1798, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1798, 2);
     const r = computeEstimate(inputs);
     // mech: 7.775 + (0.342/60)(5/32)(2500) = 10.0016 h; adhesive: 2500 x 6.5/1000 = 16.25 h
     expect(r.underlaymentLaborHours).toBeCloseTo(10.0016 + 16.25, 3);
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 10.0016 + 16.25, 3);
+  });
+
+  it("adhesive units sum fractionally per adhesive across sections, then Ceiling ONCE per adhesive", () => {
+    const glueA = "Duro-Grip Adhesive(CR-20)";
+    const glueB = "Water Based Adhesive";
+    const withU: EngineAdminData = {
+      ...admin,
+      underlaymentPrices: { "Duro-Fold": 0.3 },
+      adhesiveTimes: {
+        adhesives: [glueA, glueB],
+        bySubstrate: {
+          [glueA]: { "ISO 4'x8'": { coverageSqFt: 2000, labor: 6.5 } },
+          [glueB]: { "ISO 4'x8'": { coverageSqFt: 500, labor: 5.215 } },
+        },
+      },
+      adhesivePrices: { [glueA]: 899, [glueB]: 122.1 },
+    };
+    const layer = (name: string) => ({
+      board: "Duro-Fold",
+      attachment: "adhesive" as const,
+      fastenersPerBoard: 0,
+      adhesiveName: name,
+      substrate: "ISO 4'x8'",
+    });
+    const s0 = bid().sections[0]!; // 50 x 50 = 2500 sq ft
+    const { adhesiveMaterial } = buildEstimateInputs(
+      bid({
+        sections: [
+          { ...s0, layers: [layer(glueA), layer(glueB)] },
+          { ...s0, id: "s2", name: "B", layers: [layer(glueA)] },
+        ],
+      }),
+      withU,
+    );
+    // glueA: 1.25 + 1.25 = 2.5 -> Ceil 3 units x $899; glueB: 2500/500 = 5 (already whole) x $122.10.
+    // Ceiling is PER ADHESIVE on the estimate total (AggregateCalcQtys) - not per layer (which
+    // would give 2 + 2 = 4 units of glueA), not on the mixed total.
+    expect(adhesiveMaterial).toBeCloseTo(3 * 899 + 5 * 122.1, 2);
   });
 
   it("legacy underlaymentBoard converts to one mechanical layer at 5 fasteners/board", () => {
@@ -497,7 +536,12 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         bands: ['0"-30"'],
         lookup: {
           Wood: {
-            '0"-30"': { noDrillNoCant: 2.25, noDrillCanted: 3.375, predrillNoCant: 3.5, predrillCanted: 5.25 },
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
           },
         },
       },
