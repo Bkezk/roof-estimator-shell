@@ -30,6 +30,27 @@ import {
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
+// Legacy Bid-Advantage column order for the base-labor matrix (jsonb sorts keys,
+// so the stored object loses it). Unknown decks sort after these.
+const DECK_ORDER = [
+  "Wood",
+  "Steel",
+  "Retrofit",
+  "Concrete",
+  "Gypsum",
+  "LWC/Steel",
+  "LWC/Concrete",
+  "LWC/Other",
+  "Tectum",
+  "Purlin",
+];
+const orderedDeckKeys = (obj: Record<string, number>) =>
+  Object.keys(obj).sort((a, b) => {
+    const ia = DECK_ORDER.indexOf(a);
+    const ib = DECK_ORDER.indexOf(b);
+    return (ia === -1 ? DECK_ORDER.length : ia) - (ib === -1 ? DECK_ORDER.length : ib);
+  });
+
 function MembraneEditor() {
   const qc = useQueryClient();
   const getFn = useServerFn(getRdlCombos);
@@ -85,6 +106,16 @@ function MembraneEditor() {
 
   const d = draft;
 
+  // Base hours from the formula line ("... = 10 Hrs x ..."); display-only, used
+  // for the computed hour cells in the matrix below.
+  const hrsMatch = /=\s*([\d.]+)\s*Hrs/i.exec(selected.formula ?? "");
+  const baseHrs = hrsMatch ? Number(hrsMatch[1]) : 10;
+  // Legacy-style single matrix needs both axes; older/other combos fall back to
+  // the separate cards further down.
+  const deckKeys = d.deck_multipliers ? orderedDeckKeys(d.deck_multipliers) : [];
+  const hasMatrix = !!(d.deck_multipliers && d.fastener_spacing_multipliers?.length);
+  const tabLabel = d.base?.tab_or_width_label === "Width" ? "Width" : "Tab";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-3">
@@ -111,8 +142,127 @@ function MembraneEditor() {
         </p>
       )}
 
-      {/* Base tab/width */}
-      {d.base && d.base.tab_or_width_label && (
+      {/* 1. Base labor — legacy-style matrix: deck multipliers across the top,
+          fastener-spacing multipliers down the side, computed hours in the cells. */}
+      {hasMatrix && (
+        <Card>
+          <CardHeader>
+            <CardTitle>1. Base labor</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {d.base && d.base.tab_or_width_label && (
+              <div className="flex flex-wrap items-end gap-6">
+                <div className="space-y-2">
+                  <Label>{d.base.tab_or_width_label}</Label>
+                  <Input
+                    type="number"
+                    value={d.base.tab_value ?? 0}
+                    onChange={(e) =>
+                      update((x) => {
+                        x.base = { ...x.base, tab_value: num(e.target.value) };
+                      })
+                    }
+                    className="w-[110px]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{tabLabel} multiplier</Label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={d.base.tab_multiplier ?? 0}
+                    onChange={(e) =>
+                      update((x) => {
+                        x.base = { ...x.base, tab_multiplier: num(e.target.value) };
+                      })
+                    }
+                    className="w-[130px]"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="whitespace-nowrap">Fastener spacing (in)</TableHead>
+                    <TableHead className="whitespace-nowrap">Multiplier</TableHead>
+                    {deckKeys.map((k) => (
+                      <TableHead key={k} className="whitespace-nowrap text-center">
+                        {k}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                  <TableRow>
+                    <TableHead className="whitespace-nowrap text-muted-foreground">
+                      {baseHrs} hrs ×
+                    </TableHead>
+                    <TableHead className="text-muted-foreground">deck multiplier →</TableHead>
+                    {deckKeys.map((k) => (
+                      <TableHead key={k} className="text-center">
+                        <Input
+                          type="number"
+                          step="0.001"
+                          value={d.deck_multipliers![k] ?? 0}
+                          onChange={(e) =>
+                            update((x) => {
+                              x.deck_multipliers![k] = num(e.target.value);
+                            })
+                          }
+                          className="mx-auto w-20 text-center"
+                        />
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {d.fastener_spacing_multipliers!.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{r.spacing_in}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={r.multiplier}
+                          onChange={(e) =>
+                            update((x) => {
+                              x.fastener_spacing_multipliers![i]!.multiplier = num(e.target.value);
+                            })
+                          }
+                          className="w-20"
+                        />
+                      </TableCell>
+                      {deckKeys.map((k) => (
+                        <TableCell
+                          key={k}
+                          className="text-center tabular-nums text-muted-foreground"
+                        >
+                          {(
+                            baseHrs *
+                            (d.deck_multipliers![k] ?? 0) *
+                            r.multiplier *
+                            (d.base?.tab_multiplier || 1)
+                          ).toFixed(2)}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Gray hours are calculated live: {baseHrs} hrs × deck multiplier ×
+              fastener-spacing multiplier
+              {d.base?.tab_multiplier ? <> × {tabLabel.toLowerCase()} multiplier</> : null}. Edit
+              any multiplier and the hours update; sheet-size and thickness multipliers below
+              apply on top, per the formula.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Fallback for combos without both matrix axes (e.g. Duro-Bond) */}
+      {!hasMatrix && d.base && d.base.tab_or_width_label && (
         <Card>
           <CardHeader>
             <CardTitle>Base labor</CardTitle>
@@ -132,7 +282,7 @@ function MembraneEditor() {
               />
             </div>
             <div className="space-y-2">
-              <Label>{d.base.tab_or_width_label === "Width" ? "Width" : "Tab"} multiplier</Label>
+              <Label>{tabLabel} multiplier</Label>
               <Input
                 type="number"
                 step="0.0001"
@@ -185,8 +335,8 @@ function MembraneEditor() {
         </Card>
       )}
 
-      {/* Deck multipliers */}
-      {d.deck_multipliers && (
+      {/* Deck multipliers (fallback when the matrix isn't shown) */}
+      {!hasMatrix && d.deck_multipliers && (
         <Card>
           <CardHeader>
             <CardTitle>Deck-type multipliers</CardTitle>
@@ -204,8 +354,8 @@ function MembraneEditor() {
         </Card>
       )}
 
-      {/* Fastener spacing multipliers */}
-      {d.fastener_spacing_multipliers && (
+      {/* Fastener spacing multipliers (fallback when the matrix isn't shown) */}
+      {!hasMatrix && d.fastener_spacing_multipliers && (
         <Card>
           <CardHeader>
             <CardTitle>Fastener-spacing multipliers</CardTitle>
@@ -243,6 +393,8 @@ function MembraneEditor() {
         </Card>
       )}
 
+      {/* Side-by-side multiplier panels (legacy shows these next to the matrix) */}
+      <div className="grid items-start gap-6 lg:grid-cols-2">
       {/* Complexity factors */}
       {d.complexity_factors && (
         <Card>
@@ -286,7 +438,10 @@ function MembraneEditor() {
       {d.sheet_size_multipliers && (
         <Card>
           <CardHeader>
-            <CardTitle>{d.sheet_size_label ?? "Sheet-size multipliers"}</CardTitle>
+            <CardTitle>
+              {hasMatrix ? "2. " : ""}
+              {d.sheet_size_label ?? "Sheet-size labor multipliers"}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -374,7 +529,7 @@ function MembraneEditor() {
       {d.thickness_multipliers && (
         <Card>
           <CardHeader>
-            <CardTitle>Membrane thickness multipliers</CardTitle>
+            <CardTitle>{hasMatrix ? "3. " : ""}Membrane thickness multipliers</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -410,6 +565,7 @@ function MembraneEditor() {
           </CardContent>
         </Card>
       )}
+      </div>
 
       <div className="flex justify-end">
         <Button onClick={save} disabled={saving}>
