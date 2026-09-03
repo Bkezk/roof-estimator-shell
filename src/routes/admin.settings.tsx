@@ -41,7 +41,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+const SETTINGS_TABS = ["company", "shipping", "markup", "warranties"] as const;
+type SettingsTab = (typeof SETTINGS_TABS)[number];
+
 export const Route = createFileRoute("/admin/settings")({
+  validateSearch: (search: Record<string, unknown>): { tab?: SettingsTab } =>
+    SETTINGS_TABS.includes(search["tab"] as SettingsTab)
+      ? { tab: search["tab"] as SettingsTab }
+      : {},
   head: () => ({ meta: [{ title: "General — Bid-O-Matic" }] }),
   component: SettingsPage,
 });
@@ -49,6 +56,8 @@ export const Route = createFileRoute("/admin/settings")({
 const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 
 function SettingsPage() {
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const getFn = useServerFn(getGeneralSettings);
   const { data, isLoading } = useQuery({
@@ -70,7 +79,11 @@ function SettingsPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="company" className="space-y-4">
+      <Tabs
+        value={tab ?? "company"}
+        onValueChange={(v) => navigate({ search: { tab: v as SettingsTab }, replace: true })}
+        className="space-y-4"
+      >
         <TabsList className="flex-wrap">
           <TabsTrigger value="company">Company &amp; Bid</TabsTrigger>
           <TabsTrigger value="shipping">Shipping</TabsTrigger>

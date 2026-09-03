@@ -32,7 +32,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+const LABOR_TABS = [
+  "setup",
+  "inspection",
+  "templates",
+  "curb",
+  "roofdeck",
+  "parapet",
+  "accessory",
+] as const;
+type LaborTab = (typeof LABOR_TABS)[number];
+
 export const Route = createFileRoute("/admin/labor")({
+  validateSearch: (search: Record<string, unknown>): { tab?: LaborTab } =>
+    LABOR_TABS.includes(search["tab"] as LaborTab) ? { tab: search["tab"] as LaborTab } : {},
   head: () => ({ meta: [{ title: "Labor Engines — Bid-O-Matic" }] }),
   component: LaborPage,
 });
@@ -51,6 +64,8 @@ function SaveBar({ saving, onSave }: { saving: boolean; onSave: () => void }) {
 }
 
 function LaborPage() {
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const qc = useQueryClient();
   const getFn = useServerFn(getLaborEngines);
   const { data, isLoading } = useQuery({
@@ -72,7 +87,11 @@ function LaborPage() {
           calculated on every bid.
         </p>
       </div>
-      <Tabs defaultValue="setup" className="space-y-4">
+      <Tabs
+        value={tab ?? "setup"}
+        onValueChange={(v) => navigate({ search: { tab: v as LaborTab }, replace: true })}
+        className="space-y-4"
+      >
         <TabsList className="flex-wrap">
           <TabsTrigger value="setup">Setup Times</TabsTrigger>
           <TabsTrigger value="inspection">Inspection Times</TabsTrigger>

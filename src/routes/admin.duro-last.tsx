@@ -5,12 +5,19 @@ import { AdhesivesTab } from "@/components/adhesives-editor";
 import { ExceptionalMetalsTab } from "@/components/exceptional-metals-editor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+const DL_TABS = ["catalog", "adhesives", "metals"] as const;
+type DlTab = (typeof DL_TABS)[number];
+
 export const Route = createFileRoute("/admin/duro-last")({
+  validateSearch: (search: Record<string, unknown>): { tab?: DlTab } =>
+    DL_TABS.includes(search["tab"] as DlTab) ? { tab: search["tab"] as DlTab } : {},
   head: () => ({ meta: [{ title: "Duro-Last Pricing — Bid-O-Matic" }] }),
   component: DuroLastPage,
 });
 
 function DuroLastPage() {
+  const { tab } = Route.useSearch();
+  const navigate = Route.useNavigate();
   return (
     <div className="space-y-6">
       <div>
@@ -21,7 +28,11 @@ function DuroLastPage() {
           items in a bid.
         </p>
       </div>
-      <Tabs defaultValue="catalog" className="space-y-4">
+      <Tabs
+        value={tab ?? "catalog"}
+        onValueChange={(v) => navigate({ search: { tab: v as DlTab }, replace: true })}
+        className="space-y-4"
+      >
         <TabsList className="flex-wrap">
           <TabsTrigger value="catalog">Catalog</TabsTrigger>
           <TabsTrigger value="adhesives">Adhesives</TabsTrigger>
