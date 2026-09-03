@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Save } from "lucide-react";
 
 import { getLaborTables, saveLaborTable } from "@/lib/admin-rdl.functions";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,11 +33,14 @@ interface LayoutData {
   deck_columns: string[];
   fastening_times_min_per_fastener_by_deck: Record<string, number>;
   rows: { underlayment: string; layout_hours_per_2500sqft: number }[];
+  fasteners_per_4x8_options?: { count: number; per_sqft: number; selected?: boolean }[];
 }
 interface AdhesiveData {
   adhesives: {
     adhesive: string;
     unit_type?: string;
+    field_spacing?: number;
+    perim_spacing?: number;
     rows: { substrate: string; coverage_sqft: number; labor: number }[];
   }[];
 }
@@ -105,112 +109,181 @@ export function UnderlaymentEditor() {
 
   const adhesive = adh.adhesives[selAdh]!;
 
+  // Legacy: Labor = Layout Time + (min/fastener by deck) x # fasteners in 2,500 sq ft.
+  // # fasteners comes from the selected fasteners-per-4'x8'-sheet option.
+  const fastenerOpts = layout.fasteners_per_4x8_options ?? [];
+  const selectedOpt = fastenerOpts.find((o) => o.selected) ?? fastenerOpts[0];
+  const fastenersPer2500 = 2500 * (selectedOpt?.per_sqft ?? 0);
+  const decks = layout.deck_columns;
+
   return (
     <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Fastening time by deck (minutes per fastener)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Deck type</TableHead>
-                <TableHead>Minutes / fastener</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Object.entries(layout.fastening_times_min_per_fastener_by_deck).map(([k, v]) => (
-                <TableRow key={k}>
-                  <TableCell className="font-medium">{k}</TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      step="0.001"
-                      value={v}
-                      onChange={(e) =>
-                        setLayout((p) => {
-                          const n = clone(p!);
-                          n.fastening_times_min_per_fastener_by_deck[k] = num(e.target.value);
-                          return n;
-                        })
-                      }
-                      className="max-w-[140px]"
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="layout" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="layout">Layout &amp; Mechanical</TabsTrigger>
+          <TabsTrigger value="adhesive">Adhesive Times</TabsTrigger>
+        </TabsList>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Underlayment layout time (hours per 2,500 sq ft)</CardTitle>
-          <CardDescription>
-            One row per underlayment product. Names ending in “…” were truncated in the old app and
-            will be confirmed on live capture.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="max-h-[520px] overflow-y-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Underlayment</TableHead>
-                <TableHead>Layout hours / 2,500 sq ft</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {layout.rows.map((r, i) => (
-                <TableRow key={i}>
-                  <TableCell className="font-medium">{r.underlayment}</TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      step="0.001"
-                      value={r.layout_hours_per_2500sqft}
-                      onChange={(e) =>
-                        setLayout((p) => {
-                          const n = clone(p!);
-                          n.rows[i]!.layout_hours_per_2500sqft = num(e.target.value);
-                          return n;
-                        })
-                      }
-                      className="max-w-[160px]"
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+        <TabsContent value="layout">
+          <Card>
+            <CardHeader>
+              <CardTitle>Layout &amp; mechanical labor</CardTitle>
+              <CardDescription>
+                Labor = layout time + (time for one fastener by deck type) × # fasteners in 2,500
+                sq ft. Gray per-deck hours are the calculated preview; layout hours and the
+                minutes-per-fastener row are the editable inputs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {fastenerOpts.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-sm">Fasteners per 4&apos;x8&apos; sheet</Label>
+                  <Select
+                    value={String(selectedOpt?.count ?? "")}
+                    onValueChange={(v) =>
+                      setLayout((p) => {
+                        const n = clone(p!);
+                        n.fasteners_per_4x8_options = n.fasteners_per_4x8_options!.map((o) => ({
+                          ...o,
+                          selected: o.count === Number(v),
+                        }));
+                        return n;
+                      })
+                    }
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fastenerOpts.map((o) => (
+                        <SelectItem key={o.count} value={String(o.count)}>
+                          {o.count}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="max-h-[560px] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="sticky left-0 bg-background">Underlayment</TableHead>
+                      <TableHead className="whitespace-nowrap">Layout (hr / 2,500 sq ft)</TableHead>
+                      {decks.map((d) => (
+                        <TableHead key={d} className="whitespace-nowrap text-center">
+                          {d}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                    <TableRow>
+                      <TableHead className="sticky left-0 whitespace-nowrap bg-background text-muted-foreground">
+                        min / fastener →
+                      </TableHead>
+                      <TableHead />
+                      {decks.map((d) => (
+                        <TableHead key={d} className="text-center">
+                          <Input
+                            type="number"
+                            step="0.001"
+                            value={layout.fastening_times_min_per_fastener_by_deck[d] ?? 0}
+                            onChange={(e) =>
+                              setLayout((p) => {
+                                const n = clone(p!);
+                                n.fastening_times_min_per_fastener_by_deck[d] = num(
+                                  e.target.value,
+                                );
+                                return n;
+                              })
+                            }
+                            className="mx-auto w-20 text-center"
+                          />
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {layout.rows.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="sticky left-0 whitespace-nowrap bg-background font-medium">
+                          {r.underlayment}
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.001"
+                            value={r.layout_hours_per_2500sqft}
+                            onChange={(e) =>
+                              setLayout((p) => {
+                                const n = clone(p!);
+                                n.rows[i]!.layout_hours_per_2500sqft = num(e.target.value);
+                                return n;
+                              })
+                            }
+                            className="w-24"
+                          />
+                        </TableCell>
+                        {decks.map((d) => (
+                          <TableCell
+                            key={d}
+                            className="text-center tabular-nums text-muted-foreground"
+                          >
+                            {(
+                              r.layout_hours_per_2500sqft +
+                              (fastenersPer2500 *
+                                (layout.fastening_times_min_per_fastener_by_deck[d] ?? 0)) /
+                                60
+                            ).toFixed(2)}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Adhesive coverage &amp; labor</CardTitle>
-          <CardDescription>
-            Field coverage (sq ft) and labor per substrate, per adhesive.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label className="text-sm">Adhesive</Label>
-            <Select value={String(selAdh)} onValueChange={(v) => setSelAdh(Number(v))}>
-              <SelectTrigger className="w-[320px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {adh.adhesives.map((a, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {a.adhesive}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Table>
+        <TabsContent value="adhesive">
+          <Card>
+            <CardHeader>
+              <CardTitle>Adhesive coverage &amp; labor</CardTitle>
+              <CardDescription>
+                Field coverage (sq ft) and labor per substrate, per adhesive. A 0/0 row means the
+                substrate doesn&apos;t apply to that adhesive.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-sm">Adhesive</Label>
+                <Select value={String(selAdh)} onValueChange={(v) => setSelAdh(Number(v))}>
+                  <SelectTrigger className="w-[320px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {adh.adhesives.map((a, i) => (
+                      <SelectItem key={i} value={String(i)}>
+                        {a.adhesive}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {(adhesive.unit_type ||
+                  adhesive.field_spacing != null ||
+                  adhesive.perim_spacing != null) && (
+                  <p className="text-xs text-muted-foreground">
+                    {adhesive.unit_type && <>Unit type: {adhesive.unit_type}</>}
+                    {adhesive.field_spacing != null && (
+                      <> · Field spacing: {adhesive.field_spacing}&quot;</>
+                    )}
+                    {adhesive.perim_spacing != null && (
+                      <> · Perimeter spacing: {adhesive.perim_spacing}&quot;</>
+                    )}
+                  </p>
+                )}
+              </div>
+              <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Substrate</TableHead>
@@ -255,8 +328,10 @@ export function UnderlaymentEditor() {
               ))}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <SaveButton saving={saving} onSave={save} />
     </div>
@@ -301,8 +376,8 @@ export function TearoffEditor() {
         <CardHeader>
           <CardTitle>Tearoff times</CardTitle>
           <CardDescription>
-            Hours by tearoff type and deck. 0 means use the program default. Type names ending in
-            “…” were truncated in the old app.
+            Custom hours per 100 sq ft by tearoff type and deck. 0 means Bid-Advantage&apos;s
+            built-in default applies. Type names ending in “…” were truncated in the old app.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
