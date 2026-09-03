@@ -64,7 +64,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -276,6 +278,14 @@ function EstimatePage() {
   const [adjustInspectionPct, setAdjustInspectionPct] = useState(0);
   const [laborTemplateName, setLaborTemplateName] = useState("");
   const [warrantyName, setWarrantyName] = useState("");
+  // Legacy Home > Defaults panel: material defaults for NEW roof sections.
+  const [sectionDefaults, setSectionDefaults] = useState({
+    deckType: "Wood",
+    thickness: 40,
+    color: "White",
+    sheetSizeLabel: "1500 sf",
+  });
+  const [selSection, setSelSection] = useState(0);
   const [highWind, setHighWind] = useState(false);
   const [highWindTermYears, setHighWindTermYears] = useState(0);
   const [highWindBand, setHighWindBand] = useState("");
@@ -337,6 +347,7 @@ function EstimatePage() {
       setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
       setLaborTemplateName(d.laborTemplateName ?? "");
       setWarrantyName(d.warrantyName ?? "");
+      if (d.sectionDefaults) setSectionDefaults({ ...d.sectionDefaults });
       setHighWind(d.highWind ?? false);
       setHighWindTermYears(d.highWindTermYears ?? 0);
       setHighWindBand(d.highWindBand ?? "");
@@ -411,6 +422,7 @@ function EstimatePage() {
     adjustSetupPct,
     adjustInspectionPct,
     laborTemplateName,
+    sectionDefaults,
     warrantyName,
     highWind,
     highWindTermYears,
@@ -704,21 +716,134 @@ function EstimatePage() {
           })}
         </div>
 
-        <div className={step === 0 ? "space-y-6" : "hidden"}>
+        <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"}>
+        {/* Legacy Home: "Setup" panel (Bid Info | Client | Job Site) on the left,
+            "Defaults" panel on the right. */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Customer &amp; project</CardTitle>
+            <CardTitle className="text-base">Setup</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Client</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <Field label="Customer name">
-                  <Input
-                    value={customer.name}
-                    onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+          <CardContent>
+            <Tabs defaultValue="bidinfo">
+              <TabsList>
+                <TabsTrigger value="bidinfo">Bid Info</TabsTrigger>
+                <TabsTrigger value="client">Client</TabsTrigger>
+                <TabsTrigger value="jobsite">Job Site</TabsTrigger>
+              </TabsList>
+              <TabsContent value="bidinfo" className="space-y-3 pt-2">
+                <LegacyGroup title="1. General Info">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Customer name">
+                      <Input
+                        value={customer.name}
+                        onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Job name">
+                      <Input value={bidName} onChange={(e) => setBidName(e.target.value)} />
+                    </Field>
+                    <Field label="Estimator's name">
+                      <Input
+                        value={customer.estimatorName ?? ""}
+                        onChange={(e) =>
+                          setCustomer((c) => ({ ...c, estimatorName: e.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label="Status">
+                      <Select
+                        value={bidStatus}
+                        onValueChange={(v) => setBidStatus(asBidStatus(v))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BID_STATUSES.map((st) => (
+                            <SelectItem key={st} value={st}>
+                              {STATUS_LABELS[st]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    <Field label="Date created">
+                      <Input
+                        value={new Date(
+                          (loadedBid as { created_at?: string } | null | undefined)
+                            ?.created_at ?? Date.now(),
+                        ).toLocaleDateString()}
+                        disabled
+                      />
+                    </Field>
+                  </div>
+                </LegacyGroup>
+                <LegacyGroup title="2. Labor &amp; Markup Setup">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                    <span>
+                      Labor:{" "}
+                      <span className="font-semibold">${laborRate.toFixed(2)} per hour</span>
+                    </span>
+                    <span>
+                      Markup:{" "}
+                      <span className="font-semibold">
+                        {markup}% ({MARKUP_LABELS[markupMode]})
+                      </span>
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => goStep(STEPS.findIndex((st) => st.key === "pricing"))}
+                    >
+                      Click here to edit
+                    </Button>
+                  </div>
+                </LegacyGroup>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <LegacyGroup title="3. Labor Template">
+                    <PickOne
+                      value={laborTemplateName || "None"}
+                      options={laborTemplateOptions}
+                      onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
+                    />
+                  </LegacyGroup>
+                  <LegacyGroup title="4. Estimator Commission">
+                    <Field label="Commission rate (%)">
+                      <Input
+                        type="number"
+                        step="0.1"
+                        value={commission}
+                        onChange={(e) => setCommission(num(e.target.value))}
+                      />
+                    </Field>
+                  </LegacyGroup>
+                </div>
+                <LegacyGroup title="5. Tax Exempt">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Switch
+                      id="setup-taxexempt"
+                      checked={taxExempt}
+                      onCheckedChange={setTaxExempt}
+                    />
+                    <Label htmlFor="setup-taxexempt" className="text-xs">
+                      Tax exempt
+                    </Label>
+                    <span className="text-xs text-muted-foreground">
+                      Sales-tax rate &amp; only-tax-material come from Admin › General.
+                    </span>
+                  </div>
+                </LegacyGroup>
+                <LegacyGroup title="6. Notes">
+                  <Textarea
+                    rows={3}
+                    placeholder="Shown on the proposal…"
+                    value={customer.notes}
+                    onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
                   />
-                </Field>
+                </LegacyGroup>
+              </TabsContent>
+              <TabsContent value="client" className="pt-2">
+                <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Contact person">
                   <Input
                     value={customer.contact}
@@ -743,17 +868,9 @@ function EstimatePage() {
                     onChange={(e) => setCustomer((c) => ({ ...c, clientAddress: e.target.value }))}
                   />
                 </Field>
-                <Field label="Estimator's name">
-                  <Input
-                    value={customer.estimatorName ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, estimatorName: e.target.value }))}
-                  />
-                </Field>
-              </div>
-            </div>
-            <div>
-              <div className="mb-2 flex items-center gap-3">
-                <p className="text-xs font-medium text-muted-foreground">Job site</p>
+                </div>
+              </TabsContent>
+              <TabsContent value="jobsite" className="space-y-3 pt-2">
                 <Button
                   variant="outline"
                   size="sm"
@@ -764,8 +881,7 @@ function EstimatePage() {
                 >
                   <Copy className="mr-1 h-3 w-3" /> Copy client address
                 </Button>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Project address (street)">
                   <Input
                     value={customer.projectAddress}
@@ -792,85 +908,111 @@ function EstimatePage() {
                     onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
                   />
                 </Field>
-                <Field label="Scope notes (optional, shown on the proposal)">
-                  <Input
-                    value={customer.notes}
-                    onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
+              </div>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Defaults</CardTitle>
+            <CardDescription>
+              Used when adding new roof sections; existing sections keep their values unless you
+              apply.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <LegacyGroup title="1. Deck Type">
+              <PickOne
+                value={sectionDefaults.deckType}
+                options={admin.deckOrder}
+                onChange={(v) => setSectionDefaults((p) => ({ ...p, deckType: v }))}
+              />
+            </LegacyGroup>
+            <LegacyGroup title="2. Roof Sections Material">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <Field label="Roof system">
+                  <Select value={roofSystem} onValueChange={setRoofSystem}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {systemOptions.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Attached with">
+                  <Select
+                    value={attachment}
+                    onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="mechanical">Mechanical</SelectItem>
+                      <SelectItem value="adhered">Adhered</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Type">
+                  <PickOne
+                    value={String(sectionDefaults.thickness)}
+                    options={["40", "50", "60"]}
+                    onChange={(v) =>
+                      setSectionDefaults((p) => ({ ...p, thickness: Number(v) }))
+                    }
+                  />
+                </Field>
+                <Field label="Color">
+                  <PickOne
+                    value={sectionDefaults.color}
+                    options={colorOptions}
+                    onChange={(v) => setSectionDefaults((p) => ({ ...p, color: v }))}
+                  />
+                </Field>
+                <Field label="Avg sheet">
+                  <PickOne
+                    value={sectionDefaults.sheetSizeLabel}
+                    options={sheetSizeOptions}
+                    onChange={(v) => setSectionDefaults((p) => ({ ...p, sheetSizeLabel: v }))}
                   />
                 </Field>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Roof system</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-4">
-            <div className="space-y-1">
-              <Label className="text-xs">System</Label>
-              <Select value={roofSystem} onValueChange={setRoofSystem}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {systemOptions.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Attachment</Label>
-              <Select
-                value={attachment}
-                onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() =>
+                  setSections((p) =>
+                    p.map((s) => ({
+                      ...s,
+                      deckType: sectionDefaults.deckType,
+                      thickness: sectionDefaults.thickness,
+                      color: sectionDefaults.color,
+                      sheetSizeLabel: sectionDefaults.sheetSizeLabel,
+                    })),
+                  )
+                }
               >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="mechanical">Mechanical</SelectItem>
-                  <SelectItem value="adhered">Adhered</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Legacy Home shows labor & markup at a glance ("Click here to edit"); the
-            actual controls live on the Pricing & Warranty step. */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Labor &amp; markup</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <span>
-              Labor: <span className="font-semibold">${laborRate.toFixed(2)} / hr</span>
-            </span>
-            <span>
-              Markup:{" "}
-              <span className="font-semibold">
-                {markup}% ({MARKUP_LABELS[markupMode]})
-              </span>
-            </span>
-            <span>
-              Commission: <span className="font-semibold">{commission}%</span>
-            </span>
-            <span>
-              Labor template:{" "}
-              <span className="font-semibold">{laborTemplateName || "None"}</span>
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => goStep(STEPS.findIndex((s) => s.key === "pricing"))}
-            >
-              Click here to edit
-            </Button>
+                Apply to existing roof sections
+              </Button>
+            </LegacyGroup>
+            <LegacyGroup title="3. Select Type of Warranty">
+              <PickOne
+                value={warrantyName || "None"}
+                options={warrantyOptions}
+                onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                High-wind term &amp; band are on the Pricing &amp; Warranty step.
+              </p>
+            </LegacyGroup>
           </CardContent>
         </Card>
         </div>
@@ -882,85 +1024,23 @@ function EstimatePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                setSections((p) => {
-                  // Like the legacy Defaults panel: a new section starts from the
-                  // previous section's material settings (dimensions reset).
-                  const last = p[p.length - 1];
-                  return [
-                    ...p,
-                    newSection(
-                      last
-                        ? {
-                            deckType: last.deckType,
-                            thickness: last.thickness,
-                            color: last.color,
-                            fieldLap: last.fieldLap,
-                            fastenerOc: last.fastenerOc,
-                            sheetSizeLabel: last.sheetSizeLabel,
-                          }
-                        : {},
-                    ),
-                  ];
-                })
-              }
+              onClick={() => {
+                // New sections start from the Setup step's Defaults panel.
+                setSections((p) => [...p, newSection({ ...sectionDefaults })]);
+                setSelSection(sections.length);
+              }}
             >
-              <Plus className="mr-1 h-4 w-4" /> Add section
+              <Plus className="mr-1 h-4 w-4" /> New section
             </Button>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Legacy "Roof Sections Summary" table */}
-            {sections.length > 1 && (
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Section</TableHead>
-                      <TableHead className="text-right">L (ft)</TableHead>
-                      <TableHead className="text-right">W (ft)</TableHead>
-                      <TableHead className="text-right">Sq ft</TableHead>
-                      <TableHead>Deck</TableHead>
-                      <TableHead className="text-right">Mil</TableHead>
-                      <TableHead>Color</TableHead>
-                      <TableHead>Sheet</TableHead>
-                      <TableHead className="text-right">Lap (in)</TableHead>
-                      <TableHead className="text-right">OC (in)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sections.map((s) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-medium">{s.name}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.length}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.width}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {(s.length * s.width).toLocaleString()}
-                        </TableCell>
-                        <TableCell>{s.deckType}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.thickness}</TableCell>
-                        <TableCell>{s.color}</TableCell>
-                        <TableCell>{s.sheetSizeLabel}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.fieldLap}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s.fastenerOc}</TableCell>
-                      </TableRow>
-                    ))}
-                    <TableRow>
-                      <TableCell className="font-semibold">Total</TableCell>
-                      <TableCell />
-                      <TableCell />
-                      <TableCell className="text-right font-semibold tabular-nums">
-                        {sections
-                          .reduce((sum, s) => sum + s.length * s.width, 0)
-                          .toLocaleString()}
-                      </TableCell>
-                      <TableCell colSpan={6} />
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-            {sections.map((s, i) => (
-              <div key={s.id} className="rounded-md border p-3">
+          <CardContent>
+            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            {/* Left: editor for the selected section (legacy edits one section at a time) */}
+            {(() => {
+              const i = Math.min(selSection, sections.length - 1);
+              const s = sections[i]!;
+              return (
+              <div key={s.id} className="min-w-0 rounded-md border p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <Input
                     className="h-8 w-[220px] font-medium"
@@ -973,12 +1053,13 @@ function EstimatePage() {
                       variant="ghost"
                       size="icon"
                       title="Duplicate this section"
-                      onClick={() =>
+                      onClick={() => {
                         setSections((p) => [
                           ...p,
                           { ...clone(s), id: `s${seq++}`, name: `${s.name} (copy)` },
-                        ])
-                      }
+                        ]);
+                        setSelSection(sections.length);
+                      }}
                     >
                       <Copy className="h-4 w-4" />
                     </Button>
@@ -986,7 +1067,10 @@ function EstimatePage() {
                       variant="ghost"
                       size="icon"
                       className="text-destructive"
-                      onClick={() => setSections((p) => p.filter((_, j) => j !== i))}
+                      onClick={() => {
+                        setSections((p) => p.filter((_, j) => j !== i));
+                        setSelSection((v) => Math.max(0, Math.min(v, sections.length - 2)));
+                      }}
                       disabled={sections.length === 1}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1334,7 +1418,63 @@ function EstimatePage() {
                   </Field>
                 </div>
               </div>
-            ))}
+              );
+            })()}
+
+            {/* Right rail: legacy section diagram + Roof Sections Summary */}
+            <div className="space-y-4">
+              <EdgeDiagram section={sections[Math.min(selSection, sections.length - 1)]!} />
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Section</TableHead>
+                      <TableHead className="text-right">L</TableHead>
+                      <TableHead className="text-right">W</TableHead>
+                      <TableHead>Deck</TableHead>
+                      <TableHead className="text-right">Mil</TableHead>
+                      <TableHead>Color</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sections.map((s2, i2) => (
+                      <TableRow
+                        key={s2.id}
+                        onClick={() => setSelSection(i2)}
+                        className={
+                          i2 === Math.min(selSection, sections.length - 1)
+                            ? "cursor-pointer bg-muted/60"
+                            : "cursor-pointer"
+                        }
+                      >
+                        <TableCell className="font-medium">{s2.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
+                        <TableCell>{s2.deckType}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s2.thickness}</TableCell>
+                        <TableCell>{s2.color}</TableCell>
+                      </TableRow>
+                    ))}
+                    <TableRow>
+                      <TableCell className="font-semibold">Total sq ft</TableCell>
+                      <TableCell
+                        colSpan={5}
+                        className="text-right font-semibold tabular-nums"
+                      >
+                        {sections
+                          .reduce((sum, s2) => sum + s2.length * s2.width, 0)
+                          .toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Click a row to edit that section. Copy or remove it with the buttons at the top
+                of the editor.
+              </p>
+            </div>
+            </div>
           </CardContent>
         </Card>
         </div>
@@ -2382,6 +2522,80 @@ function EstimatePage() {
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Legacy Roof Sections diagram: the section rectangle with sides A (top), B (right),
+    C (bottom), D (left), annotated from the edges editor. Display-only. */
+function EdgeDiagram({ section }: { section: BidSectionInput }) {
+  const edges = section.edges ?? [];
+  const by = (side: string) => edges.find((e) => e.side === side);
+  const SideInfo = ({
+    side,
+    fallbackLen,
+    className,
+  }: {
+    side: string;
+    fallbackLen: number;
+    className?: string;
+  }) => {
+    const e = by(side);
+    return (
+      <div className={`text-[11px] leading-tight ${className ?? ""}`}>
+        <p className="font-semibold">
+          {side}: {e?.lengthFt ?? fallbackLen}′
+        </p>
+        {e ? (
+          <>
+            <p>{e.termination || "No Termination"}</p>
+            <p>{e.blockingFt > 0 ? `Blocking ${e.blockingFt}′` : "No Blocking"}</p>
+            <p>ARP: {e.arpSizeIn > 0 ? `${e.arpSizeIn}"` : "None"}</p>
+            {e.isPerimeter && <p className="text-muted-foreground">Perimeter edge</p>}
+          </>
+        ) : (
+          <p className="text-muted-foreground">—</p>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div className="rounded-md border p-3">
+      <div className="mb-2 flex items-baseline justify-between">
+        <p className="text-xs font-semibold">{section.name}</p>
+        {edges.length === 0 && (
+          <p className="text-[11px] text-muted-foreground">Define edges A–D to annotate</p>
+        )}
+      </div>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <div />
+        <SideInfo side="A" fallbackLen={section.length} className="text-center" />
+        <div />
+        <SideInfo side="D" fallbackLen={section.width} className="text-right" />
+        <div className="relative h-28 w-24 border-2 border-foreground/50 bg-muted/30">
+          <div className="absolute inset-x-0 top-0 h-1.5 bg-yellow-400/90" title="Side A" />
+          <span className="absolute inset-x-0 bottom-1 text-center text-[10px] text-muted-foreground">
+            Length ⟷
+          </span>
+          <span className="absolute left-0 top-1/2 origin-left -rotate-90 text-[10px] text-muted-foreground">
+            Width
+          </span>
+        </div>
+        <SideInfo side="B" fallbackLen={section.width} />
+        <div />
+        <SideInfo side="C" fallbackLen={section.length} className="text-center" />
+        <div />
+      </div>
+    </div>
+  );
+}
+
+/** Legacy-style numbered group box ("1. General Info", "2. Labor & Markup Setup", …). */
+function LegacyGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-md border p-3">
+      <p className="mb-2 text-xs font-semibold">{title}</p>
+      {children}
     </div>
   );
 }

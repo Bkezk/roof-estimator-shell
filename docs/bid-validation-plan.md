@@ -98,13 +98,12 @@ Known deliberate differences (revisit at validation):
 - **Pull Test (lbs) + Design Table (psf)** — the web app takes Fastener OC directly;
   the legacy pull-test→OC lookup is not modeled (enter the OC BA shows). Engine pins
   designTable 60.
-- **Defaults panel scope** — legacy sets bid-wide defaults for deck/wall type,
-  membrane, "attached with", underlayment attach, and parapet material that apply to
-  new items; the web app covers the membrane portion by inheriting from the previous
-  section. Wall type + parapet/underlayment attach defaults are per-item entries on
-  their steps.
+- **Defaults panel scope** — the web Setup step now has a real Defaults panel (deck
+  type, roof system, attached-with, mil, color, avg sheet, warranty) that seeds new
+  sections, with Apply-to-existing. Wall type + parapet/underlayment attach defaults
+  remain per-item entries on their steps.
 - **Per-section Man Hours / Labor Cost inline** (legacy summary grid): available via
   each section's Show Calculations; not shown inline.
-- **Section edge diagram** (legacy A/B/C/D drawing): not drawn; edges editor is
-  form-based.
+- ~~Section edge diagram~~ — now drawn on the Sections step right rail (A top /
+  B right / C bottom / D left with termination, blocking, ARP annotations).
 - **Date Created** display: web shows Updated on Saved Bids instead.

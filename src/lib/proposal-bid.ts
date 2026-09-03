@@ -74,6 +74,13 @@ export interface SavedBidState {
   /** Per-category labor template name ("" / unset = none). */
   laborTemplateName?: string;
   // Warranty selection (resolved to $/sqft via the warranties + high-wind admin tables).
+  /** Legacy Home > Defaults panel: material defaults applied to new roof sections. */
+  sectionDefaults?: {
+    deckType: string;
+    thickness: number;
+    color: string;
+    sheetSizeLabel: string;
+  };
   warrantyName?: string;
   highWind?: boolean;
   highWindTermYears?: number;
