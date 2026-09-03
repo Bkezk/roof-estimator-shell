@@ -38,6 +38,7 @@ import {
   type AdhesivesScreenData,
   type RawLaborTemplate,
   type RawLaborTemplateAdjustment,
+  type RawTabMultiRow,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -46,6 +47,16 @@ export type {
   NonDlCatalogItem,
   MetalsCatalogItem,
 } from "@/lib/engine/adapters";
+
+/** Untyped table access for hand-seeded migrations absent from the generated Database types. */
+interface UntypedFrom {
+  from: (t: string) => {
+    select: (c: string) => PromiseLike<{
+      data: Record<string, number>[] | null;
+      error: { message: string } | null;
+    }>;
+  };
+}
 
 const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
 const UNDERLAYMENT_SCREEN_ID = "duro_last:underlayment";
@@ -74,6 +85,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       adhScreenRes,
       tplRes,
       tplAdjRes,
+      tabMultiRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -106,6 +118,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("pricing_catalog").select("data").eq("id", "duro_last:adhesives").maybeSingle(),
       sb.from("labor_templates").select("id, name, sort").order("sort"),
       sb.from("labor_template_adjustments").select("template_id, area, value, sort").order("sort"),
+      // Legacy mech_tab_multi (hand-seeded migration, not in the generated Database types).
+      (sb as unknown as UntypedFrom).from("mech_tab_multi").select("*"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -126,6 +140,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (adhScreenRes.error) throw adhScreenRes.error;
     if (tplRes.error) throw tplRes.error;
     if (tplAdjRes.error) throw tplAdjRes.error;
+    if (tabMultiRes.error) throw new Error(tabMultiRes.error.message);
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -150,6 +165,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const laborTemplateRows = (tplRes.data ?? null) as RawLaborTemplate[] | null;
     const laborTemplateAdjustments = (tplAdjRes.data ?? null) as
       RawLaborTemplateAdjustment[] | null;
+    const tabMultiRows = (tabMultiRes.data ?? null) as RawTabMultiRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -170,6 +186,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       adhesivesScreen,
       laborTemplateRows,
       laborTemplateAdjustments,
+      tabMultiRows,
     });
   });
 
@@ -253,7 +270,10 @@ export const getFastenerLookup = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<MechFastenerRow[]> => {
     const sb = context.supabase as unknown as {
       from: (t: string) => {
-        select: (c: string) => PromiseLike<{ data: Record<string, number>[] | null; error: { message: string } | null }>;
+        select: (c: string) => PromiseLike<{
+          data: Record<string, number>[] | null;
+          error: { message: string } | null;
+        }>;
       };
     };
     const { data, error } = await sb.from("mech_fastener_lookup").select("*");

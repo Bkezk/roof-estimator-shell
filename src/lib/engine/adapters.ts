@@ -5,10 +5,9 @@
  *
  * Covered now: the Duro-Last membrane PRICE MATRIX (from the seeded Duro-Last Membrane pricing
  * screen) and the LABOR MULTIPLIERS for a Roof Deck Labor combo (deck / on-center / tab / sheet-size
- * / thickness). Not yet available in the seed (capture-live gaps, see the checklist): the full
- * tab/width option lists (only the selected tab is captured → a single-entry tab band) and the
- * pull-test→fastener-spacing table (so `fastenerSpacing` stays empty; sections must supply a custom
- * fastener spacing, or that table must be captured, before the OC lookup resolves).
+ * / thickness). The full legacy tab-multiplier set (mech_tab_multi) and the pull-test→spacing
+ * table (mech_fastener_lookup) were later extracted from the shipped binaries and are wired here /
+ * in fastener-spacing.ts; the combo screenshots still carry only the selected tab as `base`.
  */
 
 import type { PriceMatrix, PriceTier, FreightStep } from "./pricing";
@@ -270,7 +269,11 @@ export interface LaborTables {
   /** Deck name → id, so a section can reference the right column. */
   deckTypeIds: Record<string, number>;
   onCenterBands: Band[];
-  /** Only the captured (selected) tab option — a single band until the full list is captured. */
+  /**
+   * Tab-spacing → labor multiplier bands. buildLaborTables seeds only the captured (selected)
+   * tab option; assembleEngineAdminData expands mechanical combos to the full legacy
+   * mech_tab_multi set when those rows are provided.
+   */
   tabBands: Band[];
   sheetSizeMultiByLabel: Record<string, number>;
   thicknessLaborByMil: Record<number, number>;
@@ -834,6 +837,29 @@ export function buildInspectionTable(steps: RawInspectionStep[]): InspectionBand
   return { minimum: bands[0]?.value ?? 0, bands };
 }
 
+/**
+ * A seeded mech_tab_multi row (legacy MechTabMulti, extracted verbatim from the shipped
+ * Bid-Advantage bootstrap script): per roof system, tab spacing (inches) → labor multiplier.
+ */
+export interface RawTabMultiRow {
+  roof_system_id: number;
+  tab_spacing: number;
+  multiplier: number | string;
+}
+
+/**
+ * Legacy RoofSystemID by our rdl_combos roof-system name (exact-name join on curated admin data;
+ * ids per the seeded legacy_roof_system table). Duro-Fleece (5) has no MechTabMulti rows — its
+ * combos keep the captured base band.
+ */
+export const LEGACY_RS_ID_BY_NAME: Record<string, number> = {
+  "Duro-Last": 1,
+  "Duro-Bond": 2,
+  "Duro-Tuff": 3,
+  "Duro-Roof": 4,
+  "Duro-Fleece": 5,
+};
+
 export interface RawAdminData {
   membraneScreen: MembraneScreen | null;
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;
@@ -853,6 +879,8 @@ export interface RawAdminData {
   adhesivesScreen?: AdhesivesScreenData | null;
   laborTemplateRows?: RawLaborTemplate[] | null;
   laborTemplateAdjustments?: RawLaborTemplateAdjustment[] | null;
+  /** Legacy mech_tab_multi rows; when present, mechanical combos get their FULL tab-band set. */
+  tabMultiRows?: RawTabMultiRow[] | null;
 }
 
 export interface EngineSettings {
@@ -899,9 +927,28 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const deckOrder = [...STANDARD_DECK_ORDER];
   const priceMatrix = raw.membraneScreen ? buildPriceMatrix(raw.membraneScreen) : {};
 
+  // Full tab-band sets per legacy roof-system id (mech_tab_multi). The screenshot-captured combos
+  // carry only the SELECTED tab row (e.g. Duro-Last 28 → 1.5125); the legacy table also defines
+  // the other selectable pitches (60/64 → 1.0, 120 → 0.8, …). Legacy MechTabMulti belongs to the
+  // mechanical system, so only mechanical-attachment combos are expanded; adhered combos (and
+  // systems with no rows) keep the captured base band. bandLookup on the full set returns the
+  // exact row for every legal Field Tab Spacing value, matching CustomTabSpacingMultiplier's
+  // exact-key dictionary get.
+  const tabBandsByRs = new Map<number, Band[]>();
+  for (const r of raw.tabMultiRows ?? []) {
+    const bands = tabBandsByRs.get(r.roof_system_id) ?? [];
+    bands.push({ key: r.tab_spacing, value: Number(r.multiplier) });
+    tabBandsByRs.set(r.roof_system_id, bands);
+  }
+
   const labor: Record<string, LaborTables> = {};
   for (const c of raw.combos) {
-    labor[`${c.roof_system}|${c.attachment}`] = buildLaborTables(c.data, deckOrder);
+    const tables = buildLaborTables(c.data, deckOrder);
+    if (c.attachment === "mechanical") {
+      const bands = tabBandsByRs.get(LEGACY_RS_ID_BY_NAME[c.roof_system] ?? -1);
+      if (bands && bands.length > 0) tables.tabBands = bands;
+    }
+    labor[`${c.roof_system}|${c.attachment}`] = tables;
   }
 
   const s = raw.settings;

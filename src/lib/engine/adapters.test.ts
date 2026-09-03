@@ -508,6 +508,38 @@ describe("assembleEngineAdminData (whole-catalog transform)", () => {
     expect(d.deckOrder[0]).toBe("Wood");
   });
 
+  it("expands a mechanical combo's tab bands from legacy mech_tab_multi rows (fieldLap picks its own multiplier)", () => {
+    const d = assembleEngineAdminData({
+      ...raw,
+      combos: [
+        { roof_system: "Duro-Last", attachment: "mechanical", data: duroLastMechCombo },
+        { roof_system: "Duro-Last", attachment: "adhesive", data: duroLastMechCombo },
+      ],
+      tabMultiRows: [
+        { roof_system_id: 1, tab_spacing: 28, multiplier: "1.5125" },
+        { roof_system_id: 1, tab_spacing: 60, multiplier: 1 },
+        { roof_system_id: 1, tab_spacing: 64, multiplier: 1 },
+        { roof_system_id: 1, tab_spacing: 120, multiplier: 0.8 },
+        { roof_system_id: 3, tab_spacing: 30, multiplier: 2.8 },
+      ],
+    });
+    const mech = d.labor["Duro-Last|mechanical"]!;
+    // Full band set replaces the single captured base row; RS3 rows do not leak in.
+    expect(mech.tabBands.map((b) => [b.key, b.value]).sort((a, b) => a[0]! - b[0]!)).toEqual([
+      [28, 1.5125],
+      [60, 1],
+      [64, 1],
+      [120, 0.8],
+    ]);
+    expect(bandLookup(mech.tabBands, 120)).toBe(0.8);
+    expect(bandLookup(mech.tabBands, 60)).toBe(1);
+    // Adhered combos keep the captured base band (legacy tab multi is a mechanical-system table).
+    expect(d.labor["Duro-Last|adhesive"]!.tabBands).toEqual([{ key: 28, value: 1.5125 }]);
+    // No rows for a system -> base band fallback, unchanged behavior.
+    const none = assembleEngineAdminData({ ...raw, tabMultiRows: [] });
+    expect(none.labor["Duro-Last|mechanical"]!.tabBands).toEqual([{ key: 28, value: 1.5125 }]);
+  });
+
   it("falls back to sane defaults when settings are missing", () => {
     const d = assembleEngineAdminData({ ...raw, settings: null });
     expect(d.settings.hoursPerDay).toBe(9);
