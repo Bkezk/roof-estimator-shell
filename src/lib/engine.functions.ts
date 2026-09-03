@@ -10,6 +10,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
+import type { MechFastenerRow } from "@/lib/engine/fastener-spacing";
 import {
   assembleEngineAdminData,
   buildAccessoryCatalog,
@@ -240,4 +241,31 @@ export const getMetalsCatalog = createServerFn({ method: "GET" })
       .maybeSingle();
     if (error) throw error;
     return buildMetalsCatalog((data?.data ?? null) as MetalsScreenData | null);
+  });
+
+/**
+ * Legacy MechFastenerLookup rows (pull test -> o.c. spacing), seeded verbatim from the shipped
+ * Bid-Advantage bootstrap script. The table is not in the Lovable-generated Database types
+ * (hand-seeded migration), hence the untyped query.
+ */
+export const getFastenerLookup = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MechFastenerRow[]> => {
+    const sb = context.supabase as unknown as {
+      from: (t: string) => {
+        select: (c: string) => PromiseLike<{ data: Record<string, number>[] | null; error: { message: string } | null }>;
+      };
+    };
+    const { data, error } = await sb.from("mech_fastener_lookup").select("*");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => ({
+      roofSystemId: r["roof_system_id"]!,
+      membraneThickness: r["membrane_thickness"]!,
+      designTable: r["design_table"]!,
+      tabSpacing: r["tab_spacing"]!,
+      pullTest: r["pull_test"]!,
+      fieldSpacing: r["field_spacing"]!,
+      perimSpacing: r["perim_spacing"]!,
+      cornerSpacing: r["corner_spacing"]!,
+    }));
   });

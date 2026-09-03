@@ -22,6 +22,7 @@ import {
   getAccessoryLaborLookup,
   getNonDlCatalog,
   getMetalsCatalog,
+  getFastenerLookup,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
 import {
@@ -37,6 +38,12 @@ import {
   sectionLayers,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import {
+  universalFastenerSpacing,
+  LEGACY_ROOF_SYSTEM_IDS,
+  DESIGN_TABLE_OPTIONS,
+  type SpacingError,
+} from "@/lib/engine/fastener-spacing";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
   defaultEdges,
@@ -171,6 +178,7 @@ function EstimatePage() {
   const getAccLaborFn = useServerFn(getAccessoryLaborLookup);
   const getNonDlFn = useServerFn(getNonDlCatalog);
   const getMetalsFn = useServerFn(getMetalsCatalog);
+  const getFastenerLookupFn = useServerFn(getFastenerLookup);
   const getWarrantyFn = useServerFn(getWarrantyData);
   const getPresetsFn = useServerFn(getMarkupPresets);
   const getBidFn = useServerFn(getBid);
@@ -216,6 +224,11 @@ function EstimatePage() {
   const { data: presets } = useQuery({
     queryKey: ["markup-presets"],
     queryFn: () => getPresetsFn(),
+    enabled: authed,
+  });
+  const { data: fastenerLookup } = useQuery({
+    queryKey: ["fastener-lookup"],
+    queryFn: () => getFastenerLookupFn(),
     enabled: authed,
   });
 
@@ -498,6 +511,52 @@ function EstimatePage() {
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  // Legacy pull-test autofill (§1): when the section has a pull test entered, re-derive the
+  // field/perim/corner o.c. from MechFastenerLookup whenever a lookup key changes. Manual OC
+  // edits still stick — the lookup only fires from pull-test / design-table / lap / thickness
+  // changes, exactly like the legacy screen.
+  const editSectionWithSpacing = (
+    i: number,
+    s: BidSectionInput,
+    patch: Partial<BidSectionInput>,
+  ) => {
+    const next = { ...s, ...patch };
+    const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
+    if (
+      !fastenerLookup?.length ||
+      !rsId ||
+      attachment !== "mechanical" ||
+      !next.pullTest ||
+      next.pullTest <= 0
+    ) {
+      editSection(i, patch);
+      return;
+    }
+    const base = {
+      roofSystemId: rsId,
+      thickness: next.thickness,
+      designTable: next.designTable ?? 60,
+      tabSpacings: [next.fieldLap],
+      pullTest: next.pullTest,
+    };
+    const field = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 0 });
+    const perim = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 1 });
+    const corner = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 2 });
+    editSection(i, {
+      ...patch,
+      ...(field.ok ? { fastenerOc: field.inches } : {}),
+      ...(perim.ok ? { perimFastenerOc: perim.inches } : {}),
+      ...(corner.ok ? { cornerFastenerOc: corner.inches } : {}),
+    });
+  };
+
+  const SPACING_ERROR_TEXT: Record<SpacingError, string> = {
+    [-5]: "no lookup rows for this system/thickness",
+    [-1]: "no rows for this design table",
+    [-2]: "no rows for this tab spacing",
+    [-3]: "pull test too low — no permitted spacing",
+  };
 
   // Legacy-style stepped workflow: one screen per tab with Previous / Next, like the
   // Bid-Advantage ribbon. Steps stay mounted (hidden) so nothing is lost when switching.
@@ -1110,7 +1169,7 @@ function EstimatePage() {
                     <PickOne
                       value={String(s.thickness)}
                       options={["40", "50", "60"]}
-                      onChange={(v) => editSection(i, { thickness: Number(v) })}
+                      onChange={(v) => editSectionWithSpacing(i, s, { thickness: Number(v) })}
                     />
                   </Field>
                   <Field label="Color">
@@ -1131,7 +1190,9 @@ function EstimatePage() {
                     <Input
                       type="number"
                       value={s.fieldLap}
-                      onChange={(e) => editSection(i, { fieldLap: num(e.target.value) })}
+                      onChange={(e) =>
+                        editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
+                      }
                     />
                   </Field>
                   <Field label="Fastener OC (in)">
@@ -1141,7 +1202,49 @@ function EstimatePage() {
                       onChange={(e) => editSection(i, { fastenerOc: num(e.target.value) })}
                     />
                   </Field>
+                  <Field label="Pull test (lbs)">
+                    <Input
+                      type="number"
+                      value={s.pullTest ?? 0}
+                      onChange={(e) =>
+                        editSectionWithSpacing(i, s, { pullTest: num(e.target.value) })
+                      }
+                    />
+                  </Field>
+                  <Field label="Design table (psf)">
+                    <PickOne
+                      value={String(s.designTable ?? 60)}
+                      options={DESIGN_TABLE_OPTIONS.map(String)}
+                      onChange={(v) =>
+                        editSectionWithSpacing(i, s, { designTable: Number(v) })
+                      }
+                    />
+                  </Field>
                 </div>
+                {(s.pullTest ?? 0) > 0 &&
+                  attachment === "mechanical" &&
+                  fastenerLookup &&
+                  (() => {
+                    const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
+                    if (!rsId) return null;
+                    const res = universalFastenerSpacing(fastenerLookup, {
+                      roofSystemId: rsId,
+                      thickness: s.thickness,
+                      designTable: s.designTable ?? 60,
+                      tabSpacings: [s.fieldLap],
+                      pullTest: s.pullTest!,
+                      columnOffset: 0,
+                    });
+                    return (
+                      <p
+                        className={`mt-1 text-xs ${res.ok ? "text-muted-foreground" : "text-destructive"}`}
+                      >
+                        {res.ok
+                          ? `Pull test ${s.pullTest} lbs → ${res.inches}″ oc (legacy lookup; edit Fastener OC to override)`
+                          : `Pull-test lookup: ${SPACING_ERROR_TEXT[res.error]}`}
+                      </p>
+                    );
+                  })()}
                 <div className="mt-3 border-t pt-3">
                   <div className="mb-2 flex items-center justify-between">
                     <p className="text-xs font-medium text-muted-foreground">

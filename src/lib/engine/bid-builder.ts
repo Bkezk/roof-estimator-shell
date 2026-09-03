@@ -86,7 +86,11 @@ export interface BidSectionInput {
   thickness: number; // 40 / 50 / 60
   color: string; // e.g. "White"
   fieldLap: number; // tab lap inches
-  fastenerOc: number; // field on-center inches (entered; auto-lookup pending capture)
+  fastenerOc: number; // field on-center inches (entered, or auto-filled from the pull-test lookup)
+  /** Pull test (lbs) — UI-level input for the MechFastenerLookup autofill; 0/absent = manual OC. */
+  pullTest?: number;
+  /** Wind design table (psf, 60–210); keys the pull-test lookup. Default 60. */
+  designTable?: number;
   // perimeter / corner enhancement zones (§2)
   perimLengthFt: number; // total perimeter enhancement edge length
   cornerLengthFt: number; // total corner enhancement length
