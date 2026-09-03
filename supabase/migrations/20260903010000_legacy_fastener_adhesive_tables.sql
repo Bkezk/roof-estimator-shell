@@ -371,8 +371,9 @@ insert into public.adhesive_ribbon_spacing (adhesive_id, spacing_in, labor_multi
 create table public.adhesive_wall_coverage (
   roof_system_id int not null,
   adhesive_id int not null,
-  coverage_sqft numeric not null, -- wall sq ft covered per unit
-  primary key (roof_system_id, adhesive_id)
+  coverage_sqft numeric not null -- wall sq ft covered per unit
+  -- No PK: the SOURCE carries duplicate (roof_system_id, adhesive_id) rows for RS3
+  -- (350/300 and -1). Kept verbatim; which row wins is resolved at wiring/validation.
 );
 alter table public.adhesive_wall_coverage enable row level security;
 create policy "adhesive_wall_coverage_read" on public.adhesive_wall_coverage for select to authenticated using (true);
