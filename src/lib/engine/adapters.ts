@@ -569,7 +569,19 @@ export function buildMetalsCatalog(data: MetalsScreenData | null): MetalsCatalog
   for (const [option, rows] of Object.entries(byOption))
     for (const r of rows) push(`Collection Boxes — ${option}`, r);
 
-  for (const r of s.two_piece_metals?.rows ?? []) push("Two-Piece Metals", r);
+  // Two-piece compression: the capture lists each size's base row followed by its
+  // "Cover" / "Outside Corner" / "Inside Corner" rows. Prefix the sub-rows with the
+  // base size so the picker offers distinct base metal + cover metal choices (legacy
+  // selects base and cover separately) and catalog keys stay unique.
+  let twoPieceBase = "";
+  for (const r of s.two_piece_metals?.rows ?? []) {
+    const isSub = ["Cover", "Outside Corner", "Inside Corner"].includes(r.description ?? "");
+    if (!isSub) twoPieceBase = r.description ?? "";
+    push(
+      "Two-Piece Metals",
+      isSub && twoPieceBase ? { ...r, description: `${twoPieceBase} — ${r.description}` } : r,
+    );
+  }
 
   return items;
 }

@@ -36,7 +36,7 @@ import {
   type UnderlaymentLayer,
   sectionLayers,
 } from "@/lib/engine/bid-builder";
-import { computeEstimate } from "@/lib/engine/estimate";
+import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
   defaultEdges,
@@ -438,6 +438,11 @@ function EstimatePage() {
       buildEstimateInputs(bid, admin);
     return {
       r: computeEstimate(inputs),
+      // Per-section install hours (legacy per-section Man Hours); inputs.sections is
+      // built 1:1 in order from bid.sections.
+      sectionHours: inputs.sections.map((rs) =>
+        computeSectionInstallHours(rs, inputs.admin, inputs.formulasVersion, inputs.adjustLaborPct),
+      ),
       warnings,
       parapetMaterial,
       metalsMaterial,
@@ -1426,6 +1431,7 @@ function EstimatePage() {
             {/* Right rail: legacy section diagram + Roof Sections Summary */}
             <div className="space-y-4">
               <EdgeDiagram section={sections[Math.min(selSection, sections.length - 1)]!} />
+              {/* Legacy Roof Sections Summary: Section | L | W | System | Attach | Deck | Color | Lap */}
               <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
@@ -1433,9 +1439,11 @@ function EstimatePage() {
                       <TableHead>Section</TableHead>
                       <TableHead className="text-right">L</TableHead>
                       <TableHead className="text-right">W</TableHead>
-                      <TableHead>Deck</TableHead>
-                      <TableHead className="text-right">Mil</TableHead>
+                      <TableHead>System</TableHead>
+                      <TableHead>Attach</TableHead>
+                      <TableHead>Deck Type</TableHead>
                       <TableHead>Color</TableHead>
+                      <TableHead className="text-right">Lap</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1449,33 +1457,75 @@ function EstimatePage() {
                             : "cursor-pointer"
                         }
                       >
-                        <TableCell className="font-medium">{s2.name}</TableCell>
+                        <TableCell className="whitespace-nowrap font-medium">{s2.name}</TableCell>
                         <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
                         <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
-                        <TableCell>{s2.deckType}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s2.thickness}</TableCell>
+                        <TableCell className="whitespace-nowrap">{roofSystem}</TableCell>
+                        <TableCell className="capitalize">{attachment}</TableCell>
+                        <TableCell className="whitespace-nowrap">{s2.deckType}</TableCell>
                         <TableCell>{s2.color}</TableCell>
+                        <TableCell className="text-right tabular-nums">{s2.fieldLap}</TableCell>
                       </TableRow>
                     ))}
-                    <TableRow>
-                      <TableCell className="font-semibold">Total sq ft</TableCell>
-                      <TableCell
-                        colSpan={5}
-                        className="text-right font-semibold tabular-nums"
-                      >
-                        {sections
-                          .reduce((sum, s2) => sum + s2.length * s2.width, 0)
-                          .toLocaleString()}
-                      </TableCell>
-                    </TableRow>
                   </TableBody>
                 </Table>
+              </div>
+              {/* Legacy per-section Man Hours / Labor Cost readout for the selected section */}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border p-2 text-xs">
+                <span>
+                  Man Hours:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0).toFixed(
+                      2,
+                    )}
+                  </span>
+                </span>
+                <span>
+                  Labor Cost:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {money(
+                      (result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0) *
+                        laborRate,
+                    )}
+                  </span>
+                </span>
+                <span className="text-muted-foreground">(selected section, install labor)</span>
               </div>
               <p className="text-xs text-muted-foreground">
                 Click a row to edit that section. Copy or remove it with the buttons at the top
                 of the editor.
               </p>
             </div>
+            </div>
+
+            {/* Legacy bottom bar: Setup / Inspection / Roof SqFt / Membrane SqFt */}
+            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs">
+              <span>
+                Setup time:{" "}
+                <span className="font-semibold tabular-nums">
+                  {(result?.r.setupHours ?? 0).toFixed(2)} h
+                </span>
+              </span>
+              <span>
+                Inspection time:{" "}
+                <span className="font-semibold tabular-nums">
+                  {(result?.r.inspectionHours ?? 0).toFixed(2)} h
+                </span>
+              </span>
+              <span>
+                Roof sq ft:{" "}
+                <span className="font-semibold tabular-nums">
+                  {(result?.r.roofSqFootage ?? 0).toLocaleString()}
+                </span>
+              </span>
+              <span>
+                Membrane sq ft:{" "}
+                <span className="font-semibold tabular-nums">
+                  {(result?.r.sqFtTotalMembrane ?? 0).toLocaleString(undefined, {
+                    maximumFractionDigits: 0,
+                  })}
+                </span>
+              </span>
             </div>
           </CardContent>
         </Card>
