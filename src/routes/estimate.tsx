@@ -2818,21 +2818,31 @@ function EstimatePage() {
                   {nonDlMaterialTotal > 0 && (
                     <Row label="Other material (non-DL)" v={money(nonDlMaterialTotal)} />
                   )}
-                  {result.r.money.dTotals[1]! +
-                    result.r.money.dTotals[2]! +
-                    result.r.money.dTotals[3]! <
-                    0 && (
+                  {/* APPLIED discounts only (d[4]−d[0]); the candidate d[1..3] values exist even
+                      when their toggles are off and must not be displayed as if applied. */}
+                  {(result.r.money.dTotals[4] ?? 0) - (result.r.money.dTotals[0] ?? 0) < 0 && (
                     <Row
                       label="Discounts"
                       v={money(
-                        result.r.money.dTotals[1]! +
-                          result.r.money.dTotals[2]! +
-                          result.r.money.dTotals[3]!,
+                        (result.r.money.dTotals[4] ?? 0) - (result.r.money.dTotals[0] ?? 0),
                       )}
                     />
                   )}
                   {(result.r.money.dTotals[5] ?? 0) > 0 && (
                     <Row label="Warranty" v={money(result.r.money.dTotals[5] ?? 0)} />
+                  )}
+                  {/* Material-only sales tax lives INSIDE Purchases (legacy §4.1); surface it so
+                      the visible lines sum to Subtotal 1. d[8] − d[4..7] isolates it. */}
+                  {(() => {
+                    const dd = result.r.money.dTotals;
+                    const matTax =
+                      (dd[8] ?? 0) - (dd[4] ?? 0) - (dd[5] ?? 0) - (dd[6] ?? 0) - (dd[7] ?? 0);
+                    return matTax > 0.005 ? (
+                      <Row label="Sales tax (material)" v={money(matTax)} />
+                    ) : null;
+                  })()}
+                  {(result.r.money.dTotals[9] ?? 0) > 0 && (
+                    <Row label="Shipping" v={money(result.r.money.dTotals[9] ?? 0)} />
                   )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
                   {(nonDlLaborTotal > 0 || metalsLaborTotal > 0) && (
