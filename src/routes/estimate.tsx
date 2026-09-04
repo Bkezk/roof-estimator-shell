@@ -113,7 +113,8 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   deckType: "Wood",
   thickness: 40,
   color: "White",
-  fieldLap: 28,
+  // Legacy XML default section: sheetsizeid 4 ("1500 sf") with tab 60.
+  fieldLap: 60,
   fastenerOc: 18,
   perimLengthFt: 0,
   cornerLengthFt: 0,
