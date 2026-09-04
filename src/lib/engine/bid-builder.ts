@@ -15,8 +15,8 @@
  *  - On-center spacing per section (fastenerOc) is entered or auto-filled from the extracted
  *    pull-test lookup (fastener-spacing.ts); it feeds customFieldFastenerSpacing so the engine's
  *    OC lookup is bypassed.
- *  - Freight wired: percent-of-material or the stepped "from" table, on the DL material subtotal
- *    (M0). Membrane price tier assumed roll-goods.
+ *  - Freight wired: percent-of-material or the stepped "from" table (strict >), on the material
+ *    total before tax (dMaterial[20]). Membrane price tier assumed roll-goods.
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Insulation layers wired (§4.3, up to 4 per section): board material → dTotals[6]; mechanical
  *    labor per the app's header formula (layout hrs/2500 + fastener min × count/board); adhesive
@@ -568,16 +568,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   const servicesCost = bid.servicesCost + nonDlServices + metalsServices;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
 
-  // Freight (§4.1 dTotals[9]) — percent-of-material or the stepped "from" table, on the Duro-Last
-  // material subtotal (M0), the "Duro-Last material" the admin Shipping screen bills against.
-  // FLAGGED FOR BID VALIDATION (Phase 6): the exact freight basis (M0 vs membrane-only vs
-  // material-before-tax) and the stored scale of shipping_percent (whole percent vs fraction) both
-  // need a captured bid to confirm; percent mode divides by 100 (admin enters e.g. 5 for 5%).
+  // Freight (dMaterial[22]) — percent-of-material or the stepped "from" table, on
+  // MATERIAL TOTAL BEFORE TAX (dMaterial[20] = ALL material: DL + underlayment + non-DL), per
+  // ReviewCalc.Recalculate (docs/legacy-money-parity.md §5). Stepped lookup is STRICTLY greater
+  // than the threshold. Percent mode: the legacy IL multiplies the stored value RAW (a fraction);
+  // our admin field is entered as a whole percent, hence the /100 — the entry convention is
+  // flagged in the parity doc.
   let freight = 0;
   if (admin.settings.shippingMode === "percent") {
-    freight = freightPercent(duroLastMaterial, admin.settings.shippingPercent / 100);
+    freight = freightPercent(materialTotalBeforeTax, admin.settings.shippingPercent / 100);
   } else if (admin.shippingSteps) {
-    freight = freightStepped(duroLastMaterial, admin.shippingSteps);
+    freight = freightStepped(materialTotalBeforeTax, admin.shippingSteps);
   }
   const shipping = shippingTotal(freight, bid.extraShipping);
 

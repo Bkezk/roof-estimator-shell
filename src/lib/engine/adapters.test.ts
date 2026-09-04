@@ -454,7 +454,8 @@ describe("buildShippingSteps (from the seeded shipping_steps rows)", () => {
     ]);
     expect(steps.map((s) => s.fromThreshold)).toEqual([0, 5001, 7500]);
     expect(freightStepped(6000, steps)).toBe(975);
-    expect(freightStepped(0, steps)).toBe(800);
+    expect(freightStepped(1, steps)).toBe(800); // strict >: a zero basis ships free
+    expect(freightStepped(0, steps)).toBe(0);
   });
 });
 

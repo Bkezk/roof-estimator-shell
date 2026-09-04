@@ -242,7 +242,27 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 16 + 5, 3);
   });
 
-  it("freight: stepped 'from' table on the DL material subtotal (M0) flows into shipping", () => {
+  it("freight: stepped table bills on MATERIAL BEFORE TAX (dMaterial[20]), not M0", () => {
+    const withShip: EngineAdminData = {
+      ...admin,
+      underlaymentPrices: { '1/2" ISO': 0.85 },
+      shippingSteps: [
+        { fromThreshold: 0, cost: 800 },
+        { fromThreshold: 5001, cost: 975 },
+      ],
+    };
+    // M0 stays 3199.23, but board material 2500 × 0.85 = 2125 lifts material-before-tax to
+    // 5324.23 > 5001 → the 975 band. (On the old M0 basis this bid shipped at 800.)
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }],
+      }),
+      withShip,
+    );
+    expect(inputs.shipping).toBeCloseTo(975, 2);
+  });
+
+  it("freight: stepped 'from' table flows into shipping", () => {
     const withShip: EngineAdminData = {
       ...admin,
       shippingSteps: [
@@ -250,7 +270,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         { fromThreshold: 5001, cost: 975 },
       ],
     };
-    // base bid M0 = membrane 3199.23 (no accessories) → 0 ≤ 3199.23 < 5001 → 800 freight
+    // base bid material = membrane 3199.23 (no accessories) → 0 < 3199.23 ≤ 5001 → 800 freight
     const { inputs } = buildEstimateInputs(bid(), withShip);
     expect(inputs.shipping).toBeCloseTo(800, 2);
     // an accessory line pushes M0 over 5001 → next band
@@ -258,10 +278,10 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       bid({ accessories: [{ description: "Big", price: 2000, quantity: 1 }] }),
       withShip,
     );
-    expect(hi.shipping).toBeCloseTo(975, 2); // M0 = 3199.23 + 2000 = 5199.23 ≥ 5001
+    expect(hi.shipping).toBeCloseTo(975, 2); // 3199.23 + 2000 = 5199.23 > 5001
   });
 
-  it("freight: percent mode multiplies M0 by shipping_percent/100", () => {
+  it("freight: percent mode multiplies material-before-tax by shipping_percent/100", () => {
     const pct: EngineAdminData = {
       ...admin,
       settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },

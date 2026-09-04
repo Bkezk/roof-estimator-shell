@@ -90,13 +90,14 @@ export interface FreightStep {
  * shape is the authority here.)
  */
 export function freightStepped(materialTotal: number, steps: FreightStep[]): number {
-  const sorted = [...steps].sort((a, b) => a.fromThreshold - b.fromThreshold);
-  let cost = sorted[0]?.cost ?? 0;
+  // Legacy Recalculate walks the table from the largest threshold DOWN and takes the first row
+  // with basis STRICTLY greater than the threshold (equal falls to the smaller band). When no
+  // row qualifies (basis <= every threshold, e.g. zero material) dMaterial[22] stays unset -> 0.
+  const sorted = [...steps].sort((a, b) => b.fromThreshold - a.fromThreshold);
   for (const s of sorted) {
-    if (materialTotal >= s.fromThreshold) cost = s.cost;
-    else break;
+    if (materialTotal > s.fromThreshold) return s.cost;
   }
-  return cost;
+  return 0;
 }
 
 /** dTotals[9] shipping = GoodSingle(DL freight + hand-entered ExtraShipping). */
