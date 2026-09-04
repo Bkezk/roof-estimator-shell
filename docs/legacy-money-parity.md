@@ -74,8 +74,8 @@ Curbs bill membrane as a **self-contained prefab-wrap model hardcoded in code** 
 The web app's "curb membrane not auto-computed" flag is settled: the legacy amount comes from
 these constants (2020-vintage baked-in pricing). PORTED (2026-09-04) in `curb-wrap.ts` — style
 picker + C/D dims on the Curbs step; styles 3/4 warn quote-required; style-less older bids stay
-manual. ⚠ ASSUMPTION: BAColor enum order 1..4 mapped as White/Tan/Gray/Dark Gray (extraction
-follow-up to confirm; only 60mil Gray/Dark Gray ride on it — 40/50mil columns 1–3 are equal).
+manual. The color order is the PROVEN BAColor mapping above (§7.2) — the port's original
+White-first assumption was falsified and fixed (60mil White 0.5437 / Gray 0.5625).
 
 ## 3. Parapet membrane material & WallPlusTopSqFt
 
