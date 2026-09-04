@@ -11,6 +11,7 @@ export interface ReviewData {
   // purchases ($)
   membraneMaterial: number;
   parapetMaterial: number;
+  curbMaterial: number;
   metalsMaterial: number;
   adhesiveMaterial: number;
   accessoryMaterial: number;
@@ -63,6 +64,7 @@ export function buildReviewRows(d: ReviewData): string[][] {
   const P = "Purchases";
   push(P, "Membrane material", n2(d.membraneMaterial));
   opt(P, "Parapet material", d.parapetMaterial);
+  opt(P, "Curb material", d.curbMaterial);
   opt(P, "Metals material", d.metalsMaterial);
   opt(P, "Adhesive material", d.adhesiveMaterial);
   opt(P, "Accessories", d.accessoryMaterial);

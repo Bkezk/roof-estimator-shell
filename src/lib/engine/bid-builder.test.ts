@@ -139,18 +139,27 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
   });
 
-  it("underlayment material = board $/sqft × deck area, into the underlayment purchase line", () => {
-    const withU: EngineAdminData = { ...admin, underlaymentPrices: { '1/2" ISO': 0.85 } };
+  it("underlayment material = board $/sqft × area × 1.06 waste (1.03 for Geotextile)", () => {
+    const withU: EngineAdminData = {
+      ...admin,
+      underlaymentPrices: { '1/2" ISO': 0.85, Geotextile: 0.85 },
+    };
     const { inputs, warnings } = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
       withU,
     );
     expect(warnings).toEqual([]);
-    // 50×50 = 2500 sf × $0.85 = $2,125 underlayment (separate from membrane material)
-    expect(inputs.materialUnderlayment).toBeCloseTo(2125, 2);
+    // 50×50 = 2500 sf × $0.85 × 1.06 waste = $2,252.50 (legacy UnderlaymentCost, parity doc §6)
+    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2);
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23, 2); // membrane unchanged
     const r = computeEstimate(inputs);
-    expect(r.money.dTotals[6]).toBeCloseTo(2125, 2);
+    expect(r.money.dTotals[6]).toBeCloseTo(2252.5, 2);
+    // Geotextile carries the reduced 1.03 factor: 2500 × 0.85 × 1.03 = 2188.75
+    const geo = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: "Geotextile" }] }),
+      withU,
+    );
+    expect(geo.inputs.materialUnderlayment).toBeCloseTo(2188.75, 2);
     // warns on an unknown board
     const bad = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: "Unobtainium" }] }),
@@ -251,8 +260,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         { fromThreshold: 5001, cost: 975 },
       ],
     };
-    // M0 stays 3199.23, but board material 2500 × 0.85 = 2125 lifts material-before-tax to
-    // 5324.23 > 5001 → the 975 band. (On the old M0 basis this bid shipped at 800.)
+    // M0 stays 3199.23, but board material 2500 × 0.85 × 1.06 = 2252.50 lifts material-before-tax
+    // to 5451.73 > 5001 → the 975 band. (On the old M0 basis this bid shipped at 800.)
     const { inputs } = buildEstimateInputs(
       bid({
         sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }],
@@ -287,13 +296,13 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       underlaymentPrices: { '1/2" ISO': 0.85 },
       settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },
     };
-    // Board material (2500 × 0.85 = 2125) separates the basis from M0: the percent must apply to
-    // material-before-tax 3199.23 + 2125 = 5324.23 → 5% = 266.2115 → GoodSingle 266.21.
+    // Board material (2500 × 0.85 × 1.06 = 2252.50) separates the basis from M0: the percent
+    // applies to material-before-tax 3199.23 + 2252.50 = 5451.73 → 5% = 272.5865 → GoodSingle.
     const { inputs } = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
       pct,
     );
-    expect(inputs.shipping).toBeCloseTo(266.21, 2);
+    expect(inputs.shipping).toBeCloseTo(272.59, 2);
   });
 
   it("accessory labor (per-unit hrs × qty) folds into direct labor (LaborSubtotal1)", () => {
@@ -542,6 +551,45 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
   });
 
+  it("curbs: a legacy styleId auto-prices the wrap membrane into M0; styles 3/4 warn quote-required", () => {
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1 },
+        curbTypes: ["Closed"],
+      },
+    };
+    const curb = {
+      id: "c1",
+      name: "RTU curb",
+      quantity: 1,
+      widthIn: 24,
+      lengthIn: 24,
+      curbType: "Closed",
+      deckType: "Wood",
+      dimCIn: 12,
+      dimDIn: 0,
+    };
+    // Style 1, 40mil White (rate 0.3481): wrap 12 sqft → $34.0035 (curb-wrap.test.ts) into M0.
+    const { inputs, curbMaterial, warnings } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, styleId: 1 }] }),
+      withCurb,
+    );
+    expect(warnings).toEqual([]);
+    expect(curbMaterial).toBeCloseTo(34.0035, 3);
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 34.0035, 2);
+    // Style 3 = quote required: warned, nothing billed.
+    const quoted = buildEstimateInputs(bid({ curbs: [{ ...curb, styleId: 3 }] }), withCurb);
+    expect(quoted.curbMaterial).toBe(0);
+    expect(quoted.warnings.some((w) => w.includes("requires a quote"))).toBe(true);
+    // No styleId (older saved bids): manual as before — no material, no warning.
+    const manual = buildEstimateInputs(bid({ curbs: [curb] }), withCurb);
+    expect(manual.curbMaterial).toBe(0);
+    expect(manual.warnings).toEqual([]);
+  });
+
   it("membrane tier: a non-roll-good sheet prices the FIELD share at the lap's tab tier; perim/corner shares stay unpriced (legacy -1 zone laps)", () => {
     const tabAdmin: EngineAdminData = {
       ...admin,
@@ -591,6 +639,85 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // The roll-good sheet (the combo's FIRST label) keeps the roll-goods tier on the full area.
     const { inputs: rg } = buildEstimateInputs(bid(), tabAdmin);
     expect(rg.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+  });
+
+  it("membrane tier: custom zone laps price the perim/corner shares (≥60→tab60, ≥24→tab28, no 120 tier)", () => {
+    const tabAdmin: EngineAdminData = {
+      ...admin,
+      priceMatrix: {
+        40: { rollGoods: { White: 1.23 }, tab60: { White: 1.1 }, tab28: { White: 1.35 } },
+      },
+      sheetTabSpacings: { 1: [28, 60, 120] },
+      labor: {
+        "Duro-Last|mechanical": buildLaborTables(
+          {
+            ...combo,
+            sheet_size_multipliers: [
+              { label: "1500 sf", roof_section: 1, underlayment: 1 },
+              { label: "2000 sf", roof_section: 0.98, underlayment: 0.98 },
+            ],
+          },
+          deckOrder,
+        ),
+      },
+    };
+    const mwo = 3199.23 / 1.23; // MembraneWithOverlap × 1 (price factored out)
+    // Perim zone marked with a custom 28" lap: field share at tab60, perim share at tab28.
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            sheetSizeLabel: "2000 sf",
+            fieldLap: 60,
+            perimLengthFt: 100,
+            enhancementWidthFt: 3,
+            perimLap: 28,
+          },
+        ],
+      }),
+      tabAdmin,
+    );
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(
+      mwo * 1.1 * (2200 / 2500) + mwo * 1.35 * (300 / 2500),
+      2,
+    );
+    // A 120" perim lap has NO 120 tier — it prices at tab60 (≥ 60).
+    const { inputs: at120 } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            sheetSizeLabel: "2000 sf",
+            fieldLap: 60,
+            perimLengthFt: 100,
+            enhancementWidthFt: 3,
+            perimLap: 120,
+          },
+        ],
+      }),
+      tabAdmin,
+    );
+    expect(at120.membraneCostBeforeDiscount).toBeCloseTo(
+      mwo * 1.1 * (2200 / 2500) + mwo * 1.1 * (300 / 2500),
+      2,
+    );
+    // Unset lap keeps the legacy default: perim share unpriced.
+    const { inputs: unset } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            sheetSizeLabel: "2000 sf",
+            fieldLap: 60,
+            perimLengthFt: 100,
+            enhancementWidthFt: 3,
+          },
+        ],
+      }),
+      tabAdmin,
+    );
+    expect(unset.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.1 * (2200 / 2500), 2);
   });
 
   it("membrane tier: the SEEDED combo shape (first label 'Roll Good') prices a default '1500 sf' section at tab28 — pinned so the reprice is deliberate", () => {
@@ -728,8 +855,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withU,
     );
     expect(warnings).toEqual([]);
-    // board material: 2500 x (0.85 + 0.30) = 2875 -> underlayment purchase line
-    expect(inputs.materialUnderlayment).toBeCloseTo(2875, 2);
+    // board material: 2500 x (0.85 + 0.30) x 1.06 waste = 3047.50 -> underlayment purchase line
+    expect(inputs.materialUnderlayment).toBeCloseTo(3047.5, 2);
     // adhesive material (legacy AggregateCalcQtys): 2500/2000 = 1.25 units, ceilinged once per
     // adhesive across the estimate -> 2 whole units x $899 = $1798 -> M0
     expect(adhesiveMaterial).toBeCloseTo(1798, 2);
@@ -793,7 +920,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withU,
     );
     const r = computeEstimate(inputs);
-    expect(inputs.materialUnderlayment).toBeCloseTo(2125, 2); // unchanged material
+    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2); // unchanged material
     expect(r.underlaymentLaborHours).toBeCloseTo(10.0016, 3); // labor now bills (parity behavior)
   });
 

@@ -171,6 +171,10 @@ const newCurb = (defaults: Partial<CurbInput> = {}): CurbInput => ({
   lengthIn: 36,
   curbType: "",
   deckType: "Wood",
+  // Legacy wrap-material model: style 1 with a 12" curb height C (D 0) as the common default.
+  styleId: 1,
+  dimCIn: 12,
+  dimDIn: 0,
   ...defaults,
 });
 
@@ -471,7 +475,7 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
-    const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial } =
+    const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial } =
       buildEstimateInputs(bid, admin);
     return {
       r: computeEstimate(inputs),
@@ -484,6 +488,7 @@ function EstimatePage() {
       parapetMaterial,
       metalsMaterial,
       adhesiveMaterial,
+      curbMaterial,
       // Own-rate direct-labor hours (metals + categorized non-DL); they join man-days but are
       // priced at each line's own rate, so they aren't in any crew-rate hour bucket.
       ownRateHours: inputs.ownRateDirectLaborHours ?? 0,
@@ -717,9 +722,11 @@ function EstimatePage() {
         (d[0] ?? 0) -
         accessoryTotal -
         result.parapetMaterial -
+        result.curbMaterial -
         result.metalsMaterial -
         result.adhesiveMaterial,
       parapetMaterial: result.parapetMaterial,
+      curbMaterial: result.curbMaterial,
       metalsMaterial: result.metalsMaterial,
       adhesiveMaterial: result.adhesiveMaterial,
       accessoryMaterial: accessoryTotal,
@@ -1503,6 +1510,40 @@ function EstimatePage() {
                               }
                             />
                           </Field>
+                          {/* Custom zone laps (legacy default −1 = zone membrane unpriced on
+                              tab sheets); only meaningful off the roll-good sheet size. */}
+                          <Field label="Perim lap (in)">
+                            <PickOne
+                              value={
+                                s.perimLap !== undefined && s.perimLap !== -1
+                                  ? String(s.perimLap)
+                                  : "—"
+                              }
+                              options={[
+                                "—",
+                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem] ?? []).map(String),
+                              ]}
+                              onChange={(v) =>
+                                editSection(i, { perimLap: v === "—" ? -1 : Number(v) })
+                              }
+                            />
+                          </Field>
+                          <Field label="Corner lap (in)">
+                            <PickOne
+                              value={
+                                s.cornerLap !== undefined && s.cornerLap !== -1
+                                  ? String(s.cornerLap)
+                                  : "—"
+                              }
+                              options={[
+                                "—",
+                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem] ?? []).map(String),
+                              ]}
+                              onChange={(v) =>
+                                editSection(i, { cornerLap: v === "—" ? -1 : Number(v) })
+                              }
+                            />
+                          </Field>
                         </div>
                       </div>
                       <div className="mt-3 border-t pt-3">
@@ -2168,6 +2209,56 @@ function EstimatePage() {
                               }
                             />
                           </Field>
+                        </div>
+                        {/* Legacy wrap-material model: style 1..6 + heights C/D. Styles 3/4 are
+                            quote-required in legacy (no auto price). */}
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Membrane wrap (legacy curb style; styles 3 &amp; 4 need a quote)
+                          </p>
+                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                            <Field label="Style">
+                              <PickOne
+                                value={c.styleId !== undefined ? String(c.styleId) : ""}
+                                options={["1", "2", "3", "4", "5", "6"]}
+                                onChange={(v) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, styleId: Number(v) } : x,
+                                    ),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="C (in)">
+                              <Input
+                                type="number"
+                                min={0}
+                                value={c.dimCIn ?? 0}
+                                onChange={(e) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, dimCIn: num(e.target.value) } : x,
+                                    ),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="D (in)">
+                              <Input
+                                type="number"
+                                min={0}
+                                value={c.dimDIn ?? 0}
+                                onChange={(e) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, dimDIn: num(e.target.value) } : x,
+                                    ),
+                                  )
+                                }
+                              />
+                            </Field>
+                          </div>
                         </div>
                       </div>
                     );
@@ -2979,12 +3070,16 @@ function EstimatePage() {
                       (result.r.money.dTotals[0] ?? 0) -
                         accessoryTotal -
                         result.parapetMaterial -
+                        result.curbMaterial -
                         result.metalsMaterial -
                         result.adhesiveMaterial,
                     )}
                   />
                   {result.parapetMaterial > 0 && (
                     <Row label="Parapet material" v={money(result.parapetMaterial)} />
+                  )}
+                  {result.curbMaterial > 0 && (
+                    <Row label="Curb material" v={money(result.curbMaterial)} />
                   )}
                   {result.metalsMaterial > 0 && (
                     <Row label="Metals material" v={money(result.metalsMaterial)} />

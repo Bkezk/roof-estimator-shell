@@ -48,6 +48,7 @@
 
 import { areaWithEdgeOverlap } from "./quantities";
 import { in2Ft, bankersRound } from "./rounding";
+import { curbWrapCost, curbWrapRate } from "./curb-wrap";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
   membraneMaterialCost,
@@ -110,6 +111,10 @@ export interface BidSectionInput {
   enhancementWidthFt: number; // zone depth in from the edge (e.g. 3)
   perimFastenerOc: number; // tighter OC in the perimeter zone
   cornerFastenerOc: number; // tighter OC in the corner zone
+  /** Custom perimeter-zone lap (in). Absent/-1 = legacy default: the perim share is unpriced. */
+  perimLap?: number;
+  /** Custom corner-zone lap (in). Absent/-1 = legacy default: the corner share is unpriced. */
+  cornerLap?: number;
   underlaymentBoard: string; // LEGACY single board ("" = none); superseded by `layers`
   /** Insulation layers (up to 4). When absent, a legacy underlaymentBoard converts to one layer. */
   layers?: UnderlaymentLayer[];
@@ -210,9 +215,9 @@ const parapetGirthInches = (p: ParapetInput): number =>
 /**
  * A curb on a bid (§4.5/§5.3). Labor is exact per the seeded tables: per curb, setup minutes +
  * (min/LF for the deck × curb-type multiplier) × perimeter, × quantity. Perimeter derives from the
- * A × B footprint (inches → In2Ft). FLAGGED FOR BID VALIDATION: curb MEMBRANE MATERIAL is not
- * auto-computed (the legacy curb-wrap material model needs a captured bid) — cover it via an
- * accessory/extra line for now.
+ * A × B footprint (inches → In2Ft). MEMBRANE MATERIAL auto-computes via the legacy Curb.Cost wrap
+ * model (curb-wrap.ts) when a legacy styleId is set; style-less curbs (older saved bids) stay
+ * manual — cover those via an accessory/extra line.
  */
 export interface CurbInput {
   id: string;
@@ -220,8 +225,14 @@ export interface CurbInput {
   quantity: number;
   widthIn: number; // footprint A (inches)
   lengthIn: number; // footprint B (inches)
-  curbType: string; // from the seeded curb types (Open / Closed / …)
+  curbType: string; // from the seeded curb types (Open / Closed / …) — labor multiplier key
   deckType: string; // labor deck name, bridged via TEAROFF_DECK_BY_LABOR_DECK
+  /** Legacy CurbStyle.ID 1..6 for the wrap-material model (3/4 = quote required). */
+  styleId?: number;
+  /** Wrap dim C (inches) — curb height. */
+  dimCIn?: number;
+  /** Wrap dim D (inches). */
+  dimDIn?: number;
 }
 
 /**
@@ -315,6 +326,8 @@ export interface BuildResult {
   metalsMaterial: number;
   /** Adhesive material $ (inside duroLastMaterial/M0); split out for display/proposal. */
   adhesiveMaterial: number;
+  /** Curb wrap membrane $ (inside duroLastMaterial/M0); split out for display/proposal. */
+  curbMaterial: number;
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
@@ -353,8 +366,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // Membrane tier (legacy MembraneCost_4_0_230, docs/legacy-money-parity.md §1): the combo's
     // FIRST sheet size (the seeded "Roll Good") prices the whole MembraneWithOverlap at the
     // roll-goods tier; other sheets price the FIELD share at the fieldLap's tab tier, with the
-    // perim/corner shares UNPRICED (their per-zone custom laps are -1 in this bid model — the
-    // legacy default) and the negative-share carry applied. A lap outside the system's tab list
+    // perim/corner shares priced only when their custom zone lap is set (legacy default -1 =
+    // unpriced) and the negative-share carry applied. A lap outside the system's tab list
     // (legacy: manual custom $/sqft, not modeled) falls back to roll goods WITH a warning.
     // Tab-tier zone pricing is DuroLastSystem.MembraneCost logic — Duro-Tuff/Duro-Roof/etc. have
     // their own legacy MaterialCost implementations (not ported): they stay roll goods. A
@@ -401,6 +414,33 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         membraneWithOverlap,
       });
       membraneMaterial += membraneMaterialCost(shares.field, price ?? 0, isDuroRoof);
+      // Custom zone laps (§1): a perim/corner zone is priced only when its custom lap is set
+      // (legacy default -1 → unpriced). In-list laps: ≥ 60 → 60" Tabs, ≥ 24 → 28" Tabs — NO 120
+      // tier for zones; < 24 unpriced. Out-of-list laps are legacy's manual $/sqft (not
+      // modeled) — warned, unpriced.
+      const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
+      const zoneCost = (lap: number | undefined, share: number, zone: string): number => {
+        if (lap === undefined || lap === -1 || share <= 0) return 0;
+        if (!tabList.includes(lap)) {
+          warnings.push(
+            `${zone} lap ${lap}" is not a selectable tab pitch — zone unpriced (legacy uses a manual $/sqft here) — section "${s.name}".`,
+          );
+          return 0;
+        }
+        const zTier: PriceTier | null = lap >= 60 ? "tab60" : lap >= 24 ? "tab28" : null;
+        if (zTier === null) return 0;
+        const zPrice = priceMatrixLookup(admin.priceMatrix, s.thickness, zTier, s.color);
+        if (zPrice === null) {
+          warnings.push(
+            `No ${zTier} price for ${s.thickness}mil ${s.color} — ${zone.toLowerCase()} zone unpriced — section "${s.name}".`,
+          );
+          return 0;
+        }
+        return membraneMaterialCost(share, zPrice, isDuroRoof);
+      };
+      membraneMaterial +=
+        zoneCost(s.perimLap, shares.perim, "Perimeter") +
+        zoneCost(s.cornerLap, shares.corner, "Corner");
     }
 
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
@@ -411,7 +451,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       if (uPrice === undefined) {
         warnings.push(`No underlayment price for "${layer.board}" — section "${s.name}".`);
       } else {
-        underlaymentMaterial += area * uPrice;
+        // Legacy waste factor (RoofSection.UnderlaymentCost, parity doc §6): area × 1.06 (6%
+        // waste) on every board, × 1.03 for the board named "Geotextile".
+        const waste = layer.board.trim().toLowerCase() === "geotextile" ? 1.03 : 1.06;
+        underlaymentMaterial += area * waste * uPrice;
       }
       if (layer.attachment === "mechanical") {
         if (admin.underlaymentLabor) {
@@ -663,6 +706,40 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     });
   }
 
+  // Curb membrane (legacy Curb.Cost, parity doc §2): the hardcoded prefab-wrap model at the
+  // bid-default thickness/color wrap rate → M0. Styles 3/4 are quote-required (warned, $0);
+  // curbs without a legacy style (older saved bids) stay manual, exactly as before. An unknown
+  // thickness/color bills rate 0 — legacy behavior: the base constants still price.
+  let curbMaterial = 0;
+  {
+    const first = bid.sections[0];
+    for (const c of bid.curbs) {
+      if (c.styleId === undefined || c.quantity <= 0) continue;
+      const rate = first ? curbWrapRate(first.thickness, first.color) : 0;
+      if (first && rate === 0) {
+        warnings.push(
+          `No curb wrap rate for ${first.thickness}mil ${first.color} — curb "${c.name}" bills the base constants only (legacy rate 0).`,
+        );
+      }
+      const cost = curbWrapCost({
+        styleId: c.styleId,
+        dimAIn: c.widthIn,
+        dimBIn: c.lengthIn,
+        dimCIn: c.dimCIn ?? 0,
+        dimDIn: c.dimDIn ?? 0,
+        rate,
+        quantity: c.quantity,
+      });
+      if (cost < 0) {
+        warnings.push(
+          `Curb style ${c.styleId} requires a quote (legacy) — curb "${c.name}" not auto-priced.`,
+        );
+        continue;
+      }
+      curbMaterial += cost;
+    }
+  }
+
   // Exceptional Metals: material (price × qty) → M0 (dMaterial metals slot); labor at the line's
   // own rate → services (LaborSubtotal2), like non-DL labor.
   const metalsMaterial = bid.metals.reduce((sum, m) => sum + m.price * m.quantity, 0);
@@ -679,9 +756,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   curbLaborHours *= tf("Curbs Labor");
   underlaymentLaborHours *= tf("Underlayment Labor");
 
-  // M0 = membrane + accessories + parapet + metals material (dMaterial[0..6] slots).
+  // M0 = membrane + accessories + parapet + curb + metals material (dMaterial[0..6] slots).
   const duroLastMaterial =
-    membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial + adhesiveMaterial;
+    membraneMaterial +
+    accessoryMaterial +
+    parapetMaterial +
+    curbMaterial +
+    metalsMaterial +
+    adhesiveMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines, routed by curated category (docs/legacy-money-parity.md §6):
@@ -783,5 +865,5 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     },
   };
 
-  return { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial };
+  return { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial };
 }

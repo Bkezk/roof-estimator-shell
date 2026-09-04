@@ -7,6 +7,7 @@ const data: ReviewData = {
   statusLabel: "In Progress",
   membraneMaterial: 3199.23,
   parapetMaterial: 0,
+  curbMaterial: 0,
   metalsMaterial: 0,
   adhesiveMaterial: 0,
   accessoryMaterial: 210.85,

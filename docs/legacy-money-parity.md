@@ -70,8 +70,10 @@ Curbs bill membrane as a **self-contained prefab-wrap model hardcoded in code** 
   `ISO_Fasteners = Ceil(Ceil(LinealFt × qty)/3)`.
 
 The web app's "curb membrane not auto-computed" flag is settled: the legacy amount comes from
-these constants (2020-vintage baked-in pricing). Port as defaults with the constants surfaced as
-data, or keep manual entry — either way validation bids will price curbs through this model.
+these constants (2020-vintage baked-in pricing). PORTED (2026-09-04) in `curb-wrap.ts` — style
+picker + C/D dims on the Curbs step; styles 3/4 warn quote-required; style-less older bids stay
+manual. ⚠ ASSUMPTION: BAColor enum order 1..4 mapped as White/Tan/Gray/Dark Gray (extraction
+follow-up to confirm; only 60mil Gray/Dark Gray ride on it — 40/50mil columns 1–3 are equal).
 
 ## 3. Parapet membrane material & WallPlusTopSqFt
 
@@ -154,8 +156,8 @@ Settled premises for the web engine:
   the man-days BASIS gains metals + non-DL hours per the routing above.
 - Bonus finding — **underlayment board material carries a waste factor** (`RoofSection.
   UnderlaymentCost`, rva 0x4bcc4): `length × width × 1.06 × $/sqft` (6% waste), or × **1.03** for
-  the board named "Geotextile". The web engine bills area × price with no waste factor —
-  divergence flagged for wiring (not changed in this pass; needs the board-name join decision).
+  the board named "Geotextile". PORTED (2026-09-04): the web engine now bills area × waste ×
+  price (1.03 keyed on the exact board name "Geotextile", case-insensitive).
 
 Input conventions & follow-ups from the adversarial review:
 - `perimLengthFt` is expected CORNER-ADJUSTED (legacy PerimTotalLength subtracts an enhancement
