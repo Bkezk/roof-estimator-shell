@@ -424,10 +424,16 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // material: 2 x 550 = 1100 -> M0 alongside membrane 3199.23; OtherMaterial untouched
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1100, 2);
     expect(inputs.otherMaterial).toBeCloseTo(0, 6);
-    // labor: 2 x 1.5 h x $40 = $120 -> services (LaborSubtotal2)
-    expect(inputs.servicesCost).toBeCloseTo(120, 2);
+    // labor: 2 x 1.5 h x $40 = $120 at the LINE's own rate -> DIRECT labor (legacy dLabor[5]
+    // inside LaborSubtotal1), NOT services; the 3 hours join LS1 hours (man-days).
+    expect(inputs.servicesCost).toBeCloseTo(0, 6);
+    expect(inputs.ownRateDirectLaborCost).toBeCloseTo(120, 2);
+    expect(inputs.ownRateDirectLaborHours).toBeCloseTo(3, 6);
     const r = computeEstimate(inputs);
-    expect(r.laborSubtotal2).toBeCloseTo(120, 2);
+    expect(r.laborSubtotal2).toBeCloseTo(0, 6);
+    // base bid crew labor = 15.125 h x $50 = 756.25; + metals $120 own-rate
+    expect(r.laborSubtotal1).toBeCloseTo(756.25 + 120, 2);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 3, 6);
   });
 
   it("insulation layers: mechanical layout+fastener labor and adhesive coverage flow", () => {

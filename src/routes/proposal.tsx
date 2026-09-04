@@ -144,7 +144,8 @@ function ProposalPage() {
       warrantyCost: r.money.dTotals[5] ?? 0,
       freight: r.money.dTotals[9] ?? 0,
       nonDlMaterial,
-      nonDlServices: r.laborSubtotal2 - metalsLabor,
+      // Metals labor is now DIRECT labor (own-rate, inside LaborSubtotal1) — LS2 is subs+services.
+      nonDlServices: r.laborSubtotal2,
       crewRate: saved.laborRate,
     });
     return { saved, r, groups, grandTotal: r.money.grandTotal };

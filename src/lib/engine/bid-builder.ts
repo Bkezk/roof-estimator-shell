@@ -35,7 +35,8 @@
  *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
  *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
  *  - Exceptional Metals wired: line items (unit cost + labor/unit × own rate); material → M0,
- *    labor → services. Gutter prices are largely $0 pending live capture (flagged).
+ *    labor → DIRECT labor at the line's own rate (legacy dLabor[5] in LaborSubtotal1; hours join
+ *    man-days). Gutter prices are largely $0 pending live capture (flagged).
  *  - Parapets wired (§5.3): labor = (length/50) × the seeded deck × height-band × drill/cant matrix
  *    → direct labor; material = In2Ft(girth) × length × bid-default membrane $/sqft → M0. Height
  *    band + girth are entered (profile-dims derivation flagged for the validation bid).
@@ -541,10 +542,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // Exceptional Metals: material (price × qty) → M0 (dMaterial metals slot); labor at the line's
   // own rate → services (LaborSubtotal2), like non-DL labor.
   const metalsMaterial = bid.metals.reduce((sum, m) => sum + m.price * m.quantity, 0);
-  const metalsServices = bid.metals.reduce(
+  // Metals labor is DIRECT labor at each line's own rate (legacy dLabor[5] inside LaborSubtotal1,
+  // docs/legacy-money-parity.md §6); its hours join LS1 hours (man-days).
+  const metalsLaborCost = bid.metals.reduce(
     (sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity,
     0,
   );
+  const metalsLaborHours = bid.metals.reduce((sum, m) => sum + m.laborPerUnit * m.quantity, 0);
 
   // Apply the template factors to the category hour seams.
   parapetLaborHours *= tf("Parapets Labor");
@@ -565,7 +569,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     0,
   );
   const otherMaterial = bid.otherMaterial + nonDlMaterial;
-  const servicesCost = bid.servicesCost + nonDlServices + metalsServices;
+  const servicesCost = bid.servicesCost + nonDlServices;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
 
   // Freight (dMaterial[22]) — percent-of-material or the stepped "from" table, on
@@ -598,6 +602,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustInspectionPct:
       ((1 + (bid.adjustInspectionPct ?? 0) / 100) * tf("Inspection Time Labor") - 1) * 100,
     accessoryLaborHours,
+    ownRateDirectLaborCost: metalsLaborCost,
+    ownRateDirectLaborHours: metalsLaborHours,
     parapetLaborHours,
     curbLaborHours,
     underlaymentLaborHours,

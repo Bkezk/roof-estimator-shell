@@ -118,6 +118,14 @@ export interface EstimateInputs {
   crewLaborRatePerHour: number;
   /** Accessory install labor hours (Σ per-unit hrs × qty); billed as direct labor at the crew rate. */
   accessoryLaborHours?: number;
+  /**
+   * Own-rate direct-labor DOLLARS (legacy dLabor entries priced at each line's own rate: metals
+   * dLabor[5], non-DL categories dLabor[14..19]); added to LaborSubtotal1 after the crew-rate
+   * hours are priced.
+   */
+  ownRateDirectLaborCost?: number;
+  /** The hours behind ownRateDirectLaborCost; they join LS1 hours (man-days basis). */
+  ownRateDirectLaborHours?: number;
   /** Parapet install labor hours (Σ length/50 × matrix rate); billed as direct labor at the crew rate. */
   parapetLaborHours?: number;
   /** Curb install labor hours (qty × (setup + min/LF × type × perimeter) / 60); direct labor. */
@@ -332,14 +340,12 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
     0,
   );
 
-  // Direct-labor hours & cost. SEAM — FLAGGED FOR BID VALIDATION (Phase 6):
-  //  (a) which hours belong to the direct-labor subtotal (here: install + setup + inspection +
-  //      tear-off + accessory + parapet + curb + underlayment) and whether each bills at one crew rate;
-  //  (b) whether the money chain's row 11 (LaborSubtotal2, "labor+subs+services") re-includes the
-  //      direct labor already in row 10 — the doc's literal 8+9+10+11 would then double-add it.
-  //      We feed row 11 as subs + services ONLY (the non-double-counting reading) until a captured
-  //      bid settles it.
-  const laborSubtotal1Hours =
+  // Direct-labor hours & cost — membership SETTLED from ReviewCalc.Recalculate
+  // (docs/legacy-money-parity.md §6): LaborSubtotal1 = GoodSingle(Σ dLabor[0..21]) = the crew-rate
+  // categories (install/setup/inspection/tear-off/accessory/parapet/curb/underlayment) PLUS the
+  // own-rate dollar entries (metals dLabor[5]; non-DL categories dLabor[14..19]). Row 11
+  // (LaborSubtotal2) is subcontractors + services ONLY — no double count.
+  const crewRateHours =
     installHours +
     setupHours +
     inspectionHours +
@@ -348,7 +354,12 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
     (e.parapetLaborHours ?? 0) +
     (e.curbLaborHours ?? 0) +
     (e.underlaymentLaborHours ?? 0);
-  const laborSubtotal1 = goodSingle(calcLaborCost(e.crewLaborRatePerHour, laborSubtotal1Hours));
+  // LS1 hours include the own-rate entries' hours (they drive TotalManDays -> per-diem and the
+  // $/man-day markup mode), but their DOLLARS come in at each line's own rate, not the crew rate.
+  const laborSubtotal1Hours = crewRateHours + (e.ownRateDirectLaborHours ?? 0);
+  const laborSubtotal1 = goodSingle(
+    calcLaborCost(e.crewLaborRatePerHour, crewRateHours) + (e.ownRateDirectLaborCost ?? 0),
+  );
   const laborSubtotal2 = e.subsCost + e.servicesCost;
 
   const warranty = warrantyTotalCost({ ...e.warranty, sqFtTotalMembrane: sqFt });
