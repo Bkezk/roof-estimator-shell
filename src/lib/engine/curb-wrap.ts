@@ -18,11 +18,11 @@ export const CURB_WRAP_RATES: Record<number, readonly [number, number, number, n
 };
 
 /**
- * ASSUMED BAColor order 1..4 = White, Tan, Gray, Dark Gray — the enum order is not yet proven
- * from the IL (extraction follow-up). White as color 1 is near-certain (the legacy default);
- * 40/50mil price columns 1–3 identically so only Gray/Dark Gray at 60mil ride on the assumption.
+ * BAColor id order 1..4, PROVEN from the IL (docs/legacy-money-parity.md §7.2 — eDLColorsID enum
+ * field order AND GetCurrentColorPriceIndex agree): Tan, Gray, White, Dark Gray. The earlier
+ * assumption (White first) was falsified; at 60mil White takes the LOW 0.5437 rate.
  */
-export const CURB_COLOR_ORDER: readonly string[] = ["White", "Tan", "Gray", "Dark Gray"];
+export const CURB_COLOR_ORDER: readonly string[] = ["Tan", "Gray", "White", "Dark Gray"];
 
 /** Wrap $/sqft for a thickness/color; 0 (legacy: rate 0) when either is outside the table. */
 export function curbWrapRate(thickness: number, color: string): number {

@@ -3,10 +3,14 @@ import { describe, it, expect } from "vitest";
 import { curbWrapCost, curbWrapRate, increment2, increment6 } from "./curb-wrap";
 
 describe("curbWrapRate", () => {
-  it("looks up the hardcoded thickness × color table (assumed BAColor order)", () => {
+  it("looks up the hardcoded thickness × color table (proven BAColor order: Tan/Gray/White/DarkGray)", () => {
     expect(curbWrapRate(40, "White")).toBe(0.3481);
     expect(curbWrapRate(40, "Dark Gray")).toBe(0.3544);
-    expect(curbWrapRate(60, "Gray")).toBe(0.5437);
+    // Proven BAColor order (parity doc §7.2): 1=Tan, 2=Gray, 3=White, 4=Dark Gray — at 60mil
+    // the WHITE rate is the low 0.5437 (ids 1/2 = Tan/Gray share 0.5625).
+    expect(curbWrapRate(60, "White")).toBe(0.5437);
+    expect(curbWrapRate(60, "Gray")).toBe(0.5625);
+    expect(curbWrapRate(60, "Tan")).toBe(0.5625);
     expect(curbWrapRate(50, "tan")).toBe(0.45); // case-insensitive
   });
   it("returns 0 (legacy: rate 0) outside the table", () => {
@@ -58,7 +62,15 @@ describe("curbWrapCost (verbatim Curb.Cost, parity doc §2)", () => {
   it("styles 3 and 4 return -1 (quote required)", () => {
     for (const styleId of [3, 4]) {
       expect(
-        curbWrapCost({ styleId, dimAIn: 24, dimBIn: 24, dimCIn: 12, dimDIn: 0, rate: 1, quantity: 1 }),
+        curbWrapCost({
+          styleId,
+          dimAIn: 24,
+          dimBIn: 24,
+          dimCIn: 12,
+          dimDIn: 0,
+          rate: 1,
+          quantity: 1,
+        }),
       ).toBe(-1);
     }
   });
@@ -95,7 +107,15 @@ describe("curbWrapCost (verbatim Curb.Cost, parity doc §2)", () => {
 
   it("unknown style ids price 0", () => {
     expect(
-      curbWrapCost({ styleId: 9, dimAIn: 24, dimBIn: 24, dimCIn: 12, dimDIn: 0, rate: 1, quantity: 1 }),
+      curbWrapCost({
+        styleId: 9,
+        dimAIn: 24,
+        dimBIn: 24,
+        dimCIn: 12,
+        dimDIn: 0,
+        rate: 1,
+        quantity: 1,
+      }),
     ).toBe(0);
   });
 });
