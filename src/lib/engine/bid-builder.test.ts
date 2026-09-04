@@ -857,6 +857,14 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(zoned.inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.1 * 1.05, 2);
   });
 
+  it("Duro-Roof on a pre-series adminSnapshot (no sheetTabSpacings) keeps roll goods ×1.05 with NO warnings", () => {
+    // admin has no sheetTabSpacings at all — the shape of a snapshot frozen before the tier data
+    // existed. Zoned pricing must not engage (it would warn "not a selectable tab pitch").
+    const { inputs, warnings } = buildEstimateInputs(bid({ roofSystem: "Duro-Roof" }), admin);
+    expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23 * 1.05, 2);
+  });
+
   it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {
     const { inputs } = buildEstimateInputs(
       bid({

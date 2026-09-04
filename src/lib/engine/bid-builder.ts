@@ -391,10 +391,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // membraneMaterialCost's isDuroRoof surcharge.
     const isFlatFamily = rsId === 2 || rsId === 3 || rsId === 5;
     const midThresholdIn = rsId === 4 ? 57 : 60;
+    // A pre-series adminSnapshot has no sheetTabSpacings at all — zoned pricing must not engage
+    // there (it would warn and misprice); those frozen bids keep roll goods, warning-free.
+    const hasTabTable = admin.sheetTabSpacings?.[rsId] !== undefined;
     const isRollGoodSheet =
       rsId === 4
-        ? false
-        : rsId !== 1 || !lt?.rollGoodsSheetLabel || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+        ? !hasTabTable
+        : rsId !== 1 ||
+          !hasTabTable ||
+          !lt?.rollGoodsSheetLabel ||
+          s.sheetSizeLabel === lt.rollGoodsSheetLabel;
     let tier: PriceTier = "rollGoods";
     if (!isRollGoodSheet) {
       const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
