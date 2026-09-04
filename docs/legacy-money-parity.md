@@ -37,18 +37,20 @@ FormulasVersion, rva 0xcac8):
   repriced ~+9.8% when the tier wiring landed (pinned by test, deliberate). HUMAN GATE RESOLVED
   (2026-09-04): the web default section is aligned to legacy — sheetsizeid 4 is "1500 sf"
   (1-based list), which already matched; the default lap moved 28 → 60.
-  Tab-tier zone pricing is DuroLastSystem logic and is scoped to Duro-Last; the other systems'
-  own MaterialCost implementations (DuroTuffSystem rva 0x18915-area, DuroRoofSystem rva 0xd724,
-  DuroBond/DuroFleece) are NOT ported — those systems stay roll goods.
+  Tab-tier zone pricing is DuroLastSystem logic; the other systems' own MaterialCost
+  implementations are transcribed in §7.1 (Duro-Roof shares the zone logic with a 57" mid
+  threshold; Bond/Tuff/Fleece are flat single-price lookups).
 
 ## 2. Curb membrane material (`Curb.Cost`, rva 0x32e3c)
 
 Curbs bill membrane as a **self-contained prefab-wrap model hardcoded in code** — it does NOT use
 `lookup_DuroLastPrices`. Components:
 
-- Wrap rate $/sqft, hardcoded by thickness × color (colors 1..4 in BAColor order; capture-era
-  prices): 40mil → 0.3481/0.3481/0.3481/0.3544; 50mil → 0.45/0.45/0.45/0.471875;
-  60mil → 0.5625/0.5625/0.5437/0.5906. Other thickness/color → rate 0.
+- Wrap rate $/sqft, hardcoded by thickness × BAColor id 1..4 — **PROVEN (2026-09-04): ids are
+  1 = Tan, 2 = Gray, 3 = White, 4 = Dark Gray** (see §7.2; the earlier web-port assumption
+  1 = White was wrong). Capture-era prices by id: 40mil → 0.3481/0.3481/0.3481/0.3544;
+  50mil → 0.45/0.45/0.45/0.471875; 60mil → **Tan 0.5625 / Gray 0.5625 / WHITE 0.5437 /
+  Dark Gray 0.5906**. Terra Cotta (5) / Rock-Ply (6) / other thickness → rate 0.
 - Dimension rounding: `increment6(x) = max(6, roundUpToMultipleOf6(x))`,
   `increment2(x) = max(2, roundUpToMultipleOf2(x))` (inches).
 - Style 1 (`CurbStyle.ID` 1): `base = 4.8081 × 1.7819`;
@@ -88,8 +90,17 @@ follow-up to confirm; only 60mil Gray/Dark Gray ride on it — 40/50mil columns 
   - `AdjustedHeight` (rva 0x420ac), non-Duro-Tuff: `In2Ft(Ceil(Skirt+Cant+Vertical+WallTop+Drop))`
     — the full girth in inches, ceiled to a whole inch, in feet. (Duro-Tuff:
     `Ceil(girth/6)/2` — 6-inch increments.)
-  - `AdjustedSqFt` (rva 0x4217c), non-Duro-Tuff: `AdjustedHeight × AdjustedLength`. (Duro-Tuff:
-    `Ceil(Ft2In(AdjustedHeight)/24) × 30 × AdjustedLength` — 24" panels billed 30" each.)
+  - `AdjustedSqFt` (rva 0x4217c), non-Duro-Tuff: `AdjustedHeight × AdjustedLength`. Duro-Tuff:
+    `Ceil(Ft2In(AdjustedHeight)/24) × 30 × AdjustedLength` — UNITS VERDICT (2026-09-04, re-read
+    of the full chain): there is **NO In2Ft/÷12 anywhere in it**. `Ft2In(x) = Round(x × 12)`
+    (rva 0x41290), the division is by the bare 24, the multiply by the bare 30, then directly
+    × AdjustedLength (ft) and × the $/sqft Parapets price. Verbatim legacy output is therefore
+    panels × 30 × ft — dimensionally 12× the "30 inches billed per 24-inch panel" reading. The
+    web port's ×2.5 ft conversion is the physically sensible interpretation but produces 1/12 of
+    the legacy number; exact penny-parity with old Review sheets requires the verbatim ×30.
+    ⚠ HUMAN GATE + validation-bid check: either legacy overbilled Duro-Tuff parapet membrane
+    12×, or its Parapets price row absorbed the scale — decide verbatim-vs-corrected before
+    validating a Duro-Tuff bid.
 - Web-engine divergences settled: parapet girth × length was priced at roll goods with no
   Ceil/AdjustedLength; legacy uses the Parapets tier, whole-inch girth, and length+1+pieces.
 - PORTED (2026-09-04): profile-dims entry (Skirt/Cant/Vertical/WallTop/Drop; girth = sum), the
@@ -158,6 +169,47 @@ Settled premises for the web engine:
   UnderlaymentCost`, rva 0x4bcc4): `length × width × 1.06 × $/sqft` (6% waste), or × **1.03** for
   the board named "Geotextile". PORTED (2026-09-04): the web engine now bills area × waste ×
   price (1.03 keyed on the exact board name "Geotextile", case-insensitive).
+
+## 7. Final round (2026-09-04): non-DL-family membrane pricing, BAColor, Duro-Tuff units
+
+### 7.1 Non-Duro-Last membrane MaterialCost implementations (transcribed exactly)
+- **Duro-Bond** (`DuroBondSystem.MembraneCost_4_0_230`, rva 0xbc58; _229 identical):
+  `cost = MembraneWithOverlap × lookup_DuroBondPrices[key = MembraneType.Thickness].Price` —
+  a flat thickness-keyed single price. No color, no tiers, no zones, no sheet-size branch.
+- **Duro-Tuff** (`DuroTuffSystem.MaterialCost`, rva 0xf9b0 — no version dispatch): guard
+  `ShortName == 'durotuff'`, then
+  `cost = MembraneWithOverlap × lookup_DuroTuffPrices[key = Thickness].Price`. Flat, like Bond.
+- **Duro-Fleece** (`DuroFleeceSystem.MembraneCost_4_0_230`, rva 0xbd94; _229 identical):
+  `cost = MembraneWithOverlap × lookup_DuroFleecePrices[key = MembraneType.ID].Price` — keyed by
+  the MEMBRANE TYPE id (the four variants 50mil / 60mil / 50mil Plus / 60mil Plus), not by
+  thickness. A bid model carrying only thickness cannot reach the "Plus" rows (flagged).
+- **Duro-Roof** (`DuroRoofSystem.MembraneCost_4_0_230`, rva 0xd764): the SAME zone-share logic
+  as Duro-Last §1 — same `lookup_DuroLastPrices` categories, same CustomFieldSqftCost/zone-lap
+  skip rules and negative-share carry — with three differences: there is **NO roll-good sheet
+  branch** (every Duro-Roof section prices by zones), the middle threshold is **57** not 60
+  (field, perim AND corner: ≥120 → Cat 2, ≥57 → Cat 4, ≥24 → Cat 1 — Duro-Roof's 57" tab maps
+  to the 60"-Tabs price row), and the whole membrane cost is multiplied by **1.05** at the end
+  (the surcharge applies to custom-$ zones too).
+- Data note: the seeded admin membrane screen carries these families' rows verbatim
+  ("Duro-Bond - 40/50/60", "Duro-Tuff - 50/60", "Duro-Fleece - 50mil[/Plus]/60mil[/Plus]") with
+  a single price in the White column — the admin-editable equivalents of the legacy flat lookup
+  tables.
+
+### 7.2 BAColor: id → color (PROVEN, twice over)
+`eDLColorsID` / `eDLColorsIndex` enum field order in the DataAccess metadata: **Tan, Gray,
+White, DarkGray, TerraCotta, RockPly** (ids/indices 1..6). Independently,
+`DuroLastFunctions.GetCurrentColorPriceIndex` (rva 0xa7108) maps id → lookup_DuroLastPrices
+column: 1→3 (TanPrice), 2→4 (GrayPrice), **3→2 (Price — the base/White column)**, 4→5
+(DarkGrayPrice), 5→6 (TerraCotta), 6→7 (RockPly). Both agree: **1 = Tan, 2 = Gray, 3 = White,
+4 = Dark Gray**. The web port's assumed 1 = White was FALSIFIED — at 60mil the curb wrap rates
+for White (0.5437) and Gray (0.5625) were swapped (fixed red-first in the same series). The
+PipeStackSize price switch is consistent (case 3 loads m_dWhitePrice).
+
+### 7.3 Duro-Tuff parapet AdjustedSqFt units — see the verdict inline in §3 (no ÷12 exists in
+the IL chain; verbatim legacy = 12× the physical reading; human gate before validation).
+
+Still DB-resident, uncaptured (for the record): `lookup_Decktimes` contents and live gutter
+prices.
 
 Input conventions & follow-ups from the adversarial review:
 - `perimLengthFt` is expected CORNER-ADJUSTED (legacy PerimTotalLength subtracts an enhancement
