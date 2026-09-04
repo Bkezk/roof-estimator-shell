@@ -150,6 +150,12 @@ const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   deckType: "Wood",
   predrill: false,
   canted: false,
+  // Legacy wall profile dims (in); girth = their sum. Defaults keep the prior 36" girth.
+  skirtInches: 0,
+  cantInches: 0,
+  verticalInches: 24,
+  wallTopInches: 12,
+  dropInches: 0,
   girthInches: 36,
   // Legacy Pieces (membrane pieces wrapping the wall): AdjustedLength = length + 1 + pieces.
   pieces: 1,
@@ -1829,7 +1835,7 @@ function EstimatePage() {
                             </Button>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                           <Field label="Length (ft)">
                             <Input
                               type="number"
@@ -1861,19 +1867,6 @@ function EstimatePage() {
                               onChange={(v) =>
                                 setParapets((prev) =>
                                   prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Membrane girth (in)">
-                            <Input
-                              type="number"
-                              value={p.girthInches}
-                              onChange={(e) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, girthInches: num(e.target.value) } : x,
-                                  ),
                                 )
                               }
                             />
@@ -1921,6 +1914,72 @@ function EstimatePage() {
                             </Label>
                           </div>
                         </div>
+                        {/* Legacy wall profile dims: girth (billed membrane height) = their sum;
+                            wall adhesive bills on Vertical + Wall top only. */}
+                        {(() => {
+                          const setDim = (
+                            key:
+                              | "skirtInches"
+                              | "cantInches"
+                              | "verticalInches"
+                              | "wallTopInches"
+                              | "dropInches",
+                            v: number,
+                          ) =>
+                            setParapets((prev) =>
+                              prev.map((x, j) => {
+                                if (j !== i) return x;
+                                const nx = { ...x, [key]: v };
+                                nx.girthInches =
+                                  (nx.skirtInches ?? 0) +
+                                  (nx.cantInches ?? 0) +
+                                  (nx.verticalInches ?? 0) +
+                                  (nx.wallTopInches ?? 0) +
+                                  (nx.dropInches ?? 0);
+                                return nx;
+                              }),
+                            );
+                          const dims: Array<
+                            [
+                              string,
+                              (
+                                | "skirtInches"
+                                | "cantInches"
+                                | "verticalInches"
+                                | "wallTopInches"
+                                | "dropInches"
+                              ),
+                            ]
+                          > = [
+                            ["Skirt", "skirtInches"],
+                            ["Cant", "cantInches"],
+                            ["Vertical", "verticalInches"],
+                            ["Wall top", "wallTopInches"],
+                            ["Drop", "dropInches"],
+                          ];
+                          return (
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                Wall profile (in) — membrane girth is the sum
+                              </p>
+                              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                {dims.map(([label, key]) => (
+                                  <Field key={key} label={label}>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      value={p[key] ?? 0}
+                                      onChange={(e) => setDim(key, num(e.target.value))}
+                                    />
+                                  </Field>
+                                ))}
+                                <Field label="Girth (in)">
+                                  <Input type="number" value={p.girthInches} readOnly disabled />
+                                </Field>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })()}

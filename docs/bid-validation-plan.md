@@ -118,7 +118,8 @@ Held pending explicit approval or validation-bid evidence — do not wire withou
 - Curb membrane material (labor-only today).
 - Roll-goods perimeter geometry (§2.2 full row math) vs our AreaWithEdgeOverlap path.
 - The DLRowStyle 30-ft perimeter strip constant (transcribed verbatim, units unverified).
-- Wall-adhesive area basis (girth × length stand-in for WallPlusTopSqFt) — wired, flagged.
+- Wall-adhesive area basis: exact WallPlusTopSqFt = Length × (Vertical+WallTop)/12 via the
+  parapet profile dims (2026-09-04); dim-less older bids keep the girth × length stand-in.
 - Metals labor routed to services; freight basis; discount stacking beyond prepay; per-diem
   routing; warranty composition; parapet band/girth derivation — all flagged, validation decides.
 

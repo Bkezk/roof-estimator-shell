@@ -422,6 +422,93 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
   });
 
+  it("parapets: girth derives from the legacy profile dims (Skirt+Cant+Vertical+WallTop+Drop)", () => {
+    const withParapet: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        parapets: [
+          {
+            id: "p1",
+            name: "North wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 0, // ignored when the dims are present
+            skirtInches: 4,
+            cantInches: 2,
+            verticalInches: 20,
+            wallTopInches: 3,
+            dropInches: 1.4,
+          },
+        ],
+      }),
+      withParapet,
+    );
+    expect(warnings).toEqual([]);
+    // dims sum to 30.4 -> Ceil 31" -> 2.58 ft x 102 x $1.40 = $368.42, same as the girth test
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
+  });
+
+  it("parapets: Duro-Tuff bills 24\" panels at 30\" each on 6\"-increment heights", () => {
+    const withParapet: EngineAdminData = {
+      ...admin,
+      labor: { ...admin.labor, "Duro-Tuff|mechanical": admin.labor["Duro-Last|mechanical"]! },
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const { inputs } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Tuff",
+        parapets: [
+          {
+            id: "p1",
+            name: "North wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 30.4,
+          },
+        ],
+      }),
+      withParapet,
+    );
+    // AdjustedHeight = Ceil(30.4/6)/2 = 3 ft -> Ceil(36/24) = 2 panels x 30" = 5 ft billed;
+    // Round(5 x 102 x 1.4, 2) = 714.00 (vs 368.42 non-Duro-Tuff)
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 714, 2);
+  });
+
   it("curbs: setup + min/LF x type x perimeter, x qty, /60 -> direct labor", () => {
     const withCurb: EngineAdminData = {
       ...admin,
@@ -881,6 +968,36 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
             girthInches: 24,
             predrill: false,
             canted: false,
+          },
+        ],
+      }),
+      withCov(),
+    );
+    expect(adhesiveMaterial).toBeCloseTo(5 * 122.1, 2);
+  });
+
+  it("wall adhesive with profile dims bills WallPlusTopSqFt = length x (Vertical+WallTop)/12", () => {
+    // membrane 2500/700 = 3.5714; wall: 100 x (30+6)/12 = 300 sq ft / 350 = 0.8571 -> 4.4286
+    // -> Ceil 5. The FULL girth (20+0+30+6+20 = 76" -> 633.3 sq ft -> 1.809) would Ceil to 6 —
+    // proving the basis excludes skirt/drop.
+    const { adhesiveMaterial } = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        parapets: [
+          {
+            id: "p1",
+            name: "P1",
+            lengthFt: 100,
+            heightBand: "",
+            deckType: "Wood",
+            girthInches: 0,
+            predrill: false,
+            canted: false,
+            skirtInches: 20,
+            cantInches: 0,
+            verticalInches: 30,
+            wallTopInches: 6,
+            dropInches: 20,
           },
         ],
       }),

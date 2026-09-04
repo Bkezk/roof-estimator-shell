@@ -90,6 +90,10 @@ data, or keep manual entry — either way validation bids will price curbs throu
     `Ceil(Ft2In(AdjustedHeight)/24) × 30 × AdjustedLength` — 24" panels billed 30" each.)
 - Web-engine divergences settled: parapet girth × length was priced at roll goods with no
   Ceil/AdjustedLength; legacy uses the Parapets tier, whole-inch girth, and length+1+pieces.
+- PORTED (2026-09-04): profile-dims entry (Skirt/Cant/Vertical/WallTop/Drop; girth = sum), the
+  exact WallPlusTopSqFt wall-adhesive basis, and the Duro-Tuff 24"-panel variant (30" billed per
+  24" panel, converted to feet for the sqft basis — the one units resolution applied to the
+  verbatim formula). Dim-less older bids keep entered girth + the full-girth adhesive stand-in.
 
 ## 4. §2.2 geometry: corners, cornerAdj, and the 30 constant
 

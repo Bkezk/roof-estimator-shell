@@ -41,8 +41,9 @@
  *    man-days). Gutter prices are largely $0 pending live capture (flagged).
  *  - Parapets wired: labor = (length/50) × the seeded deck × height-band × drill/cant matrix
  *    → direct labor; material per legacy MembraneCost (Parapets tier, Ceil(girth) inches,
- *    length+1+pieces, Round2 per wall) → M0. Height band + girth are entered (profile-dims
- *    derivation flagged for the validation bid).
+ *    length+1+pieces, Round2 per wall; Duro-Tuff 24"-panel variant) → M0. Girth derives from the
+ *    legacy profile dims (Skirt/Cant/Vertical/WallTop/Drop); wall adhesive bills on
+ *    WallPlusTopSqFt = Length × (Vertical+WallTop)/12. Height band is still picked by hand.
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
@@ -161,12 +162,13 @@ export const NON_DL_LS2_CATEGORIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * A parapet wall on a bid (§4.4/§5.3). SIMPLIFIED GEOMETRY, FLAGGED FOR BID VALIDATION: the
- * height BAND is picked from the seeded band list and the membrane girth (skirt+cant+vertical+
- * top+drop) is entered directly in inches — the legacy profile-dims→band/girth derivation and the
- * exact parapet membrane overlap model need a captured bid. Labor is exact per the seeded matrix:
- * (length/50) × hrs-per-50-LF[deck][band][drill×cant]. Material prices at the bid's default
- * (first section's) membrane thickness/color, roll-goods tier.
+ * A parapet wall on a bid (§4.4/§5.3). The height BAND is picked from the seeded band list. Wall
+ * geometry follows the legacy profile dims (Skirt/Cant/Vertical/WallTop/Drop, inches): girth =
+ * their sum, and the wall-adhesive basis is legacy WallPlusTopSqFt = Length × (Vertical +
+ * WallTop)/12. When the dims are absent (older saved bids), the entered girthInches carries the
+ * girth and wall adhesive falls back to the full-girth stand-in those bids priced with. Labor is
+ * exact per the seeded matrix: (length/50) × hrs-per-50-LF[deck][band][drill×cant]. Material
+ * prices at the bid's default (first section's) membrane thickness/color, Parapets tier.
  */
 export interface ParapetInput {
   id: string;
@@ -176,10 +178,34 @@ export interface ParapetInput {
   deckType: string; // labor deck name (Wood/Steel/…), bridged via TEAROFF_DECK_BY_LABOR_DECK
   predrill: boolean;
   canted: boolean;
-  girthInches: number; // membrane girth over the wall profile, for material area
+  girthInches: number; // membrane girth over the wall profile (fallback when dims are absent)
   /** Number of wall pieces (legacy Pieces, default 1): AdjustedLength = length + 1 + pieces. */
   pieces?: number;
+  // Legacy wall profile dims (inches); girth derives as their sum when any is present.
+  skirtInches?: number;
+  cantInches?: number;
+  verticalInches?: number;
+  wallTopInches?: number;
+  dropInches?: number;
 }
+
+/** True when the wall carries the legacy profile dims (vs a directly entered girth). */
+const parapetHasDims = (p: ParapetInput): boolean =>
+  p.skirtInches !== undefined ||
+  p.cantInches !== undefined ||
+  p.verticalInches !== undefined ||
+  p.wallTopInches !== undefined ||
+  p.dropInches !== undefined;
+
+/** Membrane girth (in): Skirt+Cant+Vertical+WallTop+Drop when dims are present, else girthInches. */
+const parapetGirthInches = (p: ParapetInput): number =>
+  parapetHasDims(p)
+    ? (p.skirtInches ?? 0) +
+      (p.cantInches ?? 0) +
+      (p.verticalInches ?? 0) +
+      (p.wallTopInches ?? 0) +
+      (p.dropInches ?? 0)
+    : p.girthInches;
 
 /**
  * A curb on a bid (§4.5/§5.3). Labor is exact per the seeded tables: per curb, setup minutes +
@@ -515,13 +541,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           );
         }
       }
-      // Parapet wall adhesive (§2.4 wall coverage). FLAGGED FOR BID VALIDATION: the wall-area
-      // basis is In2Ft(girth) × length (the same area the parapet membrane bills) as a stand-in
-      // for legacy WallPlusTopSqFt.
+      // Parapet wall adhesive (§2.4 wall coverage). Basis = legacy WallPlusTopSqFt (parity doc
+      // §3): Length × (Vertical + WallTop)/12 — vertical + top only, no skirt/cant/drop. Walls
+      // without profile dims (older saved bids) keep the full-girth stand-in they priced with.
       if (bid.parapets.length > 0) {
         if (cov.wallCoverage) {
           const wallArea = bid.parapets.reduce(
-            (sum, p) => sum + in2Ft(p.girthInches) * p.lengthFt,
+            (sum, p) =>
+              sum +
+              (parapetHasDims(p)
+                ? (p.lengthFt * ((p.verticalInches ?? 0) + (p.wallTopInches ?? 0))) / 12
+                : in2Ft(p.girthInches) * p.lengthFt),
             0,
           );
           adhesiveUnitsByName[advName] =
@@ -557,31 +587,33 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   );
 
   // Parapets: labor = (length/50) × hrs-per-50-LF[deck][band][drill×cant] → direct labor.
-  // NOTE: the Duro-Tuff 24"-panel material variant (Ceil(girth/6)/2 heights, 30" billed per 24" —
-  // parity doc §3) is NOT ported; all systems use the non-Duro-Tuff formula below.
   // Material per legacy Parapet.MembraneCost (docs/legacy-money-parity.md §3): the PARAPETS
   // price tier (Category 3) at the bid-default thickness/color, girth ceiled to a whole inch
   // (AdjustedHeight), length + 1 ft + 1 ft per piece (AdjustedLength; pieces < 1 → 0), each
-  // parapet Round2'd → M0. Falls back to roll goods (with a warning) when the seeded matrix has
-  // no Parapets row for that thickness.
+  // parapet Round2'd → M0. Duro-Tuff bills its 24"-panel variant: heights round up to 6"
+  // increments (Ceil(girth/6)/2 ft), then whole 24" panels billed 30" each (the 30" in feet for
+  // the sqft basis). Falls back to roll goods (with a warning) when the seeded matrix has no
+  // Parapets row for that thickness.
   let parapetLaborHours = 0;
   let parapetMaterial = 0;
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
+    const anyWall = bid.parapets.some((p) => parapetGirthInches(p) > 0 && p.lengthFt > 0);
     let pPrice = first
       ? priceMatrixLookup(admin.priceMatrix, first.thickness, "parapet", first.color)
       : null;
     if (pPrice === null && first) {
       pPrice = priceMatrixLookup(admin.priceMatrix, first.thickness, "rollGoods", first.color);
-      if (pPrice !== null && bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0)) {
+      if (pPrice !== null && anyWall) {
         warnings.push(
           "No Parapets-tier membrane price (bid-default thickness/color) — using roll goods.",
         );
       }
     }
-    if (bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0) && (pPrice ?? 0) === 0) {
+    if (anyWall && (pPrice ?? 0) === 0) {
       warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
     }
+    const isDuroTuff = bid.roofSystem === "Duro-Tuff";
     for (const p of bid.parapets) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
       const entry = admin.parapetLabor?.lookup[tDeck]?.[p.heightBand];
@@ -593,12 +625,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       } else {
         parapetLaborHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
       }
+      const girth = parapetGirthInches(p);
       const pieces = p.pieces ?? 1;
       const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
-      parapetMaterial += bankersRound(
-        in2Ft(Math.ceil(p.girthInches)) * adjustedLengthFt * (pPrice ?? 0),
-        2,
-      );
+      let billedHeightFt: number;
+      if (isDuroTuff) {
+        const adjustedHeightFt = Math.ceil(girth / 6) / 2; // 6-inch increments, in feet
+        billedHeightFt = Math.ceil((adjustedHeightFt * 12) / 24) * in2Ft(30); // 24" panels @ 30"
+      } else {
+        billedHeightFt = in2Ft(Math.ceil(girth));
+      }
+      parapetMaterial += bankersRound(billedHeightFt * adjustedLengthFt * (pPrice ?? 0), 2);
     }
   }
 
