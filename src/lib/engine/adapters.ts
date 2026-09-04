@@ -66,6 +66,33 @@ export function buildPriceMatrix(screen: MembraneScreen): PriceMatrix {
 }
 
 /**
+ * Non-Duro-Last-family membrane prices from the same seeded membrane screen (parity doc §7.1):
+ * rows "Duro-Bond - 40", "Duro-Tuff - 50", "Duro-Fleece - 50mil[ Plus]" carry a single price
+ * (first numeric color cell — seeded in the White column). Returns family → variant → $/sqft;
+ * the legacy equivalents are the flat lookup_DuroBond/Tuff/FleecePrices tables (no color).
+ */
+export function buildFamilyMembranePrices(
+  screen: MembraneScreen,
+): Record<string, Record<string, number>> {
+  const out: Record<string, Record<string, number>> = {};
+  const colorCols = screen.columns.filter((c) => c !== "Description");
+  for (const row of screen.rows) {
+    const m = /^(Duro-Bond|Duro-Tuff|Duro-Fleece) - (.+)$/.exec(
+      String(row["Description"] ?? "").trim(),
+    );
+    if (!m) continue;
+    for (const col of colorCols) {
+      const v = row[col];
+      if (typeof v === "number") {
+        (out[m[1]!] ??= {})[m[2]!.trim()] = v;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Build the underlayment $/sqft lookup by board name from the seeded Underlayment pricing screen
  * (columns "Name" / "Cost/Sq. Ft.").
  */
@@ -1038,12 +1065,17 @@ export interface EngineAdminData {
   laborTemplates?: LaborTemplates;
   /** Selectable tab pitches by legacy roof-system id (mech_sheet_tab_spacing; absent if unfetched). */
   sheetTabSpacings?: Record<number, number[]>;
+  /** Duro-Bond / Duro-Tuff / Duro-Fleece flat membrane prices (family → variant → $/sqft). */
+  familyMembranePrices?: Record<string, Record<string, number>>;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
 export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const deckOrder = [...STANDARD_DECK_ORDER];
   const priceMatrix = raw.membraneScreen ? buildPriceMatrix(raw.membraneScreen) : {};
+  const familyMembranePrices = raw.membraneScreen
+    ? buildFamilyMembranePrices(raw.membraneScreen)
+    : {};
 
   // Full tab-band sets per legacy roof-system id (mech_tab_multi). The screenshot-captured combos
   // carry only the SELECTED tab row (e.g. Duro-Last 28 → 1.5125); the legacy table also defines
@@ -1134,5 +1166,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(membraneAdhesives ? { membraneAdhesives } : {}),
     ...(laborTemplates ? { laborTemplates } : {}),
     ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
+    ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),
   };
 }

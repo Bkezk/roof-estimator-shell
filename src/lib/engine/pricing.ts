@@ -23,6 +23,8 @@ export interface TierSelectionInputs {
   fieldLapInches: number;
   /** RoofSystem.sysSheetTabSpacings — the tab widths this system actually offers. */
   sheetTabSpacings: number[];
+  /** Middle tab threshold in inches (60 for Duro-Last, 57 for Duro-Roof); default 60. */
+  midThresholdIn?: number;
 }
 
 /**
@@ -33,7 +35,9 @@ export function selectMembranePriceTier(i: TierSelectionInputs): PriceTier {
   if (i.isDefaultRollGood) return "rollGoods";
   if (!i.sheetTabSpacings.includes(i.fieldLapInches)) return "custom";
   if (i.fieldLapInches >= 120) return "tab120";
-  if (i.fieldLapInches >= 60) return "tab60";
+  // Duro-Roof's middle threshold is 57 (its 57" tab maps to the 60"-Tabs row, parity doc §7.1);
+  // Duro-Last's is 60.
+  if (i.fieldLapInches >= (i.midThresholdIn ?? 60)) return "tab60";
   return "tab28";
 }
 

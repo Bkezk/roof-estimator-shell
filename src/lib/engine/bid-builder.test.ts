@@ -476,7 +476,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
   });
 
-  it("parapets: Duro-Tuff bills 24\" panels at 30\" each on 6\"-increment heights", () => {
+  it('parapets: Duro-Tuff bills 24" panels at 30" each on 6"-increment heights', () => {
     const withParapet: EngineAdminData = {
       ...admin,
       labor: { ...admin.labor, "Duro-Tuff|mechanical": admin.labor["Duro-Last|mechanical"]! },
@@ -494,6 +494,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         },
       },
       priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+      // Duro-Tuff membrane is flat-family priced now; 1.23 keeps the fixture's 3199.23 membrane.
+      familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
     };
     const { inputs } = buildEstimateInputs(
       bid({
@@ -755,10 +757,11 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
   });
 
-  it("membrane tier: non-Duro-Last systems keep roll goods (their legacy MaterialCost is a different impl) with NO tab-pitch warnings", () => {
+  it("membrane tier: flat-family systems (Duro-Tuff) never hit the tab-pitch path — flat price, no tab warnings", () => {
     const dtAdmin: EngineAdminData = {
       ...admin,
       sheetTabSpacings: { 1: [28, 60, 120] },
+      familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
       labor: {
         "Duro-Tuff|mechanical": buildLaborTables(
           {
@@ -779,6 +782,79 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+  });
+
+  it("family membrane pricing: Duro-Bond/Tuff are flat thickness-keyed; Duro-Fleece keys by membrane type", () => {
+    const famAdmin: EngineAdminData = {
+      ...admin,
+      familyMembranePrices: {
+        "Duro-Bond": { "40": 1.05, "50": 1.15 },
+        "Duro-Tuff": { "50": 0.95 },
+        "Duro-Fleece": { "50mil": 1.39, "50mil Plus": 1.92 },
+      },
+    };
+    const mwo = 3199.23 / 1.23; // MembraneWithOverlap for the 50×50 fixture section
+    // Duro-Bond 40mil: flat price, no color, no tier, no "No price" warning.
+    const bond = buildEstimateInputs(bid({ roofSystem: "Duro-Bond" }), famAdmin);
+    expect(bond.warnings.filter((w) => w.includes("price"))).toEqual([]);
+    expect(bond.inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.05, 2);
+    // Duro-Fleece 50mil keys "50mil" (the non-Plus row; Plus is unreachable from thickness).
+    const fleece = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Fleece",
+        sections: [{ ...bid().sections[0]!, thickness: 50 }],
+      }),
+      famAdmin,
+    );
+    expect(fleece.inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.39, 2);
+    // Missing row → warning + $0 (never a silent roll-goods fallback for these families).
+    const missing = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Tuff",
+        sections: [{ ...bid().sections[0]!, thickness: 60 }],
+      }),
+      famAdmin,
+    );
+    expect(missing.inputs.membraneCostBeforeDiscount).toBeCloseTo(0, 6);
+    expect(missing.warnings.some((w) => w.includes("Duro-Tuff"))).toBe(true);
+  });
+
+  it("Duro-Roof: always zoned (no roll-good branch), 57-inch middle threshold, ×1.05 surcharge", () => {
+    const drAdmin: EngineAdminData = {
+      ...admin,
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, tab60: { White: 1.1 } } },
+      sheetTabSpacings: { 4: [57, 87, 120] },
+    };
+    const mwo = 3199.23 / 1.23;
+    // Field lap 87 (≥57, <120) → the 60"-Tabs row (Category 4), ×1.05 — even on the default
+    // sheet label (legacy Duro-Roof has NO roll-good sheet branch).
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Roof",
+        sections: [{ ...bid().sections[0]!, fieldLap: 87 }],
+      }),
+      drAdmin,
+    );
+    expect(warnings.filter((w) => w.includes("price"))).toEqual([]);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.1 * 1.05, 2);
+    // A 57-lap perim ZONE also maps to the 60"-Tabs row under the Duro-Roof threshold.
+    const zoned = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Roof",
+        sections: [
+          {
+            ...bid().sections[0]!,
+            fieldLap: 87,
+            perimLengthFt: 100,
+            enhancementWidthFt: 3,
+            perimLap: 57,
+          },
+        ],
+      }),
+      drAdmin,
+    );
+    // shares: field 2200/2500, perim 300/2500 — both at the tab60 price, ×1.05.
+    expect(zoned.inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.1 * 1.05, 2);
   });
 
   it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {

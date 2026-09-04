@@ -373,8 +373,28 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // their own legacy MaterialCost implementations (not ported): they stay roll goods. A
     // pre-series adminSnapshot has no rollGoodsSheetLabel (undefined, not "") — treated as a
     // roll-good sheet so frozen bids keep their exact pricing, warning-free.
+    // Duro-Bond (rs 2) / Duro-Tuff (rs 3) / Duro-Fleece (rs 5): flat single-price membranes
+    // (parity doc §7.1) — no color, no tiers, no zones. Fleece keys by membrane TYPE; a
+    // thickness-only bid reaches the non-Plus rows ("50mil"/"60mil"; Plus variants flagged).
+    if (rsId === 2 || rsId === 3 || rsId === 5) {
+      const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
+      const fPrice = admin.familyMembranePrices?.[bid.roofSystem]?.[variantKey];
+      if (fPrice === undefined) {
+        warnings.push(
+          `No ${bid.roofSystem} membrane price for "${variantKey}" — section "${s.name}".`,
+        );
+      }
+      membraneMaterial += membraneWithOverlap * (fPrice ?? 0);
+    }
+    // Duro-Roof (rs 4) shares the Duro-Last zone logic with NO roll-good sheet branch and a
+    // 57" middle threshold (its 57" tab maps to the 60"-Tabs price row); ×1.05 rides on
+    // membraneMaterialCost's isDuroRoof surcharge.
+    const isFlatFamily = rsId === 2 || rsId === 3 || rsId === 5;
+    const midThresholdIn = rsId === 4 ? 57 : 60;
     const isRollGoodSheet =
-      rsId !== 1 || !lt?.rollGoodsSheetLabel || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+      rsId === 4
+        ? false
+        : rsId !== 1 || !lt?.rollGoodsSheetLabel || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
     let tier: PriceTier = "rollGoods";
     if (!isRollGoodSheet) {
       const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
@@ -382,6 +402,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         isDefaultRollGood: false,
         sheetTabSpacings: tabList,
         fieldLapInches: s.fieldLap,
+        midThresholdIn,
       });
       if (picked === "custom") {
         warnings.push(
@@ -391,19 +412,23 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         tier = picked;
       }
     }
-    let price = priceMatrixLookup(admin.priceMatrix, s.thickness, tier, s.color);
-    if (price === null && tier !== "rollGoods") {
+    let price = isFlatFamily
+      ? null
+      : priceMatrixLookup(admin.priceMatrix, s.thickness, tier, s.color);
+    if (!isFlatFamily && price === null && tier !== "rollGoods") {
       warnings.push(
         `No ${tier} price for ${s.thickness}mil ${s.color} — falling back to roll goods — section "${s.name}".`,
       );
       price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
     }
-    if (price === null) {
+    if (!isFlatFamily && price === null) {
       warnings.push(
         `No price for ${s.thickness}mil ${s.color} (roll goods) — section "${s.name}".`,
       );
     }
-    if (isRollGoodSheet) {
+    if (isFlatFamily) {
+      // membrane already priced above (flat family)
+    } else if (isRollGoodSheet) {
       membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
     } else {
       const zonePerimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
@@ -427,7 +452,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           );
           return 0;
         }
-        const zTier: PriceTier | null = lap >= 60 ? "tab60" : lap >= 24 ? "tab28" : null;
+        const zTier: PriceTier | null =
+          lap >= midThresholdIn ? "tab60" : lap >= 24 ? "tab28" : null;
         if (zTier === null) return 0;
         const zPrice = priceMatrixLookup(admin.priceMatrix, s.thickness, zTier, s.color);
         if (zPrice === null) {
