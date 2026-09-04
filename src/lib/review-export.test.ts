@@ -33,6 +33,7 @@ const data: ReviewData = {
   parapetHours: 0,
   curbHours: 0,
   underlaymentHours: 0,
+  ownRateHours: 0,
   totalManDays: 4.13,
   disposalUnits: 0,
   roofSqFt: 2500,
@@ -49,6 +50,12 @@ describe("buildReviewRows", () => {
     expect(find("Accessories")).toBeDefined(); // 210.85 (Purchases group)
     expect(find("Parapet material")).toBeUndefined(); // 0 → omitted
     expect(find("Per-diem")).toBeUndefined();
+  });
+
+  it("lists own-rate hours (metals + categorized non-DL) when present, omits at 0", () => {
+    expect(find("Metals & non-DL (own rate)")).toBeUndefined(); // 0 → omitted
+    const withOwn = buildReviewRows({ ...data, ownRateHours: 3 });
+    expect(withOwn.find((r) => r[1] === "Metals & non-DL (own rate)")![2]).toBe("3.00");
   });
 
   it("computes the legacy unit metrics from the totals", () => {

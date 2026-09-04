@@ -478,6 +478,9 @@ function EstimatePage() {
       parapetMaterial,
       metalsMaterial,
       adhesiveMaterial,
+      // Own-rate direct-labor hours (metals + categorized non-DL); they join man-days but are
+      // priced at each line's own rate, so they aren't in any crew-rate hour bucket.
+      ownRateHours: inputs.ownRateDirectLaborHours ?? 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -738,6 +741,7 @@ function EstimatePage() {
       parapetHours: result.r.parapetLaborHours,
       curbHours: result.r.curbLaborHours,
       underlaymentHours: result.r.underlaymentLaborHours,
+      ownRateHours: result.ownRateHours,
       totalManDays: result.r.money.totalManDays,
       disposalUnits: result.r.disposalUnits,
       roofSqFt: sections.reduce((sum, s) => sum + s.length * s.width, 0),
@@ -3014,6 +3018,12 @@ function EstimatePage() {
                   <div className="flex justify-between">
                     <span>Underlayment hours</span>
                     <span>{result.r.underlaymentLaborHours.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.ownRateHours > 0 && (
+                  <div className="flex justify-between">
+                    <span>Metals &amp; non-DL hours</span>
+                    <span>{result.ownRateHours.toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

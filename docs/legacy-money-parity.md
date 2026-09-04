@@ -157,8 +157,8 @@ Input conventions & follow-ups from the adversarial review:
 - `perimLengthFt` is expected CORNER-ADJUSTED (legacy PerimTotalLength subtracts an enhancement
   width per adjacent marked corner); the zone shares and fastener areas both consume it as such.
 - `ParapetInput.pieces`: UI input added on the Parapets step (default 1 → length + 2 ft).
-- Hour breakdowns (sidebar + CSV) don't yet list the own-rate hours (metals + categorized
-  non-DL) that now join man-days — display follow-up.
+- Hour breakdowns (sidebar + CSV) now list the own-rate hours (metals + categorized
+  non-DL) that join man-days — "Metals & non-DL" row.
 - Stored bids.grand_total goes stale for live-priced (unfrozen) bids after any reprice — known
   property of the snapshot design, listed for the validation pass.
 

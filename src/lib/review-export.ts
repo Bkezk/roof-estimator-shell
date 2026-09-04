@@ -38,6 +38,8 @@ export interface ReviewData {
   parapetHours: number;
   curbHours: number;
   underlaymentHours: number;
+  /** Own-rate direct-labor hours (metals + categorized non-DL); they join man-days. */
+  ownRateHours: number;
   totalManDays: number;
   disposalUnits: number;
   // areas (sq ft)
@@ -88,6 +90,7 @@ export function buildReviewRows(d: ReviewData): string[][] {
   opt(L, "Parapets", d.parapetHours);
   opt(L, "Curbs", d.curbHours);
   opt(L, "Underlayment", d.underlaymentHours);
+  opt(L, "Metals & non-DL (own rate)", d.ownRateHours);
   push(L, "Total man-days", n2(d.totalManDays));
   opt(L, "Disposal units", d.disposalUnits);
 
