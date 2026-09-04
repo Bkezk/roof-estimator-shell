@@ -152,3 +152,24 @@ describe("consumption rules (§2 port)", () => {
     expect(r.caulkTubes).toBe(9);
   });
 });
+
+describe("allowedScrewSubtypes (§2.6 deck allow-list)", () => {
+  it("Wood-only bids accept drill point/spade/xhd and reject augers/ntb/concrete screws", async () => {
+    const { allowedScrewSubtypes } = await import("./consumption");
+    const wood = allowedScrewSubtypes(["Wood"]);
+    expect(wood.has("drill point")).toBe(true);
+    expect(wood.has("spade")).toBe(true);
+    expect(wood.has("xhd")).toBe(true);
+    expect(wood.has("auger")).toBe(false);
+    expect(wood.has("concrete screw")).toBe(false);
+  });
+  it("mixed decks union their lists; LWC/Concrete allows both screw and ntb/auger families", async () => {
+    const { allowedScrewSubtypes } = await import("./consumption");
+    const mixed = allowedScrewSubtypes(["Gypsum", "Concrete"]);
+    expect(mixed.has("auger")).toBe(true);
+    expect(mixed.has("nail")).toBe(true);
+    expect(mixed.has("spade")).toBe(false);
+    const lwcC = allowedScrewSubtypes(["LWC/Concrete"]);
+    expect([...lwcC].sort()).toEqual(["auger", "concrete screw", "nail", "ntb"]);
+  });
+});

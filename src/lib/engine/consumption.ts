@@ -42,6 +42,31 @@ export function insulationFasteners(
   return Math.round(areaSqFt / 32) * per;
 }
 
+/**
+ * §2.6 — fastener subtypes that satisfy the screw bucket, per labor-deck name
+ * (legacy UpdateTotals allow-list; subtypes compared lowercase). Anything not listed for a
+ * deck (bits, tips, plates, stainless, hex head, roofing nails, collated) never counts.
+ */
+export const SCREW_SUBTYPES_BY_DECK: Record<string, string[]> = {
+  Wood: ["drill point", "spade", "xhd"],
+  Steel: ["drill point", "spade", "purlin", "xhd"],
+  Retrofit: ["drill point", "spade", "purlin", "xhd"],
+  Purlin: ["drill point", "spade", "purlin", "xhd"],
+  "LWC/Steel": ["drill point", "spade", "purlin", "xhd"],
+  Gypsum: ["ntb", "auger"],
+  "LWC/Other": ["ntb", "auger"],
+  Tectum: ["ntb", "auger"],
+  Concrete: ["concrete screw", "nail"],
+  "LWC/Concrete": ["concrete screw", "nail", "ntb", "auger"],
+};
+
+/** Union of allowed screw subtypes (lowercase) across the decks present in a bid. */
+export function allowedScrewSubtypes(deckTypes: string[]): Set<string> {
+  const out = new Set<string>();
+  for (const d of deckTypes) for (const s of SCREW_SUBTYPES_BY_DECK[d] ?? []) out.add(s);
+  return out;
+}
+
 /** §2.5 — Duro-Caulk: 1 tube per 12 LF of termination bar + fascia cover. */
 export const caulkTubes = (barLengthFt: number): number =>
   barLengthFt > 0 ? Math.ceil(barLengthFt / 12) : 0;

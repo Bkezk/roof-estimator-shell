@@ -89,6 +89,8 @@ export interface AccessoryCatalogItem {
   variant: string;
   /** Fasteners per box (Fasteners & Bits rows) — used by the needed-quantities netting. */
   fastenersPerBox?: number;
+  /** Fastener subtype (Fasteners & Bits rows) — keys the legacy §2.6 deck allow-list. */
+  subtype?: string;
 }
 
 /** Columns that are never a price (identifiers, counts, sizes) even when they hold numbers. */
@@ -157,6 +159,7 @@ export function buildAccessoryCatalog(
         const description = variant ? `${baseDesc} — ${variant}` : baseDesc;
         const key = variant ? `${row.id}::${baseDesc}::${variant}` : `${row.id}::${baseDesc}`;
         const perBox = r["Fasteners/Box"];
+        const subtype = r["Subtype"];
         items.push({
           key,
           category: row.category,
@@ -164,6 +167,7 @@ export function buildAccessoryCatalog(
           price,
           variant,
           ...(typeof perBox === "number" && perBox > 0 ? { fastenersPerBox: perBox } : {}),
+          ...(typeof subtype === "string" && subtype ? { subtype } : {}),
         });
       }
     }

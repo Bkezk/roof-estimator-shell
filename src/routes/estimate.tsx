@@ -44,7 +44,7 @@ import {
   DESIGN_TABLE_OPTIONS,
   type SpacingError,
 } from "@/lib/engine/fastener-spacing";
-import { computeNeededQuantities } from "@/lib/engine/consumption";
+import { computeNeededQuantities, allowedScrewSubtypes } from "@/lib/engine/consumption";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
   defaultEdges,
@@ -483,6 +483,12 @@ function EstimatePage() {
     let polyPlates = 0;
     let insulationPlates = 0;
     let caulk = 0;
+    // Legacy §2.6: a fastener line counts toward the screw bucket only when its SUBTYPE is
+    // allowed for a deck present in the bid (bits/tips/stainless/etc. never count).
+    const allowed = allowedScrewSubtypes([
+      ...sections.map((s) => s.deckType),
+      ...parapets.map((p) => p.deckType),
+    ]);
     for (const line of accessories) {
       const item = accCatalog?.find(
         (a) => `${a.category} — ${a.description}` === line.description,
@@ -495,8 +501,7 @@ function EstimatePage() {
           insulationPlates += line.quantity * item.fastenersPerBox;
         else if (d.includes("Plates") || d.includes("Cleat")) {
           // other plate rows (induction/cleat) — not netted against a bucket yet
-        } else if (item.fastenersPerBox >= 50) {
-          // >= 50/box keeps drill bits & driver tips (1/box) out of the screw bucket
+        } else if (allowed.has((item.subtype ?? "").toLowerCase())) {
           screws += line.quantity * item.fastenersPerBox;
         }
       } else if (item.category.includes("Sealant") && item.description.startsWith("Duro-Caulk")) {
@@ -504,7 +509,8 @@ function EstimatePage() {
       }
     }
     return { screws, polyPlates, insulationPlates, caulk };
-  }, [accessories, accCatalog]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessories, accCatalog, JSON.stringify(sections.map((s) => s.deckType)), JSON.stringify(parapets.map((p) => p.deckType))]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -2263,9 +2269,11 @@ function EstimatePage() {
               the legacy 30-ft perimeter strip constant is flagged for bid validation), 21
               screws per 10-ft bar (42/63 for two-piece), insulation fasteners per board
               density (doubled under adhered/Duro-Bond membranes), plates 1-per-screw,
-              adhesive units area ÷ coverage ceilinged once per adhesive. Not included:
-              washer/drain caulk adders, pipe-stack sealant, and custom-layout sheets — add
-              those manually for now.
+              adhesive units area ÷ coverage ceilinged once per adhesive. Entered fastener
+              boxes count toward Screws only when the fastener&apos;s subtype is allowed for a
+              deck in this bid (e.g. Augers for Gypsum/Tectum, Drill Points for Wood/Steel) —
+              same rule as legacy. Not included: washer/drain caulk adders, pipe-stack
+              sealant, and custom-layout sheets — add those manually for now.
             </p>
           </CardContent>
         </Card>
