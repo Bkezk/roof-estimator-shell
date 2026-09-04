@@ -88,6 +88,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       tplRes,
       tplAdjRes,
       tabMultiRes,
+      sheetTabRes,
       legacyAdhRes,
       covDeckRes,
       covUnderRes,
@@ -126,6 +127,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("labor_template_adjustments").select("template_id, area, value, sort").order("sort"),
       // Legacy mech_tab_multi (hand-seeded migration, not in the generated Database types).
       (sb as unknown as UntypedFrom).from("mech_tab_multi").select("*"),
+      (sb as unknown as UntypedFrom).from("mech_sheet_tab_spacing").select("*"),
       // Legacy adhesive-coverage tables (membrane/wall adhesive units for adhered systems).
       (sb as unknown as UntypedFrom).from("legacy_adhesive").select("*"),
       (sb as unknown as UntypedFrom).from("adhesive_coverage_deck").select("*"),
@@ -152,6 +154,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (tplRes.error) throw tplRes.error;
     if (tplAdjRes.error) throw tplAdjRes.error;
     if (tabMultiRes.error) throw new Error(tabMultiRes.error.message);
+    if (sheetTabRes.error) throw new Error(sheetTabRes.error.message);
     if (legacyAdhRes.error) throw new Error(legacyAdhRes.error.message);
     if (covDeckRes.error) throw new Error(covDeckRes.error.message);
     if (covUnderRes.error) throw new Error(covUnderRes.error.message);
@@ -181,6 +184,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const laborTemplateAdjustments = (tplAdjRes.data ?? null) as
       RawLaborTemplateAdjustment[] | null;
     const tabMultiRows = (tabMultiRes.data ?? null) as RawTabMultiRow[] | null;
+    const sheetTabRows = (sheetTabRes.data ?? null) as Array<{
+      roof_system_id: number;
+      spacing: number;
+    }> | null;
     const legacyAdhesiveRows = (legacyAdhRes.data ?? null) as unknown as
       RawLegacyAdhesiveRow[] | null;
     const adhesiveCoverageDeck = (covDeckRes.data ?? null) as unknown as
@@ -210,6 +217,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       laborTemplateRows,
       laborTemplateAdjustments,
       tabMultiRows,
+      sheetTabRows,
       legacyAdhesiveRows,
       adhesiveCoverageDeck,
       adhesiveCoverageUnderlayment,

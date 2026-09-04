@@ -281,6 +281,12 @@ export interface LaborTables {
   tabBands: Band[];
   sheetSizeMultiByLabel: Record<string, number>;
   thicknessLaborByMil: Record<number, number>;
+  /**
+   * The combo's FIRST sheet-size label (legacy RoofSystem.SheetSizeList[0] — "Roll Good" in the
+   * seeded data): sections on this sheet price membrane at the roll-goods tier; other sheets
+   * price by zone at tab tiers ("" when the combo has no sheet list → treat as roll goods).
+   */
+  rollGoodsSheetLabel: string;
 }
 
 /**
@@ -309,6 +315,7 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
   const sheetSizeMultiByLabel: Record<string, number> = {};
   for (const s of combo.sheet_size_multipliers ?? [])
     sheetSizeMultiByLabel[s.label] = s.roof_section;
+  const rollGoodsSheetLabel = combo.sheet_size_multipliers?.[0]?.label ?? "";
 
   const thicknessLaborByMil: Record<number, number> = {};
   for (const t of combo.thickness_multipliers ?? []) thicknessLaborByMil[t.mil] = t.multiplier;
@@ -320,6 +327,7 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     tabBands,
     sheetSizeMultiByLabel,
     thicknessLaborByMil,
+    rollGoodsSheetLabel,
   };
 }
 
@@ -980,6 +988,8 @@ export interface RawAdminData {
   laborTemplateAdjustments?: RawLaborTemplateAdjustment[] | null;
   /** Legacy mech_tab_multi rows; when present, mechanical combos get their FULL tab-band set. */
   tabMultiRows?: RawTabMultiRow[] | null;
+  /** Legacy mech_sheet_tab_spacing rows (selectable tab pitches per roof system). */
+  sheetTabRows?: Array<{ roof_system_id: number; spacing: number }> | null;
   /** Legacy adhesive-coverage tables (membrane/wall adhesive units for adhered systems). */
   legacyAdhesiveRows?: RawLegacyAdhesiveRow[] | null;
   adhesiveCoverageDeck?: RawAdhesiveCoverageRow[] | null;
@@ -1026,6 +1036,8 @@ export interface EngineAdminData {
   membraneAdhesives?: Record<number, Record<string, MembraneAdhesiveCoverage>>;
   /** Per-category labor templates (absent if labor_templates wasn't fetched). */
   laborTemplates?: LaborTemplates;
+  /** Selectable tab pitches by legacy roof-system id (mech_sheet_tab_spacing; absent if unfetched). */
+  sheetTabSpacings?: Record<number, number[]>;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1040,6 +1052,11 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   // systems with no rows) keep the captured base band. bandLookup on the full set returns the
   // exact row for every legal Field Tab Spacing value, matching CustomTabSpacingMultiplier's
   // exact-key dictionary get.
+  const sheetTabSpacings: Record<number, number[]> = {};
+  for (const r of raw.sheetTabRows ?? []) {
+    (sheetTabSpacings[r.roof_system_id] ??= []).push(r.spacing);
+  }
+
   const tabBandsByRs = new Map<number, Band[]>();
   for (const r of raw.tabMultiRows ?? []) {
     const bands = tabBandsByRs.get(r.roof_system_id) ?? [];
@@ -1116,5 +1133,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(adhesivePrices ? { adhesivePrices } : {}),
     ...(membraneAdhesives ? { membraneAdhesives } : {}),
     ...(laborTemplates ? { laborTemplates } : {}),
+    ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
   };
 }

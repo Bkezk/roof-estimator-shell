@@ -37,6 +37,36 @@ export function selectMembranePriceTier(i: TierSelectionInputs): PriceTier {
   return "tab28";
 }
 
+/**
+ * Split MembraneWithOverlap into field/perim/corner MATERIAL shares (legacy MembraneCost_4_0_230:
+ * MaterialTotalX = AreaX/AreaTotal × MembraneWithOverlap) with the negative-share carry — a zone
+ * driven negative credits the NEXT zone (field → perim → corner) and clamps to 0.
+ */
+export function membraneZoneShares(i: {
+  areaTotal: number;
+  areaPerimeter: number;
+  areaCorner: number;
+  membraneWithOverlap: number;
+}): { field: number; perim: number; corner: number } {
+  if (i.areaTotal <= 0) return { field: 0, perim: 0, corner: 0 };
+  const areaField = i.areaTotal - i.areaPerimeter - i.areaCorner; // may go negative
+  const per = i.membraneWithOverlap / i.areaTotal;
+  let carry = 0;
+  const zone = (area: number): number => {
+    let share = area * per - carry;
+    carry = 0;
+    if (share < 0) {
+      carry = Math.abs(share);
+      share = 0;
+    }
+    return share;
+  };
+  const field = zone(areaField);
+  const perim = zone(i.areaPerimeter);
+  const corner = zone(i.areaCorner);
+  return { field, perim, corner };
+}
+
 /** Price matrix: thickness → tier → color → $/sqft (admin oLookupDuroLastPrices). */
 export type PriceMatrix = Record<number, Partial<Record<PriceTier, Record<string, number>>>>;
 

@@ -450,6 +450,57 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
   });
 
+  it("membrane tier: a non-roll-good sheet prices the FIELD share at the lap's tab tier; perim/corner shares stay unpriced (legacy -1 zone laps)", () => {
+    const tabAdmin: EngineAdminData = {
+      ...admin,
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, tab60: { White: 1.1 } } },
+      sheetTabSpacings: { 1: [28, 60, 120] },
+      labor: {
+        "Duro-Last|mechanical": buildLaborTables(
+          {
+            ...combo,
+            sheet_size_multipliers: [
+              { label: "1500 sf", roof_section: 1, underlayment: 1 },
+              { label: "2000 sf", roof_section: 0.98, underlayment: 0.98 },
+            ],
+          },
+          deckOrder,
+        ),
+      },
+    };
+    // Plain tab-sheet section (no zones): field share = 1 -> full MembraneWithOverlap at tab60.
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, sheetSizeLabel: "2000 sf", fieldLap: 60 }],
+      }),
+      tabAdmin,
+    );
+    // MembraneWithOverlap(50x50, _230) x $1.10: 3199.23/1.23 x 1.10 = 2861.10
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.1, 2);
+
+    // With a perimeter zone marked, only the field SHARE is priced (legacy skips zones whose
+    // custom lap is -1): areas 2500 total, perim 100x3 -> field share 2200/2500.
+    const { inputs: zoned } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            sheetSizeLabel: "2000 sf",
+            fieldLap: 60,
+            perimLengthFt: 100,
+            enhancementWidthFt: 3,
+          },
+        ],
+      }),
+      tabAdmin,
+    );
+    expect(zoned.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.1 * (2200 / 2500), 2);
+
+    // The roll-good sheet (the combo's FIRST label) keeps the roll-goods tier on the full area.
+    const { inputs: rg } = buildEstimateInputs(bid(), tabAdmin);
+    expect(rg.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+  });
+
   it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {
     const { inputs } = buildEstimateInputs(
       bid({

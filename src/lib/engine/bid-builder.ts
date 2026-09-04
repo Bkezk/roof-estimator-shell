@@ -16,7 +16,8 @@
  *    pull-test lookup (fastener-spacing.ts); it feeds customFieldFastenerSpacing so the engine's
  *    OC lookup is bypassed.
  *  - Freight wired: percent-of-material or the stepped "from" table (strict >), on the material
- *    total before tax (dMaterial[20]). Membrane price tier assumed roll-goods.
+ *    total before tax (dMaterial[20]). Membrane tier per legacy: roll-good sheet → roll goods;
+ *    tab sheets → field share at the fieldLap tab tier (zones unpriced at default -1 laps).
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
  *  - Insulation layers wired (§4.3, up to 4 per section): board material → dTotals[6]; mechanical
  *    labor per the app's header formula (layout hrs/2500 + fastener min × count/board); adhesive
@@ -49,10 +50,13 @@ import { in2Ft, bankersRound } from "./rounding";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
   membraneMaterialCost,
+  membraneZoneShares,
   priceMatrixLookup,
+  selectMembranePriceTier,
   shippingTotal,
   freightStepped,
   freightPercent,
+  type PriceTier,
 } from "./pricing";
 import { CURRENT_FORMULAS_VERSION } from "./version";
 import type { EstimateInputs, RoofSection, Attachment } from "./estimate";
@@ -317,15 +321,57 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   /** Fractional adhesive units by adhesive name, summed across every section's layers. */
   const adhesiveUnitsByName: Record<string, number> = {};
 
+  const rsId = LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1;
   const sections: RoofSection[] = bid.sections.map((s) => {
-    const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
+    const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
+    // Membrane tier (legacy MembraneCost_4_0_230, docs/legacy-money-parity.md §1): the combo's
+    // FIRST sheet size (the seeded "Roll Good") prices the whole MembraneWithOverlap at the
+    // roll-goods tier; other sheets price the FIELD share at the fieldLap's tab tier, with the
+    // perim/corner shares UNPRICED (their per-zone custom laps are -1 in this bid model — the
+    // legacy default) and the negative-share carry applied. A lap outside the system's tab list
+    // (legacy: manual custom $/sqft, not modeled) falls back to roll goods WITH a warning.
+    const isRollGoodSheet =
+      !lt || lt.rollGoodsSheetLabel === "" || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+    let tier: PriceTier = "rollGoods";
+    if (!isRollGoodSheet) {
+      const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
+      const picked = selectMembranePriceTier({
+        isDefaultRollGood: false,
+        sheetTabSpacings: tabList,
+        fieldLapInches: s.fieldLap,
+      });
+      if (picked === "custom") {
+        warnings.push(
+          `Field lap ${s.fieldLap}" is not a selectable tab pitch — membrane priced at roll goods (legacy uses a manual $/sqft here) — section "${s.name}".`,
+        );
+      } else {
+        tier = picked;
+      }
+    }
+    let price = priceMatrixLookup(admin.priceMatrix, s.thickness, tier, s.color);
+    if (price === null && tier !== "rollGoods") {
+      warnings.push(
+        `No ${tier} price for ${s.thickness}mil ${s.color} — falling back to roll goods — section "${s.name}".`,
+      );
+      price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
+    }
     if (price === null) {
       warnings.push(
         `No price for ${s.thickness}mil ${s.color} (roll goods) — section "${s.name}".`,
       );
     }
-    const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
-    membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
+    if (isRollGoodSheet) {
+      membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
+    } else {
+      const zonePerimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+      const shares = membraneZoneShares({
+        areaTotal: s.length * s.width,
+        areaPerimeter: zonePerimLengthFt * s.enhancementWidthFt,
+        areaCorner: s.cornerLengthFt * s.enhancementWidthFt,
+        membraneWithOverlap,
+      });
+      membraneMaterial += membraneMaterialCost(shares.field, price ?? 0, isDuroRoof);
+    }
 
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
     // labor and adhesive labor → direct labor; adhesive units × price → M0.
