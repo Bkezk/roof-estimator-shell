@@ -34,9 +34,9 @@ FormulasVersion, rva 0xcac8):
   section prices the full MembraneWithOverlap — but at the TAB tier, not roll goods. CORRECTION
   (adversarial review): the pre-series "always roll goods" was therefore NOT exact for default
   sections on sheet sizes; with the seeded prices a default "1500 sf" / 28-lap Duro-Last section
-  repriced ~+9.8% when the tier wiring landed (pinned by test, deliberate). ⚠ HUMAN GATE: the
-  legacy DEFAULT section is sheetsizeid 4 with tab 60 (saved-bid XML defaults) while the web
-  default is "1500 sf" / lap 28 — align the web defaults (or not) as a product decision.
+  repriced ~+9.8% when the tier wiring landed (pinned by test, deliberate). HUMAN GATE RESOLVED
+  (2026-09-04): the web default section is aligned to legacy — sheetsizeid 4 is "1500 sf"
+  (1-based list), which already matched; the default lap moved 28 → 60.
   Tab-tier zone pricing is DuroLastSystem logic and is scoped to Duro-Last; the other systems'
   own MaterialCost implementations (DuroTuffSystem rva 0x18915-area, DuroRoofSystem rva 0xd724,
   DuroBond/DuroFleece) are NOT ported — those systems stay roll goods.
@@ -156,7 +156,7 @@ Settled premises for the web engine:
 Input conventions & follow-ups from the adversarial review:
 - `perimLengthFt` is expected CORNER-ADJUSTED (legacy PerimTotalLength subtracts an enhancement
   width per adjacent marked corner); the zone shares and fastener areas both consume it as such.
-- `ParapetInput.pieces` has no UI input yet (defaults to 1 → length + 2 ft) — web session to add.
+- `ParapetInput.pieces`: UI input added on the Parapets step (default 1 → length + 2 ft).
 - Hour breakdowns (sidebar + CSV) don't yet list the own-rate hours (metals + categorized
   non-DL) that now join man-days — display follow-up.
 - Stored bids.grand_total goes stale for live-priced (unfrozen) bids after any reprice — known

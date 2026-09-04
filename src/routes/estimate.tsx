@@ -151,6 +151,8 @@ const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   predrill: false,
   canted: false,
   girthInches: 36,
+  // Legacy Pieces (membrane pieces wrapping the wall): AdjustedLength = length + 1 + pieces.
+  pieces: 1,
   ...defaults,
 });
 
@@ -1823,7 +1825,7 @@ function EstimatePage() {
                             </Button>
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
                           <Field label="Length (ft)">
                             <Input
                               type="number"
@@ -1867,6 +1869,20 @@ function EstimatePage() {
                                 setParapets((prev) =>
                                   prev.map((x, j) =>
                                     j === i ? { ...x, girthInches: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Pieces">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={p.pieces ?? 1}
+                              onChange={(e) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, pieces: num(e.target.value) } : x,
                                   ),
                                 )
                               }
