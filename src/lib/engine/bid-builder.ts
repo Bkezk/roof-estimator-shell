@@ -136,7 +136,7 @@ export interface AccessoryLine {
 /**
  * A non-Duro-Last catalog line (Sheet Metal Work, Blocking, Subcontractors, Services, …). Each unit
  * carries a material Price and a labor component (LaborPerUnit hours × its own Labor Rate $/hr),
- * snapshotted when added. Material folds into OtherMaterial; the labor $ folds into services.
+ * snapshotted when added. Routing is per `category` — see that field's doc.
  */
 export interface NonDlLine {
   description: string;
@@ -557,6 +557,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   );
 
   // Parapets: labor = (length/50) × hrs-per-50-LF[deck][band][drill×cant] → direct labor.
+  // NOTE: the Duro-Tuff 24"-panel material variant (Ceil(girth/6)/2 heights, 30" billed per 24" —
+  // parity doc §3) is NOT ported; all systems use the non-Duro-Tuff formula below.
   // Material per legacy Parapet.MembraneCost (docs/legacy-money-parity.md §3): the PARAPETS
   // price tier (Category 3) at the bid-default thickness/color, girth ceiled to a whole inch
   // (AdjustedHeight), length + 1 ft + 1 ft per piece (AdjustedLength; pieces < 1 → 0), each

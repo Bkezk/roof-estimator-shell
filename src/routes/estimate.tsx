@@ -2492,8 +2492,9 @@ function EstimatePage() {
             <CardContent>
               {nonDlLines.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  No non-DL items. Material folds into Other material; labor into Subs &amp;
-                  services.
+                  No non-DL items. Blocking / deck / sheet-metal / masonry items price material into
+                  Other material and labor as direct labor; subcontractors &amp; services roll into
+                  Subs &amp; services.
                 </p>
               ) : (
                 <Table>
@@ -2943,7 +2944,7 @@ function EstimatePage() {
                     <Row label="Shipping" v={money(result.r.money.dTotals[9] ?? 0)} />
                   )}
                   <Row label="Labor" v={money(result.r.laborSubtotal1)} />
-                  {(nonDlLaborTotal > 0 || metalsLaborTotal > 0) && (
+                  {result.r.laborSubtotal2 > 0 && (
                     <Row label="Subs & services" v={money(result.r.laborSubtotal2)} />
                   )}
                   <Row label="Subtotal 1" v={money(result.r.money.subtotal1)} />

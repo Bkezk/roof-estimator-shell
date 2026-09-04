@@ -30,10 +30,16 @@ FormulasVersion, rva 0xcac8):
   - **Negative-share carry**: each zone subtracts a running credit `carry` first
     (`share −= carry; carry = 0; if share < 0 { carry = |share|; share = 0 }`) — a zone driven
     negative (AreaField can go negative when zones exceed the section) credits the next zone.
-- Default quick-bid sections (no perim sides, no corners): fieldShare = 1, so roll-goods and
-  tab-sheet sections alike price the full MembraneWithOverlap — the web engine's current
-  "always roll goods" is exact for roll-good sheets and for default sections, and diverges only
-  for tab sheets with enhancement zones + custom zone laps.
+- Default quick-bid sections (no perim sides, no corners): fieldShare = 1, so a tab-sheet
+  section prices the full MembraneWithOverlap — but at the TAB tier, not roll goods. CORRECTION
+  (adversarial review): the pre-series "always roll goods" was therefore NOT exact for default
+  sections on sheet sizes; with the seeded prices a default "1500 sf" / 28-lap Duro-Last section
+  repriced ~+9.8% when the tier wiring landed (pinned by test, deliberate). ⚠ HUMAN GATE: the
+  legacy DEFAULT section is sheetsizeid 4 with tab 60 (saved-bid XML defaults) while the web
+  default is "1500 sf" / lap 28 — align the web defaults (or not) as a product decision.
+  Tab-tier zone pricing is DuroLastSystem logic and is scoped to Duro-Last; the other systems'
+  own MaterialCost implementations (DuroTuffSystem rva 0x18915-area, DuroRoofSystem rva 0xd724,
+  DuroBond/DuroFleece) are NOT ported — those systems stay roll goods.
 
 ## 2. Curb membrane material (`Curb.Cost`, rva 0x32e3c)
 
@@ -146,6 +152,15 @@ Settled premises for the web engine:
   UnderlaymentCost`, rva 0x4bcc4): `length × width × 1.06 × $/sqft` (6% waste), or × **1.03** for
   the board named "Geotextile". The web engine bills area × price with no waste factor —
   divergence flagged for wiring (not changed in this pass; needs the board-name join decision).
+
+Input conventions & follow-ups from the adversarial review:
+- `perimLengthFt` is expected CORNER-ADJUSTED (legacy PerimTotalLength subtracts an enhancement
+  width per adjacent marked corner); the zone shares and fastener areas both consume it as such.
+- `ParapetInput.pieces` has no UI input yet (defaults to 1 → length + 2 ft) — web session to add.
+- Hour breakdowns (sidebar + CSV) don't yet list the own-rate hours (metals + categorized
+  non-DL) that now join man-days — display follow-up.
+- Stored bids.grand_total goes stale for live-priced (unfrozen) bids after any reprice — known
+  property of the snapshot design, listed for the validation pass.
 
 Not settled here (unchanged flags): ribbon-spacing membrane-adhesive branch, `lookup_Decktimes`
 (`SELECT TabSpacing, DeckType, FastenerSpacing, Value ... FROM lookup_Decktimes` — MySQL), sheet

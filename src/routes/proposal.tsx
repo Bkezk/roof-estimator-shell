@@ -152,8 +152,17 @@ function ProposalPage() {
       warrantyCost: r.money.dTotals[5] ?? 0,
       freight: r.money.dTotals[9] ?? 0,
       nonDlMaterial,
-      // Metals labor is now DIRECT labor (own-rate, inside LaborSubtotal1) — LS2 is subs+services.
-      nonDlServices: r.laborSubtotal2,
+      // LS2 is subs+services; categorized non-DL labor moved to own-rate DIRECT labor, so add it
+      // back into the Additional-work cost WEIGHT (allocation weights only — the total is exact).
+      nonDlServices:
+        r.laborSubtotal2 +
+        saved.nonDlLines.reduce(
+          (s, l) =>
+            l.category !== undefined && !NON_DL_LS2_CATEGORIES.has(l.category)
+              ? s + l.laborPerUnit * l.laborRate * l.quantity
+              : s,
+          0,
+        ),
       crewRate: saved.laborRate,
     });
     return { saved, r, groups, grandTotal: r.money.grandTotal };
