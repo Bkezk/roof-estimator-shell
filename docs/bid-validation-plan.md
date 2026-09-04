@@ -107,3 +107,25 @@ Known deliberate differences (revisit at validation):
 - ~~Section edge diagram~~ — now drawn on the Sections step right rail (A top /
   B right / C bottom / D left with termination, blocking, ARP annotations).
 - **Date Created** display: web shows Updated on Saved Bids instead.
+
+## Remaining known divergences from legacy (as of 2026-09-04)
+
+Held pending explicit approval or validation-bid evidence — do not wire without one of those.
+
+**Money path (change totals):**
+- Tab-sheet membrane pricing: we always price the Roll Goods tier; legacy prices 28"/60"/120"
+  tab sheets at their own tiers. Needs the tier-selection rule confirmed (tab lap vs avg-sheet).
+- Curb membrane material (labor-only today).
+- Roll-goods perimeter geometry (§2.2 full row math) vs our AreaWithEdgeOverlap path.
+- The DLRowStyle 30-ft perimeter strip constant (transcribed verbatim, units unverified).
+- Wall-adhesive area basis (girth × length stand-in for WallPlusTopSqFt) — wired, flagged.
+- Metals labor routed to services; freight basis; discount stacking beyond prepay; per-diem
+  routing; warranty composition; parapet band/girth derivation — all flagged, validation decides.
+
+**Ordering/display parity (no totals impact):**
+- Per-deck-family screw buckets + separate edging bucket (legacy fasteners screen) — we show one
+  aggregate row; a screenshot of that legacy screen would let us mirror the layout.
+- Caulk needed per color, +1 tube/drain, +1 per 4 conduit washers; strip mastic row
+  (350 LF/unit + 3% scrap); pipe-stack sealant (sizes in uncaptured MySQL).
+- Edge-hardware auto-length prefills (§2.7; term-bar rule fully known, fascia/drip IDs flagged).
+- Two-piece screw needs count from edge terminations only, not Metals-line footage.
