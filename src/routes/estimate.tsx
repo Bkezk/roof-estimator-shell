@@ -126,8 +126,19 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   tearOff: false,
   tearOffType: "",
   toThicknessInches: 0,
+  // Legacy XML section defaults: Pull Test 350 lbs, Design Table 60 psf.
+  pullTest: 350,
+  designTable: 60,
   ...defaults,
 });
+
+// Selectable Field Tab Spacing pitches per system (legacy RSSheetTabSpacing + MechTabMulti;
+// systems not listed keep a free numeric input).
+const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
+  "Duro-Last": [28, 60, 120],
+  "Duro-Roof": [57, 87, 120],
+  "Duro-Tuff": [30, 60, 120],
+};
 
 let pseq = 1;
 const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
@@ -269,6 +280,7 @@ function EstimatePage() {
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
+  const [membraneAdhesive, setMembraneAdhesive] = useState("Water Based Adhesive");
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
@@ -336,6 +348,7 @@ function EstimatePage() {
     if (d && Array.isArray(d.sections)) {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
+      setMembraneAdhesive(d.membraneAdhesiveName ?? "Water Based Adhesive");
       setSections(
         d.sections.length
           ? d.sections.map((s) => ({ ...s, layers: sectionLayers(s) }))
@@ -416,6 +429,7 @@ function EstimatePage() {
   const saved: SavedBidState = {
     roofSystem,
     attachment,
+    membraneAdhesiveName: membraneAdhesive,
     sections,
     accessories,
     nonDlLines,
@@ -1075,6 +1089,15 @@ function EstimatePage() {
                     </SelectContent>
                   </Select>
                 </Field>
+                {attachment === "adhered" && (
+                  <Field label="Adhesive">
+                    <PickOne
+                      value={membraneAdhesive}
+                      options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                      onChange={setMembraneAdhesive}
+                    />
+                  </Field>
+                )}
                 <Field label="Type">
                   <PickOne
                     value={String(sectionDefaults.thickness)}
@@ -1235,14 +1258,30 @@ function EstimatePage() {
                       onChange={(v) => editSection(i, { sheetSizeLabel: v })}
                     />
                   </Field>
-                  <Field label="Tab lap (in)">
-                    <Input
-                      type="number"
-                      value={s.fieldLap}
-                      onChange={(e) =>
-                        editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
-                      }
-                    />
+                  <Field label="Field tab spacing (in)">
+                    {TAB_OPTIONS_BY_SYSTEM[roofSystem] ? (
+                      <PickOne
+                        value={String(s.fieldLap)}
+                        options={[
+                          // Keep a legacy-invalid stored value visible rather than lying.
+                          ...(TAB_OPTIONS_BY_SYSTEM[roofSystem]!.includes(s.fieldLap)
+                            ? []
+                            : [String(s.fieldLap)]),
+                          ...TAB_OPTIONS_BY_SYSTEM[roofSystem]!.map(String),
+                        ]}
+                        onChange={(v) =>
+                          editSectionWithSpacing(i, s, { fieldLap: Number(v) })
+                        }
+                      />
+                    ) : (
+                      <Input
+                        type="number"
+                        value={s.fieldLap}
+                        onChange={(e) =>
+                          editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
+                        }
+                      />
+                    )}
                   </Field>
                   <Field label="Fastener OC (in)">
                     <Input

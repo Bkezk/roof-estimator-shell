@@ -841,6 +841,101 @@ export function buildInspectionTable(steps: RawInspectionStep[]): InspectionBand
   return { minimum: bands[0]?.value ?? 0, bands };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Membrane / parapet-wall adhesive coverage (legacy AdhesiveCoverage tables, extracted
+// verbatim from the shipped bootstrap script — docs/legacy-consumption-rules.md §2.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RawAdhesiveCoverageRow {
+  roof_system_id: number;
+  adhesive_id: number;
+  coverage_sqft: number | string;
+  deck_type_id?: number;
+  underlayment_group_id?: number;
+}
+export interface RawLegacyAdhesiveRow {
+  adhesive_id: number;
+  long_name: string;
+}
+
+/** global_DeckType id → our labor-deck name. */
+export const LEGACY_DECK_NAME_BY_ID: Record<number, string> = {
+  1: "Wood",
+  2: "Steel",
+  3: "Retrofit",
+  4: "Concrete",
+  5: "Gypsum",
+  6: "LWC/Steel",
+  7: "LWC/Concrete",
+  8: "LWC/Other",
+  9: "Tectum",
+  10: "Purlin",
+};
+
+export interface MembraneAdhesiveCoverage {
+  /** Bare-deck coverage (sq ft/unit) by our deck name — membrane adhered straight to the deck. */
+  byDeckName: Record<string, number>;
+  /**
+   * Coverage when adhering over insulation. The captured tables are UNIFORM across board groups
+   * per (system, adhesive) — e.g. Water Based 700 everywhere, Solvent 300 — so a single value is
+   * exposed; null when the source rows disagree (then the caller warns instead of guessing,
+   * because the board→group mapping itself lives in uncaptured MySQL).
+   */
+  underlaymentUniform: number | null;
+  /** Parapet wall coverage; null when absent or the source rows are ambiguous (RS3 duplicates). */
+  wallCoverage: number | null;
+}
+
+export function buildMembraneAdhesives(raw: {
+  adhesives: RawLegacyAdhesiveRow[];
+  deckRows: RawAdhesiveCoverageRow[];
+  underlaymentRows: RawAdhesiveCoverageRow[];
+  wallRows: RawAdhesiveCoverageRow[];
+}): Record<number, Record<string, MembraneAdhesiveCoverage>> {
+  const nameById = new Map(raw.adhesives.map((a) => [a.adhesive_id, a.long_name]));
+  const out: Record<number, Record<string, MembraneAdhesiveCoverage>> = {};
+  const ensure = (rs: number, name: string): MembraneAdhesiveCoverage =>
+    ((out[rs] ??= {})[name] ??= {
+      byDeckName: {},
+      underlaymentUniform: null,
+      wallCoverage: null,
+    });
+
+  for (const r of raw.deckRows) {
+    const name = nameById.get(r.adhesive_id);
+    const deck = LEGACY_DECK_NAME_BY_ID[r.deck_type_id ?? -1];
+    const cov = Number(r.coverage_sqft);
+    if (name && deck && cov > 0) ensure(r.roof_system_id, name).byDeckName[deck] = cov;
+  }
+
+  const uniq = (rows: RawAdhesiveCoverageRow[], positiveOnly: boolean) => {
+    const map = new Map<string, Set<number>>();
+    for (const r of rows) {
+      const name = nameById.get(r.adhesive_id);
+      if (!name) continue;
+      const cov = Number(r.coverage_sqft);
+      if (positiveOnly && cov <= 0) continue; // 0 rows = "needs quote" (tapered/crickets)
+      const key = `${r.roof_system_id}|${name}`;
+      if (!map.has(key)) map.set(key, new Set());
+      map.get(key)!.add(cov);
+    }
+    return map;
+  };
+
+  for (const [key, vals] of uniq(raw.underlaymentRows, true)) {
+    const rs = Number(key.slice(0, key.indexOf("|")));
+    const name = key.slice(key.indexOf("|") + 1);
+    ensure(rs, name).underlaymentUniform = vals.size === 1 ? [...vals][0]! : null;
+  }
+  for (const [key, vals] of uniq(raw.wallRows, false)) {
+    const rs = Number(key.slice(0, key.indexOf("|")));
+    const name = key.slice(key.indexOf("|") + 1);
+    const only = vals.size === 1 ? [...vals][0]! : null;
+    ensure(rs, name).wallCoverage = only !== null && only > 0 ? only : null;
+  }
+  return out;
+}
+
 /**
  * A seeded mech_tab_multi row (legacy MechTabMulti, extracted verbatim from the shipped
  * Bid-Advantage bootstrap script): per roof system, tab spacing (inches) → labor multiplier.
@@ -885,6 +980,11 @@ export interface RawAdminData {
   laborTemplateAdjustments?: RawLaborTemplateAdjustment[] | null;
   /** Legacy mech_tab_multi rows; when present, mechanical combos get their FULL tab-band set. */
   tabMultiRows?: RawTabMultiRow[] | null;
+  /** Legacy adhesive-coverage tables (membrane/wall adhesive units for adhered systems). */
+  legacyAdhesiveRows?: RawLegacyAdhesiveRow[] | null;
+  adhesiveCoverageDeck?: RawAdhesiveCoverageRow[] | null;
+  adhesiveCoverageUnderlayment?: RawAdhesiveCoverageRow[] | null;
+  adhesiveWallCoverage?: RawAdhesiveCoverageRow[] | null;
 }
 
 export interface EngineSettings {
@@ -922,6 +1022,8 @@ export interface EngineAdminData {
   adhesiveTimes?: AdhesiveTimesTables;
   /** Adhesive product name → price per unit (absent if the Adhesives screen wasn't fetched). */
   adhesivePrices?: Record<string, number>;
+  /** Membrane/wall adhesive coverage by legacy roof-system id → adhesive name (§2.4). */
+  membraneAdhesives?: Record<number, Record<string, MembraneAdhesiveCoverage>>;
   /** Per-category labor templates (absent if labor_templates wasn't fetched). */
   laborTemplates?: LaborTemplates;
 }
@@ -985,6 +1087,14 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     : undefined;
   const adhesiveTimes = raw.adhesiveTimes ? buildAdhesiveTimes(raw.adhesiveTimes) : undefined;
   const adhesivePrices = raw.adhesivesScreen ? buildAdhesivePrices(raw.adhesivesScreen) : undefined;
+  const membraneAdhesives = raw.legacyAdhesiveRows?.length
+    ? buildMembraneAdhesives({
+        adhesives: raw.legacyAdhesiveRows,
+        deckRows: raw.adhesiveCoverageDeck ?? [],
+        underlaymentRows: raw.adhesiveCoverageUnderlayment ?? [],
+        wallRows: raw.adhesiveWallCoverage ?? [],
+      })
+    : undefined;
   const laborTemplates = raw.laborTemplateRows?.length
     ? buildLaborTemplates(raw.laborTemplateRows, raw.laborTemplateAdjustments ?? [])
     : undefined;
@@ -1004,6 +1114,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(underlaymentLabor ? { underlaymentLabor } : {}),
     ...(adhesiveTimes ? { adhesiveTimes } : {}),
     ...(adhesivePrices ? { adhesivePrices } : {}),
+    ...(membraneAdhesives ? { membraneAdhesives } : {}),
     ...(laborTemplates ? { laborTemplates } : {}),
   };
 }

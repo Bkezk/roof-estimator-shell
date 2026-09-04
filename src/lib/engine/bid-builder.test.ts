@@ -652,3 +652,66 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(noLabor.warnings.some((w) => w.includes("No labor table"))).toBe(true);
   });
 });
+
+describe("membrane adhesive units for adhered systems (§2.4)", () => {
+  const withCov = (): EngineAdminData => ({
+    ...admin,
+    adhesivePrices: { "Water Based Adhesive": 122.1 },
+    membraneAdhesives: {
+      1: {
+        "Water Based Adhesive": {
+          byDeckName: { Wood: 700 },
+          underlaymentUniform: 700,
+          wallCoverage: 350,
+        },
+      },
+    },
+  });
+
+  it("bare-deck sections bill area/coverage, ceilinged once at the estimate level", () => {
+    // 50×50 = 2500 sq ft on Wood at 700 sq ft/unit → 3.571… → Ceil 4 units × $122.10.
+    const { adhesiveMaterial, warnings } = buildEstimateInputs(
+      bid({ attachment: "adhered" }),
+      withCov(),
+    );
+    expect(adhesiveMaterial).toBeCloseTo(4 * 122.1, 2);
+    expect(warnings.filter((w) => w.toLowerCase().includes("adhesive"))).toEqual([]);
+  });
+
+  it("parapet wall adhesive joins the same aggregate (girth-area / wall coverage)", () => {
+    // membrane 2500/700 = 3.5714; wall: In2Ft(24)=2 ft × 100 ft = 200 sq ft / 350 = 0.5714
+    // → 4.1428 → Ceil 5 units.
+    const { adhesiveMaterial } = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        parapets: [
+          {
+            id: "p1",
+            name: "P1",
+            lengthFt: 100,
+            heightBand: "",
+            deckType: "Wood",
+            girthInches: 24,
+            predrill: false,
+            canted: false,
+          },
+        ],
+      }),
+      withCov(),
+    );
+    expect(adhesiveMaterial).toBeCloseTo(5 * 122.1, 2);
+  });
+
+  it("warns instead of guessing when coverage is unknown (deck not in table)", () => {
+    const a = withCov();
+    a.membraneAdhesives![1]!["Water Based Adhesive"]!.byDeckName = {};
+    const { adhesiveMaterial, warnings } = buildEstimateInputs(bid({ attachment: "adhered" }), a);
+    expect(adhesiveMaterial).toBe(0);
+    expect(warnings.some((w) => w.includes("Membrane adhesive coverage unknown"))).toBe(true);
+  });
+
+  it("mechanical bids bill no membrane adhesive", () => {
+    const { adhesiveMaterial } = buildEstimateInputs(bid(), withCov());
+    expect(adhesiveMaterial).toBe(0);
+  });
+});

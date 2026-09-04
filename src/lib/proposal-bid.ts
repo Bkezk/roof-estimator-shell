@@ -81,6 +81,8 @@ export interface SavedBidState {
     color: string;
     sheetSizeLabel: string;
   };
+  /** Membrane adhesive for fully-adhered bids (defaults to Water Based Adhesive). */
+  membraneAdhesiveName?: string;
   warrantyName?: string;
   highWind?: boolean;
   highWindTermYears?: number;
@@ -199,6 +201,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
   return {
     roofSystem: s.roofSystem,
     attachment: s.attachment,
+    ...(s.membraneAdhesiveName ? { membraneAdhesiveName: s.membraneAdhesiveName } : {}),
     sections: s.sections,
     accessories: s.accessories,
     nonDlLines: s.nonDlLines,

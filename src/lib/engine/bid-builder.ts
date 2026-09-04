@@ -62,6 +62,7 @@ import {
   underlaymentMechanicalHours,
   underlaymentAdhesive,
   laborTemplateFactor,
+  LEGACY_RS_ID_BY_NAME,
   type EngineAdminData,
 } from "./adapters";
 
@@ -185,6 +186,11 @@ export type MetalLine = NonDlLine;
 export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
+  /**
+   * Membrane adhesive for fully-adhered systems ("Water Based Adhesive" / "Solvent Based
+   * Adhesive"); defaults to Water Based. Drives the §2.4 membrane/wall adhesive units.
+   */
+  membraneAdhesiveName?: string;
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
   nonDlLines: NonDlLine[];
@@ -409,10 +415,64 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     };
   });
 
+  // Membrane adhesive units for fully-adhered systems (§2.4): (field+perim+corner area) ÷
+  // coverage — bare deck keyed by deck type; over insulation the captured coverage tables are
+  // uniform per adhesive (the board→group mapping lives in uncaptured MySQL, so a non-uniform
+  // table warns instead of guessing). Tapered/cricket top boards are quote-only → warned.
+  if (bid.attachment === "adhered") {
+    const advName = bid.membraneAdhesiveName || "Water Based Adhesive";
+    const rsId = LEGACY_RS_ID_BY_NAME[bid.roofSystem];
+    const cov = rsId !== undefined ? admin.membraneAdhesives?.[rsId]?.[advName] : undefined;
+    if (!cov) {
+      warnings.push(
+        `No membrane-adhesive coverage data for ${bid.roofSystem} / ${advName} — membrane adhesive units not billed.`,
+      );
+    } else {
+      for (const s of bid.sections) {
+        const area = s.length * s.width;
+        const layers = sectionLayers(s);
+        const topBoard = layers[layers.length - 1]?.board;
+        let coverage: number | undefined;
+        if (layers.length === 0) coverage = cov.byDeckName[s.deckType];
+        else if (topBoard && /tapered|crickets/i.test(topBoard)) coverage = undefined;
+        else coverage = cov.underlaymentUniform ?? undefined;
+        if (coverage && coverage > 0) {
+          adhesiveUnitsByName[advName] = (adhesiveUnitsByName[advName] ?? 0) + area / coverage;
+        } else {
+          warnings.push(
+            `Membrane adhesive coverage unknown for section "${s.name}" (${advName} ${
+              topBoard ? `over ${topBoard}` : `on ${s.deckType}`
+            }) — units not billed; needs a quote.`,
+          );
+        }
+      }
+      // Parapet wall adhesive (§2.4 wall coverage). FLAGGED FOR BID VALIDATION: the wall-area
+      // basis is In2Ft(girth) × length (the same area the parapet membrane bills) as a stand-in
+      // for legacy WallPlusTopSqFt.
+      if (bid.parapets.length > 0) {
+        if (cov.wallCoverage) {
+          const wallArea = bid.parapets.reduce(
+            (sum, p) => sum + in2Ft(p.girthInches) * p.lengthFt,
+            0,
+          );
+          adhesiveUnitsByName[advName] =
+            (adhesiveUnitsByName[advName] ?? 0) + wallArea / cov.wallCoverage;
+        } else {
+          warnings.push(
+            `Parapet wall adhesive coverage unavailable or ambiguous for ${advName} — wall adhesive units not billed.`,
+          );
+        }
+      }
+      if (admin.adhesivePrices?.[advName] === undefined) {
+        warnings.push(`No adhesive price for "${advName}" — membrane adhesive bills at $0.`);
+      }
+    }
+  }
+
   // Adhesive whole units (legacy AdheredSystems.AggregateCalcQtys, docs/legacy-consumption-rules
   // §2.4): fractional units summed per adhesive across the WHOLE estimate, then Ceiling ONCE per
-  // adhesive; the whole units price into M0. (Membrane and parapet-wall adhesive join this same
-  // aggregate in the legacy app — those unit sources aren't computed here yet.)
+  // adhesive; the whole units price into M0. Membrane and parapet-wall adhesive (above) join the
+  // same aggregate, exactly as in the legacy app.
   let adhesiveMaterial = 0;
   for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
     adhesiveMaterial += Math.ceil(units) * (admin.adhesivePrices?.[name] ?? 0);

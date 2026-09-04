@@ -39,6 +39,8 @@ import {
   type RawLaborTemplate,
   type RawLaborTemplateAdjustment,
   type RawTabMultiRow,
+  type RawLegacyAdhesiveRow,
+  type RawAdhesiveCoverageRow,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -86,6 +88,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       tplRes,
       tplAdjRes,
       tabMultiRes,
+      legacyAdhRes,
+      covDeckRes,
+      covUnderRes,
+      covWallRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -120,6 +126,11 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       sb.from("labor_template_adjustments").select("template_id, area, value, sort").order("sort"),
       // Legacy mech_tab_multi (hand-seeded migration, not in the generated Database types).
       (sb as unknown as UntypedFrom).from("mech_tab_multi").select("*"),
+      // Legacy adhesive-coverage tables (membrane/wall adhesive units for adhered systems).
+      (sb as unknown as UntypedFrom).from("legacy_adhesive").select("*"),
+      (sb as unknown as UntypedFrom).from("adhesive_coverage_deck").select("*"),
+      (sb as unknown as UntypedFrom).from("adhesive_coverage_underlayment").select("*"),
+      (sb as unknown as UntypedFrom).from("adhesive_wall_coverage").select("*"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -141,6 +152,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (tplRes.error) throw tplRes.error;
     if (tplAdjRes.error) throw tplAdjRes.error;
     if (tabMultiRes.error) throw new Error(tabMultiRes.error.message);
+    if (legacyAdhRes.error) throw new Error(legacyAdhRes.error.message);
+    if (covDeckRes.error) throw new Error(covDeckRes.error.message);
+    if (covUnderRes.error) throw new Error(covUnderRes.error.message);
+    if (covWallRes.error) throw new Error(covWallRes.error.message);
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -166,6 +181,14 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     const laborTemplateAdjustments = (tplAdjRes.data ?? null) as
       RawLaborTemplateAdjustment[] | null;
     const tabMultiRows = (tabMultiRes.data ?? null) as RawTabMultiRow[] | null;
+    const legacyAdhesiveRows = (legacyAdhRes.data ?? null) as unknown as
+      RawLegacyAdhesiveRow[] | null;
+    const adhesiveCoverageDeck = (covDeckRes.data ?? null) as unknown as
+      RawAdhesiveCoverageRow[] | null;
+    const adhesiveCoverageUnderlayment = (covUnderRes.data ?? null) as unknown as
+      RawAdhesiveCoverageRow[] | null;
+    const adhesiveWallCoverage = (covWallRes.data ?? null) as unknown as
+      RawAdhesiveCoverageRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -187,6 +210,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       laborTemplateRows,
       laborTemplateAdjustments,
       tabMultiRows,
+      legacyAdhesiveRows,
+      adhesiveCoverageDeck,
+      adhesiveCoverageUnderlayment,
+      adhesiveWallCoverage,
     });
   });
 
