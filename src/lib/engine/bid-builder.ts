@@ -38,13 +38,14 @@
  *  - Exceptional Metals wired: line items (unit cost + labor/unit × own rate); material → M0,
  *    labor → DIRECT labor at the line's own rate (legacy dLabor[5] in LaborSubtotal1; hours join
  *    man-days). Gutter prices are largely $0 pending live capture (flagged).
- *  - Parapets wired (§5.3): labor = (length/50) × the seeded deck × height-band × drill/cant matrix
- *    → direct labor; material = In2Ft(girth) × length × bid-default membrane $/sqft → M0. Height
- *    band + girth are entered (profile-dims derivation flagged for the validation bid).
+ *  - Parapets wired: labor = (length/50) × the seeded deck × height-band × drill/cant matrix
+ *    → direct labor; material per legacy MembraneCost (Parapets tier, Ceil(girth) inches,
+ *    length+1+pieces, Round2 per wall) → M0. Height band + girth are entered (profile-dims
+ *    derivation flagged for the validation bid).
  */
 
 import { areaWithEdgeOverlap } from "./quantities";
-import { in2Ft } from "./rounding";
+import { in2Ft, bankersRound } from "./rounding";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
   membraneMaterialCost,
@@ -172,6 +173,8 @@ export interface ParapetInput {
   predrill: boolean;
   canted: boolean;
   girthInches: number; // membrane girth over the wall profile, for material area
+  /** Number of wall pieces (legacy Pieces, default 1): AdjustedLength = length + 1 + pieces. */
+  pieces?: number;
 }
 
 /**
@@ -503,16 +506,28 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     0,
   );
 
-  // Parapets (§5.3): labor = (length/50) × hrs-per-50-LF[deck][band][drill×cant] → direct labor;
-  // material = In2Ft(girth) × length × the bid-default membrane $/sqft → M0 (dMaterial[1] slot).
+  // Parapets: labor = (length/50) × hrs-per-50-LF[deck][band][drill×cant] → direct labor.
+  // Material per legacy Parapet.MembraneCost (docs/legacy-money-parity.md §3): the PARAPETS
+  // price tier (Category 3) at the bid-default thickness/color, girth ceiled to a whole inch
+  // (AdjustedHeight), length + 1 ft + 1 ft per piece (AdjustedLength; pieces < 1 → 0), each
+  // parapet Round2'd → M0. Falls back to roll goods (with a warning) when the seeded matrix has
+  // no Parapets row for that thickness.
   let parapetLaborHours = 0;
   let parapetMaterial = 0;
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
-    const pPrice = first
-      ? (priceMatrixLookup(admin.priceMatrix, first.thickness, "rollGoods", first.color) ?? 0)
-      : 0;
-    if (bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0) && pPrice === 0) {
+    let pPrice = first
+      ? priceMatrixLookup(admin.priceMatrix, first.thickness, "parapet", first.color)
+      : null;
+    if (pPrice === null && first) {
+      pPrice = priceMatrixLookup(admin.priceMatrix, first.thickness, "rollGoods", first.color);
+      if (pPrice !== null && bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0)) {
+        warnings.push(
+          "No Parapets-tier membrane price (bid-default thickness/color) — using roll goods.",
+        );
+      }
+    }
+    if (bid.parapets.some((p) => p.girthInches > 0 && p.lengthFt > 0) && (pPrice ?? 0) === 0) {
       warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
     }
     for (const p of bid.parapets) {
@@ -526,7 +541,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       } else {
         parapetLaborHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
       }
-      parapetMaterial += in2Ft(p.girthInches) * p.lengthFt * pPrice;
+      const pieces = p.pieces ?? 1;
+      const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
+      parapetMaterial += bankersRound(
+        in2Ft(Math.ceil(p.girthInches)) * adjustedLengthFt * (pPrice ?? 0),
+        2,
+      );
     }
   }
 

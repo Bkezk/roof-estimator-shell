@@ -396,15 +396,20 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
             deckType: "Wood",
             predrill: false,
             canted: false,
-            girthInches: 30,
+            girthInches: 30.4,
           },
         ],
       }),
-      withParapet,
+      {
+        ...withParapet,
+        priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+      },
     );
     expect(warnings).toEqual([]);
-    // material: In2Ft(30) = 2.5 ft girth x 100 ft x $1.23 = $307.50 into M0
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 307.5, 2);
+    // material (legacy Parapet.MembraneCost): girth Ceil(30.4)=31" -> In2Ft = 2.58 ft;
+    // AdjustedLength = 100 + 1 + pieces(default 1) = 102; PARAPETS-tier price $1.40:
+    // Round(2.58 x 102 x 1.4, 2) = 368.42 into M0
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2); // membrane-only basis unchanged
     const r = computeEstimate(inputs);
     expect(r.parapetLaborHours).toBeCloseTo(4.5, 6); // 100/50 x 2.25
