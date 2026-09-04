@@ -284,11 +284,16 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
   it("freight: percent mode multiplies material-before-tax by shipping_percent/100", () => {
     const pct: EngineAdminData = {
       ...admin,
+      underlaymentPrices: { '1/2" ISO': 0.85 },
       settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },
     };
-    const { inputs } = buildEstimateInputs(bid(), pct);
-    // 5% of M0 3199.23 = 159.9615 → GoodSingle → 159.96
-    expect(inputs.shipping).toBeCloseTo(159.96, 2);
+    // Board material (2500 × 0.85 = 2125) separates the basis from M0: the percent must apply to
+    // material-before-tax 3199.23 + 2125 = 5324.23 → 5% = 266.2115 → GoodSingle 266.21.
+    const { inputs } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
+      pct,
+    );
+    expect(inputs.shipping).toBeCloseTo(266.21, 2);
   });
 
   it("accessory labor (per-unit hrs × qty) folds into direct labor (LaborSubtotal1)", () => {
@@ -499,6 +504,67 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // The roll-good sheet (the combo's FIRST label) keeps the roll-goods tier on the full area.
     const { inputs: rg } = buildEstimateInputs(bid(), tabAdmin);
     expect(rg.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+  });
+
+  it("membrane tier: the SEEDED combo shape (first label 'Roll Good') prices a default '1500 sf' section at tab28 — pinned so the reprice is deliberate", () => {
+    const seededAdmin: EngineAdminData = {
+      ...admin,
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, tab28: { White: 1.35 } } },
+      sheetTabSpacings: { 1: [28, 60, 120] },
+      labor: {
+        "Duro-Last|mechanical": buildLaborTables(
+          {
+            ...combo,
+            sheet_size_multipliers: [
+              { label: "Roll Good", roof_section: 4, underlayment: 4 },
+              { label: "1500 sf", roof_section: 1, underlayment: 1 },
+            ],
+          },
+          deckOrder,
+        ),
+      },
+    };
+    const { inputs, warnings } = buildEstimateInputs(bid(), seededAdmin); // default: 1500 sf, lap 28
+    expect(warnings).toEqual([]);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.35, 2);
+  });
+
+  it("membrane tier: a pre-series adminSnapshot (LaborTables without rollGoodsSheetLabel) keeps roll goods with NO warnings", () => {
+    const oldTables = { ...buildLaborTables(combo, deckOrder) } as Record<string, unknown>;
+    delete oldTables["rollGoodsSheetLabel"]; // jsonb snapshot taken before the field existed
+    const snapshotAdmin: EngineAdminData = {
+      ...admin,
+      labor: { "Duro-Last|mechanical": oldTables as never },
+    };
+    const { inputs, warnings } = buildEstimateInputs(bid(), snapshotAdmin);
+    expect(warnings).toEqual([]);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+  });
+
+  it("membrane tier: non-Duro-Last systems keep roll goods (their legacy MaterialCost is a different impl) with NO tab-pitch warnings", () => {
+    const dtAdmin: EngineAdminData = {
+      ...admin,
+      sheetTabSpacings: { 1: [28, 60, 120] },
+      labor: {
+        "Duro-Tuff|mechanical": buildLaborTables(
+          {
+            ...combo,
+            roof_system: "Duro-Tuff",
+            sheet_size_multipliers: [
+              { label: "Roll Good", roof_section: 4, underlayment: 4 },
+              { label: "1500 sf", roof_section: 1, underlayment: 1 },
+            ],
+          },
+          deckOrder,
+        ),
+      },
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ roofSystem: "Duro-Tuff", sections: [{ ...bid().sections[0]!, fieldLap: 30 }] }),
+      dtAdmin,
+    );
+    expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
   });
 
   it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {

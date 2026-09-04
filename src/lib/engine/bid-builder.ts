@@ -330,8 +330,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // perim/corner shares UNPRICED (their per-zone custom laps are -1 in this bid model — the
     // legacy default) and the negative-share carry applied. A lap outside the system's tab list
     // (legacy: manual custom $/sqft, not modeled) falls back to roll goods WITH a warning.
+    // Tab-tier zone pricing is DuroLastSystem.MembraneCost logic — Duro-Tuff/Duro-Roof/etc. have
+    // their own legacy MaterialCost implementations (not ported): they stay roll goods. A
+    // pre-series adminSnapshot has no rollGoodsSheetLabel (undefined, not "") — treated as a
+    // roll-good sheet so frozen bids keep their exact pricing, warning-free.
     const isRollGoodSheet =
-      !lt || lt.rollGoodsSheetLabel === "" || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+      rsId !== 1 || !lt?.rollGoodsSheetLabel || s.sheetSizeLabel === lt.rollGoodsSheetLabel;
     let tier: PriceTier = "rollGoods";
     if (!isRollGoodSheet) {
       const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
