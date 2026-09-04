@@ -32,8 +32,9 @@
  *    hours (prefilled from the accessory_labor single-hours screens where an exact description
  *    matches, else entered); Σ(hrs × qty) folds into direct labor. Per-foot / drill-variant /
  *    fastener-derived accessory labor is entered manually until a captured bid validates it.
- *  - Non-DL catalog lines wired: material (Price × qty) → OtherMaterial (taxable); labor
- *    (LaborPerUnit × Labor Rate × qty) → services (LaborSubtotal2).
+ *  - Non-DL catalog lines wired and routed by category: six categories → OtherMaterial +
+ *    own-rate direct labor; Subcontractors / 3rd Party Services → LaborSubtotal2 whole
+ *    (labor + material); uncategorized legacy lines keep the old services routing.
  *  - Exceptional Metals wired: line items (unit cost + labor/unit × own rate); material → M0,
  *    labor → DIRECT labor at the line's own rate (legacy dLabor[5] in LaborSubtotal1; hours join
  *    man-days). Gutter prices are largely $0 pending live capture (flagged).
@@ -134,11 +135,25 @@ export interface AccessoryLine {
  */
 export interface NonDlLine {
   description: string;
+  /**
+   * Curated catalog category (exact string from the seeded non-DL screens). Routes the line per
+   * the legacy split (docs/legacy-money-parity.md §6): Subcontractors / 3rd Party Services →
+   * LaborSubtotal2 (labor AND material); every other category → material into OtherMaterial and
+   * labor into own-rate DIRECT labor (dLabor[14..19]). Absent on older saved lines → the previous
+   * web routing (material → OtherMaterial, labor → services) is preserved.
+   */
+  category?: string;
   price: number; // material $/unit
   laborPerUnit: number; // labor hours/unit
   laborRate: number; // $/hr for this line's labor
   quantity: number;
 }
+
+/** Non-DL categories whose whole cost (labor + material) belongs to LaborSubtotal2. */
+export const NON_DL_LS2_CATEGORIES: ReadonlySet<string> = new Set([
+  "Subcontractors",
+  "3rd Party Services",
+]);
 
 /**
  * A parapet wall on a bid (§4.4/§5.3). SIMPLIFIED GEOMETRY, FLAGGED FOR BID VALIDATION: the
@@ -560,14 +575,33 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     membraneMaterial + accessoryMaterial + parapetMaterial + metalsMaterial + adhesiveMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
-  // Non-DL catalog lines: material (Price × qty) → OtherMaterial (dTotals[7], taxable purchases);
-  // labor $ (LaborPerUnit hours × its own Labor Rate × qty) → services (LaborSubtotal2). Both subs
-  // and services land in row 11, so non-DL labor routes to services (the split is display-only).
-  const nonDlMaterial = bid.nonDlLines.reduce((sum, l) => sum + l.price * l.quantity, 0);
-  const nonDlServices = bid.nonDlLines.reduce(
-    (sum, l) => sum + l.laborPerUnit * l.laborRate * l.quantity,
-    0,
-  );
+  // Non-DL catalog lines, routed by curated category (docs/legacy-money-parity.md §6):
+  //  - Subcontractors / 3rd Party Services: labor AND material → LaborSubtotal2 (legacy
+  //    NonDL.MaterialCost EXCLUDES them, so their material never reaches OtherMaterial/tax).
+  //  - The six other categories: material → OtherMaterial (dTotals[7], taxable); labor at the
+  //    line's OWN rate → direct labor (dLabor[14..19] inside LaborSubtotal1), hours → man-days.
+  //  - Uncategorized (older saved lines): previous web routing preserved (material →
+  //    OtherMaterial, labor → services).
+  let nonDlMaterial = 0;
+  let nonDlServices = 0;
+  let nonDlSubs = 0;
+  let nonDlOwnRateCost = 0;
+  let nonDlOwnRateHours = 0;
+  for (const l of bid.nonDlLines) {
+    const material = l.price * l.quantity;
+    const labor = l.laborPerUnit * l.laborRate * l.quantity;
+    if (l.category !== undefined && NON_DL_LS2_CATEGORIES.has(l.category)) {
+      if (l.category === "Subcontractors") nonDlSubs += material + labor;
+      else nonDlServices += material + labor;
+    } else if (l.category !== undefined) {
+      nonDlMaterial += material;
+      nonDlOwnRateCost += labor;
+      nonDlOwnRateHours += l.laborPerUnit * l.quantity;
+    } else {
+      nonDlMaterial += material;
+      nonDlServices += labor;
+    }
+  }
   const otherMaterial = bid.otherMaterial + nonDlMaterial;
   const servicesCost = bid.servicesCost + nonDlServices;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
@@ -602,8 +636,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustInspectionPct:
       ((1 + (bid.adjustInspectionPct ?? 0) / 100) * tf("Inspection Time Labor") - 1) * 100,
     accessoryLaborHours,
-    ownRateDirectLaborCost: metalsLaborCost,
-    ownRateDirectLaborHours: metalsLaborHours,
+    ownRateDirectLaborCost: metalsLaborCost + nonDlOwnRateCost,
+    ownRateDirectLaborHours: metalsLaborHours + nonDlOwnRateHours,
     parapetLaborHours,
     curbLaborHours,
     underlaymentLaborHours,
@@ -616,7 +650,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     otherMaterial,
     materialTotalBeforeTax,
     shipping,
-    subsCost: bid.subsCost,
+    subsCost: bid.subsCost + nonDlSubs,
     servicesCost,
     prepayDiscount: bid.prepayDiscount,
     stdSizeDiscount: bid.stdSizeDiscount,

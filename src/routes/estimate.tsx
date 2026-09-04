@@ -504,9 +504,7 @@ function EstimatePage() {
       ...parapets.map((p) => p.deckType),
     ]);
     for (const line of accessories) {
-      const item = accCatalog?.find(
-        (a) => `${a.category} — ${a.description}` === line.description,
-      );
+      const item = accCatalog?.find((a) => `${a.category} — ${a.description}` === line.description);
       if (!item) continue;
       if (item.category.includes("Fasteners") && item.fastenersPerBox) {
         const d = item.description;
@@ -524,7 +522,12 @@ function EstimatePage() {
     }
     return { screws, polyPlates, insulationPlates, caulk };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessories, accCatalog, JSON.stringify(sections.map((s) => s.deckType)), JSON.stringify(parapets.map((p) => p.deckType))]);
+  }, [
+    accessories,
+    accCatalog,
+    JSON.stringify(sections.map((s) => s.deckType)),
+    JSON.stringify(parapets.map((p) => p.deckType)),
+  ]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -846,1951 +849,2000 @@ function EstimatePage() {
         </div>
 
         <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"}>
-        {/* Legacy Home: "Setup" panel (Bid Info | Client | Job Site) on the left,
+          {/* Legacy Home: "Setup" panel (Bid Info | Client | Job Site) on the left,
             "Defaults" panel on the right. */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Setup</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="bidinfo">
-              <TabsList>
-                <TabsTrigger value="bidinfo">Bid Info</TabsTrigger>
-                <TabsTrigger value="client">Client</TabsTrigger>
-                <TabsTrigger value="jobsite">Job Site</TabsTrigger>
-              </TabsList>
-              <TabsContent value="bidinfo" className="space-y-3 pt-2">
-                <LegacyGroup title="1. General Info">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Setup</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="bidinfo">
+                <TabsList>
+                  <TabsTrigger value="bidinfo">Bid Info</TabsTrigger>
+                  <TabsTrigger value="client">Client</TabsTrigger>
+                  <TabsTrigger value="jobsite">Job Site</TabsTrigger>
+                </TabsList>
+                <TabsContent value="bidinfo" className="space-y-3 pt-2">
+                  <LegacyGroup title="1. General Info">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Customer name">
+                        <Input
+                          value={customer.name}
+                          onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                        />
+                      </Field>
+                      <Field label="Job name">
+                        <Input value={bidName} onChange={(e) => setBidName(e.target.value)} />
+                      </Field>
+                      <Field label="Estimator's name">
+                        <Input
+                          value={customer.estimatorName ?? ""}
+                          onChange={(e) =>
+                            setCustomer((c) => ({ ...c, estimatorName: e.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label="Status">
+                        <Select
+                          value={bidStatus}
+                          onValueChange={(v) => setBidStatus(asBidStatus(v))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {BID_STATUSES.map((st) => (
+                              <SelectItem key={st} value={st}>
+                                {STATUS_LABELS[st]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="Date created">
+                        <Input
+                          value={new Date(
+                            (loadedBid as { created_at?: string } | null | undefined)?.created_at ??
+                              Date.now(),
+                          ).toLocaleDateString()}
+                          disabled
+                        />
+                      </Field>
+                    </div>
+                  </LegacyGroup>
+                  <LegacyGroup title="2. Labor &amp; Markup Setup">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                      <span>
+                        Labor:{" "}
+                        <span className="font-semibold">${laborRate.toFixed(2)} per hour</span>
+                      </span>
+                      <span>
+                        Markup:{" "}
+                        <span className="font-semibold">
+                          {markup}% ({MARKUP_LABELS[markupMode]})
+                        </span>
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => goStep(STEPS.findIndex((st) => st.key === "pricing"))}
+                      >
+                        Click here to edit
+                      </Button>
+                    </div>
+                  </LegacyGroup>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Customer name">
+                    <LegacyGroup title="3. Labor Template">
+                      <PickOne
+                        value={laborTemplateName || "None"}
+                        options={laborTemplateOptions}
+                        onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
+                      />
+                    </LegacyGroup>
+                    <LegacyGroup title="4. Estimator Commission">
+                      <Field label="Commission rate (%)">
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={commission}
+                          onChange={(e) => setCommission(num(e.target.value))}
+                        />
+                      </Field>
+                    </LegacyGroup>
+                  </div>
+                  <LegacyGroup title="5. Tax Exempt">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Switch
+                        id="setup-taxexempt"
+                        checked={taxExempt}
+                        onCheckedChange={setTaxExempt}
+                      />
+                      <Label htmlFor="setup-taxexempt" className="text-xs">
+                        Tax exempt
+                      </Label>
+                      <span className="text-xs text-muted-foreground">
+                        Sales-tax rate &amp; only-tax-material come from Admin › General.
+                      </span>
+                    </div>
+                  </LegacyGroup>
+                  <LegacyGroup title="6. Notes">
+                    <Textarea
+                      rows={3}
+                      placeholder="Shown on the proposal…"
+                      value={customer.notes}
+                      onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
+                    />
+                  </LegacyGroup>
+                </TabsContent>
+                <TabsContent value="client" className="pt-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Contact person">
                       <Input
-                        value={customer.name}
-                        onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                        value={customer.contact}
+                        onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
                       />
                     </Field>
-                    <Field label="Job name">
-                      <Input value={bidName} onChange={(e) => setBidName(e.target.value)} />
-                    </Field>
-                    <Field label="Estimator's name">
+                    <Field label="Phone">
                       <Input
-                        value={customer.estimatorName ?? ""}
+                        value={customer.phone ?? ""}
+                        onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="E-mail">
+                      <Input
+                        value={customer.email ?? ""}
+                        onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Client address (street, city/st/zip)">
+                      <Input
+                        value={customer.clientAddress ?? ""}
                         onChange={(e) =>
-                          setCustomer((c) => ({ ...c, estimatorName: e.target.value }))
+                          setCustomer((c) => ({ ...c, clientAddress: e.target.value }))
                         }
                       />
                     </Field>
-                    <Field label="Status">
-                      <Select
-                        value={bidStatus}
-                        onValueChange={(v) => setBidStatus(asBidStatus(v))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BID_STATUSES.map((st) => (
-                            <SelectItem key={st} value={st}>
-                              {STATUS_LABELS[st]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field label="Date created">
-                      <Input
-                        value={new Date(
-                          (loadedBid as { created_at?: string } | null | undefined)
-                            ?.created_at ?? Date.now(),
-                        ).toLocaleDateString()}
-                        disabled
-                      />
-                    </Field>
                   </div>
-                </LegacyGroup>
-                <LegacyGroup title="2. Labor &amp; Markup Setup">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                    <span>
-                      Labor:{" "}
-                      <span className="font-semibold">${laborRate.toFixed(2)} per hour</span>
-                    </span>
-                    <span>
-                      Markup:{" "}
-                      <span className="font-semibold">
-                        {markup}% ({MARKUP_LABELS[markupMode]})
-                      </span>
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => goStep(STEPS.findIndex((st) => st.key === "pricing"))}
-                    >
-                      Click here to edit
-                    </Button>
-                  </div>
-                </LegacyGroup>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <LegacyGroup title="3. Labor Template">
-                    <PickOne
-                      value={laborTemplateName || "None"}
-                      options={laborTemplateOptions}
-                      onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
-                    />
-                  </LegacyGroup>
-                  <LegacyGroup title="4. Estimator Commission">
-                    <Field label="Commission rate (%)">
-                      <Input
-                        type="number"
-                        step="0.1"
-                        value={commission}
-                        onChange={(e) => setCommission(num(e.target.value))}
-                      />
-                    </Field>
-                  </LegacyGroup>
-                </div>
-                <LegacyGroup title="5. Tax Exempt">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Switch
-                      id="setup-taxexempt"
-                      checked={taxExempt}
-                      onCheckedChange={setTaxExempt}
-                    />
-                    <Label htmlFor="setup-taxexempt" className="text-xs">
-                      Tax exempt
-                    </Label>
-                    <span className="text-xs text-muted-foreground">
-                      Sales-tax rate &amp; only-tax-material come from Admin › General.
-                    </span>
-                  </div>
-                </LegacyGroup>
-                <LegacyGroup title="6. Notes">
-                  <Textarea
-                    rows={3}
-                    placeholder="Shown on the proposal…"
-                    value={customer.notes}
-                    onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
-                  />
-                </LegacyGroup>
-              </TabsContent>
-              <TabsContent value="client" className="pt-2">
-                <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Contact person">
-                  <Input
-                    value={customer.contact}
-                    onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Phone">
-                  <Input
-                    value={customer.phone ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
-                  />
-                </Field>
-                <Field label="E-mail">
-                  <Input
-                    value={customer.email ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Client address (street, city/st/zip)">
-                  <Input
-                    value={customer.clientAddress ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, clientAddress: e.target.value }))}
-                  />
-                </Field>
-                </div>
-              </TabsContent>
-              <TabsContent value="jobsite" className="space-y-3 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-xs"
-                  onClick={() =>
-                    setCustomer((c) => ({ ...c, projectAddress: c.clientAddress ?? "" }))
-                  }
-                >
-                  <Copy className="mr-1 h-3 w-3" /> Copy client address
-                </Button>
-                <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Project address (street)">
-                  <Input
-                    value={customer.projectAddress}
-                    onChange={(e) =>
-                      setCustomer((c) => ({ ...c, projectAddress: e.target.value }))
+                </TabsContent>
+                <TabsContent value="jobsite" className="space-y-3 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-xs"
+                    onClick={() =>
+                      setCustomer((c) => ({ ...c, projectAddress: c.clientAddress ?? "" }))
                     }
-                  />
-                </Field>
-                <Field label="City / St. / Zip">
-                  <Input
-                    value={customer.jobCityStZip ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Job #">
-                  <Input
-                    value={customer.jobNumber ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, jobNumber: e.target.value }))}
-                  />
-                </Field>
-                <Field label="Ship via">
-                  <Input
-                    value={customer.shipVia ?? ""}
-                    onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
-                  />
-                </Field>
-              </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Defaults</CardTitle>
-            <CardDescription>
-              Used when adding new roof sections; existing sections keep their values unless you
-              apply.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <LegacyGroup title="1. Deck Type">
-              <PickOne
-                value={sectionDefaults.deckType}
-                options={admin.deckOrder}
-                onChange={(v) => setSectionDefaults((p) => ({ ...p, deckType: v }))}
-              />
-            </LegacyGroup>
-            <LegacyGroup title="2. Roof Sections Material">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <Field label="Roof system">
-                  <Select value={roofSystem} onValueChange={setRoofSystem}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {systemOptions.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {s}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Attached with">
-                  <Select
-                    value={attachment}
-                    onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
                   >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="mechanical">Mechanical</SelectItem>
-                      <SelectItem value="adhered">Adhered</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                {attachment === "adhered" && (
-                  <Field label="Adhesive">
-                    <PickOne
-                      value={membraneAdhesive}
-                      options={["Water Based Adhesive", "Solvent Based Adhesive"]}
-                      onChange={setMembraneAdhesive}
-                    />
-                  </Field>
-                )}
-                <Field label="Type">
-                  <PickOne
-                    value={String(sectionDefaults.thickness)}
-                    options={["40", "50", "60"]}
-                    onChange={(v) =>
-                      setSectionDefaults((p) => ({ ...p, thickness: Number(v) }))
-                    }
-                  />
-                </Field>
-                <Field label="Color">
-                  <PickOne
-                    value={sectionDefaults.color}
-                    options={colorOptions}
-                    onChange={(v) => setSectionDefaults((p) => ({ ...p, color: v }))}
-                  />
-                </Field>
-                <Field label="Avg sheet">
-                  <PickOne
-                    value={sectionDefaults.sheetSizeLabel}
-                    options={sheetSizeOptions}
-                    onChange={(v) => setSectionDefaults((p) => ({ ...p, sheetSizeLabel: v }))}
-                  />
-                </Field>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() =>
-                  setSections((p) =>
-                    p.map((s) => ({
-                      ...s,
-                      deckType: sectionDefaults.deckType,
-                      thickness: sectionDefaults.thickness,
-                      color: sectionDefaults.color,
-                      sheetSizeLabel: sectionDefaults.sheetSizeLabel,
-                    })),
-                  )
-                }
-              >
-                Apply to existing roof sections
-              </Button>
-            </LegacyGroup>
-            <LegacyGroup title="3. Select Type of Warranty">
-              <PickOne
-                value={warrantyName || "None"}
-                options={warrantyOptions}
-                onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
-              />
-              <p className="mt-2 text-xs text-muted-foreground">
-                High-wind term &amp; band are on the Pricing &amp; Warranty step.
-              </p>
-            </LegacyGroup>
-          </CardContent>
-        </Card>
-        </div>
-
-        <div className={step === 1 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Roof sections</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                // New sections start from the Setup step's Defaults panel.
-                setSections((p) => [...p, newSection({ ...sectionDefaults })]);
-                setSelSection(sections.length);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> New section
-            </Button>
-          </CardHeader>
-          <CardContent>
-            <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-            {/* Left: editor for the selected section (legacy edits one section at a time) */}
-            {(() => {
-              const i = Math.min(selSection, sections.length - 1);
-              const s = sections[i]!;
-              return (
-              <div key={s.id} className="min-w-0 rounded-md border p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <Input
-                    className="h-8 w-[220px] font-medium"
-                    value={s.name}
-                    onChange={(e) => editSection(i, { name: e.target.value })}
-                  />
-                  <div className="flex items-center gap-1">
-                    <SectionCalcDialog section={s} admin={admin} roofSystem={roofSystem} />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Duplicate this section"
-                      onClick={() => {
-                        setSections((p) => [
-                          ...p,
-                          { ...clone(s), id: `s${seq++}`, name: `${s.name} (copy)` },
-                        ]);
-                        setSelSection(sections.length);
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive"
-                      onClick={() => {
-                        setSections((p) => p.filter((_, j) => j !== i));
-                        setSelSection((v) => Math.max(0, Math.min(v, sections.length - 2)));
-                      }}
-                      disabled={sections.length === 1}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <Copy className="mr-1 h-3 w-3" /> Copy client address
+                  </Button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Project address (street)">
+                      <Input
+                        value={customer.projectAddress}
+                        onChange={(e) =>
+                          setCustomer((c) => ({ ...c, projectAddress: e.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label="City / St. / Zip">
+                      <Input
+                        value={customer.jobCityStZip ?? ""}
+                        onChange={(e) =>
+                          setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label="Job #">
+                      <Input
+                        value={customer.jobNumber ?? ""}
+                        onChange={(e) => setCustomer((c) => ({ ...c, jobNumber: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Ship via">
+                      <Input
+                        value={customer.shipVia ?? ""}
+                        onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
+                      />
+                    </Field>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                  <Field label="Length (ft)">
-                    <Input
-                      type="number"
-                      value={s.length}
-                      onChange={(e) => editSection(i, { length: num(e.target.value) })}
-                    />
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Defaults</CardTitle>
+              <CardDescription>
+                Used when adding new roof sections; existing sections keep their values unless you
+                apply.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <LegacyGroup title="1. Deck Type">
+                <PickOne
+                  value={sectionDefaults.deckType}
+                  options={admin.deckOrder}
+                  onChange={(v) => setSectionDefaults((p) => ({ ...p, deckType: v }))}
+                />
+              </LegacyGroup>
+              <LegacyGroup title="2. Roof Sections Material">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <Field label="Roof system">
+                    <Select value={roofSystem} onValueChange={setRoofSystem}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {systemOptions.map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
-                  <Field label="Width (ft)">
-                    <Input
-                      type="number"
-                      value={s.width}
-                      onChange={(e) => editSection(i, { width: num(e.target.value) })}
-                    />
+                  <Field label="Attached with">
+                    <Select
+                      value={attachment}
+                      onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mechanical">Mechanical</SelectItem>
+                        <SelectItem value="adhered">Adhered</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </Field>
-                  <Field label="Deck">
+                  {attachment === "adhered" && (
+                    <Field label="Adhesive">
+                      <PickOne
+                        value={membraneAdhesive}
+                        options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                        onChange={setMembraneAdhesive}
+                      />
+                    </Field>
+                  )}
+                  <Field label="Type">
                     <PickOne
-                      value={s.deckType}
-                      options={admin.deckOrder}
-                      onChange={(v) => editSection(i, { deckType: v })}
-                    />
-                  </Field>
-                  <Field label="Thickness">
-                    <PickOne
-                      value={String(s.thickness)}
+                      value={String(sectionDefaults.thickness)}
                       options={["40", "50", "60"]}
-                      onChange={(v) => editSectionWithSpacing(i, s, { thickness: Number(v) })}
+                      onChange={(v) => setSectionDefaults((p) => ({ ...p, thickness: Number(v) }))}
                     />
                   </Field>
                   <Field label="Color">
                     <PickOne
-                      value={s.color}
+                      value={sectionDefaults.color}
                       options={colorOptions}
-                      onChange={(v) => editSection(i, { color: v })}
+                      onChange={(v) => setSectionDefaults((p) => ({ ...p, color: v }))}
                     />
                   </Field>
                   <Field label="Avg sheet">
                     <PickOne
-                      value={s.sheetSizeLabel}
+                      value={sectionDefaults.sheetSizeLabel}
                       options={sheetSizeOptions}
-                      onChange={(v) => editSection(i, { sheetSizeLabel: v })}
-                    />
-                  </Field>
-                  <Field label="Field tab spacing (in)">
-                    {TAB_OPTIONS_BY_SYSTEM[roofSystem] ? (
-                      <PickOne
-                        value={String(s.fieldLap)}
-                        options={[
-                          // Keep a legacy-invalid stored value visible rather than lying.
-                          ...(TAB_OPTIONS_BY_SYSTEM[roofSystem]!.includes(s.fieldLap)
-                            ? []
-                            : [String(s.fieldLap)]),
-                          ...TAB_OPTIONS_BY_SYSTEM[roofSystem]!.map(String),
-                        ]}
-                        onChange={(v) =>
-                          editSectionWithSpacing(i, s, { fieldLap: Number(v) })
-                        }
-                      />
-                    ) : (
-                      <Input
-                        type="number"
-                        value={s.fieldLap}
-                        onChange={(e) =>
-                          editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
-                        }
-                      />
-                    )}
-                  </Field>
-                  <Field label="Fastener OC (in)">
-                    <Input
-                      type="number"
-                      value={s.fastenerOc}
-                      onChange={(e) => editSection(i, { fastenerOc: num(e.target.value) })}
-                    />
-                  </Field>
-                  <Field label="Pull test (lbs)">
-                    <Input
-                      type="number"
-                      value={s.pullTest ?? 0}
-                      onChange={(e) =>
-                        editSectionWithSpacing(i, s, { pullTest: num(e.target.value) })
-                      }
-                    />
-                  </Field>
-                  <Field label="Design table (psf)">
-                    <PickOne
-                      value={String(s.designTable ?? 60)}
-                      options={DESIGN_TABLE_OPTIONS.map(String)}
-                      onChange={(v) =>
-                        editSectionWithSpacing(i, s, { designTable: Number(v) })
-                      }
+                      onChange={(v) => setSectionDefaults((p) => ({ ...p, sheetSizeLabel: v }))}
                     />
                   </Field>
                 </div>
-                {(s.pullTest ?? 0) > 0 &&
-                  attachment === "mechanical" &&
-                  fastenerLookup &&
-                  (() => {
-                    const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
-                    if (!rsId) return null;
-                    const res = universalFastenerSpacing(fastenerLookup, {
-                      roofSystemId: rsId,
-                      thickness: s.thickness,
-                      designTable: s.designTable ?? 60,
-                      tabSpacings: [s.fieldLap],
-                      pullTest: s.pullTest!,
-                      columnOffset: 0,
-                    });
-                    return (
-                      <p
-                        className={`mt-1 text-xs ${res.ok ? "text-muted-foreground" : "text-destructive"}`}
-                      >
-                        {res.ok
-                          ? `Pull test ${s.pullTest} lbs → ${res.inches}″ oc (legacy lookup; edit Fastener OC to override)`
-                          : `Pull-test lookup: ${SPACING_ERROR_TEXT[res.error]}`}
-                      </p>
-                    );
-                  })()}
-                <div className="mt-3 border-t pt-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Edges &amp; perimeter / corner zones (leave length 0 to bill the whole section
-                      as field)
-                    </p>
-                    {(s.edges?.length ?? 0) === 0 ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const edges = defaultEdges(s.length, s.width);
-                          editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
-                        }}
-                      >
-                        Define edges A–D
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => editSection(i, { edges: [] })}
-                      >
-                        Remove edges
-                      </Button>
-                    )}
-                  </div>
-                  {(s.edges?.length ?? 0) > 0 && (
-                    <div className="mb-3 space-y-2">
-                      {(s.edges ?? []).map((e, ei) => {
-                        const editEdge = (patch: Partial<EdgeInput>) => {
-                          const edges = (s.edges ?? []).map((x, j) =>
-                            j === ei ? { ...x, ...patch } : x,
-                          );
-                          editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
-                        };
-                        return (
-                          <div
-                            key={e.side}
-                            className="grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() =>
+                    setSections((p) =>
+                      p.map((s) => ({
+                        ...s,
+                        deckType: sectionDefaults.deckType,
+                        thickness: sectionDefaults.thickness,
+                        color: sectionDefaults.color,
+                        sheetSizeLabel: sectionDefaults.sheetSizeLabel,
+                      })),
+                    )
+                  }
+                >
+                  Apply to existing roof sections
+                </Button>
+              </LegacyGroup>
+              <LegacyGroup title="3. Select Type of Warranty">
+                <PickOne
+                  value={warrantyName || "None"}
+                  options={warrantyOptions}
+                  onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  High-wind term &amp; band are on the Pricing &amp; Warranty step.
+                </p>
+              </LegacyGroup>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={step === 1 ? "space-y-6" : "hidden"}>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Roof sections</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  // New sections start from the Setup step's Defaults panel.
+                  setSections((p) => [...p, newSection({ ...sectionDefaults })]);
+                  setSelSection(sections.length);
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" /> New section
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                {/* Left: editor for the selected section (legacy edits one section at a time) */}
+                {(() => {
+                  const i = Math.min(selSection, sections.length - 1);
+                  const s = sections[i]!;
+                  return (
+                    <div key={s.id} className="min-w-0 rounded-md border p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <Input
+                          className="h-8 w-[220px] font-medium"
+                          value={s.name}
+                          onChange={(e) => editSection(i, { name: e.target.value })}
+                        />
+                        <div className="flex items-center gap-1">
+                          <SectionCalcDialog section={s} admin={admin} roofSystem={roofSystem} />
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Duplicate this section"
+                            onClick={() => {
+                              setSections((p) => [
+                                ...p,
+                                { ...clone(s), id: `s${seq++}`, name: `${s.name} (copy)` },
+                              ]);
+                              setSelSection(sections.length);
+                            }}
                           >
-                            <Field label={`Side ${e.side} length (ft)`}>
-                              <Input
-                                type="number"
-                                value={e.lengthFt}
-                                onChange={(ev) => editEdge({ lengthFt: num(ev.target.value) })}
-                              />
-                            </Field>
-                            <Field label="Termination (ordering)">
-                              <PickOne
-                                value={e.termination}
-                                options={TERMINATION_OPTIONS}
-                                onChange={(v) => editEdge({ termination: v })}
-                              />
-                            </Field>
-                            <Field label="Blocking (ft)">
-                              <Input
-                                type="number"
-                                value={e.blockingFt}
-                                onChange={(ev) => editEdge({ blockingFt: num(ev.target.value) })}
-                              />
-                            </Field>
-                            <Field label="ARP">
-                              <PickOne
-                                value={e.arpSizeIn === 0 ? "None" : `${e.arpSizeIn}"`}
-                                options={ARP_SIZE_OPTIONS.map((a) => (a === 0 ? "None" : `${a}"`))}
-                                onChange={(v) =>
-                                  editEdge({ arpSizeIn: v === "None" ? 0 : Number(v.slice(0, -1)) })
-                                }
-                              />
-                            </Field>
-                            <div className="flex items-end gap-2 pb-1">
-                              <Switch
-                                id={`pe-${s.id}-${e.side}`}
-                                checked={e.isPerimeter}
-                                onCheckedChange={(v) => editEdge({ isPerimeter: v })}
-                              />
-                              <Label htmlFor={`pe-${s.id}-${e.side}`} className="text-xs">
-                                Perimeter edge
-                              </Label>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                    <Field
-                      label={
-                        (s.edges?.length ?? 0) > 0 ? "Perim len (from edges)" : "Perim len (ft)"
-                      }
-                    >
-                      <Input
-                        type="number"
-                        value={s.perimLengthFt}
-                        disabled={(s.edges?.length ?? 0) > 0}
-                        title={
-                          (s.edges?.length ?? 0) > 0
-                            ? "Derived from the edges marked Perimeter edge"
-                            : undefined
-                        }
-                        onChange={(e) => editSection(i, { perimLengthFt: num(e.target.value) })}
-                      />
-                    </Field>
-                    <Field label="Corner len (ft)">
-                      <Input
-                        type="number"
-                        value={s.cornerLengthFt}
-                        onChange={(e) => editSection(i, { cornerLengthFt: num(e.target.value) })}
-                      />
-                    </Field>
-                    <Field label="Zone width (ft)">
-                      <Input
-                        type="number"
-                        value={s.enhancementWidthFt}
-                        onChange={(e) =>
-                          editSection(i, { enhancementWidthFt: num(e.target.value) })
-                        }
-                      />
-                    </Field>
-                    <Field label="Perim OC (in)">
-                      <Input
-                        type="number"
-                        value={s.perimFastenerOc}
-                        onChange={(e) => editSection(i, { perimFastenerOc: num(e.target.value) })}
-                      />
-                    </Field>
-                    <Field label="Corner OC (in)">
-                      <Input
-                        type="number"
-                        value={s.cornerFastenerOc}
-                        onChange={(e) => editSection(i, { cornerFastenerOc: num(e.target.value) })}
-                      />
-                    </Field>
-                  </div>
-                </div>
-                <div className="mt-3 border-t pt-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Insulation layers (up to 4)
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={(s.layers?.length ?? 0) >= 4}
-                      onClick={() =>
-                        editSection(i, {
-                          layers: [
-                            ...(s.layers ?? []),
-                            {
-                              board: boardOptions[0] ?? "",
-                              attachment: "mechanical",
-                              fastenersPerBoard: fastenerOptions[0] ?? 5,
-                              adhesiveName: adhesiveOptions[0] ?? "",
-                              substrate: "",
-                            },
-                          ],
-                        })
-                      }
-                    >
-                      <Plus className="mr-1 h-4 w-4" /> Add layer
-                    </Button>
-                  </div>
-                  {(s.layers?.length ?? 0) === 0 ? (
-                    <p className="text-xs text-muted-foreground">No insulation layers.</p>
-                  ) : (
-                    (s.layers ?? []).map((layer, li) => {
-                      const editLayer = (patch: Partial<UnderlaymentLayer>) =>
-                        editSection(i, {
-                          layers: (s.layers ?? []).map((x, j) =>
-                            j === li ? { ...x, ...patch } : x,
-                          ),
-                        });
-                      return (
-                        <div
-                          key={li}
-                          className="mb-2 grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
-                        >
-                          <Field label={`Layer ${li + 1} board`}>
+                            <Copy className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive"
+                            onClick={() => {
+                              setSections((p) => p.filter((_, j) => j !== i));
+                              setSelSection((v) => Math.max(0, Math.min(v, sections.length - 2)));
+                            }}
+                            disabled={sections.length === 1}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                        <Field label="Length (ft)">
+                          <Input
+                            type="number"
+                            value={s.length}
+                            onChange={(e) => editSection(i, { length: num(e.target.value) })}
+                          />
+                        </Field>
+                        <Field label="Width (ft)">
+                          <Input
+                            type="number"
+                            value={s.width}
+                            onChange={(e) => editSection(i, { width: num(e.target.value) })}
+                          />
+                        </Field>
+                        <Field label="Deck">
+                          <PickOne
+                            value={s.deckType}
+                            options={admin.deckOrder}
+                            onChange={(v) => editSection(i, { deckType: v })}
+                          />
+                        </Field>
+                        <Field label="Thickness">
+                          <PickOne
+                            value={String(s.thickness)}
+                            options={["40", "50", "60"]}
+                            onChange={(v) => editSectionWithSpacing(i, s, { thickness: Number(v) })}
+                          />
+                        </Field>
+                        <Field label="Color">
+                          <PickOne
+                            value={s.color}
+                            options={colorOptions}
+                            onChange={(v) => editSection(i, { color: v })}
+                          />
+                        </Field>
+                        <Field label="Avg sheet">
+                          <PickOne
+                            value={s.sheetSizeLabel}
+                            options={sheetSizeOptions}
+                            onChange={(v) => editSection(i, { sheetSizeLabel: v })}
+                          />
+                        </Field>
+                        <Field label="Field tab spacing (in)">
+                          {TAB_OPTIONS_BY_SYSTEM[roofSystem] ? (
                             <PickOne
-                              value={layer.board}
-                              options={boardOptions}
-                              onChange={(v) => editLayer({ board: v })}
-                            />
-                          </Field>
-                          <Field label="Attach">
-                            <PickOne
-                              value={layer.attachment}
-                              options={["mechanical", "adhesive"]}
+                              value={String(s.fieldLap)}
+                              options={[
+                                // Keep a legacy-invalid stored value visible rather than lying.
+                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem]!.includes(s.fieldLap)
+                                  ? []
+                                  : [String(s.fieldLap)]),
+                                ...TAB_OPTIONS_BY_SYSTEM[roofSystem]!.map(String),
+                              ]}
                               onChange={(v) =>
-                                editLayer({ attachment: v as UnderlaymentLayer["attachment"] })
+                                editSectionWithSpacing(i, s, { fieldLap: Number(v) })
+                              }
+                            />
+                          ) : (
+                            <Input
+                              type="number"
+                              value={s.fieldLap}
+                              onChange={(e) =>
+                                editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
+                              }
+                            />
+                          )}
+                        </Field>
+                        <Field label="Fastener OC (in)">
+                          <Input
+                            type="number"
+                            value={s.fastenerOc}
+                            onChange={(e) => editSection(i, { fastenerOc: num(e.target.value) })}
+                          />
+                        </Field>
+                        <Field label="Pull test (lbs)">
+                          <Input
+                            type="number"
+                            value={s.pullTest ?? 0}
+                            onChange={(e) =>
+                              editSectionWithSpacing(i, s, { pullTest: num(e.target.value) })
+                            }
+                          />
+                        </Field>
+                        <Field label="Design table (psf)">
+                          <PickOne
+                            value={String(s.designTable ?? 60)}
+                            options={DESIGN_TABLE_OPTIONS.map(String)}
+                            onChange={(v) =>
+                              editSectionWithSpacing(i, s, { designTable: Number(v) })
+                            }
+                          />
+                        </Field>
+                      </div>
+                      {(s.pullTest ?? 0) > 0 &&
+                        attachment === "mechanical" &&
+                        fastenerLookup &&
+                        (() => {
+                          const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
+                          if (!rsId) return null;
+                          const res = universalFastenerSpacing(fastenerLookup, {
+                            roofSystemId: rsId,
+                            thickness: s.thickness,
+                            designTable: s.designTable ?? 60,
+                            tabSpacings: [s.fieldLap],
+                            pullTest: s.pullTest!,
+                            columnOffset: 0,
+                          });
+                          return (
+                            <p
+                              className={`mt-1 text-xs ${res.ok ? "text-muted-foreground" : "text-destructive"}`}
+                            >
+                              {res.ok
+                                ? `Pull test ${s.pullTest} lbs → ${res.inches}″ oc (legacy lookup; edit Fastener OC to override)`
+                                : `Pull-test lookup: ${SPACING_ERROR_TEXT[res.error]}`}
+                            </p>
+                          );
+                        })()}
+                      <div className="mt-3 border-t pt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Edges &amp; perimeter / corner zones (leave length 0 to bill the whole
+                            section as field)
+                          </p>
+                          {(s.edges?.length ?? 0) === 0 ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const edges = defaultEdges(s.length, s.width);
+                                editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
+                              }}
+                            >
+                              Define edges A–D
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => editSection(i, { edges: [] })}
+                            >
+                              Remove edges
+                            </Button>
+                          )}
+                        </div>
+                        {(s.edges?.length ?? 0) > 0 && (
+                          <div className="mb-3 space-y-2">
+                            {(s.edges ?? []).map((e, ei) => {
+                              const editEdge = (patch: Partial<EdgeInput>) => {
+                                const edges = (s.edges ?? []).map((x, j) =>
+                                  j === ei ? { ...x, ...patch } : x,
+                                );
+                                editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
+                              };
+                              return (
+                                <div
+                                  key={e.side}
+                                  className="grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
+                                >
+                                  <Field label={`Side ${e.side} length (ft)`}>
+                                    <Input
+                                      type="number"
+                                      value={e.lengthFt}
+                                      onChange={(ev) =>
+                                        editEdge({ lengthFt: num(ev.target.value) })
+                                      }
+                                    />
+                                  </Field>
+                                  <Field label="Termination (ordering)">
+                                    <PickOne
+                                      value={e.termination}
+                                      options={TERMINATION_OPTIONS}
+                                      onChange={(v) => editEdge({ termination: v })}
+                                    />
+                                  </Field>
+                                  <Field label="Blocking (ft)">
+                                    <Input
+                                      type="number"
+                                      value={e.blockingFt}
+                                      onChange={(ev) =>
+                                        editEdge({ blockingFt: num(ev.target.value) })
+                                      }
+                                    />
+                                  </Field>
+                                  <Field label="ARP">
+                                    <PickOne
+                                      value={e.arpSizeIn === 0 ? "None" : `${e.arpSizeIn}"`}
+                                      options={ARP_SIZE_OPTIONS.map((a) =>
+                                        a === 0 ? "None" : `${a}"`,
+                                      )}
+                                      onChange={(v) =>
+                                        editEdge({
+                                          arpSizeIn: v === "None" ? 0 : Number(v.slice(0, -1)),
+                                        })
+                                      }
+                                    />
+                                  </Field>
+                                  <div className="flex items-end gap-2 pb-1">
+                                    <Switch
+                                      id={`pe-${s.id}-${e.side}`}
+                                      checked={e.isPerimeter}
+                                      onCheckedChange={(v) => editEdge({ isPerimeter: v })}
+                                    />
+                                    <Label htmlFor={`pe-${s.id}-${e.side}`} className="text-xs">
+                                      Perimeter edge
+                                    </Label>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                          <Field
+                            label={
+                              (s.edges?.length ?? 0) > 0
+                                ? "Perim len (from edges)"
+                                : "Perim len (ft)"
+                            }
+                          >
+                            <Input
+                              type="number"
+                              value={s.perimLengthFt}
+                              disabled={(s.edges?.length ?? 0) > 0}
+                              title={
+                                (s.edges?.length ?? 0) > 0
+                                  ? "Derived from the edges marked Perimeter edge"
+                                  : undefined
+                              }
+                              onChange={(e) =>
+                                editSection(i, { perimLengthFt: num(e.target.value) })
                               }
                             />
                           </Field>
-                          {layer.attachment === "mechanical" ? (
-                            <Field label="Fasteners / 4×8 board">
+                          <Field label="Corner len (ft)">
+                            <Input
+                              type="number"
+                              value={s.cornerLengthFt}
+                              onChange={(e) =>
+                                editSection(i, { cornerLengthFt: num(e.target.value) })
+                              }
+                            />
+                          </Field>
+                          <Field label="Zone width (ft)">
+                            <Input
+                              type="number"
+                              value={s.enhancementWidthFt}
+                              onChange={(e) =>
+                                editSection(i, { enhancementWidthFt: num(e.target.value) })
+                              }
+                            />
+                          </Field>
+                          <Field label="Perim OC (in)">
+                            <Input
+                              type="number"
+                              value={s.perimFastenerOc}
+                              onChange={(e) =>
+                                editSection(i, { perimFastenerOc: num(e.target.value) })
+                              }
+                            />
+                          </Field>
+                          <Field label="Corner OC (in)">
+                            <Input
+                              type="number"
+                              value={s.cornerFastenerOc}
+                              onChange={(e) =>
+                                editSection(i, { cornerFastenerOc: num(e.target.value) })
+                              }
+                            />
+                          </Field>
+                        </div>
+                      </div>
+                      <div className="mt-3 border-t pt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Insulation layers (up to 4)
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={(s.layers?.length ?? 0) >= 4}
+                            onClick={() =>
+                              editSection(i, {
+                                layers: [
+                                  ...(s.layers ?? []),
+                                  {
+                                    board: boardOptions[0] ?? "",
+                                    attachment: "mechanical",
+                                    fastenersPerBoard: fastenerOptions[0] ?? 5,
+                                    adhesiveName: adhesiveOptions[0] ?? "",
+                                    substrate: "",
+                                  },
+                                ],
+                              })
+                            }
+                          >
+                            <Plus className="mr-1 h-4 w-4" /> Add layer
+                          </Button>
+                        </div>
+                        {(s.layers?.length ?? 0) === 0 ? (
+                          <p className="text-xs text-muted-foreground">No insulation layers.</p>
+                        ) : (
+                          (s.layers ?? []).map((layer, li) => {
+                            const editLayer = (patch: Partial<UnderlaymentLayer>) =>
+                              editSection(i, {
+                                layers: (s.layers ?? []).map((x, j) =>
+                                  j === li ? { ...x, ...patch } : x,
+                                ),
+                              });
+                            return (
+                              <div
+                                key={li}
+                                className="mb-2 grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
+                              >
+                                <Field label={`Layer ${li + 1} board`}>
+                                  <PickOne
+                                    value={layer.board}
+                                    options={boardOptions}
+                                    onChange={(v) => editLayer({ board: v })}
+                                  />
+                                </Field>
+                                <Field label="Attach">
+                                  <PickOne
+                                    value={layer.attachment}
+                                    options={["mechanical", "adhesive"]}
+                                    onChange={(v) =>
+                                      editLayer({
+                                        attachment: v as UnderlaymentLayer["attachment"],
+                                      })
+                                    }
+                                  />
+                                </Field>
+                                {layer.attachment === "mechanical" ? (
+                                  <Field label="Fasteners / 4×8 board">
+                                    <PickOne
+                                      value={String(
+                                        layer.fastenersPerBoard || fastenerOptions[0] || 5,
+                                      )}
+                                      options={fastenerOptions.map(String)}
+                                      onChange={(v) => editLayer({ fastenersPerBoard: Number(v) })}
+                                    />
+                                  </Field>
+                                ) : (
+                                  <>
+                                    <Field label="Adhesive">
+                                      <PickOne
+                                        value={layer.adhesiveName}
+                                        options={adhesiveOptions}
+                                        onChange={(v) =>
+                                          editLayer({ adhesiveName: v, substrate: "" })
+                                        }
+                                      />
+                                    </Field>
+                                    <Field label="Substrate">
+                                      <PickOne
+                                        value={layer.substrate}
+                                        options={substratesFor(layer.adhesiveName)}
+                                        onChange={(v) => editLayer({ substrate: v })}
+                                      />
+                                    </Field>
+                                  </>
+                                )}
+                                <div className="flex items-end justify-end">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-destructive"
+                                    onClick={() =>
+                                      editSection(i, {
+                                        layers: (s.layers ?? []).filter((_, j) => j !== li),
+                                        underlaymentBoard: "",
+                                      })
+                                    }
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id={`to-${s.id}`}
+                            checked={s.tearOff}
+                            onCheckedChange={(v) => editSection(i, { tearOff: v })}
+                          />
+                          <Label htmlFor={`to-${s.id}`} className="text-xs">
+                            Tear-off
+                          </Label>
+                        </div>
+                        {s.tearOff && (
+                          <>
+                            <Field label="Tear-off type">
                               <PickOne
-                                value={String(layer.fastenersPerBoard || fastenerOptions[0] || 5)}
-                                options={fastenerOptions.map(String)}
-                                onChange={(v) => editLayer({ fastenersPerBoard: Number(v) })}
+                                value={s.tearOffType}
+                                options={admin.tearOff?.tearoffTypes ?? []}
+                                onChange={(v) => editSection(i, { tearOffType: v })}
                               />
                             </Field>
-                          ) : (
-                            <>
-                              <Field label="Adhesive">
-                                <PickOne
-                                  value={layer.adhesiveName}
-                                  options={adhesiveOptions}
-                                  onChange={(v) => editLayer({ adhesiveName: v, substrate: "" })}
-                                />
-                              </Field>
-                              <Field label="Substrate">
-                                <PickOne
-                                  value={layer.substrate}
-                                  options={substratesFor(layer.adhesiveName)}
-                                  onChange={(v) => editLayer({ substrate: v })}
-                                />
-                              </Field>
-                            </>
-                          )}
-                          <div className="flex items-end justify-end">
+                            <Field label="Debris depth (in)">
+                              <Input
+                                type="number"
+                                className="w-[120px]"
+                                value={s.toThicknessInches}
+                                onChange={(e) =>
+                                  editSection(i, { toThicknessInches: num(e.target.value) })
+                                }
+                              />
+                            </Field>
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-3 border-t pt-3">
+                        <Field label="Section notes">
+                          <Input
+                            value={s.notes ?? ""}
+                            placeholder="Optional notes for this section…"
+                            onChange={(e) => editSection(i, { notes: e.target.value })}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Right rail: legacy section diagram + Roof Sections Summary */}
+                <div className="space-y-4">
+                  <EdgeDiagram section={sections[Math.min(selSection, sections.length - 1)]!} />
+                  {/* Legacy Roof Sections Summary: Section | L | W | System | Attach | Deck | Color | Lap */}
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Section</TableHead>
+                          <TableHead className="text-right">L</TableHead>
+                          <TableHead className="text-right">W</TableHead>
+                          <TableHead>System</TableHead>
+                          <TableHead>Attach</TableHead>
+                          <TableHead>Deck Type</TableHead>
+                          <TableHead>Color</TableHead>
+                          <TableHead className="text-right">Lap</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sections.map((s2, i2) => (
+                          <TableRow
+                            key={s2.id}
+                            onClick={() => setSelSection(i2)}
+                            className={
+                              i2 === Math.min(selSection, sections.length - 1)
+                                ? "cursor-pointer bg-muted/60"
+                                : "cursor-pointer"
+                            }
+                          >
+                            <TableCell className="whitespace-nowrap font-medium">
+                              {s2.name}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
+                            <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
+                            <TableCell className="whitespace-nowrap">{roofSystem}</TableCell>
+                            <TableCell className="capitalize">{attachment}</TableCell>
+                            <TableCell className="whitespace-nowrap">{s2.deckType}</TableCell>
+                            <TableCell>{s2.color}</TableCell>
+                            <TableCell className="text-right tabular-nums">{s2.fieldLap}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {/* Legacy per-section Man Hours / Labor Cost readout for the selected section */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border p-2 text-xs">
+                    <span>
+                      Man Hours:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {(
+                          result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0
+                        ).toFixed(2)}
+                      </span>
+                    </span>
+                    <span>
+                      Labor Cost:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {money(
+                          (result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0) *
+                            laborRate,
+                        )}
+                      </span>
+                    </span>
+                    <span className="text-muted-foreground">(selected section, install labor)</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Click a row to edit that section. Copy or remove it with the buttons at the top
+                    of the editor.
+                  </p>
+                </div>
+              </div>
+
+              {/* Legacy bottom bar: Setup / Inspection / Roof SqFt / Membrane SqFt */}
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs">
+                <span>
+                  Setup time:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.setupHours ?? 0).toFixed(2)} h
+                  </span>
+                </span>
+                <span>
+                  Inspection time:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.inspectionHours ?? 0).toFixed(2)} h
+                  </span>
+                </span>
+                <span>
+                  Roof sq ft:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.roofSqFootage ?? 0).toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  Membrane sq ft:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.sqFtTotalMembrane ?? 0).toLocaleString(undefined, {
+                      maximumFractionDigits: 0,
+                    })}
+                  </span>
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={step === 2 ? "space-y-6" : "hidden"}>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Parapets</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setParapets((p) => [
+                    ...p,
+                    newParapet({ heightBand: admin.parapetLabor?.bands[0] ?? "" }),
+                  ]);
+                  setSelParapet(parapets.length);
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" /> New parapet
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {parapets.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No parapet walls. Labor bills from the deck × wall-height matrix; membrane girth ×
+                  length prices at the bid's default membrane.
+                </p>
+              ) : (
+                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  {(() => {
+                    const i = Math.min(selParapet, parapets.length - 1);
+                    const p = parapets[i]!;
+                    return (
+                      <div key={p.id} className="min-w-0 rounded-md border p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <Input
+                            className="h-8 w-[200px] font-medium"
+                            value={p.name}
+                            onChange={(e) =>
+                              setParapets((prev) =>
+                                prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                              )
+                            }
+                          />
+                          <div className="flex items-center">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Duplicate this parapet"
+                              onClick={() => {
+                                setParapets((prev) => [
+                                  ...prev,
+                                  { ...clone(p), id: `p${pseq++}`, name: `${p.name} (copy)` },
+                                ]);
+                                setSelParapet(parapets.length);
+                              }}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="icon"
                               className="text-destructive"
-                              onClick={() =>
-                                editSection(i, {
-                                  layers: (s.layers ?? []).filter((_, j) => j !== li),
-                                  underlaymentBoard: "",
-                                })
-                              }
+                              onClick={() => {
+                                setParapets((prev) => prev.filter((_, j) => j !== i));
+                                setSelParapet((v) => Math.max(0, Math.min(v, parapets.length - 2)));
+                              }}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-                <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id={`to-${s.id}`}
-                      checked={s.tearOff}
-                      onCheckedChange={(v) => editSection(i, { tearOff: v })}
-                    />
-                    <Label htmlFor={`to-${s.id}`} className="text-xs">
-                      Tear-off
-                    </Label>
-                  </div>
-                  {s.tearOff && (
-                    <>
-                      <Field label="Tear-off type">
-                        <PickOne
-                          value={s.tearOffType}
-                          options={admin.tearOff?.tearoffTypes ?? []}
-                          onChange={(v) => editSection(i, { tearOffType: v })}
-                        />
-                      </Field>
-                      <Field label="Debris depth (in)">
-                        <Input
-                          type="number"
-                          className="w-[120px]"
-                          value={s.toThicknessInches}
-                          onChange={(e) =>
-                            editSection(i, { toThicknessInches: num(e.target.value) })
-                          }
-                        />
-                      </Field>
-                    </>
-                  )}
-                </div>
-                <div className="mt-3 border-t pt-3">
-                  <Field label="Section notes">
-                    <Input
-                      value={s.notes ?? ""}
-                      placeholder="Optional notes for this section…"
-                      onChange={(e) => editSection(i, { notes: e.target.value })}
-                    />
-                  </Field>
-                </div>
-              </div>
-              );
-            })()}
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                          <Field label="Length (ft)">
+                            <Input
+                              type="number"
+                              value={p.lengthFt}
+                              onChange={(e) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, lengthFt: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Wall height">
+                            <PickOne
+                              value={p.heightBand}
+                              options={admin.parapetLabor?.bands ?? []}
+                              onChange={(v) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, heightBand: v } : x)),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Deck">
+                            <PickOne
+                              value={p.deckType}
+                              options={admin.deckOrder}
+                              onChange={(v) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Membrane girth (in)">
+                            <Input
+                              type="number"
+                              value={p.girthInches}
+                              onChange={(e) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, girthInches: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <div className="flex items-end gap-2 pb-1">
+                            <Switch
+                              id={`pd-${p.id}`}
+                              checked={p.predrill}
+                              onCheckedChange={(v) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
+                                )
+                              }
+                            />
+                            <Label htmlFor={`pd-${p.id}`} className="text-xs">
+                              Pre-drill
+                            </Label>
+                          </div>
+                          <div className="flex items-end gap-2 pb-1">
+                            <Switch
+                              id={`ct-${p.id}`}
+                              checked={p.canted}
+                              onCheckedChange={(v) =>
+                                setParapets((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
+                                )
+                              }
+                            />
+                            <Label htmlFor={`ct-${p.id}`} className="text-xs">
+                              Canted
+                            </Label>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-            {/* Right rail: legacy section diagram + Roof Sections Summary */}
-            <div className="space-y-4">
-              <EdgeDiagram section={sections[Math.min(selSection, sections.length - 1)]!} />
-              {/* Legacy Roof Sections Summary: Section | L | W | System | Attach | Deck | Color | Lap */}
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Section</TableHead>
-                      <TableHead className="text-right">L</TableHead>
-                      <TableHead className="text-right">W</TableHead>
-                      <TableHead>System</TableHead>
-                      <TableHead>Attach</TableHead>
-                      <TableHead>Deck Type</TableHead>
-                      <TableHead>Color</TableHead>
-                      <TableHead className="text-right">Lap</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sections.map((s2, i2) => (
-                      <TableRow
-                        key={s2.id}
-                        onClick={() => setSelSection(i2)}
-                        className={
-                          i2 === Math.min(selSection, sections.length - 1)
-                            ? "cursor-pointer bg-muted/60"
-                            : "cursor-pointer"
-                        }
-                      >
-                        <TableCell className="whitespace-nowrap font-medium">{s2.name}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
-                        <TableCell className="whitespace-nowrap">{roofSystem}</TableCell>
-                        <TableCell className="capitalize">{attachment}</TableCell>
-                        <TableCell className="whitespace-nowrap">{s2.deckType}</TableCell>
-                        <TableCell>{s2.color}</TableCell>
-                        <TableCell className="text-right tabular-nums">{s2.fieldLap}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              {/* Legacy per-section Man Hours / Labor Cost readout for the selected section */}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border p-2 text-xs">
-                <span>
-                  Man Hours:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0).toFixed(
-                      2,
-                    )}
-                  </span>
-                </span>
-                <span>
-                  Labor Cost:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {money(
-                      (result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0) *
-                        laborRate,
-                    )}
-                  </span>
-                </span>
-                <span className="text-muted-foreground">(selected section, install labor)</span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Click a row to edit that section. Copy or remove it with the buttons at the top
-                of the editor.
-              </p>
-            </div>
-            </div>
-
-            {/* Legacy bottom bar: Setup / Inspection / Roof SqFt / Membrane SqFt */}
-            <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs">
-              <span>
-                Setup time:{" "}
-                <span className="font-semibold tabular-nums">
-                  {(result?.r.setupHours ?? 0).toFixed(2)} h
-                </span>
-              </span>
-              <span>
-                Inspection time:{" "}
-                <span className="font-semibold tabular-nums">
-                  {(result?.r.inspectionHours ?? 0).toFixed(2)} h
-                </span>
-              </span>
-              <span>
-                Roof sq ft:{" "}
-                <span className="font-semibold tabular-nums">
-                  {(result?.r.roofSqFootage ?? 0).toLocaleString()}
-                </span>
-              </span>
-              <span>
-                Membrane sq ft:{" "}
-                <span className="font-semibold tabular-nums">
-                  {(result?.r.sqFtTotalMembrane ?? 0).toLocaleString(undefined, {
-                    maximumFractionDigits: 0,
-                  })}
-                </span>
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-        </div>
-
-        <div className={step === 2 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Parapets</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setParapets((p) => [
-                  ...p,
-                  newParapet({ heightBand: admin.parapetLabor?.bands[0] ?? "" }),
-                ]);
-                setSelParapet(parapets.length);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> New parapet
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {parapets.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No parapet walls. Labor bills from the deck × wall-height matrix; membrane girth ×
-                length prices at the bid's default membrane.
-              </p>
-            ) : (
-              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-              {(() => {
-                const i = Math.min(selParapet, parapets.length - 1);
-                const p = parapets[i]!;
-                return (
-                <div key={p.id} className="min-w-0 rounded-md border p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <Input
-                      className="h-8 w-[200px] font-medium"
-                      value={p.name}
-                      onChange={(e) =>
-                        setParapets((prev) =>
-                          prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
-                        )
-                      }
-                    />
-                    <div className="flex items-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Duplicate this parapet"
-                        onClick={() => {
-                          setParapets((prev) => [
-                            ...prev,
-                            { ...clone(p), id: `p${pseq++}`, name: `${p.name} (copy)` },
-                          ]);
-                          setSelParapet(parapets.length);
-                        }}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive"
-                        onClick={() => {
-                          setParapets((prev) => prev.filter((_, j) => j !== i));
-                          setSelParapet((v) => Math.max(0, Math.min(v, parapets.length - 2)));
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                  {/* Right rail: parapet summary */}
+                  <div className="space-y-2">
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Parapet</TableHead>
+                            <TableHead className="text-right">Len (ft)</TableHead>
+                            <TableHead>Height</TableHead>
+                            <TableHead>Deck</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {parapets.map((p2, i2) => (
+                            <TableRow
+                              key={p2.id}
+                              onClick={() => setSelParapet(i2)}
+                              className={
+                                i2 === Math.min(selParapet, parapets.length - 1)
+                                  ? "cursor-pointer bg-muted/60"
+                                  : "cursor-pointer"
+                              }
+                            >
+                              <TableCell className="font-medium">{p2.name}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {p2.lengthFt}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">{p2.heightBand}</TableCell>
+                              <TableCell>{p2.deckType}</TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow>
+                            <TableCell className="font-semibold">Total LF</TableCell>
+                            <TableCell
+                              colSpan={3}
+                              className="text-right font-semibold tabular-nums"
+                            >
+                              {parapets.reduce((s2, p2) => s2 + p2.lengthFt, 0).toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
                     </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                    <Field label="Length (ft)">
-                      <Input
-                        type="number"
-                        value={p.lengthFt}
-                        onChange={(e) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) =>
-                              j === i ? { ...x, lengthFt: num(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Wall height">
-                      <PickOne
-                        value={p.heightBand}
-                        options={admin.parapetLabor?.bands ?? []}
-                        onChange={(v) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, heightBand: v } : x)),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Deck">
-                      <PickOne
-                        value={p.deckType}
-                        options={admin.deckOrder}
-                        onChange={(v) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Membrane girth (in)">
-                      <Input
-                        type="number"
-                        value={p.girthInches}
-                        onChange={(e) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) =>
-                              j === i ? { ...x, girthInches: num(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <div className="flex items-end gap-2 pb-1">
-                      <Switch
-                        id={`pd-${p.id}`}
-                        checked={p.predrill}
-                        onCheckedChange={(v) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
-                          )
-                        }
-                      />
-                      <Label htmlFor={`pd-${p.id}`} className="text-xs">
-                        Pre-drill
-                      </Label>
-                    </div>
-                    <div className="flex items-end gap-2 pb-1">
-                      <Switch
-                        id={`ct-${p.id}`}
-                        checked={p.canted}
-                        onCheckedChange={(v) =>
-                          setParapets((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
-                          )
-                        }
-                      />
-                      <Label htmlFor={`ct-${p.id}`} className="text-xs">
-                        Canted
-                      </Label>
-                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Click a row to edit that parapet.
+                    </p>
                   </div>
                 </div>
-                );
-              })()}
-
-              {/* Right rail: parapet summary */}
-              <div className="space-y-2">
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Parapet</TableHead>
-                        <TableHead className="text-right">Len (ft)</TableHead>
-                        <TableHead>Height</TableHead>
-                        <TableHead>Deck</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {parapets.map((p2, i2) => (
-                        <TableRow
-                          key={p2.id}
-                          onClick={() => setSelParapet(i2)}
-                          className={
-                            i2 === Math.min(selParapet, parapets.length - 1)
-                              ? "cursor-pointer bg-muted/60"
-                              : "cursor-pointer"
-                          }
-                        >
-                          <TableCell className="font-medium">{p2.name}</TableCell>
-                          <TableCell className="text-right tabular-nums">{p2.lengthFt}</TableCell>
-                          <TableCell className="whitespace-nowrap">{p2.heightBand}</TableCell>
-                          <TableCell>{p2.deckType}</TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow>
-                        <TableCell className="font-semibold">Total LF</TableCell>
-                        <TableCell
-                          colSpan={3}
-                          className="text-right font-semibold tabular-nums"
-                        >
-                          {parapets.reduce((s2, p2) => s2 + p2.lengthFt, 0).toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-                <p className="text-xs text-muted-foreground">Click a row to edit that parapet.</p>
-              </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 3 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Curbs</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setCurbs((p) => [...p, newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" })]);
-                setSelCurb(curbs.length);
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> New curb
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {curbs.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No curbs. Labor bills per curb: setup + minutes/LF for the deck × curb-type
-                multiplier × perimeter.
-              </p>
-            ) : (
-              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-              {(() => {
-                const i = Math.min(selCurb, curbs.length - 1);
-                const c = curbs[i]!;
-                return (
-                <div key={c.id} className="min-w-0 rounded-md border p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <Input
-                      className="h-8 w-[200px] font-medium"
-                      value={c.name}
-                      onChange={(e) =>
-                        setCurbs((prev) =>
-                          prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
-                        )
-                      }
-                    />
-                    <div className="flex items-center">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Duplicate this curb"
-                        onClick={() => {
-                          setCurbs((prev) => [
-                            ...prev,
-                            { ...clone(c), id: `c${cseq++}`, name: `${c.name} (copy)` },
-                          ]);
-                          setSelCurb(curbs.length);
-                        }}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive"
-                        onClick={() => {
-                          setCurbs((prev) => prev.filter((_, j) => j !== i));
-                          setSelCurb((v) => Math.max(0, Math.min(v, curbs.length - 2)));
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                    <Field label="Quantity">
-                      <Input
-                        type="number"
-                        value={c.quantity}
-                        onChange={(e) =>
-                          setCurbs((prev) =>
-                            prev.map((x, j) =>
-                              j === i ? { ...x, quantity: num(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="A (in)">
-                      <Input
-                        type="number"
-                        value={c.widthIn}
-                        onChange={(e) =>
-                          setCurbs((prev) =>
-                            prev.map((x, j) =>
-                              j === i ? { ...x, widthIn: num(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="B (in)">
-                      <Input
-                        type="number"
-                        value={c.lengthIn}
-                        onChange={(e) =>
-                          setCurbs((prev) =>
-                            prev.map((x, j) =>
-                              j === i ? { ...x, lengthIn: num(e.target.value) } : x,
-                            ),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Type">
-                      <PickOne
-                        value={c.curbType}
-                        options={admin.curbLabor?.curbTypes ?? []}
-                        onChange={(v) =>
-                          setCurbs((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, curbType: v } : x)),
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field label="Deck">
-                      <PickOne
-                        value={c.deckType}
-                        options={admin.deckOrder}
-                        onChange={(v) =>
-                          setCurbs((prev) =>
-                            prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
-                          )
-                        }
-                      />
-                    </Field>
-                  </div>
-                </div>
-                );
-              })()}
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Curbs</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setCurbs((p) => [
+                    ...p,
+                    newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" }),
+                  ]);
+                  setSelCurb(curbs.length);
+                }}
+              >
+                <Plus className="mr-1 h-4 w-4" /> New curb
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {curbs.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No curbs. Labor bills per curb: setup + minutes/LF for the deck × curb-type
+                  multiplier × perimeter.
+                </p>
+              ) : (
+                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  {(() => {
+                    const i = Math.min(selCurb, curbs.length - 1);
+                    const c = curbs[i]!;
+                    return (
+                      <div key={c.id} className="min-w-0 rounded-md border p-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <Input
+                            className="h-8 w-[200px] font-medium"
+                            value={c.name}
+                            onChange={(e) =>
+                              setCurbs((prev) =>
+                                prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
+                              )
+                            }
+                          />
+                          <div className="flex items-center">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Duplicate this curb"
+                              onClick={() => {
+                                setCurbs((prev) => [
+                                  ...prev,
+                                  { ...clone(c), id: `c${cseq++}`, name: `${c.name} (copy)` },
+                                ]);
+                                setSelCurb(curbs.length);
+                              }}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => {
+                                setCurbs((prev) => prev.filter((_, j) => j !== i));
+                                setSelCurb((v) => Math.max(0, Math.min(v, curbs.length - 2)));
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                          <Field label="Quantity">
+                            <Input
+                              type="number"
+                              value={c.quantity}
+                              onChange={(e) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, quantity: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="A (in)">
+                            <Input
+                              type="number"
+                              value={c.widthIn}
+                              onChange={(e) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, widthIn: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="B (in)">
+                            <Input
+                              type="number"
+                              value={c.lengthIn}
+                              onChange={(e) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) =>
+                                    j === i ? { ...x, lengthIn: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Type">
+                            <PickOne
+                              value={c.curbType}
+                              options={admin.curbLabor?.curbTypes ?? []}
+                              onChange={(v) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, curbType: v } : x)),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Deck">
+                            <PickOne
+                              value={c.deckType}
+                              options={admin.deckOrder}
+                              onChange={(v) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
+                                )
+                              }
+                            />
+                          </Field>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
-              {/* Right rail: curb summary */}
-              <div className="space-y-2">
-                <div className="overflow-x-auto rounded-md border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Curb</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">A (in)</TableHead>
-                        <TableHead className="text-right">B (in)</TableHead>
-                        <TableHead>Type</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {curbs.map((c2, i2) => (
-                        <TableRow
-                          key={c2.id}
-                          onClick={() => setSelCurb(i2)}
-                          className={
-                            i2 === Math.min(selCurb, curbs.length - 1)
-                              ? "cursor-pointer bg-muted/60"
-                              : "cursor-pointer"
-                          }
-                        >
-                          <TableCell className="font-medium">{c2.name}</TableCell>
-                          <TableCell className="text-right tabular-nums">{c2.quantity}</TableCell>
-                          <TableCell className="text-right tabular-nums">{c2.widthIn}</TableCell>
-                          <TableCell className="text-right tabular-nums">{c2.lengthIn}</TableCell>
-                          <TableCell className="whitespace-nowrap">{c2.curbType}</TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow>
-                        <TableCell className="font-semibold">Total curbs</TableCell>
-                        <TableCell className="text-right font-semibold tabular-nums">
-                          {curbs.reduce((s2, c2) => s2 + c2.quantity, 0).toLocaleString()}
-                        </TableCell>
-                        <TableCell colSpan={3} />
-                      </TableRow>
-                    </TableBody>
-                  </Table>
+                  {/* Right rail: curb summary */}
+                  <div className="space-y-2">
+                    <div className="overflow-x-auto rounded-md border">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Curb</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead className="text-right">A (in)</TableHead>
+                            <TableHead className="text-right">B (in)</TableHead>
+                            <TableHead>Type</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {curbs.map((c2, i2) => (
+                            <TableRow
+                              key={c2.id}
+                              onClick={() => setSelCurb(i2)}
+                              className={
+                                i2 === Math.min(selCurb, curbs.length - 1)
+                                  ? "cursor-pointer bg-muted/60"
+                                  : "cursor-pointer"
+                              }
+                            >
+                              <TableCell className="font-medium">{c2.name}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {c2.quantity}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {c2.widthIn}
+                              </TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {c2.lengthIn}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">{c2.curbType}</TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow>
+                            <TableCell className="font-semibold">Total curbs</TableCell>
+                            <TableCell className="text-right font-semibold tabular-nums">
+                              {curbs.reduce((s2, c2) => s2 + c2.quantity, 0).toLocaleString()}
+                            </TableCell>
+                            <TableCell colSpan={3} />
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <p className="text-xs text-muted-foreground">Click a row to edit that curb.</p>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">Click a row to edit that curb.</p>
-              </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 4 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Accessories</CardTitle>
-            <Select
-              value=""
-              onValueChange={(key) => {
-                const item = accCatalog?.find((a) => a.key === key);
-                if (item) {
-                  // Prefill labor from the base description (before the " — color" suffix), if known.
-                  const baseDesc = item.variant
-                    ? item.description.slice(0, -` — ${item.variant}`.length)
-                    : item.description;
-                  const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
-                  setAccessories((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      price: item.price,
-                      quantity: 1,
-                      laborHoursPerUnit,
-                    },
-                  ]);
-                }
-              }}
-            >
-              <SelectTrigger className="w-[240px] max-w-full">
-                <SelectValue placeholder="Add accessory…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(accCatalog ?? []).map((a) => (
-                  <SelectItem key={a.key} value={a.key}>
-                    {a.category} — {a.description} ({money(a.price)})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardHeader>
-          <CardContent>
-            {accessories.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No accessories added.</p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="w-[80px]">Unit</TableHead>
-                    <TableHead className="w-[90px]">Labor h/ea</TableHead>
-                    <TableHead className="w-[80px]">Qty</TableHead>
-                    <TableHead className="w-[100px] text-right">Total</TableHead>
-                    <TableHead className="w-[44px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accessories.map((a, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{a.description}</TableCell>
-                      <TableCell>{money(a.price)}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          step="0.0001"
-                          className="h-8 w-[80px]"
-                          value={a.laborHoursPerUnit ?? 0}
-                          onChange={(e) =>
-                            setAccessories((p) =>
-                              p.map((x, j) =>
-                                j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
-                              ),
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8 w-[70px]"
-                          value={a.quantity}
-                          onChange={(e) =>
-                            setAccessories((p) =>
-                              p.map((x, j) =>
-                                j === i ? { ...x, quantity: num(e.target.value) } : x,
-                              ),
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {money(a.price * a.quantity)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive"
-                          onClick={() => setAccessories((p) => p.filter((_, j) => j !== i))}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Accessories</CardTitle>
+              <Select
+                value=""
+                onValueChange={(key) => {
+                  const item = accCatalog?.find((a) => a.key === key);
+                  if (item) {
+                    // Prefill labor from the base description (before the " — color" suffix), if known.
+                    const baseDesc = item.variant
+                      ? item.description.slice(0, -` — ${item.variant}`.length)
+                      : item.description;
+                    const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
+                    setAccessories((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        price: item.price,
+                        quantity: 1,
+                        laborHoursPerUnit,
+                      },
+                    ]);
+                  }
+                }}
+              >
+                <SelectTrigger className="w-[240px] max-w-full">
+                  <SelectValue placeholder="Add accessory…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(accCatalog ?? []).map((a) => (
+                    <SelectItem key={a.key} value={a.key}>
+                      {a.category} — {a.description} ({money(a.price)})
+                    </SelectItem>
                   ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Legacy red/green "needed" quantities (docs/legacy-consumption-rules.md §2). */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Calculated needs (legacy ordering rules)</CardTitle>
-            <CardDescription>
-              Computed from your sections, edges, insulation and parapets — red means still
-              needed after what you&apos;ve added above, green means covered. Display only;
-              never changes the bid total.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {(() => {
-              const rows: { label: string; needed: number; entered: number | null }[] = [
-                {
-                  label: `Screws (membrane ${neededQty.breakdown.membraneScrews} + bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
-                  needed: neededQty.screws,
-                  entered: enteredQty.screws,
-                },
-                {
-                  label: "Poly plates (1 per membrane screw + parapet decks)",
-                  needed: neededQty.polyPlates,
-                  entered: enteredQty.polyPlates,
-                },
-                {
-                  label: "Insulation plates (1 per insulation screw)",
-                  needed: neededQty.insulationPlates,
-                  entered: enteredQty.insulationPlates,
-                },
-                {
-                  label: "Duro-Caulk tubes (1 per 12 LF of term bar/fascia)",
-                  needed: neededQty.caulkTubes,
-                  entered: enteredQty.caulk,
-                },
-                ...Object.entries(neededQty.adhesiveUnits).map(([name, units]) => ({
-                  label: `${name} (units, whole-unit per estimate)`,
-                  needed: units,
-                  entered: null,
-                })),
-              ].filter((r) => r.needed > 0 || (r.entered ?? 0) > 0);
-              if (rows.length === 0) {
-                return (
-                  <p className="text-sm text-muted-foreground">
-                    Nothing to calculate yet — add edge terminations, insulation layers, or
-                    parapets and the needed fasteners, plates, caulk and adhesive units appear
-                    here.
-                  </p>
-                );
-              }
-              return (
+                </SelectContent>
+              </Select>
+            </CardHeader>
+            <CardContent>
+              {accessories.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No accessories added.</p>
+              ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
-                      <TableHead className="text-right">Needed</TableHead>
-                      <TableHead className="text-right">Entered</TableHead>
-                      <TableHead className="text-right">Status</TableHead>
+                      <TableHead className="w-[80px]">Unit</TableHead>
+                      <TableHead className="w-[90px]">Labor h/ea</TableHead>
+                      <TableHead className="w-[80px]">Qty</TableHead>
+                      <TableHead className="w-[100px] text-right">Total</TableHead>
+                      <TableHead className="w-[44px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {rows.map((r) => {
-                      const remaining = r.needed - (r.entered ?? 0);
-                      return (
-                        <TableRow key={r.label}>
-                          <TableCell className="whitespace-normal">{r.label}</TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {r.needed.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {r.entered === null ? "—" : r.entered.toLocaleString()}
-                          </TableCell>
-                          <TableCell
-                            className={`text-right font-semibold tabular-nums ${
-                              r.entered !== null && remaining > 0
-                                ? "text-destructive"
-                                : "text-green-700 dark:text-green-500"
-                            }`}
+                    {accessories.map((a, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{a.description}</TableCell>
+                        <TableCell>{money(a.price)}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            step="0.0001"
+                            className="h-8 w-[80px]"
+                            value={a.laborHoursPerUnit ?? 0}
+                            onChange={(e) =>
+                              setAccessories((p) =>
+                                p.map((x, j) =>
+                                  j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            className="h-8 w-[70px]"
+                            value={a.quantity}
+                            onChange={(e) =>
+                              setAccessories((p) =>
+                                p.map((x, j) =>
+                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {money(a.price * a.quantity)}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive"
+                            onClick={() => setAccessories((p) => p.filter((_, j) => j !== i))}
                           >
-                            {r.entered === null
-                              ? "order"
-                              : remaining > 0
-                                ? `−${remaining.toLocaleString()} needed`
-                                : "covered"}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
-              );
-            })()}
-            <p className="text-xs text-muted-foreground">
-              Rules from the extracted legacy engine: membrane screws from the row-style
-              field/perimeter count (mark perimeter edges in Sections for the perimeter rows;
-              the legacy 30-ft perimeter strip constant is flagged for bid validation), 21
-              screws per 10-ft bar (42/63 for two-piece), insulation fasteners per board
-              density (doubled under adhered/Duro-Bond membranes), plates 1-per-screw,
-              adhesive units area ÷ coverage ceilinged once per adhesive. Entered fastener
-              boxes count toward Screws only when the fastener&apos;s subtype is allowed for a
-              deck in this bid (e.g. Augers for Gypsum/Tectum, Drill Points for Wood/Steel) —
-              same rule as legacy. Not included: washer/drain caulk adders, pipe-stack
-              sealant, and custom-layout sheets — add those manually for now.
-            </p>
-          </CardContent>
-        </Card>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Legacy red/green "needed" quantities (docs/legacy-consumption-rules.md §2). */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Calculated needs (legacy ordering rules)</CardTitle>
+              <CardDescription>
+                Computed from your sections, edges, insulation and parapets — red means still needed
+                after what you&apos;ve added above, green means covered. Display only; never changes
+                the bid total.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(() => {
+                const rows: { label: string; needed: number; entered: number | null }[] = [
+                  {
+                    label: `Screws (membrane ${neededQty.breakdown.membraneScrews} + bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
+                    needed: neededQty.screws,
+                    entered: enteredQty.screws,
+                  },
+                  {
+                    label: "Poly plates (1 per membrane screw + parapet decks)",
+                    needed: neededQty.polyPlates,
+                    entered: enteredQty.polyPlates,
+                  },
+                  {
+                    label: "Insulation plates (1 per insulation screw)",
+                    needed: neededQty.insulationPlates,
+                    entered: enteredQty.insulationPlates,
+                  },
+                  {
+                    label: "Duro-Caulk tubes (1 per 12 LF of term bar/fascia)",
+                    needed: neededQty.caulkTubes,
+                    entered: enteredQty.caulk,
+                  },
+                  ...Object.entries(neededQty.adhesiveUnits).map(([name, units]) => ({
+                    label: `${name} (units, whole-unit per estimate)`,
+                    needed: units,
+                    entered: null,
+                  })),
+                ].filter((r) => r.needed > 0 || (r.entered ?? 0) > 0);
+                if (rows.length === 0) {
+                  return (
+                    <p className="text-sm text-muted-foreground">
+                      Nothing to calculate yet — add edge terminations, insulation layers, or
+                      parapets and the needed fasteners, plates, caulk and adhesive units appear
+                      here.
+                    </p>
+                  );
+                }
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right">Needed</TableHead>
+                        <TableHead className="text-right">Entered</TableHead>
+                        <TableHead className="text-right">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((r) => {
+                        const remaining = r.needed - (r.entered ?? 0);
+                        return (
+                          <TableRow key={r.label}>
+                            <TableCell className="whitespace-normal">{r.label}</TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {r.needed.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {r.entered === null ? "—" : r.entered.toLocaleString()}
+                            </TableCell>
+                            <TableCell
+                              className={`text-right font-semibold tabular-nums ${
+                                r.entered !== null && remaining > 0
+                                  ? "text-destructive"
+                                  : "text-green-700 dark:text-green-500"
+                              }`}
+                            >
+                              {r.entered === null
+                                ? "order"
+                                : remaining > 0
+                                  ? `−${remaining.toLocaleString()} needed`
+                                  : "covered"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                );
+              })()}
+              <p className="text-xs text-muted-foreground">
+                Rules from the extracted legacy engine: membrane screws from the row-style
+                field/perimeter count (mark perimeter edges in Sections for the perimeter rows; the
+                legacy 30-ft perimeter strip constant is flagged for bid validation), 21 screws per
+                10-ft bar (42/63 for two-piece), insulation fasteners per board density (doubled
+                under adhered/Duro-Bond membranes), plates 1-per-screw, adhesive units area ÷
+                coverage ceilinged once per adhesive. Entered fastener boxes count toward Screws
+                only when the fastener&apos;s subtype is allowed for a deck in this bid (e.g. Augers
+                for Gypsum/Tectum, Drill Points for Wood/Steel) — same rule as legacy. Not included:
+                washer/drain caulk adders, pipe-stack sealant, and custom-layout sheets — add those
+                manually for now.
+              </p>
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 5 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Metals</CardTitle>
-            <Select
-              value=""
-              onValueChange={(key) => {
-                const item = metalsCatalog?.find((m) => m.key === key);
-                if (item)
-                  setMetals((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      price: item.unitCost,
-                      laborPerUnit: item.laborPerUnit,
-                      laborRate: item.laborRate,
-                      quantity: 1,
-                    },
-                  ]);
-              }}
-            >
-              <SelectTrigger className="w-[240px] max-w-full">
-                <SelectValue placeholder="Add metals item…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(metalsCatalog ?? []).map((m) => (
-                  <SelectItem key={m.key} value={m.key}>
-                    {m.category} — {m.description}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardHeader>
-          <CardContent>
-            {metals.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No metals. Gutters, downspouts, pitch pans, collection boxes — material folds into
-                Duro-Last material; labor into Subs &amp; services.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="w-[80px]">Matl</TableHead>
-                    <TableHead className="w-[80px]">Labor/ea</TableHead>
-                    <TableHead className="w-[80px]">Qty</TableHead>
-                    <TableHead className="w-[100px] text-right">Total</TableHead>
-                    <TableHead className="w-[44px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {metals.map((m, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{m.description}</TableCell>
-                      <TableCell>{money(m.price)}</TableCell>
-                      <TableCell>{money(m.laborPerUnit * m.laborRate)}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8 w-[70px]"
-                          value={m.quantity}
-                          onChange={(e) =>
-                            setMetals((p) =>
-                              p.map((x, j) =>
-                                j === i ? { ...x, quantity: num(e.target.value) } : x,
-                              ),
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {money((m.price + m.laborPerUnit * m.laborRate) * m.quantity)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive"
-                          onClick={() => setMetals((p) => p.filter((_, j) => j !== i))}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Metals</CardTitle>
+              <Select
+                value=""
+                onValueChange={(key) => {
+                  const item = metalsCatalog?.find((m) => m.key === key);
+                  if (item)
+                    setMetals((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        price: item.unitCost,
+                        laborPerUnit: item.laborPerUnit,
+                        laborRate: item.laborRate,
+                        quantity: 1,
+                      },
+                    ]);
+                }}
+              >
+                <SelectTrigger className="w-[240px] max-w-full">
+                  <SelectValue placeholder="Add metals item…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(metalsCatalog ?? []).map((m) => (
+                    <SelectItem key={m.key} value={m.key}>
+                      {m.category} — {m.description}
+                    </SelectItem>
                   ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                </SelectContent>
+              </Select>
+            </CardHeader>
+            <CardContent>
+              {metals.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No metals. Gutters, downspouts, pitch pans, collection boxes — material folds into
+                  Duro-Last material; labor into Subs &amp; services.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="w-[80px]">Matl</TableHead>
+                      <TableHead className="w-[80px]">Labor/ea</TableHead>
+                      <TableHead className="w-[80px]">Qty</TableHead>
+                      <TableHead className="w-[100px] text-right">Total</TableHead>
+                      <TableHead className="w-[44px]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {metals.map((m, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{m.description}</TableCell>
+                        <TableCell>{money(m.price)}</TableCell>
+                        <TableCell>{money(m.laborPerUnit * m.laborRate)}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            className="h-8 w-[70px]"
+                            value={m.quantity}
+                            onChange={(e) =>
+                              setMetals((p) =>
+                                p.map((x, j) =>
+                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {money((m.price + m.laborPerUnit * m.laborRate) * m.quantity)}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive"
+                            onClick={() => setMetals((p) => p.filter((_, j) => j !== i))}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 6 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
-            <Select
-              value=""
-              onValueChange={(key) => {
-                const item = nonDlCatalog?.find((n) => n.key === key);
-                if (item)
-                  setNonDlLines((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      price: item.price,
-                      laborPerUnit: item.laborPerUnit,
-                      laborRate: item.laborRate,
-                      quantity: 1,
-                    },
-                  ]);
-              }}
-            >
-              <SelectTrigger className="w-[240px] max-w-full">
-                <SelectValue placeholder="Add non-DL item…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(nonDlCatalog ?? []).map((n) => (
-                  <SelectItem key={n.key} value={n.key}>
-                    {n.category} — {n.description}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardHeader>
-          <CardContent>
-            {nonDlLines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No non-DL items. Material folds into Other material; labor into Subs &amp; services.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="w-[80px]">Matl</TableHead>
-                    <TableHead className="w-[80px]">Labor/ea</TableHead>
-                    <TableHead className="w-[80px]">Qty</TableHead>
-                    <TableHead className="w-[100px] text-right">Total</TableHead>
-                    <TableHead className="w-[44px]" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {nonDlLines.map((l, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{l.description}</TableCell>
-                      <TableCell>{money(l.price)}</TableCell>
-                      <TableCell>{money(l.laborPerUnit * l.laborRate)}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="h-8 w-[70px]"
-                          value={l.quantity}
-                          onChange={(e) =>
-                            setNonDlLines((p) =>
-                              p.map((x, j) =>
-                                j === i ? { ...x, quantity: num(e.target.value) } : x,
-                              ),
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {money((l.price + l.laborPerUnit * l.laborRate) * l.quantity)}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive"
-                          onClick={() => setNonDlLines((p) => p.filter((_, j) => j !== i))}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
+              <Select
+                value=""
+                onValueChange={(key) => {
+                  const item = nonDlCatalog?.find((n) => n.key === key);
+                  if (item)
+                    setNonDlLines((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        category: item.category,
+                        price: item.price,
+                        laborPerUnit: item.laborPerUnit,
+                        laborRate: item.laborRate,
+                        quantity: 1,
+                      },
+                    ]);
+                }}
+              >
+                <SelectTrigger className="w-[240px] max-w-full">
+                  <SelectValue placeholder="Add non-DL item…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(nonDlCatalog ?? []).map((n) => (
+                    <SelectItem key={n.key} value={n.key}>
+                      {n.category} — {n.description}
+                    </SelectItem>
                   ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                </SelectContent>
+              </Select>
+            </CardHeader>
+            <CardContent>
+              {nonDlLines.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No non-DL items. Material folds into Other material; labor into Subs &amp;
+                  services.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="w-[80px]">Matl</TableHead>
+                      <TableHead className="w-[80px]">Labor/ea</TableHead>
+                      <TableHead className="w-[80px]">Qty</TableHead>
+                      <TableHead className="w-[100px] text-right">Total</TableHead>
+                      <TableHead className="w-[44px]" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nonDlLines.map((l, i) => (
+                      <TableRow key={i}>
+                        <TableCell>{l.description}</TableCell>
+                        <TableCell>{money(l.price)}</TableCell>
+                        <TableCell>{money(l.laborPerUnit * l.laborRate)}</TableCell>
+                        <TableCell>
+                          <Input
+                            type="number"
+                            className="h-8 w-[70px]"
+                            value={l.quantity}
+                            onChange={(e) =>
+                              setNonDlLines((p) =>
+                                p.map((x, j) =>
+                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
+                                ),
+                              )
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {money((l.price + l.laborPerUnit * l.laborRate) * l.quantity)}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive"
+                            onClick={() => setNonDlLines((p) => p.filter((_, j) => j !== i))}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 7 ? "space-y-6" : "hidden"}>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Pricing controls</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-4">
-            {(presets?.length ?? 0) > 0 && (
-              <Field label="Preset">
-                <Select value="" onValueChange={applyPreset}>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Pricing controls</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-4">
+              {(presets?.length ?? 0) > 0 && (
+                <Field label="Preset">
+                  <Select value="" onValueChange={applyPreset}>
+                    <SelectTrigger className="w-[160px]">
+                      <SelectValue placeholder="Apply preset…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(presets ?? []).map((p) => (
+                        <SelectItem key={p.name} value={p.name}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+              <Field label="Markup type">
+                <Select
+                  value={String(markupMode)}
+                  onValueChange={(v) => setMarkupMode(Number(v) as MarkupMode)}
+                >
                   <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Apply preset…" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(presets ?? []).map((p) => (
-                      <SelectItem key={p.name} value={p.name}>
-                        {p.name}
+                    {([0, 1, 2] as MarkupMode[]).map((m) => (
+                      <SelectItem key={m} value={String(m)}>
+                        {MARKUP_LABELS[m]}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
-            )}
-            <Field label="Markup type">
-              <Select
-                value={String(markupMode)}
-                onValueChange={(v) => setMarkupMode(Number(v) as MarkupMode)}
-              >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {([0, 1, 2] as MarkupMode[]).map((m) => (
-                    <SelectItem key={m} value={String(m)}>
-                      {MARKUP_LABELS[m]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="Markup value">
-              <Input
-                type="number"
-                value={markup}
-                onChange={(e) => setMarkup(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Labor $/hr">
-              <Input
-                type="number"
-                value={laborRate}
-                onChange={(e) => setLaborRate(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Commission %">
-              <Input
-                type="number"
-                value={commission}
-                onChange={(e) => setCommission(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Adjust labor %">
-              <Input
-                type="number"
-                value={adjustLaborPct}
-                onChange={(e) => setAdjustLaborPct(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Adjust setup %">
-              <Input
-                type="number"
-                value={adjustSetupPct}
-                onChange={(e) => setAdjustSetupPct(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Adjust inspection %">
-              <Input
-                type="number"
-                value={adjustInspectionPct}
-                onChange={(e) => setAdjustInspectionPct(num(e.target.value))}
-              />
-            </Field>
-            <Field label="Labor template">
-              <PickOne
-                value={laborTemplateName || "None"}
-                options={laborTemplateOptions}
-                onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
-              />
-            </Field>
-            <Field label="Per-diem $/man-day">
-              <Input
-                type="number"
-                value={perDiem}
-                onChange={(e) => setPerDiem(num(e.target.value))}
-              />
-            </Field>
-            <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 pt-1">
-              <div className="flex items-center gap-2">
-                <Switch id="taxex" checked={taxExempt} onCheckedChange={setTaxExempt} />
-                <Label htmlFor="taxex" className="text-xs">
-                  Tax exempt
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch id="pdim" checked={perDiemInMarkup} onCheckedChange={setPerDiemInMarkup} />
-                <Label htmlFor="pdim" className="text-xs">
-                  Per-diem in markup
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="commim"
-                  checked={commissionInMarkup}
-                  onCheckedChange={setCommissionInMarkup}
+              <Field label="Markup value">
+                <Input
+                  type="number"
+                  value={markup}
+                  onChange={(e) => setMarkup(num(e.target.value))}
                 />
-                <Label htmlFor="commim" className="text-xs">
-                  Commission in markup
-                </Label>
-              </div>
-            </div>
-            <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2">
-              <span className="text-xs font-medium text-muted-foreground">Discounts:</span>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="disc-prepay"
-                  checked={prepayDiscount}
-                  onCheckedChange={setPrepayDiscount}
+              </Field>
+              <Field label="Labor $/hr">
+                <Input
+                  type="number"
+                  value={laborRate}
+                  onChange={(e) => setLaborRate(num(e.target.value))}
                 />
-                <Label htmlFor="disc-prepay" className="text-xs">
-                  Prepay (−5%)
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="disc-std"
-                  checked={stdSizeDiscount}
-                  onCheckedChange={setStdSizeDiscount}
+              </Field>
+              <Field label="Commission %">
+                <Input
+                  type="number"
+                  value={commission}
+                  onChange={(e) => setCommission(num(e.target.value))}
                 />
-                <Label htmlFor="disc-std" className="text-xs">
-                  Standard sheet (−4%, ≥50k sf)
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="disc-vol"
-                  checked={volumeDiscount}
-                  onCheckedChange={setVolumeDiscount}
+              </Field>
+              <Field label="Adjust labor %">
+                <Input
+                  type="number"
+                  value={adjustLaborPct}
+                  onChange={(e) => setAdjustLaborPct(num(e.target.value))}
                 />
-                <Label htmlFor="disc-vol" className="text-xs">
-                  Volume (−5%, &gt;100k sf)
-                </Label>
+              </Field>
+              <Field label="Adjust setup %">
+                <Input
+                  type="number"
+                  value={adjustSetupPct}
+                  onChange={(e) => setAdjustSetupPct(num(e.target.value))}
+                />
+              </Field>
+              <Field label="Adjust inspection %">
+                <Input
+                  type="number"
+                  value={adjustInspectionPct}
+                  onChange={(e) => setAdjustInspectionPct(num(e.target.value))}
+                />
+              </Field>
+              <Field label="Labor template">
+                <PickOne
+                  value={laborTemplateName || "None"}
+                  options={laborTemplateOptions}
+                  onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
+                />
+              </Field>
+              <Field label="Per-diem $/man-day">
+                <Input
+                  type="number"
+                  value={perDiem}
+                  onChange={(e) => setPerDiem(num(e.target.value))}
+                />
+              </Field>
+              <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <Switch id="taxex" checked={taxExempt} onCheckedChange={setTaxExempt} />
+                  <Label htmlFor="taxex" className="text-xs">
+                    Tax exempt
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="pdim"
+                    checked={perDiemInMarkup}
+                    onCheckedChange={setPerDiemInMarkup}
+                  />
+                  <Label htmlFor="pdim" className="text-xs">
+                    Per-diem in markup
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="commim"
+                    checked={commissionInMarkup}
+                    onCheckedChange={setCommissionInMarkup}
+                  />
+                  <Label htmlFor="commim" className="text-xs">
+                    Commission in markup
+                  </Label>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2">
+                <span className="text-xs font-medium text-muted-foreground">Discounts:</span>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="disc-prepay"
+                    checked={prepayDiscount}
+                    onCheckedChange={setPrepayDiscount}
+                  />
+                  <Label htmlFor="disc-prepay" className="text-xs">
+                    Prepay (−5%)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="disc-std"
+                    checked={stdSizeDiscount}
+                    onCheckedChange={setStdSizeDiscount}
+                  />
+                  <Label htmlFor="disc-std" className="text-xs">
+                    Standard sheet (−4%, ≥50k sf)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="disc-vol"
+                    checked={volumeDiscount}
+                    onCheckedChange={setVolumeDiscount}
+                  />
+                  <Label htmlFor="disc-vol" className="text-xs">
+                    Volume (−5%, &gt;100k sf)
+                  </Label>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Warranty</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-end gap-4">
-            <Field label="Warranty type">
-              <PickOne
-                value={warrantyName || "None"}
-                options={warrantyOptions}
-                onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
-              />
-            </Field>
-            <div className="flex items-center gap-2 pb-1">
-              <Switch id="hw" checked={highWind} onCheckedChange={setHighWind} />
-              <Label htmlFor="hw" className="text-xs">
-                High wind
-              </Label>
-            </div>
-            {highWind && (
-              <>
-                <Field label="Term (years)">
-                  <PickOne
-                    value={highWindTermYears ? String(highWindTermYears) : ""}
-                    options={hwTerms.map(String)}
-                    onChange={(v) => setHighWindTermYears(Number(v))}
-                  />
-                </Field>
-                <Field label="Max wind (mph band)">
-                  <PickOne
-                    value={highWindBand}
-                    options={hwBands}
-                    onChange={(v) => setHighWindBand(v)}
-                  />
-                </Field>
-              </>
-            )}
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Warranty</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-end gap-4">
+              <Field label="Warranty type">
+                <PickOne
+                  value={warrantyName || "None"}
+                  options={warrantyOptions}
+                  onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
+                />
+              </Field>
+              <div className="flex items-center gap-2 pb-1">
+                <Switch id="hw" checked={highWind} onCheckedChange={setHighWind} />
+                <Label htmlFor="hw" className="text-xs">
+                  High wind
+                </Label>
+              </div>
+              {highWind && (
+                <>
+                  <Field label="Term (years)">
+                    <PickOne
+                      value={highWindTermYears ? String(highWindTermYears) : ""}
+                      options={hwTerms.map(String)}
+                      onChange={(v) => setHighWindTermYears(Number(v))}
+                    />
+                  </Field>
+                  <Field label="Max wind (mph band)">
+                    <PickOne
+                      value={highWindBand}
+                      options={hwBands}
+                      onChange={(v) => setHighWindBand(v)}
+                    />
+                  </Field>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
         <div className={step === 8 ? "space-y-6" : "hidden"}>
-                {hasOrderingSummary && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                      {edgeSummary.terminations.map((t) => (
-                        <div key={t.termination} className="flex justify-between">
-                          <span className="text-muted-foreground">{t.termination}</span>
-                          <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
-                        </div>
-                      ))}
-                      {edgeSummary.blockingFt > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Wood blocking</span>
-                          <span className="tabular-nums">{edgeSummary.blockingFt.toLocaleString()} ft</span>
-                        </div>
-                      )}
-                      {edgeSummary.arpSqFtTotal > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
-                          <span className="tabular-nums">
-                            {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
-                          </span>
-                        </div>
-                      )}
-                      {insulationBoards > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Insulation boards (4×8)</span>
-                          <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {insulationFasteners > 0 && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Insulation fasteners</span>
-                          <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
-                        </div>
-                      )}
-                      {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
-                        <div key={name} className="flex justify-between">
-                          <span className="text-muted-foreground">{name}</span>
-                          <span className="tabular-nums">{units.toFixed(2)} units</span>
-                        </div>
-                      ))}
-                      <p className="border-t pt-2 text-xs text-muted-foreground">
-                        For ordering only — termination hardware, blocking and ARP material are priced by
-                        adding Accessory / Non-DL lines until the legacy auto-pricing is validated against a
-                        captured bid.
-                      </p>
-                    </CardContent>
-                  </Card>
+          {hasOrderingSummary && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {edgeSummary.terminations.map((t) => (
+                  <div key={t.termination} className="flex justify-between">
+                    <span className="text-muted-foreground">{t.termination}</span>
+                    <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
+                  </div>
+                ))}
+                {edgeSummary.blockingFt > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Wood blocking</span>
+                    <span className="tabular-nums">
+                      {edgeSummary.blockingFt.toLocaleString()} ft
+                    </span>
+                  </div>
                 )}
+                {edgeSummary.arpSqFtTotal > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
+                    <span className="tabular-nums">
+                      {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
+                    </span>
+                  </div>
+                )}
+                {insulationBoards > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Insulation boards (4×8)</span>
+                    <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
+                  </div>
+                )}
+                {insulationFasteners > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Insulation fasteners</span>
+                    <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
+                  </div>
+                )}
+                {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
+                  <div key={name} className="flex justify-between">
+                    <span className="text-muted-foreground">{name}</span>
+                    <span className="tabular-nums">{units.toFixed(2)} units</span>
+                  </div>
+                ))}
+                <p className="border-t pt-2 text-xs text-muted-foreground">
+                  For ordering only — termination hardware, blocking and ARP material are priced by
+                  adding Accessory / Non-DL lines until the legacy auto-pricing is validated against
+                  a captured bid.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Review &amp; finish</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <p className="text-muted-foreground">
-              The full cost and hours breakdown is in the Bid total panel{" "}
-              <span className="lg:hidden">below</span>
-              <span className="hidden lg:inline">on the right</span>.{" "}
-              {result?.warnings.length
-                ? "Resolve the warnings shown there before finalizing."
-                : "No input warnings."}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={handleSave} disabled={saving}>
-                <Save className="mr-2 h-4 w-4" />
-                {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!bidId}
-                title={bidId ? "Open the printable proposal" : "Save the bid first"}
-                onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
-              >
-                <FileText className="mr-2 h-4 w-4" />
-                Proposal
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!result}
-                title="Download the estimate review as CSV"
-                onClick={exportReview}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Export
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Review &amp; finish</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                The full cost and hours breakdown is in the Bid total panel{" "}
+                <span className="lg:hidden">below</span>
+                <span className="hidden lg:inline">on the right</span>.{" "}
+                {result?.warnings.length
+                  ? "Resolve the warnings shown there before finalizing."
+                  : "No input warnings."}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleSave} disabled={saving}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!bidId}
+                  title={bidId ? "Open the printable proposal" : "Save the bid first"}
+                  onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  Proposal
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={!result}
+                  title="Download the estimate review as CSV"
+                  onClick={exportReview}
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Export
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="flex items-center justify-between border-t pt-4">
@@ -2871,9 +2923,7 @@ function EstimatePage() {
                   {(result.r.money.dTotals[4] ?? 0) - (result.r.money.dTotals[0] ?? 0) < 0 && (
                     <Row
                       label="Discounts"
-                      v={money(
-                        (result.r.money.dTotals[4] ?? 0) - (result.r.money.dTotals[0] ?? 0),
-                      )}
+                      v={money((result.r.money.dTotals[4] ?? 0) - (result.r.money.dTotals[0] ?? 0))}
                     />
                   )}
                   {(result.r.money.dTotals[5] ?? 0) > 0 && (

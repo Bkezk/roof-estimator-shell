@@ -329,6 +329,45 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal2).toBeCloseTo(7.515, 3); // subs + services
   });
 
+  it("non-DL routing by category: six categories → own-rate direct labor; subs/services (labor AND material) → LS2; uncategorized legacy lines keep the old services routing", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        nonDlLines: [
+          // Category line → material stays OtherMaterial; labor at own rate → LS1 seam.
+          {
+            description: "Sheet Metal Work — Counter Flashing",
+            category: "Sheet Metal Work",
+            price: 100,
+            laborPerUnit: 1,
+            laborRate: 45,
+            quantity: 2,
+          },
+          // Subcontractor → labor AND material to LS2 (legacy NonDL.MaterialCost excludes it).
+          {
+            description: "Subcontractors — HVAC lift",
+            category: "Subcontractors",
+            price: 500,
+            laborPerUnit: 2,
+            laborRate: 60,
+            quantity: 1,
+          },
+          // Uncategorized (older saved bid): unchanged legacy-web behavior.
+          { description: "Misc", price: 50, laborPerUnit: 1, laborRate: 40, quantity: 1 },
+        ],
+      }),
+      admin,
+    );
+    expect(inputs.otherMaterial).toBeCloseTo(200 + 50, 2); // NOT the sub's 500
+    expect(inputs.subsCost).toBeCloseTo(500 + 120, 2); // sub material + labor → LS2
+    expect(inputs.servicesCost).toBeCloseTo(40, 2); // only the uncategorized line
+    expect(inputs.ownRateDirectLaborCost).toBeCloseTo(90, 2); // sheet metal 2 × 1h × $45
+    expect(inputs.ownRateDirectLaborHours).toBeCloseTo(2, 6);
+    const r = computeEstimate(inputs);
+    expect(r.laborSubtotal2).toBeCloseTo(620 + 40, 2);
+    expect(r.laborSubtotal1).toBeCloseTo(756.25 + 90, 2);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 2, 6);
+  });
+
   it("parapets: matrix labor rolls into direct labor; girth × length × membrane $ into M0", () => {
     const withParapet: EngineAdminData = {
       ...admin,

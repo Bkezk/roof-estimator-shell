@@ -6,7 +6,7 @@ import { Printer, ArrowLeft } from "lucide-react";
 
 import { getEngineAdminData } from "@/lib/engine.functions";
 import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
-import { buildEstimateInputs } from "@/lib/engine/bid-builder";
+import { buildEstimateInputs, NON_DL_LS2_CATEGORIES } from "@/lib/engine/bid-builder";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { buildProposalPricing } from "@/lib/engine/proposal";
 import {
@@ -114,7 +114,15 @@ function ProposalPage() {
       (s, a) => s + (a.laborHoursPerUnit ?? 0) * a.quantity,
       0,
     );
-    const nonDlMaterial = saved.nonDlLines.reduce((s, l) => s + l.price * l.quantity, 0);
+    // Subs/services lines carry their material inside LaborSubtotal2 (legacy routing) — exclude
+    // them here so the proposal's Additional-work group doesn't count that material twice.
+    const nonDlMaterial = saved.nonDlLines.reduce(
+      (s, l) =>
+        l.category !== undefined && NON_DL_LS2_CATEGORIES.has(l.category)
+          ? s
+          : s + l.price * l.quantity,
+      0,
+    );
     const metalsLabor = (saved.metals ?? []).reduce(
       (s, m) => s + m.laborPerUnit * m.laborRate * m.quantity,
       0,
