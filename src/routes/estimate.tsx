@@ -64,6 +64,7 @@ import {
   type WarrantyData,
 } from "@/lib/proposal-bid";
 import type { EngineAdminData } from "@/lib/engine/adapters";
+import { CURB_TYPE_BY_STYLE_ID } from "@/lib/engine/curb-wrap";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
@@ -134,6 +135,16 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
 
 // Selectable Field Tab Spacing pitches per system (legacy RSSheetTabSpacing + MechTabMulti;
 // systems not listed keep a free numeric input).
+// Legacy curb termination options by id (docs §8.3).
+const CURB_TERM_LABELS = [
+  "None",
+  'Scupper/Fascia Bar (1¾")',
+  "Lift & Tuck",
+  "Lift & T-Bar",
+  "No Lift & T-Bar",
+  "No Lift & Counter Flash",
+];
+
 const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
   "Duro-Last": [28, 60, 120],
   "Duro-Roof": [57, 87, 120],
@@ -168,9 +179,10 @@ const newCurb = (defaults: Partial<CurbInput> = {}): CurbInput => ({
   quantity: 1,
   widthIn: 24,
   lengthIn: 36,
-  curbType: "",
+  // One legacy style selection drives BOTH the wrap model and the labor type (docs §8.1):
+  // default style 1 = Open.
+  curbType: "Open",
   deckType: "Wood",
-  // Legacy wrap-material model: style 1 with a 12" curb height C (D 0) as the common default.
   styleId: 1,
   dimCIn: 12,
   dimDIn: 0,
@@ -2197,6 +2209,78 @@ function EstimatePage() {
                             </div>
                           );
                         })()}
+                        {/* Legacy Membrane Options + flags (docs §8.5/§8.6): the parapet's OWN
+                            mil/color price its membrane; Use Slipsheet adds poly labor; the
+                            labor %% mirrors the legacy per-item labor link. */}
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Membrane options
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <Field label="Mil">
+                              <PickOne
+                                value={
+                                  p.thicknessMil !== undefined
+                                    ? `${p.thicknessMil}mil`
+                                    : "Bid default"
+                                }
+                                options={["Bid default", "40mil", "50mil", "60mil"]}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "Bid default") delete nx.thicknessMil;
+                                      else nx.thicknessMil = parseInt(v, 10);
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="Color">
+                              <PickOne
+                                value={p.color ?? "Bid default"}
+                                options={["Bid default", ...colorOptions]}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "Bid default") delete nx.color;
+                                      else nx.color = v;
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="Labor adj (%)">
+                              <NumInput
+                                value={p.adjustLaborPct ?? 0}
+                                onValue={(n) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => (j === i ? { ...x, adjustLaborPct: n } : x)),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <div className="flex items-end gap-2 pb-1">
+                              <Switch
+                                id={`ss-${p.id}`}
+                                checked={p.useSlipsheet ?? false}
+                                onCheckedChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => (j === i ? { ...x, useSlipsheet: v } : x)),
+                                  )
+                                }
+                              />
+                              <Label htmlFor={`ss-${p.id}`} className="text-xs">
+                                Use Slipsheet
+                              </Label>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -2309,10 +2393,7 @@ function EstimatePage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  setCurbs((p) => [
-                    ...p,
-                    newCurb({ curbType: admin.curbLabor?.curbTypes[0] ?? "" }),
-                  ]);
+                  setCurbs((p) => [...p, newCurb()]);
                   setSelCurb(curbs.length);
                 }}
               >
@@ -2381,13 +2462,12 @@ function EstimatePage() {
                               }
                             />
                           </Field>
-                          <Field label="Type">
-                            <PickOne
-                              value={c.curbType}
-                              options={admin.curbLabor?.curbTypes ?? []}
-                              onChange={(v) =>
+                          <Field label="Labor adj (%)">
+                            <NumInput
+                              value={c.adjustLaborPct ?? 0}
+                              onValue={(n) =>
                                 setCurbs((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, curbType: v } : x)),
+                                  prev.map((x, j) => (j === i ? { ...x, adjustLaborPct: n } : x)),
                                 )
                               }
                             />
@@ -2448,17 +2528,40 @@ function EstimatePage() {
                             are quote-required in legacy (no auto price). */}
                         <div className="mt-2 space-y-2">
                           <p className="text-xs font-medium text-muted-foreground">
-                            Select curb style (styles 3 &amp; 4 need a quote)
+                            Select curb style — one selection drives the wrap membrane AND the labor
+                            type (canted styles need a quote)
                           </p>
                           <div className="flex flex-wrap gap-2">
-                            {[1, 2, 3, 4, 5, 6].map((id) => (
+                            {(
+                              [
+                                [1, "Open"],
+                                [2, "Closed"],
+                                [3, "Open Canted"],
+                                [4, "Closed Canted"],
+                                [5, "With Top"],
+                                [6, "Scupper"],
+                                [7, "Metal Scupper"],
+                              ] as Array<[number, string]>
+                            ).map(([id, name]) => (
                               <button
                                 key={id}
                                 type="button"
-                                title={`Legacy curb style ${id}${id === 3 || id === 4 ? " (quote required)" : ""}`}
+                                title={`${name}${id === 3 || id === 4 ? " (quote required)" : ""}`}
                                 onClick={() =>
                                   setCurbs((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, styleId: id } : x)),
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = {
+                                        ...x,
+                                        styleId: id,
+                                        curbType: CURB_TYPE_BY_STYLE_ID[id] ?? "",
+                                      };
+                                      // Legacy forcing: With Top → termination None;
+                                      // Scupper/Metal Scupper → Scupper-Fascia Bar.
+                                      if (id === 5) nx.termOption = 0;
+                                      if (id === 6 || id === 7) nx.termOption = 1;
+                                      return nx;
+                                    }),
                                   )
                                 }
                                 className={`flex flex-col items-center rounded-md border px-2 py-1.5 ${
@@ -2469,7 +2572,7 @@ function EstimatePage() {
                               >
                                 <CurbStyleIcon styleId={id} />
                                 <span className="text-[10px] font-medium">
-                                  {id}
+                                  {name}
                                   {id === 3 || id === 4 ? " (quote)" : ""}
                                 </span>
                               </button>
@@ -2522,6 +2625,58 @@ function EstimatePage() {
                               />
                             </Field>
                           </div>
+                          {/* Legacy termination options (docs §8.3): With Top forces None;
+                              scuppers force Scupper-Fascia. Lift options auto-price their labor;
+                              hardware footage is an ordering quantity (rates DB-resident). */}
+                          <div className="max-w-xs">
+                            <Field label="Termination option">
+                              <PickOne
+                                value={CURB_TERM_LABELS[c.termOption ?? 0] ?? "None"}
+                                options={
+                                  c.styleId === 5
+                                    ? ["None"]
+                                    : c.styleId === 6 || c.styleId === 7
+                                      ? ['Scupper/Fascia Bar (1¾")']
+                                      : CURB_TERM_LABELS
+                                }
+                                onChange={(v) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i
+                                        ? { ...x, termOption: CURB_TERM_LABELS.indexOf(v) }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                              />
+                            </Field>
+                          </div>
+                          {(() => {
+                            const t = c.termOption ?? 0;
+                            if (t === 1 || t === 3 || t === 4) {
+                              const ft = ((2 * c.widthIn + 2 * c.lengthIn + 12) / 12) * c.quantity;
+                              return (
+                                <p className="text-[11px] text-muted-foreground">
+                                  {t === 1 ? '1¾" fascia bar' : "Term bar (no-drill)"}:{" "}
+                                  {ft.toFixed(2)} ft — ordering quantity, not auto-priced.
+                                  {t === 3 ? " Lift labor auto-added." : ""}
+                                </p>
+                              );
+                            }
+                            if (t === 2)
+                              return (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Lift labor auto-added.
+                                </p>
+                              );
+                            if (t === 5)
+                              return (
+                                <p className="text-[11px] text-muted-foreground">
+                                  Counterflash footage is an ordering quantity, not auto-priced.
+                                </p>
+                              );
+                            return null;
+                          })()}
                           {/* Legacy Insulation/Plastic on Curb(s): insulation adds the §2 ISO
                               labor; both drive ordering quantities (shown, not auto-priced). */}
                           {(() => {
@@ -3856,7 +4011,8 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
   );
   return (
     <>
-      {(styleId === 1 || styleId === 2 || styleId === 3 || styleId === 4) && skirt}
+      {(styleId === 1 || styleId === 2 || styleId === 5) && skirt}
+      {(styleId === 3 || styleId === 4) && <g transform="skewX(-10) translate(7,0)">{skirt}</g>}
       {styleId === 1 && (
         <>
           {box(true)}
@@ -3870,32 +4026,12 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
         </>
       )}
       {styleId === 2 && box(true)}
-      {styleId === 3 && box(false)}
-      {styleId === 4 && (
-        <>
-          {/* taller capped box (quote style) */}
-          <polygon
-            points="17,15 32,7.5 47,15 32,22.5"
-            className={tan}
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-          <polygon
-            points="17,15 32,22.5 32,36.5 17,29"
-            className={tanSide}
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-          <polygon
-            points="32,22.5 47,15 47,29 32,36.5"
-            className={tanSide}
-            stroke="currentColor"
-            strokeWidth="1.4"
-          />
-        </>
-      )}
-      {styleId === 5 && scupper(false)}
-      {styleId === 6 && scupper(true)}
+      {/* canted variants (quote): the same curb with sloped sides */}
+      {styleId === 3 && <g transform="skewX(-10) translate(7,0)">{box(true)}</g>}
+      {styleId === 4 && <g transform="skewX(-10) translate(7,0)">{box(false)}</g>}
+      {styleId === 5 && box(false)}
+      {styleId === 6 && scupper(false)}
+      {styleId === 7 && scupper(true)}
     </>
   );
 }
@@ -3912,7 +4048,7 @@ function CurbStyleIcon({ styleId }: { styleId: number }) {
 /** Legacy Curbs screen info panel: red A/B/C/D readout + the SELECTED style's drawing. */
 function CurbDiagram({ c }: { c: CurbInput }) {
   const styleId = c.styleId ?? 0;
-  const isScupper = styleId === 5 || styleId === 6;
+  const isScupper = styleId === 6 || styleId === 7;
   const L = ({ x, y, t }: { x: number; y: number; t: string }) => (
     <text x={x} y={y} className="fill-red-600 text-[6px] font-bold dark:fill-red-400">
       {t}
@@ -3928,7 +4064,7 @@ function CurbDiagram({ c }: { c: CurbInput }) {
           <p>D: {c.dimDIn ?? 0}</p>
         </div>
         <svg viewBox="0 0 64 48" className="h-36 min-w-0 flex-1 text-foreground">
-          {styleId >= 1 && styleId <= 6 && <CurbStyleArt styleId={styleId} />}
+          {styleId >= 1 && styleId <= 7 && <CurbStyleArt styleId={styleId} />}
           {styleId >= 1 && !isScupper && (
             <>
               <L x={20} y={13} t="A" />
