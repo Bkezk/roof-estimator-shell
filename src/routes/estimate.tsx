@@ -204,6 +204,7 @@ const STEPS = [
   { key: "curbs", label: "Curbs" },
   { key: "accessories", label: "Accessories" },
   { key: "metals", label: "Metals" },
+  { key: "tearoff", label: "Tear-Off" },
   { key: "nondl", label: "Non-DL" },
   { key: "pricing", label: "Pricing & Warranty" },
   { key: "review", label: "Review" },
@@ -682,6 +683,8 @@ function EstimatePage() {
         return accessories.length;
       case "metals":
         return metals.length;
+      case "tearoff":
+        return sections.filter((s) => s.tearOff).length;
       case "nondl":
         return nonDlLines.length;
       default:
@@ -1586,38 +1589,21 @@ function EstimatePage() {
                           ({sectionLayers(s).length} on this section).
                         </p>
                       </div>
-                      <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            id={`to-${s.id}`}
-                            checked={s.tearOff}
-                            onCheckedChange={(v) => editSection(i, { tearOff: v })}
-                          />
-                          <Label htmlFor={`to-${s.id}`} className="text-xs">
-                            Tear-off
-                          </Label>
-                        </div>
-                        {s.tearOff && (
-                          <>
-                            <Field label="Tear-off type">
-                              <PickOne
-                                value={s.tearOffType}
-                                options={admin.tearOff?.tearoffTypes ?? []}
-                                onChange={(v) => editSection(i, { tearOffType: v })}
-                              />
-                            </Field>
-                            <Field label="Debris depth (in)">
-                              <Input
-                                type="number"
-                                className="w-[120px]"
-                                value={s.toThicknessInches}
-                                onChange={(e) =>
-                                  editSection(i, { toThicknessInches: num(e.target.value) })
-                                }
-                              />
-                            </Field>
-                          </>
-                        )}
+                      <div className="mt-3 border-t pt-3">
+                        <p className="text-xs text-muted-foreground">
+                          Tear-off is managed on the{" "}
+                          <button
+                            type="button"
+                            className="font-medium text-primary underline"
+                            onClick={() => goStep(7)}
+                          >
+                            Tear-Off step
+                          </button>
+                          {s.tearOff
+                            ? ` (on: ${s.tearOffType || "no type"})`
+                            : " (off for this section)"}
+                          .
+                        </p>
                       </div>
                       <div className="mt-3 border-t pt-3">
                         <Field label="Section notes">
@@ -3084,41 +3070,123 @@ function EstimatePage() {
           </Card>
         </div>
 
+        {/* Legacy Tear-Off screen: per-section tear-off type + debris depth. */}
         <div className={step === 7 ? "space-y-6" : "hidden"}>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Tear-Off</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Section</TableHead>
+                      <TableHead>W × L</TableHead>
+                      <TableHead>Deck</TableHead>
+                      <TableHead>Tear-off</TableHead>
+                      <TableHead>Existing roof type</TableHead>
+                      <TableHead>Debris depth (in)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sections.map((s, i) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="font-medium">{s.name}</TableCell>
+                        <TableCell className="tabular-nums">
+                          {s.width}x{s.length}
+                        </TableCell>
+                        <TableCell>{s.deckType}</TableCell>
+                        <TableCell>
+                          <Switch
+                            checked={s.tearOff}
+                            onCheckedChange={(v) => editSection(i, { tearOff: v })}
+                          />
+                        </TableCell>
+                        <TableCell className="min-w-[180px]">
+                          {s.tearOff ? (
+                            <PickOne
+                              value={s.tearOffType}
+                              options={admin.tearOff?.tearoffTypes ?? []}
+                              onChange={(v) => editSection(i, { tearOffType: v })}
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {s.tearOff ? (
+                            <NumInput
+                              className="h-8 w-[90px]"
+                              min={0}
+                              value={s.toThicknessInches}
+                              onValue={(n) => editSection(i, { toThicknessInches: n })}
+                            />
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-4 text-xs">
+                <span>
+                  Tear-off man hours:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.tearOffLaborHours ?? 0).toFixed(2)}
+                  </span>
+                </span>
+                <span>
+                  Disposal units:{" "}
+                  <span className="font-semibold tabular-nums">{result?.r.disposalUnits ?? 0}</span>
+                </span>
+                <span>
+                  Labor cost:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {money((result?.r.tearOffLaborHours ?? 0) * laborRate)}
+                  </span>
+                </span>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Hours come from the seeded Tearoff Times table (deck × existing roof type); debris
+                depth drives the disposal-unit volume.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={step === 8 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
-              <Select
-                value=""
-                onValueChange={(key) => {
-                  const item = nonDlCatalog?.find((n) => n.key === key);
-                  if (item)
-                    setNonDlLines((p) => [
-                      ...p,
-                      {
-                        description: `${item.category} — ${item.description}`,
-                        category: item.category,
-                        price: item.price,
-                        laborPerUnit: item.laborPerUnit,
-                        laborRate: item.laborRate,
-                        quantity: 1,
-                      },
-                    ]);
-                }}
-              >
-                <SelectTrigger className="w-[240px] max-w-full">
-                  <SelectValue placeholder="Add non-DL item…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(nonDlCatalog ?? []).map((n) => (
-                    <SelectItem key={n.key} value={n.key}>
-                      {n.category} — {n.description}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </CardHeader>
             <CardContent>
+              <CatalogPicker
+                items={(nonDlCatalog ?? []).map((n2) => ({
+                  key: n2.key,
+                  category: n2.category,
+                  description: n2.description,
+                  price: n2.price,
+                }))}
+                onAdd={(key) => {
+                  const item = nonDlCatalog?.find((n2) => n2.key === key);
+                  if (!item) return;
+                  setNonDlLines((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      category: item.category,
+                      price: item.price,
+                      laborPerUnit: item.laborPerUnit,
+                      laborRate: item.laborRate,
+                      quantity: 1,
+                    },
+                  ]);
+                }}
+              />
+
               {nonDlLines.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No non-DL items. Blocking / deck / sheet-metal / masonry items price material into
@@ -3179,7 +3247,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 8 ? "space-y-6" : "hidden"}>
+        <div className={step === 9 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Pricing controls</CardTitle>
@@ -3378,7 +3446,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 9 ? "space-y-6" : "hidden"}>
+        <div className={step === 10 ? "space-y-6" : "hidden"}>
           {hasOrderingSummary && (
             <Card>
               <CardHeader>
