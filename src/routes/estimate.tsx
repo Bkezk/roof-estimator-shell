@@ -34,7 +34,6 @@ import {
   type ParapetInput,
   type CurbInput,
   type MetalLine,
-  type UnderlaymentLayer,
   sectionLayers,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
@@ -188,6 +187,7 @@ const MARKUP_LABELS: Record<MarkupMode, string> = {
 const STEPS = [
   { key: "setup", label: "Setup" },
   { key: "sections", label: "Sections" },
+  { key: "underlayment", label: "Underlayment" },
   { key: "parapets", label: "Parapets" },
   { key: "curbs", label: "Curbs" },
   { key: "accessories", label: "Accessories" },
@@ -347,6 +347,16 @@ function EstimatePage() {
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
+
+  // Underlayment step (legacy Underlayment/Insulation screen): section multi-select + the
+  // pending layer being configured (board / attachment) before it's applied to the selection.
+  const [uSel, setUSel] = useState<string[]>([]);
+  const [uTab, setUTab] = useState(0); // 0..3 → Layer 1..4
+  const [uBoard, setUBoard] = useState("");
+  const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
+  const [uFast, setUFast] = useState(0);
+  const [uAdh, setUAdh] = useState("");
+  const [uSub, setUSub] = useState("");
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({
@@ -650,6 +660,8 @@ function EstimatePage() {
     switch (key) {
       case "sections":
         return sections.length;
+      case "underlayment":
+        return sections.filter((s) => (s.layers?.length ?? 0) > 0 || s.underlaymentBoard).length;
       case "parapets":
         return parapets.length;
       case "curbs":
@@ -1547,114 +1559,20 @@ function EstimatePage() {
                         </div>
                       </div>
                       <div className="mt-3 border-t pt-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Insulation layers (up to 4)
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={(s.layers?.length ?? 0) >= 4}
-                            onClick={() =>
-                              editSection(i, {
-                                layers: [
-                                  ...(s.layers ?? []),
-                                  {
-                                    board: boardOptions[0] ?? "",
-                                    attachment: "mechanical",
-                                    fastenersPerBoard: fastenerOptions[0] ?? 5,
-                                    adhesiveName: adhesiveOptions[0] ?? "",
-                                    substrate: "",
-                                  },
-                                ],
-                              })
-                            }
+                        <p className="text-xs text-muted-foreground">
+                          Insulation layers are managed on the{" "}
+                          <button
+                            type="button"
+                            className="font-medium text-primary underline"
+                            onClick={() => {
+                              setUSel([s.id]);
+                              goStep(2);
+                            }}
                           >
-                            <Plus className="mr-1 h-4 w-4" /> Add layer
-                          </Button>
-                        </div>
-                        {(s.layers?.length ?? 0) === 0 ? (
-                          <p className="text-xs text-muted-foreground">No insulation layers.</p>
-                        ) : (
-                          (s.layers ?? []).map((layer, li) => {
-                            const editLayer = (patch: Partial<UnderlaymentLayer>) =>
-                              editSection(i, {
-                                layers: (s.layers ?? []).map((x, j) =>
-                                  j === li ? { ...x, ...patch } : x,
-                                ),
-                              });
-                            return (
-                              <div
-                                key={li}
-                                className="mb-2 grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
-                              >
-                                <Field label={`Layer ${li + 1} board`}>
-                                  <PickOne
-                                    value={layer.board}
-                                    options={boardOptions}
-                                    onChange={(v) => editLayer({ board: v })}
-                                  />
-                                </Field>
-                                <Field label="Attach">
-                                  <PickOne
-                                    value={layer.attachment}
-                                    options={["mechanical", "adhesive"]}
-                                    onChange={(v) =>
-                                      editLayer({
-                                        attachment: v as UnderlaymentLayer["attachment"],
-                                      })
-                                    }
-                                  />
-                                </Field>
-                                {layer.attachment === "mechanical" ? (
-                                  <Field label="Fasteners / 4×8 board">
-                                    <PickOne
-                                      value={String(
-                                        layer.fastenersPerBoard || fastenerOptions[0] || 5,
-                                      )}
-                                      options={fastenerOptions.map(String)}
-                                      onChange={(v) => editLayer({ fastenersPerBoard: Number(v) })}
-                                    />
-                                  </Field>
-                                ) : (
-                                  <>
-                                    <Field label="Adhesive">
-                                      <PickOne
-                                        value={layer.adhesiveName}
-                                        options={adhesiveOptions}
-                                        onChange={(v) =>
-                                          editLayer({ adhesiveName: v, substrate: "" })
-                                        }
-                                      />
-                                    </Field>
-                                    <Field label="Substrate">
-                                      <PickOne
-                                        value={layer.substrate}
-                                        options={substratesFor(layer.adhesiveName)}
-                                        onChange={(v) => editLayer({ substrate: v })}
-                                      />
-                                    </Field>
-                                  </>
-                                )}
-                                <div className="flex items-end justify-end">
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="text-destructive"
-                                    onClick={() =>
-                                      editSection(i, {
-                                        layers: (s.layers ?? []).filter((_, j) => j !== li),
-                                        underlaymentBoard: "",
-                                      })
-                                    }
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
+                            Underlayment step
+                          </button>{" "}
+                          ({sectionLayers(s).length} on this section).
+                        </p>
                       </div>
                       <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
                         <div className="flex items-center gap-2">
@@ -1807,7 +1725,272 @@ function EstimatePage() {
           </Card>
         </div>
 
+        {/* Legacy Underlayment / Insulation screen: select sections, configure a layer, apply. */}
         <div className={step === 2 ? "space-y-6" : "hidden"}>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Underlayment / Insulation</CardTitle>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">Select roof section(s) or:</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setUSel(sections.map((s) => s.id))}
+                >
+                  Select all sections
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="overflow-x-auto rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>W × L</TableHead>
+                      {[1, 2, 3, 4].map((n) => (
+                        <TableHead key={n}>Layer {n} : Attachment</TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sections.map((s) => {
+                      const sLayers = sectionLayers(s);
+                      const sel = uSel.includes(s.id);
+                      return (
+                        <TableRow
+                          key={s.id}
+                          onClick={() =>
+                            setUSel((prev) =>
+                              prev.includes(s.id)
+                                ? prev.filter((x) => x !== s.id)
+                                : [...prev, s.id],
+                            )
+                          }
+                          className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
+                        >
+                          <TableCell className="font-medium">{s.name}</TableCell>
+                          <TableCell className="tabular-nums">
+                            {s.width}x{s.length}
+                          </TableCell>
+                          {[0, 1, 2, 3].map((li) => {
+                            const l = sLayers[li];
+                            return (
+                              <TableCell key={li} className="whitespace-nowrap text-xs">
+                                {l
+                                  ? `${l.board} : ${
+                                      l.attachment === "mechanical"
+                                        ? `Mech (${l.fastenersPerBoard || 5}/bd)`
+                                        : l.adhesiveName || "Adhesive"
+                                    }`
+                                  : "None : None"}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-4 text-xs">
+                <span>
+                  Sq Ft to cover:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {sections
+                      .filter((s) => uSel.includes(s.id))
+                      .reduce((sum, s) => sum + s.length * s.width, 0)
+                      .toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  Man hours (bid):{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.underlaymentLaborHours ?? 0).toFixed(2)}
+                  </span>
+                </span>
+                <span>
+                  Labor cost:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {money((result?.r.underlaymentLaborHours ?? 0) * laborRate)}
+                  </span>
+                </span>
+              </div>
+
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                {/* Layer tabs + stack visual (legacy bottom-left) */}
+                <div className="rounded-md border">
+                  <div className="flex border-b">
+                    {[0, 1, 2, 3].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setUTab(n)}
+                        className={`px-3 py-1.5 text-xs font-medium ${
+                          uTab === n
+                            ? "border-b-2 border-primary text-primary"
+                            : "text-muted-foreground"
+                        }`}
+                      >
+                        Add Layer {n + 1}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="p-4">
+                    {(() => {
+                      const stackSec = sections.find((s) => uSel.includes(s.id)) ?? sections[0];
+                      const stackLayers = stackSec ? sectionLayers(stackSec) : [];
+                      return (
+                        <div className="mx-auto w-64 space-y-1">
+                          {[3, 2, 1, 0].map((li) => {
+                            const l = stackLayers[li];
+                            return (
+                              <div
+                                key={li}
+                                className={`flex h-8 items-center justify-center rounded-sm border text-[11px] ${
+                                  li === uTab ? "ring-2 ring-primary" : ""
+                                } ${
+                                  l
+                                    ? "bg-amber-100 font-medium dark:bg-amber-300/20"
+                                    : "border-dashed text-muted-foreground"
+                                }`}
+                              >
+                                {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
+                              </div>
+                            );
+                          })}
+                          <div className="flex h-8 items-center justify-center rounded-sm bg-blue-500/80 text-[11px] font-semibold text-white">
+                            Deck{stackSec ? ` (${stackSec.deckType})` : ""}
+                          </div>
+                          <p className="pt-1 text-center text-[11px] text-muted-foreground">
+                            {stackSec ? `Showing ${stackSec.name}` : "Add a section first"}
+                          </p>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* Insulation type + attachment (legacy bottom-right) */}
+                <div className="space-y-3 rounded-md border p-4">
+                  <p className="text-xs font-semibold">Select insulation type</p>
+                  <div className="flex flex-wrap gap-2">
+                    {boardOptions.map((b) => (
+                      <button
+                        key={b}
+                        type="button"
+                        onClick={() => setUBoard(b)}
+                        className={`rounded-md border px-2.5 py-2 text-xs ${
+                          uBoard === b
+                            ? "border-primary bg-primary/10 font-medium"
+                            : "hover:bg-muted"
+                        }`}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Underlayment price per sq ft:{" "}
+                    <span className="font-semibold tabular-nums">
+                      {(admin.underlaymentPrices?.[uBoard] ?? 0).toFixed(2)}
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <Field label="Attachment method">
+                      <PickOne
+                        value={uAttach}
+                        options={["mechanical", "adhesive"]}
+                        onChange={(v) => setUAttach(v as "mechanical" | "adhesive")}
+                      />
+                    </Field>
+                    {uAttach === "mechanical" ? (
+                      <Field label="Fasteners / 4×8 board">
+                        <PickOne
+                          value={String(uFast || fastenerOptions[0] || 5)}
+                          options={fastenerOptions.map(String)}
+                          onChange={(v) => setUFast(Number(v))}
+                        />
+                      </Field>
+                    ) : (
+                      <>
+                        <Field label="Adhesive">
+                          <PickOne
+                            value={uAdh}
+                            options={adhesiveOptions}
+                            onChange={(v) => {
+                              setUAdh(v);
+                              setUSub("");
+                            }}
+                          />
+                        </Field>
+                        <Field label="Substrate">
+                          <PickOne
+                            value={uSub}
+                            options={substratesFor(uAdh)}
+                            onChange={(v) => setUSub(v)}
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      disabled={!uBoard || uSel.length === 0}
+                      onClick={() =>
+                        setSections((prev) =>
+                          prev.map((s) => {
+                            if (!uSel.includes(s.id)) return s;
+                            const nextLayers = [...sectionLayers(s)];
+                            const idx = Math.min(uTab, nextLayers.length);
+                            nextLayers[idx] = {
+                              board: uBoard,
+                              attachment: uAttach,
+                              fastenersPerBoard:
+                                uAttach === "mechanical" ? uFast || fastenerOptions[0] || 5 : 0,
+                              adhesiveName: uAttach === "adhesive" ? uAdh : "",
+                              substrate: uAttach === "adhesive" ? uSub : "",
+                            };
+                            return { ...s, layers: nextLayers, underlaymentBoard: "" };
+                          }),
+                        )
+                      }
+                    >
+                      Apply layer {uTab + 1} to selected
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={uSel.length === 0}
+                      onClick={() =>
+                        setSections((prev) =>
+                          prev.map((s) =>
+                            uSel.includes(s.id)
+                              ? {
+                                  ...s,
+                                  layers: sectionLayers(s).filter((_, j) => j !== uTab),
+                                  underlaymentBoard: "",
+                                }
+                              : s,
+                          ),
+                        )
+                      }
+                    >
+                      None (clear layer {uTab + 1})
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Pick sections above, choose a board and attachment, then apply. Layers bill
+                    board $/sqft × area × 1.06 waste plus their layout/fastener or adhesive labor.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className={step === 3 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Parapets</CardTitle>
@@ -1995,7 +2178,7 @@ function EstimatePage() {
                             ["Skirt", "skirtInches"],
                             ["Cant", "cantInches"],
                             ["Vertical", "verticalInches"],
-                            ["Wall top", "wallTopInches"],
+                            ["Top of Wall", "wallTopInches"],
                             ["Drop", "dropInches"],
                           ];
                           return (
@@ -2025,8 +2208,11 @@ function EstimatePage() {
                     );
                   })()}
 
-                  {/* Right rail: parapet summary */}
+                  {/* Right rail: legacy wall-profile diagram + parapet summary */}
                   <div className="space-y-2">
+                    <ParapetProfileDiagram
+                      p={parapets[Math.min(selParapet, parapets.length - 1)]!}
+                    />
                     <div className="overflow-x-auto rounded-md border">
                       <Table>
                         <TableHeader>
@@ -2068,6 +2254,50 @@ function EstimatePage() {
                         </TableBody>
                       </Table>
                     </div>
+                    {/* Legacy bottom readouts: Vertical Wall / Total Wall / Parapet Membrane */}
+                    {(() => {
+                      const girthOf = (p2: ParapetInput) =>
+                        (p2.skirtInches ?? 0) +
+                          (p2.cantInches ?? 0) +
+                          (p2.verticalInches ?? 0) +
+                          (p2.wallTopInches ?? 0) +
+                          (p2.dropInches ?? 0) || p2.girthInches;
+                      const vertSqFt = parapets.reduce(
+                        (s2, p2) => s2 + (p2.lengthFt * (p2.verticalInches ?? 0)) / 12,
+                        0,
+                      );
+                      const totalSqFt = parapets.reduce(
+                        (s2, p2) => s2 + (p2.lengthFt * girthOf(p2)) / 12,
+                        0,
+                      );
+                      const membraneSqFt = parapets.reduce((s2, p2) => {
+                        const pieces = p2.pieces ?? 1;
+                        const adjLen = pieces >= 1 ? p2.lengthFt + 1 + pieces : 0;
+                        return s2 + (Math.ceil(girthOf(p2)) / 12) * adjLen;
+                      }, 0);
+                      return (
+                        <div className="flex flex-wrap justify-between gap-2 rounded-md border px-3 py-2 text-[11px]">
+                          <span>
+                            Vertical Wall Sq Ft:{" "}
+                            <span className="font-semibold tabular-nums">
+                              {vertSqFt.toFixed(2)}
+                            </span>
+                          </span>
+                          <span>
+                            Total Wall Sq Ft:{" "}
+                            <span className="font-semibold tabular-nums">
+                              {totalSqFt.toFixed(2)}
+                            </span>
+                          </span>
+                          <span>
+                            Parapet Membrane Sq Ft:{" "}
+                            <span className="font-semibold tabular-nums">
+                              {membraneSqFt.toFixed(2)}
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })()}
                     <p className="text-xs text-muted-foreground">
                       Click a row to edit that parapet.
                     </p>
@@ -2078,7 +2308,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 3 ? "space-y-6" : "hidden"}>
+        <div className={step === 4 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Curbs</CardTitle>
@@ -2212,24 +2442,36 @@ function EstimatePage() {
                         </div>
                         {/* Legacy wrap-material model: style 1..6 + heights C/D. Styles 3/4 are
                             quote-required in legacy (no auto price). */}
-                        <div className="mt-2 space-y-1">
+                        <div className="mt-2 space-y-2">
                           <p className="text-xs font-medium text-muted-foreground">
-                            Membrane wrap (legacy curb style; styles 3 &amp; 4 need a quote)
+                            Select curb style (styles 3 &amp; 4 need a quote)
                           </p>
-                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                            <Field label="Style">
-                              <PickOne
-                                value={c.styleId !== undefined ? String(c.styleId) : ""}
-                                options={["1", "2", "3", "4", "5", "6"]}
-                                onChange={(v) =>
+                          <div className="flex flex-wrap gap-2">
+                            {[1, 2, 3, 4, 5, 6].map((id) => (
+                              <button
+                                key={id}
+                                type="button"
+                                title={`Legacy curb style ${id}${id === 3 || id === 4 ? " (quote required)" : ""}`}
+                                onClick={() =>
                                   setCurbs((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, styleId: Number(v) } : x,
-                                    ),
+                                    prev.map((x, j) => (j === i ? { ...x, styleId: id } : x)),
                                   )
                                 }
-                              />
-                            </Field>
+                                className={`flex flex-col items-center rounded-md border px-2 py-1.5 ${
+                                  c.styleId === id
+                                    ? "border-primary bg-primary/10"
+                                    : "hover:bg-muted"
+                                }`}
+                              >
+                                <CurbStyleIcon styleId={id} />
+                                <span className="text-[10px] font-medium">
+                                  {id}
+                                  {id === 3 || id === 4 ? " (quote)" : ""}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
                             <Field label="C (in)">
                               <Input
                                 type="number"
@@ -2244,7 +2486,7 @@ function EstimatePage() {
                                 }
                               />
                             </Field>
-                            <Field label="D (in)">
+                            <Field label="Skirt D (in)">
                               <Input
                                 type="number"
                                 min={0}
@@ -2264,8 +2506,9 @@ function EstimatePage() {
                     );
                   })()}
 
-                  {/* Right rail: curb summary */}
+                  {/* Right rail: legacy dim readout + diagram, then the curb summary */}
                   <div className="space-y-2">
+                    <CurbDiagram c={curbs[Math.min(selCurb, curbs.length - 1)]!} />
                     <div className="overflow-x-auto rounded-md border">
                       <Table>
                         <TableHeader>
@@ -2319,7 +2562,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 4 ? "space-y-6" : "hidden"}>
+        <div className={step === 5 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Accessories</CardTitle>
@@ -2533,7 +2776,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 5 ? "space-y-6" : "hidden"}>
+        <div className={step === 6 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Metals</CardTitle>
@@ -2626,7 +2869,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 6 ? "space-y-6" : "hidden"}>
+        <div className={step === 7 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
@@ -2721,7 +2964,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 7 ? "space-y-6" : "hidden"}>
+        <div className={step === 8 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Pricing controls</CardTitle>
@@ -2920,7 +3163,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 8 ? "space-y-6" : "hidden"}>
+        <div className={step === 9 ? "space-y-6" : "hidden"}>
           {hasOrderingSummary && (
             <Card>
               <CardHeader>
@@ -3289,6 +3532,269 @@ function EdgeDiagram({ section }: { section: BidSectionInput }) {
         <SideInfo side="C" fallbackLen={section.length} className="text-center" />
         <div />
       </div>
+    </div>
+  );
+}
+
+/**
+ * Legacy Parapets screen wall-profile diagram: the membrane path over the wall drawn live from
+ * the five profile dims (skirt along the roof, cant diagonal, vertical up, top-of-wall across,
+ * drop down the far side), with red inch labels like the legacy app.
+ */
+function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
+  const skirt = p.skirtInches ?? 0;
+  const cant = p.cantInches ?? 0;
+  const vert = p.verticalInches ?? 0;
+  const top = p.wallTopInches ?? 0;
+  const drop = p.dropInches ?? 0;
+  const girth = skirt + cant + vert + top + drop || p.girthInches;
+  const c707 = 0.7071;
+  // Membrane path in inch-space, y up.
+  const pts: Array<[number, number]> = [[0, 0]];
+  const push = (dx: number, dy: number) => {
+    const [x, y] = pts[pts.length - 1]!;
+    pts.push([x + dx, y + dy]);
+  };
+  push(skirt, 0); // skirt along the roof
+  push(cant * c707, cant * c707); // cant up at 45°
+  push(0, vert); // vertical wall
+  push(top, 0); // top of wall
+  push(0, -drop); // drop down the outside
+  const xs = pts.map((q) => q[0]);
+  const ys = pts.map((q) => q[1]);
+  const w = Math.max(1, Math.max(...xs) - Math.min(...xs));
+  const h = Math.max(1, Math.max(...ys) - Math.min(...ys));
+  const scale = Math.min(150 / w, 120 / h);
+  const X = (x: number) => 40 + (x - Math.min(...xs)) * scale;
+  const Y = (y: number) => 150 - (y - Math.min(...ys)) * scale;
+  const path = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${X(x)},${Y(y)}`).join(" ");
+  const mid = (i: number): [number, number] => {
+    const a = pts[i]!;
+    const b = pts[i + 1]!;
+    return [(X(a[0]) + X(b[0])) / 2, (Y(a[1]) + Y(b[1])) / 2];
+  };
+  const labels: Array<{ v: number; at: [number, number]; dx: number; dy: number }> = [
+    { v: skirt, at: mid(0), dx: 0, dy: 14 },
+    { v: cant, at: mid(1), dx: 14, dy: 6 },
+    { v: vert, at: mid(2), dx: -8, dy: 0 },
+    { v: top, at: mid(3), dx: 0, dy: -8 },
+    { v: drop, at: mid(4), dx: 14, dy: 0 },
+  ];
+  return (
+    <div className="rounded-md border p-3">
+      <p className="mb-1 text-xs font-semibold">{p.name} — wall profile</p>
+      {girth <= 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          Enter the wall dims to draw the profile.
+        </p>
+      ) : (
+        <svg viewBox="0 0 230 170" className="h-40 w-full text-foreground">
+          {/* roof deck baseline */}
+          <line
+            x1="8"
+            y1={Y(0)}
+            x2={X(0) + 4}
+            y2={Y(0)}
+            stroke="currentColor"
+            strokeWidth="1"
+            opacity="0.35"
+          />
+          <path d={path} fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
+          {labels
+            .filter((l) => l.v > 0)
+            .map((l, i) => (
+              <text
+                key={i}
+                x={l.at[0] + l.dx}
+                y={l.at[1] + l.dy}
+                textAnchor="middle"
+                className="fill-red-600 text-[10px] font-semibold dark:fill-red-400"
+              >
+                {l.v}"
+              </text>
+            ))}
+          <text
+            x="222"
+            y="164"
+            textAnchor="end"
+            className="fill-red-600 text-[10px] font-semibold dark:fill-red-400"
+          >
+            Girth: {girth}"
+          </text>
+        </svg>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        Skirt → cant → vertical → top of wall → drop
+      </p>
+    </div>
+  );
+}
+
+/** Small legacy-style curb thumbnail per CurbStyle.ID (schematic; 3 & 4 are quote-required). */
+function CurbStyleIcon({ styleId }: { styleId: number }) {
+  const box = (
+    <>
+      {/* top face */}
+      <polygon
+        points="12,10 28,5 42,11 26,16"
+        className="fill-amber-100 dark:fill-amber-300/20"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      {/* left + right faces */}
+      <polygon
+        points="12,10 26,16 26,30 12,24"
+        className="fill-amber-200/70 dark:fill-amber-300/10"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      <polygon
+        points="26,16 42,11 42,25 26,30"
+        className="fill-amber-200/40 dark:fill-amber-300/5"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+    </>
+  );
+  return (
+    <svg viewBox="0 0 52 36" className="h-9 w-12 text-foreground">
+      {styleId === 1 && (
+        <>
+          {box}
+          <polygon
+            points="16,11.5 28,7.5 38,12 27,15.5"
+            className="fill-background"
+            stroke="currentColor"
+            strokeWidth="0.75"
+          />
+        </>
+      )}
+      {styleId === 2 && (
+        <>
+          {box}
+          <polygon
+            points="9,9 28,3 45,10 26,17"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+        </>
+      )}
+      {styleId === 3 && box}
+      {styleId === 4 && (
+        <path
+          d="M14,6 h14 v6 h-8 v16 h-6 z"
+          className="fill-amber-100 dark:fill-amber-300/20"
+          stroke="currentColor"
+          strokeWidth="1"
+        />
+      )}
+      {styleId === 5 && (
+        <>
+          {box}
+          <rect
+            x="17"
+            y="18"
+            width="7"
+            height="7"
+            className="fill-background"
+            stroke="currentColor"
+            strokeWidth="0.75"
+          />
+        </>
+      )}
+      {styleId === 6 && (
+        <>
+          <path
+            d="M14,6 h16 v6 h-9 v16 h-7 z"
+            className="fill-slate-200 dark:fill-slate-500/30"
+            stroke="currentColor"
+            strokeWidth="1"
+          />
+          <text x="36" y="26" className="fill-current text-[8px]">
+            M
+          </text>
+        </>
+      )}
+      {/* skirt flange */}
+      {styleId !== 4 && styleId !== 6 && (
+        <>
+          <line x1="12" y1="24" x2="4" y2="29" stroke="currentColor" strokeWidth="1" />
+          <line x1="26" y1="30" x2="26" y2="35" stroke="currentColor" strokeWidth="1" />
+          <line x1="42" y1="25" x2="50" y2="29" stroke="currentColor" strokeWidth="1" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/** Legacy Curbs screen info panel: red A/B/C/D readout + labeled isometric curb diagram. */
+function CurbDiagram({ c }: { c: CurbInput }) {
+  return (
+    <div className="rounded-md border p-3">
+      <div className="flex items-center gap-4">
+        <div className="space-y-0.5 text-sm font-semibold text-red-600 dark:text-red-400">
+          <p>A: {c.widthIn}</p>
+          <p>B: {c.lengthIn}</p>
+          <p>C: {c.dimCIn ?? 0}</p>
+          <p>D: {c.dimDIn ?? 0}</p>
+        </div>
+        <svg viewBox="0 0 220 150" className="h-32 flex-1 text-foreground">
+          {/* skirt flange (D) */}
+          <polygon
+            points="40,86 110,118 186,90 152,74 110,90 74,72"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1"
+            opacity="0.5"
+          />
+          {/* curb box */}
+          <polygon
+            points="74,40 110,26 152,42 112,58"
+            className="fill-amber-100 dark:fill-amber-300/20"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <polygon
+            points="86,44 112,34 138,44 112,53"
+            className="fill-background"
+            stroke="currentColor"
+            strokeWidth="0.75"
+          />
+          <polygon
+            points="74,40 112,58 112,90 74,72"
+            className="fill-amber-200/70 dark:fill-amber-300/10"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          <polygon
+            points="112,58 152,42 152,74 112,90"
+            className="fill-amber-200/40 dark:fill-amber-300/5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+          />
+          {/* dim labels with leader arrows */}
+          <line x1="78" y1="30" x2="106" y2="19" stroke="currentColor" strokeWidth="0.75" />
+          <text x="86" y="16" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
+            A
+          </text>
+          <line x1="116" y1="20" x2="150" y2="34" stroke="currentColor" strokeWidth="0.75" />
+          <text x="142" y="24" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
+            B
+          </text>
+          <line x1="66" y1="42" x2="66" y2="70" stroke="currentColor" strokeWidth="0.75" />
+          <text x="56" y="58" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
+            C
+          </text>
+          <line x1="52" y1="94" x2="42" y2="88" stroke="currentColor" strokeWidth="0.75" />
+          <text x="40" y="106" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
+            D
+          </text>
+        </svg>
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        A × B footprint, C curb height, D skirt — nearest ¼"
+      </p>
     </div>
   );
 }
