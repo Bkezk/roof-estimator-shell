@@ -2061,14 +2061,11 @@ function EstimatePage() {
                         </div>
                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                           <Field label="Length (ft)">
-                            <Input
-                              type="number"
+                            <NumInput
                               value={p.lengthFt}
-                              onChange={(e) =>
+                              onValue={(n) =>
                                 setParapets((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, lengthFt: num(e.target.value) } : x,
-                                  ),
+                                  prev.map((x, j) => (j === i ? { ...x, lengthFt: n } : x)),
                                 )
                               }
                             />
@@ -2096,15 +2093,12 @@ function EstimatePage() {
                             />
                           </Field>
                           <Field label="Pieces">
-                            <Input
-                              type="number"
+                            <NumInput
                               min={0}
                               value={p.pieces ?? 1}
-                              onChange={(e) =>
+                              onValue={(n) =>
                                 setParapets((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, pieces: num(e.target.value) } : x,
-                                  ),
+                                  prev.map((x, j) => (j === i ? { ...x, pieces: n } : x)),
                                 )
                               }
                             />
@@ -2189,11 +2183,10 @@ function EstimatePage() {
                               <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
                                 {dims.map(([label, key]) => (
                                   <Field key={key} label={label}>
-                                    <Input
-                                      type="number"
+                                    <NumInput
                                       min={0}
                                       value={p[key] ?? 0}
-                                      onChange={(e) => setDim(key, num(e.target.value))}
+                                      onValue={(n) => setDim(key, n)}
                                     />
                                   </Field>
                                 ))}
@@ -2379,40 +2372,11 @@ function EstimatePage() {
                         </div>
                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                           <Field label="Quantity">
-                            <Input
-                              type="number"
+                            <NumInput
                               value={c.quantity}
-                              onChange={(e) =>
+                              onValue={(n) =>
                                 setCurbs((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, quantity: num(e.target.value) } : x,
-                                  ),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="A (in)">
-                            <Input
-                              type="number"
-                              value={c.widthIn}
-                              onChange={(e) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, widthIn: num(e.target.value) } : x,
-                                  ),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="B (in)">
-                            <Input
-                              type="number"
-                              value={c.lengthIn}
-                              onChange={(e) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) =>
-                                    j === i ? { ...x, lengthIn: num(e.target.value) } : x,
-                                  ),
+                                  prev.map((x, j) => (j === i ? { ...x, quantity: n } : x)),
                                 )
                               }
                             />
@@ -2439,9 +2403,49 @@ function EstimatePage() {
                               }
                             />
                           </Field>
+                          {/* Legacy curb screen has its OWN Mil/Color — the wrap rate keys on
+                              them, not the bid default. */}
+                          <Field label="Mil">
+                            <PickOne
+                              value={
+                                c.thicknessMil !== undefined
+                                  ? `${c.thicknessMil}mil`
+                                  : "Bid default"
+                              }
+                              options={["Bid default", "40mil", "50mil", "60mil"]}
+                              onChange={(v) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) => {
+                                    if (j !== i) return x;
+                                    const nx = { ...x };
+                                    if (v === "Bid default") delete nx.thicknessMil;
+                                    else nx.thicknessMil = parseInt(v, 10);
+                                    return nx;
+                                  }),
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field label="Color">
+                            <PickOne
+                              value={c.color ?? "Bid default"}
+                              options={["Bid default", ...colorOptions]}
+                              onChange={(v) =>
+                                setCurbs((prev) =>
+                                  prev.map((x, j) => {
+                                    if (j !== i) return x;
+                                    const nx = { ...x };
+                                    if (v === "Bid default") delete nx.color;
+                                    else nx.color = v;
+                                    return nx;
+                                  }),
+                                )
+                              }
+                            />
+                          </Field>
                         </div>
-                        {/* Legacy wrap-material model: style 1..6 + heights C/D. Styles 3/4 are
-                            quote-required in legacy (no auto price). */}
+                        {/* Legacy wrap-material model: style 1..6 + the A/B/C/D dims. Styles 3/4
+                            are quote-required in legacy (no auto price). */}
                         <div className="mt-2 space-y-2">
                           <p className="text-xs font-medium text-muted-foreground">
                             Select curb style (styles 3 &amp; 4 need a quote)
@@ -2471,71 +2475,48 @@ function EstimatePage() {
                               </button>
                             ))}
                           </div>
-                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                            <Field label="C (in)">
-                              <Input
-                                type="number"
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Enter curb dimensions in nearest .25&quot;
+                          </p>
+                          <div className="grid grid-cols-4 gap-2">
+                            <Field label="A:">
+                              <NumInput
+                                value={c.widthIn}
+                                onValue={(n) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) => (j === i ? { ...x, widthIn: n } : x)),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="B:">
+                              <NumInput
+                                value={c.lengthIn}
+                                onValue={(n) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) => (j === i ? { ...x, lengthIn: n } : x)),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="C:">
+                              <NumInput
                                 min={0}
                                 value={c.dimCIn ?? 0}
-                                onChange={(e) =>
+                                onValue={(n) =>
                                   setCurbs((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, dimCIn: num(e.target.value) } : x,
-                                    ),
+                                    prev.map((x, j) => (j === i ? { ...x, dimCIn: n } : x)),
                                   )
                                 }
                               />
                             </Field>
-                            <Field label="Skirt D (in)">
-                              <Input
-                                type="number"
+                            <Field label="Skirt (D):">
+                              <NumInput
                                 min={0}
                                 value={c.dimDIn ?? 0}
-                                onChange={(e) =>
+                                onValue={(n) =>
                                   setCurbs((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, dimDIn: num(e.target.value) } : x,
-                                    ),
-                                  )
-                                }
-                              />
-                            </Field>
-                            {/* Legacy curb screen has its OWN Mil/Color — the wrap rate keys on
-                                them, not the bid default. */}
-                            <Field label="Mil">
-                              <PickOne
-                                value={
-                                  c.thicknessMil !== undefined
-                                    ? `${c.thicknessMil}mil`
-                                    : "Bid default"
-                                }
-                                options={["Bid default", "40mil", "50mil", "60mil"]}
-                                onChange={(v) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "Bid default") delete nx.thicknessMil;
-                                      else nx.thicknessMil = parseInt(v, 10);
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="Color">
-                              <PickOne
-                                value={c.color ?? "Bid default"}
-                                options={["Bid default", ...colorOptions]}
-                                onChange={(v) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "Bid default") delete nx.color;
-                                      else nx.color = v;
-                                      return nx;
-                                    }),
+                                    prev.map((x, j) => (j === i ? { ...x, dimDIn: n } : x)),
                                   )
                                 }
                               />
@@ -3723,107 +3704,193 @@ function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
 
 /** Small legacy-style curb thumbnail per CurbStyle.ID (schematic; 3 & 4 are quote-required). */
 function CurbStyleIcon({ styleId }: { styleId: number }) {
-  // Parametric isometric curb like the legacy thumbnails: a box of height h on a flared skirt.
-  const iso = (h: number, opts: { open?: boolean; lid?: boolean; hole?: boolean } = {}) => {
-    const ty = 14; // box top center-side y
-    const by = ty + h;
-    const gy = by + 6; // ground (skirt) y
-    return (
-      <>
-        {/* skirt (flared base) */}
-        <polygon
-          points={`16,${by} 32,${by + 6} 60,${gy} 32,${gy + 7} 4,${gy}`}
-          className="fill-amber-200/50 dark:fill-amber-300/10"
-          stroke="currentColor"
-          strokeWidth="1"
-        />
-        <line x1="16" y1={by} x2="4" y2={gy} stroke="currentColor" strokeWidth="1" />
-        <line x1="48" y1={by} x2="60" y2={gy} stroke="currentColor" strokeWidth="1" />
-        {/* box faces */}
-        <polygon
-          points={`16,${ty} 32,${ty - 6} 48,${ty} 32,${ty + 6}`}
-          className="fill-amber-100 dark:fill-amber-300/25"
-          stroke="currentColor"
-          strokeWidth="1"
-        />
-        <polygon
-          points={`16,${ty} 32,${ty + 6} 32,${by + 6} 16,${by}`}
-          className="fill-amber-200/80 dark:fill-amber-300/15"
-          stroke="currentColor"
-          strokeWidth="1"
-        />
-        <polygon
-          points={`32,${ty + 6} 48,${ty} 48,${by} 32,${by + 6}`}
-          className="fill-amber-200/50 dark:fill-amber-300/5"
-          stroke="currentColor"
-          strokeWidth="1"
-        />
-        {opts.open && (
-          <polygon
-            points={`21,${ty} 32,${ty - 4} 43,${ty} 32,${ty + 4}`}
-            className="fill-background"
-            stroke="currentColor"
-            strokeWidth="0.75"
-          />
-        )}
-        {opts.lid && (
-          <polygon
-            points={`12,${ty} 32,${ty - 8} 52,${ty} 32,${ty + 8}`}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-        )}
-        {opts.hole && (
-          <rect
-            x="20"
-            y={ty + 5}
-            width="8"
-            height={Math.max(5, h - 5)}
-            className="fill-background"
-            stroke="currentColor"
-            strokeWidth="0.75"
-          />
-        )}
-      </>
-    );
-  };
-  // Wall bracket (legacy's 4th/5th thumbnails): two vertical panels with a gap.
-  const bracket = (metal: boolean) => (
+  // Faithful redraws of the legacy thumbnails: a curb box on a flared skirt with corner lobes
+  // (open w/ membrane flap, open, capped) and the through-wall scupper (plate—chute—plate,
+  // plain or "Metal"). Ids 3/4 are the quote-required styles.
+  const tan = "fill-amber-50 dark:fill-amber-300/20";
+  const tanSide = "fill-amber-100 dark:fill-amber-300/10";
+  const skirt = (
     <>
       <polygon
-        points="18,8 28,4 28,30 18,34"
-        className={
-          metal ? "fill-slate-200 dark:fill-slate-500/30" : "fill-amber-100 dark:fill-amber-300/25"
-        }
+        points="4,34 32,22 60,34 32,46"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <ellipse
+        cx="7"
+        cy="34"
+        rx="4"
+        ry="2.5"
+        className={tan}
         stroke="currentColor"
         strokeWidth="1"
+      />
+      <ellipse
+        cx="57"
+        cy="34"
+        rx="4"
+        ry="2.5"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      <ellipse
+        cx="32"
+        cy="44.5"
+        rx="4"
+        ry="2.5"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+    </>
+  );
+  const box = (open: boolean) => (
+    <>
+      {/* wall top rim (outer diamond, hole punched when open) */}
+      <polygon
+        points="17,20 32,12.5 47,20 32,27.5"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      {open && (
+        <>
+          <polygon
+            points="23,20 32,15.5 41,20 32,24.5"
+            className="fill-background"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+          <line x1="23" y1="20" x2="23" y2="23" stroke="currentColor" strokeWidth="0.8" />
+          <line x1="32" y1="24.5" x2="32" y2="27.5" stroke="currentColor" strokeWidth="0.8" />
+        </>
+      )}
+      {/* outer walls */}
+      <polygon
+        points="17,20 32,27.5 32,36.5 17,29"
+        className={tanSide}
+        stroke="currentColor"
+        strokeWidth="1.4"
       />
       <polygon
-        points="36,4 46,8 46,34 36,30"
-        className={
-          metal ? "fill-slate-200 dark:fill-slate-500/30" : "fill-amber-100 dark:fill-amber-300/25"
-        }
+        points="32,27.5 47,20 47,29 32,36.5"
+        className={tanSide}
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+    </>
+  );
+  const scupper = (metal: boolean) => (
+    <>
+      {/* left plate */}
+      <polygon
+        points="8,10 20,5 20,29 8,34"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <line
+        x1="10.5"
+        y1="11"
+        x2="10.5"
+        y2="31.5"
+        stroke="currentColor"
+        strokeWidth="0.8"
+        strokeDasharray="1.2,1.6"
+      />
+      {/* chute */}
+      <polygon
+        points="20,13 25,10.5 49,16.5 44,19"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <polygon
+        points="20,13 44,19 44,30 20,24"
+        className={tanSide}
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      {/* right plate */}
+      <polygon
+        points="44,13 56,8 56,32 44,37"
+        className={tan}
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <line
+        x1="53.5"
+        y1="10.5"
+        x2="53.5"
+        y2="34"
+        stroke="currentColor"
+        strokeWidth="0.8"
+        strokeDasharray="1.2,1.6"
+      />
+      {/* opening in the right plate */}
+      <polygon
+        points="46.5,19 52.5,16.5 52.5,26.5 46.5,29"
+        className="fill-background"
         stroke="currentColor"
         strokeWidth="1"
       />
-      <line x1="18" y1="34" x2="10" y2="38" stroke="currentColor" strokeWidth="1" />
-      <line x1="46" y1="34" x2="54" y2="38" stroke="currentColor" strokeWidth="1" />
       {metal && (
-        <text x="32" y="22" textAnchor="middle" className="fill-current text-[7px] font-semibold">
+        <text
+          x="31"
+          y="25"
+          textAnchor="middle"
+          transform="skewY(8)"
+          className="fill-current text-[7px] font-semibold"
+        >
           Metal
         </text>
       )}
     </>
   );
   return (
-    <svg viewBox="0 0 64 44" className="h-10 w-14 text-foreground">
-      {styleId === 1 && iso(12, { open: true })}
-      {styleId === 2 && iso(9, { lid: true })}
-      {styleId === 3 && iso(5)}
-      {styleId === 4 && bracket(false)}
-      {styleId === 5 && iso(12, { hole: true })}
-      {styleId === 6 && bracket(true)}
+    <svg viewBox="0 0 64 48" className="h-11 w-14 text-foreground">
+      {(styleId === 1 || styleId === 2 || styleId === 3 || styleId === 4) && skirt}
+      {styleId === 1 && (
+        <>
+          {box(true)}
+          {/* peeled membrane flap at the front-right corner */}
+          <path
+            d="M36,34 a9,9 0 0 0 9,-9 l3,2 a11,11 0 0 1 -10,10 z"
+            className="fill-amber-100 dark:fill-amber-300/25"
+            stroke="currentColor"
+            strokeWidth="1.1"
+          />
+        </>
+      )}
+      {styleId === 2 && box(true)}
+      {styleId === 3 && box(false)}
+      {styleId === 4 && (
+        <>
+          {/* taller capped box (quote style) */}
+          <polygon
+            points="17,15 32,7.5 47,15 32,22.5"
+            className={tan}
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+          <polygon
+            points="17,15 32,22.5 32,36.5 17,29"
+            className={tanSide}
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+          <polygon
+            points="32,22.5 47,15 47,29 32,36.5"
+            className={tanSide}
+            stroke="currentColor"
+            strokeWidth="1.4"
+          />
+        </>
+      )}
+      {styleId === 5 && scupper(false)}
+      {styleId === 6 && scupper(true)}
     </svg>
   );
 }
@@ -3906,6 +3973,41 @@ function LegacyGroup({ title, children }: { title: string; children: React.React
       <p className="mb-2 text-xs font-semibold">{title}</p>
       {children}
     </div>
+  );
+}
+
+/**
+ * Number input that keeps its raw text while focused — a default 0 can be backspaced or is
+ * replaced by select-on-focus (legacy field behavior) — and commits the parsed number.
+ */
+function NumInput({
+  value,
+  onValue,
+  min,
+  className,
+}: {
+  value: number;
+  onValue: (n: number) => void;
+  min?: number;
+  className?: string;
+}) {
+  const [text, setText] = useState<string | null>(null);
+  return (
+    <Input
+      type="number"
+      min={min}
+      className={className}
+      value={text ?? String(value)}
+      onFocus={(e) => {
+        setText(String(value));
+        e.currentTarget.select();
+      }}
+      onChange={(e) => {
+        setText(e.target.value);
+        onValue(num(e.target.value));
+      }}
+      onBlur={() => setText(null)}
+    />
   );
 }
 
