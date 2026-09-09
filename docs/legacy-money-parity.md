@@ -808,3 +808,15 @@ and bills `+ layer.QuoteAdhesiveUnits` (the raw container count) instead. Those 
 QuoteAdhesiveUnits not modeled" should become: model a per-layer `quoteAdhesiveUnits` integer,
 prompt for it only when the board's group ∈ {16,18,19} under an adhered attachment, and add it
 verbatim to the adhesive-unit total.
+
+**§10.7 implementation status (2026-09-09).** All three corrections are wired: (1) quotes now
+carry a shared ID — one quote applied to several sections bills ONCE (legacy CustomQuotes dedup;
+id-less quotes from older saves bill per occurrence), and re-quoting a layer offers the
+frmQuoteDecision Merge (sums LumpSum + labor hours, days converted) vs Start-new choice;
+(2) the Flute Filler dialog carries the verbatim frmFluteFillerCalc "Calculate pieces" helper
+(piece length ft / ridge-to-ridge in / waste %, `fluteFillerPieces`); (3) per-layer
+`quoteAdhesiveUnits`: an adhered layer over a board whose AdhesiveGroupID ∈ {16,18,19} skips the
+coverage formula and bills the raw container count verbatim (entered on the attachment panel;
+missing containers warn). Material/labor buckets were already correct (our materialUnderlayment
+IS the legacy dMaterial[5] underlayment slot; the §10.6 prose said "dTotals[6]" because that is
+this port's name for the same slot in the money chain).

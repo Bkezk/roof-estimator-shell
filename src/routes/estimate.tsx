@@ -35,6 +35,8 @@ import {
   type CurbInput,
   type MetalLine,
   sectionLayers,
+  fluteFillerPieces,
+  type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import {
@@ -393,6 +395,14 @@ function EstimatePage() {
   const [qCpp, setQCpp] = useState(0);
   const [qLabor, setQLabor] = useState(0);
   const [qLaborDays, setQLaborDays] = useState(false);
+  // frmQuoteDecision (§10.7): merge into an existing quote on the selection, or start new.
+  const [qMerge, setQMerge] = useState(true);
+  // frmFluteFillerCalc inputs (§10.7): piece length (ft), ridge-to-ridge (in), waste %.
+  const [qFfLen, setQFfLen] = useState(4);
+  const [qFfR2R, setQFfR2R] = useState(24);
+  const [qFfPlus, setQFfPlus] = useState(0);
+  // Adhered-layer quote containers over tapered surfaces (§10.7 QuoteAdhesiveUnits).
+  const [uQAU, setUQAU] = useState(0);
   const openQuoteDialog = (board: string) => {
     setQName("New Quote");
     setQPieceMode(false);
@@ -401,7 +411,17 @@ function EstimatePage() {
     setQCpp(0);
     setQLabor(0);
     setQLaborDays(false);
+    setQMerge(true);
     setUQuoteBoard(board);
+  };
+  /** The existing quote for this entry on the selected sections' current layer, if any. */
+  const existingQuoteFor = (board: string) => {
+    for (const s of sections) {
+      if (!uSel.includes(s.id)) continue;
+      const l = sectionLayers(s)[uTab];
+      if (l?.quote && l.board === board) return l.quote;
+    }
+    return undefined;
   };
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
   const [uFast, setUFast] = useState(0);
@@ -2043,6 +2063,9 @@ function EstimatePage() {
                             onChange={(v) => setUSub(v)}
                           />
                         </Field>
+                        <Field label="Quote containers (over tapered)">
+                          <NumInput min={0} value={uQAU} onValue={setUQAU} />
+                        </Field>
                       </>
                     )}
                   </div>
@@ -2063,6 +2086,11 @@ function EstimatePage() {
                                 uAttach === "mechanical" ? uFast || fastenerOptions[0] || 5 : 0,
                               adhesiveName: uAttach === "adhesive" ? uAdh : "",
                               substrate: uAttach === "adhesive" ? uSub : "",
+                              // §10.7: containers billed verbatim when this layer sits over a
+                              // tapered/crickets-group board (engine checks the group).
+                              ...(uAttach === "adhesive" && uQAU > 0
+                                ? { quoteAdhesiveUnits: uQAU }
+                                : {}),
                             };
                             return { ...s, layers: nextLayers, underlaymentBoard: "" };
                           }),
@@ -2248,6 +2276,71 @@ function EstimatePage() {
                                 <Input value={qName} onChange={(e) => setQName(e.target.value)} />
                               </Field>
                             </div>
+                            {uQuoteBoard !== null && existingQuoteFor(uQuoteBoard) && (
+                              /* frmQuoteDecision (§10.7): merge sums LumpSum + labor hours. */
+                              <div className="flex items-center gap-4 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:bg-amber-950/30">
+                                <span>A quote already exists on this layer:</span>
+                                <label className="flex items-center gap-1">
+                                  <input
+                                    type="radio"
+                                    checked={qMerge}
+                                    onChange={() => setQMerge(true)}
+                                  />
+                                  Merge (add amounts)
+                                </label>
+                                <label className="flex items-center gap-1">
+                                  <input
+                                    type="radio"
+                                    checked={!qMerge}
+                                    onChange={() => setQMerge(false)}
+                                  />
+                                  Start new quote
+                                </label>
+                              </div>
+                            )}
+                            {uQuoteBoard === "Flute Filler" && (
+                              /* frmFluteFillerCalc (§10.7, verbatim formula): a helper that
+                                 fills Pieces; the quote bills whatever lands there. */
+                              <div className="rounded-md border p-3">
+                                <p className="pb-1 text-xs font-medium">Calculate pieces</p>
+                                <div className="grid grid-cols-4 items-end gap-2">
+                                  <Field label="Piece length (ft)">
+                                    <NumInput min={0} value={qFfLen} onValue={setQFfLen} />
+                                  </Field>
+                                  <Field label="Ridge-to-ridge (in)">
+                                    <NumInput min={0} value={qFfR2R} onValue={setQFfR2R} />
+                                  </Field>
+                                  <Field label="Waste %">
+                                    <NumInput min={0} value={qFfPlus} onValue={setQFfPlus} />
+                                  </Field>
+                                  {(() => {
+                                    const calc = fluteFillerPieces({
+                                      sections: sections
+                                        .filter((x) => uSel.includes(x.id))
+                                        .map((x) => ({ widthFt: x.width })),
+                                      pieceLengthFt: qFfLen,
+                                      ridgeToRidgeIn: qFfR2R,
+                                      wastePct: qFfPlus,
+                                    });
+                                    return (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => {
+                                          setQPieceMode(true);
+                                          setQPieces(
+                                            qFfPlus > 0 ? calc.piecesWithWaste : calc.pieces,
+                                          );
+                                        }}
+                                      >
+                                        Use {qFfPlus > 0 ? calc.piecesWithWaste : calc.pieces}
+                                        {qFfPlus > 0 ? ` (${calc.pieces} + waste)` : ""}
+                                      </Button>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            )}
                             <div className="rounded-md border p-3">
                               <p className="pb-1 text-xs font-medium">Labor</p>
                               <div className="flex items-end gap-3">
@@ -2330,6 +2423,35 @@ function EstimatePage() {
                           disabled={uSel.length === 0}
                           onClick={() => {
                             const board = uQuoteBoard!;
+                            // One QuoteUL shared across the selection: the same id bills ONCE
+                            // (§10.7 dedup). Merge sums LumpSum + labor hours (days converted
+                            // × hours-per-man-day), like frmQuoteDecision's merge path.
+                            type Q = NonNullable<UnderlaymentLayer["quote"]>;
+                            const hpd = admin?.settings.hoursPerDay ?? 9;
+                            const norm = (q: Q) =>
+                              q.laborInDays ? (q.laborAmount ?? 0) * hpd : (q.laborAmount ?? 0);
+                            const lumpOf = (q: Q) =>
+                              q.pieceMode
+                                ? (q.pieces ?? 0) * (q.costPerPiece ?? 0)
+                                : (q.lumpSum ?? 0);
+                            const entered: Q = {
+                              name: qName,
+                              ...(qPieceMode
+                                ? { pieceMode: true, pieces: qPieces, costPerPiece: qCpp }
+                                : { lumpSum: qLump }),
+                              laborAmount: qLabor,
+                              ...(qLaborDays ? { laborInDays: true } : {}),
+                            };
+                            const existing = existingQuoteFor(board);
+                            const quote: Q =
+                              existing && qMerge
+                                ? {
+                                    id: existing.id ?? crypto.randomUUID(),
+                                    name: existing.name,
+                                    lumpSum: lumpOf(existing) + lumpOf(entered),
+                                    laborAmount: norm(existing) + norm(entered),
+                                  }
+                                : { id: crypto.randomUUID(), ...entered };
                             setSections((prev) =>
                               prev.map((s) => {
                                 if (!uSel.includes(s.id)) return s;
@@ -2341,14 +2463,7 @@ function EstimatePage() {
                                   fastenersPerBoard: 0,
                                   adhesiveName: "",
                                   substrate: "",
-                                  quote: {
-                                    name: qName,
-                                    ...(qPieceMode
-                                      ? { pieceMode: true, pieces: qPieces, costPerPiece: qCpp }
-                                      : { lumpSum: qLump }),
-                                    laborAmount: qLabor,
-                                    ...(qLaborDays ? { laborInDays: true } : {}),
-                                  },
+                                  quote,
                                 };
                                 return { ...s, layers: nextLayers, underlaymentBoard: "" };
                               }),

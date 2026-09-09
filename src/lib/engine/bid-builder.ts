@@ -89,14 +89,17 @@ export interface UnderlaymentLayer {
   adhesiveName: string; // adhesive: from the Adhesive Times table
   substrate: string; // adhesive: substrate row in that adhesive's grid
   /**
-   * Legacy custom-quote layer (docs §10.5 — NeedQuote entries: Flute Filler, Tapered/Other,
-   * ISO/Rigid Quote). When present the layer bills the QUOTED amounts VERBATIM instead of any
-   * catalog price/labor: material = lump sum (or pieces × cost/piece), no ×1.06 waste; labor =
-   * the entered hours (days × hours-per-man-day when laborInDays — FLAGGED FOR BID VALIDATION,
-   * as is the material bucket: it joins underlayment material/dTotals[6]). No auto fasteners
-   * or adhesive units (legacy quote boards take manual QuoteAdhesiveUnits — not modeled).
+   * Legacy custom-quote layer (docs §10.5/§10.7 — NeedQuote entries: Flute Filler,
+   * Tapered/Other, ISO/Rigid Quote). Bills the QUOTED amounts VERBATIM, IL-exact per §10.7:
+   * material = LumpSum (piece mode keeps LumpSum = pieces × cost/piece), NO waste factor, into
+   * the underlayment-material slot (legacy dMaterial[5] — the same bucket priced boards use);
+   * labor = LaborUnits normalized to hours (days × HoursPerDay) into underlayment labor at the
+   * crew rate. A quote ID shared across sections bills ONCE (legacy CustomQuotes dedup set).
+   * No auto fasteners; adhesive over tapered groups uses quoteAdhesiveUnits (§10.7 target 3).
    */
   quote?: {
+    /** Shared quote identity: the same id applied to several sections bills once. */
+    id?: string;
     name: string;
     /** false/absent = Lump Sum Quote; true = Piece Quote (pieces × cost per piece). */
     pieceMode?: boolean;
@@ -106,6 +109,46 @@ export interface UnderlaymentLayer {
     /** Labor "Total Amount" — hours, or days when laborInDays. */
     laborAmount?: number;
     laborInDays?: boolean;
+  };
+  /**
+   * Legacy QuoteAdhesiveUnits (docs §10.7 target 3): when THIS adhered layer sits over a board
+   * whose AdhesiveGroupID ∈ {16 Tapered ISO, 18 Tapered Rigid, 19 Crickets/Other}, the coverage
+   * formula is skipped and this raw container count bills verbatim.
+   */
+  quoteAdhesiveUnits?: number;
+}
+
+/** Adhesive groups whose surface can't be auto-covered (legacy AdhesiveNeedsQuoteAdhesiveUnits). */
+export const QUOTE_ADHESIVE_GROUPS: ReadonlySet<number> = new Set([16, 18, 19]);
+
+/**
+ * The legacy "Calculate Pieces" flute-filler calculator (frmFluteFillerCalc, docs §10.7 —
+ * rva 0x24a00), VERBATIM: per section (inches; secWid = Round(Width)×12; ff = length ft × 12;
+ * r2r = ridge-to-ridge inches): across = Round(ff/r2r); x = secWid/ff;
+ * rows = Round(x + (1 − frac(x))); trim = frac(x) ≥ 0.5 ? Round((1 − frac(x)) × across) : 0;
+ * pieces += Round(across × rows − trim). With waste: Ceil(total × (1 + plus/100)).
+ */
+export function fluteFillerPieces(i: {
+  sections: Array<{ widthFt: number }>;
+  pieceLengthFt: number;
+  ridgeToRidgeIn: number;
+  wastePct?: number;
+}): { pieces: number; piecesWithWaste: number } {
+  const ff = i.pieceLengthFt * 12;
+  if (ff <= 0 || i.ridgeToRidgeIn <= 0) return { pieces: 0, piecesWithWaste: 0 };
+  let total = 0;
+  for (const s of i.sections) {
+    const secWid = bankersRound(s.widthFt, 0) * 12;
+    const across = bankersRound(ff / i.ridgeToRidgeIn, 0);
+    const x = secWid / ff;
+    const frac = x - Math.floor(x);
+    const rows = bankersRound(x + (1 - frac), 0);
+    const trim = frac >= 0.5 ? bankersRound((1 - frac) * across, 0) : 0;
+    total += bankersRound(across * rows - trim, 0);
+  }
+  return {
+    pieces: total,
+    piecesWithWaste: Math.ceil(total * (1 + (i.wastePct ?? 0) / 100)),
   };
 }
 
@@ -451,6 +494,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
   let underlaymentLaborHours = 0;
+  /** §10.7: a quote ID shared across sections/layers bills ONCE (legacy CustomQuotes dedup). */
+  const billedQuoteIds = new Set<string>();
   /** Fractional adhesive units by adhesive name, summed across every section's layers. */
   const adhesiveUnitsByName: Record<string, number> = {};
 
@@ -581,10 +626,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
 
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
     // labor and adhesive labor → direct labor; adhesive units × price → M0.
-    for (const layer of sectionLayers(s)) {
+    const sLayers = sectionLayers(s);
+    for (const [li, layer] of sLayers.entries()) {
       const area = s.length * s.width;
-      // Custom-quote layer (docs §10.5): quoted amounts verbatim; nothing else bills.
+      // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
+      // A quote ID applied to several sections bills ONCE (legacy CustomQuotes dedup set);
+      // a quote without an id (older saved bids) bills per occurrence.
       if (layer.quote) {
+        if (layer.quote.id) {
+          if (billedQuoteIds.has(layer.quote.id)) continue;
+          billedQuoteIds.add(layer.quote.id);
+        }
         underlaymentMaterial += layer.quote.pieceMode
           ? (layer.quote.pieces ?? 0) * (layer.quote.costPerPiece ?? 0)
           : (layer.quote.lumpSum ?? 0);
@@ -630,6 +682,29 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           }
         }
       } else if (admin.adhesiveTimes) {
+        // §10.7 target 3 (UnderlaymentAdhesive, rva 0x4d470): an adhered layer over a board
+        // whose adhesive group ∈ {16 Tapered ISO, 18 Tapered Rigid, 19 Crickets/Other} skips
+        // the coverage formula and bills the layer's raw QuoteAdhesiveUnits verbatim (no
+        // custom-spacing multiplier — that rides the coverage formula).
+        const lowerBoard = li > 0 ? sLayers[li - 1]!.board : undefined;
+        const lowerGroup = lowerBoard
+          ? admin.underlaymentGroups?.adhesiveGroupIdByBoard[lowerBoard]
+          : undefined;
+        if (lowerGroup !== undefined && QUOTE_ADHESIVE_GROUPS.has(lowerGroup)) {
+          const units = layer.quoteAdhesiveUnits ?? 0;
+          if (units > 0) {
+            if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
+              warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+            }
+            adhesiveUnitsByName[layer.adhesiveName] =
+              (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + units;
+          } else {
+            warnings.push(
+              `Adhesive over "${lowerBoard}" needs quote adhesive containers (tapered surface) — section "${s.name}".`,
+            );
+          }
+          continue;
+        }
         const entry = admin.adhesiveTimes.bySubstrate[layer.adhesiveName]?.[layer.substrate];
         if (!entry || entry.coverageSqFt <= 0) {
           warnings.push(

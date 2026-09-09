@@ -326,6 +326,11 @@ export interface UnderlaymentGroupsData {
   groupIdByBoard: Record<string, number>;
   /** Entries that open the legacy quote flow instead of pricing (NeedQuote, docs §10.5). */
   needQuoteByBoard: Record<string, boolean>;
+  /**
+   * Board name → AdhesiveGroupID (the adhered-eligibility/coverage axis, docs §10.4) — distinct
+   * from the picker tile. Drives the §10.7 QuoteAdhesiveUnits path (groups 16/18/19).
+   */
+  adhesiveGroupIdByBoard: Record<string, number>;
 }
 
 export function buildUnderlaymentGroups(
@@ -334,7 +339,11 @@ export function buildUnderlaymentGroups(
 ): UnderlaymentGroupsData {
   const groupIdByBoard: Record<string, number> = {};
   const needQuoteByBoard: Record<string, boolean> = {};
-  for (const b of boardRows) if (b.need_quote) needQuoteByBoard[b.board_name] = true;
+  const adhesiveGroupIdByBoard: Record<string, number> = {};
+  for (const b of boardRows) {
+    if (b.need_quote) needQuoteByBoard[b.board_name] = true;
+    adhesiveGroupIdByBoard[b.board_name] = b.underlayment_group_id;
+  }
   const hasSubtypes = boardRows.some((b) => typeof b.subtype === "number");
   if (hasSubtypes) {
     const boardsByTile = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -354,7 +363,7 @@ export function buildUnderlaymentGroups(
           .map((b) => b.board_name),
       }),
     );
-    return { groups, groupIdByBoard, needQuoteByBoard };
+    return { groups, groupIdByBoard, needQuoteByBoard, adhesiveGroupIdByBoard };
   }
   // Fallback (pre-subtype snapshot): tiles from the adhesive-group axis.
   const boardsByGroup = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -374,7 +383,7 @@ export function buildUnderlaymentGroups(
         .sort((a, b) => a.sort - b.sort)
         .map((b) => b.board_name),
     }));
-  return { groups, groupIdByBoard, needQuoteByBoard };
+  return { groups, groupIdByBoard, needQuoteByBoard, adhesiveGroupIdByBoard };
 }
 
 /** One auto-priced NDL rate row (material $/unit + labor hrs/unit at its own $/hr rate). */

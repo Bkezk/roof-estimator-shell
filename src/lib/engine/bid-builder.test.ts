@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { buildEstimateInputs, type BidInput, type UnderlaymentLayer } from "./bid-builder";
+import {
+  buildEstimateInputs,
+  fluteFillerPieces,
+  type BidInput,
+  type UnderlaymentLayer,
+} from "./bid-builder";
 import { computeEstimate } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
 
@@ -1889,5 +1894,119 @@ describe("custom-quote underlayment layers (§10.5: Flute Filler / Tapered / ISO
     expect(inputs.materialUnderlayment).toBeCloseTo(2252.5 + 300, 2);
     // priced labor 10.0016 + quote 1 h
     expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(11.0016, 3);
+  });
+});
+
+describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUnits", () => {
+  const withU: EngineAdminData = {
+    ...admin,
+    underlaymentPrices: { '1/2" ISO': 0.85 },
+    adhesiveTimes: {
+      adhesives: ["Duro-Grip Adhesive(CR-20)"],
+      bySubstrate: {
+        "Duro-Grip Adhesive(CR-20)": { "ISO 4'x8'": { coverageSqFt: 2000, labor: 6.5 } },
+      },
+    },
+    adhesivePrices: { "Duro-Grip Adhesive(CR-20)": 899 },
+    underlaymentGroups: {
+      groups: [],
+      groupIdByBoard: {},
+      needQuoteByBoard: { "Tapered ISO": true },
+      adhesiveGroupIdByBoard: { "Tapered ISO": 16, '1/2" ISO': 2 },
+    },
+  };
+
+  it("the same quote ID across two sections bills ONCE (legacy CustomQuotes dedup)", () => {
+    const q = {
+      board: "Flute Filler",
+      attachment: "mechanical" as const,
+      fastenersPerBoard: 0,
+      adhesiveName: "",
+      substrate: "",
+      quote: { id: "q1", name: "New Quote", lumpSum: 1500, laborAmount: 8 },
+    };
+    const s0 = bid().sections[0]!;
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          { ...s0, id: "s1", layers: [q] },
+          { ...s0, id: "s2", name: "B", layers: [q] },
+        ],
+      }),
+      withU,
+    );
+    expect(inputs.materialUnderlayment).toBeCloseTo(1500, 2);
+    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(8, 6);
+    // id-less quotes (older bids) still bill per occurrence
+    const noId = { ...q, quote: { name: "New Quote", lumpSum: 1500, laborAmount: 8 } };
+    const dup = buildEstimateInputs(
+      bid({
+        sections: [
+          { ...s0, id: "s1", layers: [noId] },
+          { ...s0, id: "s2", name: "B", layers: [noId] },
+        ],
+      }),
+      withU,
+    );
+    expect(dup.inputs.materialUnderlayment).toBeCloseTo(3000, 2);
+  });
+
+  it("fluteFillerPieces: verbatim frmFluteFillerCalc geometry", () => {
+    // 50 ft wide section, 4 ft pieces (48"), 24" ridge-to-ridge:
+    // secWid = 600; across = Round(48/24) = 2; x = 600/48 = 12.5 (frac .5);
+    // rows = Round(12.5 + .5) = 13; trim = Round(.5 × 2) = 1; pieces = Round(26 − 1) = 25.
+    const r = fluteFillerPieces({
+      sections: [{ widthFt: 50 }],
+      pieceLengthFt: 4,
+      ridgeToRidgeIn: 24,
+      wastePct: 10,
+    });
+    expect(r.pieces).toBe(25);
+    expect(r.piecesWithWaste).toBe(Math.ceil(25 * 1.1)); // 28
+    expect(fluteFillerPieces({ sections: [], pieceLengthFt: 0, ridgeToRidgeIn: 24 }).pieces).toBe(
+      0,
+    );
+  });
+
+  it("adhered layer over a tapered-group board bills quoteAdhesiveUnits verbatim (no coverage)", () => {
+    const layers: UnderlaymentLayer[] = [
+      {
+        board: "Tapered ISO",
+        attachment: "mechanical",
+        fastenersPerBoard: 0,
+        adhesiveName: "",
+        substrate: "",
+        quote: { id: "q2", name: "Tapered quote", lumpSum: 900, laborAmount: 0 },
+      },
+      {
+        board: '1/2" ISO',
+        attachment: "adhesive",
+        fastenersPerBoard: 0,
+        adhesiveName: "Duro-Grip Adhesive(CR-20)",
+        substrate: "",
+        quoteAdhesiveUnits: 7,
+      },
+    ];
+    const { inputs, warnings, adhesiveMaterial } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers }] }),
+      withU,
+    );
+    // 7 containers verbatim × $899 (whole units, no coverage formula, no spacing multiplier)
+    expect(adhesiveMaterial).toBeCloseTo(7 * 899, 2);
+    expect(warnings).toEqual([]);
+    expect(inputs.materialUnderlayment).toBeCloseTo(900 + 2500 * 0.85 * 1.06, 2);
+    // without the containers entered, it warns instead of billing $0 silently
+    const missing = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [layers[0]!, { ...layers[1]!, quoteAdhesiveUnits: 0 }],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(missing.warnings.some((w) => w.includes("quote adhesive containers"))).toBe(true);
   });
 });
