@@ -728,10 +728,83 @@ labor = entered hours (days × hours-per-man-day) into underlayment labor at the
 Quote layers bill no auto fasteners/adhesive; an adhered membrane over a quote top board warns
 "needs a quote" (legacy manual QuoteAdhesiveUnits is not modeled).
 
-⚠ FLAGGED FOR EXTRACTION/VALIDATION (implemented on the most defensible reading, not IL-exact):
-(a) labor conversion — days × HoursPerManDay, and quote labor billing at the crew rate inside
-underlayment labor; (b) the material bucket (dTotals[6] vs another slot); (c) the "Calculate
-Pieces" link's formula (omitted — pieces are manual); (d) the generic HandleGetQuote dialog's
-text/fields for non-Flute quote boards (assumed same shape); (e) QuoteAdhesiveUnits. Extraction
-targets: HandleFluteFiller 0xaf64c, HandleGetQuote 0xafba8, the CustomQuote model + WriteXML,
-and where quote material/labor enter RoofSection.UnderlaymentCost / ManHours / CalcQtys.
+⚠ The five flags below are now RESOLVED by IL extraction — see §10.7 for the exact transcription.
+Net: (a) labor CONFIRMED (days × HoursPerDay, crew `Estimate.LaborRate`); (b) material bucket
+CORRECTED — it is `dMaterial[5]` (the per-category underlayment MATERIAL slot), not `dTotals[6]`,
+verbatim LumpSum, no waste (normal underlayment ×1.06, Geotextile ×1.03); (c) CORRECTED — the
+"Calculate Pieces" link DOES have a formula (opens `frmFluteFillerCalc`, a geometry calculator),
+and LumpSum = Pieces × PerPiece; (d) the generic dialog is `frmULQuote`, identical to the Flute
+dialog EXCEPT it has no pieces calculator; (e) CORRECTED — `QuoteAdhesiveUnits` IS a real modeled
+path (groups 16/18/19, entered via `frmULCustomAdhesiveUnits`, billed verbatim). Details in §10.7.
+
+### 10.7 Quote-layer money semantics — IL-exact (2026-09-09)
+
+Extraction that resolves the §10.6 flags. A "quote" board (`Underlayment.NeedQuote`) does not price
+by formula — the estimator captures a manual `QuoteUL` object and bills it verbatim.
+
+**Dialogs (target 1).** `MenuItem_Click` routes `SubType==4` (Flute Filler) to `HandleFluteFiller`
+(0xaf64c) and every other NeedQuote board to `HandleGetQuote` (0xafba8). The two handlers are
+otherwise IDENTICAL: build a `QuoteUL`, gather the selected sections' existing `CustomQuoteID`s, and
+if a quote already spans the selection pop `frmQuoteDecision.DisplayDialog` (return 6 = merge into
+the existing quote — sums `LumpSum` and `LaborUnits`, converting the existing days→hours via
+`×Settings.HoursPerDay`; 7 = start a new quote; else cancel). They differ ONLY in the editor form:
+- `HandleFluteFiller` → **`frmULFlute.DoPopup`**.
+- `HandleGetQuote` → **`frmULQuote.DoPopup`**.
+
+Both editor forms carry the same fields: `txtName`; a **Lump Sum vs Piece** radio pair
+(`rdoLump`/`rdoQuote`) with `txtLump` (lump $) and `txtPieces` × `txtPerPiece`; a labor `txtLabor`
+with an **Hours vs Days** radio pair (`rdoHours`/`rdoDays`); and a live "Total Cost" =
+`QuoteUL.LaborCost + LumpSum`. In Piece mode `LumpSum = Pieces × PerPiece` (set on every
+pieces/per-piece keystroke). Defaults: a new quote's `IsDays` = `Settings.UseManDays`.
+**The only difference:** `frmULFlute` has the **"Calculate Pieces"** link (`pieceCalcLink`), absent
+from `frmULQuote`.
+
+**"Calculate Pieces" (target 1)** — `pieceCalcLink_LinkClicked` opens **`frmFluteFillerCalc`**
+(`calculateButton_Click`, rva 0x24a00). Inputs: `tbFFLength` (flute-filler piece length, ft),
+`tbRidgetoRidge` (ridge-to-ridge / flute width, in), `plusTextBox` (optional waste %), over the
+selected sections. Per section (all in inches; `secLen`,`secWid` = Round(Length/Width)×12,
+`ff = tbFFLength×12`, `r2r = tbRidgetoRidge`):
+```
+across   = Round(ff / r2r)                       // strips across the ridge-to-ridge width
+rows     = Round(secWid/ff + (1 − frac(secWid/ff)))   // rows along width, partial rounded up
+trim     = frac(secWid/ff) ≥ 0.5 ? Round((1 − frac(secWid/ff)) × across) : 0
+totalPieces += Round(across × rows − trim)
+```
+Displayed as `labelPieces = Σ totalPieces`, and with the waste %:
+`labelPiecesPlus = Ceil(totalPieces × (1 + plus/100))`. It is a helper — the value the quote uses is
+whatever ends up in `txtPieces` (`QuoteUL.Pieces`); the calculator does not itself write the layer.
+
+**QuoteUL model + persistence (target 2).** Fields: `ID`, `Name`, `LumpSum`, `Pieces`, `PerPiece`,
+`LaborUnits`, `IsDays`, `LaborCost`, `AdhesiveContainers`; persisted lowercase as
+`lumpsum, pieces, perpiece, laborunits, isdays, adhesivecontainers` (+ name/id), stored in
+`Estimate.CustomQuotes` (an id→QuoteUL map). The layer stores only `CustomQuoteID` (−1 = none;
+`UsingQuote` ⇔ ≠ −1) and its own `QuoteAdhesiveUnits`; setting a layer's Underlayment or
+AttachmentSystem resets both. `LaborUnits`↔`LaborCost` are kept in sync at the crew rate:
+`set_LaborUnits(u)` → `LaborCost = u × LaborRate` (hours) or `u × HoursPerDay × LaborRate` (days);
+`LaborRate = Estimate.LaborRate`, `HoursPerDay = Settings.HoursPerDay`.
+
+**Where the money lands (target 2).**
+- MATERIAL — `RoofSection.UnderlaymentCost` (0x4bef0) accumulates into `m_dUnder_cost[SubType−1]`:
+  non-quote board = `Length × Width × (Name=="Geotextile" ? 1.03 : 1.06) × SqFtCost.SmartValue`;
+  **quote board (`UsingQuote`) = `+ CustomQuotes[CustomQuoteID].LumpSum` — verbatim, NO waste
+  factor.** Each quote id counted once across the selection (dedup set). `ReviewCalc.Recalculate`
+  (0x4550c) folds `RoofSections.UnderlaymentCost` into **`dMaterial[5]`** (the underlayment MATERIAL
+  slot, per roof-system offset) via `GoodSingle`. (So §10.6's "dTotals[6]" was the wrong index; it
+  is the `dMaterial[5]` underlayment slot — the same bucket normal underlayment material uses.)
+- LABOR — `RoofSection.UnderlaymentQuoteHours` (0x4cba8): for each layer/SubType, if the board is
+  NeedQuote and `UsingQuote`, it forces the quote `IsDays = 0` (normalise to hours) and adds
+  `CustomQuotes[CustomQuoteID].LaborUnits` into `m_dUnder_labor[SubType−1]`. Those hours flow through
+  the standard underlayment-labor path into `dLabor[5]` and thence ManHours at `Estimate.LaborRate`
+  — i.e. quote labor is billed as plain crew hours, days already converted ×HoursPerDay. Quote
+  layers add no automatic fastener counts.
+
+**QuoteAdhesiveUnits (target 3).** `Underlayment.AdhesiveNeedsQuoteAdhesiveUnits` =
+`{16, 18, 19}.Contains(AdhesiveGroupID)` — i.e. groups **16 Tapered ISO, 18 Tapered Rigid,
+19 Crickets/Other** (the irregular/tapered surfaces the app can't auto-cover). When an adhered layer
+sits over such a board, `RoofSection.UnderlaymentAdhesive` (0x4d470) skips the coverage-rate formula
+and bills `+ layer.QuoteAdhesiveUnits` (the raw container count) instead. Those units are entered in
+**`frmULCustomAdhesiveUnits`** (a per-section grid; `PopulateDGV` / `btnFinish_Click` →
+`UnderlaymentLayer.set_QuoteAdhesiveUnits`), NOT in the quote dialog. So the web note "manual
+QuoteAdhesiveUnits not modeled" should become: model a per-layer `quoteAdhesiveUnits` integer,
+prompt for it only when the board's group ∈ {16,18,19} under an adhered attachment, and add it
+verbatim to the adhesive-unit total.
