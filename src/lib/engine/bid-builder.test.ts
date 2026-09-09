@@ -1708,3 +1708,94 @@ describe("auto-priced NDL items (§8.3/§8.4/§8.6: counterflash / blocking / ca
     expect(warnings.some((w) => w.includes("ARP (SqFt)"))).toBe(true);
   });
 });
+
+describe("Enhancement Options (§10.3: custom fastener densities + adhesive ribbon spacing)", () => {
+  const withU: EngineAdminData = {
+    ...admin,
+    underlaymentPrices: { '1/2" ISO': 0.85 },
+    underlaymentLabor: {
+      layoutHoursByProduct: { '1/2" ISO': 7.775 },
+      fastenerCounts: [5],
+      fastenerMinutesByDeck: { Wood: 0.342 },
+    },
+    adhesiveTimes: {
+      adhesives: ["Duro-Grip Adhesive(CR-20)"],
+      bySubstrate: {
+        "Duro-Grip Adhesive(CR-20)": { "ISO 4'x8'": { coverageSqFt: 2000, labor: 6.5 } },
+      },
+    },
+    adhesivePrices: { "Duro-Grip Adhesive(CR-20)": 899 },
+  };
+  const mechLayer = {
+    board: '1/2" ISO',
+    attachment: "mechanical" as const,
+    fastenersPerBoard: 5,
+    adhesiveName: "",
+    substrate: "",
+  };
+
+  it("custom densities replace the count: Round(d×zone area) per zone, banker's Round", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            perimLengthFt: 200,
+            enhancementWidthFt: 3, // perim 600, field 1900, corner 0
+            layers: [mechLayer],
+            uCustomFastenerDensity: { field: 0.05, perim: 0.1, corner: 0.2 },
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(warnings).toEqual([]);
+    const r = computeEstimate(inputs);
+    // count = Round(0.05×1900) + Round(0.1×600) + Round(0.2×0) = 95 + 60 = 155
+    // hours = 2500/2500 × 7.775 + 0.342/60 × 155 = 7.775 + 0.8835 = 8.6585
+    expect(r.underlaymentLaborHours).toBeCloseTo(8.6585, 4);
+    // default (no custom): 7.775 + 0.342/60 × (5/32) × 2500 = 10.0016 — custom is a real change
+    const def = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            perimLengthFt: 200,
+            enhancementWidthFt: 3,
+            layers: [mechLayer],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(computeEstimate(def.inputs).underlaymentLaborHours).toBeCloseTo(10.0016, 3);
+  });
+
+  it("custom ribbon spacing multiplies adhered-layer units by 12/spacing (labor unchanged)", () => {
+    const adhLayer = {
+      board: '1/2" ISO',
+      attachment: "adhesive" as const,
+      fastenersPerBoard: 0,
+      adhesiveName: "Duro-Grip Adhesive(CR-20)",
+      substrate: "ISO 4'x8'",
+    };
+    const def = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [adhLayer] }] }),
+      withU,
+    );
+    // 2500/2000 = 1.25 units → Ceil 2 × $899
+    expect(def.adhesiveMaterial).toBeCloseTo(2 * 899, 2);
+    const custom = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, layers: [adhLayer], uAdhesiveSpacingIn: 6 }],
+      }),
+      withU,
+    );
+    // 1.25 × 12/6 = 2.5 units → Ceil 3 × $899; labor stays area-based
+    expect(custom.adhesiveMaterial).toBeCloseTo(3 * 899, 2);
+    expect(computeEstimate(custom.inputs).underlaymentLaborHours).toBeCloseTo(
+      computeEstimate(def.inputs).underlaymentLaborHours,
+      6,
+    );
+  });
+});

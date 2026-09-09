@@ -368,6 +368,14 @@ function EstimatePage() {
   const [uBoard, setUBoard] = useState("");
   // Selected insulation-type parent tile (legacy Select Insulation Type); null = follow uBoard.
   const [uGroup, setUGroup] = useState<number | null>(null);
+  // Enhancement Options (legacy frmUnderlaymentAdv, docs §10.3): custom fastener densities
+  // (per sq ft) + custom adhesive ribbon spacing; applied per section.
+  const [uEnhOpen, setUEnhOpen] = useState(false);
+  const [uEnhFasteners, setUEnhFasteners] = useState(false);
+  const [uEnhField, setUEnhField] = useState(0.15625); // 5 per 4×8 board
+  const [uEnhPerim, setUEnhPerim] = useState(0.15625);
+  const [uEnhCorner, setUEnhCorner] = useState(0.15625);
+  const [uEnhSpacing, setUEnhSpacing] = useState(0); // 0 = default coverage
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
   const [uFast, setUFast] = useState(0);
   const [uAdh, setUAdh] = useState("");
@@ -2053,6 +2061,112 @@ function EstimatePage() {
                     >
                       None (clear layer {uTab + 1})
                     </Button>
+                  </div>
+                  {/* Legacy Enhancement Options (frmUnderlaymentAdv, docs §10.3): custom
+                      mechanical fastener densities per zone + custom adhesive ribbon spacing,
+                      stored per SECTION like legacy. */}
+                  <div className="border-t pt-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-primary underline underline-offset-2"
+                        onClick={() => setUEnhOpen((v) => !v)}
+                      >
+                        Enhancement Options
+                      </button>
+                      {sections.some(
+                        (s) =>
+                          uSel.includes(s.id) &&
+                          (s.uCustomFastenerDensity || (s.uAdhesiveSpacingIn ?? 0) > 0),
+                      ) && (
+                        <span className="text-[11px] font-medium text-green-600">
+                          ← Using Custom Enhancement
+                        </span>
+                      )}
+                    </div>
+                    {uEnhOpen && (
+                      <div className="mt-2 space-y-2 rounded-md border bg-muted/30 p-3">
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id="uenh-fast"
+                            checked={uEnhFasteners}
+                            onCheckedChange={setUEnhFasteners}
+                          />
+                          <Label htmlFor="uenh-fast" className="text-xs">
+                            Custom mechanical fastening (fasteners per sq ft, by zone)
+                          </Label>
+                        </div>
+                        {uEnhFasteners && (
+                          <div className="grid grid-cols-3 gap-2">
+                            {(
+                              [
+                                ["Field", uEnhField, setUEnhField],
+                                ["Perimeter", uEnhPerim, setUEnhPerim],
+                                ["Corner", uEnhCorner, setUEnhCorner],
+                              ] as const
+                            ).map(([label, val, set]) => (
+                              <Field key={label} label={`${label} (/sq ft)`}>
+                                <NumInput min={0} value={val} onValue={set} />
+                                <p className="pt-0.5 text-[10px] text-muted-foreground">
+                                  ≈ {(val * 32).toFixed(1)} per 4×8 board
+                                </p>
+                              </Field>
+                            ))}
+                          </div>
+                        )}
+                        <Field label="Custom adhesive ribbon spacing (in; 0 = default)">
+                          <NumInput min={0} value={uEnhSpacing} onValue={setUEnhSpacing} />
+                        </Field>
+                        <p className="text-[10px] text-muted-foreground">
+                          Adhesive units are multiplied by 12 ÷ spacing (legacy §10.3); fastener
+                          counts become Round(density × zone area) per zone.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            disabled={uSel.length === 0}
+                            onClick={() =>
+                              setSections((prev) =>
+                                prev.map((s) => {
+                                  if (!uSel.includes(s.id)) return s;
+                                  const nx = { ...s };
+                                  if (uEnhFasteners)
+                                    nx.uCustomFastenerDensity = {
+                                      field: uEnhField,
+                                      perim: uEnhPerim,
+                                      corner: uEnhCorner,
+                                    };
+                                  else delete nx.uCustomFastenerDensity;
+                                  if (uEnhSpacing > 0) nx.uAdhesiveSpacingIn = uEnhSpacing;
+                                  else delete nx.uAdhesiveSpacingIn;
+                                  return nx;
+                                }),
+                              )
+                            }
+                          >
+                            Apply enhancement to selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={uSel.length === 0}
+                            onClick={() =>
+                              setSections((prev) =>
+                                prev.map((s) => {
+                                  if (!uSel.includes(s.id)) return s;
+                                  const nx = { ...s };
+                                  delete nx.uCustomFastenerDensity;
+                                  delete nx.uAdhesiveSpacingIn;
+                                  return nx;
+                                }),
+                              )
+                            }
+                          >
+                            Clear enhancement
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <p className="text-[11px] text-muted-foreground">
                     Pick sections above, choose a board and attachment, then apply. Layers bill

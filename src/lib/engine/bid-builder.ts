@@ -125,6 +125,18 @@ export interface BidSectionInput {
    * Termination/blocking footage is an ordering summary only (no auto-pricing until validated).
    */
   edges?: EdgeInput[];
+  /**
+   * Legacy Enhancement Options (docs §10.3, frmUnderlaymentAdv): custom MECHANICAL fastener
+   * densities in fasteners per sq ft, applied per zone to every mechanical layer:
+   * count = Round(field × AreaField) + Round(perim × AreaPerimeter) + Round(corner × AreaCorner)
+   * (banker's Round, per layer — replaces the default per-board density). Absent = default.
+   */
+  uCustomFastenerDensity?: { field: number; perim: number; corner: number };
+  /**
+   * Legacy custom adhesive RIBBON spacing (inches, docs §10.3): adhered-layer adhesive units
+   * × 12 / spacing (default ×1). Absent/0 = default coverage.
+   */
+  uAdhesiveSpacingIn?: number;
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -538,6 +550,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         zoneCost(s.cornerLap, shares.corner, "Corner");
     }
 
+    // Carve the perimeter/corner enhancement zones out of the field area (§2, _230 subtracts
+    // both). When per-side edges are defined, the perimeter-marked edges are the source of truth
+    // for the perimeter length (the UI keeps perimLengthFt in sync; recomputed here so saved
+    // bids agree). Computed BEFORE the layer loop — the §10.3 custom fastener densities bill
+    // per zone area.
+    const perimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+    const perimArea = perimLengthFt * s.enhancementWidthFt;
+    const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
+    const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
+
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
     // labor and adhesive labor → direct labor; adhesive units × price → M0.
     for (const layer of sectionLayers(s)) {
@@ -560,6 +582,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             warnings.push(
               `No underlayment labor for "${layer.board}" on ${s.deckType} — section "${s.name}".`,
             );
+          } else if (s.uCustomFastenerDensity) {
+            // Enhancement Options custom fastening (docs §10.3, rva 0x4d23c/0x4d00c): the
+            // per-layer fastener COUNT is Round(density × zone area) per zone (banker's
+            // Round), replacing the default per-board density entirely.
+            const d = s.uCustomFastenerDensity;
+            const count =
+              bankersRound(d.field * fieldArea, 0) +
+              bankersRound(d.perim * perimArea, 0) +
+              bankersRound(d.corner * cornerArea, 0);
+            underlaymentLaborHours += (area / 2500) * layout + (minPerFast / 60) * count;
           } else {
             underlaymentLaborHours += underlaymentMechanicalHours({
               areaSqFt: area,
@@ -585,10 +617,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
             warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
           }
+          // Enhancement Options custom ribbon spacing (docs §10.3, rva 0x4d470): units
+          // × 12 / spacing (default ×1); the spacing is ribbon on-center inches.
+          const spacingMult =
+            s.uAdhesiveSpacingIn && s.uAdhesiveSpacingIn > 0 ? 12 / s.uAdhesiveSpacingIn : 1;
           // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
           // adhesive after all sections (legacy AggregateCalcQtys), below.
           adhesiveUnitsByName[layer.adhesiveName] =
-            (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units;
+            (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units * spacingMult;
         }
       }
     }
@@ -603,14 +639,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         );
       }
     }
-
-    // Carve the perimeter/corner enhancement zones out of the field area (§2, _230 subtracts both).
-    // When per-side edges are defined, the perimeter-marked edges are the source of truth for the
-    // perimeter length (the UI keeps perimLengthFt in sync; recomputed here so saved bids agree).
-    const perimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
-    const perimArea = perimLengthFt * s.enhancementWidthFt;
-    const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
-    const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
 
     return {
       id: s.id,
