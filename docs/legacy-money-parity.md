@@ -532,3 +532,163 @@ NOT seeded as pickable options (quote-only in legacy, no price rows): "Rigid Quo
 the Tapered/Other dropdown (Tapered Perlite / Tapered Crickets / Other / Tapered ISO / Tapered
 EPS); Flute Filler has no priced boards. If a captured bid or a lookup_Underlayments extraction
 later contradicts a placement, the seed row is a one-line fix.
+
+## 10. Underlayment screen — menu tree, catalog, enhancement options, attachment (IL-exact, 2026-09-09)
+
+Instruments: `Estimator.exe` `frmUnderlayment` / `frmUnderlaymentAdv`; `DataAccess.dll`
+`Underlayment` / `RoofSection`. Supersedes the provisional, screenshot-inferred §9.2 for the
+*mechanism* (board→tile and board→group are DB columns, not name inferences).
+
+### 10.1 Insulation-type tiles → context menus (target 1)
+
+Each of the 8 "Select Insulation Type" tiles is a **classic WinForms `ContextMenu` + `MenuItem`
+(NOT `ContextMenuStrip`/`ToolStripMenuItem`), and the tree is FLAT** — one level, no parent items
+/ no `DropDownItems`. Tile button → its menu (rvas): `btnSlip`→`mnuSlipSheets` (0xab974),
+`btnRigid`→`mnuRigidISO` (0xab9d8), `btnOther`→`mnuOtherRigid` (0xaba3c),
+`btnFlute`→`mnuFluteFiller` (0xabaa0), `btnFire`→`mnuFireRated` (0xabb04),
+`btnQuote`→`mnuCustomQuote` (0xabb68), `btn4x4ISO`→`mnu4x4ISO` (0xabbcc),
+`btn4x4Rigid`→`mnu4x4Rigid` (0xabc30).
+
+Menus are built EMPTY in InitializeComponent and populated at runtime in **`frmUnderlayment_Load`
+(rva 0xaed5c)**: each menu `.MenuItems.Clear()`, then a single loop over
+`Management.oRefUnderlayments[i]`:
+```
+mi = new MenuItem( u.ToString() )          // Text = Underlayment.Name (Description)
+switch (u.SubType):                        // 1..8 → exactly one tile:
+  1→mnuSlipSheets  2→mnuRigidISO  3→mnuOtherRigid  4→mnuFluteFiller
+  5→mnuFireRated   6→mnuCustomQuote 7→mnu4x4ISO     8→mnu4x4Rigid
+mi.MergeOrder = i                          // index back into oRefUnderlayments
+mi.Click += MenuItem_Click
+```
+So a board's TILE is strictly its `SubType` (1–8); the item's label is its `Name`; and
+`MergeOrder` carries the catalog index the leaf handler assigns. (Internal button names are the
+2020 field names; the live UI labels can differ — e.g. "8'x4' ISO", "4'x4' ISO", "Tapered/Other".
+The label is cosmetic; placement is `SubType`.)
+
+Tile button behavior (each `btn*_Click`): if its menu holds **>1** items → `ContextMenu.Show` at
+point (0,48); if **exactly 1** item → `MenuItem.PerformClick` it directly (no popup). ⚠ BUG:
+`btn4x4Rigid_Click` (0xabc30) single-item branch performs `mnu4x4ISO`'s item, not
+`mnu4x4Rigid`'s (copy-paste error) — harmless only while 4×4 Rigid has ≠1 item.
+
+Leaf handler **`MenuItem_Click` (rva 0xabcfc)** — also the `btnNone1` Click handler:
+- **sender is a `Button`** → clear the layer for every selected section: `layer.Underlayment =
+  null; layer.CustomQuoteID = -1; section.RowStatus = 2`. (This is the "None" button path.)
+- **sender is a `MenuItem`** → `u = oRefUnderlayments[mi.MergeOrder]`.
+  - If `u.NeedQuote`: `u.SubType == 4` → `HandleFluteFiller(MergeOrder, 1)` (rva 0xaf64c); else
+    `HandleGetQuote(MergeOrder, 1)` (rva 0xafba8) and `forcePopAddAdhesive = 0`. If the handler
+    returns non-null the click is fully handled (skip the assign below).
+  - Assign to each selected section's current layer: `layer.Underlayment = u`; if
+    `!u.NeedQuote` → `layer.CustomQuoteID = -1`.
+  - Then re-validate the NEXT layer's adhesive attachment against the new board's group (see §10.4).
+
+Runtime `Underlayment` model (DataRow ctor rva 0xadb00; XML ctor 0xad964; WriteXML 0xadb9c) —
+attributes/fields, all from the DB row: `id`, `name`, `subtype`, `sort`, **`adhesivegroupid`**
+(= `get_AdhesiveSubgroup` — the single group id), `thickness` (`RealThickness`), `sqftcosts`,
+`layout` labor, **`needquote`** (stored bool — the ONLY quote flag; there is no per-menu-item
+price prompt), and three admin-editable flags `managable` (price), `managablemechlabor`,
+`managableadheredlabor`.
+
+### 10.2 Catalog + groups (target 2)
+
+**Live source** (Management load, decoded from the `oRefUnderlayments` fill loop): the query is
+`SELECT * FROM ref_UnderlaymentTypes ORDER BY Description`, and the columns actually read are:
+`UnderlaymentTypeID, Description, SubType, SortOrder, `**`AdhesiveGroupID`**`, RealThickness,
+CostPerSqFt, CustomLayoutLabor, ManagementEditable, ManageMechLabor, ManageAdheredLabor,
+NeedQuote`. So **board→tile = `SubType`** and **board→group = `AdhesiveGroupID`**, both single
+columns on the live table.
+
+⚠ **PREMISE CORRECTION — the installer seed cannot verify the current catalog.** The
+`SqlScript.xml` `ref_UnderlaymentTypes` INSERT uses an OLDER schema:
+`ManagementEditable, Description, Subtype, CostPerSqFt, RealThickness, Type1..Type10, SortOrder,
+CustomType1..CustomType10` — no single `AdhesiveGroupID`, no `NeedQuote`/`ManageMechLabor`/
+`ManageAdheredLabor`/`UnderlaymentTypeID`, and the `Type1..Type10` columns the live load doesn't
+read. It also seeds only `SubType` 1/5/7/8 (30 rows) — tiles Rigid ISO(2), Other Rigid(3), Flute
+Filler(4), Custom Quote(6) are EMPTY in it, and boards the live app shows (plain Dens Deck, 5/8"
+F/C Sheet Rock, Tapered/Mod-Bit/Built-Up families) are absent. The live Azure `ref_UnderlaymentTypes`
+is authoritative; capture `SubType` + `AdhesiveGroupID` together per board there (admin
+Decktype/Underlay grid or a `SELECT`).
+
+**Group list — VERIFIED row-by-row.** Legacy `UnderlaymentGroup` (19 rows, `SqlScript.xml`) is an
+EXACT match to the web `underlayment_group` seed (id, description, sort — after the N-prefix fix
+migration re-seed): 1 Slip Sheets(1), 2 ISO 4'x8'(2), 3 ISO 4'x4'(3), 4 EPO/XPS 4'x8'(4),
+5 Flute Filler(6), 6 Fire Rated Mat(7), 7 DensDeck/Securock(8), 8 DensDeck Prime(9),
+9 Gypsum Board(10), 10 Smooth Mod-Bit(11), 11 Granulated Mod-Bit(12), 12 Smooth Built-Up(13),
+13 Graveled Built-Up(14), 14 Perlite(15), 15 Spray Foam(16), 16 Tapered ISO(17), 17 EPO/XPS 4'x4'(5),
+18 Tapered Rigid(18), 19 Crickets/Other(19).
+
+**Board→group provisional mapping — CONFIRMED (no mismatch).** The provisional Dens Deck/Securock→7,
+DensDeck Prime→8, 5/8" F/C Sheet Rock→9 is consistent with the group list (7 = "DensDeck/Securock",
+8 = "DensDeck Prime", 9 = "Gypsum Board"; F/C = fire-code gypsum → Gypsum Board) and already matches
+the `underlayment_board_group` seed. Only caveat: full per-board confirmation for every live board
+(especially the tiles the installer seed omits) still requires the live `AdhesiveGroupID` column;
+the group *targets* are correct, the open item is completeness of the board list.
+
+Installer capture-era catalog (30 rows, for reference; `Description | SubType | RealThickness`):
+DensDeck Prime ¼/½/⅝ (5), Securock GFRB ¼/⅜/½/⅝ (5), ISO 4'×4' ½HD/1/1½/2/2½/2.7/3/3½/4 (7),
+ISO Quote 4'×4' (7, NeedQuote), Duro-Weave (1), Rigid 4'×4' ½/1/1½/2/2½/2.7/3/3½/4 (8),
+Rigid Quote 4'×4' (8, NeedQuote). (Note SubType 5 = Fire Rated tile holds both DensDeck Prime and
+Securock in this old seed — another reason to prefer the live `SubType`.)
+
+### 10.3 Enhancement Options (target 3)
+
+The "Enhancement Options" link `llblAdvOptions_LinkClicked` (0xae748) → `ShowUnderlayAdvancedOptions`
+(0xae750) opens **`frmUnderlaymentAdv`** modally. The panel's green "<- Using Custom Enhancement"
+label (`TestForEnhancement`, 0xae678) lights when a selected section has `UUseMechCustomSettings`
+OR `UUseAdheredCustomSettings`.
+
+Form inputs (`frmUnderlaymentAdv` InitializeComponent 0x1de00; `LoadForUnderlaymentPage` 0x1fdd0):
+- `cboRoofSection` — which section the settings apply to; `chkApplyToAll` applies to all selected.
+- `chkFasteners` — master enable for custom mechanical fastening; `chkFasteners_CheckedChanged`
+  (0x20544) enables/disables the six textboxes and the radios.
+- Fastener density: `tbFieldPerSqFt`/`tbFieldPer4x8`, `tbPerimPerSqFt`/`tbPerimPer4x8`,
+  `tbCornerPerSqFt`/`tbCornerPer4x8` — per-sqft OR per-4'×8' board (a 4×8 = 32 sqft; the two are
+  kept in sync by the `*_Validated` handlers). Radios `rbField12`/`rbField6`, `rbPerim6`/`rbPerim4`
+  are default-spacing presets.
+- Adhesive: custom ribbon spacing (`CheckUsingAdhesiveCustomSpacing`) → `CustomAdhesiveSpacing`.
+- `btnOK_Click` (0x1809b) commits into the section(s): `UUseMechCustomSettings`,
+  `UUseAdheredCustomSettings`, `UCustomFastenersDensity[0..2]`, `UCustomAdhesiveSpacing[0..]`.
+
+How each value feeds the calc (code-exact; `UCustomFastenersDensity` is indexed **[0]=field,
+[1]=perimeter, [2]=corner**, fasteners per sq ft):
+- **Fastener counts** — `RoofSection.UnderlaymentFasteners` (0x4cf40) sums, over up to 4 layers,
+  `UnderlaymentLayerFieldFasteners` (0x4d23c) + `UnderlaymentLayerPerimFasteners` (0x4d00c). Each
+  fires only when the layer's own attachment is `cMechanicalSystem`.
+  - Field: field-attach mech → SubType1 `Round(Ceil(AreaField×0.08))`; else non-custom SubType7/8
+    `Round(AreaField/16)×4`, else `Round(AreaField/32)×5`; **custom
+    `Round(UCustomFastenersDensity[0]×AreaField)`**. Field-attach NOT mech → non-custom SubType7/8
+    `Round(AreaField/16)×5` else `Round(AreaField/32)×10`; custom same as above.
+  - Perim: perim-attach mech → SubType1 `Round(Ceil(AreaPerimeter×0.08))`; else non-custom
+    SubType7/8 `Round(AreaPerimeter/16)×4` else `Round(AreaPerimeter/32)×5`; **custom
+    `Round([1]×AreaPerimeter) + Round([2]×AreaCorner)`**. Perim-attach NOT mech → non-custom
+    SubType7/8 `Round((AreaPerimeter+AreaCorner)/16)×8` else `/32×16`; custom same.
+  - DuroBond field/perim add via `DuroLastFunctions.DuroBondFasteners*` when the attachment
+    short-name is `durobondmech`.
+- **Adhesive units** — `RoofSection.UnderlaymentAdhesive` (0x4d470), only for `AdheredSystem`
+  layers with a `NextLowerUnderlay`: if `board.AdhesiveNeedsQuoteAdhesiveUnits` → `+
+  QuoteAdhesiveUnits` (manual). Else per zone: `AreaField / RoofSystem[insulations].
+  LookupCoverageRate(field, uLayer, nextLower.AdhesiveSubgroup, adheredSystem) ×
+  IIf(UUseAdheredCustomSettings, 12.0 / UCustomAdhesiveSpacing[0], 1)` (+ same shape for
+  perimeter). So custom adhesive spacing enters as a **`12 / spacing`** coverage multiplier
+  (default ×1); spacing is ribbon on-center inches.
+- **Labor**: the enhancement form changes fastener COUNTS / adhesive UNITS (and the material +
+  fastening labor that scale with them). It applies no separate labor multiplier of its own.
+
+### 10.4 Attachment-method dropdown population (target 4)
+
+`LoadAttachment` (0xadd24) / `CommitAttachedWith` (0xae3c0) fill `cbAttachedWith` per selected
+board with: "N/A (No Underlayment)" (no board), "None", the DuroBond options ("Section Fastened
+w/ Durobond", "1+ Sections Use DuroBond"), the mechanical system (`durolastmech`), then each
+`AdheredSystem` in `oRefAdheredSystems` offered **only when
+`RoofSystem('insulations').AcceptableUnderlayGroups(adheredSystem).Contains(board.AdhesiveSubgroup)`**
+(and the board's group is not quote-only for that system without units). So eligibility is fully
+data-driven by the board's `AdhesiveGroupID` × the adhesive→group allow-list.
+
+That allow-list and its coverage are tables we ALREADY have seeded: `underlayment_group`,
+`adhesive_allowed_under` (= AcceptableUnderlayGroups / `AdhesivesAllowedUnder`),
+`adhesive_coverage_underlayment`, and deck eligibility `AdhesiveAllowedDeckType` — all in
+`20260903010000_legacy_fastener_adhesive_tables.sql`, plus `underlayment_board_group`
+(`20260909220000`). The ONLY per-board inputs still uncaptured are each live board's `SubType`
+(tile) and `AdhesiveGroupID` (group) — capture both from live `ref_UnderlaymentTypes` per §10.2,
+and every tile placement + attachment-eligibility list falls out of data already present.
+`MenuItem_Click`'s tail (0xabcfc) uses the same allow-list to drop a now-invalid adhesive on the
+next layer after a board change.
