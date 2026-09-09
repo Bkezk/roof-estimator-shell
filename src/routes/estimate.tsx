@@ -3786,63 +3786,63 @@ function CurbStyleIcon({ styleId }: { styleId: number }) {
     <>
       {/* left plate */}
       <polygon
-        points="8,10 20,5 20,29 8,34"
+        points="6,8 20,3 20,31 6,36"
         className={tan}
         stroke="currentColor"
         strokeWidth="1.2"
       />
       <line
-        x1="10.5"
-        y1="11"
-        x2="10.5"
-        y2="31.5"
+        x1="8.5"
+        y1="9.5"
+        x2="8.5"
+        y2="33.5"
         stroke="currentColor"
         strokeWidth="0.8"
         strokeDasharray="1.2,1.6"
       />
-      {/* chute */}
+      {/* chute (drops slightly left → right, entering each plate mid-face) */}
       <polygon
-        points="20,13 25,10.5 49,16.5 44,19"
+        points="20,12 26,9.5 50,18.5 44,21"
         className={tan}
         stroke="currentColor"
         strokeWidth="1.2"
       />
       <polygon
-        points="20,13 44,19 44,30 20,24"
+        points="20,12 44,21 44,33 20,24"
         className={tanSide}
         stroke="currentColor"
         strokeWidth="1.2"
       />
       {/* right plate */}
       <polygon
-        points="44,13 56,8 56,32 44,37"
+        points="44,16 58,11 58,39 44,44"
         className={tan}
         stroke="currentColor"
         strokeWidth="1.2"
       />
       <line
-        x1="53.5"
-        y1="10.5"
-        x2="53.5"
-        y2="34"
+        x1="55.5"
+        y1="13.5"
+        x2="55.5"
+        y2="41.5"
         stroke="currentColor"
         strokeWidth="0.8"
         strokeDasharray="1.2,1.6"
       />
       {/* opening in the right plate */}
       <polygon
-        points="46.5,19 52.5,16.5 52.5,26.5 46.5,29"
+        points="47,24 53,21.5 53,32 47,34.5"
         className="fill-background"
         stroke="currentColor"
         strokeWidth="1"
       />
       {metal && (
         <text
-          x="31"
-          y="25"
+          x="31.5"
+          y="24.5"
           textAnchor="middle"
-          transform="skewY(8)"
-          className="fill-current text-[7px] font-semibold"
+          transform="skewY(11)"
+          className="fill-current text-[7.5px] font-semibold"
         >
           Metal
         </text>
