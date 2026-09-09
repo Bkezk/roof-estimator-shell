@@ -187,6 +187,12 @@ export interface ParapetInput {
   girthInches: number; // membrane girth over the wall profile (fallback when dims are absent)
   /** Number of wall pieces (legacy Pieces, default 1): AdjustedLength = length + 1 + pieces. */
   pieces?: number;
+  /**
+   * Legacy "Use Slipsheet" (UsePlastic, docs §8.6): polyethylene = AdjustedHeight × Length ×
+   * 1.25 sq ft — labor 0.25 h / 100 sq ft is auto-priced; the material is an NDL item (rate
+   * DB-resident), so the sq ft stays an ordering quantity.
+   */
+  useSlipsheet?: boolean;
   /** Per-parapet membrane mil (legacy Membrane Options); absent = bid default. Docs §8.5. */
   thicknessMil?: number;
   /** Per-parapet membrane color (legacy Membrane Options); absent = bid default. Docs §8.5. */
@@ -730,12 +736,20 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       const girth = parapetGirthInches(p);
       const pieces = p.pieces ?? 1;
       const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
+      // Legacy AdjustedHeight (family-dependent): Duro-Tuff ceils to 6" increments (half-foot
+      // steps); everyone else In2Ft(Ceil(girth)).
+      const adjustedHeightFt = isDuroTuff ? Math.ceil(girth / 6) / 2 : in2Ft(Math.ceil(girth));
       let billedHeightFt: number;
       if (isDuroTuff) {
-        const adjustedHeightFt = Math.ceil(girth / 6) / 2; // 6-inch increments, in feet
         billedHeightFt = Math.ceil((adjustedHeightFt * 12) / 24) * in2Ft(30); // 24" panels @ 30"
       } else {
-        billedHeightFt = in2Ft(Math.ceil(girth));
+        billedHeightFt = adjustedHeightFt;
+      }
+      // Use Slipsheet (docs §8.6): poly = AdjustedHeight × Length × 1.25 sq ft;
+      // labor 0.25 h / 100 sq ft (the legacy BaseManHours poly term).
+      if (p.useSlipsheet) {
+        const polySqFt = adjustedHeightFt * p.lengthFt * 1.25;
+        parapetLaborHours += (polySqFt / 100) * 0.25;
       }
       // Legacy prices at the PARAPET's own mil/color (docs §8.5); bid default when unset.
       const ownPrice =

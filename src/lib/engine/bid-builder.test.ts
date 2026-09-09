@@ -431,6 +431,51 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
   });
 
+  it("parapets: Use Slipsheet adds the legacy polyethylene labor (0.25 h / 100 sq ft)", () => {
+    // Legacy Parapet.get_Polyethylene = AdjustedHeight × Length × 1.25 sq ft (UsePlastic), and
+    // BaseManHours adds Polyethylene / 100 × 0.25 hours (docs §8.6). Material is an NDL item
+    // (rate DB-resident) — only the labor is auto-priced here.
+    const withParapet: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const { inputs } = buildEstimateInputs(
+      bid({
+        parapets: [
+          {
+            id: "p1",
+            name: "North wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 30.4,
+            useSlipsheet: true,
+          },
+        ],
+      }),
+      withParapet,
+    );
+    const r = computeEstimate(inputs);
+    // AdjustedHeight = In2Ft(Ceil(30.4)) = 2.58 ft; poly = 2.58 × 100 × 1.25 = 322.5 sq ft;
+    // labor = 4.5 (matrix) + 322.5 / 100 × 0.25 = 4.5 + 0.80625
+    expect(r.parapetLaborHours).toBeCloseTo(4.5 + 0.80625, 5);
+  });
+
   it("parapets: each prices at its OWN mil/color when overridden (legacy Membrane Options)", () => {
     // Legacy Parapet.LookupParpetMembranePrice keys the PARAPET's own MembraneType.Thickness and
     // GetCurrentColorPriceIndex uses the PARAPET's own Color (docs §8.5) — not the bid default.
