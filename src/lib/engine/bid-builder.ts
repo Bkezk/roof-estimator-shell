@@ -453,10 +453,35 @@ export function sectionLayers(s: BidSectionInput): UnderlaymentLayer[] {
 const comboKey = (system: string, attachment: Attachment): string =>
   `${system}|${attachment === "adhered" ? "adhesive" : "mechanical"}`;
 
+/**
+ * Per-item attribution for the legacy Estimate Review ledger — recorded DURING the build loops
+ * (same math, no recomputation), so the ledger's rows always sum to the engine's aggregates.
+ */
+export interface ReviewBreakdown {
+  /** Accessory lines material (dMaterial[4] share of M0). */
+  accessoriesMaterial: number;
+  /** Auto-priced ARP material (§8.6, MembraneAccs → shown with Accessories). */
+  arpMaterial: number;
+  /** Exceptional Metals own-rate labor (dLabor[5] share). */
+  metalsLaborCost: number;
+  metalsLaborHours: number;
+  /** Underlayment material/labor by insulation TILE (SubType 1..8; 0 = unmapped board). */
+  underlaymentMaterialBySubtype: Record<number, number>;
+  underlaymentHoursBySubtype: Record<number, number>;
+  /** Auto-priced NDL items (§8.3/§8.4) for the non-DL ledger rows. */
+  auto: {
+    counterflash: { material: number; laborCost: number; hours: number };
+    blocking: { laborCost: number; hours: number };
+    masonry: { material: number; laborCost: number; hours: number };
+  };
+}
+
 export interface BuildResult {
   inputs: EstimateInputs;
   /** Warnings for the UI (e.g. missing price / labor combo). */
   warnings: string[];
+  /** Per-item attribution for the review ledger (display-only; sums to the aggregates). */
+  breakdown: ReviewBreakdown;
   /** Parapet membrane material $ (inside duroLastMaterial/M0); split out for display/proposal. */
   parapetMaterial: number;
   /** Exceptional Metals material $ (inside duroLastMaterial/M0); split out for display/proposal. */
@@ -496,6 +521,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let underlaymentLaborHours = 0;
   /** §10.7: a quote ID shared across sections/layers bills ONCE (legacy CustomQuotes dedup). */
   const billedQuoteIds = new Set<string>();
+  // Review-ledger attribution (recorded as we bill; display-only).
+  const uMatBySub: Record<number, number> = {};
+  const uHrsBySub: Record<number, number> = {};
+  const addSub = (rec: Record<number, number>, tile: number, v: number) => {
+    if (v) rec[tile] = (rec[tile] ?? 0) + v;
+  };
+  const bAuto = {
+    counterflash: { material: 0, laborCost: 0, hours: 0 },
+    blocking: { laborCost: 0, hours: 0 },
+    masonry: { material: 0, laborCost: 0, hours: 0 },
+  };
   /** Fractional adhesive units by adhesive name, summed across every section's layers. */
   const adhesiveUnitsByName: Record<string, number> = {};
 
@@ -632,16 +668,21 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
       // A quote ID applied to several sections bills ONCE (legacy CustomQuotes dedup set);
       // a quote without an id (older saved bids) bills per occurrence.
+      const uTile = admin.underlaymentGroups?.groupIdByBoard[layer.board] ?? 0;
       if (layer.quote) {
         if (layer.quote.id) {
           if (billedQuoteIds.has(layer.quote.id)) continue;
           billedQuoteIds.add(layer.quote.id);
         }
-        underlaymentMaterial += layer.quote.pieceMode
+        const qMaterial = layer.quote.pieceMode
           ? (layer.quote.pieces ?? 0) * (layer.quote.costPerPiece ?? 0)
           : (layer.quote.lumpSum ?? 0);
+        underlaymentMaterial += qMaterial;
+        addSub(uMatBySub, uTile, qMaterial);
         const amt = layer.quote.laborAmount ?? 0;
-        underlaymentLaborHours += layer.quote.laborInDays ? amt * admin.settings.hoursPerDay : amt;
+        const qHours = layer.quote.laborInDays ? amt * admin.settings.hoursPerDay : amt;
+        underlaymentLaborHours += qHours;
+        addSub(uHrsBySub, uTile, qHours);
         continue;
       }
       const uPrice = admin.underlaymentPrices?.[layer.board];
@@ -652,6 +693,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         // waste) on every board, × 1.03 for the board named "Geotextile".
         const waste = layer.board.trim().toLowerCase() === "geotextile" ? 1.03 : 1.06;
         underlaymentMaterial += area * waste * uPrice;
+        addSub(uMatBySub, uTile, area * waste * uPrice);
       }
       if (layer.attachment === "mechanical") {
         if (admin.underlaymentLabor) {
@@ -671,14 +713,18 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
               bankersRound(d.field * fieldArea, 0) +
               bankersRound(d.perim * perimArea, 0) +
               bankersRound(d.corner * cornerArea, 0);
-            underlaymentLaborHours += (area / 2500) * layout + (minPerFast / 60) * count;
+            const mh = (area / 2500) * layout + (minPerFast / 60) * count;
+            underlaymentLaborHours += mh;
+            addSub(uHrsBySub, uTile, mh);
           } else {
-            underlaymentLaborHours += underlaymentMechanicalHours({
+            const mh = underlaymentMechanicalHours({
               areaSqFt: area,
               layoutHoursPer2500: layout,
               minutesPerFastener: minPerFast,
               fastenersPerBoard: layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5,
             });
+            underlaymentLaborHours += mh;
+            addSub(uHrsBySub, uTile, mh);
           }
         }
       } else if (admin.adhesiveTimes) {
@@ -717,6 +763,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             laborPer1000SqFt: entry.labor,
           });
           underlaymentLaborHours += a.hours;
+          addSub(uHrsBySub, uTile, a.hours);
           if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
             warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
           }
@@ -1058,10 +1105,20 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let autoNdlMaterial = 0;
   let autoOwnRateCost = 0;
   let autoOwnRateHours = 0;
-  const addAutoItem = (qty: number, rate: NdlAutoRateItem, laborOnly: boolean) => {
-    if (!laborOnly) autoNdlMaterial += qty * rate.price;
+  const addAutoItem = (
+    qty: number,
+    rate: NdlAutoRateItem,
+    laborOnly: boolean,
+    slot: { material?: number; laborCost: number; hours: number },
+  ) => {
+    if (!laborOnly) {
+      autoNdlMaterial += qty * rate.price;
+      if (slot.material !== undefined) slot.material += qty * rate.price;
+    }
     autoOwnRateCost += qty * rate.laborPerUnit * rate.laborRate;
     autoOwnRateHours += qty * rate.laborPerUnit;
+    slot.laborCost += qty * rate.laborPerUnit * rate.laborRate;
+    slot.hours += qty * rate.laborPerUnit;
   };
 
   // Curb counter flashing (§8.3, termination option 5 "No Lift & Counter Flash"): inches =
@@ -1081,7 +1138,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       const inches = whole + (Math.ceil(cents / 25) * 25) / 100;
       const qty = Math.ceil(bankersRound(inches / 12, 2));
       const rate = admin.autoRates?.counterflash;
-      if (rate) addAutoItem(qty, rate, false);
+      if (rate) addAutoItem(qty, rate, false, bAuto.counterflash);
       else
         warnings.push(
           `Curb counter flashing: ${qty} ft needed but no "Curb Counter Flashing" rate row (Sheet Metal Work) — not auto-priced.`,
@@ -1100,7 +1157,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     if (blockedFt > 0) {
       const qty = Math.ceil(blockedFt);
       const rate = admin.autoRates?.parapetBlocking;
-      if (rate) addAutoItem(qty, rate, true);
+      if (rate) addAutoItem(qty, rate, true, bAuto.blocking);
       else
         warnings.push(
           `Parapet wood blocking: ${qty} ft needed but no '2" x 4" W/ 8" ISO' rate row (Parapet Wall Blocking) — not auto-priced.`,
@@ -1125,7 +1182,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     if (removeLen > 0) {
       const qty = Math.ceil(removeLen / 2);
       const rate = admin.autoRates?.masonryRemove;
-      if (rate) addAutoItem(qty, rate, false);
+      if (rate) addAutoItem(qty, rate, false, bAuto.masonry);
       else
         warnings.push(
           `Capstone removal: ${qty} units needed but no "Remove Only" rate row (Masonry) — not auto-priced.`,
@@ -1134,7 +1191,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     if (reinstallLen > 0) {
       const qty = Math.ceil(reinstallLen / 2);
       const rate = admin.autoRates?.masonryReplace;
-      if (rate) addAutoItem(qty, rate, false);
+      if (rate) addAutoItem(qty, rate, false, bAuto.masonry);
       else
         warnings.push(
           `Capstone reinstallation: ${qty} units needed but no "Replace Capstones" rate row (Masonry) — not auto-priced.`,
@@ -1167,6 +1224,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   parapetLaborHours *= tf("Parapets Labor");
   curbLaborHours *= tf("Curbs Labor");
   underlaymentLaborHours *= tf("Underlayment Labor");
+  for (const k of Object.keys(uHrsBySub)) uHrsBySub[Number(k)]! *= tf("Underlayment Labor");
 
   // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
   const duroLastMaterial =
@@ -1278,5 +1336,22 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     },
   };
 
-  return { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial };
+  const breakdown: ReviewBreakdown = {
+    accessoriesMaterial: accessoryMaterial,
+    arpMaterial,
+    metalsLaborCost,
+    metalsLaborHours,
+    underlaymentMaterialBySubtype: uMatBySub,
+    underlaymentHoursBySubtype: uHrsBySub,
+    auto: bAuto,
+  };
+  return {
+    inputs,
+    warnings,
+    breakdown,
+    parapetMaterial,
+    metalsMaterial,
+    adhesiveMaterial,
+    curbMaterial,
+  };
 }

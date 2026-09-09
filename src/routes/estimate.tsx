@@ -39,6 +39,8 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import { buildReviewLedger } from "@/lib/engine/review-ledger";
+import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
 import {
   universalFastenerSpacing,
   LEGACY_ROOF_SYSTEM_IDS,
@@ -325,6 +327,10 @@ function EstimatePage() {
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
   const [laborRate, setLaborRate] = useState(50);
+  const [extraShipping, setExtraShipping] = useState(0);
+  // The legacy Review screen shows the ledger; the auxiliary knobs (warranty picker, labor
+  // rate, templates…) sit behind this toggle instead of always-on forms.
+  const [showPricingSettings, setShowPricingSettings] = useState(false);
   const [commission, setCommission] = useState(3);
   const [taxExempt, setTaxExempt] = useState(false);
   const [prepayDiscount, setPrepayDiscount] = useState(false);
@@ -468,6 +474,7 @@ function EstimatePage() {
       setStdSizeDiscount(d.stdSizeDiscount ?? false);
       setVolumeDiscount(d.volumeDiscount ?? false);
       setPerDiem(d.perDiem ?? 0);
+      setExtraShipping(d.extraShipping ?? 0);
       setPerDiemInMarkup(d.perDiemInMarkup ?? true);
       setCommissionInMarkup(d.commissionInMarkup ?? false);
       setAdjustLaborPct(d.adjustLaborPct ?? 0);
@@ -507,6 +514,32 @@ function EstimatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presets, bidParam]);
 
+  const parapetWallStats = useMemo(() => {
+    let vert = 0;
+    let total = 0;
+    for (const p of parapets) {
+      const hasDims =
+        p.skirtInches !== undefined ||
+        p.cantInches !== undefined ||
+        p.verticalInches !== undefined ||
+        p.wallTopInches !== undefined ||
+        p.dropInches !== undefined;
+      if (hasDims) {
+        vert += (p.lengthFt * (p.verticalInches ?? 0)) / 12;
+        total +=
+          (p.lengthFt *
+            ((p.verticalInches ?? 0) +
+              (p.dropInches ?? 0) +
+              (p.cantInches ?? 0) +
+              (p.wallTopInches ?? 0))) /
+          12;
+      } else {
+        total += (p.lengthFt * p.girthInches) / 12;
+      }
+    }
+    return { vert, total };
+  }, [parapets]);
+
   const systemOptions = useMemo(() => {
     if (!admin) return [];
     return [...new Set(Object.keys(admin.labor).map((k) => k.split("|")[0]!))];
@@ -540,6 +573,7 @@ function EstimatePage() {
   const saved: SavedBidState = {
     roofSystem,
     attachment,
+    extraShipping,
     membraneAdhesiveName: membraneAdhesive,
     sections,
     accessories,
@@ -573,10 +607,19 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
+    const build = buildEstimateInputs(bid, admin);
     const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial } =
-      buildEstimateInputs(bid, admin);
+      build;
+    const r = computeEstimate(inputs);
     return {
-      r: computeEstimate(inputs),
+      r,
+      // The legacy Estimate Review ledger rows (attribution of the amounts billed above).
+      ledger: buildReviewLedger({
+        bid,
+        result: build,
+        est: r,
+        crewRate: bid.crewLaborRatePerHour,
+      }),
       // Per-section install hours (legacy per-section Man Hours); inputs.sections is
       // built 1:1 in order from bid.sections.
       sectionHours: inputs.sections.map((rs) =>
@@ -4022,7 +4065,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 9 ? "space-y-6" : "hidden"}>
+        <div className={step === 9 && showPricingSettings ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Pricing controls</CardTitle>
@@ -4222,6 +4265,52 @@ function EstimatePage() {
         </div>
 
         <div className={step === 9 ? "space-y-6" : "hidden"}>
+          {result && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-base">Estimate Review</CardTitle>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPricingSettings((v) => !v)}
+                >
+                  {showPricingSettings ? "Hide settings" : "Settings (warranty, labor rate…)"}
+                </Button>
+              </CardHeader>
+              <CardContent>
+                <EstimateReviewLedger
+                  ledger={result.ledger}
+                  est={result.r}
+                  stats={{
+                    roofSqFt: result.r.roofSqFootage,
+                    membraneSqFt: result.r.sqFtTotalMembrane,
+                    parapetVertSqFt: parapetWallStats.vert,
+                    parapetWallSqFt: parapetWallStats.total,
+                  }}
+                  discounts={{
+                    prepay: prepayDiscount,
+                    std: stdSizeDiscount,
+                    volume: volumeDiscount,
+                    onPrepay: setPrepayDiscount,
+                    onStd: setStdSizeDiscount,
+                    onVolume: setVolumeDiscount,
+                  }}
+                  markup={{
+                    mode: markupMode,
+                    value: markup,
+                    onChange: (m, val) => {
+                      setMarkupMode(m);
+                      setMarkup(val);
+                    },
+                  }}
+                  perDiem={{ rate: perDiem, onChange: setPerDiem }}
+                  commission={{ pct: commission, onChange: setCommission }}
+                  extraShipping={{ value: extraShipping, onChange: setExtraShipping }}
+                  onOpenSettings={() => setShowPricingSettings(true)}
+                />
+              </CardContent>
+            </Card>
+          )}
           {hasOrderingSummary && (
             <Card>
               <CardHeader>

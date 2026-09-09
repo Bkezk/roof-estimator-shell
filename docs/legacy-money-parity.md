@@ -820,3 +820,23 @@ coverage formula and bills the raw container count verbatim (entered on the atta
 missing containers warn). Material/labor buckets were already correct (our materialUnderlayment
 IS the legacy dMaterial[5] underlayment slot; the §10.6 prose said "dTotals[6]" because that is
 this port's name for the same slot in the money chain).
+
+### 11. Estimate Review ledger — captured + rebuilt (2026-09-09)
+
+The legacy Review screen (shots 124824 Cost view / 124849 Labor view) is the three-column ledger:
+Purchases | Labor & Services | Totals, with the bottom Cost/Labor radio flipping the middle
+column between $ and man-hours, "Use" checkboxes on the three discounts, and click-to-edit cells
+(Shipping (Other) green cell, Dollar Markup / Markup percentage links, Per-Diem, and the stats
+block: Total Man Days, price/labor per roof & membrane sqft, roof/parapet/membrane areas).
+The web Review step now mirrors it: `review-ledger.ts` ATTRIBUTES the engine's billed amounts to
+the legacy rows (per-tile insulation from the build-loop breakdown, non-DL rows mapped
+Wood Blocking = Roof Edge + Parapet Wall Blocking / Roof Decking = Structural Deck / Sheet Metal /
+Masonry / Custom Apps / Other, auto items on their rows, fixed subcontractor rows HVAC / Sheet
+Metal / Masonry / Guttering) — tests assert every group sums to the engine aggregates
+(M0, materialUnderlayment, otherMaterial, LS1 $ + hours, LS2). Non-grid knobs (warranty picker,
+labor rate, adjust %s, templates, tax exempt, high wind) live behind the ledger's Settings
+toggle. Known display deviations from the capture: an explicit "Adhesives" row under Duro-Last
+purchases (estimate-level whole-unit adhesives have no legacy row name), a single Amount column
+(the capture shows two identical ones), and Services rows appear only when data exists (the
+legacy fixed Crane/Landfill/Dumpster/Vacuum/Set Up Charge list is a services screen we have not
+captured).

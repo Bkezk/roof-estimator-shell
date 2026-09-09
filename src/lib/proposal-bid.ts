@@ -43,6 +43,8 @@ export const emptyCustomer = (): CustomerInfo => ({
 
 /** The persisted estimator state (stored in bids.data jsonb). */
 export interface SavedBidState {
+  /** Legacy Review "Shipping (Other)" editable cell — extra shipping $ on top of freight. */
+  extraShipping?: number;
   roofSystem: string;
   attachment: "mechanical" | "adhered";
   sections: BidSectionInput[];
@@ -223,7 +225,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     adjustSetupPct: s.adjustSetupPct ?? 0,
     adjustInspectionPct: s.adjustInspectionPct ?? 0,
     ...(s.laborTemplateName ? { laborTemplateName: s.laborTemplateName } : {}),
-    extraShipping: 0,
+    extraShipping: s.extraShipping ?? 0,
     subsCost: 0,
     servicesCost: 0,
     materialUnderlayment: 0,
