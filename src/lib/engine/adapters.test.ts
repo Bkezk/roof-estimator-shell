@@ -1069,3 +1069,44 @@ describe("accessory catalog: Price/Package screens (Panduit, Membrane Accs) are 
     ]);
   });
 });
+
+describe("accessory catalog: Price/Part (Panduit) and '+ for Color' (Drain Boots) columns", () => {
+  it("Panduit's Price/Part is the price; Parts/Bag is data, never a price", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:panduit",
+        category: "Panduit",
+        data: {
+          columns: ["Description", "Part #", "Parts/Bag", "Price/Part"],
+          rows: [
+            { Description: '3/8" x 14"', "Part #": "1222", "Parts/Bag": 50, "Price/Part": 0.88 },
+            { Description: "Panduit Tool", "Part #": "1221", "Parts/Bag": 1, "Price/Part": 239 },
+          ],
+        },
+      },
+    ]);
+    expect(items.map((i) => [i.description, i.price])).toEqual([
+      ['3/8" x 14"', 0.88],
+      ["Panduit Tool", 239],
+    ]);
+  });
+
+  it("Drain Boots '+ for Color' yields a second, colored item at its full price", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:drain_boots",
+        category: "Drain Boots",
+        data: {
+          columns: ["Description", "Part #", "Price", "+ for Color"],
+          rows: [
+            { Description: '2" Drain Boot', "Part #": "1916", Price: 20.9, "+ for Color": 21.9 },
+          ],
+        },
+      },
+    ]);
+    expect(items.map((i) => [i.description, i.price])).toEqual([
+      ['2" Drain Boot', 20.9],
+      ['2" Drain Boot — Color', 21.9],
+    ]);
+  });
+});

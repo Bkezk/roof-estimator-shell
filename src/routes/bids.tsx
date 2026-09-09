@@ -46,7 +46,11 @@ function BidsPage() {
   const { session } = useAuth();
   // Only fetch with a live session — otherwise the server fn 401s (e.g. a mobile browser whose
   // token expired while backgrounded); AuthGate handles the redirect to /login.
-  const { data: bids, isLoading, error } = useQuery({
+  const {
+    data: bids,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["bids"],
     queryFn: listBidsFn,
     enabled: !!session,
@@ -131,8 +135,16 @@ function BidsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
-                  <span className="text-sm font-semibold tabular-nums">
+                  {/* Stored at save time — the estimator recomputes live, so an engine change
+                      (or an empty-data row) can differ from this until the bid is re-saved. */}
+                  <span
+                    className="text-sm font-semibold tabular-nums"
+                    title="Total as of the last save — open the bid for the live figure"
+                  >
                     {money(Number(bid.grand_total ?? 0))}
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                      (last saved)
+                    </span>
                   </span>
                   <Button asChild variant="ghost" size="sm">
                     <Link to="/estimate" search={{ bid: bid.id }}>

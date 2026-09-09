@@ -840,3 +840,15 @@ purchases (estimate-level whole-unit adhesives have no legacy row name), a singl
 (the capture shows two identical ones), and Services rows appear only when data exists (the
 legacy fixed Crane/Landfill/Dumpster/Vacuum/Set Up Charge list is a services screen we have not
 captured).
+
+### 11.1 Walkthrough follow-ups (2026-09-09, from claude/parity-walkthrough report)
+
+Closed in this pass beyond the first fix batch: Panduit's `Price/Part` and Drain Boots'
+`+ for Color` price columns are now recognized (`+ for Color` is the colored variant's FULL
+price — $20.90 white / $21.90 color — so it yields a "— Color" item, not an adder); the Bids
+list total is labeled "(last saved)". NOT seeded: the third installer Membrane Accs row
+("1' of Stripping w/ 6\"oc Fasteners") — the installer marks it `ShowInEstimator = 0`, so
+legacy deliberately hid it from the estimator; adding it to the pickable screen would surface
+what legacy suppressed. Revisit only if a live capture shows it in the legacy admin grid.
+Remaining §6 structural gaps (accessory calculated screens, parapet Termination/Wall Type,
+per-section overrides, Setup defaults, Reports/Export, plain gutter styles) are tracked there.

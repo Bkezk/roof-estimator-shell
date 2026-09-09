@@ -131,6 +131,7 @@ const NON_PRICE_COLUMNS = new Set([
   "closed part #",
   "fasteners/box",
   "parts/package",
+  "parts/bag",
   "multiplier",
 ]);
 
@@ -153,7 +154,10 @@ const KNOWN_COLORS = new Set([
 function priceColumnVariant(col: string): string | null {
   const c = col.trim();
   if (NON_PRICE_COLUMNS.has(c.toLowerCase())) return null;
-  if (c === "Price" || c === "Price/Box" || c === "Price/Package") return "";
+  if (c === "Price" || c === "Price/Box" || c === "Price/Package" || c === "Price/Part") return "";
+  // Drain Boots: "+ for Color" is the colored variant's FULL price (e.g. $20.90 white /
+  // $21.90 color), not an adder — one extra item per row.
+  if (c === "+ for Color") return "Color";
   if (/ Price$/i.test(c)) return c.replace(/ Price$/i, "").trim();
   if (KNOWN_COLORS.has(c)) return c;
   return null;
