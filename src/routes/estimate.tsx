@@ -371,6 +371,11 @@ function EstimatePage() {
   const [uAdh, setUAdh] = useState("");
   const [uSub, setUSub] = useState("");
 
+  // Tear-Off step (legacy multi-select pattern): section selection + the pending options.
+  const [toSel, setToSel] = useState<string[]>([]);
+  const [toType, setToType] = useState("");
+  const [toDepth, setToDepth] = useState(0);
+
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({
     queryKey: ["bid", bidParam],
@@ -3070,77 +3075,82 @@ function EstimatePage() {
           </Card>
         </div>
 
-        {/* Legacy Tear-Off screen: per-section tear-off type + debris depth. */}
+        {/* Legacy Tear-Off screen (modeled on the sibling multi-select screens; exact
+            legacy capture pending): select sections, pick the existing roof type + depth, apply. */}
         <div className={step === 7 ? "space-y-6" : "hidden"}>
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Tear-Off</CardTitle>
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-muted-foreground">Select roof section(s) or:</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setToSel(sections.map((s) => s.id))}
+                >
+                  Select all sections
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Section</TableHead>
+                      <TableHead>ID</TableHead>
                       <TableHead>W × L</TableHead>
                       <TableHead>Deck</TableHead>
-                      <TableHead>Tear-off</TableHead>
-                      <TableHead>Existing roof type</TableHead>
-                      <TableHead>Debris depth (in)</TableHead>
+                      <TableHead>Tear-Off : Existing Roof</TableHead>
+                      <TableHead>Debris depth</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sections.map((s, i) => (
-                      <TableRow key={s.id}>
-                        <TableCell className="font-medium">{s.name}</TableCell>
-                        <TableCell className="tabular-nums">
-                          {s.width}x{s.length}
-                        </TableCell>
-                        <TableCell>{s.deckType}</TableCell>
-                        <TableCell>
-                          <Switch
-                            checked={s.tearOff}
-                            onCheckedChange={(v) => editSection(i, { tearOff: v })}
-                          />
-                        </TableCell>
-                        <TableCell className="min-w-[180px]">
-                          {s.tearOff ? (
-                            <PickOne
-                              value={s.tearOffType}
-                              options={admin.tearOff?.tearoffTypes ?? []}
-                              onChange={(v) => editSection(i, { tearOffType: v })}
-                            />
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {s.tearOff ? (
-                            <NumInput
-                              className="h-8 w-[90px]"
-                              min={0}
-                              value={s.toThicknessInches}
-                              onValue={(n) => editSection(i, { toThicknessInches: n })}
-                            />
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {sections.map((s) => {
+                      const sel = toSel.includes(s.id);
+                      return (
+                        <TableRow
+                          key={s.id}
+                          onClick={() =>
+                            setToSel((prev) =>
+                              prev.includes(s.id)
+                                ? prev.filter((x) => x !== s.id)
+                                : [...prev, s.id],
+                            )
+                          }
+                          className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
+                        >
+                          <TableCell className="font-medium">{s.name}</TableCell>
+                          <TableCell className="tabular-nums">
+                            {s.width}x{s.length}
+                          </TableCell>
+                          <TableCell>{s.deckType}</TableCell>
+                          <TableCell className="whitespace-nowrap text-xs">
+                            {s.tearOff ? s.tearOffType || "On : (no type)" : "None : None"}
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums">
+                            {s.tearOff ? `${s.toThicknessInches}"` : "—"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-4 text-xs">
                 <span>
-                  Tear-off man hours:{" "}
+                  Sq Ft to tear off:{" "}
                   <span className="font-semibold tabular-nums">
-                    {(result?.r.tearOffLaborHours ?? 0).toFixed(2)}
+                    {sections
+                      .filter((s) => s.tearOff)
+                      .reduce((sum, s) => sum + s.length * s.width, 0)
+                      .toLocaleString()}
                   </span>
                 </span>
                 <span>
-                  Disposal units:{" "}
-                  <span className="font-semibold tabular-nums">{result?.r.disposalUnits ?? 0}</span>
+                  Man hours:{" "}
+                  <span className="font-semibold tabular-nums">
+                    {(result?.r.tearOffLaborHours ?? 0).toFixed(2)}
+                  </span>
                 </span>
                 <span>
                   Labor cost:{" "}
@@ -3148,11 +3158,79 @@ function EstimatePage() {
                     {money((result?.r.tearOffLaborHours ?? 0) * laborRate)}
                   </span>
                 </span>
+                <span>
+                  Disposal units:{" "}
+                  <span className="font-semibold tabular-nums">{result?.r.disposalUnits ?? 0}</span>
+                </span>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                Hours come from the seeded Tearoff Times table (deck × existing roof type); debris
-                depth drives the disposal-unit volume.
-              </p>
+
+              <div className="space-y-3 rounded-md border p-4 lg:max-w-2xl">
+                <p className="text-xs font-semibold">Select existing roof type</p>
+                <div className="flex flex-wrap gap-2">
+                  {(admin.tearOff?.tearoffTypes ?? []).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setToType(t)}
+                      className={`rounded-md border px-2.5 py-2 text-xs ${
+                        toType === t ? "border-primary bg-primary/10 font-medium" : "hover:bg-muted"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-end gap-3">
+                  <Field label="Debris depth (in)">
+                    <NumInput
+                      className="w-[110px]"
+                      min={0}
+                      value={toDepth}
+                      onValue={(n) => setToDepth(n)}
+                    />
+                  </Field>
+                  <Button
+                    size="sm"
+                    disabled={!toType || toSel.length === 0}
+                    onClick={() =>
+                      setSections((prev) =>
+                        prev.map((s) =>
+                          toSel.includes(s.id)
+                            ? {
+                                ...s,
+                                tearOff: true,
+                                tearOffType: toType,
+                                toThicknessInches: toDepth,
+                              }
+                            : s,
+                        ),
+                      )
+                    }
+                  >
+                    Apply to selected
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={toSel.length === 0}
+                    onClick={() =>
+                      setSections((prev) =>
+                        prev.map((s) =>
+                          toSel.includes(s.id)
+                            ? { ...s, tearOff: false, tearOffType: "", toThicknessInches: 0 }
+                            : s,
+                        ),
+                      )
+                    }
+                  >
+                    None (remove tear-off)
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Hours bill from the seeded Tearoff Times table (deck × existing roof type); debris
+                  depth drives the disposal-unit volume.
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
