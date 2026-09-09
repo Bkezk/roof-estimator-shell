@@ -215,7 +215,6 @@ const STEPS = [
   { key: "metals", label: "Metals" },
   { key: "tearoff", label: "Tear-Off" },
   { key: "nondl", label: "Non-DL" },
-  { key: "pricing", label: "Pricing & Warranty" },
   { key: "review", label: "Review" },
 ] as const;
 
@@ -353,9 +352,11 @@ function EstimatePage() {
   const [highWindTermYears, setHighWindTermYears] = useState(0);
   const [highWindBand, setHighWindBand] = useState("");
 
+  const [presetName, setPresetName] = useState("");
   const applyPreset = (name: string) => {
     const p = presets?.find((x) => x.name === name);
     if (!p) return;
+    setPresetName(name);
     setLaborRate(p.hourlyRate);
     setMarkup(p.markupAmount);
     const mode = markupTypeToMode(p.markupType);
@@ -493,6 +494,18 @@ function EstimatePage() {
     setBidStatus(asBidStatus(loadedBid.status));
     hydratedFor.current = loadedBid.id;
   }, [loadedBid]);
+
+  // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
+  // $45/hr, 35% gross profit) instead of hardcoded fallbacks; saved bids keep their own values.
+  const appliedDefaultPreset = useRef(false);
+  useEffect(() => {
+    if (appliedDefaultPreset.current || bidParam || !presets?.length) return;
+    const def = presets.find((x) => x.isDefault) ?? presets[0];
+    if (def) applyPreset(def.name);
+    appliedDefaultPreset.current = true;
+    // applyPreset is recreated each render; the ref guard makes this effectively run-once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presets, bidParam]);
 
   const systemOptions = useMemo(() => {
     if (!admin) return [];
@@ -1034,7 +1047,7 @@ function EstimatePage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => goStep(STEPS.findIndex((st) => st.key === "pricing"))}
+                        onClick={() => goStep(STEPS.findIndex((st) => st.key === "review"))}
                       >
                         Click here to edit
                       </Button>
@@ -4017,7 +4030,7 @@ function EstimatePage() {
             <CardContent className="flex flex-wrap gap-4">
               {(presets?.length ?? 0) > 0 && (
                 <Field label="Preset">
-                  <Select value="" onValueChange={applyPreset}>
+                  <Select value={presetName} onValueChange={applyPreset}>
                     <SelectTrigger className="w-[160px]">
                       <SelectValue placeholder="Apply preset…" />
                     </SelectTrigger>
@@ -4208,7 +4221,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 10 ? "space-y-6" : "hidden"}>
+        <div className={step === 9 ? "space-y-6" : "hidden"}>
           {hasOrderingSummary && (
             <Card>
               <CardHeader>
@@ -4256,9 +4269,9 @@ function EstimatePage() {
                   </div>
                 ))}
                 <p className="border-t pt-2 text-xs text-muted-foreground">
-                  For ordering only — termination hardware, blocking and ARP material are priced by
-                  adding Accessory / Non-DL lines until the legacy auto-pricing is validated against
-                  a captured bid.
+                  For ordering only — ARP material and parapet blocking/capstones now auto-price
+                  (§8); termination hardware footage is still priced by adding Accessory / Non-DL
+                  lines until its per-ft vs per-piece basis is extracted.
                 </p>
               </CardContent>
             </Card>
