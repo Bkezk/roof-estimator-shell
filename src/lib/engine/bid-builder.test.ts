@@ -1532,3 +1532,179 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
     expect(adhesiveMaterial).toBe(0);
   });
 });
+
+describe("auto-priced NDL items (§8.3/§8.4/§8.6: counterflash / blocking / capstones / ARP)", () => {
+  const autoRates = {
+    counterflash: { price: 4, laborPerUnit: 0.0167, laborRate: 45 },
+    parapetBlocking: { price: 0.57, laborPerUnit: 0.04, laborRate: 40 },
+    masonryRemove: { price: 0, laborPerUnit: 0.1, laborRate: 45 },
+    masonryReplace: { price: 5, laborPerUnit: 0, laborRate: 45 },
+    arpPricePerSqFt: 3,
+  };
+  const withCurbLabor: EngineAdminData = {
+    ...admin,
+    autoRates,
+    curbLabor: {
+      setupMinutes: 8,
+      minutesByDeck: { Wood: 7.5 },
+      multiplierByType: { Closed: 1 },
+      curbTypes: ["Closed"],
+    },
+  };
+  const withParapet: EngineAdminData = {
+    ...admin,
+    autoRates,
+    priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    parapetLabor: {
+      bands: ['0"-30"'],
+      lookup: {
+        Wood: {
+          '0"-30"': {
+            noDrillNoCant: 2.25,
+            noDrillCanted: 3.375,
+            predrillNoCant: 3.5,
+            predrillCanted: 5.25,
+          },
+        },
+      },
+    },
+  };
+  const wall = {
+    id: "p1",
+    name: "North wall",
+    lengthFt: 100,
+    heightBand: '0"-30"',
+    deckType: "Wood",
+    predrill: false,
+    canted: false,
+    girthInches: 30.4,
+  };
+  const curb = {
+    id: "c1",
+    name: "RTU curb",
+    quantity: 2,
+    widthIn: 24,
+    lengthIn: 36,
+    curbType: "Closed",
+    deckType: "Wood",
+  };
+
+  it("counterflash (term option 5): Σ(A+B)×qty×2 in → quarter-up → ÷12 → Ceil ft on the $4/0.0167h/$45 row", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, termOption: 5 }] }),
+      withCurbLabor,
+    );
+    expect(warnings).toEqual([]);
+    // (24+36) × 2 × 2 = 240 in → 240/12 = 20 ft
+    expect(inputs.otherMaterial).toBeCloseTo(20 * 4, 2);
+    expect(inputs.ownRateDirectLaborCost).toBeCloseTo(20 * 0.0167 * 45, 4); // 15.03
+    expect(inputs.ownRateDirectLaborHours).toBeCloseTo(20 * 0.0167, 6);
+  });
+
+  it("counterflash fractional inches round UP to the next 0.25 before ÷12", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, quantity: 1, widthIn: 14.025, lengthIn: 10, termOption: 5 }] }),
+      withCurbLabor,
+    );
+    // (24.025) × 1 × 2 = 48.05 → 48.25 (quarter-up) → /12 = 4.02 → Ceil 5 (without the
+    // quarter step it would be 48.05/12 = 4.00 → 4)
+    expect(inputs.otherMaterial).toBeCloseTo(5 * 4, 2);
+  });
+
+  it("other termination options bill no counterflash", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, termOption: 3 }] }),
+      withCurbLabor,
+    );
+    expect(inputs.otherMaterial).toBeCloseTo(0, 6);
+  });
+
+  it("parapet wood blocking: Ceil(Σ length × 1.03) on the TopOfParapet row — LABOR-ONLY", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, hasBlocking: true }] }),
+      withParapet,
+    );
+    expect(warnings).toEqual([]);
+    // 100 × 1.03 = 103 → Ceil 103 units × 0.04 h × $40 = $164.80; material price IGNORED
+    expect(inputs.ownRateDirectLaborHours).toBeCloseTo(103 * 0.04, 6);
+    expect(inputs.ownRateDirectLaborCost).toBeCloseTo(103 * 0.04 * 40, 2);
+    expect(inputs.otherMaterial).toBeCloseTo(0, 6);
+  });
+
+  it("capstones: option 1 → Remove Only Ceil(len/2); option 2 → Replace ONLY + sealant ordering note", () => {
+    const removed = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, capstoneOption: 1 }] }),
+      withParapet,
+    );
+    // Ceil(100/2) = 50 × 0.1 h × $45 = $225 labor, $0 material
+    expect(removed.inputs.ownRateDirectLaborCost).toBeCloseTo(225, 2);
+    expect(removed.inputs.otherMaterial).toBeCloseTo(0, 6);
+
+    const reinstalled = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, capstoneOption: 2, capstoneLengthFt: 45 }] }),
+      withParapet,
+    );
+    // Option-2 walls feed the REINSTALL item only (verbatim legacy): Ceil(45/2) = 23 × $5
+    expect(reinstalled.inputs.otherMaterial).toBeCloseTo(23 * 5, 2);
+    expect(reinstalled.inputs.ownRateDirectLaborCost).toBeCloseTo(0, 6);
+    // sealant tubes: Ceil(Ceil(45)/40) = 2 — ordering quantity only
+    expect(reinstalled.warnings.some((w) => w.includes("2 tubes"))).toBe(true);
+  });
+
+  it("parapet ARP: ((size+6)/12) × AdjustedLength (no ×1.03) × $/sqft → M0", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, arpSizeIn: 18 }] }),
+      withParapet,
+    );
+    expect(warnings).toEqual([]);
+    // (18+6)/12 = 2 ft wide × AdjustedLength 102 (arp length defaults to the wall length) =
+    // 204 sq ft → Ceil 204 × $3 = $612, on top of membrane 3199.23 + parapet membrane 368.42
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 612, 2);
+    // a custom ARP length bills RAW (not adjusted): 2 × 30 = 60 → $180
+    const custom = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, arpSizeIn: 18, arpLengthFt: 30 }] }),
+      withParapet,
+    );
+    expect(custom.inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 180, 2);
+  });
+
+  it("section and parapet ARP are ceiled SEPARATELY before pricing", () => {
+    const edges = [
+      {
+        side: "A",
+        lengthFt: 10,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 12,
+      },
+    ];
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, edges }],
+        parapets: [{ ...wall, arpSizeIn: 18 }],
+      }),
+      withParapet,
+    );
+    // section: 1.03 × ((12+6)/12) × 10 = 15.45 → Ceil 16; parapet: 204 → Ceil 204;
+    // qty = 16 + 204 = 220 × $3 = $660
+    const arpMaterial = 220 * 3;
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + arpMaterial, 2);
+  });
+
+  it("geometry that needs a missing rate row warns instead of silently billing $0", () => {
+    const noRates: EngineAdminData = { ...withParapet };
+    delete (noRates as { autoRates?: unknown }).autoRates;
+    const { warnings } = buildEstimateInputs(
+      bid({
+        parapets: [{ ...wall, hasBlocking: true, capstoneOption: 1, arpSizeIn: 18 }],
+        curbs: [{ ...curb, termOption: 5 }],
+      }),
+      { ...noRates, curbLabor: withCurbLabor.curbLabor! },
+    );
+    expect(warnings.some((w) => w.includes("Curb Counter Flashing"))).toBe(true);
+    expect(warnings.some((w) => w.includes('2" x 4" W/ 8" ISO'))).toBe(true);
+    expect(warnings.some((w) => w.includes("Remove Only"))).toBe(true);
+    expect(warnings.some((w) => w.includes("ARP (SqFt)"))).toBe(true);
+  });
+});

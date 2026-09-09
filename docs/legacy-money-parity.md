@@ -489,6 +489,27 @@ rows carry a `_locked` flag that pins identity, not the price value). What remai
 task — having the engine consume these already-seeded rates to auto-price each item — not a
 data-capture gap.
 
+**Engine wiring status (2026-09-09).** The engine now auto-prices, from bid geometry, via
+`admin.autoRates` (exact-Description rows out of the seeded screens; `buildNdlAutoRates`):
+
+- **Curb counter flashing** (termination option 5, §8.3): Σ(A+B)×qty×2 in → Round 2dp →
+  fractional inch UP to the next ¼" → ÷12 → Round 2dp → Ceil, on "Curb Counter Flashing"
+  (Sheet Metal Work). Material → OtherMaterial; labor at $45/h own-rate → LS1 + man-days.
+- **Parapet wood blocking** (§8.4): Ceil(Σ blocked-wall Length × 1.03) on '2" x 4" W/ 8" ISO'
+  (Parapet Wall Blocking) — LABOR-ONLY (legacy TotalCost = LaborCost; material price ignored).
+- **Capstone masonry** (§8.4): remove = Ceil(Σ option-1 CapstoneLength/2) on "Remove Only";
+  reinstall = Ceil(Σ option-2 /2) on "Replace Capstones" (verbatim: option-2 walls feed reinstall
+  ONLY). Option-2 sealant tubes (Ceil(Ceil(len)/40)) stay an ordering quantity — the sealant
+  item/rate join is not modeled.
+- **ARP material** (§8.6): CalcQty = Ceil(Σ section ARP) + Ceil(Σ parapet ARP) × the
+  "ARP (SqFt)" Membrane Accs price → M0. Parapet ARP = ((size+6)/12) ×
+  (ARPLength==Length ? AdjustedLength : ARPLength) — no ×1.03, no membrane deduction.
+
+Still NOT auto-priced: the **slipsheet/curb polyethylene material** — the legacy NDLOthers
+plastic item has no seeded row anywhere in the web catalogs (only "polyisocyanurate" text
+matches a plastic/poly search), so its sq ft stays an ordering quantity; and the termination
+hardware/footage items held in §8 (price basis unproven).
+
 **Recovered from the installer seed (capture-era defaults, delivered as CSV outside the repo).**
 `SqlScript.xml` seeds much of the exceptional-metals/accessory pricing with real values:
 `ref_AccGutters` (60), `ref_MetalsGutters` (12), `ref_AccDownSpouts` (6), `ref_MetalsDownSpouts` (2),

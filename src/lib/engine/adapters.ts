@@ -276,6 +276,75 @@ export function buildNonDlCatalog(
   return items;
 }
 
+/** One auto-priced NDL rate row (material $/unit + labor hrs/unit at its own $/hr rate). */
+export interface NdlAutoRateItem {
+  price: number;
+  laborPerUnit: number;
+  laborRate: number;
+}
+
+/**
+ * The specific seeded rate rows the engine auto-prices from bid geometry (docs
+ * legacy-money-parity.md §8.3/§8.4/§8.6 + §9.1 — these are the legacy `ref_ndl`-driven items whose
+ * CalcQty the app computed itself). Resolved by EXACT Description within their captured admin
+ * screens (curated data; the same exact-name join the rest of the admin uses). A missing row leaves
+ * its slot undefined — the engine warns instead of auto-pricing.
+ */
+export interface NdlAutoRates {
+  /** "Curb Counter Flashing" (Sheet Metal Work) — curb termination option 5 footage. */
+  counterflash?: NdlAutoRateItem;
+  /** '2" x 4" W/ 8" ISO' (Parapet Wall Blocking) — the legacy TopOfParapet item (LABOR-ONLY). */
+  parapetBlocking?: NdlAutoRateItem;
+  /** "Remove Only" (Masonry) — capstone removal per 2 LF. */
+  masonryRemove?: NdlAutoRateItem;
+  /** "Replace Capstones" (Masonry) — capstone reinstallation per 2 LF. */
+  masonryReplace?: NdlAutoRateItem;
+  /** "ARP (SqFt)" (Membrane Accs): $/sq ft = Price/Package ÷ Parts/Package. */
+  arpPricePerSqFt?: number;
+}
+
+/**
+ * Pull the auto-priced rows out of the seeded screens. Exact-description matching only — no fuzzy
+ * fallback (a renamed row degrades to a warned, unpriced quantity rather than a wrong price).
+ */
+export function buildNdlAutoRates(args: {
+  sheetMetalScreen?: MembraneScreen | null;
+  blockingScreen?: MembraneScreen | null;
+  masonryScreen?: MembraneScreen | null;
+  membraneAccsScreen?: MembraneScreen | null;
+}): NdlAutoRates {
+  const num = (v: string | number | null | undefined): number => (typeof v === "number" ? v : 0);
+  const rateRow = (
+    screen: MembraneScreen | null | undefined,
+    description: string,
+  ): NdlAutoRateItem | undefined => {
+    const r = screen?.rows?.find((row) => String(row["Description"] ?? "") === description);
+    if (!r) return undefined;
+    return {
+      price: num(r["Price"]),
+      laborPerUnit: num(r["LaborPerUnit"]),
+      laborRate: num(r["Labor Rate"]),
+    };
+  };
+  const out: NdlAutoRates = {};
+  const cf = rateRow(args.sheetMetalScreen, "Curb Counter Flashing");
+  if (cf) out.counterflash = cf;
+  const blk = rateRow(args.blockingScreen, '2" x 4" W/ 8" ISO');
+  if (blk) out.parapetBlocking = blk;
+  const rem = rateRow(args.masonryScreen, "Remove Only");
+  if (rem) out.masonryRemove = rem;
+  const rep = rateRow(args.masonryScreen, "Replace Capstones");
+  if (rep) out.masonryReplace = rep;
+  const arp = args.membraneAccsScreen?.rows?.find(
+    (row) => String(row["Description"] ?? "") === "ARP (SqFt)",
+  );
+  if (arp) {
+    const parts = num(arp["Parts/Package"]);
+    out.arpPricePerSqFt = num(arp["Price/Package"]) / (parts > 0 ? parts : 1);
+  }
+  return out;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Labor multipliers (from a Roof Deck Labor "Membrane Labor" combo)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1022,6 +1091,11 @@ export interface RawAdminData {
   adhesiveCoverageDeck?: RawAdhesiveCoverageRow[] | null;
   adhesiveCoverageUnderlayment?: RawAdhesiveCoverageRow[] | null;
   adhesiveWallCoverage?: RawAdhesiveCoverageRow[] | null;
+  /** Screens holding the engine's auto-priced NDL rate rows (buildNdlAutoRates). */
+  nonDlSheetMetalScreen?: MembraneScreen | null;
+  nonDlBlockingScreen?: MembraneScreen | null;
+  nonDlMasonryScreen?: MembraneScreen | null;
+  membraneAccsScreen?: MembraneScreen | null;
 }
 
 export interface EngineSettings {
@@ -1067,6 +1141,8 @@ export interface EngineAdminData {
   sheetTabSpacings?: Record<number, number[]>;
   /** Duro-Bond / Duro-Tuff / Duro-Fleece flat membrane prices (family → variant → $/sqft). */
   familyMembranePrices?: Record<string, Record<string, number>>;
+  /** Auto-priced NDL rate rows (counterflash / parapet blocking / masonry / ARP — §8.3/§8.4). */
+  autoRates?: NdlAutoRates;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1147,6 +1223,12 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const laborTemplates = raw.laborTemplateRows?.length
     ? buildLaborTemplates(raw.laborTemplateRows, raw.laborTemplateAdjustments ?? [])
     : undefined;
+  const autoRates = buildNdlAutoRates({
+    sheetMetalScreen: raw.nonDlSheetMetalScreen ?? null,
+    blockingScreen: raw.nonDlBlockingScreen ?? null,
+    masonryScreen: raw.nonDlMasonryScreen ?? null,
+    membraneAccsScreen: raw.membraneAccsScreen ?? null,
+  });
 
   return {
     deckOrder,
@@ -1167,5 +1249,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(laborTemplates ? { laborTemplates } : {}),
     ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
     ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),
+    ...(Object.keys(autoRates).length ? { autoRates } : {}),
   };
 }

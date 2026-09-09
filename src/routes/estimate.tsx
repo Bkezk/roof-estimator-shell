@@ -2272,6 +2272,102 @@ function EstimatePage() {
                             </div>
                           </div>
                         </div>
+                        {/* Legacy wall extras (docs §8.4/§8.6): wood blocking (labor-only
+                            TopOfParapet item), capstone masonry, and parapet ARP — all
+                            auto-priced from the seeded rates. */}
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Wall extras (auto-priced)
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                            <div className="flex items-end gap-2 pb-1">
+                              <Switch
+                                id={`bk-${p.id}`}
+                                checked={p.hasBlocking ?? false}
+                                onCheckedChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => (j === i ? { ...x, hasBlocking: v } : x)),
+                                  )
+                                }
+                              />
+                              <Label htmlFor={`bk-${p.id}`} className="text-xs">
+                                Wood blocking
+                              </Label>
+                            </div>
+                            <Field label="Capstones">
+                              <PickOne
+                                value={
+                                  p.capstoneOption === 1
+                                    ? "Remove only"
+                                    : p.capstoneOption === 2
+                                      ? "Remove & reinstall"
+                                      : "None"
+                                }
+                                options={["None", "Remove only", "Remove & reinstall"]}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "None") {
+                                        delete nx.capstoneOption;
+                                        delete nx.capstoneLengthFt;
+                                      } else nx.capstoneOption = v === "Remove only" ? 1 : 2;
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            {(p.capstoneOption ?? 0) > 0 && (
+                              <Field label="Capstone len (ft)">
+                                <NumInput
+                                  min={0}
+                                  value={p.capstoneLengthFt ?? p.lengthFt}
+                                  onValue={(n) =>
+                                    setParapets((prev) =>
+                                      prev.map((x, j) =>
+                                        j === i ? { ...x, capstoneLengthFt: n } : x,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </Field>
+                            )}
+                            <Field label="ARP size">
+                              <PickOne
+                                value={(p.arpSizeIn ?? 0) > 0 ? `${p.arpSizeIn}"` : "None"}
+                                options={["None", '12"', '18"', '24"', '30"']}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "None") {
+                                        delete nx.arpSizeIn;
+                                        delete nx.arpLengthFt;
+                                      } else nx.arpSizeIn = parseInt(v, 10);
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            {(p.arpSizeIn ?? 0) > 0 && (
+                              <Field label="ARP len (ft)">
+                                <NumInput
+                                  min={0}
+                                  value={p.arpLengthFt ?? p.lengthFt}
+                                  onValue={(n) =>
+                                    setParapets((prev) =>
+                                      prev.map((x, j) => (j === i ? { ...x, arpLengthFt: n } : x)),
+                                    )
+                                  }
+                                />
+                              </Field>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -2660,12 +2756,18 @@ function EstimatePage() {
                                   Lift labor auto-added.
                                 </p>
                               );
-                            if (t === 5)
+                            if (t === 5) {
+                              // §8.3: (A+B) × qty × 2 inches, fraction up to ¼", ÷12, Ceil ft.
+                              const ft = Math.ceil(
+                                ((c.widthIn + c.lengthIn) * c.quantity * 2) / 12,
+                              );
                               return (
                                 <p className="text-[11px] text-muted-foreground">
-                                  Counterflash footage is an ordering quantity, not auto-priced.
+                                  Curb counter flashing: ≈{ft} ft — auto-priced off the Sheet Metal
+                                  Work rate.
                                 </p>
                               );
+                            }
                             return null;
                           })()}
                           {/* Legacy Insulation/Plastic on Curb(s): insulation adds the §2 ISO

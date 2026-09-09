@@ -10,6 +10,7 @@ import {
   buildAccessoryCatalog,
   buildAccessoryLaborLookup,
   buildNonDlCatalog,
+  buildNdlAutoRates,
   buildShippingSteps,
   buildSetupTable,
   buildInspectionTable,
@@ -809,5 +810,63 @@ describe("buildLaborTemplates / laborTemplateFactor", () => {
     expect(laborTemplateFactor(t.byName["Standard"], "Parapets Labor")).toBeCloseTo(1.1, 6);
     expect(laborTemplateFactor(t.byName["Standard"], "Missing Area")).toBe(1);
     expect(laborTemplateFactor(undefined, "Anything")).toBe(1);
+  });
+});
+
+describe("buildNdlAutoRates (the engine's auto-priced NDL rate rows)", () => {
+  it("resolves each row by EXACT description; ARP $/sqft = Price/Package ÷ Parts/Package", () => {
+    const rates = buildNdlAutoRates({
+      sheetMetalScreen: {
+        columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+        rows: [
+          { Description: "Reglet Flashing", Price: 4.3, LaborPerUnit: 0.25, "Labor Rate": 45 },
+          {
+            Description: "Curb Counter Flashing",
+            Price: 4,
+            LaborPerUnit: 0.0167,
+            "Labor Rate": 45,
+          },
+        ],
+      },
+      blockingScreen: {
+        columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+        rows: [
+          { Description: '2" x 4" W/ 8" ISO', Price: 0.57, LaborPerUnit: 0.04, "Labor Rate": 40 },
+        ],
+      },
+      masonryScreen: {
+        columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+        rows: [
+          { Description: "Remove Only", Price: 0, LaborPerUnit: 0.1, "Labor Rate": 45 },
+          { Description: "Mortar Mix", Price: 0, LaborPerUnit: 0.3, "Labor Rate": 45 },
+          { Description: "Replace Capstones", Price: 0, LaborPerUnit: 0, "Labor Rate": 45 },
+        ],
+      },
+      membraneAccsScreen: {
+        columns: ["Description", "Part #", "Parts/Package", "Price/Package"],
+        rows: [
+          { Description: "ARP (SqFt)", "Part #": "1001", "Parts/Package": 1, "Price/Package": 3 },
+          { Description: "T-Patch", "Part #": "8067", "Parts/Package": 50, "Price/Package": 10 },
+        ],
+      },
+    });
+    expect(rates.counterflash).toEqual({ price: 4, laborPerUnit: 0.0167, laborRate: 45 });
+    expect(rates.parapetBlocking).toEqual({ price: 0.57, laborPerUnit: 0.04, laborRate: 40 });
+    expect(rates.masonryRemove).toEqual({ price: 0, laborPerUnit: 0.1, laborRate: 45 });
+    expect(rates.masonryReplace).toEqual({ price: 0, laborPerUnit: 0, laborRate: 45 });
+    expect(rates.arpPricePerSqFt).toBe(3);
+  });
+
+  it("a renamed/missing row leaves its slot undefined (no fuzzy matching)", () => {
+    const rates = buildNdlAutoRates({
+      sheetMetalScreen: {
+        columns: ["Description", "Price", "LaborPerUnit", "Labor Rate"],
+        rows: [
+          { Description: "Curb CounterFlashing", Price: 4, LaborPerUnit: 0.0167, "Labor Rate": 45 },
+        ],
+      },
+    });
+    expect(rates.counterflash).toBeUndefined();
+    expect(rates.arpPricePerSqFt).toBeUndefined();
   });
 });

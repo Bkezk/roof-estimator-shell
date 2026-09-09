@@ -93,6 +93,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       covDeckRes,
       covUnderRes,
       covWallRes,
+      ndlSheetMetalRes,
+      ndlBlockingRes,
+      ndlMasonryRes,
+      membraneAccsRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -133,6 +137,16 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       (sb as unknown as UntypedFrom).from("adhesive_coverage_deck").select("*"),
       (sb as unknown as UntypedFrom).from("adhesive_coverage_underlayment").select("*"),
       (sb as unknown as UntypedFrom).from("adhesive_wall_coverage").select("*"),
+      // Screens holding the auto-priced NDL rate rows (§8.3/§8.4 counterflash / blocking /
+      // capstone masonry / ARP).
+      sb.from("pricing_catalog").select("data").eq("id", "non_dl:sheet_metal_work").maybeSingle(),
+      sb
+        .from("pricing_catalog")
+        .select("data")
+        .eq("id", "non_dl:parapet_wall_blocking")
+        .maybeSingle(),
+      sb.from("pricing_catalog").select("data").eq("id", "non_dl:masonry").maybeSingle(),
+      sb.from("pricing_catalog").select("data").eq("id", "duro_last:membrane_accs").maybeSingle(),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -159,6 +173,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (covDeckRes.error) throw new Error(covDeckRes.error.message);
     if (covUnderRes.error) throw new Error(covUnderRes.error.message);
     if (covWallRes.error) throw new Error(covWallRes.error.message);
+    if (ndlSheetMetalRes.error) throw ndlSheetMetalRes.error;
+    if (ndlBlockingRes.error) throw ndlBlockingRes.error;
+    if (ndlMasonryRes.error) throw ndlMasonryRes.error;
+    if (membraneAccsRes.error) throw membraneAccsRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -222,6 +240,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       adhesiveCoverageDeck,
       adhesiveCoverageUnderlayment,
       adhesiveWallCoverage,
+      nonDlSheetMetalScreen: (ndlSheetMetalRes.data?.data ?? null) as MembraneScreen | null,
+      nonDlBlockingScreen: (ndlBlockingRes.data?.data ?? null) as MembraneScreen | null,
+      nonDlMasonryScreen: (ndlMasonryRes.data?.data ?? null) as MembraneScreen | null,
+      membraneAccsScreen: (membraneAccsRes.data?.data ?? null) as MembraneScreen | null,
     });
   });
 

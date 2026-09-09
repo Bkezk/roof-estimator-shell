@@ -73,6 +73,7 @@ import {
   laborTemplateFactor,
   LEGACY_RS_ID_BY_NAME,
   type EngineAdminData,
+  type NdlAutoRateItem,
 } from "./adapters";
 
 /**
@@ -203,6 +204,30 @@ export interface ParapetInput {
   thicknessMil?: number;
   /** Per-parapet membrane color (legacy Membrane Options); absent = bid default. Docs §8.5. */
   color?: string;
+  /**
+   * Legacy "Wood Blocking on Top of Wall" (docs §8.4): CalcQty on the TopOfParapet NDL item =
+   * Ceil(Σ Length × 1.03) across blocked walls — the item is LABOR-ONLY in the legacy collection
+   * (TotalCost = LaborCost; its material price is ignored).
+   */
+  hasBlocking?: boolean;
+  /**
+   * Legacy capstone option (docs §8.4): 0/absent none, 1 Remove Only, 2 Remove & Reinstall.
+   * Remove qty = Ceil(Σ option-1 CapstoneLength / 2) on Masonry "Remove Only"; reinstall qty =
+   * Ceil(Σ option-2 CapstoneLength / 2) on "Replace Capstones" (verbatim legacy: option-2 walls
+   * feed the reinstall item ONLY, not the remove item). Option 2 also totals sealant tubes
+   * (Ceil(Ceil(len)/40)) as an ordering quantity (its item/rate is not modeled yet).
+   */
+  capstoneOption?: number;
+  /** Capstone length (ft); absent = the wall length (legacy default). */
+  capstoneLengthFt?: number;
+  /**
+   * Legacy parapet ARP size (inches; 0/absent = none). ARPSqFt = ((size + 6) / 12) ×
+   * (ARPLength == Length ? AdjustedLength : ARPLength) — NO ×1.03 waste and NO membrane
+   * deduction on the parapet side (docs §8.6; both differ from the section §2.3 formula).
+   */
+  arpSizeIn?: number;
+  /** Parapet ARP length (ft); absent = the wall length (which bills at AdjustedLength). */
+  arpLengthFt?: number;
   // Legacy wall profile dims (inches); girth derives as their sum when any is present.
   skirtInches?: number;
   cantInches?: number;
@@ -257,8 +282,9 @@ export interface CurbInput {
   /**
    * Legacy curb termination option (docs §8.3): 0 None, 1 Scupper-Fascia Bar 1¾",
    * 2 Lift & Tuck, 3 Lift & T-Bar, 4 No Lift & T-Bar, 5 No Lift & Counter Flash.
-   * The Lift options (2/3) add the legacy lift labor; hardware footage for 1/3/4/5 is an
-   * ordering quantity (rates DB-resident — priced via accessory/non-DL lines for now).
+   * The Lift options (2/3) add the legacy lift labor; option 5 auto-prices the "Curb Counter
+   * Flashing" Sheet Metal Work item (§8.3); hardware footage for 1/3/4 is an ordering quantity
+   * (term-bar/fascia price basis unproven — priced via accessory/non-DL lines for now).
    */
   termOption?: number;
   /**
@@ -708,6 +734,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // Parapets row for that thickness.
   let parapetLaborHours = 0;
   let parapetMaterial = 0;
+  /** Σ parapet ARP sq ft (§8.6) — joins the section ARP in the MembraneAccs CalcQty below. */
+  let parapetArpSqFt = 0;
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
     const anyWall = bid.parapets.some((p) => parapetGirthInches(p) > 0 && p.lengthFt > 0);
@@ -772,6 +800,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Per-item labor % (docs §8.7): legacy ManHours = BaseManHours × (1 + AdjustLabor/100),
       // wrapping the whole item (matrix labor + slipsheet labor).
       parapetLaborHours += itemHours * (1 + (p.adjustLaborPct ?? 0) / 100);
+      // Parapet ARP (docs §8.6): ((size+6)/12) × (ARPLength == Length ? AdjustedLength :
+      // ARPLength) — no ×1.03, no membrane deduction (both section-side-only).
+      if ((p.arpSizeIn ?? 0) > 0) {
+        const arpLen = p.arpLengthFt ?? p.lengthFt;
+        parapetArpSqFt +=
+          (((p.arpSizeIn ?? 0) + 6) / 12) * (arpLen === p.lengthFt ? adjustedLengthFt : arpLen);
+      }
       // Legacy prices at the PARAPET's own mil/color (docs §8.5); bid default when unset.
       const ownPrice =
         p.thicknessMil !== undefined || p.color !== undefined
@@ -879,19 +914,134 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   );
   const metalsLaborHours = bid.metals.reduce((sum, m) => sum + m.laborPerUnit * m.quantity, 0);
 
+  // ── Auto-priced NDL items (docs §8.3/§8.4/§8.6) ────────────────────────────────────────────
+  // The legacy app computed these items' CalcQty from bid geometry and priced them off their
+  // seeded ref_ndl rates (admin.autoRates). Routing matches their catalog categories: material →
+  // OtherMaterial, labor at the row's OWN rate → direct labor (LS1) with its hours in man-days —
+  // exactly how a hand-added line from the same screen routes. A missing rate row leaves the
+  // quantity unpriced WITH a warning (no silent $0 when the geometry asked for the item).
+  let autoNdlMaterial = 0;
+  let autoOwnRateCost = 0;
+  let autoOwnRateHours = 0;
+  const addAutoItem = (qty: number, rate: NdlAutoRateItem, laborOnly: boolean) => {
+    if (!laborOnly) autoNdlMaterial += qty * rate.price;
+    autoOwnRateCost += qty * rate.laborPerUnit * rate.laborRate;
+    autoOwnRateHours += qty * rate.laborPerUnit;
+  };
+
+  // Curb counter flashing (§8.3, termination option 5 "No Lift & Counter Flash"): inches =
+  // Σ (A+B) × qty × 2 → Round 2dp → fractional inch UP to the next 0.25 → ÷12 → Round 2dp → Ceil.
+  {
+    const inchesRaw = bid.curbs.reduce(
+      (sum, c) =>
+        c.termOption === 5 && c.quantity > 0
+          ? sum + (c.widthIn + c.lengthIn) * c.quantity * 2
+          : sum,
+      0,
+    );
+    if (inchesRaw > 0) {
+      const r2 = bankersRound(inchesRaw, 2);
+      const whole = Math.floor(r2);
+      const cents = Math.round((r2 - whole) * 100);
+      const inches = whole + (Math.ceil(cents / 25) * 25) / 100;
+      const qty = Math.ceil(bankersRound(inches / 12, 2));
+      const rate = admin.autoRates?.counterflash;
+      if (rate) addAutoItem(qty, rate, false);
+      else
+        warnings.push(
+          `Curb counter flashing: ${qty} ft needed but no "Curb Counter Flashing" rate row (Sheet Metal Work) — not auto-priced.`,
+        );
+    }
+  }
+
+  // Parapet wood blocking (§8.4, TopOfParapet): CalcQty = Ceil(Σ blocked-wall Length × 1.03).
+  // LABOR-ONLY in the legacy collection: TotalCost = LaborCost; the row's material price is
+  // deliberately ignored.
+  {
+    const blockedFt = bid.parapets.reduce(
+      (sum, p) => (p.hasBlocking ? sum + p.lengthFt * 1.03 : sum),
+      0,
+    );
+    if (blockedFt > 0) {
+      const qty = Math.ceil(blockedFt);
+      const rate = admin.autoRates?.parapetBlocking;
+      if (rate) addAutoItem(qty, rate, true);
+      else
+        warnings.push(
+          `Parapet wood blocking: ${qty} ft needed but no '2" x 4" W/ 8" ISO' rate row (Parapet Wall Blocking) — not auto-priced.`,
+        );
+    }
+  }
+
+  // Capstone masonry (§8.4): remove qty = Ceil(Σ option-1 CapstoneLength / 2) on "Remove Only";
+  // reinstall qty = Ceil(Σ option-2 CapstoneLength / 2) on "Replace Capstones" (verbatim legacy:
+  // option-2 walls feed reinstall ONLY). Option-2 sealant tubes (Ceil(Ceil(len)/40)) stay an
+  // ordering quantity — the legacy sealant item/rate join is not modeled yet.
+  {
+    const capLen = (p: ParapetInput) => p.capstoneLengthFt ?? p.lengthFt;
+    const removeLen = bid.parapets.reduce(
+      (sum, p) => (p.capstoneOption === 1 ? sum + capLen(p) : sum),
+      0,
+    );
+    const reinstallLen = bid.parapets.reduce(
+      (sum, p) => (p.capstoneOption === 2 ? sum + capLen(p) : sum),
+      0,
+    );
+    if (removeLen > 0) {
+      const qty = Math.ceil(removeLen / 2);
+      const rate = admin.autoRates?.masonryRemove;
+      if (rate) addAutoItem(qty, rate, false);
+      else
+        warnings.push(
+          `Capstone removal: ${qty} units needed but no "Remove Only" rate row (Masonry) — not auto-priced.`,
+        );
+    }
+    if (reinstallLen > 0) {
+      const qty = Math.ceil(reinstallLen / 2);
+      const rate = admin.autoRates?.masonryReplace;
+      if (rate) addAutoItem(qty, rate, false);
+      else
+        warnings.push(
+          `Capstone reinstallation: ${qty} units needed but no "Replace Capstones" rate row (Masonry) — not auto-priced.`,
+        );
+      const tubes = Math.ceil(Math.ceil(reinstallLen) / 40);
+      warnings.push(
+        `Capstone sealant: ${tubes} tube${tubes === 1 ? "" : "s"} to order (quantity only — the legacy sealant rate is not auto-priced yet; add it as a catalog line).`,
+      );
+    }
+  }
+
+  // ARP material (§8.6, the MembraneAccs "ARP (SqFt)" item → M0): CalcQty = Ceil(Σ section ARP)
+  // + Ceil(Σ parapet ARP) — each side ceiled separately, exactly as the legacy collections
+  // aggregate. (Section ARP also deducts from membrane sq ft — §2.3, already applied above.)
+  let arpMaterial = 0;
+  {
+    const sectionArp = bid.sections.reduce((sum, s) => sum + edgesArpSqFt(s.edges ?? []), 0);
+    const qty = Math.ceil(sectionArp) + Math.ceil(parapetArpSqFt);
+    if (qty > 0) {
+      const price = admin.autoRates?.arpPricePerSqFt;
+      if (price !== undefined) arpMaterial = qty * price;
+      else
+        warnings.push(
+          `ARP: ${qty} sq ft needed but no "ARP (SqFt)" price row (Membrane Accs) — not auto-priced.`,
+        );
+    }
+  }
+
   // Apply the template factors to the category hour seams.
   parapetLaborHours *= tf("Parapets Labor");
   curbLaborHours *= tf("Curbs Labor");
   underlaymentLaborHours *= tf("Underlayment Labor");
 
-  // M0 = membrane + accessories + parapet + curb + metals material (dMaterial[0..6] slots).
+  // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
   const duroLastMaterial =
     membraneMaterial +
     accessoryMaterial +
     parapetMaterial +
     curbMaterial +
     metalsMaterial +
-    adhesiveMaterial;
+    adhesiveMaterial +
+    arpMaterial;
   const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
 
   // Non-DL catalog lines, routed by curated category (docs/legacy-money-parity.md §6):
@@ -901,11 +1051,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   //    line's OWN rate → direct labor (dLabor[14..19] inside LaborSubtotal1), hours → man-days.
   //  - Uncategorized (older saved lines): previous web routing preserved (material →
   //    OtherMaterial, labor → services).
-  let nonDlMaterial = 0;
+  let nonDlMaterial = autoNdlMaterial;
   let nonDlServices = 0;
   let nonDlSubs = 0;
-  let nonDlOwnRateCost = 0;
-  let nonDlOwnRateHours = 0;
+  let nonDlOwnRateCost = autoOwnRateCost;
+  let nonDlOwnRateHours = autoOwnRateHours;
   for (const l of bid.nonDlLines) {
     const material = l.price * l.quantity;
     const labor = l.laborPerUnit * l.laborRate * l.quantity;
