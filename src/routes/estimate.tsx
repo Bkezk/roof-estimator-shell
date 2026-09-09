@@ -3784,7 +3784,7 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
   );
   const scupper = (metal: boolean) => (
     <>
-      {/* left plate */}
+      {/* left plate with the punched opening the chute passes through (open-ended prism) */}
       <polygon
         points="6,8 20,3 20,31 6,36"
         className={tan}
@@ -3800,20 +3800,26 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
         strokeWidth="0.8"
         strokeDasharray="1.2,1.6"
       />
-      {/* chute (drops slightly left → right, entering each plate mid-face) */}
       <polygon
-        points="20,12 26,9.5 50,18.5 44,21"
+        points="13,13 19,10.5 19,21.5 13,24"
+        className="fill-background"
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      {/* chute: rectangular prism, open at both ends, entering each plate mid-face */}
+      <polygon
+        points="20,12.5 26,10 50,23 44,25.5"
         className={tan}
         stroke="currentColor"
         strokeWidth="1.2"
       />
       <polygon
-        points="20,12 44,21 44,33 20,24"
+        points="20,12.5 44,25.5 44,34.5 20,21.5"
         className={tanSide}
         stroke="currentColor"
         strokeWidth="1.2"
       />
-      {/* right plate */}
+      {/* right plate with the through-opening where the chute arrives */}
       <polygon
         points="44,16 58,11 58,39 44,44"
         className={tan}
@@ -3829,20 +3835,19 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
         strokeWidth="0.8"
         strokeDasharray="1.2,1.6"
       />
-      {/* opening in the right plate */}
       <polygon
-        points="47,24 53,21.5 53,32 47,34.5"
+        points="47,26.5 53,24 53,33 47,35.5"
         className="fill-background"
         stroke="currentColor"
         strokeWidth="1"
       />
       {metal && (
         <text
-          x="31.5"
-          y="24.5"
+          x="32"
+          y="25"
           textAnchor="middle"
-          transform="skewY(11)"
-          className="fill-current text-[7.5px] font-semibold"
+          transform="rotate(28.5 32 25)"
+          className="fill-current text-[6.5px] font-semibold"
         >
           Metal
         </text>
