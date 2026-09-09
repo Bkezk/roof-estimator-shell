@@ -684,6 +684,79 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.77, 4);
   });
 
+  it("per-item labor %: adjustLaborPct scales the WHOLE item's hours (curbs and parapets)", () => {
+    // Legacy frmLaborPopUp link (docs §8.7): ManHours = BaseHours × (1 + AdjustLabor/100),
+    // wrapping every per-item adder (curb ISO/lift labor, parapet slipsheet labor).
+    const withBoth: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1 },
+        curbTypes: ["Closed"],
+      },
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const curb = {
+      id: "c1",
+      name: "RTU curb",
+      quantity: 2,
+      widthIn: 60,
+      lengthIn: 60,
+      curbType: "Closed",
+      deckType: "Wood",
+      hasInsulation: true,
+      termOption: 3,
+    };
+    const parapet = {
+      id: "p1",
+      name: "North wall",
+      lengthFt: 100,
+      heightBand: '0"-30"',
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 30.4,
+      useSlipsheet: true,
+    };
+    // curb base: type labor 2×(8+7.5×20)/60 + ISO Round((0.25+20×0.0167)×2,2)=1.17
+    //            + lift 1+20×0.020833 = 1.41666
+    const curbBase = (2 * (8 + 7.5 * 20)) / 60 + 1.17 + 1 + 20 * 0.020833;
+    // parapet base: 4.5 matrix + 0.80625 slipsheet
+    const parapetBase = 4.5 + 0.80625;
+    const { inputs } = buildEstimateInputs(
+      bid({
+        curbs: [{ ...curb, adjustLaborPct: 50 }],
+        parapets: [{ ...parapet, adjustLaborPct: -20 }],
+      }),
+      withBoth,
+    );
+    const r = computeEstimate(inputs);
+    expect(r.curbLaborHours).toBeCloseTo(curbBase * 1.5, 4);
+    expect(r.parapetLaborHours).toBeCloseTo(parapetBase * 0.8, 4);
+    // absent / 0 leaves hours unchanged
+    const { inputs: plain } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb }], parapets: [{ ...parapet }] }),
+      withBoth,
+    );
+    const r2 = computeEstimate(plain);
+    expect(r2.curbLaborHours).toBeCloseTo(curbBase, 4);
+    expect(r2.parapetLaborHours).toBeCloseTo(parapetBase, 4);
+  });
+
   it("curbs: Lift termination options (2/3) add the legacy lift labor, once per curb entry", () => {
     // Curb.BaseHours (docs §8.2/§8.3): TermOption ∈ {2 Lift & Tuck, 3 Lift & T-Bar} adds
     // 1 + LinealFt × 0.020833 (12 < LF ≤ 32) or 1 + LinealFt × 0.041667 (LF > 32), where

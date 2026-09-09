@@ -188,6 +188,11 @@ export interface ParapetInput {
   /** Number of wall pieces (legacy Pieces, default 1): AdjustedLength = length + 1 + pieces. */
   pieces?: number;
   /**
+   * Per-item labor adjustment percent (legacy AdjustLabor, the "Labor: X h (Y%)" link — docs
+   * §8.7): the item's ENTIRE hours × (1 + pct/100). 0/absent = unchanged; below-zero allowed.
+   */
+  adjustLaborPct?: number;
+  /**
    * Legacy "Use Slipsheet" (UsePlastic, docs §8.6): polyethylene = AdjustedHeight × Length ×
    * 1.25 sq ft — labor 0.25 h / 100 sq ft is auto-priced; the material is an NDL item (rate
    * DB-resident), so the sq ft stays an ordering quantity.
@@ -255,6 +260,11 @@ export interface CurbInput {
    * ordering quantity (rates DB-resident — priced via accessory/non-DL lines for now).
    */
   termOption?: number;
+  /**
+   * Per-item labor adjustment percent (legacy AdjustLabor, the "Labor: X h (Y%)" link — docs
+   * §8.7): the curb's ENTIRE hours (type labor + ISO + lift) × (1 + pct/100), Round 8dp.
+   */
+  adjustLaborPct?: number;
   /** Legacy "Insulation on Curb(s)": adds ISO labor (0.25 + LinealFt × 0.0167) × qty hours. */
   hasInsulation?: boolean;
   /** Legacy "Plastic on Curb(s)": drives the PolyethyleneSqF ordering quantity (no auto price). */
@@ -725,13 +735,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     for (const p of bid.parapets) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
       const entry = admin.parapetLabor?.lookup[tDeck]?.[p.heightBand];
+      let itemHours = 0;
       if (!entry) {
         if (p.lengthFt > 0)
           warnings.push(
             `No parapet labor for ${p.deckType} / ${p.heightBand || "(no band)"} — "${p.name}".`,
           );
       } else {
-        parapetLaborHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
+        itemHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
       }
       const girth = parapetGirthInches(p);
       const pieces = p.pieces ?? 1;
@@ -749,8 +760,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // labor 0.25 h / 100 sq ft (the legacy BaseManHours poly term).
       if (p.useSlipsheet) {
         const polySqFt = adjustedHeightFt * p.lengthFt * 1.25;
-        parapetLaborHours += (polySqFt / 100) * 0.25;
+        itemHours += (polySqFt / 100) * 0.25;
       }
+      // Per-item labor % (docs §8.7): legacy ManHours = BaseManHours × (1 + AdjustLabor/100),
+      // wrapping the whole item (matrix labor + slipsheet labor).
+      parapetLaborHours += itemHours * (1 + (p.adjustLaborPct ?? 0) / 100);
       // Legacy prices at the PARAPET's own mil/color (docs §8.5); bid default when unset.
       const ownPrice =
         p.thicknessMil !== undefined || p.color !== undefined
@@ -770,19 +784,25 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let curbLaborHours = 0;
   for (const c of bid.curbs) {
     if (c.quantity <= 0) continue;
+    // Per-item hours accumulate here, then × (1 + adjustLaborPct/100), Round 8dp — the legacy
+    // Curb.ManHours composition (docs §8.7) wrapping type labor + ISO + lift labor.
+    let itemHours = 0;
+    const addItem = () => {
+      curbLaborHours += bankersRound(itemHours * (1 + (c.adjustLaborPct ?? 0) / 100), 8);
+    };
     // Legacy "Insulation on Curb(s)" (parity doc §2): ISO_Labor = Round((0.25 + LinealFt ×
     // 0.0167) × qty, 2) hours, LinealFt = (A+B)/6 (the footprint perimeter in feet).
     if (c.hasInsulation) {
       const linealFt = (c.widthIn + c.lengthIn) / 6;
-      curbLaborHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
+      itemHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
     }
     // Lift termination labor (docs §8.2/§8.3): TermOption 2 (Lift & Tuck) / 3 (Lift & T-Bar)
     // add 1 + LF × 0.020833 (12 < LF ≤ 32) or 1 + LF × 0.041667 (LF > 32) hours — ONCE per
     // curb entry (the legacy adder sits outside the × qty terms), LF = (A+B)/6.
     if (c.termOption === 2 || c.termOption === 3) {
       const lf = (c.widthIn + c.lengthIn) / 6;
-      if (lf > 32) curbLaborHours += 1 + lf * 0.041667;
-      else if (lf > 12) curbLaborHours += 1 + lf * 0.020833;
+      if (lf > 32) itemHours += 1 + lf * 0.041667;
+      else if (lf > 12) itemHours += 1 + lf * 0.020833;
     }
     const tDeck = TEAROFF_DECK_BY_LABOR_DECK[c.deckType] ?? c.deckType;
     const minutesPerLF = admin.curbLabor?.minutesByDeck[tDeck];
@@ -791,15 +811,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       warnings.push(
         `No curb labor for ${c.deckType} / ${c.curbType || "(no type)"} — "${c.name}".`,
       );
+      addItem();
       continue;
     }
-    curbLaborHours += curbHoursCalc({
+    itemHours += curbHoursCalc({
       quantity: c.quantity,
       setupMinutes: admin.curbLabor?.setupMinutes ?? 0,
       minutesPerLF,
       typeMultiplier,
       perimeterFt: 2 * (in2Ft(c.widthIn) + in2Ft(c.lengthIn)),
     });
+    addItem();
   }
 
   // Curb membrane (legacy Curb.Cost, parity doc §2): the hardcoded prefab-wrap model → M0, at
