@@ -3703,8 +3703,8 @@ function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
 }
 
 /** Small legacy-style curb thumbnail per CurbStyle.ID (schematic; 3 & 4 are quote-required). */
-function CurbStyleIcon({ styleId }: { styleId: number }) {
-  // Faithful redraws of the legacy thumbnails: a curb box on a flared skirt with corner lobes
+function CurbStyleArt({ styleId }: { styleId: number }) {
+  // Faithful redraws of the legacy drawings (shared by the picker tiles and the info panel): a curb box on a flared skirt with corner lobes
   // (open w/ membrane flap, open, capped) and the through-wall scupper (plate—chute—plate,
   // plain or "Metal"). Ids 3/4 are the quote-required styles.
   const tan = "fill-amber-50 dark:fill-amber-300/20";
@@ -3850,7 +3850,7 @@ function CurbStyleIcon({ styleId }: { styleId: number }) {
     </>
   );
   return (
-    <svg viewBox="0 0 64 48" className="h-11 w-14 text-foreground">
+    <>
       {(styleId === 1 || styleId === 2 || styleId === 3 || styleId === 4) && skirt}
       {styleId === 1 && (
         <>
@@ -3891,12 +3891,28 @@ function CurbStyleIcon({ styleId }: { styleId: number }) {
       )}
       {styleId === 5 && scupper(false)}
       {styleId === 6 && scupper(true)}
+    </>
+  );
+}
+
+/** Small picker tile wrapping the shared style art. */
+function CurbStyleIcon({ styleId }: { styleId: number }) {
+  return (
+    <svg viewBox="0 0 64 48" className="h-11 w-14 text-foreground">
+      <CurbStyleArt styleId={styleId} />
     </svg>
   );
 }
 
-/** Legacy Curbs screen info panel: red A/B/C/D readout + labeled isometric curb diagram. */
+/** Legacy Curbs screen info panel: red A/B/C/D readout + the SELECTED style's drawing. */
 function CurbDiagram({ c }: { c: CurbInput }) {
+  const styleId = c.styleId ?? 0;
+  const isScupper = styleId === 5 || styleId === 6;
+  const L = ({ x, y, t }: { x: number; y: number; t: string }) => (
+    <text x={x} y={y} className="fill-red-600 text-[6px] font-bold dark:fill-red-400">
+      {t}
+    </text>
+  );
   return (
     <div className="rounded-md border p-3">
       <div className="flex items-center gap-4">
@@ -3906,60 +3922,35 @@ function CurbDiagram({ c }: { c: CurbInput }) {
           <p>C: {c.dimCIn ?? 0}</p>
           <p>D: {c.dimDIn ?? 0}</p>
         </div>
-        <svg viewBox="0 0 220 150" className="h-32 flex-1 text-foreground">
-          {/* skirt flange (D) */}
-          <polygon
-            points="40,86 110,118 186,90 152,74 110,90 74,72"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1"
-            opacity="0.5"
-          />
-          {/* curb box */}
-          <polygon
-            points="74,40 110,26 152,42 112,58"
-            className="fill-amber-100 dark:fill-amber-300/20"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <polygon
-            points="86,44 112,34 138,44 112,53"
-            className="fill-background"
-            stroke="currentColor"
-            strokeWidth="0.75"
-          />
-          <polygon
-            points="74,40 112,58 112,90 74,72"
-            className="fill-amber-200/70 dark:fill-amber-300/10"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          <polygon
-            points="112,58 152,42 152,74 112,90"
-            className="fill-amber-200/40 dark:fill-amber-300/5"
-            stroke="currentColor"
-            strokeWidth="1.5"
-          />
-          {/* dim labels with leader arrows */}
-          <line x1="78" y1="30" x2="106" y2="19" stroke="currentColor" strokeWidth="0.75" />
-          <text x="86" y="16" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
-            A
-          </text>
-          <line x1="116" y1="20" x2="150" y2="34" stroke="currentColor" strokeWidth="0.75" />
-          <text x="142" y="24" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
-            B
-          </text>
-          <line x1="66" y1="42" x2="66" y2="70" stroke="currentColor" strokeWidth="0.75" />
-          <text x="56" y="58" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
-            C
-          </text>
-          <line x1="52" y1="94" x2="42" y2="88" stroke="currentColor" strokeWidth="0.75" />
-          <text x="40" y="106" className="fill-red-600 text-[11px] font-semibold dark:fill-red-400">
-            D
-          </text>
+        <svg viewBox="0 0 64 48" className="h-36 min-w-0 flex-1 text-foreground">
+          {styleId >= 1 && styleId <= 6 && <CurbStyleArt styleId={styleId} />}
+          {styleId >= 1 && !isScupper && (
+            <>
+              <L x={20} y={13} t="A" />
+              <L x={41} y={13} t="B" />
+              <L x={49.5} y={27} t="C" />
+              <L x={44} y={43.5} t="D" />
+            </>
+          )}
+          {isScupper && (
+            <>
+              <L x={11} y={4.5} t="A" />
+              <L x={33} y={9} t="B" />
+              <L x={60} y={26} t="C" />
+              <L x={38} y={44} t="D" />
+            </>
+          )}
+          {styleId === 0 && (
+            <text x="32" y="26" textAnchor="middle" className="fill-current text-[6px] opacity-60">
+              Pick a curb style
+            </text>
+          )}
         </svg>
       </div>
       <p className="mt-1 text-[11px] text-muted-foreground">
+        {styleId >= 1
+          ? `Style: ${styleId}${styleId === 3 || styleId === 4 ? " (quote required)" : ""} — `
+          : ""}
         A × B footprint, C curb height, D skirt — nearest ¼"
       </p>
     </div>
