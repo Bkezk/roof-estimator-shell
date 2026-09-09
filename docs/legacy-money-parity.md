@@ -215,7 +215,7 @@ PipeStackSize price switch is consistent (case 3 loads m_dWhitePrice).
 ### 7.3 Duro-Tuff parapet AdjustedSqFt units — see the verdict inline in §3 (no ÷12 exists in
 the IL chain; verbatim legacy = 12× the physical reading; human gate before validation).
 
-Still DB-resident, uncaptured (for the record): `lookup_Decktimes` contents and live gutter
+Still live-DB, uncaptured (for the record): `lookup_Decktimes` contents and live gutter
 prices.
 
 Input conventions & follow-ups from the adversarial review:
@@ -228,7 +228,8 @@ Input conventions & follow-ups from the adversarial review:
   property of the snapshot design, listed for the validation pass.
 
 Not settled here (unchanged flags): ribbon-spacing membrane-adhesive branch, `lookup_Decktimes`
-(`SELECT TabSpacing, DeckType, FastenerSpacing, Value ... FROM lookup_Decktimes` — MySQL), sheet
+(`SELECT TabSpacing, DeckType, FastenerSpacing, Value, CustomValue FROM lookup_Decktimes` —
+Azure SQL, see §9), sheet
 `NumSheetsReq`, subs/services material row placement at validation.
 
 ## 8. Screens round (2026-09-09): curb styles/terminations, parapet tabs & options, per-item labor
@@ -269,7 +270,7 @@ With Top); **Scupper (6)** and **Metal Scupper (7)** force termination = Scupper
 `CustomHrsPerLinealFt` + `CustomBase`): col 1 = stock hrs/lineal-ft, col 3 = stock base
 hrs/curb, col 4 = custom hrs/LF override, col 5 = custom base override. `lookup_CurbTypes` is
 keyed by `CurbStyle.ID`: col 1 = stock multiplier, col 2 = custom multiplier. Custom wins when
-> 0. Stock values are MySQL-resident (uncaptured — the web app's seeded curb labor tables are
+> 0. Stock values are live-DB-resident (Azure SQL, §9; uncaptured — the web app's seeded curb labor tables are
 the live-capture equivalents).
 
 ```
@@ -434,4 +435,36 @@ caught the engine still billing raw Length; walkthrough check: a 100 ft 1-piece 
 102 ft of labor in the legacy link). None of the new input fields are UI-reachable yet — the
 web session wires the screens. Termination/blocking/capstone/ARP quantity routing documented above; their PRICING needs
 the DB-resident NDL/hardware rates (term bar, fascia bar, counterflash, masonry, top-of-parapet
-blocking, plastic, ARP dealer price) — flagged with the other MySQL-resident items.
+blocking, plastic, ARP dealer price) — flagged with the other live-DB items (§9).
+
+## 9. DB capture round (2026-09-09): storage architecture correction + installer-seed recovery
+
+**Premise correction.** Earlier notes above called the uncaptured tables "MySQL-resident". The
+decompiled client contradicts that: `MySql.Data.dll` ships in the folder but nothing connects
+through it. The legacy app uses two stores:
+
+- **Azure SQL Server** `BidAdvantage` (`tcp:<name>.database.windows.net,1433`, embedded shared
+  `bacustomer@…` login) — the `[dbo].[…]` T-SQL schema in `SqlScript.xml`; every `ref_*` and
+  `lookup_*` reference/pricing table lives here. It is the vendor's shared backend, not a
+  per-customer DB.
+- **Local Access `main.mdb`** (Jet OLEDB 4.0) — per-estimate working data (`user_Curbs`,
+  `user_Parapets`, `user_TermBars`, `user_ndl*`, …); no reference prices.
+
+So the capture tooling is SQL Server's (`sqlcmd`/`bcp`/SSMS export) or Access export — not
+`mysqldump`. Exact column lists recovered from the app's own queries:
+`lookup_Decktimes(TabSpacing, DeckType, FastenerSpacing, Value, CustomValue)`;
+`lookup_CurbTypes(CurbTypeID, Multiplyer, CustomMultiplier)` (canted styles = ids 3, 4);
+`lookup_CurbTimes(DeckTypeID, HrsPerLinealFt, MinutesToInstall, Base, CustomHrsPerLinealFt, CustomBase)`;
+`lookup_ParapetTimes(WallType, DeckType, Canted, Vertical, Value, CustomValue)`;
+`ref_TermBars`/`ref_FasciaBars`/`ref_ndl` (`SELECT *`; ref_ndl is one table, rows tagged by NDL
+category + `RefID` — masonry remove=1/install=2, top-of-parapet blocking, counterflash sheet-metal,
+plastic). These are Azure-only (zero seed rows in the client) — capture via the admin grids
+(`BAManager.exe`) or an authorized SQL export.
+
+**Recovered from the installer seed (capture-era defaults, delivered as CSV outside the repo).**
+`SqlScript.xml` seeds much of the exceptional-metals/accessory pricing with real values:
+`ref_AccGutters` (60), `ref_MetalsGutters` (12), `ref_AccDownSpouts` (6), `ref_MetalsDownSpouts` (2),
+`ref_TwoPieceMetal` (1 — 3" 2-Piece Compression), `ref_GenericEdge` (4 gravel-stop corners),
+`ref_Sealants` (12), `ref_Stacks` (12), `ref_Fasteners` (10), `lookup_TearoffLabor` (28), and
+`MembraneAcc` — which **confirms the ARP dealer default `PricePerPack` = 1.11**. These are ship-time
+defaults; the live Azure rows win if the vendor updated prices, so seed from them and reconcile.
