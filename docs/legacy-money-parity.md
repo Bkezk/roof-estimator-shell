@@ -429,6 +429,9 @@ Wired (red-first, this series): style-5 wrap first-factor fix + all-styles Round
 correction); per-parapet mil/color membrane pricing; curb `termOption` lift-labor adder;
 parapet `useSlipsheet` labor adder; per-item `adjustLaborPct` on curbs and parapets;
 `CURB_TYPE_BY_STYLE_ID` mapping export (engine behavior unchanged — UI collapse is a human
-gate). Termination/blocking/capstone/ARP quantity routing documented above; their PRICING needs
+gate); parapet matrix labor moved to the AdjustedLength basis (§8.5 — the adversarial pass
+caught the engine still billing raw Length; walkthrough check: a 100 ft 1-piece wall shows
+102 ft of labor in the legacy link). None of the new input fields are UI-reachable yet — the
+web session wires the screens. Termination/blocking/capstone/ARP quantity routing documented above; their PRICING needs
 the DB-resident NDL/hardware rates (term bar, fascia bar, counterflash, masonry, top-of-parapet
 blocking, plastic, ARP dealer price) — flagged with the other MySQL-resident items.
