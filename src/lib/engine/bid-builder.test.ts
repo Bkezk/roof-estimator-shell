@@ -433,6 +433,50 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.59, 3);
   });
 
+  it("parapets: a missing tier for an OVERRIDE mil/color warns with the parapet's name", () => {
+    const withParapet: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const { warnings } = buildEstimateInputs(
+      bid({
+        parapets: [
+          {
+            id: "p1",
+            name: "Odd wall",
+            lengthFt: 100,
+            heightBand: '0"-30"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 30.4,
+            thicknessMil: 60,
+            color: "Terra Cotta",
+          },
+        ],
+      }),
+      withParapet,
+    );
+    // 60/Terra Cotta has no Parapets tier and no roll-goods fallback → the zero-price warning
+    // names the parapet (positive control for the tier-warning path).
+    expect(warnings).toEqual([
+      'No membrane price for the parapet material (parapet "Odd wall" thickness/color).',
+    ]);
+  });
+
   it("parapets: Use Slipsheet adds the legacy polyethylene labor (0.25 h / 100 sq ft)", () => {
     // Legacy Parapet.get_Polyethylene = AdjustedHeight × Length × 1.25 sq ft (UsePlastic), and
     // BaseManHours adds Polyethylene / 100 × 0.25 hours (docs §8.6). Material is an NDL item

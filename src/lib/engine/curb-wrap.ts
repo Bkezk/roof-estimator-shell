@@ -70,8 +70,8 @@ export interface CurbWrapInputs {
  */
 export function curbWrapCost(i: CurbWrapInputs): number {
   const { styleId, rate, quantity } = i;
-  // The legacy method tail rounds EVERY style's result (Round(cost, 8) after the switch);
-  // the −1 quote markers pass through it unchanged.
+  // The legacy method tail rounds EVERY priced style's result (Round(cost, 8) after the
+  // switch). The −1 quote markers return early here — Round(−1, 8) is −1, so behavior matches.
   const tail = (cost: number): number => bankersRound(cost, 8);
   if (styleId === 3 || styleId === 4) return -1;
   if (styleId === 1 || styleId === 2) {

@@ -729,9 +729,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
       return price ?? 0;
     };
-    const defaultPrice = first
-      ? parapetTierPrice(first.thickness, first.color, "bid-default thickness/color")
-      : 0;
+    let defaultPrice = 0;
+    if (first) {
+      defaultPrice = parapetTierPrice(first.thickness, first.color, "bid-default thickness/color");
+    } else if (anyWall) {
+      // No sections at all: keep the old diagnostic — real walls are pricing at $0.
+      warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
+    }
     const isDuroTuff = bid.roofSystem === "Duro-Tuff";
     for (const p of bid.parapets) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
