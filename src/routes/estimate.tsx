@@ -2500,7 +2500,98 @@ function EstimatePage() {
                                 }
                               />
                             </Field>
+                            {/* Legacy curb screen has its OWN Mil/Color — the wrap rate keys on
+                                them, not the bid default. */}
+                            <Field label="Mil">
+                              <PickOne
+                                value={
+                                  c.thicknessMil !== undefined
+                                    ? `${c.thicknessMil}mil`
+                                    : "Bid default"
+                                }
+                                options={["Bid default", "40mil", "50mil", "60mil"]}
+                                onChange={(v) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "Bid default") delete nx.thicknessMil;
+                                      else nx.thicknessMil = parseInt(v, 10);
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <Field label="Color">
+                              <PickOne
+                                value={c.color ?? "Bid default"}
+                                options={["Bid default", ...colorOptions]}
+                                onChange={(v) =>
+                                  setCurbs((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      if (v === "Bid default") delete nx.color;
+                                      else nx.color = v;
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
                           </div>
+                          {/* Legacy Insulation/Plastic on Curb(s): insulation adds the §2 ISO
+                              labor; both drive ordering quantities (shown, not auto-priced). */}
+                          {(() => {
+                            const linealFt = (c.widthIn + c.lengthIn) / 6;
+                            const isoFasteners = Math.ceil(Math.ceil(linealFt * c.quantity) / 3);
+                            const polySqFt =
+                              (linealFt * ((c.dimCIn ?? 0) + (c.dimDIn ?? 0)) * 5 * c.quantity) /
+                              48;
+                            return (
+                              <div className="flex flex-wrap items-center gap-4 pt-1">
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    id={`ci-${c.id}`}
+                                    checked={c.hasInsulation ?? false}
+                                    onCheckedChange={(v) =>
+                                      setCurbs((prev) =>
+                                        prev.map((x, j) =>
+                                          j === i ? { ...x, hasInsulation: v } : x,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  <Label htmlFor={`ci-${c.id}`} className="text-xs">
+                                    Insulation on curb(s)
+                                  </Label>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Switch
+                                    id={`cp-${c.id}`}
+                                    checked={c.hasPlastic ?? false}
+                                    onCheckedChange={(v) =>
+                                      setCurbs((prev) =>
+                                        prev.map((x, j) => (j === i ? { ...x, hasPlastic: v } : x)),
+                                      )
+                                    }
+                                  />
+                                  <Label htmlFor={`cp-${c.id}`} className="text-xs">
+                                    Plastic on curb(s)
+                                  </Label>
+                                </div>
+                                {(c.hasInsulation || c.hasPlastic) && (
+                                  <p className="text-[11px] text-muted-foreground">
+                                    {c.hasInsulation &&
+                                      `ISO: ${(linealFt * c.quantity).toFixed(1)} sq ft, ${isoFasteners} fasteners. `}
+                                    {c.hasPlastic && `Poly: ${polySqFt.toFixed(1)} sq ft.`} Ordering
+                                    quantities — not auto-priced.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     );

@@ -233,6 +233,14 @@ export interface CurbInput {
   dimCIn?: number;
   /** Wrap dim D (inches). */
   dimDIn?: number;
+  /** Per-curb membrane mil for the wrap rate (legacy curb screen); absent = bid default. */
+  thicknessMil?: number;
+  /** Per-curb membrane color for the wrap rate (legacy curb screen); absent = bid default. */
+  color?: string;
+  /** Legacy "Insulation on Curb(s)": adds ISO labor (0.25 + LinealFt × 0.0167) × qty hours. */
+  hasInsulation?: boolean;
+  /** Legacy "Plastic on Curb(s)": drives the PolyethyleneSqF ordering quantity (no auto price). */
+  hasPlastic?: boolean;
 }
 
 /**
@@ -715,11 +723,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   }
 
   // Curbs (§5.3): qty × (setup min + min/LF[deck] × type multiplier × perimeter LF) / 60 → direct
-  // labor. Perimeter = 2 × (In2Ft(A) + In2Ft(B)). Curb membrane material is NOT auto-computed
-  // (flagged for the validation bid).
+  // labor. Perimeter = 2 × (In2Ft(A) + In2Ft(B)); insulation-on-curb ISO labor adds per §2.
+  // Membrane material auto-computes below via the legacy wrap model.
   let curbLaborHours = 0;
   for (const c of bid.curbs) {
     if (c.quantity <= 0) continue;
+    // Legacy "Insulation on Curb(s)" (parity doc §2): ISO_Labor = Round((0.25 + LinealFt ×
+    // 0.0167) × qty, 2) hours, LinealFt = (A+B)/6 (the footprint perimeter in feet).
+    if (c.hasInsulation) {
+      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      curbLaborHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
+    }
     const tDeck = TEAROFF_DECK_BY_LABOR_DECK[c.deckType] ?? c.deckType;
     const minutesPerLF = admin.curbLabor?.minutesByDeck[tDeck];
     const typeMultiplier = admin.curbLabor?.multiplierByType[c.curbType];
@@ -738,19 +752,22 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     });
   }
 
-  // Curb membrane (legacy Curb.Cost, parity doc §2): the hardcoded prefab-wrap model at the
-  // bid-default thickness/color wrap rate → M0. Styles 3/4 are quote-required (warned, $0);
-  // curbs without a legacy style (older saved bids) stay manual, exactly as before. An unknown
-  // thickness/color bills rate 0 — legacy behavior: the base constants still price.
+  // Curb membrane (legacy Curb.Cost, parity doc §2): the hardcoded prefab-wrap model → M0, at
+  // the CURB's own mil/color (the legacy curb screen carries Deck/Mil/Color per curb; bid
+  // default when unset). Styles 3/4 are quote-required (warned, $0); curbs without a legacy
+  // style (older saved bids) stay manual, exactly as before. An unknown thickness/color bills
+  // rate 0 — legacy behavior: the base constants still price.
   let curbMaterial = 0;
   {
     const first = bid.sections[0];
     for (const c of bid.curbs) {
       if (c.styleId === undefined || c.quantity <= 0) continue;
-      const rate = first ? curbWrapRate(first.thickness, first.color) : 0;
-      if (first && rate === 0) {
+      const mil = c.thicknessMil ?? first?.thickness ?? 0;
+      const color = c.color ?? first?.color ?? "";
+      const rate = curbWrapRate(mil, color);
+      if (rate === 0) {
         warnings.push(
-          `No curb wrap rate for ${first.thickness}mil ${first.color} — curb "${c.name}" bills the base constants only (legacy rate 0).`,
+          `No curb wrap rate for ${mil}mil ${color} — curb "${c.name}" bills the base constants only (legacy rate 0).`,
         );
       }
       const cost = curbWrapCost({

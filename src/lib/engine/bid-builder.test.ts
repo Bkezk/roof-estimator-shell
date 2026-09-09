@@ -553,6 +553,45 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
   });
 
+  it("curbs: per-curb mil/color drives the wrap rate; insulation-on-curb adds the ISO labor", () => {
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1 },
+        curbTypes: ["Closed"],
+      },
+    };
+    const curb = {
+      id: "c1",
+      name: "RTU curb",
+      quantity: 2,
+      widthIn: 24,
+      lengthIn: 24,
+      curbType: "Closed",
+      deckType: "Wood",
+      styleId: 1,
+      dimCIn: 12,
+      dimDIn: 0,
+    };
+    // 60mil Gray wrap rate 0.5625 (proven BAColor order), NOT the bid default 40mil White:
+    // (12 × 0.5625 + 0.3099 + 4.8081×1.7819) × 2.6047 × qty 2 = 81.4097
+    const { curbMaterial } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, thicknessMil: 60, color: "Gray" }] }),
+      withCurb,
+    );
+    expect(curbMaterial).toBeCloseTo(2 * 40.70483, 3);
+    // Insulation on curb(s): LinealFt = (24+24)/6 = 8 → Round((0.25 + 8×0.0167) × 2, 2) = 0.77 h
+    // on top of the type labor (perimeter 8 ft: (8 + 7.5×1×8)/60 × 2 = 2.2667 h).
+    const { inputs } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, hasInsulation: true }] }),
+      withCurb,
+    );
+    const r = computeEstimate(inputs);
+    expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.77, 4);
+  });
+
   it("curbs: a legacy styleId auto-prices the wrap membrane into M0; styles 3/4 warn quote-required", () => {
     const withCurb: EngineAdminData = {
       ...admin,
