@@ -258,7 +258,7 @@ does not have: the admin "curb types" (Open / Closed / Closed w/ Top / Scupper /
 are the `lookup_CurbTypes` rows keyed by these SAME style ids. ⚠ HUMAN GATE (UI change): collapse
 to one style selection deriving both, mapping 1→Open, 2→Closed, 5→Closed w/ Top, 6→Scupper,
 7→Metal Scupper; canted 3/4 quote the wrap and need a decision on which labor row they use
-(their `lookup_CurbTypes` rows are DB-resident, uncaptured).
+(their `lookup_CurbTypes` rows do not exist — the multiplier grid has no canted entries, so canted styles carry no labor multiplier, consistent with being quote-required; see §9.1).
 
 Style side-effects in the form: selecting **With Top (5)** forces termination = None and disables
 the termination group (`grpTerm.Enabled = !topButton.Checked` — terminations only disabled for
@@ -270,7 +270,7 @@ With Top); **Scupper (6)** and **Metal Scupper (7)** force termination = Scupper
 `CustomHrsPerLinealFt` + `CustomBase`): col 1 = stock hrs/lineal-ft, col 3 = stock base
 hrs/curb, col 4 = custom hrs/LF override, col 5 = custom base override. `lookup_CurbTypes` is
 keyed by `CurbStyle.ID`: col 1 = stock multiplier, col 2 = custom multiplier. Custom wins when
-> 0. Stock values are live-DB-resident (Azure SQL, §9; uncaptured — the web app's seeded curb labor tables are
+> 0. Stock values originate in the Azure DB but are ALREADY captured and seeded (§9.1) — the web app's seeded curb labor tables are
 the live-capture equivalents).
 
 ```
@@ -458,8 +458,36 @@ So the capture tooling is SQL Server's (`sqlcmd`/`bcp`/SSMS export) or Access ex
 `lookup_ParapetTimes(WallType, DeckType, Canted, Vertical, Value, CustomValue)`;
 `ref_TermBars`/`ref_FasciaBars`/`ref_ndl` (`SELECT *`; ref_ndl is one table, rows tagged by NDL
 category + `RefID` — masonry remove=1/install=2, top-of-parapet blocking, counterflash sheet-metal,
-plastic). These are Azure-only (zero seed rows in the client) — capture via the admin grids
-(`BAManager.exe`) or an authorized SQL export.
+plastic). These have zero seed rows in the client installer, so their VALUES live only in the Azure
+DB — but see §9.1: they were already captured from the admin screens and seeded into the web app.
+
+### 9.1 Capture status (corrected 2026-09-09) — these rates are ALREADY seeded
+
+Correction to the flags scattered through §8 (and the first draft of §9): the term-bar / fascia /
+counter-flashing / masonry / wall-blocking / deck-time / parapet-time rates are NOT an open capture
+gap. They were captured in the 2026-08-31 admin-screen batch (≈90 `BAManager.exe` screenshots in the
+owner's Drive) and are already seeded in the web app. Every inline "rate DB-resident" / "uncaptured"
+note in §8 should be read against this table — the rate originates in the Azure DB, and it is already
+in a migration:
+
+| Legacy table / screen | Web table (migration) | Sample seeded value (verify vs screenshot before trusting to the penny) |
+|---|---|---|
+| `lookup_CurbTimes` + `lookup_CurbTypes` (Curb Labor) | `labor_curb_deck` / `labor_curb_type` / `labor_curb.setup_minutes` | VERIFIED 2026-09-09 vs screenshot: setup 8; Wood 7.5 … Concrete 10.5; Open 1.1 / Closed 1 / Closed w/ Top 1.1 / Scupper 4 / Metal Scupper 3. Canted styles 3/4 have NO row (no multiplier → quote-required, consistent with `Curb.Cost` = −1). |
+| `lookup_ParapetTimes` (Parapet Labor) | `labor_parapet` | full deck × height-band × drill/cant matrix (Wood 0″–30″ = 2.25 h … Concrete 100″+ = 16 h). |
+| `lookup_Decktimes` (Roof Deck / Membrane Labor) | `rdl_combos` | re-modeled as the 10-hr base × deck × tab × fastener-spacing × sheet-size × thickness multiplier set (fastener spacing 24″→0.91 … 6″→1.41). |
+| `ref_TermBars` (Term Bar) | `pricing_catalog` accessory_labor `termination_bars` | Term Bar pre-drill 0.035 h/ft, no-drill 0.0175 h/ft. |
+| `ref_FasciaBars` (Fascia Bars) | `pricing_catalog` accessory_labor `fascia_bars` | 1¾″ pre-drill 0.0374 / no-drill 0.0187; 4″ 0.0395 / 0.0197. |
+| `ref_ndl` counter-flash (Sheet Metal Work) | `pricing_catalog` `non_dl:sheet_metal_work` | Curb Counter Flashing $4.00/ft, 0.0167 h/ft, $45/h (+ ~20 other sheet-metal items). |
+| `ref_ndl` masonry (Masonry) | `pricing_catalog` `non_dl:masonry` | Remove Only 0.1 h, Mortar Mix 0.3 h, Replace Capstones (labor set). |
+| `ref_ndl` top-of-parapet (Parapet Wall Blocking) | `pricing_catalog` `non_dl:parapet_wall_blocking` | 2×4 w/ 8″ ISO $0.57/ft, 0.04 h/ft, $40/h. |
+| gutters / downspouts / two-piece / sealants / stacks / fasteners | `metals_gutters` seed (`20260909200000…`) + catalog | from the §9 installer-seed CSVs. |
+
+Genuinely still blank (shop-specific "enter your price" fields — empty in the source too, NOT missed
+captures): Masonry **mortar-mix** and **replacement-capstone** prices ($0), gutter **labor-per-foot**
+($0), and a few **roof-edge wood-blocking** rows ($0). These are set in the admin later (the seeded
+rows carry a `_locked` flag that pins identity, not the price value). What remains is an ENGINEERING
+task — having the engine consume these already-seeded rates to auto-price each item — not a
+data-capture gap.
 
 **Recovered from the installer seed (capture-era defaults, delivered as CSV outside the repo).**
 `SqlScript.xml` seeds much of the exceptional-metals/accessory pricing with real values:
