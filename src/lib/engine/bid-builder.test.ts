@@ -639,6 +639,61 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.77, 4);
   });
 
+  it("curbs: Lift termination options (2/3) add the legacy lift labor, once per curb entry", () => {
+    // Curb.BaseHours (docs §8.2/§8.3): TermOption ∈ {2 Lift & Tuck, 3 Lift & T-Bar} adds
+    // 1 + LinealFt × 0.020833 (12 < LF ≤ 32) or 1 + LinealFt × 0.041667 (LF > 32), where
+    // LinealFt = (A+B)/6 — added ONCE, not × qty. No-lift options (0/1/4/5) add nothing.
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1 },
+        curbTypes: ["Closed"],
+      },
+    };
+    const curb = {
+      id: "c1",
+      name: "Big curb",
+      quantity: 2,
+      widthIn: 60,
+      lengthIn: 60,
+      curbType: "Closed",
+      deckType: "Wood",
+    };
+    const base = (2 * (8 + 7.5 * 1 * 20)) / 60; // perimeter 2 × (5 + 5) = 20 ft, qty 2
+    const hours = (termOption?: number) => {
+      const { inputs } = buildEstimateInputs(
+        bid({
+          curbs: [termOption === undefined ? { ...curb } : { ...curb, termOption }],
+        }),
+        withCurb,
+      );
+      return computeEstimate(inputs).curbLaborHours;
+    };
+    // LF = (60+60)/6 = 20 → 12 < 20 ≤ 32 → +1 + 20 × 0.020833 = 1.41666 (once, though qty 2)
+    expect(hours(3)).toBeCloseTo(base + 1 + 20 * 0.020833, 4);
+    expect(hours(2)).toBeCloseTo(base + 1 + 20 * 0.020833, 4);
+    for (const opt of [0, 1, 4, 5, undefined]) expect(hours(opt)).toBeCloseTo(base, 4);
+    // LF > 32 branch: A=B=120 → LF = 40 → +1 + 40 × 0.041667
+    const { inputs } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, widthIn: 120, lengthIn: 120, termOption: 3 }] }),
+      withCurb,
+    );
+    const basePerim40 = (2 * (8 + 7.5 * 1 * 40)) / 60; // perimeter 2 × (10 + 10) = 40 ft
+    expect(computeEstimate(inputs).curbLaborHours).toBeCloseTo(
+      basePerim40 + 1 + 40 * 0.041667,
+      4,
+    );
+    // LF ≤ 12 adds nothing: A=B=36 → LF = 12
+    const { inputs: small } = buildEstimateInputs(
+      bid({ curbs: [{ ...curb, widthIn: 36, lengthIn: 36, termOption: 3 }] }),
+      withCurb,
+    );
+    // perimeter 2 × (3 + 3) = 12 ft; no lift adder at LF = 12
+    expect(computeEstimate(small).curbLaborHours).toBeCloseTo((2 * (8 + 7.5 * 12)) / 60, 4);
+  });
+
   it("curbs: a legacy styleId auto-prices the wrap membrane into M0; styles 3/4 warn quote-required", () => {
     const withCurb: EngineAdminData = {
       ...admin,

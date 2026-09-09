@@ -242,6 +242,13 @@ export interface CurbInput {
   thicknessMil?: number;
   /** Per-curb membrane color for the wrap rate (legacy curb screen); absent = bid default. */
   color?: string;
+  /**
+   * Legacy curb termination option (docs §8.3): 0 None, 1 Scupper-Fascia Bar 1¾",
+   * 2 Lift & Tuck, 3 Lift & T-Bar, 4 No Lift & T-Bar, 5 No Lift & Counter Flash.
+   * The Lift options (2/3) add the legacy lift labor; hardware footage for 1/3/4/5 is an
+   * ordering quantity (rates DB-resident — priced via accessory/non-DL lines for now).
+   */
+  termOption?: number;
   /** Legacy "Insulation on Curb(s)": adds ISO labor (0.25 + LinealFt × 0.0167) × qty hours. */
   hasInsulation?: boolean;
   /** Legacy "Plastic on Curb(s)": drives the PolyethyleneSqF ordering quantity (no auto price). */
@@ -754,6 +761,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     if (c.hasInsulation) {
       const linealFt = (c.widthIn + c.lengthIn) / 6;
       curbLaborHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
+    }
+    // Lift termination labor (docs §8.2/§8.3): TermOption 2 (Lift & Tuck) / 3 (Lift & T-Bar)
+    // add 1 + LF × 0.020833 (12 < LF ≤ 32) or 1 + LF × 0.041667 (LF > 32) hours — ONCE per
+    // curb entry (the legacy adder sits outside the × qty terms), LF = (A+B)/6.
+    if (c.termOption === 2 || c.termOption === 3) {
+      const lf = (c.widthIn + c.lengthIn) / 6;
+      if (lf > 32) curbLaborHours += 1 + lf * 0.041667;
+      else if (lf > 12) curbLaborHours += 1 + lf * 0.020833;
     }
     const tDeck = TEAROFF_DECK_BY_LABOR_DECK[c.deckType] ?? c.deckType;
     const minutesPerLF = admin.curbLabor?.minutesByDeck[tDeck];
