@@ -32,6 +32,23 @@ export function curbWrapRate(thickness: number, color: string): number {
   return row[idx] ?? 0;
 }
 
+/**
+ * Legacy curb style id → labor curb-type name (docs/legacy-money-parity.md §8.1). The legacy
+ * app has ONE style selection (`Curb.Style`) driving BOTH the wrap model (curbWrapCost) and the
+ * labor multiplier (`lookup_CurbTypes[Style.ID]`); the seeded curb-type names are that table's
+ * live-captured rows for ids 1/2/5/6/7. The canted styles (3/4) quote the wrap and their labor
+ * rows are DB-resident (uncaptured) — no mapping. Exported for the UI to derive the labor type
+ * from the style selection (collapsing the two pickers is a flagged human-gate UI change; the
+ * engine itself still takes both fields).
+ */
+export const CURB_TYPE_BY_STYLE_ID: Readonly<Record<number, string>> = {
+  1: "Open",
+  2: "Closed",
+  5: "Closed w/ Top",
+  6: "Scupper",
+  7: "Metal Scupper",
+};
+
 /** Legacy increment6: round up to a multiple of 6", minimum 6". */
 export const increment6 = (x: number): number => Math.max(6, Math.ceil(x / 6) * 6);
 /** Legacy increment2: round up to a multiple of 2", minimum 2". */

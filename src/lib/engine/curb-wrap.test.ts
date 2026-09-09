@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 
-import { curbWrapCost, curbWrapRate, increment2, increment6 } from "./curb-wrap";
+import {
+  CURB_TYPE_BY_STYLE_ID,
+  curbWrapCost,
+  curbWrapRate,
+  increment2,
+  increment6,
+} from "./curb-wrap";
 
 describe("curbWrapRate", () => {
   it("looks up the hardcoded thickness × color table (proven BAColor order: Tan/Gray/White/DarkGray)", () => {
@@ -133,5 +139,17 @@ describe("curbWrapCost (verbatim Curb.Cost, parity doc §2)", () => {
         quantity: 1,
       }),
     ).toBe(0);
+  });
+});
+
+describe("CURB_TYPE_BY_STYLE_ID", () => {
+  it("maps the five non-canted styles to the seeded curb-type names; canted styles unmapped", () => {
+    expect(CURB_TYPE_BY_STYLE_ID[1]).toBe("Open");
+    expect(CURB_TYPE_BY_STYLE_ID[2]).toBe("Closed");
+    expect(CURB_TYPE_BY_STYLE_ID[5]).toBe("Closed w/ Top");
+    expect(CURB_TYPE_BY_STYLE_ID[6]).toBe("Scupper");
+    expect(CURB_TYPE_BY_STYLE_ID[7]).toBe("Metal Scupper");
+    expect(CURB_TYPE_BY_STYLE_ID[3]).toBeUndefined();
+    expect(CURB_TYPE_BY_STYLE_ID[4]).toBeUndefined();
   });
 });

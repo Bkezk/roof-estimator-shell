@@ -799,10 +799,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withCurb,
     );
     const basePerim40 = (2 * (8 + 7.5 * 1 * 40)) / 60; // perimeter 2 × (10 + 10) = 40 ft
-    expect(computeEstimate(inputs).curbLaborHours).toBeCloseTo(
-      basePerim40 + 1 + 40 * 0.041667,
-      4,
-    );
+    expect(computeEstimate(inputs).curbLaborHours).toBeCloseTo(basePerim40 + 1 + 40 * 0.041667, 4);
     // LF ≤ 12 adds nothing: A=B=36 → LF = 12
     const { inputs: small } = buildEstimateInputs(
       bid({ curbs: [{ ...curb, widthIn: 36, lengthIn: 36, termOption: 3 }] }),
