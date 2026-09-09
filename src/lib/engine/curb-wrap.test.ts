@@ -75,9 +75,11 @@ describe("curbWrapCost (verbatim Curb.Cost, parity doc §2)", () => {
     }
   });
 
-  it("style 5: doubled-C wrap with the verbatim stack order, ×2.17777", () => {
-    // inc6(10)=12 not <12 → C'=24; D'=6; wrap=(48+48+(12+24))×(24+12+24)/144 = 132×60/144 = 55
-    // (55×0.45 + 0.3099 + 10.9275×1.7819) × 2.17777 × qty 2 = 193.9592
+  it("style 5: (A'+2D'+C')×(B'+2D'+C') wrap (corrected first factor), ×2.17777", () => {
+    // IL rva 0x32e3c, id-5 block (re-read 2026-09-09): dims[0] is loaded through increment6
+    // exactly once — the first factor is A' + 2D' + C', NOT 2A'+2B'+2D'+C' as first ported.
+    // inc6(10)=12, 12<12 false → C'=2×12=24; D'=6; wrap=(24+12+24)×(24+12+24)/144 = 3600/144 = 25
+    // (25×0.45 + 0.3099 + 10.9275×1.7819) × 2.17777 × qty 2 = 135.15943…
     const cost = curbWrapCost({
       styleId: 5,
       dimAIn: 24,
@@ -87,7 +89,21 @@ describe("curbWrapCost (verbatim Curb.Cost, parity doc §2)", () => {
       rate: 0.45,
       quantity: 2,
     });
-    expect(cost).toBeCloseTo(193.9592, 2);
+    expect(cost).toBeCloseTo(135.1594, 2);
+  });
+
+  it("styles 1/2/5 pass through the method-tail Round(cost, 8) like style 6", () => {
+    // The legacy final Round(…, 8) sits after the style switch — every result takes it.
+    const cost = curbWrapCost({
+      styleId: 1,
+      dimAIn: 7, // inc6 → 12
+      dimBIn: 7,
+      dimCIn: 7,
+      dimDIn: 1,
+      rate: 1 / 3, // forces a long fraction pre-round
+      quantity: 1,
+    });
+    expect(cost).toBe(Number(cost.toFixed(8)));
   });
 
   it("style 6: inc2 dims, ×30/144 wrap, ×3.04, tall-C surcharge, Round8", () => {
