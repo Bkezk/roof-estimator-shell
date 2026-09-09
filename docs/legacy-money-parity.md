@@ -59,12 +59,19 @@ Curbs bill membrane as a **self-contained prefab-wrap model hardcoded in code** 
   `cost = ((wrapSqFt × rate) + 0.3099 + base) × 2.6047 × qty`.
 - Style 2: same with `base = 6.2651 × 1.7819`.
 - Style 5: `base = 10.9275 × 1.7819`; `C' = inc6(dimC) < 12 ? 24 : 2×inc6(dimC)`;
-  `wrapSqFt = (2A'+2B' + (2D'+C')) × (B' + 2D' + C')/144` (verbatim stack order);
-  multiplier ×2.17777.
+  `wrapSqFt = (A' + 2D' + C') × (B' + 2D' + C') / 144` — **CORRECTED 2026-09-09**: the earlier
+  transcription (and the port built on it) read the first factor as `2A'+2B' + (2D'+C')`; the
+  IL loads dims[0] through increment6 exactly once in this block, with no ×2 and no B' in the
+  first factor (re-read of rva 0x32e3c, offsets 201567→201780). Fixed red-first in the same
+  series. Multiplier ×2.17777.
 - Styles 3 and 4: `cost = -1` (quote required — the app shows these as needs-quote).
 - Style 6: `inc2` dims; `wrapSqFt = (2A'+2B') × 30 / 144`; `cost = ((wrapSqFt × rate) + 0.3099 +
   4.8081×1.7819) × 3.04`; if `inc2(dimC) > 18`: `+ ((inc2(dimC)−18) × 2A' + 2B')/144 × 0.3484 ×
-  3.04` (verbatim); × qty; `Round(..., 8)`.
+  3.04` (verbatim); × qty.
+- Style 7 (Metal Scupper) falls outside the 1..6 switch: wrap material = **$0** (the metal
+  scupper itself is a quoted/non-DL metal item, not a membrane wrap).
+- The final `Round(cost, 8)` is the METHOD tail — it applies to **every** style's result (styles
+  1/2/5/6 and the −1 quote markers pass through it), not just style 6 (corrected 2026-09-09).
 - Related quantities: `LinealFt = Round((dimA+dimB)/6, 8)` (= footprint perimeter, ft);
   `TotalFt = Round((ΣdimA..D)/12, 8)`; `PolyethyleneSqF = Round(LinealFt × (dimC+dimD) × 5/48 ×
   qty, 8)` when hasPlastic; `SF_ISO = LinealFt × qty` when hasInsulation;
@@ -223,3 +230,205 @@ Input conventions & follow-ups from the adversarial review:
 Not settled here (unchanged flags): ribbon-spacing membrane-adhesive branch, `lookup_Decktimes`
 (`SELECT TabSpacing, DeckType, FastenerSpacing, Value ... FROM lookup_Decktimes` — MySQL), sheet
 `NumSheetsReq`, subs/services material row placement at validation.
+
+## 8. Screens round (2026-09-09): curb styles/terminations, parapet tabs & options, per-item labor
+
+Source instruments: DataAccess.dll resolved disassembly (`Management` ref-data ctor at
+lines ~86200–86700, `Curb`/`Parapet`/`Parapets` classes, NDL collections), Estimator.exe
+disassembly (`frmCurbs` / `frmParapets` / `frmLaborPopUp` handlers), user-string decode via
+dnfile. All reference lists below are HARDCODED in the binary (no DB read) unless flagged.
+
+### 8.1 Curb styles — one selection drives BOTH labor and wrap
+
+`Management.oRefCurbStyles` is a hardcoded 7-element array, ids 1..7:
+**1 Open, 2 Closed, 3 Open Canted, 4 Closed Canted, 5 With Top, 6 Scupper, 7 Metal Scupper.**
+
+The five toolbar thumbnails on `frmCurbs` map (button → style id → large-image index):
+openButton → 1 → img 0; closedButton → 2 → img 1; topButton → **5** → img 3;
+scupperButton → 6 → img 4; metalScupperButton → 7 → img 5. The two CANTED variants are not
+buttons — they are context-menu items (`mnuOpenCanted` → 3, `mnuClosedCanted` → 4, both showing
+img 2).
+
+Every selector sets ONE property, `Curb.Style`, and that single style id drives BOTH sides:
+- **Material** — `Curb.Cost` switches on `Style.ID` 1..6 (§2): 3/4 → −1 quote, 7 → $0 wrap.
+- **Labor** — `Curb.BaseHours` multiplies by `oLookupCurbTypes[Style.ID]` (below).
+The web app's two independent pickers (wrap style + labor curb type) are a split the legacy app
+does not have: the admin "curb types" (Open / Closed / Closed w/ Top / Scupper / Metal Scupper)
+are the `lookup_CurbTypes` rows keyed by these SAME style ids. ⚠ HUMAN GATE (UI change): collapse
+to one style selection deriving both, mapping 1→Open, 2→Closed, 5→Closed w/ Top, 6→Scupper,
+7→Metal Scupper; canted 3/4 quote the wrap and need a decision on which labor row they use
+(their `lookup_CurbTypes` rows are DB-resident, uncaptured).
+
+Style side-effects in the form: selecting **With Top (5)** forces termination = None and disables
+the termination group (`grpTerm.Enabled = !topButton.Checked` — terminations only disabled for
+With Top); **Scupper (6)** and **Metal Scupper (7)** force termination = Scupper-Fascia Bar (1).
+
+### 8.2 `Curb.BaseHours` (rva 0x333a4) — exact transcription
+
+`lookup_CurbTimes` is keyed by `DeckType.ID`; columns (per the SqlScript ALTERs: stock cols +
+`CustomHrsPerLinealFt` + `CustomBase`): col 1 = stock hrs/lineal-ft, col 3 = stock base
+hrs/curb, col 4 = custom hrs/LF override, col 5 = custom base override. `lookup_CurbTypes` is
+keyed by `CurbStyle.ID`: col 1 = stock multiplier, col 2 = custom multiplier. Custom wins when
+> 0. Stock values are MySQL-resident (uncaptured — the web app's seeded curb labor tables are
+the live-capture equivalents).
+
+```
+perLF   = CurbTimes[deck].custom4 > 0 ? custom4 : col1
+hrs     = perLF × ((dimA + dimB) × 2 / 12) × qty          // footprint perimeter ft × qty
+base    = CurbTimes[deck].custom5 > 0 ? custom5 : col3
+hrs    += base × qty
+mult    = CurbTypes[styleId].custom2 > 0 ? custom2 : col1
+hrs    ×= mult
+hrs    += PolyethyleneSqF / 400 + ISO_Labor                // §2 quantities
+// termination labor — ONLY the Lift options, added ONCE (not × qty):
+if TermOption ∈ {2 (Lift & Tuck), 3 (Lift & T-Bar)}:
+    LF = LinealFt = (dimA + dimB) / 6
+    if 12 < LF ≤ 32: hrs += 1 + LF × 0.020833
+    elif LF > 32:    hrs += 1 + LF × 0.041667              // ≤ 12 ft: nothing
+Curb.ManHours = Round(BaseHours × (1 + AdjustLabor/100), 8)
+```
+
+### 8.3 Curb termination options — ids, material, labor
+
+`frmCurbs.optNone_CheckedChanged` maps the radio group to `Curb.TermOption`:
+**0 None, 1 Scupper-Fascia Bar 1¾", 2 Lift & Tuck, 3 Lift & T-Bar, 4 No Lift & T-Bar,
+5 No Lift & Counter Flash.**
+
+Priced effects per option:
+- **0 None / 2 Lift & Tuck** — no hardware. Option 2 adds the lift labor above; option 0 nothing.
+- **3 Lift & T-Bar / 4 No Lift & T-Bar** — term-bar footage `Round((2A+2B+12)/12 × qty, 4)` ft
+  into the term bar's **no-drill** length split (`TermBar.GetCurbEdgeLength`, §wiring docs);
+  option 3 also adds the lift labor.
+- **1 Scupper-Fascia Bar 1¾"** — fascia-bar footage, same `(2A+2B+12)/12 × qty` formula, onto
+  the 1¾" fascia bar (`FaciaBar.Size == 3`) **in the curb's own color**
+  (`FaciaBar.GetCurbEdgeLengthByColor`). No extra labor line (the bar's own labor rate applies).
+- **5 No Lift & Counter Flash** — `SheetMetals.RecalcParents`: inches = Σ over such curbs of
+  `(A + B) × qty × 2`, Round 2dp, fraction rounded UP to the next 0.25, ÷ 12 → Round 2dp ft,
+  `Ceil` → CalcQty on the "Curb Counterflashing" sheet-metal item (rate DB-resident).
+
+### 8.4 Parapet termination / blocking / capstones / ARP (frmParapets tabs)
+
+**Termination**: `cboTermType` holds the hardcoded `Management.oRefTerminations` catalog —
+Empty(1) then **2 T-Bar, 3 1¾" Fascia, 4 4" Fascia, 5 2" Gravel Stop, 9 4" Gravel Stop,
+6 2" Drip Edge, 10 4" Drip Edge, 11 3" / 7 4" / 12 5" / 8 6" / 13 7" / 14 8" 2-pc Metal**.
+Selecting one enables the **Length** input (`TermLength`), defaulting to the wall Length,
+editable — it is the FOOTAGE of that termination product. Routing by `Termination.ID`:
+- id 2 → term bar footage by color (`RoofColorToTermBarColor(parapet.Color)`), and when
+  `WallType == 1` the same footage ALSO lands in the no-drill split
+  (`TermBar.GetParapetLength`).
+- ids 3/4 → fascia bar of that size in the parapet's color (`GetParapetLengthByColor` matches
+  `Termination.ID == FaciaBar.m_iSize`).
+- ids 5/9/6/10 → gravel stop / drip edge accumulators (`GenericEdgeItem.CalcParapetLength`).
+- ids 7/8/11–14 → the matching 2-pc metal size (`TwoPieceMetal.GetParapetLength`).
+`Parapet.AutoModLengths`: when the wall Length changes by Δ, TermLength shifts by Δ (cleared —
+and the termination reset to Empty — if it would go ≤ 0).
+Separate flag **UseTermBarOnBase** (CheckBox1): adds wall Length ft of term bar (color 3) via
+`TermBar.GetParapetBaseLength`, split no-drill/pre-drill by WallType like above.
+
+**Wood Blocking**: `chkWood` → `HasBlocking`; the length box (`txtWoodLength` →
+`BlockingLength`) **persists but never prices** — its only consumers are WriteXML /
+Insert/UpdateRow. Pricing uses the wall Length: `Parapets.BlockingLinealFt = Σ Length where
+HasBlocking`, and `WallBlockings.RecalcParents` (the 'TopOfParapet' NDL collection, LABOR-ONLY —
+`TotalCost = LaborCost`) sets its single item's `CalcQty = Ceil(BlockingLinealFt × 1.03)`.
+Rates DB-resident.
+
+**Capstones**: `Management.oRefCapstoneOptions` = Empty, **1 Remove Only, 2 Remove &
+Reinstall**. CapstoneLength defaults to wall Length, editable, and DOES price:
+`Masonry.RecalcParents` sets remove-item `CalcQty = Ceil(Σ CapstoneLength[id=1] / 2)` and
+reinstall-item `CalcQty = Ceil(Σ CapstoneLength[id=2] / 2)` (Masonry NDL rates DB-resident,
+RefID 1 = remove / 2 = install). Additionally (§ prior wiring round) option 2 adds sealant
+tubes `Ceil(Ceil(length)/40)`.
+
+**ARP**: `Management.oRefARPs` = Empty + sizes **12/18/24/30 in** (ids 1–4). ARPLength defaults
+to wall Length, editable. `Parapet.ARPSqFt = (Size + 6)/12 × (ARPLength == Length ?
+AdjustedLength : ARPLength)` — NOTE: no 1.03 factor (roof-SECTION ARP has ×1.03; parapet ARP
+does not), and the ==Length case bills the padded AdjustedLength. Parapet ARP is an **add-on**:
+`MembraneAccs.RecalcParents` item 1 ("ARP (SqFt)") `CalcQty = Ceil(sections ARPSqFt) +
+Ceil(parapets ARPSqFt)`; parapet MembraneCost still bills the FULL AdjustedSqFt (no ARP
+deduction — `NonARPSqFt` feeds only the Review sq-ft display lines). This differs from roof
+sections, where ARP sq ft IS subtracted from the membrane. ARP unit price: MembraneAcc ref
+(bootstrap default $1.11/pack of 1; dealer price DB-resident).
+
+### 8.5 Parapet membrane options — the parapet's OWN mil & color (PROVEN)
+
+`Parapet.GetCurrentColorPriceIndex` (rva 0x42448) switches on **`Parapet.get_Color`** — the
+parapet's own color — with the identical id→column map as the bid-level lookup (1 Tan→3,
+2 Gray→4, 3 White→2, 4 DarkGray→5, 5 TerraCotta→6, 6 RockPly→7). `LookupParpetMembranePrice`
+(rva 0x4249c) walks `lookup_DuroLastPrices` matching col0 == **`Parapet.MembraneType.Thickness`**
+(the parapet's own mil) and col1 == Category **3** (Parapets tier — ALWAYS category 3, whatever
+the parapet's roof-system family), returning that row's color column. `MembraneCost =
+Round(AdjustedSqFt × that price, 2)`. The frmParapets "Membrane Options" expander exposes
+per-parapet Roof System / Mil / Color / Attached-With combos. **The web engine pricing every
+parapet at the bid-default mil/color is therefore wrong whenever a parapet's own selection
+differs** (wired this round: per-parapet mil/color override).
+
+Per-parapet **Attachment** changes:
+- Tab layout (`Parapet.Recalculate`): attachment `'durolastmech'` → intermediate tabs at 25"
+  (vert' > 30), 23"/28" (vert' > 53/59), 23"/28" (vert' > 83/89); `'durobondmech'` → no
+  intermediate tabs; `AdheredSystem` → one tab at 60" when vert' > 59. (vert' = `Round6Inch`:
+  >102 → 102; ≤30 → as-is; else nearest 6" of (v+2), except values just above 30 that would
+  round DOWN to 30 stay as-is.) The remaining height + wrap fills the last tab.
+- `EdgeFasteners` (rva 0x42588), by roof-system ShortName:
+  durolast: vert ≤ 30 → 0; mech → `Ceil(AdjustedLength / In2Ft(12) × CalcTabCount)`; else
+  `Round(AdjustedLength / In2Ft(15) × TabCount)`. durotuff: mech →
+  `Round(Ceil(AdjustedHeight/24) × AdjustedLength / In2Ft(15))`; else
+  `Round(Floor(Cant+Vertical)/60 × AdjustedLength / In2Ft(15))`. durobond:
+  `Round(AdjustedLength / 1.5 × AdjustedHeight / 2)`. durofleece:
+  `Round((Cant+Vertical)/60 × AdjustedLength / In2Ft(15))`. → joins the edging-fastener totals
+  (`Accessories.GetEdgingFastenerTotals` slot 5).
+- `WallAdhesive` (rva 0x42768): ONLY when the attachment is an `AdheredSystem` —
+  `WallPlusTopSqFt / RoofSystem.LookupCoverageRate(2, 0, adhesive)` gallons, summed per
+  adhesive across matching parapets then `Ceil` once (`AdheredSystems.AggregateCalcQtys`).
+- `BaseManHours` (rva 0x42814): `lookup_ParapetTimes` key = `[WallType, DeckType.ID,
+  Cant > 0 ? 1 : 0, Vertical]`; value col 5 (CustomValue) when > 0 else col 4; hours =
+  `(value / 50) × AdjustedLength + Polyethylene/100 × 0.25`. Mechanical attachment uses the
+  parapet's WallType in the key; every other attachment keys WallType = **4** (fixed).
+  Stock values DB-resident. `ManHours = BaseManHours × (1 + AdjustLabor/100)`.
+- `DeckFasteners` (= ToInt32(AdjustedLength)) has NO consumers — dead code.
+
+### 8.6 Parapet wall styles & flags
+
+`Management.oRefParapetStyles` — 4 hardcoded styles; ctor order (id, name, HasSkirt, HasCant,
+HasVertical, HasWallTop, HasDrop):
+**1 Basic (skirt+vertical), 2 Canted (+cant), 3 Basic with Drop (+wallTop+drop),
+4 Canted with Drop (all).** Selecting a style icon (`tsParapetStyle`, Tag = the style object)
+enables/disables + clears the Cant / Drop / WallTop inputs. The style has NO direct price
+term — it affects money only through which dims are enterable and `HasCant` (tab layout +
+`Cant > 0` in the labor key). Drawing otherwise.
+
+**"Use Slipsheet:"** is `chkPlastic` → `Parapet.UsePlastic`. Priced:
+`Polyethylene = AdjustedHeight × Length × 1.25` sq ft (AdjustedHeight is the family-dependent
+one, so Duro-Tuff uses its half-foot-ceil height) → material via `NDLOthers.RecalcParents`
+plastic item `CalcQty = Ceil(parapets poly + curbs poly)` (rate DB-resident) **and** labor
+`0.25 h / 100 sq ft` inside BaseManHours (wired this round). (`Parapets.PolyethyleneLabor`
+exists but has no consumers — the labor rides in BaseManHours.)
+
+**"Wall Type"** combo: index 0 **'Wood or Metal' → WallType 1**, index 1 **'Brick or
+Concrete' → WallType 4** (default; the parapet default-XML carries walltypeid=4). Effects:
+WallType 1 routes term-bar footage (termination id 2 + UseTermBarOnBase) into the NO-DRILL
+length split (wood/metal walls need no pre-drilling; the term-bar item carries separate
+adjustlabornodrill/adjustlaborpredrill rates — DB-resident), and WallType is the first key of
+the mechanical-attachment labor lookup.
+
+### 8.7 Per-item labor links ("Labor: X h (Y%)")
+
+Curbs, parapets (and corners / drains / pipe stacks — same pattern, AdjustLabor columns in each
+user_ table) store a per-item **AdjustLabor** percent delta, default 0. The link label shows the
+item's base hours and `(100 + AdjustLabor)%`. Clicking opens `frmLaborPopUp` seeded with
+`BaseHours`/`BaseManHours`: the user edits either the percent or the target hours (two-way:
+hours = base × pct/100), uncapped (`m_fMaxPercent` = float.Max in this mode; percent below 100
+allowed). OK → `item.AdjustLabor = Round(pct) − 100`. Composition: the multiplier wraps the
+item's ENTIRE base hours — including the curb ISO/poly/lift-termination adders and the parapet
+poly labor — as `ManHours = Base × (1 + AdjustLabor/100)` (curb result Round 8dp), BEFORE
+collection sums and the estimate-level labor templates/adjustments. `Parapets.set_AdjustLabor`
+(set-all) exists but is never called by either app — per-item is the only live path.
+
+### 8.8 Wired this round vs flagged
+
+Wired (red-first, this series): style-5 wrap first-factor fix + all-styles Round8 (§2
+correction); per-parapet mil/color membrane pricing; curb `termOption` lift-labor adder;
+parapet `useSlipsheet` labor adder; per-item `adjustLaborPct` on curbs and parapets;
+`CURB_TYPE_BY_STYLE_ID` mapping export (engine behavior unchanged — UI collapse is a human
+gate). Termination/blocking/capstone/ARP quantity routing documented above; their PRICING needs
+the DB-resident NDL/hardware rates (term bar, fascia bar, counterflash, masonry, top-of-parapet
+blocking, plastic, ARP dealer price) — flagged with the other MySQL-resident items.
