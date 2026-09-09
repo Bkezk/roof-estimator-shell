@@ -492,6 +492,61 @@ export interface BuildResult {
   curbMaterial: number;
 }
 
+/**
+ * The FIELD membrane tier + $/sqft the engine will bill for a section — the same §1 decision
+ * chain buildEstimateInputs runs (roll-good sheet vs tab tier, flat families, Duro-Roof 57").
+ * Exists so display surfaces (the Show-calculations dialog) can never disagree with the bid
+ * total; a test pins helper × MembraneWithOverlap == the engine's membrane material for
+ * default-lap sections.
+ */
+export function sectionMembraneDisplayPricing(
+  admin: EngineAdminData,
+  roofSystem: string,
+  attachment: Attachment,
+  s: BidSectionInput,
+): { pricePerSqFt: number; tierLabel: string } {
+  const rsId = LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1;
+  if (rsId === 2 || rsId === 3 || rsId === 5) {
+    const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
+    return {
+      pricePerSqFt: admin.familyMembranePrices?.[roofSystem]?.[variantKey] ?? 0,
+      tierLabel: `${roofSystem} flat price`,
+    };
+  }
+  const lt = admin.labor[comboKey(roofSystem, attachment)];
+  const midThresholdIn = rsId === 4 ? 57 : 60;
+  const hasTabTable = admin.sheetTabSpacings?.[rsId] !== undefined;
+  const isRollGoodSheet =
+    rsId === 4
+      ? !hasTabTable
+      : rsId !== 1 ||
+        !hasTabTable ||
+        !lt?.rollGoodsSheetLabel ||
+        s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+  let tier: PriceTier = "rollGoods";
+  if (!isRollGoodSheet) {
+    const picked = selectMembranePriceTier({
+      isDefaultRollGood: false,
+      sheetTabSpacings: admin.sheetTabSpacings?.[rsId] ?? [],
+      fieldLapInches: s.fieldLap,
+      midThresholdIn,
+    });
+    if (picked !== "custom") tier = picked;
+  }
+  let price = priceMatrixLookup(admin.priceMatrix, s.thickness, tier, s.color);
+  if (price === null && tier !== "rollGoods") {
+    price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
+  }
+  const TIER_LABELS: Record<string, string> = {
+    rollGoods: "Roll Goods",
+    tab28: '28" Tabs',
+    tab60: '60" Tabs',
+    tab120: '120" Tabs',
+    parapet: "Parapets",
+  };
+  return { pricePerSqFt: price ?? 0, tierLabel: TIER_LABELS[tier] ?? tier };
+}
+
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
 export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): BuildResult {
   const warnings: string[] = [];
@@ -668,7 +723,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
       // A quote ID applied to several sections bills ONCE (legacy CustomQuotes dedup set);
       // a quote without an id (older saved bids) bills per occurrence.
-      const uTile = admin.underlaymentGroups?.groupIdByBoard[layer.board] ?? 0;
+      const uTile = admin.underlaymentGroups?.groupIdByBoard?.[layer.board] ?? 0;
       if (layer.quote) {
         if (layer.quote.id) {
           if (billedQuoteIds.has(layer.quote.id)) continue;
@@ -734,7 +789,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         // custom-spacing multiplier — that rides the coverage formula).
         const lowerBoard = li > 0 ? sLayers[li - 1]!.board : undefined;
         const lowerGroup = lowerBoard
-          ? admin.underlaymentGroups?.adhesiveGroupIdByBoard[lowerBoard]
+          ? admin.underlaymentGroups?.adhesiveGroupIdByBoard?.[lowerBoard]
           : undefined;
         if (lowerGroup !== undefined && QUOTE_ADHESIVE_GROUPS.has(lowerGroup)) {
           const units = layer.quoteAdhesiveUnits ?? 0;

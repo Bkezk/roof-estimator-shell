@@ -1,8 +1,12 @@
 import { Calculator } from "lucide-react";
 
-import { sectionLayers, type BidSectionInput } from "@/lib/engine/bid-builder";
+import {
+  sectionLayers,
+  sectionMembraneDisplayPricing,
+  type BidSectionInput,
+} from "@/lib/engine/bid-builder";
 import { areaWithEdgeOverlap } from "@/lib/engine/quantities";
-import { priceMatrixLookup, membraneMaterialCost } from "@/lib/engine/pricing";
+import { membraneMaterialCost } from "@/lib/engine/pricing";
 import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
 import {
   TEAROFF_DECK_BY_LABOR_DECK,
@@ -34,20 +38,25 @@ export function SectionCalcDialog({
   section: s,
   admin,
   roofSystem,
+  attachment = "mechanical",
 }: {
   section: BidSectionInput;
   admin: EngineAdminData;
   roofSystem: string;
+  attachment?: "mechanical" | "adhered";
 }) {
   const version = CURRENT_FORMULAS_VERSION;
   const roofArea = s.length * s.width;
   const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
-  const price = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color);
-  const membraneCost = membraneMaterialCost(
-    membraneWithOverlap,
-    price ?? 0,
-    roofSystem === "Duro-Roof",
+  // The same §1 tier decision the engine bills (roll-good sheet vs tab tier) — never hardcode
+  // roll goods here; the dialog previously disagreed with the bid total on tab-sheet sections.
+  const { pricePerSqFt: price, tierLabel } = sectionMembraneDisplayPricing(
+    admin,
+    roofSystem,
+    attachment,
+    s,
   );
+  const membraneCost = membraneMaterialCost(membraneWithOverlap, price, roofSystem === "Duro-Roof");
   const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
   const perimArea = perimLen * s.enhancementWidthFt;
   const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
@@ -141,7 +150,7 @@ export function SectionCalcDialog({
             `Price (${s.thickness} mil ${s.color}, roll goods)`,
             price !== null ? `${money(price)} / sf` : "no price found",
           )}
-          {line("Membrane material", money(membraneCost))}
+          {line(`Membrane material (${tierLabel})`, money(membraneCost))}
 
           {s.tearOff && (
             <>

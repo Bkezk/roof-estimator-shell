@@ -12,6 +12,7 @@ import {
   buildNonDlCatalog,
   buildNdlAutoRates,
   buildUnderlaymentGroups,
+  normalizeAdminSnapshot,
   buildShippingSteps,
   buildSetupTable,
   buildInspectionTable,
@@ -934,5 +935,137 @@ describe("buildUnderlaymentGroups (legacy Select Insulation Type structure)", ()
     // groupIdByBoard maps to the TILE in subtype mode
     expect(ug.groupIdByBoard['1/4" DensDeck Prime']).toBe(5);
     expect(ug.groupIdByBoard["1\" Rigid 4'x 4'"]).toBe(8);
+  });
+});
+
+describe("normalizeAdminSnapshot — frozen-snapshot schema drift (the 'test 1' crash class)", () => {
+  // The REAL pre-quote-commit snapshot shape, pulled from the live bid "test 1"
+  // (bids 87f06ad3, adminSnapshot.underlaymentGroups): groups + groupIdByBoard only —
+  // needQuoteByBoard and adhesiveGroupIdByBoard did not exist yet.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const test1Ug = require("./__fixtures__/test1-underlayment-groups.json");
+
+  it("fills the later-added fields with safe defaults, keeping captured values", () => {
+    const frozen = {
+      deckOrder: [],
+      priceMatrix: {},
+      labor: {},
+      settings: {
+        hoursPerDay: 9,
+        masterEliteCont: true,
+        salesTax: 0.0625,
+        taxMaterialOnly: true,
+        shippingMode: "stepped",
+        shippingPercent: 0,
+      },
+      underlaymentGroups: test1Ug,
+    } as unknown as import("./adapters").EngineAdminData;
+    const n = normalizeAdminSnapshot(frozen);
+    expect(n.underlaymentGroups!.needQuoteByBoard).toEqual({});
+    expect(n.underlaymentGroups!.adhesiveGroupIdByBoard).toEqual({});
+    expect(n.underlaymentGroups!.groupIdByBoard["Duro-Blue Slipsheet"]).toBe(1);
+    expect(n.underlaymentGroups!.groups.length).toBe(3);
+    // the exact expressions the UI/engine evaluate must be safe on BOTH shapes
+    for (const admin of [frozen, n]) {
+      const ug = admin.underlaymentGroups!;
+      expect(() => ug.needQuoteByBoard?.["Duro-Blue Slipsheet"]).not.toThrow();
+      expect(() => ug.adhesiveGroupIdByBoard?.["Duro-Blue Slipsheet"]).not.toThrow();
+      expect(() => ug.groupIdByBoard?.["Duro-Blue Slipsheet"]).not.toThrow();
+    }
+  });
+
+  it("the engine computes a bid against the RAW un-normalized snapshot without throwing", async () => {
+    const { buildEstimateInputs } = await import("./bid-builder");
+    const frozen = {
+      deckOrder: ["Wood"],
+      priceMatrix: { 40: { rollGoods: { White: 1.23 } } },
+      labor: {},
+      settings: {
+        hoursPerDay: 9,
+        masterEliteCont: true,
+        salesTax: 0,
+        taxMaterialOnly: true,
+        shippingMode: "stepped",
+        shippingPercent: 0,
+      },
+      underlaymentPrices: { "Duro-Blue Slipsheet": 0.06 },
+      underlaymentGroups: test1Ug,
+    } as unknown as import("./adapters").EngineAdminData;
+    const bid = {
+      roofSystem: "Duro-Last",
+      attachment: "mechanical" as const,
+      sections: [
+        {
+          id: "s1",
+          name: "Main",
+          length: 50,
+          width: 50,
+          deckType: "Wood",
+          thickness: 40,
+          color: "White",
+          fieldLap: 28,
+          fastenerOc: 18,
+          perimLengthFt: 0,
+          cornerLengthFt: 0,
+          enhancementWidthFt: 3,
+          perimFastenerOc: 18,
+          cornerFastenerOc: 18,
+          underlaymentBoard: "Duro-Blue Slipsheet",
+          sheetSizeLabel: "1500 sf",
+          tearOff: false,
+          tearOffType: "",
+          toThicknessInches: 0,
+        },
+      ],
+      accessories: [],
+      nonDlLines: [],
+      metals: [],
+      parapets: [],
+      curbs: [],
+      markupMode: 2 as const,
+      markup: 35,
+      crewLaborRatePerHour: 45,
+      commission: 0,
+      commissionInMarkup: false,
+      perDiem: 0,
+      perDiemInMarkup: true,
+      prepayDiscount: false,
+      stdSizeDiscount: false,
+      volumeDiscount: false,
+      taxExempt: true,
+      adjustLaborPct: 0,
+      extraShipping: 0,
+      subsCost: 0,
+      servicesCost: 0,
+      materialUnderlayment: 0,
+      otherMaterial: 0,
+      warrantyCostPerSqFt: 0,
+      warrantyNonEliteMasterCharge: 0,
+      warrantyIsHighWind: false,
+      warrantyHighWindUpcharge: 0,
+    };
+    expect(() => buildEstimateInputs(bid, frozen)).not.toThrow();
+  });
+});
+
+describe("accessory catalog: Price/Package screens (Panduit, Membrane Accs) are pickable", () => {
+  it("recognises Price/Package as the price column and Parts/Package as data", () => {
+    const items = buildAccessoryCatalog([
+      {
+        id: "duro_last:membrane_accs",
+        category: "Membrane Accs",
+        data: {
+          columns: ["Description", "Part #", "Parts/Package", "Price/Package"],
+          rows: [
+            { Description: "ARP (SqFt)", "Part #": "1001", "Parts/Package": 1, "Price/Package": 3 },
+            { Description: "T-Patch", "Part #": "8067", "Parts/Package": 50, "Price/Package": 10 },
+          ],
+        },
+      },
+    ]);
+    expect(items.map((i) => [i.description, i.price])).toEqual([
+      ["ARP (SqFt)", 3],
+      ["T-Patch", 10],
+    ]);
   });
 });

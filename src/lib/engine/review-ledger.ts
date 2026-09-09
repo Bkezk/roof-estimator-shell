@@ -209,7 +209,7 @@ export function buildReviewLedger(i: {
       insulation: insulationPurchases,
       nonDuroLast: nonDlPurchases,
       materials: inp.materialTotalBeforeTax,
-      tax: est.money.salesTaxValue,
+      tax: est.money.taxCharged,
       shippingDl: inp.shipping - bid.extraShipping,
     },
     labor: {

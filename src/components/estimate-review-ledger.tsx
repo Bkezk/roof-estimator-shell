@@ -157,9 +157,7 @@ export function EstimateReviewLedger(props: {
             </tr>
             <tr className="border-t">
               <td className="py-0.5 pl-5 pr-2 text-muted-foreground">Tax</td>
-              <td className="px-2 py-0.5 text-right tabular-nums">
-                {usd(est.money.salesTaxValue)}
-              </td>
+              <td className="px-2 py-0.5 text-right tabular-nums">{usd(est.money.taxCharged)}</td>
             </tr>
             <tr className="border-t">
               <td className="py-0.5 pl-5 pr-2 text-muted-foreground">Shipping (DL)</td>
@@ -262,7 +260,7 @@ export function EstimateReviewLedger(props: {
             </tr>
             <TotalRowU label="Insulation & Underlayment" value={usd(v(6))} />
             <TotalRowU label="Other Purchases" value={usd(v(7))} />
-            <TotalRowU label="Sales Tax" value={usd(est.money.salesTaxValue)} />
+            <TotalRowU label="Sales Tax" value={usd(est.money.taxCharged)} />
             <TotalRowU label="Total Purchases" value={usd(v(8))} />
             <TotalRowU label="Total Shipping" value={usd(v(9))} />
             <TotalRowU label="Total Labor" value={usd(v(10))} />

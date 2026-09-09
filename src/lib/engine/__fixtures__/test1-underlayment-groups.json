@@ -1,0 +1,25 @@
+{
+  "groupIdByBoard": {
+    "1/2\" ISO": 2, "1\" ISO": 2, "1 1/2\" ISO": 2, "2\" ISO": 2, "2 1/2\" ISO": 2,
+    "2.7\" ISO": 2, "3\" ISO": 2, "3 1/2\" ISO": 2, "4\" ISO": 2,
+    "1/2\" HD ISO 4'x 4'": 3, "1\" ISO 4'x 4'": 3, "1 1/2\" ISO 4'x 4'": 3, "2\" ISO 4'x 4'": 3,
+    "2 1/2\" ISO 4'x 4'": 3, "2.7\" ISO 4'x 4'": 3, "3\" ISO 4'x 4'": 3, "3 1/2\" ISO 4'x 4'": 3,
+    "4\" ISO 4'x 4'": 3,
+    "1\" Rigid": 4, "1 1/2\" Rigid": 4, "2\" Rigid": 4, "2 1/2\" Rigid": 4, "2.7\" Rigid": 4,
+    "3\" Rigid": 4, "3 1/2\" Rigid": 4, "4\" Rigid": 4,
+    "1/2\" Rigid 4'x 4'": 17, "1\" Rigid 4'x 4'": 17, "1 1/2\" Rigid 4'x 4'": 17,
+    "2\" Rigid 4'x 4'": 17, "2 1/2\" Rigid 4'x 4'": 17, "2.7\" Rigid 4'x 4'": 17,
+    "3\" Rigid 4'x 4'": 17, "3 1/2\" Rigid 4'x 4'": 17, "4\" Rigid 4'x 4'": 17,
+    "FR 10": 6, "FR 50": 6,
+    "1/4\" Dens Deck": 7, "3/8\" Dens Deck": 7, "1/4\" Securock GFRB": 7, "3/8\" Securock GFRB": 7,
+    "1/2\" Securock GFRB": 7, "5/8\" Securock GFRB": 7,
+    "1/4\" DensDeck Prime": 8, "1/2\" DensDeck Prime": 8, "5/8\" DensDeck Prime": 8,
+    "5/8\" F/C Sheet Rock": 9,
+    "Duro-Blue Slipsheet": 1, "Duro-Fold": 1, "Duro-Weave": 1, "Geotextile": 1, "Ultra-Fold": 1
+  },
+  "groups": [
+    { "id": 1, "name": "Slip Sheets", "boards": ["Duro-Blue Slipsheet", "Duro-Weave", "Geotextile", "Duro-Fold", "Ultra-Fold"] },
+    { "id": 2, "name": "ISO 4'x8'", "boards": ["1/2\" ISO", "1\" ISO", "1 1/2\" ISO", "2\" ISO", "2 1/2\" ISO", "2.7\" ISO", "3\" ISO", "3 1/2\" ISO", "4\" ISO"] },
+    { "id": 6, "name": "Fire Rated Mat", "boards": ["FR 10", "FR 50"] }
+  ]
+}

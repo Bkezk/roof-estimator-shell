@@ -135,3 +135,17 @@ describe("computeMoney — money chain column 0 (engine-truth §4)", () => {
     expect(r.salesTaxValue).toBe(0);
   });
 });
+
+describe("taxCharged — the tax the bid actually charged, either mode", () => {
+  it("material-only mode: salesTaxValue is 0 but taxCharged carries the material tax", () => {
+    const r = computeMoney({
+      ...base(),
+      taxExempt: false,
+      taxMaterialOnly: true,
+      salesTax: 0.0625,
+      materialTotalBeforeTax: 10000,
+    });
+    expect(r.salesTaxValue).toBe(0);
+    expect(r.taxCharged).toBeCloseTo(625, 2);
+  });
+});

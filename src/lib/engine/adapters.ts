@@ -130,6 +130,7 @@ const NON_PRICE_COLUMNS = new Set([
   "open part #",
   "closed part #",
   "fasteners/box",
+  "parts/package",
   "multiplier",
 ]);
 
@@ -152,7 +153,7 @@ const KNOWN_COLORS = new Set([
 function priceColumnVariant(col: string): string | null {
   const c = col.trim();
   if (NON_PRICE_COLUMNS.has(c.toLowerCase())) return null;
-  if (c === "Price" || c === "Price/Box") return "";
+  if (c === "Price" || c === "Price/Box" || c === "Price/Package") return "";
   if (/ Price$/i.test(c)) return c.replace(/ Price$/i, "").trim();
   if (KNOWN_COLORS.has(c)) return c;
   return null;
@@ -384,6 +385,26 @@ export function buildUnderlaymentGroups(
         .map((b) => b.board_name),
     }));
   return { groups, groupIdByBoard, needQuoteByBoard, adhesiveGroupIdByBoard };
+}
+
+/**
+ * Forward-compatibility for FROZEN admin snapshots (saved bids): a snapshot taken before a
+ * field existed must never crash a newer build (the "test 1" class of bug — its
+ * underlaymentGroups predated needQuoteByBoard/adhesiveGroupIdByBoard). Fills every
+ * later-added sub-field with a safe default; never changes captured VALUES.
+ */
+export function normalizeAdminSnapshot(admin: EngineAdminData): EngineAdminData {
+  const ug = admin.underlaymentGroups;
+  if (!ug) return admin;
+  return {
+    ...admin,
+    underlaymentGroups: {
+      groups: ug.groups ?? [],
+      groupIdByBoard: ug.groupIdByBoard ?? {},
+      needQuoteByBoard: ug.needQuoteByBoard ?? {},
+      adhesiveGroupIdByBoard: ug.adhesiveGroupIdByBoard ?? {},
+    },
+  };
 }
 
 /** One auto-priced NDL rate row (material $/unit + labor hrs/unit at its own $/hr rate). */

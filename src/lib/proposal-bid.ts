@@ -16,6 +16,7 @@ import type {
 } from "@/lib/engine/bid-builder";
 import type { MarkupMode } from "@/lib/engine/money";
 import type { EngineAdminData } from "@/lib/engine/adapters";
+import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
 
 /** Customer / project header, persisted with the bid and printed on the proposal. */
 export interface CustomerInfo {
@@ -184,7 +185,8 @@ export function resolveBidComputeData(
 ): BidComputeData {
   if (s.adminSnapshot) {
     return {
-      admin: s.adminSnapshot,
+      // Older snapshots predate later-added fields; normalize so newer builds never crash.
+      admin: normalizeAdminSnapshot(s.adminSnapshot),
       // Snapshots from before warranty freezing fall back to live rather than dropping warranty $.
       warranty: s.warrantySnapshot ?? liveWarranty ?? null,
       frozenAsOf: s.pricingAsOf ?? "",

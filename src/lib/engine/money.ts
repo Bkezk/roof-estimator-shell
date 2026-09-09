@@ -73,6 +73,12 @@ export interface MoneyResult {
   perDiemValue: number; // dTotals[17]
   totalManDays: number; // dTotals[21]
   salesTaxValue: number; // dTotals[19]
+  /**
+   * The tax the bid actually charged, whichever mode: material-only tax (folded into
+   * TotalPurchases/d[8], not d[19]) or the end-of-chain d[19]. Display surfaces show THIS —
+   * the ledger previously showed $0.00 tax while Total Purchases carried the material tax.
+   */
+  taxCharged: number;
 }
 
 /** Markup value, `CalcMarkupValue` (§4.3). S = TotalSub1, MD = TotalManDays, x = markup. */
@@ -181,5 +187,6 @@ export function computeMoney(i: MoneyInputs): MoneyResult {
     perDiemValue: d[17]!,
     totalManDays: d[21]!,
     salesTaxValue: d[19]!,
+    taxCharged: materialTax + d[19]!,
   };
 }

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildEstimateInputs,
   fluteFillerPieces,
+  sectionMembraneDisplayPricing,
   type BidInput,
   type UnderlaymentLayer,
 } from "./bid-builder";
@@ -2008,5 +2009,43 @@ describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUni
       withU,
     );
     expect(missing.warnings.some((w) => w.includes("quote adhesive containers"))).toBe(true);
+  });
+});
+
+describe("sectionMembraneDisplayPricing — the calc dialog can never disagree with the engine", () => {
+  it("tab-sheet section: helper picks the SAME tab-tier price the engine bills (not roll goods)", () => {
+    // The seeded combo shape: first sheet label is "Roll Good", real sheets follow.
+    const tabCombo = {
+      ...combo,
+      sheet_size_multipliers: [
+        { label: "Roll Good", roof_section: 4, underlayment: 4 },
+        { label: "1500 sf", roof_section: 1, underlayment: 1 },
+      ],
+    };
+    const withTabs: EngineAdminData = {
+      ...admin,
+      labor: { "Duro-Last|mechanical": buildLaborTables(tabCombo, deckOrder) },
+      priceMatrix: {
+        40: { rollGoods: { White: 1.23 }, tab28: { White: 1.35 }, tab60: { White: 1.28 } },
+      },
+      sheetTabSpacings: { 1: [28, 60, 120] },
+    };
+    // fieldLap 60 on a real sheet size → 60" Tabs tier ($1.28), the case the walkthrough caught
+    const s = { ...bid().sections[0]!, fieldLap: 60 };
+    const disp = sectionMembraneDisplayPricing(withTabs, "Duro-Last", "mechanical", s);
+    expect(disp.tierLabel).toBe('60" Tabs');
+    expect(disp.pricePerSqFt).toBe(1.28);
+    const { inputs } = buildEstimateInputs(bid({ sections: [s] }), withTabs);
+    // default section (no zones): engine membrane = withOverlap × the SAME price
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.28, 2);
+  });
+
+  it("roll-good sheet (no tab table): helper and engine both bill roll goods", () => {
+    const s = bid().sections[0]!;
+    const disp = sectionMembraneDisplayPricing(admin, "Duro-Last", "mechanical", s);
+    expect(disp.tierLabel).toBe("Roll Goods");
+    expect(disp.pricePerSqFt).toBe(1.23);
+    const { inputs } = buildEstimateInputs(bid(), admin);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2);
   });
 });

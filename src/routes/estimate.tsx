@@ -39,6 +39,7 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
 import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
 import {
@@ -331,6 +332,9 @@ function EstimatePage() {
   // The legacy Review screen shows the ledger; the auxiliary knobs (warranty picker, labor
   // rate, templates…) sit behind this toggle instead of always-on forms.
   const [showPricingSettings, setShowPricingSettings] = useState(false);
+  // A saved bid whose row has no usable data ({} / null): surface it loudly instead of quietly
+  // showing a fresh default estimate under the saved name (the "smith elemetry" bug).
+  const [loadedBidEmpty, setLoadedBidEmpty] = useState(false);
   const [commission, setCommission] = useState(3);
   const [taxExempt, setTaxExempt] = useState(false);
   const [prepayDiscount, setPrepayDiscount] = useState(false);
@@ -450,6 +454,7 @@ function EstimatePage() {
   useEffect(() => {
     if (!loadedBid || hydratedFor.current === loadedBid.id) return;
     const d = loadedBid.data as unknown as Partial<SavedBidState> | null;
+    setLoadedBidEmpty(!(d && Array.isArray(d.sections)));
     if (d && Array.isArray(d.sections)) {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
@@ -489,7 +494,7 @@ function EstimatePage() {
       setSnapshot(
         d.adminSnapshot
           ? {
-              admin: d.adminSnapshot,
+              admin: normalizeAdminSnapshot(d.adminSnapshot),
               warranty: d.warrantySnapshot ?? null,
               asOf: d.pricingAsOf ?? loadedBid.updated_at,
             }
@@ -889,7 +894,7 @@ function EstimatePage() {
       subtotal2: result.r.money.subtotal2,
       commissionValue: result.r.money.commissionValue,
       perDiemCharge: perDiemInMarkup ? 0 : (d[17] ?? 0),
-      salesTaxValue: result.r.money.salesTaxValue,
+      salesTaxValue: result.r.money.taxCharged,
       grandTotal: result.r.money.grandTotal,
       installHours: result.r.installHours,
       setupHours: result.r.setupHours,
@@ -922,6 +927,13 @@ function EstimatePage() {
   return (
     <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_320px] lg:pb-0">
       <div className="space-y-6">
+        {loadedBidEmpty && (
+          <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
+            <span className="font-semibold">This saved bid has no stored data.</span> What you see
+            below is a fresh default estimate under its name — nothing here was loaded from the
+            save. Saving will write the current inputs over the empty record.
+          </div>
+        )}
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
@@ -1318,7 +1330,7 @@ function EstimatePage() {
                   onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
-                  High-wind term &amp; band are on the Pricing &amp; Warranty step.
+                  High-wind term &amp; band are in the Review step's Settings panel.
                 </p>
               </LegacyGroup>
             </CardContent>
@@ -1356,7 +1368,12 @@ function EstimatePage() {
                           onChange={(e) => editSection(i, { name: e.target.value })}
                         />
                         <div className="flex items-center gap-1">
-                          <SectionCalcDialog section={s} admin={admin} roofSystem={roofSystem} />
+                          <SectionCalcDialog
+                            section={s}
+                            admin={admin}
+                            roofSystem={roofSystem}
+                            attachment={attachment}
+                          />
                           <Button
                             variant="ghost"
                             size="icon"
@@ -2016,13 +2033,13 @@ function EstimatePage() {
                     }
                     // Priced boards the mapping doesn't know (admin-added later) stay reachable
                     // under a catch-all "Other" tile (id -1).
-                    const ungrouped = boardOptions.filter((b) => !(b in ug.groupIdByBoard));
+                    const ungrouped = boardOptions.filter((b) => !(b in (ug.groupIdByBoard ?? {})));
                     const groups = ungrouped.length
                       ? [...ug.groups, { id: -1, name: "Other", boards: ungrouped }]
                       : ug.groups;
                     const activeGroup =
                       uGroup ??
-                      (uBoard ? (ug.groupIdByBoard[uBoard] ?? -1) : undefined) ??
+                      (uBoard ? (ug.groupIdByBoard?.[uBoard] ?? -1) : undefined) ??
                       groups[0]!.id;
                     const boards = groups.find((g) => g.id === activeGroup)?.boards ?? [];
                     return (
@@ -2034,7 +2051,7 @@ function EstimatePage() {
                               type="button"
                               onClick={() => {
                                 setUGroup(g.id);
-                                if (uBoard && (ug.groupIdByBoard[uBoard] ?? -1) !== g.id)
+                                if (uBoard && (ug.groupIdByBoard?.[uBoard] ?? -1) !== g.id)
                                   setUBoard("");
                               }}
                               className={`rounded-md border px-3 py-2 text-xs ${
@@ -2049,7 +2066,7 @@ function EstimatePage() {
                         </div>
                         <div className="flex flex-wrap gap-2 border-t pt-2">
                           {boards.map((b) =>
-                            ug.needQuoteByBoard[b] ? (
+                            ug.needQuoteByBoard?.[b] ? (
                               // Legacy NeedQuote entry: opens the quote dialog (docs §10.5).
                               <button
                                 key={b}
@@ -4522,7 +4539,7 @@ function EstimatePage() {
                   {perDiem > 0 && !perDiemInMarkup && (
                     <Row label="Per-diem" v={money(result.r.money.dTotals[17] ?? 0)} />
                   )}
-                  <Row label="Sales tax" v={money(result.r.money.salesTaxValue)} />
+                  <Row label="Sales tax" v={money(result.r.money.taxCharged)} />
                   <TableRow className="font-semibold">
                     <TableCell>Bid total</TableCell>
                     <TableCell className="text-right">{money(result.r.money.grandTotal)}</TableCell>

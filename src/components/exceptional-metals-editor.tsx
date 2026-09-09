@@ -52,7 +52,8 @@ interface MetalsData {
       sizes_by_style: Record<string, string[]>;
       columns: string[];
       rows: CostRow[];
-      captured_for: { style: string; size: string };
+      captured_for?: { style: string; size: string };
+      seed_note?: string;
     };
     downspouts: {
       master_label: string;
@@ -235,8 +236,10 @@ export function ExceptionalMetalsTab() {
             <CardHeader>
               <CardTitle className="text-base">Gutters</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Priced grid captured for {s.gutters.captured_for.style} at{" "}
-                {s.gutters.captured_for.size}. Styles: {s.gutters.styles.join(", ")}.
+                {s.gutters.captured_for
+                  ? `Priced grid captured for ${s.gutters.captured_for.style} at ${s.gutters.captured_for.size}. `
+                  : (s.gutters.seed_note ?? "")}{" "}
+                Styles: {s.gutters.styles.join(", ")}.
               </p>
             </CardHeader>
             <CardContent>
