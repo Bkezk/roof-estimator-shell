@@ -3075,161 +3075,254 @@ function EstimatePage() {
           </Card>
         </div>
 
-        {/* Legacy Tear-Off screen (modeled on the sibling multi-select screens; exact
-            legacy capture pending): select sections, pick the existing roof type + depth, apply. */}
+        {/* Legacy Tear-Off screen (mirrors the 2026-08-31 12:44 capture): section select grid,
+            type tiles grouped Single Ply / Built Up / Urethane, thickness + disposal capacity,
+            the red labor-variables note, and the Existing Roof / Deck info panel. */}
         <div className={step === 7 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Tear-Off</CardTitle>
               <div className="flex items-center gap-2">
-                <p className="text-xs text-muted-foreground">Select roof section(s) or:</p>
+                <p className="text-xs text-muted-foreground">Select Roof Section(s) or:</p>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setToSel(sections.map((s) => s.id))}
                 >
-                  Select all sections
+                  Select All
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>W × L</TableHead>
-                      <TableHead>Deck</TableHead>
-                      <TableHead>Tear-Off : Existing Roof</TableHead>
-                      <TableHead>Debris depth</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sections.map((s) => {
-                      const sel = toSel.includes(s.id);
-                      return (
-                        <TableRow
-                          key={s.id}
-                          onClick={() =>
-                            setToSel((prev) =>
-                              prev.includes(s.id)
-                                ? prev.filter((x) => x !== s.id)
-                                : [...prev, s.id],
-                            )
-                          }
-                          className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
-                        >
-                          <TableCell className="font-medium">{s.name}</TableCell>
-                          <TableCell className="tabular-nums">
-                            {s.width}x{s.length}
-                          </TableCell>
-                          <TableCell>{s.deckType}</TableCell>
-                          <TableCell className="whitespace-nowrap text-xs">
-                            {s.tearOff ? s.tearOffType || "On : (no type)" : "None : None"}
-                          </TableCell>
-                          <TableCell className="text-xs tabular-nums">
-                            {s.tearOff ? `${s.toThicknessInches}"` : "—"}
-                          </TableCell>
+            <CardContent>
+              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+                <div className="space-y-4">
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Section</TableHead>
+                          <TableHead>Deck</TableHead>
+                          <TableHead>W x L</TableHead>
                         </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-4 text-xs">
-                <span>
-                  Sq Ft to tear off:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {sections
-                      .filter((s) => s.tearOff)
-                      .reduce((sum, s) => sum + s.length * s.width, 0)
-                      .toLocaleString()}
-                  </span>
-                </span>
-                <span>
-                  Man hours:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.r.tearOffLaborHours ?? 0).toFixed(2)}
-                  </span>
-                </span>
-                <span>
-                  Labor cost:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {money((result?.r.tearOffLaborHours ?? 0) * laborRate)}
-                  </span>
-                </span>
-                <span>
-                  Disposal units:{" "}
-                  <span className="font-semibold tabular-nums">{result?.r.disposalUnits ?? 0}</span>
-                </span>
-              </div>
-
-              <div className="space-y-3 rounded-md border p-4 lg:max-w-2xl">
-                <p className="text-xs font-semibold">Select existing roof type</p>
-                <div className="flex flex-wrap gap-2">
-                  {(admin.tearOff?.tearoffTypes ?? []).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setToType(t)}
-                      className={`rounded-md border px-2.5 py-2 text-xs ${
-                        toType === t ? "border-primary bg-primary/10 font-medium" : "hover:bg-muted"
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex flex-wrap items-end gap-3">
-                  <Field label="Debris depth (in)">
-                    <NumInput
-                      className="w-[110px]"
-                      min={0}
-                      value={toDepth}
-                      onValue={(n) => setToDepth(n)}
-                    />
-                  </Field>
-                  <Button
-                    size="sm"
-                    disabled={!toType || toSel.length === 0}
-                    onClick={() =>
-                      setSections((prev) =>
-                        prev.map((s) =>
-                          toSel.includes(s.id)
-                            ? {
-                                ...s,
-                                tearOff: true,
-                                tearOffType: toType,
-                                toThicknessInches: toDepth,
+                      </TableHeader>
+                      <TableBody>
+                        {sections.map((s) => {
+                          const sel = toSel.includes(s.id);
+                          return (
+                            <TableRow
+                              key={s.id}
+                              onClick={() =>
+                                setToSel((prev) =>
+                                  prev.includes(s.id)
+                                    ? prev.filter((x) => x !== s.id)
+                                    : [...prev, s.id],
+                                )
                               }
-                            : s,
-                        ),
-                      )
-                    }
-                  >
-                    Apply to selected
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={toSel.length === 0}
-                    onClick={() =>
-                      setSections((prev) =>
-                        prev.map((s) =>
-                          toSel.includes(s.id)
-                            ? { ...s, tearOff: false, tearOffType: "", toThicknessInches: 0 }
-                            : s,
-                        ),
-                      )
-                    }
-                  >
-                    None (remove tear-off)
-                  </Button>
+                              className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
+                            >
+                              <TableCell className="font-medium">{s.name}</TableCell>
+                              <TableCell>{s.deckType}</TableCell>
+                              <TableCell className="tabular-nums">
+                                {s.width}x{s.length}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  {/* Type tiles, grouped like the legacy trio (the urethane tile is a dropdown
+                      group in legacy). */}
+                  <div className="space-y-3 rounded-md border p-3">
+                    {(() => {
+                      const types = admin.tearOff?.tearoffTypes ?? [];
+                      const groups: Array<[string, string[]]> = [
+                        ["Single Ply & Combinations", []],
+                        ["Built Up, Modified & Combinations", []],
+                        ["Urethane", []],
+                      ];
+                      for (const t of types) {
+                        if (/uret|spray/i.test(t)) groups[2]![1].push(t);
+                        else if (/bur|built|mod/i.test(t)) groups[1]![1].push(t);
+                        else groups[0]![1].push(t);
+                      }
+                      return (
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          {groups
+                            .filter(([, ts]) => ts.length > 0)
+                            .map(([label, ts]) => (
+                              <div key={label} className="rounded-md border p-2">
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {label}
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {ts.map((t) => (
+                                    <button
+                                      key={t}
+                                      type="button"
+                                      onClick={() => setToType(t)}
+                                      className={`rounded-md border px-2 py-1.5 text-xs ${
+                                        toType === t
+                                          ? "border-primary bg-primary/10 font-medium"
+                                          : "hover:bg-muted"
+                                      }`}
+                                    >
+                                      {t}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      );
+                    })()}
+                    <div className="flex flex-wrap items-end gap-3">
+                      <Field label="Thickness (in)">
+                        <NumInput
+                          className="w-[100px]"
+                          min={0}
+                          value={toDepth}
+                          onValue={(n) => setToDepth(n)}
+                        />
+                      </Field>
+                      <Field label="Disposal Unit Capacity Adjustments">
+                        <PickOne
+                          value="Normal Fill"
+                          options={["Normal Fill"]}
+                          onChange={() => {}}
+                        />
+                      </Field>
+                      <Button
+                        size="sm"
+                        disabled={!toType || toSel.length === 0}
+                        onClick={() =>
+                          setSections((prev) =>
+                            prev.map((s) =>
+                              toSel.includes(s.id)
+                                ? {
+                                    ...s,
+                                    tearOff: true,
+                                    tearOffType: toType,
+                                    toThicknessInches: toDepth,
+                                  }
+                                : s,
+                            ),
+                          )
+                        }
+                      >
+                        Apply to selected
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={toSel.length === 0}
+                        onClick={() =>
+                          setSections((prev) =>
+                            prev.map((s) =>
+                              toSel.includes(s.id)
+                                ? { ...s, tearOff: false, tearOffType: "", toThicknessInches: 0 }
+                                : s,
+                            ),
+                          )
+                        }
+                      >
+                        ✕ Don&apos;t Tear-off
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Legacy red note, verbatim. */}
+                  <div className="rounded-md border p-3 text-xs">
+                    <p className="mb-1 font-semibold">Labor Cost Variables To Consider</p>
+                    <div className="space-y-0.5 text-red-600 dark:text-red-400">
+                      <p>
+                        a) Rock Removal — 1. Manual · 2. Vacuum service - Enter Quote in Non-DL
+                        services
+                      </p>
+                      <p>
+                        b) Roofing Composition — 1. Asbestos · 2. Coal Tar Pitch · 3. Hot Mopped
+                        Base Sheet · 4. Severely Decomposed Roofing · 5. Heavily Nailed Roofing
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Hours bill from the seeded Tearoff Times table (deck × existing roof type); debris
-                  depth drives the disposal-unit volume.
-                </p>
+
+                {/* Right rail: legacy info panel (Existing Roof / Deck bars + core-cut table). */}
+                <div className="space-y-2">
+                  {(() => {
+                    const focus = sections.find((s) => toSel.includes(s.id)) ?? sections[0];
+                    return (
+                      <div className="space-y-1.5 rounded-md border p-3">
+                        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1 text-xs">
+                          <span className="text-muted-foreground">Existing Roof:</span>
+                          <span className="rounded-sm bg-muted px-2 py-1 text-center font-medium">
+                            {focus?.tearOff ? focus.tearOffType || "(no type)" : "Unknown"}
+                          </span>
+                          <span className="text-muted-foreground">Deck:</span>
+                          <span className="rounded-sm bg-blue-500/80 px-2 py-1 text-center font-medium text-white">
+                            {focus?.deckType ?? "—"}
+                          </span>
+                        </div>
+                        <p className="pt-1 text-xs">
+                          <span className="font-semibold">Roof Section:</span> {focus?.name ?? "—"}
+                          <span className="float-right">
+                            <span className="font-semibold">Total Thickness:</span>{" "}
+                            <span className="tabular-nums">
+                              {(focus?.tearOff ? focus.toThicknessInches : 0).toFixed(1)}
+                            </span>
+                          </span>
+                        </p>
+                      </div>
+                    );
+                  })()}
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>W x L</TableHead>
+                          <TableHead>Core Cut</TableHead>
+                          <TableHead className="text-right">Thickness</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sections.map((s) => (
+                          <TableRow key={s.id}>
+                            <TableCell className="tabular-nums">
+                              {s.width}x{s.length}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {s.tearOff ? s.tearOffType || "(no type)" : "Unknown"}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {(s.tearOff ? s.toThicknessInches : 0).toFixed(2)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-2 rounded-md border px-3 py-2 text-[11px]">
+                    <span>
+                      Man Hours:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {(result?.r.tearOffLaborHours ?? 0).toFixed(2)}
+                      </span>
+                    </span>
+                    <span>
+                      Labor Cost:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {money((result?.r.tearOffLaborHours ?? 0) * laborRate)}
+                      </span>
+                    </span>
+                    <span>
+                      Disposal Units:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {result?.r.disposalUnits ?? 0}
+                      </span>
+                    </span>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
