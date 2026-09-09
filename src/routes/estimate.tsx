@@ -3847,7 +3847,7 @@ function CurbStyleArt({ styleId }: { styleId: number }) {
           y="25"
           textAnchor="middle"
           transform="rotate(28.5 32 25)"
-          className="fill-current text-[6.5px] font-semibold"
+          className="fill-current text-[4.5px] font-semibold"
         >
           Metal
         </text>
