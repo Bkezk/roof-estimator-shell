@@ -714,3 +714,24 @@ Rigid 4'x4' (122200), Tapered/Other (122216). Findings, now seeded as
 
 Still NOT modeled: the quote entries themselves (ISO/Rigid Quote, Tapered/*, Flute Filler) —
 they need the custom-quote layer flow (name + manual $ + labor), a future UI feature.
+
+### 10.6 Custom-quote layers — IMPLEMENTED (2026-09-09), semantics partly flagged
+
+The NeedQuote entries are pickable: the ten quote rows are seeded
+(`underlayment_board_group.need_quote`, migration 20260910000000, applied live) into their
+captured tiles, and clicking one opens a quote dialog mirroring the captured HandleFluteFiller
+form (§10.5): quote name, S.F of selected sections (display), labor Total Amount with
+Hours/Days, Lump Sum vs Piece (pieces × cost/piece), and the Material & Labor Cost preview.
+Ok writes a `quote` object onto the section's layer; the engine bills it VERBATIM: material =
+lump sum (or pieces × cost/piece), NO ×1.06 waste, into underlayment material (dTotals[6]);
+labor = entered hours (days × hours-per-man-day) into underlayment labor at the crew rate.
+Quote layers bill no auto fasteners/adhesive; an adhered membrane over a quote top board warns
+"needs a quote" (legacy manual QuoteAdhesiveUnits is not modeled).
+
+⚠ FLAGGED FOR EXTRACTION/VALIDATION (implemented on the most defensible reading, not IL-exact):
+(a) labor conversion — days × HoursPerManDay, and quote labor billing at the crew rate inside
+underlayment labor; (b) the material bucket (dTotals[6] vs another slot); (c) the "Calculate
+Pieces" link's formula (omitted — pieces are manual); (d) the generic HandleGetQuote dialog's
+text/fields for non-Flute quote boards (assumed same shape); (e) QuoteAdhesiveUnits. Extraction
+targets: HandleFluteFiller 0xaf64c, HandleGetQuote 0xafba8, the CustomQuote model + WriteXML,
+and where quote material/labor enter RoofSection.UnderlaymentCost / ManHours / CalcQtys.

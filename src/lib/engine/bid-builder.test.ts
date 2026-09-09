@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { buildEstimateInputs, type BidInput } from "./bid-builder";
+import { buildEstimateInputs, type BidInput, type UnderlaymentLayer } from "./bid-builder";
 import { computeEstimate } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
 
@@ -1797,5 +1797,97 @@ describe("Enhancement Options (§10.3: custom fastener densities + adhesive ribb
       computeEstimate(def.inputs).underlaymentLaborHours,
       6,
     );
+  });
+});
+
+describe("custom-quote underlayment layers (§10.5: Flute Filler / Tapered / ISO-Rigid Quote)", () => {
+  const withU: EngineAdminData = {
+    ...admin,
+    underlaymentPrices: { '1/2" ISO': 0.85 },
+    underlaymentLabor: {
+      layoutHoursByProduct: { '1/2" ISO': 7.775 },
+      fastenerCounts: [5],
+      fastenerMinutesByDeck: { Wood: 0.342 },
+    },
+  };
+  const quoteLayer = (quote: NonNullable<UnderlaymentLayer["quote"]>): UnderlaymentLayer => ({
+    board: "Flute Filler",
+    attachment: "mechanical",
+    fastenersPerBoard: 0,
+    adhesiveName: "",
+    substrate: "",
+    quote,
+  });
+
+  it("lump-sum quote bills the material VERBATIM (no waste) + labor hours; no warnings", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [quoteLayer({ name: "New Quote", lumpSum: 1500, laborAmount: 8 })],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(warnings).toEqual([]);
+    expect(inputs.materialUnderlayment).toBeCloseTo(1500, 2);
+    const r = computeEstimate(inputs);
+    expect(r.underlaymentLaborHours).toBeCloseTo(8, 6);
+  });
+
+  it("piece quote bills pieces × cost/piece; labor in DAYS converts at hours-per-man-day", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [
+              quoteLayer({
+                name: "Tapered ISO quote",
+                pieceMode: true,
+                pieces: 10,
+                costPerPiece: 42,
+                laborAmount: 2,
+                laborInDays: true,
+              }),
+            ],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(inputs.materialUnderlayment).toBeCloseTo(420, 2);
+    // 2 days × 9 h/day (admin.settings.hoursPerDay)
+    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(18, 6);
+  });
+
+  it("a quote layer stacks with a priced layer without disturbing it", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [
+              {
+                board: '1/2" ISO',
+                attachment: "mechanical",
+                fastenersPerBoard: 5,
+                adhesiveName: "",
+                substrate: "",
+              },
+              quoteLayer({ name: "New Quote", lumpSum: 300, laborAmount: 1 }),
+            ],
+          },
+        ],
+      }),
+      withU,
+    );
+    expect(warnings).toEqual([]);
+    // priced: 2500 × 0.85 × 1.06 = 2252.50; quote adds 300 verbatim
+    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5 + 300, 2);
+    // priced labor 10.0016 + quote 1 h
+    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(11.0016, 3);
   });
 });

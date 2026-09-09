@@ -73,6 +73,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -376,6 +383,26 @@ function EstimatePage() {
   const [uEnhPerim, setUEnhPerim] = useState(0.15625);
   const [uEnhCorner, setUEnhCorner] = useState(0.15625);
   const [uEnhSpacing, setUEnhSpacing] = useState(0); // 0 = default coverage
+  // Custom-quote flow (legacy NeedQuote entries — Flute Filler / Tapered/Other / ISO-Rigid
+  // Quote, docs §10.5): the dialog mirrors the captured HandleFluteFiller form.
+  const [uQuoteBoard, setUQuoteBoard] = useState<string | null>(null);
+  const [qName, setQName] = useState("New Quote");
+  const [qPieceMode, setQPieceMode] = useState(false);
+  const [qLump, setQLump] = useState(0);
+  const [qPieces, setQPieces] = useState(0);
+  const [qCpp, setQCpp] = useState(0);
+  const [qLabor, setQLabor] = useState(0);
+  const [qLaborDays, setQLaborDays] = useState(false);
+  const openQuoteDialog = (board: string) => {
+    setQName("New Quote");
+    setQPieceMode(false);
+    setQLump(0);
+    setQPieces(0);
+    setQCpp(0);
+    setQLabor(0);
+    setQLaborDays(false);
+    setUQuoteBoard(board);
+  };
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
   const [uFast, setUFast] = useState(0);
   const [uAdh, setUAdh] = useState("");
@@ -1945,20 +1972,32 @@ function EstimatePage() {
                           ))}
                         </div>
                         <div className="flex flex-wrap gap-2 border-t pt-2">
-                          {boards.map((b) => (
-                            <button
-                              key={b}
-                              type="button"
-                              onClick={() => setUBoard(b)}
-                              className={`rounded-md border px-2.5 py-1.5 text-xs ${
-                                uBoard === b
-                                  ? "border-primary bg-primary/10 font-medium"
-                                  : "hover:bg-muted"
-                              }`}
-                            >
-                              {b}
-                            </button>
-                          ))}
+                          {boards.map((b) =>
+                            ug.needQuoteByBoard[b] ? (
+                              // Legacy NeedQuote entry: opens the quote dialog (docs §10.5).
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => openQuoteDialog(b)}
+                                className="rounded-md border border-dashed px-2.5 py-1.5 text-xs italic hover:bg-muted"
+                              >
+                                {b} …
+                              </button>
+                            ) : (
+                              <button
+                                key={b}
+                                type="button"
+                                onClick={() => setUBoard(b)}
+                                className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                                  uBoard === b
+                                    ? "border-primary bg-primary/10 font-medium"
+                                    : "hover:bg-muted"
+                                }`}
+                              >
+                                {b}
+                              </button>
+                            ),
+                          )}
                         </div>
                       </>
                     );
@@ -2162,7 +2201,166 @@ function EstimatePage() {
                   <p className="text-[11px] text-muted-foreground">
                     Pick sections above, choose a board and attachment, then apply. Layers bill
                     board $/sqft × area × 1.06 waste plus their layout/fastener or adhesive labor.
+                    Dashed entries require a quote (legacy) — clicking one opens the quote form.
                   </p>
+                  {/* Custom-quote dialog — mirrors the captured legacy HandleFluteFiller form
+                      (docs §10.5): quote name, labor hours/days, lump-sum vs per-piece. */}
+                  <Dialog
+                    open={uQuoteBoard !== null}
+                    onOpenChange={(open) => {
+                      if (!open) setUQuoteBoard(null);
+                    }}
+                  >
+                    <DialogContent className="max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>{uQuoteBoard}</DialogTitle>
+                      </DialogHeader>
+                      {(() => {
+                        const sf = sections
+                          .filter((s) => uSel.includes(s.id))
+                          .reduce((sum, s) => sum + s.length * s.width, 0);
+                        const material = qPieceMode ? qPieces * qCpp : qLump;
+                        const hours = qLaborDays
+                          ? qLabor * (admin?.settings.hoursPerDay ?? 9)
+                          : qLabor;
+                        const preview = material + hours * laborRate;
+                        return (
+                          <div className="space-y-3 text-sm">
+                            {uQuoteBoard === "Flute Filler" ? (
+                              <p className="text-xs text-muted-foreground">
+                                Since you have selected Flute Filler you will need to obtain a quote
+                                before you can finalize your bid. When you have your quote you will
+                                need to furnish the following information to complete your bid. If
+                                using wood blocking on any of these sections, you will have to
+                                manually enter the required amounts on the Non-D/L screen.
+                              </p>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                This selection requires a quote. Enter the quoted material and labor
+                                to complete your bid.
+                              </p>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              <Field label="S.F of Sections">
+                                <Input value={sf.toFixed(2)} readOnly disabled />
+                              </Field>
+                              <Field label="Quote name">
+                                <Input value={qName} onChange={(e) => setQName(e.target.value)} />
+                              </Field>
+                            </div>
+                            <div className="rounded-md border p-3">
+                              <p className="pb-1 text-xs font-medium">Labor</p>
+                              <div className="flex items-end gap-3">
+                                <Field label="Total amount">
+                                  <NumInput min={0} value={qLabor} onValue={setQLabor} />
+                                </Field>
+                                <div className="flex items-center gap-3 pb-1 text-xs">
+                                  <label className="flex items-center gap-1">
+                                    <input
+                                      type="radio"
+                                      checked={!qLaborDays}
+                                      onChange={() => setQLaborDays(false)}
+                                    />
+                                    Hours
+                                  </label>
+                                  <label className="flex items-center gap-1">
+                                    <input
+                                      type="radio"
+                                      checked={qLaborDays}
+                                      onChange={() => setQLaborDays(true)}
+                                    />
+                                    Days
+                                  </label>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div
+                                className={`rounded-md border p-3 ${qPieceMode ? "opacity-60" : ""}`}
+                              >
+                                <label className="flex items-center gap-1 pb-1 text-xs font-medium">
+                                  <input
+                                    type="radio"
+                                    checked={!qPieceMode}
+                                    onChange={() => setQPieceMode(false)}
+                                  />
+                                  Lump Sum Quote
+                                </label>
+                                <Field label="Total amount ($)">
+                                  <NumInput min={0} value={qLump} onValue={setQLump} />
+                                </Field>
+                              </div>
+                              <div
+                                className={`rounded-md border p-3 ${qPieceMode ? "" : "opacity-60"}`}
+                              >
+                                <label className="flex items-center gap-1 pb-1 text-xs font-medium">
+                                  <input
+                                    type="radio"
+                                    checked={qPieceMode}
+                                    onChange={() => setQPieceMode(true)}
+                                  />
+                                  Piece Quote
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Field label="Pieces">
+                                    <NumInput min={0} value={qPieces} onValue={setQPieces} />
+                                  </Field>
+                                  <Field label="Cost per piece ($)">
+                                    <NumInput min={0} value={qCpp} onValue={setQCpp} />
+                                  </Field>
+                                </div>
+                              </div>
+                            </div>
+                            <p className="text-sm font-semibold">
+                              Material &amp; Labor Cost: ${preview.toFixed(2)}
+                            </p>
+                            {uSel.length === 0 && (
+                              <p className="text-xs text-destructive">
+                                Select at least one roof section above first.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setUQuoteBoard(null)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          disabled={uSel.length === 0}
+                          onClick={() => {
+                            const board = uQuoteBoard!;
+                            setSections((prev) =>
+                              prev.map((s) => {
+                                if (!uSel.includes(s.id)) return s;
+                                const nextLayers = [...sectionLayers(s)];
+                                const idx = Math.min(uTab, nextLayers.length);
+                                nextLayers[idx] = {
+                                  board,
+                                  attachment: "mechanical",
+                                  fastenersPerBoard: 0,
+                                  adhesiveName: "",
+                                  substrate: "",
+                                  quote: {
+                                    name: qName,
+                                    ...(qPieceMode
+                                      ? { pieceMode: true, pieces: qPieces, costPerPiece: qCpp }
+                                      : { lumpSum: qLump }),
+                                    laborAmount: qLabor,
+                                    ...(qLaborDays ? { laborInDays: true } : {}),
+                                  },
+                                };
+                                return { ...s, layers: nextLayers, underlaymentBoard: "" };
+                              }),
+                            );
+                            setUQuoteBoard(null);
+                          }}
+                        >
+                          Ok
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </CardContent>

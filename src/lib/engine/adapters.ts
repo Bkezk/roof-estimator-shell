@@ -292,6 +292,8 @@ export interface RawUnderlaymentBoardGroupRow {
   /** Live SubType 1..8 — WHICH "Select Insulation Type" tile holds the board (docs §10.1). */
   subtype?: number | null;
   subtype_sort?: number | null;
+  /** Legacy NeedQuote — the entry opens the quote flow instead of pricing (docs §10.5). */
+  need_quote?: boolean | null;
 }
 
 /**
@@ -318,10 +320,12 @@ const UNDERLAYMENT_TILES: Array<{ id: number; name: string }> = [
  * Only tiles with at least one priced board are listed.
  */
 export interface UnderlaymentGroupsData {
-  /** Picker tiles WITH at least one priced board, in legacy panel order. */
+  /** Picker tiles WITH at least one entry, in legacy panel order. */
   groups: Array<{ id: number; name: string; boards: string[] }>;
   /** Board name → its picker tile id (name-exact against the price screen). */
   groupIdByBoard: Record<string, number>;
+  /** Entries that open the legacy quote flow instead of pricing (NeedQuote, docs §10.5). */
+  needQuoteByBoard: Record<string, boolean>;
 }
 
 export function buildUnderlaymentGroups(
@@ -329,6 +333,8 @@ export function buildUnderlaymentGroups(
   boardRows: RawUnderlaymentBoardGroupRow[],
 ): UnderlaymentGroupsData {
   const groupIdByBoard: Record<string, number> = {};
+  const needQuoteByBoard: Record<string, boolean> = {};
+  for (const b of boardRows) if (b.need_quote) needQuoteByBoard[b.board_name] = true;
   const hasSubtypes = boardRows.some((b) => typeof b.subtype === "number");
   if (hasSubtypes) {
     const boardsByTile = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -348,7 +354,7 @@ export function buildUnderlaymentGroups(
           .map((b) => b.board_name),
       }),
     );
-    return { groups, groupIdByBoard };
+    return { groups, groupIdByBoard, needQuoteByBoard };
   }
   // Fallback (pre-subtype snapshot): tiles from the adhesive-group axis.
   const boardsByGroup = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -368,7 +374,7 @@ export function buildUnderlaymentGroups(
         .sort((a, b) => a.sort - b.sort)
         .map((b) => b.board_name),
     }));
-  return { groups, groupIdByBoard };
+  return { groups, groupIdByBoard, needQuoteByBoard };
 }
 
 /** One auto-priced NDL rate row (material $/unit + labor hrs/unit at its own $/hr rate). */

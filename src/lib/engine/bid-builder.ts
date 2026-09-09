@@ -83,11 +83,30 @@ import {
  * hrs/1000 sqft (confirmed scale).
  */
 export interface UnderlaymentLayer {
-  board: string; // from the Underlayment prices screen
+  board: string; // from the Underlayment prices screen (or a NeedQuote entry when quoted)
   attachment: "mechanical" | "adhesive";
   fastenersPerBoard: number; // mechanical: fasteners per 4×8 board (app default 5)
   adhesiveName: string; // adhesive: from the Adhesive Times table
   substrate: string; // adhesive: substrate row in that adhesive's grid
+  /**
+   * Legacy custom-quote layer (docs §10.5 — NeedQuote entries: Flute Filler, Tapered/Other,
+   * ISO/Rigid Quote). When present the layer bills the QUOTED amounts VERBATIM instead of any
+   * catalog price/labor: material = lump sum (or pieces × cost/piece), no ×1.06 waste; labor =
+   * the entered hours (days × hours-per-man-day when laborInDays — FLAGGED FOR BID VALIDATION,
+   * as is the material bucket: it joins underlayment material/dTotals[6]). No auto fasteners
+   * or adhesive units (legacy quote boards take manual QuoteAdhesiveUnits — not modeled).
+   */
+  quote?: {
+    name: string;
+    /** false/absent = Lump Sum Quote; true = Piece Quote (pieces × cost per piece). */
+    pieceMode?: boolean;
+    lumpSum?: number;
+    pieces?: number;
+    costPerPiece?: number;
+    /** Labor "Total Amount" — hours, or days when laborInDays. */
+    laborAmount?: number;
+    laborInDays?: boolean;
+  };
 }
 
 export interface BidSectionInput {
@@ -564,6 +583,15 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // labor and adhesive labor → direct labor; adhesive units × price → M0.
     for (const layer of sectionLayers(s)) {
       const area = s.length * s.width;
+      // Custom-quote layer (docs §10.5): quoted amounts verbatim; nothing else bills.
+      if (layer.quote) {
+        underlaymentMaterial += layer.quote.pieceMode
+          ? (layer.quote.pieces ?? 0) * (layer.quote.costPerPiece ?? 0)
+          : (layer.quote.lumpSum ?? 0);
+        const amt = layer.quote.laborAmount ?? 0;
+        underlaymentLaborHours += layer.quote.laborInDays ? amt * admin.settings.hoursPerDay : amt;
+        continue;
+      }
       const uPrice = admin.underlaymentPrices?.[layer.board];
       if (uPrice === undefined) {
         warnings.push(`No underlayment price for "${layer.board}" — section "${s.name}".`);
@@ -692,10 +720,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       for (const s of bid.sections) {
         const area = s.length * s.width;
         const layers = sectionLayers(s);
-        const topBoard = layers[layers.length - 1]?.board;
+        const topLayer = layers[layers.length - 1];
+        const topBoard = topLayer?.board;
         let coverage: number | undefined;
         if (layers.length === 0) coverage = cov.byDeckName[s.deckType];
-        else if (topBoard && /tapered|crickets/i.test(topBoard)) coverage = undefined;
+        // Tapered/cricket AND custom-quote top boards are quote-only (§10.5: legacy quote
+        // boards take manual QuoteAdhesiveUnits) — never auto-covered.
+        else if (topLayer?.quote || (topBoard && /tapered|crickets/i.test(topBoard)))
+          coverage = undefined;
         else coverage = cov.underlaymentUniform ?? undefined;
         if (coverage && coverage > 0) {
           adhesiveUnitsByName[advName] = (adhesiveUnitsByName[advName] ?? 0) + area / coverage;
