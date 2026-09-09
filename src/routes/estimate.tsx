@@ -2793,41 +2793,34 @@ function EstimatePage() {
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Accessories</CardTitle>
-              <Select
-                value=""
-                onValueChange={(key) => {
-                  const item = accCatalog?.find((a) => a.key === key);
-                  if (item) {
-                    // Prefill labor from the base description (before the " — color" suffix), if known.
-                    const baseDesc = item.variant
-                      ? item.description.slice(0, -` — ${item.variant}`.length)
-                      : item.description;
-                    const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
-                    setAccessories((p) => [
-                      ...p,
-                      {
-                        description: `${item.category} — ${item.description}`,
-                        price: item.price,
-                        quantity: 1,
-                        laborHoursPerUnit,
-                      },
-                    ]);
-                  }
-                }}
-              >
-                <SelectTrigger className="w-[240px] max-w-full">
-                  <SelectValue placeholder="Add accessory…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(accCatalog ?? []).map((a) => (
-                    <SelectItem key={a.key} value={a.key}>
-                      {a.category} — {a.description} ({money(a.price)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </CardHeader>
             <CardContent>
+              <CatalogPicker
+                items={(accCatalog ?? []).map((a) => ({
+                  key: a.key,
+                  category: a.category,
+                  description: a.description,
+                  price: a.price,
+                }))}
+                onAdd={(key) => {
+                  const item = accCatalog?.find((a) => a.key === key);
+                  if (!item) return;
+                  const baseDesc = item.variant
+                    ? item.description.slice(0, -` — ${item.variant}`.length)
+                    : item.description;
+                  const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
+                  setAccessories((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      price: item.price,
+                      quantity: 1,
+                      laborHoursPerUnit,
+                    },
+                  ]);
+                }}
+              />
+
               {accessories.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No accessories added.</p>
               ) : (
@@ -3007,40 +3000,35 @@ function EstimatePage() {
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Metals</CardTitle>
-              <Select
-                value=""
-                onValueChange={(key) => {
-                  const item = metalsCatalog?.find((m) => m.key === key);
-                  if (item)
-                    setMetals((p) => [
-                      ...p,
-                      {
-                        description: `${item.category} — ${item.description}`,
-                        price: item.unitCost,
-                        laborPerUnit: item.laborPerUnit,
-                        laborRate: item.laborRate,
-                        quantity: 1,
-                      },
-                    ]);
-                }}
-              >
-                <SelectTrigger className="w-[240px] max-w-full">
-                  <SelectValue placeholder="Add metals item…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(metalsCatalog ?? []).map((m) => (
-                    <SelectItem key={m.key} value={m.key}>
-                      {m.category} — {m.description}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </CardHeader>
             <CardContent>
+              <CatalogPicker
+                items={(metalsCatalog ?? []).map((m) => ({
+                  key: m.key,
+                  category: m.category,
+                  description: m.description,
+                  price: m.unitCost,
+                }))}
+                onAdd={(key) => {
+                  const item = metalsCatalog?.find((m) => m.key === key);
+                  if (!item) return;
+                  setMetals((p) => [
+                    ...p,
+                    {
+                      description: `${item.category} — ${item.description}`,
+                      price: item.unitCost,
+                      laborPerUnit: item.laborPerUnit,
+                      laborRate: item.laborRate,
+                      quantity: 1,
+                    },
+                  ]);
+                }}
+              />
+
               {metals.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No metals. Gutters, downspouts, pitch pans, collection boxes — material folds into
-                  Duro-Last material; labor into Subs &amp; services.
+                  Duro-Last material; labor bills as direct labor at each line's own rate.
                 </p>
               ) : (
                 <Table>
@@ -4104,6 +4092,96 @@ function LegacyGroup({ title, children }: { title: string; children: React.React
     <div className="rounded-md border p-3">
       <p className="mb-2 text-xs font-semibold">{title}</p>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Legacy-style catalog picker (mirrors the legacy Accessories screen): category tree on the
+ * left, searchable item list on the right, one click to add a line.
+ */
+function CatalogPicker({
+  items,
+  onAdd,
+}: {
+  items: Array<{ key: string; category: string; description: string; price: number }>;
+  onAdd: (key: string) => void;
+}) {
+  const [cat, setCat] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const cats = useMemo(() => [...new Set(items.map((i) => i.category))], [items]);
+  const query = q.trim().toLowerCase();
+  const searching = query.length > 0;
+  const shown = searching
+    ? items.filter((i) => `${i.category} ${i.description}`.toLowerCase().includes(query))
+    : cat !== null
+      ? items.filter((i) => i.category === cat)
+      : [];
+  return (
+    <div className="mb-4 grid gap-3 rounded-md border p-3 md:grid-cols-[230px_minmax(0,1fr)]">
+      <div className="space-y-2">
+        <Input
+          className="h-8"
+          placeholder="Search all items…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div className="max-h-72 overflow-y-auto rounded-md border">
+          {cats.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => {
+                setCat(cat === c ? null : c);
+                setQ("");
+              }}
+              className={`flex w-full items-center justify-between gap-2 border-b px-2.5 py-1.5 text-left text-xs last:border-b-0 ${
+                cat === c && !searching
+                  ? "bg-primary/10 font-medium text-primary"
+                  : "hover:bg-muted"
+              }`}
+            >
+              <span>{c}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {items.filter((i) => i.category === c).length}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="max-h-80 overflow-y-auto rounded-md border">
+        {shown.length === 0 ? (
+          <p className="p-3 text-xs text-muted-foreground">
+            {searching ? "No items match." : "Pick a category on the left, or search."}
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <tbody>
+              {shown.map((i) => (
+                <tr key={i.key} className="border-b last:border-b-0 hover:bg-muted/50">
+                  <td className="px-2.5 py-1.5">
+                    {searching && (
+                      <span className="block text-[11px] text-muted-foreground">{i.category}</span>
+                    )}
+                    {i.description}
+                  </td>
+                  <td className="w-24 px-2.5 py-1.5 text-right tabular-nums">{money(i.price)}</td>
+                  <td className="w-16 px-2 py-1 text-right">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7"
+                      onClick={() => onAdd(i.key)}
+                    >
+                      Add
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
