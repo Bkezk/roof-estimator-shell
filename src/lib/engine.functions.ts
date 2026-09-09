@@ -41,6 +41,8 @@ import {
   type RawTabMultiRow,
   type RawLegacyAdhesiveRow,
   type RawAdhesiveCoverageRow,
+  type RawUnderlaymentGroupRow,
+  type RawUnderlaymentBoardGroupRow,
 } from "@/lib/engine/adapters";
 
 export type {
@@ -97,6 +99,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       ndlBlockingRes,
       ndlMasonryRes,
       membraneAccsRes,
+      uGroupRes,
+      uBoardGroupRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -147,6 +151,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", "non_dl:masonry").maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", "duro_last:membrane_accs").maybeSingle(),
+      // Legacy underlayment parent groups + priced-board mapping (hand-seeded tables).
+      (sb as unknown as UntypedFrom).from("underlayment_group").select("*"),
+      (sb as unknown as UntypedFrom).from("underlayment_board_group").select("*"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -177,6 +184,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (ndlBlockingRes.error) throw ndlBlockingRes.error;
     if (ndlMasonryRes.error) throw ndlMasonryRes.error;
     if (membraneAccsRes.error) throw membraneAccsRes.error;
+    if (uGroupRes.error) throw new Error(uGroupRes.error.message);
+    if (uBoardGroupRes.error) throw new Error(uBoardGroupRes.error.message);
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -244,6 +253,10 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       nonDlBlockingScreen: (ndlBlockingRes.data?.data ?? null) as MembraneScreen | null,
       nonDlMasonryScreen: (ndlMasonryRes.data?.data ?? null) as MembraneScreen | null,
       membraneAccsScreen: (membraneAccsRes.data?.data ?? null) as MembraneScreen | null,
+      underlaymentGroupRows: (uGroupRes.data ?? null) as unknown as
+        RawUnderlaymentGroupRow[] | null,
+      underlaymentBoardGroupRows: (uBoardGroupRes.data ?? null) as unknown as
+        RawUnderlaymentBoardGroupRow[] | null,
     });
   });
 

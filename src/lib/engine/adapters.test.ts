@@ -11,6 +11,7 @@ import {
   buildAccessoryLaborLookup,
   buildNonDlCatalog,
   buildNdlAutoRates,
+  buildUnderlaymentGroups,
   buildShippingSteps,
   buildSetupTable,
   buildInspectionTable,
@@ -868,5 +869,30 @@ describe("buildNdlAutoRates (the engine's auto-priced NDL rate rows)", () => {
     });
     expect(rates.counterflash).toBeUndefined();
     expect(rates.arpPricePerSqFt).toBeUndefined();
+  });
+});
+
+describe("buildUnderlaymentGroups (legacy Select Insulation Type structure)", () => {
+  const groupRows = [
+    { underlayment_group_id: 1, description: "Slip Sheets", sort_option: 1 },
+    { underlayment_group_id: 2, description: "ISO 4'x8'", sort_option: 2 },
+    { underlayment_group_id: 17, description: "EPO/XPS 4'x4'", sort_option: 5 },
+    { underlayment_group_id: 5, description: "Flute Filler", sort_option: 6 },
+  ];
+  const boardRows = [
+    { board_name: '1" ISO', underlayment_group_id: 2, sort: 2 },
+    { board_name: '1/2" ISO', underlayment_group_id: 2, sort: 1 },
+    { board_name: "Geotextile", underlayment_group_id: 1, sort: 3 },
+    { board_name: "Duro-Blue Slipsheet", underlayment_group_id: 1, sort: 1 },
+    { board_name: "1/2\" Rigid 4'x 4'", underlayment_group_id: 17, sort: 1 },
+  ];
+
+  it("orders parents by sort_option, boards by sort; empty parents are dropped", () => {
+    const ug = buildUnderlaymentGroups(groupRows, boardRows);
+    expect(ug.groups.map((g) => g.name)).toEqual(["Slip Sheets", "ISO 4'x8'", "EPO/XPS 4'x4'"]);
+    expect(ug.groups[0]!.boards).toEqual(["Duro-Blue Slipsheet", "Geotextile"]);
+    expect(ug.groups[1]!.boards).toEqual(['1/2" ISO', '1" ISO']);
+    expect(ug.groupIdByBoard["1/2\" Rigid 4'x 4'"]).toBe(17);
+    expect(ug.groupIdByBoard["Geotextile"]).toBe(1);
   });
 });

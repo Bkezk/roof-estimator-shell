@@ -276,6 +276,58 @@ export function buildNonDlCatalog(
   return items;
 }
 
+/** A seeded underlayment_group row (legacy parent insulation types, verbatim). */
+export interface RawUnderlaymentGroupRow {
+  underlayment_group_id: number;
+  description: string;
+  sort_option: number;
+}
+
+/** A seeded underlayment_board_group row (priced board → its parent group). */
+export interface RawUnderlaymentBoardGroupRow {
+  board_name: string;
+  underlayment_group_id: number;
+  sort: number;
+}
+
+/**
+ * The legacy Underlayment "Select Insulation Type" structure: parent groups (tile order =
+ * sort_option) and each priced board's parent. Only groups that actually have priced boards
+ * are listed (Flute Filler / Tapered / existing-substrate groups have none). Board sort within
+ * a group follows the seeded thickness order.
+ */
+export interface UnderlaymentGroupsData {
+  /** Parent groups WITH at least one priced board, in legacy tile order. */
+  groups: Array<{ id: number; name: string; boards: string[] }>;
+  /** Board name → parent group id (name-exact against the price screen). */
+  groupIdByBoard: Record<string, number>;
+}
+
+export function buildUnderlaymentGroups(
+  groupRows: RawUnderlaymentGroupRow[],
+  boardRows: RawUnderlaymentBoardGroupRow[],
+): UnderlaymentGroupsData {
+  const groupIdByBoard: Record<string, number> = {};
+  const boardsByGroup = new Map<number, RawUnderlaymentBoardGroupRow[]>();
+  for (const b of boardRows) {
+    groupIdByBoard[b.board_name] = b.underlayment_group_id;
+    const list = boardsByGroup.get(b.underlayment_group_id) ?? [];
+    list.push(b);
+    boardsByGroup.set(b.underlayment_group_id, list);
+  }
+  const groups = [...groupRows]
+    .sort((a, b) => a.sort_option - b.sort_option)
+    .filter((g) => (boardsByGroup.get(g.underlayment_group_id)?.length ?? 0) > 0)
+    .map((g) => ({
+      id: g.underlayment_group_id,
+      name: g.description,
+      boards: (boardsByGroup.get(g.underlayment_group_id) ?? [])
+        .sort((a, b) => a.sort - b.sort)
+        .map((b) => b.board_name),
+    }));
+  return { groups, groupIdByBoard };
+}
+
 /** One auto-priced NDL rate row (material $/unit + labor hrs/unit at its own $/hr rate). */
 export interface NdlAutoRateItem {
   price: number;
@@ -1096,6 +1148,9 @@ export interface RawAdminData {
   nonDlBlockingScreen?: MembraneScreen | null;
   nonDlMasonryScreen?: MembraneScreen | null;
   membraneAccsScreen?: MembraneScreen | null;
+  /** Legacy underlayment parent groups + board→group mapping (Select Insulation Type panel). */
+  underlaymentGroupRows?: RawUnderlaymentGroupRow[] | null;
+  underlaymentBoardGroupRows?: RawUnderlaymentBoardGroupRow[] | null;
 }
 
 export interface EngineSettings {
@@ -1143,6 +1198,8 @@ export interface EngineAdminData {
   familyMembranePrices?: Record<string, Record<string, number>>;
   /** Auto-priced NDL rate rows (counterflash / parapet blocking / masonry / ARP — §8.3/§8.4). */
   autoRates?: NdlAutoRates;
+  /** Legacy Underlayment parent-type structure (Select Insulation Type tiles → options). */
+  underlaymentGroups?: UnderlaymentGroupsData;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1223,6 +1280,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const laborTemplates = raw.laborTemplateRows?.length
     ? buildLaborTemplates(raw.laborTemplateRows, raw.laborTemplateAdjustments ?? [])
     : undefined;
+  const underlaymentGroups = raw.underlaymentBoardGroupRows?.length
+    ? buildUnderlaymentGroups(raw.underlaymentGroupRows ?? [], raw.underlaymentBoardGroupRows)
+    : undefined;
   const autoRates = buildNdlAutoRates({
     sheetMetalScreen: raw.nonDlSheetMetalScreen ?? null,
     blockingScreen: raw.nonDlBlockingScreen ?? null,
@@ -1250,5 +1310,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
     ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),
     ...(Object.keys(autoRates).length ? { autoRates } : {}),
+    ...(underlaymentGroups ? { underlaymentGroups } : {}),
   };
 }

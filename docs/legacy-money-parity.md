@@ -517,3 +517,18 @@ hardware/footage items held in §8 (price basis unproven).
 `ref_Sealants` (12), `ref_Stacks` (12), `ref_Fasteners` (10), `lookup_TearoffLabor` (28), and
 `MembraneAcc` — which **confirms the ARP dealer default `PricePerPack` = 1.11**. These are ship-time
 defaults; the live Azure rows win if the vendor updated prices, so seed from them and reconcile.
+
+### 9.2 Underlayment parent-type grouping (2026-09-09)
+
+The legacy Underlayment screen's "Select Insulation Type" panel (parent tiles → that parent's
+options) is now mirrored: `underlayment_board_group` maps each of the 52 priced boards to its
+`underlayment_group` parent, name-exact against the price screen and corroborated by the
+2026-08-31 estimator captures — the tile panel (Slip Sheets / 8'x4' ISO / Other Rigid / Fire
+Rated / Flute Filler / 4'x4' ISO / Other Rigid 4'x4' / Tapered-Other) and the expanded
+"Other Rigid 4'x4'" list (½"–4" Rigid 4'x4'), which pins "Rigid"-named boards to the EPO/XPS
+groups. DensDeck/Securock, DensDeck Prime, and Gypsum boards group under their eponymous
+verbatim `underlayment_group` rows (their tile placement wasn't captured in that shot's state).
+NOT seeded as pickable options (quote-only in legacy, no price rows): "Rigid Quote 4'x4'" and
+the Tapered/Other dropdown (Tapered Perlite / Tapered Crickets / Other / Tapered ISO / Tapered
+EPS); Flute Filler has no priced boards. If a captured bid or a lookup_Underlayments extraction
+later contradicts a placement, the seed row is a one-line fix.

@@ -366,6 +366,8 @@ function EstimatePage() {
   const [uSel, setUSel] = useState<string[]>([]);
   const [uTab, setUTab] = useState(0); // 0..3 → Layer 1..4
   const [uBoard, setUBoard] = useState("");
+  // Selected insulation-type parent tile (legacy Select Insulation Type); null = follow uBoard.
+  const [uGroup, setUGroup] = useState<number | null>(null);
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
   const [uFast, setUFast] = useState(0);
   const [uAdh, setUAdh] = useState("");
@@ -1874,25 +1876,94 @@ function EstimatePage() {
                   </div>
                 </div>
 
-                {/* Insulation type + attachment (legacy bottom-right) */}
+                {/* Insulation type + attachment (legacy bottom-right): parent tiles → that
+                    parent's board options, mirroring the legacy Select Insulation Type panel. */}
                 <div className="space-y-3 rounded-md border p-4">
                   <p className="text-xs font-semibold">Select insulation type</p>
-                  <div className="flex flex-wrap gap-2">
-                    {boardOptions.map((b) => (
-                      <button
-                        key={b}
-                        type="button"
-                        onClick={() => setUBoard(b)}
-                        className={`rounded-md border px-2.5 py-2 text-xs ${
-                          uBoard === b
-                            ? "border-primary bg-primary/10 font-medium"
-                            : "hover:bg-muted"
-                        }`}
-                      >
-                        {b}
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    const ug = admin.underlaymentGroups;
+                    if (!ug || ug.groups.length === 0) {
+                      // Older admin snapshot without the grouping tables: keep the flat list.
+                      return (
+                        <div className="flex flex-wrap gap-2">
+                          {boardOptions.map((b) => (
+                            <button
+                              key={b}
+                              type="button"
+                              onClick={() => setUBoard(b)}
+                              className={`rounded-md border px-2.5 py-2 text-xs ${
+                                uBoard === b
+                                  ? "border-primary bg-primary/10 font-medium"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              {b}
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    }
+                    // Legacy tile labels where the legacy panel names differ from the DB group
+                    // descriptions ("Other Rigid" tiles are the EPO/XPS groups).
+                    const tileLabel: Record<number, string> = {
+                      2: "8' x 4' ISO",
+                      3: "4' x 4' ISO",
+                      4: "Other Rigid 8' x 4'",
+                      17: "Other Rigid 4' x 4'",
+                      6: "Fire Rated",
+                    };
+                    // Priced boards the mapping doesn't know (admin-added later) stay reachable
+                    // under a catch-all "Other" tile (id -1).
+                    const ungrouped = boardOptions.filter((b) => !(b in ug.groupIdByBoard));
+                    const groups = ungrouped.length
+                      ? [...ug.groups, { id: -1, name: "Other", boards: ungrouped }]
+                      : ug.groups;
+                    const activeGroup =
+                      uGroup ??
+                      (uBoard ? (ug.groupIdByBoard[uBoard] ?? -1) : undefined) ??
+                      groups[0]!.id;
+                    const boards = groups.find((g) => g.id === activeGroup)?.boards ?? [];
+                    return (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          {groups.map((g) => (
+                            <button
+                              key={g.id}
+                              type="button"
+                              onClick={() => {
+                                setUGroup(g.id);
+                                if (uBoard && (ug.groupIdByBoard[uBoard] ?? -1) !== g.id)
+                                  setUBoard("");
+                              }}
+                              className={`rounded-md border px-3 py-2 text-xs ${
+                                activeGroup === g.id
+                                  ? "border-primary bg-primary/10 font-semibold"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              {tileLabel[g.id] ?? g.name}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-2 border-t pt-2">
+                          {boards.map((b) => (
+                            <button
+                              key={b}
+                              type="button"
+                              onClick={() => setUBoard(b)}
+                              className={`rounded-md border px-2.5 py-1.5 text-xs ${
+                                uBoard === b
+                                  ? "border-primary bg-primary/10 font-medium"
+                                  : "hover:bg-muted"
+                              }`}
+                            >
+                              {b}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
                   <p className="text-xs text-muted-foreground">
                     Underlayment price per sq ft:{" "}
                     <span className="font-semibold tabular-nums">
