@@ -426,9 +426,11 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2); // membrane-only basis unchanged
     const r = computeEstimate(inputs);
-    expect(r.parapetLaborHours).toBeCloseTo(4.5, 6); // 100/50 x 2.25
+    // AdjustedLength = 100 + 1 + pieces(1) = 102 (legacy BaseManHours multiplies
+    // AdjustedLength, not raw Length — docs §8.5): 102/50 × 2.25 = 4.59
+    expect(r.parapetLaborHours).toBeCloseTo(4.59, 6);
     // rolls into direct labor alongside install 15.125
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.59, 3);
   });
 
   it("parapets: Use Slipsheet adds the legacy polyethylene labor (0.25 h / 100 sq ft)", () => {
@@ -472,8 +474,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     const r = computeEstimate(inputs);
     // AdjustedHeight = In2Ft(Ceil(30.4)) = 2.58 ft; poly = 2.58 × 100 × 1.25 = 322.5 sq ft;
-    // labor = 4.5 (matrix) + 322.5 / 100 × 0.25 = 4.5 + 0.80625
-    expect(r.parapetLaborHours).toBeCloseTo(4.5 + 0.80625, 5);
+    // labor = 4.59 (matrix, on AdjustedLength 102) + 322.5 / 100 × 0.25 = 4.59 + 0.80625
+    expect(r.parapetLaborHours).toBeCloseTo(4.59 + 0.80625, 5);
   });
 
   it("parapets: each prices at its OWN mil/color when overridden (legacy Membrane Options)", () => {
@@ -735,8 +737,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // curb base: type labor 2×(8+7.5×20)/60 + ISO Round((0.25+20×0.0167)×2,2)=1.17
     //            + lift 1+20×0.020833 = 1.41666
     const curbBase = (2 * (8 + 7.5 * 20)) / 60 + 1.17 + 1 + 20 * 0.020833;
-    // parapet base: 4.5 matrix + 0.80625 slipsheet
-    const parapetBase = 4.5 + 0.80625;
+    // parapet base: 4.59 matrix (AdjustedLength 102) + 0.80625 slipsheet
+    const parapetBase = 4.59 + 0.80625;
     const { inputs } = buildEstimateInputs(
       bid({
         curbs: [{ ...curb, adjustLaborPct: 50 }],
@@ -1326,7 +1328,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.setupHours).toBeCloseTo(16 * 1.2, 3); // Setup 120 (min 16 x 1.2)
     // tear-off: base 62.19 x 1.5 (per-section additional %), then Ceiling-to-cent
     expect(r.tearOffLaborHours).toBeCloseTo(62.19 * 1.5, 1);
-    expect(r.parapetLaborHours).toBeCloseTo(4.5 * 1.1, 3); // Parapets 110
+    expect(r.parapetLaborHours).toBeCloseTo(4.59 * 1.1, 3); // Parapets 110, AdjustedLength 102
   });
 
   it("edges: perimeter-marked sides drive the perimeter zone; ARP edges reduce membrane sqft (§2.3)", () => {

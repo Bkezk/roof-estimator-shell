@@ -172,7 +172,8 @@ export const NON_DL_LS2_CATEGORIES: ReadonlySet<string> = new Set([
  * their sum, and the wall-adhesive basis is legacy WallPlusTopSqFt = Length × (Vertical +
  * WallTop)/12. When the dims are absent (older saved bids), the entered girthInches carries the
  * girth and wall adhesive falls back to the full-girth stand-in those bids priced with. Labor is
- * exact per the seeded matrix: (length/50) × hrs-per-50-LF[deck][band][drill×cant]. Material
+ * exact per the seeded matrix: (AdjustedLength/50) × hrs-per-50-LF[deck][band][drill×cant]
+ * (AdjustedLength = length + 1 + pieces — the legacy BaseManHours basis, docs §8.5). Material
  * prices at the PARAPET's own membrane thickness/color when set (legacy Membrane Options,
  * docs/legacy-money-parity.md §8.5), else the bid default (first section's), Parapets tier.
  */
@@ -734,6 +735,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const isDuroTuff = bid.roofSystem === "Duro-Tuff";
     for (const p of bid.parapets) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
+      const girth = parapetGirthInches(p);
+      const pieces = p.pieces ?? 1;
+      const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
       const entry = admin.parapetLabor?.lookup[tDeck]?.[p.heightBand];
       let itemHours = 0;
       if (!entry) {
@@ -742,11 +746,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             `No parapet labor for ${p.deckType} / ${p.heightBand || "(no band)"} — "${p.name}".`,
           );
       } else {
-        itemHours += (p.lengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
+        // Legacy BaseManHours (docs §8.5): (value / 50) × ADJUSTEDLENGTH — the padded
+        // length + 1 ft + 1 ft/piece, the same basis the membrane bills — not raw Length.
+        itemHours += (adjustedLengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
       }
-      const girth = parapetGirthInches(p);
-      const pieces = p.pieces ?? 1;
-      const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
       // Legacy AdjustedHeight (family-dependent): Duro-Tuff ceils to 6" increments (half-foot
       // steps); everyone else In2Ft(Ceil(girth)).
       const adjustedHeightFt = isDuroTuff ? Math.ceil(girth / 6) / 2 : in2Ft(Math.ceil(girth));
