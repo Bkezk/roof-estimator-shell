@@ -692,3 +692,25 @@ That allow-list and its coverage are tables we ALREADY have seeded: `underlaymen
 and every tile placement + attachment-eligibility list falls out of data already present.
 `MenuItem_Click`'s tail (0xabcfc) uses the same allow-list to drop a now-invalid adhesive on the
 next layer after a board change.
+
+### 10.5 Live tile contents — CAPTURED (2026-08-31 estimator batch, decoded 2026-09-09)
+
+The §10.2 open item (per-board SubType) is closed for every PRICED board: the estimator batch
+photographed each tile's open menu — Slip Sheets (121934), 8'x4' ISO (121946), Other Rigid 8'x4'
+(122002), Fire Rated (122032), Flute Filler quote dialog (122049), 4'x4' ISO (122117), Other
+Rigid 4'x4' (122200), Tapered/Other (122216). Findings, now seeded as
+`underlayment_board_group.subtype/subtype_sort` (migration 20260909230000, applied live):
+
+- **Fire Rated (SubType 5)** holds FR 10/FR 50 AND the whole DensDeck / DensDeck Prime /
+  Securock GFRB / 5/8" F/C Sheet Rock families (12 boards) — confirming the installer-seed hint;
+  the picker tiles now match. (Their ADHESIVE groups stay 7/8/9 in `underlayment_group_id` —
+  a separate axis, unchanged.)
+- Slip Sheets: Duro-Fold, Ultra-Fold, Duro-Blue Slipsheet, Geotextile, Duro-Weave (menu order).
+- 8'x4' ISO: ½"–4" ISO + "ISO Quote 4'x 8'"; 4'x4' ISO: ½" HD–4" + "ISO Quote 4'x4'";
+  Other Rigid 8'x4': 1"–4" Rigid + "Rigid Quote 4'x8'"; Other Rigid 4'x4': ½"–4" + quote.
+- **Flute Filler** opens the §10.1 HandleFluteFiller QUOTE DIALOG (captured): S.F of Sections,
+  quote name, labor total (hours/days), Lump Sum vs Piece (pieces × cost/piece) — no board menu.
+- Tapered/Other: the five quote entries (Tapered Perlite/Crickets/ISO/EPS, Other).
+
+Still NOT modeled: the quote entries themselves (ISO/Rigid Quote, Tapered/*, Flute Filler) —
+they need the custom-quote layer flow (name + manual $ + labor), a future UI feature.

@@ -283,23 +283,44 @@ export interface RawUnderlaymentGroupRow {
   sort_option: number;
 }
 
-/** A seeded underlayment_board_group row (priced board → its parent group). */
+/** A seeded underlayment_board_group row (priced board → adhesive group + live tile). */
 export interface RawUnderlaymentBoardGroupRow {
   board_name: string;
+  /** AdhesiveGroupID — the adhered-eligibility/coverage axis (docs §10.4). */
   underlayment_group_id: number;
   sort: number;
+  /** Live SubType 1..8 — WHICH "Select Insulation Type" tile holds the board (docs §10.1). */
+  subtype?: number | null;
+  subtype_sort?: number | null;
 }
 
 /**
- * The legacy Underlayment "Select Insulation Type" structure: parent groups (tile order =
- * sort_option) and each priced board's parent. Only groups that actually have priced boards
- * are listed (Flute Filler / Tapered / existing-substrate groups have none). Board sort within
- * a group follows the seeded thickness order.
+ * The legacy "Select Insulation Type" tiles (SubType 1..8) in panel order, labeled as the live
+ * app labels them (captured 2026-08-31). SubTypes 4 (Flute Filler) and 6 (Tapered/Other) hold
+ * quote-only entries, not priced boards, so they never surface from buildUnderlaymentGroups.
+ */
+const UNDERLAYMENT_TILES: Array<{ id: number; name: string }> = [
+  { id: 1, name: "Slip Sheets" },
+  { id: 2, name: "8' x 4' ISO" },
+  { id: 3, name: "Other Rigid 8' x 4'" },
+  { id: 5, name: "Fire Rated" },
+  { id: 4, name: "Flute Filler" },
+  { id: 7, name: "4' x 4' ISO" },
+  { id: 8, name: "Other Rigid 4' x 4'" },
+  { id: 6, name: "Tapered/Other" },
+];
+
+/**
+ * The legacy Underlayment "Select Insulation Type" structure: tiles → that tile's priced
+ * boards. When the seeded rows carry the captured live SubType, tiles ARE the legacy panel
+ * (board→tile = SubType, docs §10.1 — note Fire Rated holds the DensDeck/Securock/gypsum
+ * families); an older snapshot without subtypes falls back to grouping by adhesive group.
+ * Only tiles with at least one priced board are listed.
  */
 export interface UnderlaymentGroupsData {
-  /** Parent groups WITH at least one priced board, in legacy tile order. */
+  /** Picker tiles WITH at least one priced board, in legacy panel order. */
   groups: Array<{ id: number; name: string; boards: string[] }>;
-  /** Board name → parent group id (name-exact against the price screen). */
+  /** Board name → its picker tile id (name-exact against the price screen). */
   groupIdByBoard: Record<string, number>;
 }
 
@@ -308,6 +329,28 @@ export function buildUnderlaymentGroups(
   boardRows: RawUnderlaymentBoardGroupRow[],
 ): UnderlaymentGroupsData {
   const groupIdByBoard: Record<string, number> = {};
+  const hasSubtypes = boardRows.some((b) => typeof b.subtype === "number");
+  if (hasSubtypes) {
+    const boardsByTile = new Map<number, RawUnderlaymentBoardGroupRow[]>();
+    for (const b of boardRows) {
+      if (typeof b.subtype !== "number") continue;
+      groupIdByBoard[b.board_name] = b.subtype;
+      const list = boardsByTile.get(b.subtype) ?? [];
+      list.push(b);
+      boardsByTile.set(b.subtype, list);
+    }
+    const groups = UNDERLAYMENT_TILES.filter((t) => (boardsByTile.get(t.id)?.length ?? 0) > 0).map(
+      (t) => ({
+        id: t.id,
+        name: t.name,
+        boards: (boardsByTile.get(t.id) ?? [])
+          .sort((a, b) => (a.subtype_sort ?? 0) - (b.subtype_sort ?? 0))
+          .map((b) => b.board_name),
+      }),
+    );
+    return { groups, groupIdByBoard };
+  }
+  // Fallback (pre-subtype snapshot): tiles from the adhesive-group axis.
   const boardsByGroup = new Map<number, RawUnderlaymentBoardGroupRow[]>();
   for (const b of boardRows) {
     groupIdByBoard[b.board_name] = b.underlayment_group_id;

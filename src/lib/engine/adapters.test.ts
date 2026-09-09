@@ -887,12 +887,52 @@ describe("buildUnderlaymentGroups (legacy Select Insulation Type structure)", ()
     { board_name: "1/2\" Rigid 4'x 4'", underlayment_group_id: 17, sort: 1 },
   ];
 
-  it("orders parents by sort_option, boards by sort; empty parents are dropped", () => {
+  it("fallback (no subtypes): parents by sort_option, boards by sort; empty dropped", () => {
     const ug = buildUnderlaymentGroups(groupRows, boardRows);
     expect(ug.groups.map((g) => g.name)).toEqual(["Slip Sheets", "ISO 4'x8'", "EPO/XPS 4'x4'"]);
     expect(ug.groups[0]!.boards).toEqual(["Duro-Blue Slipsheet", "Geotextile"]);
     expect(ug.groups[1]!.boards).toEqual(['1/2" ISO', '1" ISO']);
     expect(ug.groupIdByBoard["1/2\" Rigid 4'x 4'"]).toBe(17);
     expect(ug.groupIdByBoard["Geotextile"]).toBe(1);
+  });
+
+  it("live SubType tiles win when present: legacy panel labels/order; Fire Rated holds DensDeck", () => {
+    const rows = [
+      { board_name: "FR 10", underlayment_group_id: 6, sort: 1, subtype: 5, subtype_sort: 1 },
+      {
+        board_name: '1/4" DensDeck Prime',
+        underlayment_group_id: 8,
+        sort: 1,
+        subtype: 5,
+        subtype_sort: 5,
+      },
+      { board_name: "Duro-Fold", underlayment_group_id: 1, sort: 4, subtype: 1, subtype_sort: 1 },
+      {
+        board_name: "Duro-Blue Slipsheet",
+        underlayment_group_id: 1,
+        sort: 1,
+        subtype: 1,
+        subtype_sort: 3,
+      },
+      {
+        board_name: "1\" Rigid 4'x 4'",
+        underlayment_group_id: 17,
+        sort: 2,
+        subtype: 8,
+        subtype_sort: 2,
+      },
+    ];
+    const ug = buildUnderlaymentGroups(groupRows, rows);
+    expect(ug.groups.map((g) => g.name)).toEqual([
+      "Slip Sheets",
+      "Fire Rated",
+      "Other Rigid 4' x 4'",
+    ]);
+    // captured menu order, not the adhesive-group sort
+    expect(ug.groups[0]!.boards).toEqual(["Duro-Fold", "Duro-Blue Slipsheet"]);
+    expect(ug.groups[1]!.boards).toEqual(["FR 10", '1/4" DensDeck Prime']);
+    // groupIdByBoard maps to the TILE in subtype mode
+    expect(ug.groupIdByBoard['1/4" DensDeck Prime']).toBe(5);
+    expect(ug.groupIdByBoard["1\" Rigid 4'x 4'"]).toBe(8);
   });
 });

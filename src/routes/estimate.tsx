@@ -1911,15 +1911,6 @@ function EstimatePage() {
                         </div>
                       );
                     }
-                    // Legacy tile labels where the legacy panel names differ from the DB group
-                    // descriptions ("Other Rigid" tiles are the EPO/XPS groups).
-                    const tileLabel: Record<number, string> = {
-                      2: "8' x 4' ISO",
-                      3: "4' x 4' ISO",
-                      4: "Other Rigid 8' x 4'",
-                      17: "Other Rigid 4' x 4'",
-                      6: "Fire Rated",
-                    };
                     // Priced boards the mapping doesn't know (admin-added later) stay reachable
                     // under a catch-all "Other" tile (id -1).
                     const ungrouped = boardOptions.filter((b) => !(b in ug.groupIdByBoard));
@@ -1949,7 +1940,7 @@ function EstimatePage() {
                                   : "hover:bg-muted"
                               }`}
                             >
-                              {tileLabel[g.id] ?? g.name}
+                              {g.name}
                             </button>
                           ))}
                         </div>
