@@ -3723,98 +3723,107 @@ function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
 
 /** Small legacy-style curb thumbnail per CurbStyle.ID (schematic; 3 & 4 are quote-required). */
 function CurbStyleIcon({ styleId }: { styleId: number }) {
-  const box = (
-    <>
-      {/* top face */}
-      <polygon
-        points="12,10 28,5 42,11 26,16"
-        className="fill-amber-100 dark:fill-amber-300/20"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      {/* left + right faces */}
-      <polygon
-        points="12,10 26,16 26,30 12,24"
-        className="fill-amber-200/70 dark:fill-amber-300/10"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      <polygon
-        points="26,16 42,11 42,25 26,30"
-        className="fill-amber-200/40 dark:fill-amber-300/5"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-    </>
-  );
-  return (
-    <svg viewBox="0 0 52 36" className="h-9 w-12 text-foreground">
-      {styleId === 1 && (
-        <>
-          {box}
+  // Parametric isometric curb like the legacy thumbnails: a box of height h on a flared skirt.
+  const iso = (h: number, opts: { open?: boolean; lid?: boolean; hole?: boolean } = {}) => {
+    const ty = 14; // box top center-side y
+    const by = ty + h;
+    const gy = by + 6; // ground (skirt) y
+    return (
+      <>
+        {/* skirt (flared base) */}
+        <polygon
+          points={`16,${by} 32,${by + 6} 60,${gy} 32,${gy + 7} 4,${gy}`}
+          className="fill-amber-200/50 dark:fill-amber-300/10"
+          stroke="currentColor"
+          strokeWidth="1"
+        />
+        <line x1="16" y1={by} x2="4" y2={gy} stroke="currentColor" strokeWidth="1" />
+        <line x1="48" y1={by} x2="60" y2={gy} stroke="currentColor" strokeWidth="1" />
+        {/* box faces */}
+        <polygon
+          points={`16,${ty} 32,${ty - 6} 48,${ty} 32,${ty + 6}`}
+          className="fill-amber-100 dark:fill-amber-300/25"
+          stroke="currentColor"
+          strokeWidth="1"
+        />
+        <polygon
+          points={`16,${ty} 32,${ty + 6} 32,${by + 6} 16,${by}`}
+          className="fill-amber-200/80 dark:fill-amber-300/15"
+          stroke="currentColor"
+          strokeWidth="1"
+        />
+        <polygon
+          points={`32,${ty + 6} 48,${ty} 48,${by} 32,${by + 6}`}
+          className="fill-amber-200/50 dark:fill-amber-300/5"
+          stroke="currentColor"
+          strokeWidth="1"
+        />
+        {opts.open && (
           <polygon
-            points="16,11.5 28,7.5 38,12 27,15.5"
+            points={`21,${ty} 32,${ty - 4} 43,${ty} 32,${ty + 4}`}
             className="fill-background"
             stroke="currentColor"
             strokeWidth="0.75"
           />
-        </>
-      )}
-      {styleId === 2 && (
-        <>
-          {box}
+        )}
+        {opts.lid && (
           <polygon
-            points="9,9 28,3 45,10 26,17"
+            points={`12,${ty} 32,${ty - 8} 52,${ty} 32,${ty + 8}`}
             fill="none"
             stroke="currentColor"
             strokeWidth="1.5"
           />
-        </>
-      )}
-      {styleId === 3 && box}
-      {styleId === 4 && (
-        <path
-          d="M14,6 h14 v6 h-8 v16 h-6 z"
-          className="fill-amber-100 dark:fill-amber-300/20"
-          stroke="currentColor"
-          strokeWidth="1"
-        />
-      )}
-      {styleId === 5 && (
-        <>
-          {box}
+        )}
+        {opts.hole && (
           <rect
-            x="17"
-            y="18"
-            width="7"
-            height="7"
+            x="20"
+            y={ty + 5}
+            width="8"
+            height={Math.max(5, h - 5)}
             className="fill-background"
             stroke="currentColor"
             strokeWidth="0.75"
           />
-        </>
+        )}
+      </>
+    );
+  };
+  // Wall bracket (legacy's 4th/5th thumbnails): two vertical panels with a gap.
+  const bracket = (metal: boolean) => (
+    <>
+      <polygon
+        points="18,8 28,4 28,30 18,34"
+        className={
+          metal ? "fill-slate-200 dark:fill-slate-500/30" : "fill-amber-100 dark:fill-amber-300/25"
+        }
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      <polygon
+        points="36,4 46,8 46,34 36,30"
+        className={
+          metal ? "fill-slate-200 dark:fill-slate-500/30" : "fill-amber-100 dark:fill-amber-300/25"
+        }
+        stroke="currentColor"
+        strokeWidth="1"
+      />
+      <line x1="18" y1="34" x2="10" y2="38" stroke="currentColor" strokeWidth="1" />
+      <line x1="46" y1="34" x2="54" y2="38" stroke="currentColor" strokeWidth="1" />
+      {metal && (
+        <text x="32" y="22" textAnchor="middle" className="fill-current text-[7px] font-semibold">
+          Metal
+        </text>
       )}
-      {styleId === 6 && (
-        <>
-          <path
-            d="M14,6 h16 v6 h-9 v16 h-7 z"
-            className="fill-slate-200 dark:fill-slate-500/30"
-            stroke="currentColor"
-            strokeWidth="1"
-          />
-          <text x="36" y="26" className="fill-current text-[8px]">
-            M
-          </text>
-        </>
-      )}
-      {/* skirt flange */}
-      {styleId !== 4 && styleId !== 6 && (
-        <>
-          <line x1="12" y1="24" x2="4" y2="29" stroke="currentColor" strokeWidth="1" />
-          <line x1="26" y1="30" x2="26" y2="35" stroke="currentColor" strokeWidth="1" />
-          <line x1="42" y1="25" x2="50" y2="29" stroke="currentColor" strokeWidth="1" />
-        </>
-      )}
+    </>
+  );
+  return (
+    <svg viewBox="0 0 64 44" className="h-10 w-14 text-foreground">
+      {styleId === 1 && iso(12, { open: true })}
+      {styleId === 2 && iso(9, { lid: true })}
+      {styleId === 3 && iso(5)}
+      {styleId === 4 && bracket(false)}
+      {styleId === 5 && iso(12, { hole: true })}
+      {styleId === 6 && bracket(true)}
     </svg>
   );
 }
