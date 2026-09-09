@@ -431,6 +431,53 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.5, 3);
   });
 
+  it("parapets: each prices at its OWN mil/color when overridden (legacy Membrane Options)", () => {
+    // Legacy Parapet.LookupParpetMembranePrice keys the PARAPET's own MembraneType.Thickness and
+    // GetCurrentColorPriceIndex uses the PARAPET's own Color (docs §8.5) — not the bid default.
+    const withParapet: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: {
+        40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } },
+        60: { rollGoods: { Gray: 2.0 }, parapet: { Gray: 2.5 } },
+      },
+    };
+    const base = {
+      lengthFt: 100,
+      heightBand: '0"-30"',
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 30.4,
+    };
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({
+        parapets: [
+          { id: "p1", name: "Default wall", ...base },
+          { id: "p2", name: "Gray 60 wall", ...base, thicknessMil: 60, color: "Gray" },
+        ],
+      }),
+      withParapet,
+    );
+    expect(warnings).toEqual([]);
+    // girth Ceil(30.4)=31" → 2.58 ft; AdjustedLength = 102.
+    // p1 @ bid default 40/White $1.40 → Round(2.58×102×1.4, 2)  = 368.42
+    // p2 @ own 60/Gray $2.50        → Round(2.58×102×2.5, 2)  = 657.90
+    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 657.9, 2);
+  });
+
   it("parapets: girth derives from the legacy profile dims (Skirt+Cant+Vertical+WallTop+Drop)", () => {
     const withParapet: EngineAdminData = {
       ...admin,

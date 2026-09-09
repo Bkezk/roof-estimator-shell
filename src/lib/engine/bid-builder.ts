@@ -173,7 +173,8 @@ export const NON_DL_LS2_CATEGORIES: ReadonlySet<string> = new Set([
  * WallTop)/12. When the dims are absent (older saved bids), the entered girthInches carries the
  * girth and wall adhesive falls back to the full-girth stand-in those bids priced with. Labor is
  * exact per the seeded matrix: (length/50) × hrs-per-50-LF[deck][band][drill×cant]. Material
- * prices at the bid's default (first section's) membrane thickness/color, Parapets tier.
+ * prices at the PARAPET's own membrane thickness/color when set (legacy Membrane Options,
+ * docs/legacy-money-parity.md §8.5), else the bid default (first section's), Parapets tier.
  */
 export interface ParapetInput {
   id: string;
@@ -186,6 +187,10 @@ export interface ParapetInput {
   girthInches: number; // membrane girth over the wall profile (fallback when dims are absent)
   /** Number of wall pieces (legacy Pieces, default 1): AdjustedLength = length + 1 + pieces. */
   pieces?: number;
+  /** Per-parapet membrane mil (legacy Membrane Options); absent = bid default. Docs §8.5. */
+  thicknessMil?: number;
+  /** Per-parapet membrane color (legacy Membrane Options); absent = bid default. Docs §8.5. */
+  color?: string;
   // Legacy wall profile dims (inches); girth derives as their sum when any is present.
   skirtInches?: number;
   cantInches?: number;
@@ -682,20 +687,27 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
     const anyWall = bid.parapets.some((p) => parapetGirthInches(p) > 0 && p.lengthFt > 0);
-    let pPrice = first
-      ? priceMatrixLookup(admin.priceMatrix, first.thickness, "parapet", first.color)
-      : null;
-    if (pPrice === null && first) {
-      pPrice = priceMatrixLookup(admin.priceMatrix, first.thickness, "rollGoods", first.color);
-      if (pPrice !== null && anyWall) {
-        warnings.push(
-          "No Parapets-tier membrane price (bid-default thickness/color) — using roll goods.",
-        );
+    // Parapets-tier price for a (thickness, color), with the roll-goods fallback; warnings are
+    // deduped per distinct (thickness, color) so a many-wall bid doesn't repeat itself.
+    const tierWarned = new Set<string>();
+    const parapetTierPrice = (thickness: number, color: string, label: string): number => {
+      let price = priceMatrixLookup(admin.priceMatrix, thickness, "parapet", color);
+      if (price === null) {
+        price = priceMatrixLookup(admin.priceMatrix, thickness, "rollGoods", color);
+        if (price !== null && anyWall && !tierWarned.has(`rg|${thickness}|${color}`)) {
+          tierWarned.add(`rg|${thickness}|${color}`);
+          warnings.push(`No Parapets-tier membrane price (${label}) — using roll goods.`);
+        }
       }
-    }
-    if (anyWall && (pPrice ?? 0) === 0) {
-      warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
-    }
+      if (anyWall && (price ?? 0) === 0 && !tierWarned.has(`0|${thickness}|${color}`)) {
+        tierWarned.add(`0|${thickness}|${color}`);
+        warnings.push(`No membrane price for the parapet material (${label}).`);
+      }
+      return price ?? 0;
+    };
+    const defaultPrice = first
+      ? parapetTierPrice(first.thickness, first.color, "bid-default thickness/color")
+      : 0;
     const isDuroTuff = bid.roofSystem === "Duro-Tuff";
     for (const p of bid.parapets) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
@@ -718,7 +730,16 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       } else {
         billedHeightFt = in2Ft(Math.ceil(girth));
       }
-      parapetMaterial += bankersRound(billedHeightFt * adjustedLengthFt * (pPrice ?? 0), 2);
+      // Legacy prices at the PARAPET's own mil/color (docs §8.5); bid default when unset.
+      const ownPrice =
+        p.thicknessMil !== undefined || p.color !== undefined
+          ? parapetTierPrice(
+              p.thicknessMil ?? first?.thickness ?? 0,
+              p.color ?? first?.color ?? "",
+              `parapet "${p.name}" thickness/color`,
+            )
+          : defaultPrice;
+      parapetMaterial += bankersRound(billedHeightFt * adjustedLengthFt * ownPrice, 2);
     }
   }
 
