@@ -10,6 +10,7 @@
 import type { BidInput, BuildResult, NonDlLine } from "./bid-builder";
 import { NON_DL_LS2_CATEGORIES } from "./bid-builder";
 import type { EstimateResult } from "./estimate";
+import { NON_DL_LS2_GROUPS, type NonDlGroup } from "./nondl";
 
 export interface LedgerRow {
   label: string;
@@ -61,6 +62,18 @@ const NONDL_ROW_BY_CATEGORY: Record<string, string> = {
   "Sheet Metal Work": "Sheet Metal",
   Masonry: "Masonry",
   "Preset Custom Applications": "Custom Apps",
+};
+/** §14 module groups → the same legacy Review rows. */
+const NONDL_ROW_BY_GROUP: Record<NonDlGroup, string> = {
+  roofEdgeBlocking: "Wood Blocking",
+  wallBlocking: "Wood Blocking",
+  deckMaterials: "Roof Decking",
+  sheetMetal: "Sheet Metal",
+  masonry: "Masonry",
+  customApps: "Custom Apps",
+  others: "Other",
+  services: "Other",
+  subcontractors: "Other",
 };
 const NONDL_ROW_ORDER = [
   "Wood Blocking",
@@ -136,7 +149,15 @@ export function buildReviewLedger(i: {
     bump(ndlLaborCost, row, l.laborPerUnit * l.laborRate * l.quantity);
     bump(ndlHours, row, l.laborPerUnit * l.quantity);
   }
-  // Auto-priced items (§8.3/§8.4) land on their legacy rows.
+  // §14 Non-DL module lines (the six dialogs + auto rows) land on their legacy rows.
+  for (const ln of result.nonDl?.lines ?? []) {
+    if (NON_DL_LS2_GROUPS.has(ln.group)) continue;
+    const row = NONDL_ROW_BY_GROUP[ln.group];
+    bump(ndlMat, row, ln.materialCost);
+    bump(ndlLaborCost, row, ln.laborCost);
+    bump(ndlHours, row, ln.hours);
+  }
+  // Auto-priced items (§8.3/§8.4; zero when the §14 module owns them) land on their legacy rows.
   bump(ndlMat, "Sheet Metal", b.auto.counterflash.material);
   bump(ndlLaborCost, "Sheet Metal", b.auto.counterflash.laborCost);
   bump(ndlHours, "Sheet Metal", b.auto.counterflash.hours);
@@ -182,6 +203,13 @@ export function buildReviewLedger(i: {
     const whole = (l.price + l.laborPerUnit * l.laborRate) * l.quantity;
     if (l.category === "Subcontractors") bump(subsByDesc, l.description, whole);
     else bump(svcByDesc, l.description, whole);
+  }
+  // §14 module: one LaborSubtotal2 row per Subcontractors / Services item (material + labor).
+  for (const ln of result.nonDl?.lines ?? []) {
+    if (!NON_DL_LS2_GROUPS.has(ln.group)) continue;
+    const whole = ln.materialCost + ln.laborCost;
+    if (ln.group === "subcontractors") bump(subsByDesc, ln.item, whole);
+    else bump(svcByDesc, ln.item, whole);
   }
   const subcontractors: LedgerRow[] = SUBCONTRACTOR_ROWS.map((label) => ({
     label,

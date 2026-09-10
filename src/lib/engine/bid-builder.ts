@@ -46,7 +46,7 @@
  *    WallPlusTopSqFt = Length × (Vertical+WallTop)/12. Height band is still picked by hand.
  */
 
-import { areaWithEdgeOverlap } from "./quantities";
+import { areaWithEdgeOverlap, tearOffVolume } from "./quantities";
 import { in2Ft, bankersRound } from "./rounding";
 import {
   computeAccessories,
@@ -56,6 +56,14 @@ import {
   type AccessoriesResult,
 } from "./accessories";
 import { computeMetals, normalizeMetalsState, type MetalsState, type MetalsResult } from "./metals";
+import {
+  computeNonDl,
+  normalizeNonDlState,
+  parseInches,
+  type NonDlGeometry,
+  type NonDlResult,
+  type NonDlState,
+} from "./nondl";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
@@ -432,6 +440,8 @@ export interface BidInput {
   accessoriesCalc?: Partial<AccessoriesState>;
   /** §13 EXCEPTIONAL Metals screen state (gutters/downspouts/pitch pans/collection boxes). */
   metalsCalc?: Partial<MetalsState>;
+  /** §14 Non-Duro-Last Items screen state (the six legacy dialogs). */
+  nonDlCalc?: Partial<NonDlState>;
   nonDlLines: NonDlLine[];
   metals: MetalLine[];
   parapets: ParapetInput[];
@@ -536,6 +546,8 @@ export interface BuildResult {
   accessories?: AccessoriesResult;
   /** §13 EXCEPTIONAL Metals screen results (absent when the snapshot lacks the ref data). */
   metalsScreen?: MetalsResult;
+  /** §14 Non-Duro-Last Items results (absent when the snapshot lacks the non_dl screens). */
+  nonDl?: NonDlResult;
   /** Whole units per adhesive (§2.4 Ceil-once; the Adhesives screen's Calc Qty column). */
   adhesiveWholeUnits?: Record<string, number>;
 }
@@ -1039,6 +1051,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let parapetMaterial = 0;
   /** Σ parapet ARP sq ft (§8.6) — joins the section ARP in the MembraneAccs CalcQty below. */
   let parapetArpSqFt = 0;
+  /** Σ parapet slipsheet polyethylene sq ft (§8.6) — the §14 Others "Slipsheet" CalcQty. */
+  let parapetPolySqFt = 0;
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
     const anyWall = bid.parapets.some((p) => parapetGirthInches(p) > 0 && p.lengthFt > 0);
@@ -1105,6 +1119,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       if (p.useSlipsheet) {
         const polySqFt = adjustedHeightFt * p.lengthFt * 1.25;
         itemHours += (polySqFt / 100) * 0.25;
+        parapetPolySqFt += polySqFt;
       }
       // Per-item labor % (docs §8.7): legacy ManHours = BaseManHours × (1 + AdjustLabor/100),
       // wrapping the whole item (matrix labor + slipsheet labor).
@@ -1256,9 +1271,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     slot.hours += qty * rate.laborPerUnit;
   };
 
+  // When the §14 Non-DL ref data is present, that module OWNS every auto-quantity row
+  // (counterflash, blocking, masonry, dumpster, slipsheet/ISO) — the legacy path below only
+  // runs on older frozen snapshots without the non_dl screens.
+  const nonDlOwnsAuto = admin.nonDl !== undefined;
+
   // Curb counter flashing (§8.3, termination option 5 "No Lift & Counter Flash"): inches =
   // Σ (A+B) × qty × 2 → Round 2dp → fractional inch UP to the next 0.25 → ÷12 → Round 2dp → Ceil.
-  {
+  const curbCounterflashFt = (() => {
     const inchesRaw = bid.curbs.reduce(
       (sum, c) =>
         c.termOption === 5 && c.quantity > 0
@@ -1266,54 +1286,57 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           : sum,
       0,
     );
-    if (inchesRaw > 0) {
-      const r2 = bankersRound(inchesRaw, 2);
-      const whole = Math.floor(r2);
-      const cents = Math.round((r2 - whole) * 100);
-      const inches = whole + (Math.ceil(cents / 25) * 25) / 100;
-      const qty = Math.ceil(bankersRound(inches / 12, 2));
-      const rate = admin.autoRates?.counterflash;
-      if (rate) addAutoItem(qty, rate, false, bAuto.counterflash);
-      else
-        warnings.push(
-          `Curb counter flashing: ${qty} ft needed but no "Curb Counter Flashing" rate row (Sheet Metal Work) — not auto-priced.`,
-        );
-    }
+    if (inchesRaw <= 0) return 0;
+    const r2 = bankersRound(inchesRaw, 2);
+    const whole = Math.floor(r2);
+    const cents = Math.round((r2 - whole) * 100);
+    const inches = whole + (Math.ceil(cents / 25) * 25) / 100;
+    return Math.ceil(bankersRound(inches / 12, 2));
+  })();
+  if (!nonDlOwnsAuto && curbCounterflashFt > 0) {
+    const rate = admin.autoRates?.counterflash;
+    if (rate) addAutoItem(curbCounterflashFt, rate, false, bAuto.counterflash);
+    else
+      warnings.push(
+        `Curb counter flashing: ${curbCounterflashFt} ft needed but no "Curb Counter Flashing" rate row (Sheet Metal Work) — not auto-priced.`,
+      );
   }
 
   // Parapet wood blocking (§8.4, TopOfParapet): CalcQty = Ceil(Σ blocked-wall Length × 1.03).
-  // LABOR-ONLY in the legacy collection: TotalCost = LaborCost; the row's material price is
-  // deliberately ignored.
-  {
-    const blockedFt = bid.parapets.reduce(
-      (sum, p) => (p.hasBlocking ? sum + p.lengthFt * 1.03 : sum),
-      0,
-    );
-    if (blockedFt > 0) {
-      const qty = Math.ceil(blockedFt);
-      const rate = admin.autoRates?.parapetBlocking;
-      if (rate) addAutoItem(qty, rate, true, bAuto.blocking);
-      else
-        warnings.push(
-          `Parapet wood blocking: ${qty} ft needed but no '2" x 4" W/ 8" ISO' rate row (Parapet Wall Blocking) — not auto-priced.`,
-        );
-    }
+  // The legacy dialog total is labor-only (TotalCost = LaborCost), but ReviewCalc bills the
+  // row's material into dMaterial[14] (§14) — the §14 module does; this older path keeps its
+  // previous labor-only behaviour for frozen snapshots.
+  const parapetBlockingLinealFt = bid.parapets.reduce(
+    (sum, p) => (p.hasBlocking ? sum + p.lengthFt : sum),
+    0,
+  );
+  if (!nonDlOwnsAuto && parapetBlockingLinealFt > 0) {
+    const qty = Math.ceil(parapetBlockingLinealFt * 1.03);
+    const rate = admin.autoRates?.parapetBlocking;
+    if (rate) addAutoItem(qty, rate, true, bAuto.blocking);
+    else
+      warnings.push(
+        `Parapet wood blocking: ${qty} ft needed but no '2" x 4" W/ 8" ISO' rate row (Parapet Wall Blocking) — not auto-priced.`,
+      );
   }
 
-  // Capstone masonry (§8.4): remove qty = Ceil(Σ option-1 CapstoneLength / 2) on "Remove Only";
-  // reinstall qty = Ceil(Σ option-2 CapstoneLength / 2) on "Replace Capstones" (verbatim legacy:
-  // option-2 walls feed reinstall ONLY). Option-2 sealant tubes (Ceil(Ceil(len)/40)) stay an
-  // ordering quantity — the legacy sealant item/rate join is not modeled yet.
-  {
-    const capLen = (p: ParapetInput) => p.capstoneLengthFt ?? p.lengthFt;
-    const removeLen = bid.parapets.reduce(
-      (sum, p) => (p.capstoneOption === 1 ? sum + capLen(p) : sum),
-      0,
-    );
-    const reinstallLen = bid.parapets.reduce(
-      (sum, p) => (p.capstoneOption === 2 ? sum + capLen(p) : sum),
-      0,
-    );
+  // Capstone masonry (§8.4/§14): remove qty = Ceil(Σ option-1 CapstoneLength / 2) on RefID 1
+  // "Remove Only"; re-lay qty = Ceil(Σ option-2 CapstoneLength / 2) on RefID 2 (the Masonry
+  // "install" index = the Mortar Mix row in the seed; the §14 module keys by RefID). Option-2
+  // sealant tubes (Ceil(Ceil(len)/40)) stay an ordering quantity — the legacy sealant item/rate
+  // join is not modeled yet.
+  const capLen = (p: ParapetInput) => p.capstoneLengthFt ?? p.lengthFt;
+  const capstoneRemoveLf = bid.parapets.reduce(
+    (sum, p) => (p.capstoneOption === 1 ? sum + capLen(p) : sum),
+    0,
+  );
+  const capstoneReplaceLf = bid.parapets.reduce(
+    (sum, p) => (p.capstoneOption === 2 ? sum + capLen(p) : sum),
+    0,
+  );
+  if (!nonDlOwnsAuto) {
+    const removeLen = capstoneRemoveLf;
+    const reinstallLen = capstoneReplaceLf;
     if (removeLen > 0) {
       const qty = Math.ceil(removeLen / 2);
       const rate = admin.autoRates?.masonryRemove;
@@ -1429,6 +1452,68 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       nonDlServices += labor;
     }
   }
+
+  // §14 Non-Duro-Last Items (docs/legacy-money-parity.md §14): the six legacy dialogs + the
+  // auto-quantity hooks. Six material groups → OtherMaterial (dMaterial[14..19], taxable) with
+  // labor at each row's own rate → direct labor (LS1) + man-days; Subcontractors / Services →
+  // LaborSubtotal2 as material + labor per item.
+  const dumpsterUnitYardage = admin.nonDl?.dumpsterYardage ?? 30;
+  let nonDlResult: NonDlResult | undefined;
+  if (admin.nonDl) {
+    let curbPolySqFt = 0;
+    let curbIsoSqFt = 0;
+    for (const c of bid.curbs) {
+      if (c.quantity <= 0) continue;
+      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      // Curb.PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8); Curb.SF_ISO =
+      // LinealFt × qty (IL-exact).
+      if (c.hasPlastic)
+        curbPolySqFt += bankersRound(
+          ((linealFt * ((c.dimCIn ?? 0) + (c.dimDIn ?? 0)) * 5) / 48) * c.quantity,
+          8,
+        );
+      if (c.hasInsulation) curbIsoSqFt += linealFt * c.quantity;
+    }
+    const geometry: NonDlGeometry = {
+      sections: bid.sections
+        .filter((s) => s.length * s.width > 0)
+        .map((s) => ({
+          blockingLinealFt: (s.edges ?? []).reduce((sum, e) => sum + (e.blockingFt ?? 0), 0),
+          underlaymentThicknessIn: sectionLayers(s).reduce(
+            (sum, l) => sum + (l.quote ? 0 : parseInches(l.board)),
+            0,
+          ),
+        })),
+      parapetBlockingLinealFt,
+      curbCounterflashFt,
+      capstoneRemoveLf,
+      capstoneReplaceLf,
+      disposalUnits: tearOffVolume(
+        bid.sections.map((s) => ({
+          length: s.length,
+          width: s.width,
+          tearOff: s.tearOff,
+          toThicknessInches: s.toThicknessInches,
+        })),
+        1,
+        dumpsterUnitYardage,
+      ),
+      polyethyleneSqFt: parapetPolySqFt + curbPolySqFt,
+      curbIsoSqFt,
+    };
+    nonDlResult = computeNonDl({
+      state: normalizeNonDlState(bid.nonDlCalc),
+      ref: admin.nonDl,
+      geometry,
+      crewRate: bid.crewLaborRatePerHour,
+    });
+    warnings.push(...nonDlResult.warnings);
+    nonDlMaterial += nonDlResult.otherMaterial;
+    nonDlOwnRateCost += nonDlResult.ownRateLaborCost;
+    nonDlOwnRateHours += nonDlResult.ownRateLaborHours;
+    nonDlSubs += nonDlResult.subsCost;
+    nonDlServices += nonDlResult.servicesCost;
+  }
   const otherMaterial = bid.otherMaterial + nonDlMaterial;
   const servicesCost = bid.servicesCost + nonDlServices;
   const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
@@ -1470,7 +1555,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     underlaymentLaborHours,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
-    dumpsterUnitYardage: 30,
+    dumpsterUnitYardage,
     duroLastMaterial,
     membraneCostBeforeDiscount: membraneMaterial,
     materialUnderlayment,
@@ -1520,6 +1605,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     curbMaterial,
     ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
     ...(metalsResult ? { metalsScreen: metalsResult } : {}),
+    ...(nonDlResult ? { nonDl: nonDlResult } : {}),
     adhesiveWholeUnits,
   };
 }

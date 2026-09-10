@@ -15,6 +15,7 @@ import type { Band, DualValue } from "./labor";
 import type { SetupBandTable, InspectionBandTable } from "./quantities";
 import type { AccessoryRefData, TermColor, EdgeSizeRef } from "./accessories";
 import { buildMetalsRefData, type MetalsRefData } from "./metals";
+import { buildNonDlRefData, type NonDlRefData } from "./nondl";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Membrane price matrix (from pricing_catalog id "duro_last:duro_last_membrane")
@@ -1596,6 +1597,8 @@ export interface RawAdminData {
   /** Accessory pricing screens (duro_last:*) + accessory_labor rows for the §12 calculated tab. */
   accessoryCatalogRows?: Array<{ id: string; category: string; data: MembraneScreen }> | null;
   accessoryLaborRows?: Array<{ id: string; category: string; data: MembraneScreen }> | null;
+  /** Every non_dl pricing screen (the §14 Non-Duro-Last Items collections). */
+  nonDlScreens?: Array<{ id: string; category: string; data: MembraneScreen }> | null;
 }
 
 export interface EngineSettings {
@@ -1649,6 +1652,8 @@ export interface EngineAdminData {
   accessories?: AccessoryRefData;
   /** §13 EXCEPTIONAL Metals ref data (gutters/downspouts/pitch pans/collection boxes). */
   metals?: MetalsRefData;
+  /** §14 Non-Duro-Last Items ref data (the nine legacy NDL collections). */
+  nonDl?: NonDlRefData;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1747,6 +1752,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const metals = metalsScreenRow
     ? buildMetalsRefData(metalsScreenRow.data as unknown as MetalsScreenData)
     : undefined;
+  const nonDl = raw.nonDlScreens?.length ? buildNonDlRefData(raw.nonDlScreens) : undefined;
 
   return {
     deckOrder,
@@ -1771,5 +1777,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(underlaymentGroups ? { underlaymentGroups } : {}),
     ...(accessories ? { accessories } : {}),
     ...(metals ? { metals } : {}),
+    ...(nonDl ? { nonDl } : {}),
   };
 }

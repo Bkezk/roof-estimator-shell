@@ -338,7 +338,12 @@ Reinstall**. CapstoneLength defaults to wall Length, editable, and DOES price:
 `Masonry.RecalcParents` sets remove-item `CalcQty = Ceil(Σ CapstoneLength[id=1] / 2)` and
 reinstall-item `CalcQty = Ceil(Σ CapstoneLength[id=2] / 2)` (Masonry NDL rates DB-resident,
 RefID 1 = remove / 2 = install). Additionally (§ prior wiring round) option 2 adds sealant
-tubes `Ceil(Ceil(length)/40)`.
+tubes `Ceil(Ceil(length)/40)`. **§14 correction (2026-09-10):** RefID 2 (the "install"
+index) is the **Mortar Mix** row, not "Replace Capstones" — the installer ledger patched
+LaborPerUnit on ndlMasonryID 1 and 2 only, and the live seed carries labor on Remove Only
+(0.1 h) and Mortar Mix (0.3 h) with Replace Capstones at 0; "Replace Capstones" is a manual
+row. Also: `WallBlockings.TotalCost = LaborCost` is only the dialog's footer — ReviewCalc
+bills the wall-blocking MATERIAL into dMaterial[14] (see §14.3).
 
 **ARP**: `Management.oRefARPs` = Empty + sizes **12/18/24/30 in** (ids 1–4). ARPLength defaults
 to wall Length, editable. `Parapet.ARPSqFt = (Size + 6)/12 × (ARPLength == Length ?
@@ -513,9 +518,12 @@ data-capture gap.
   (Sheet Metal Work). Material → OtherMaterial; labor at $45/h own-rate → LS1 + man-days.
 - **Parapet wood blocking** (§8.4): Ceil(Σ blocked-wall Length × 1.03) on '2" x 4" W/ 8" ISO'
   (Parapet Wall Blocking) — LABOR-ONLY (legacy TotalCost = LaborCost; material price ignored).
+  **Superseded by §14**: the labor-only reading was the dialog footer; ReviewCalc bills the
+  material too. The §14 module bills material + labor; this older path survives only for
+  frozen snapshots without the non_dl screens.
 - **Capstone masonry** (§8.4): remove = Ceil(Σ option-1 CapstoneLength/2) on "Remove Only";
   reinstall = Ceil(Σ option-2 /2) on "Replace Capstones" (verbatim: option-2 walls feed reinstall
-  ONLY). Option-2 sealant tubes (Ceil(Ceil(len)/40)) stay an ordering quantity — the sealant
+  ONLY). **Superseded by §14**: the reinstall index is RefID 2 = Mortar Mix (see §8.4 note). Option-2 sealant tubes (Ceil(Ceil(len)/40)) stay an ordering quantity — the sealant
   item/rate join is not modeled.
 - **ARP material** (§8.6): CalcQty = Ceil(Σ section ARP) + Ceil(Σ parapet ARP) × the
   "ARP (SqFt)" Membrane Accs price → M0. Parapet ARP = ((size+6)/12) ×
@@ -1480,3 +1488,104 @@ position (the 6"X6" grid carries Drop/Outlet in the same slot); its money values
 0.75 h / $45) were already present, so no prices were invented. Note the seeded gutter grids
 carry $0 labor columns (installer defaults had no per-LF gutter labor) — gutter hours stay 0
 until the admin fills them; downspout/pitch-pan/collection-box labor is live.
+
+## 14. Non-Duro-Last Items — the complete money path (IL-exact, 2026-09-10)
+
+Extracted in-session from `DataAccess.dll` (`NDLItem` 0xa85f1–0xa8fc9, `NDLCollectionBase`
+0xa768c–0xa8550, `EdgeBlockings`/`WallBlockings`/`DeckMaterials`/`SheetMetals`/`Masonry`/
+`Services`/`Subcontractors`/`CustomApps`/`NDLOthers`, `NonDL` 0xa90d4–0xa9d64,
+`ReviewCalc.Recalculate` + `ReviewCalc.NonDL` 0x46b80) and `Estimator.exe` (`frmNonDL`
+RefreshSummary 0x67f44, `frmNonDL1..6` Load / FieldChanged / btnResetLabor /
+txtMaterialTotal_LostFocus / btnFinish).
+
+### 14.1 Item money (`NDLItem`)
+
+- `Qty(total) = m_iQty (user "Extra"/"Quantity") + m_iCalcQty (auto)`. Grids that show a single
+  "Quantity" (Sheet Metal, Masonry, Services, Subcontractors, Custom) display `Qty(1)` and
+  `set_Qty(incl, v)` stores `v − CalcQty`; the Blocking and Deck grids show `Footage`/`Calc` and
+  `Extra` separately.
+- `MaterialCost = DACommon.toSingle(Qty(1) × UnitCost, 4)` — Round 4 dp then Single.
+- `Labor (hours) = m_dUserLabor = Qty(1) × dLaborPerUnit`, recomputed by `set_Qty`,
+  `set_CalcQty` and `set_LaborPerUnit`; `set_Labor(v)` stores `toSingle(v, 2)` and back-derives
+  `dLaborPerUnit = Round(v / Qty(1), 2)`; the Days column is `Hours ÷ Settings.HoursPerDay`.
+- `LaborCost = toSingle(Labor × LaborRate, 4)`.
+- `LaborRate`: the ref row's rate; `ReadRefData` substitutes `Estimate.LaborRate` (crew rate)
+  when the ref rate is 0. A user-added row (the blank last grid row; typing a Description calls
+  `NDLCollectionBase.Add(desc)`) inherits the previous row's rate, or the crew rate when first.
+  "Use Estimate Labor" sets every row of the dialog's collection(s) to the crew rate.
+- `IsPresent = Labor > 0 or Qty(1) > 0`.
+
+### 14.2 Collections & the dead override
+
+`NDLCollectionBase.OnRecalculate` calls `RecalcRow(i)` per row then sums MaterialCost /
+LaborCost / Labor in double. `get_MaterialCost(recalc)` / `Labor()` / `get_LaborCost(recalc)`
+branch on `bOverride`: when set, material = `m_dMaterialCostOverride` and labor = 0 (the
+"Subcontractor" lump sum the Deck Materials / Sheet Metal dialogs' editable "Material Total"
+box writes via `set_MaterialCost`, with the btnFinish warning "treated as a subcontract and will
+not be figured as a labor portion"). **`bOverride` is initialised `false` in the ctor and no
+code path in the shipped Estimator.exe / DataAccess.dll ever calls `set_IsOverriden`** (full
+IL scan) — the typed total is stored (`NonDuroLast.DeckMaterialsMat / SheetMetalWorkMat`) but
+never bills. Dead code; not reproduced (same policy as Peel Stop).
+
+### 14.3 ReviewCalc wiring
+
+`dLabor` is sized `30 + Subcontractors.Count + Services.Count + 1`. For i = 0..5 the
+`ReviewCalc.NonDL(group, labor?, cost?)` switch feeds **dMaterial[14+i]**, **dLabor[14+i,0]**
+(LaborCost) and **dLabor[14+i,1]** (hours) from: 1 = WallBlockings + EdgeBlockings, 2 =
+DeckMaterials, 3 = SheetMetals, 4 = Masonry, 5 = CustomApps, 6 = NDLOthers — all with
+`get_MaterialCost(0)`, so **wall-blocking material bills** (the earlier "labor-only" reading
+was the dialog footer). `dMaterial[20] = Σ dMaterial[0..19]` (MaterialTotalBeforeTax, taxed
+unless TaxExempt) and `dTotals[7] = NonDL.MaterialCost` (OtherMaterial) — the same six groups.
+Labor for those six is DIRECT labor at each row's own rate inside LaborSubtotal1, hours in
+man-days. **Subcontractors** and **Services** get one dLabor row per item at `24 + k`:
+`[,0] = MaterialCost + LaborCost`, `[,1] = Labor`, both accumulated into the last row
+(LaborSubtotal2). `NonDL.MaterialCostIncludingServices` (the summary Totals row) adds
+Services material; Subcontractors material is never material. This CONFIRMS the web routing
+that already existed (`NON_DL_LS2_CATEGORIES`).
+
+### 14.4 Auto quantities (`RecalcParents`, keyed by ref RefID)
+
+| Collection | Hook | CalcQty |
+|---|---|---|
+| EdgeBlockings ("Thickness" ref column = OtherRefData) | per present RoofSection | greedy fill of `UnderlaymentThickness` (Σ layer RealThickness) with rows 3→0 while `t > 0.6`; one more row-0 board when `0.5 ≤ t`; `CalcQty[i] += toInt(Ceil(count[i] × BlockingLinealFt × f32(1.03)))` |
+| WallBlockings row 0 | Parapets.BlockingLinealFt | `ToInt32(Ceil(LF × 1.03))` |
+| SheetMetals RefID 1 (Curb Counter Flashing) | curbs TermOption 5 | the §8.3 feet |
+| Masonry RefID 1 (Remove Only) / RefID 2 (**Mortar Mix**) | capstone option 1 / 2 LF | `Ceil(LF / 2)` each |
+| Services RefID 3 (Dumpster) | RoofSections.TearOffVolume | `Ceil(Σ section DumpsterYards ÷ Settings.DumpsterYards)` |
+| NDLOthers RefID 1 (DL Approved Slipsheet) / 2 | Parapets + Curbs PolyethyleneSqFt / Curbs.ISO_SqFt | `Ceil(sq ft)` each |
+
+`Curb.PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8)`; `Curb.SF_ISO = LinealFt
+× qty`. The 3rd Party Services screen's `extras.yardage` is `Settings.DumpsterYards` (30).
+
+**Seed gaps (flagged, not guessed):** neither the RoofEdgeBlocking `Thickness` column nor the
+Underlayment `RealThickness` was captured — both stand in via the inch dimension in the row's
+own name (`½"`, `5/4"`, `1 1/2" ISO`, `2.7" Rigid`; slip sheets → 0), a seeded numeric
+`Thickness` key wins when present. `ref_ndlOthers` (2 rows; the ledger names row 1 "DL
+Approved Slipsheet") was never on a captured admin screen — seeded as `non_dl:others` with $0
+and `_uncaptured`, so an auto quantity on either row raises a warning instead of billing $0
+silently; capture the two rows' prices from the licensed Estimator to close it.
+
+### 14.5 Screen & web implementation
+
+`frmNonDL`: title "Non-Duro-Last Items", six tiles (Wood & Edge Blocking / Structural Roof Deck
+Materials / Sheet Metal Work / Masonry Work / Sub-Contractors and Services / Customized
+Contractor Applications — icons recovered into `public/nondl-*.png`), lvSummary `Category |
+Item | Qty. | Cost/Quote | Hours | Labor Cost` (hours Round 3) + Edit; categories in order Roof
+Edge Blocking, Wall Blocking, Roof Deck Materials, Sheet Metals, Masonry, Services,
+Subcontractors, Custom Applications, Others; Totals = MaterialCostIncludingServices / Labor /
+LaborCost. Dialog grids (CustomList): `Description | Footage|Calc | Extra | Unit Cost | Total
+Cost | HoursPerUnit | Days|Hours | Labor Rate | Labor Cost` (frmNonDL1/2) or `Description |
+Quantity | …` (3/4/5/6), the blank add-row, "Use Estimate Labor", footer `Total:` (1, 3) or
+`Material Total:` / `Labor Total:` (2, 4, 5, 6), Finished.
+
+Web: engine module `src/lib/engine/nondl.ts` (`buildNonDlRefData` from every `non_dl` screen,
+`NonDlState` = per-row extra + unit-cost / hrs-per-unit / hours / rate overrides + custom rows,
+`nonDlCalcQuantities`, `computeNonDl` → lines + OtherMaterial / own-rate labor / subs /
+services), billed in `bid-builder.ts` (the module OWNS the auto rows whenever the snapshot
+carries the non_dl screens; the older §8.3/§8.4 auto path survives only for frozen snapshots
+without them; flat `nonDlLines` from older bids keep billing as before and show as "Extra
+catalog lines (older bid)"). Review ledger rows come from the module lines (Wood Blocking ←
+edge + wall, Roof Decking, Sheet Metal, Masonry, Custom Apps, Other ← Others; one
+Subcontractors / Services row per item). UI `src/components/nondl-screens.tsx` mirrors the
+six-tile screen and dialogs. `Settings.DumpsterYards` now reads the services screen's
+`extras.yardage` (was hard-coded 30).

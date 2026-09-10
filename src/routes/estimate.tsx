@@ -60,6 +60,8 @@ import {
 import { SectionCalcDialog } from "@/components/section-calc-dialog";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
+import { NonDlScreens } from "@/components/nondl-screens";
+import { emptyNonDlState, normalizeNonDlState, type NonDlState } from "@/lib/engine/nondl";
 import {
   emptyAccessoriesState,
   normalizeAccessoriesState,
@@ -340,6 +342,7 @@ function EstimatePage() {
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [metals, setMetals] = useState<MetalLine[]>([]);
   const [metalsCalc, setMetalsCalc] = useState<MetalsState>(() => emptyMetalsState());
+  const [nonDlCalc, setNonDlCalc] = useState<NonDlState>(() => emptyNonDlState());
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
   const [curbs, setCurbs] = useState<CurbInput[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
@@ -488,6 +491,7 @@ function EstimatePage() {
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setMetals(Array.isArray(d.metals) ? d.metals : []);
       setMetalsCalc(normalizeMetalsState(d.metalsCalc));
+      setNonDlCalc(normalizeNonDlState(d.nonDlCalc));
       setParapets(Array.isArray(d.parapets) ? d.parapets : []);
       setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
       setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
@@ -607,6 +611,7 @@ function EstimatePage() {
     nonDlLines,
     metals,
     metalsCalc,
+    nonDlCalc,
     parapets,
     curbs,
     customer,
@@ -668,6 +673,8 @@ function EstimatePage() {
       adhesiveWholeUnits,
       // §13 EXCEPTIONAL Metals screen results (summary lines + dMaterial[5]/dLabor[5] totals).
       metalsScreen: build.metalsScreen,
+      // §14 Non-Duro-Last Items results (six dialogs + auto rows; OtherMaterial / LS1 / LS2).
+      nonDl: build.nonDl,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -789,7 +796,7 @@ function EstimatePage() {
       case "tearoff":
         return sections.filter((s) => s.tearOff).length;
       case "nondl":
-        return nonDlLines.length;
+        return nonDlLines.length + (result?.nonDl?.lines.length ?? 0);
       default:
         return null;
     }
@@ -4089,43 +4096,79 @@ function EstimatePage() {
           </Card>
         </div>
 
+        {/* Legacy Non-Duro-Last Items screen (frmNonDL): six entry tiles + the lvSummary grid.
+            Money per docs §14 (extracted IL): six material groups → OtherMaterial (taxable) with
+            direct labor at each row's own rate; subs & services → LaborSubtotal2. */}
         <div className={step === 8 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Non-Duro-Last items</CardTitle>
+              <CardTitle className="text-base">Non-Duro-Last Items</CardTitle>
+              {result?.nonDl && result.nonDl.lines.length > 0 && (
+                <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                  <span>
+                    Other material:{" "}
+                    <span className="font-semibold">{money(result.nonDl.otherMaterial)}</span>
+                  </span>
+                  <span>
+                    Hours:{" "}
+                    <span className="font-semibold">{result.nonDl.totalHours.toFixed(2)} h</span>
+                  </span>
+                  <span>
+                    Labor Cost:{" "}
+                    <span className="font-semibold">{money(result.nonDl.totalLaborCost)}</span>
+                  </span>
+                  {result.nonDl.subsCost + result.nonDl.servicesCost > 0 && (
+                    <span>
+                      Subs &amp; services:{" "}
+                      <span className="font-semibold">
+                        {money(result.nonDl.subsCost + result.nonDl.servicesCost)}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              )}
             </CardHeader>
             <CardContent>
-              <CatalogPicker
-                items={(nonDlCatalog ?? []).map((n2) => ({
-                  key: n2.key,
-                  category: n2.category,
-                  description: n2.description,
-                  price: n2.price,
-                }))}
-                onAdd={(key) => {
-                  const item = nonDlCatalog?.find((n2) => n2.key === key);
-                  if (!item) return;
-                  setNonDlLines((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      category: item.category,
-                      price: item.price,
-                      laborPerUnit: item.laborPerUnit,
-                      laborRate: item.laborRate,
-                      quantity: 1,
-                    },
-                  ]);
-                }}
+              <NonDlScreens
+                refData={admin?.nonDl}
+                state={nonDlCalc}
+                onChange={setNonDlCalc}
+                result={result?.nonDl}
+                crewRate={laborRate}
               />
-
-              {nonDlLines.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No non-DL items. Blocking / deck / sheet-metal / masonry items price material into
-                  Other material and labor as direct labor; subcontractors &amp; services roll into
-                  Subs &amp; services.
-                </p>
-              ) : (
+            </CardContent>
+          </Card>
+          {/* Old flat-picker lines: only rendered when a bid already carries them (pre-§14
+              saved bids) — the tile screens above are the legacy money path. */}
+          {nonDlLines.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                <CardTitle className="text-base">Extra catalog lines (older bid)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CatalogPicker
+                  items={(nonDlCatalog ?? []).map((n2) => ({
+                    key: n2.key,
+                    category: n2.category,
+                    description: n2.description,
+                    price: n2.price,
+                  }))}
+                  onAdd={(key) => {
+                    const item = nonDlCatalog?.find((n2) => n2.key === key);
+                    if (!item) return;
+                    setNonDlLines((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        category: item.category,
+                        price: item.price,
+                        laborPerUnit: item.laborPerUnit,
+                        laborRate: item.laborRate,
+                        quantity: 1,
+                      },
+                    ]);
+                  }}
+                />
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -4174,9 +4217,9 @@ function EstimatePage() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         <div className={step === 9 && showPricingSettings ? "space-y-6" : "hidden"}>
@@ -4603,8 +4646,11 @@ function EstimatePage() {
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
                     <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
                   )}
-                  {nonDlMaterialTotal > 0 && (
-                    <Row label="Other material (non-DL)" v={money(nonDlMaterialTotal)} />
+                  {(result.r.money.dTotals[7] ?? 0) > 0 && (
+                    <Row
+                      label="Other material (non-DL)"
+                      v={money(result.r.money.dTotals[7] ?? 0)}
+                    />
                   )}
                   {/* APPLIED discounts only (d[4]−d[0]); the candidate d[1..3] values exist even
                       when their toggles are off and must not be displayed as if applied. */}

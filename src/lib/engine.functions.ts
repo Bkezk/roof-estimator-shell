@@ -103,6 +103,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       uBoardGroupRes,
       accCatalogRes,
       accLaborRes,
+      nonDlScreensRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -159,6 +160,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       // §12 Accessories: every duro_last pricing screen + the accessory_labor tables.
       sb.from("pricing_catalog").select("id, category, data").eq("branch", "duro_last"),
       sb.from("accessory_labor").select("id, category, data"),
+      // §14 Non-Duro-Last Items: every non_dl pricing screen.
+      sb.from("pricing_catalog").select("id, category, data").eq("branch", "non_dl"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -270,6 +273,11 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         data: MembraneScreen;
       }> | null,
       accessoryLaborRows: (accLaborRes.data ?? null) as unknown as Array<{
+        id: string;
+        category: string;
+        data: MembraneScreen;
+      }> | null,
+      nonDlScreens: (nonDlScreensRes.data ?? null) as unknown as Array<{
         id: string;
         category: string;
         data: MembraneScreen;
