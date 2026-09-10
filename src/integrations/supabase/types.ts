@@ -517,24 +517,33 @@ export type Database = {
       warranties: {
         Row: {
           id: string
+          is_high_wind: boolean
           name: string
           non_master_elite_surcharge: number
           price_per_sqft: number
+          req_thickness: number
           sort: number
+          term_years: number
         }
         Insert: {
           id?: string
+          is_high_wind?: boolean
           name: string
           non_master_elite_surcharge?: number
           price_per_sqft?: number
+          req_thickness?: number
           sort?: number
+          term_years?: number
         }
         Update: {
           id?: string
+          is_high_wind?: boolean
           name?: string
           non_master_elite_surcharge?: number
           price_per_sqft?: number
+          req_thickness?: number
           sort?: number
+          term_years?: number
         }
         Relationships: []
       }

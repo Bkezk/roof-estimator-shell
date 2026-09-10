@@ -498,6 +498,12 @@ export interface BidInput {
   adjustInspectionPct?: number;
   /** Per-category labor template name (from labor_templates); "" / unset = no template. */
   laborTemplateName?: string;
+  /**
+   * Legacy per-estimate sales tax (Estimate.SalesTax fraction / TaxMaterialOnly — frmHome
+   * "5. Tax Exempt" group). Absent = the company settings.
+   */
+  salesTaxRate?: number;
+  taxMaterialOnly?: boolean;
 
   // provided extras (seams)
   extraShipping: number;
@@ -1802,8 +1808,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     volumeDiscount: bid.volumeDiscount,
     markupMode: bid.markupMode,
     markup: bid.markup,
-    salesTax: admin.settings.salesTax,
-    taxMaterialOnly: admin.settings.taxMaterialOnly,
+    salesTax: bid.salesTaxRate ?? admin.settings.salesTax,
+    taxMaterialOnly: bid.taxMaterialOnly ?? admin.settings.taxMaterialOnly,
     taxExempt: bid.taxExempt,
     perDiem: bid.perDiem,
     perDiemInMarkup: bid.perDiemInMarkup,

@@ -1733,3 +1733,96 @@ Changed`, `LoadComplexityFactors`, `optQuick_CheckedChanged`, `optComplex_Click`
   Man Hours / Labor Cost / sq ft; Edge Options tabs A–D; preview with corner boxes; lvSummary
   Section | L | W | System | Attach | Deck Type | Color | Lap; Roof Sections Summary dialog with
   the LoadSummary columns; New / Copy / Remove; Show Calculations; Notes).
+
+## 17. Home screen (Setup step) — parity + wiring (IL-exact, 2026-09-10)
+
+Read in-session: `frmHome` (Estimator.exe) `InitializeComponent` captions, `LoadEstimate`
+0x59130, `btnStart_Click`, `btnUpdate_Click` (+ `frmUpdateBidOptions`), `cbWarranty_SelectedIndex
+Changed` 0x59d9c, `cbMaxWind_SelectedIndexChanged`, `cboBuildingType/cboStatus_SelectionChange
+Committed`, `chkTaxExempt/chkTaxMode/txtSalesTax` handlers, `txtCommission_Validating`,
+`btnLbrMarkup_Click` (+ `frmLaborTemplate` captions), `cboTemplate_SelectedIndexChanged` /
+`updateTemplate`, `TestForEnhancement` 0x58b38, `LoadDefaultUnderlaymentAttachment`,
+`llbCopyClient_LinkClicked`, `txtEstimateTitle_LostFocus`, `Button1_Click` (apply to existing
+sections → `RoofSections.OverwriteWithDefault` 0x5032c + `frmRSComparison`), `Button1_Click_1`
+(apply to existing parapets), `cbParapetWallType_SelectedIndexChanged`, `txtCompany_TextChnaged`;
+`frmEditClient` / `frmMembTypeSelect` captions; DataAccess `Estimate` setters, `Warranty` members;
+seeded `Warranty` + `WarrantyHighWind` rows.
+
+### 17.1 Layout (frmHome)
+
+Left "Setup" panel, TabControl **Bid Info | Client | Job Site**:
+- Bid Info: **1. General Info** — Customer Name (`txtCompany` ↔ `Estimate.ClientName`, the SAME
+  field the Client tab's "Company Name" edits), Job Name (`Estimate.Title`; blank → "Bid Title
+  cannot be left blank." and the old title is restored), Estimator's Name, Date Created
+  (`calStartDate` "MMM dd, yyyy" ↔ `Estimate.StartDate`, editable), Status (`EstimateStatus`),
+  Building Type (`BuildingType`: Commercial / Residential). **2. Labor && Markup Setup** —
+  "Labor: $X per hour" and "Markup: $X per day" (mode 1) / "X%" (mode 0) / "X% (Gross)" (mode 2);
+  "Click here to edit" opens `frmLaborTemplate` ("Edit Markup & Labor": copy-from options list,
+  Hourly Labor, Hours per Man Day, Man-Day Labor, Markup radios Percentage of Total Costs /
+  Dollars per Man Day / Gross Profit Percentage, Include prior to Markup: Commission / Per Diem,
+  Hours or Man Days). **3. Labor Template** (`cboTemplate` + description; on an existing bid:
+  "Are you sure you want to change your labor template? This will override all manually entered
+  labor settings." — `updateTemplate` then WRITES the template's modifiers into every section /
+  parapet / curb / drain / pipe stack / term bar / fascia / 2-pc / generic edge AdjustLabor and
+  the estimate's AdjustSetupLabor / AdjustInspectionTime). **4. Estimator Commission** (Commission
+  Rate, "##0.0#"). **5. Tax Exempt** — checkbox + Sales Tax % (`Estimate.SalesTax` stored as a
+  fraction, shown ×100 "#0.00##") + "Only Tax Material" (`TaxMaterialOnly`): checking exempt sets
+  SalesTax 0 and disables both; unchecking restores `Settings.SalesTax` / `TaxOnlyMaterial`.
+  **6. Notes** (`Description`).
+- Client: Company Name, Contact Person, Address 1, Address 2, City St, Zip, Phone x Ext, Fax,
+  E-Mail (ClientName / ClientContact / ClientAddress1-2 / ClientCity / ClientState / ClientZip /
+  ClientPhone / ClientExtension / ClientFax / ClientEmail); "Edit Client Information" opens the
+  `frmEditClient` client list (Company Profile / "Company is a Client").
+- Job Site: "Copy Client Address" (Address 1/2, City, State, Zip), Address 1, Address 2, City St,
+  Zip, Job #, Ship Via, Ship To.
+
+Right "Defaults" panel: Manufacturer combo, "Update Pricing && Labor" (`frmUpdateBidOptions`:
+Update Material Pricing & Unit Labor, Update Labor Template, Update Non-DL Labor/Unit,
+Labor Rate, Price/Unit to Management Defaults, Reset Underlayment Price Quotes, Upgrade
+DuroLast Mechanical Labor to v4.0, Upgrade to Latest Formulas), **1. Deck Type**, **2. Wall
+Type** (Wood or Metal → `Parapet.WallType` 1 / Brick or Concrete → 4), **3. Roof Sections
+Material** (Roof System, Attached With [28"/60"/120" Tab Mechanically Fastened, (No Tab)
+Induction Weld, (No Tab) Fully Adhered, Duro-Grip ×4], Attached To, Type, Color, Design Table
+(psf), "Perimeter && Enhancement" link, `lblEnhancement` "<- Enhancement Necessary" (red) when
+`UniversalFastenerSpacing` fails for the default section / "<- Using Custom Enhancement"
+(green), "Apply To Existing Roof Sections"), **4. Underlayment Attached With** (None /
+durolastmech / adhered systems allowed under insulations; "(will not apply to existing
+underlayment)"), **5. Parapets Material** (Roof System [Duro-Last / Duro-Last Fleece-Back /
+Duro-Roof], Attached With, Type, Color, "Apply to Existing Parapets"), **6. Select Type of
+Warranty** (`cbWarranty` + "Max Expected Wind" `cbMaxWind`: 55-72 / 73-80 / 81-90 / 91-100 /
+101-110 / 111-120 mph → `MaxWindExpected` 72…120, enabled only while `Warranty.IsHighWind`),
+"Start!" (→ the first estimate step). An "Existing Bids:" list + "Reports" sit on the Home form
+too (the web's bids page / proposal).
+
+### 17.2 Semantics that changed on the web
+
+- **Warranty high wind**: legacy `Warranty` rows carry `IsHighWind` and `WarrantyTerm`; the
+  `WarrantyHighWind` upcharge keys on (WarrantyLength, MaxWindExpected). The web had an
+  independent "High wind" toggle + term picker. Now `warranties` carries `req_thickness /
+  is_high_wind / term_years` (migration `20260910120000_warranty_legacy_flags.sql`, values from
+  the legacy seed by name), `effectiveHighWind` derives the flag + term from the warranty and
+  the band from `maxWindExpected`; older snapshots without the flags keep the saved fields.
+  ⚠ The live `high_wind_upcharges` 20-yr rows (0.09/0.11/0.13/0.15/0.17 mech) differ from the
+  legacy seed (0.07/0.9[sic]/0.11/0.13/0.15) — left as captured (not a code matter).
+- **ReqThickness** (`frmMembTypeSelect`, "Use These Thicknesses"): the web lists the sections
+  thinner than the warranty's requirement and bumps them on request (legacy also cascades to
+  parapets — parapets on the web inherit the section/bid thickness unless overridden).
+- **Per-bid sales tax**: `SavedBidState.salesTaxRate / taxMaterialOnly` (absent = company
+  settings) → `BidInput` → the money chain; Tax Exempt zeroes the rate exactly like the legacy
+  handler and un-exempting returns to the settings.
+- **Apply To Existing Roof Sections** applies the legacy set (Roof System + attachment systems,
+  Design Table, Membrane Type, Color) — NOT deck type or sheet size (the previous web button
+  applied deck/thickness/color/sheet). Legacy additionally skips sections whose deck is
+  incompatible or whose fastener spacing lookup fails and shows a before/after comparison
+  (`frmRSComparison`); the web applies unconditionally after the same confirmation text.
+- **Defaults persisted**: `sectionDefaults.designTable`, `parapetDefaults` (Type / Color / Wall
+  Type → new parapets; "Apply to Existing Parapets"), `underlaymentAttachmentDefault` (seeds the
+  Underlayment step's attachment picker), `buildingType`, `startDate`, `maxWindExpected`;
+  client/job-site fields split into the legacy parts (`clientAddress2 / clientCity / clientState /
+  clientZip / phoneExt / fax / projectAddress2 / jobCity / jobState / jobZip / shipTo`), with
+  the combined `jobCityStZip` line the proposal prints kept in sync.
+- **Labor template change warning** ported (existing bids only); the web keeps composing
+  template factors at compute time instead of overwriting every item's AdjustLabor.
+- Not carried: the client list (`frmEditClient`), Manufacturer switching (Duro-Last only), the
+  per-option "Update Pricing & Labor" sub-choices (the web replaces the whole frozen snapshot),
+  Reports.

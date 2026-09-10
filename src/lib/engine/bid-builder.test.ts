@@ -2230,3 +2230,22 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     expect(perimeterEnhancementCalculator(31, 300)).toBe(13); // 12.4 → ceiling 13
   });
 });
+
+describe("§17 Home: per-bid sales tax overrides the company settings", () => {
+  it("bid salesTaxRate / taxMaterialOnly reach the money chain; absent = admin settings", () => {
+    const def = buildEstimateInputs(bid({ taxExempt: false }), admin).inputs;
+    expect(def.salesTax).toBe(0.0625);
+    expect(def.taxMaterialOnly).toBe(true);
+    const over = buildEstimateInputs(
+      bid({ taxExempt: false, salesTaxRate: 0.07, taxMaterialOnly: false }),
+      admin,
+    ).inputs;
+    expect(over.salesTax).toBe(0.07);
+    expect(over.taxMaterialOnly).toBe(false);
+    // tax exempt still zeroes the charge whatever the rate
+    const r = computeEstimate(
+      buildEstimateInputs(bid({ taxExempt: true, salesTaxRate: 0.07 }), admin).inputs,
+    );
+    expect(r.money.salesTaxValue).toBe(0);
+  });
+});

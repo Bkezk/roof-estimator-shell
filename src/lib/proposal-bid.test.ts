@@ -3,9 +3,12 @@ import { describe, it, expect } from "vitest";
 import {
   savedToBidInput,
   buildBidInput,
+  cityStZip,
+  effectiveHighWind,
   markupTypeToMode,
   resolveBidComputeData,
   emptyCustomer,
+  MAX_WIND_OPTIONS,
   type SavedBidState,
   type WarrantyData,
 } from "./proposal-bid";
@@ -139,7 +142,11 @@ describe("resolveBidComputeData (frozen pricing / Update Pricing & Labor)", () =
 
   it("a bid with a snapshot computes against it, ignoring live data", () => {
     const cd = resolveBidComputeData(
-      { adminSnapshot: frozen, warrantySnapshot: warrantyData, pricingAsOf: "2026-09-01T00:00:00Z" },
+      {
+        adminSnapshot: frozen,
+        warrantySnapshot: warrantyData,
+        pricingAsOf: "2026-09-01T00:00:00Z",
+      },
       live,
       { warranties: [], highWind: [] },
     );
@@ -160,5 +167,93 @@ describe("resolveBidComputeData (frozen pricing / Update Pricing & Labor)", () =
     expect(cd.admin).toBe(frozen);
     expect(cd.warranty).toBe(warrantyData); // fallback, not dropped
     expect(cd.frozenAsOf).toBe("");
+  });
+});
+
+describe("§17 Home: legacy warranty flags, max wind, per-bid tax", () => {
+  const flagged: WarrantyData = {
+    warranties: [
+      {
+        name: "20 Yr High Wind",
+        pricePerSqFt: 0.13,
+        nonMasterEliteSurcharge: 0,
+        reqThickness: 50,
+        isHighWind: true,
+        termYears: 20,
+      },
+      {
+        name: "15 Yr NDL",
+        pricePerSqFt: 0,
+        nonMasterEliteSurcharge: 0,
+        reqThickness: 40,
+        isHighWind: false,
+        termYears: 15,
+      },
+    ],
+    highWind: [
+      { termYears: 20, windBand: "91-100", mechPerSqFt: 0.13, adheredPerSqFt: 0.14 },
+      { termYears: 15, windBand: "91-100", mechPerSqFt: 0.11, adheredPerSqFt: 0.12 },
+    ],
+  };
+
+  it("the warranty carries IsHighWind + term; the bid only picks Max Expected Wind", () => {
+    const b = buildBidInput(
+      base({ warrantyName: "20 Yr High Wind", maxWindExpected: 100 }),
+      flagged,
+    );
+    expect(b.warrantyIsHighWind).toBe(true);
+    expect(b.warrantyHighWindUpcharge).toBe(0.13); // 20-yr row, 91-100 band, mechanical
+    // a saved highWind toggle cannot turn a non-high-wind warranty into one
+    const ndl = buildBidInput(
+      base({
+        warrantyName: "15 Yr NDL",
+        highWind: true,
+        highWindTermYears: 15,
+        maxWindExpected: 100,
+      }),
+      flagged,
+    );
+    expect(ndl.warrantyIsHighWind).toBe(false);
+    expect(ndl.warrantyHighWindUpcharge).toBe(0);
+  });
+
+  it("warranty rows without the flags (older snapshots) fall back to the saved high-wind fields", () => {
+    const eff = effectiveHighWind(
+      base({
+        warrantyName: "15 + 5 Yr Material & Labor",
+        highWind: true,
+        highWindTermYears: 15,
+        highWindBand: "101-110",
+      }),
+      warrantyData,
+    );
+    expect(eff).toEqual({ isHighWind: true, termYears: 15, band: "101-110", fromWarranty: false });
+  });
+
+  it("MAX_WIND_OPTIONS mirror the legacy cbMaxWind list (label → MaxWindExpected → band)", () => {
+    expect(MAX_WIND_OPTIONS.map((o) => o.value)).toEqual([72, 80, 90, 100, 110, 120]);
+    expect(MAX_WIND_OPTIONS.map((o) => o.label)).toEqual([
+      "55-72 mph",
+      "73-80 mph",
+      "81-90 mph",
+      "91-100 mph",
+      "101-110 mph",
+      "111-120 mph",
+    ]);
+  });
+
+  it("per-bid sales tax / tax mode pass through only when set", () => {
+    expect(savedToBidInput(base()).salesTaxRate).toBeUndefined();
+    expect(savedToBidInput(base()).taxMaterialOnly).toBeUndefined();
+    const b = savedToBidInput(base({ salesTaxRate: 0.07, taxMaterialOnly: false }));
+    expect(b.salesTaxRate).toBe(0.07);
+    expect(b.taxMaterialOnly).toBe(false);
+  });
+
+  it("cityStZip joins the parts the way the legacy 'City St, Zip' line reads", () => {
+    expect(cityStZip("Saginaw", "MI", "48601")).toBe("Saginaw, MI 48601");
+    expect(cityStZip("Saginaw", "", "")).toBe("Saginaw");
+    expect(cityStZip("", "MI", "48601")).toBe("MI 48601");
+    expect(cityStZip()).toBe("");
   });
 });

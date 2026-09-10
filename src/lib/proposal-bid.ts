@@ -36,6 +36,46 @@ export interface CustomerInfo {
   jobNumber?: string;
   shipVia?: string;
   estimatorName?: string; // legacy Home > General Info "Estimator's Name"
+  // Legacy frmHome Client tab (ClientAddress1/2, ClientCity/State/Zip, ClientExtension,
+  // ClientFax) and Job Site tab (Address2, City/State/Zip, ShipTo). `clientAddress` doubles as
+  // Address 1 and `projectAddress` as the job-site Address 1; `jobCityStZip` stays the combined
+  // job-site line the proposal prints (kept in sync from the parts).
+  clientAddress2?: string;
+  clientCity?: string;
+  clientState?: string;
+  clientZip?: string;
+  phoneExt?: string;
+  fax?: string;
+  projectAddress2?: string;
+  jobCity?: string;
+  jobState?: string;
+  jobZip?: string;
+  shipTo?: string;
+}
+
+/** Legacy Home "Building Type" list (Estimate.BuildingType). */
+export const BUILDING_TYPES = ["Commercial", "Residential"] as const;
+
+/**
+ * Legacy Home "Max Expected Wind" combo (frmHome.LoadEstimate): label → Estimate.MaxWindExpected
+ * → the high_wind_upcharges wind_band key.
+ */
+export const MAX_WIND_OPTIONS: ReadonlyArray<{ label: string; value: number; band: string }> = [
+  { label: "55-72 mph", value: 72, band: "55-72" },
+  { label: "73-80 mph", value: 80, band: "73-80" },
+  { label: "81-90 mph", value: 90, band: "81-90" },
+  { label: "91-100 mph", value: 100, band: "91-100" },
+  { label: "101-110 mph", value: 110, band: "101-110" },
+  { label: "111-120 mph", value: 120, band: "111-120" },
+];
+
+/** Combined "City, ST Zip" line from the parts (blank parts skipped). */
+export function cityStZip(city?: string, state?: string, zip?: string): string {
+  const c = (city ?? "").trim();
+  const st = (state ?? "").trim();
+  const z = (zip ?? "").trim();
+  const left = [c, st].filter(Boolean).join(", ");
+  return [left, z].filter(Boolean).join(" ");
 }
 
 export const emptyCustomer = (): CustomerInfo => ({
@@ -92,7 +132,30 @@ export interface SavedBidState {
     thickness: number;
     color: string;
     sheetSizeLabel: string;
+    /** Legacy Home "Design Table (psf)" default (Estimate.defaultRoofSection.DesignTable). */
+    designTable?: number;
   };
+  /** Legacy Home "5. Parapets Material" + "2. Wall Type" defaults for NEW parapets. */
+  parapetDefaults?: {
+    thicknessMil?: number;
+    color?: string;
+    /** 1 = Wood or Metal, 4 = Brick or Concrete (Parapet.WallType). */
+    wallType?: number;
+  };
+  /** Legacy Home "4. Underlayment Attached With" default (new layers only). */
+  underlaymentAttachmentDefault?: "mechanical" | "adhesive" | "none";
+  /** Legacy Home General Info: Building Type (Commercial / Residential), start date (ISO date). */
+  buildingType?: string;
+  startDate?: string;
+  /**
+   * Legacy per-estimate sales tax (Estimate.SalesTax as a FRACTION, Estimate.TaxMaterialOnly):
+   * seeded from Settings on a new bid, editable on Home, zeroed / disabled while Tax Exempt.
+   * Absent = the company settings (older saved bids).
+   */
+  salesTaxRate?: number;
+  taxMaterialOnly?: boolean;
+  /** Legacy Estimate.MaxWindExpected (72…120; the high-wind band = MAX_WIND_OPTIONS). */
+  maxWindExpected?: number;
   /** Membrane adhesive for fully-adhered bids (defaults to Water Based Adhesive). */
   membraneAdhesiveName?: string;
   warrantyName?: string;
@@ -127,13 +190,46 @@ export function markupTypeToMode(t: string): MarkupMode | null {
 
 /** Warranty admin data the resolver needs (from the warranties + high_wind_upcharges tables). */
 export interface WarrantyData {
-  warranties: Array<{ name: string; pricePerSqFt: number; nonMasterEliteSurcharge: number }>;
+  warranties: Array<{
+    name: string;
+    pricePerSqFt: number;
+    nonMasterEliteSurcharge: number;
+    /** Legacy Warranty.ReqThickness / IsHighWind / WarrantyTerm (absent on older snapshots). */
+    reqThickness?: number;
+    isHighWind?: boolean;
+    termYears?: number;
+  }>;
   highWind: Array<{
     termYears: number;
     windBand: string;
     mechPerSqFt: number;
     adheredPerSqFt: number;
   }>;
+}
+
+/**
+ * Legacy high-wind semantics (frmHome.cbWarranty_SelectedIndexChanged): the warranty itself
+ * carries IsHighWind and its term (WarrantyHighWind keys on WarrantyLength × MaxWindExpected);
+ * the estimator only picks "Max Expected Wind". Warranty rows without the flags (older
+ * snapshots) fall back to the bid's saved highWind / term; the band comes from maxWindExpected
+ * when set, else the saved highWindBand.
+ */
+export function effectiveHighWind(
+  s: Pick<
+    SavedBidState,
+    "warrantyName" | "highWind" | "highWindTermYears" | "highWindBand" | "maxWindExpected"
+  >,
+  data: Pick<WarrantyData, "warranties">,
+): { isHighWind: boolean; termYears: number; band: string; fromWarranty: boolean } {
+  const w = data.warranties.find((x) => x.name === s.warrantyName);
+  const fromWarranty = w?.isHighWind !== undefined;
+  const isHighWind = fromWarranty ? (w!.isHighWind as boolean) : (s.highWind ?? false);
+  const termYears = w?.termYears ?? s.highWindTermYears ?? 0;
+  const band =
+    s.maxWindExpected !== undefined
+      ? (MAX_WIND_OPTIONS.find((o) => o.value === s.maxWindExpected)?.band ?? "")
+      : (s.highWindBand ?? "");
+  return { isHighWind, termYears, band, fromWarranty };
 }
 
 /** Resolve the selected warranty (+ high-wind) into the engine's numeric warranty inputs. */
@@ -148,12 +244,11 @@ export function resolveWarrantyInput(
   | "warrantyHighWindUpcharge"
 > {
   const w = data.warranties.find((x) => x.name === s.warrantyName);
-  const isHighWind = s.highWind ?? false;
+  const eff = effectiveHighWind(s, data);
+  const isHighWind = eff.isHighWind;
   let highWindUpcharge = 0;
   if (isHighWind) {
-    const hw = data.highWind.find(
-      (x) => x.termYears === s.highWindTermYears && x.windBand === s.highWindBand,
-    );
+    const hw = data.highWind.find((x) => x.termYears === eff.termYears && x.windBand === eff.band);
     highWindUpcharge = hw ? (s.attachment === "adhered" ? hw.adheredPerSqFt : hw.mechPerSqFt) : 0;
   }
   return {
@@ -239,6 +334,8 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     adjustSetupPct: s.adjustSetupPct ?? 0,
     adjustInspectionPct: s.adjustInspectionPct ?? 0,
     ...(s.laborTemplateName ? { laborTemplateName: s.laborTemplateName } : {}),
+    ...(s.salesTaxRate !== undefined ? { salesTaxRate: s.salesTaxRate } : {}),
+    ...(s.taxMaterialOnly !== undefined ? { taxMaterialOnly: s.taxMaterialOnly } : {}),
     extraShipping: s.extraShipping ?? 0,
     subsCost: 0,
     servicesCost: 0,

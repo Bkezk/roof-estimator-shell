@@ -121,7 +121,9 @@ export const getWarrantyData = createServerFn({ method: "GET" })
     const [wRes, hwRes] = await Promise.all([
       context.supabase
         .from("warranties")
-        .select("name, price_per_sqft, non_master_elite_surcharge")
+        .select(
+          "name, price_per_sqft, non_master_elite_surcharge, req_thickness, is_high_wind, term_years",
+        )
         .order("sort"),
       context.supabase
         .from("high_wind_upcharges")
@@ -135,6 +137,9 @@ export const getWarrantyData = createServerFn({ method: "GET" })
         name: w.name,
         pricePerSqFt: Number(w.price_per_sqft),
         nonMasterEliteSurcharge: Number(w.non_master_elite_surcharge),
+        reqThickness: Number(w.req_thickness ?? 40),
+        isHighWind: !!w.is_high_wind,
+        termYears: Number(w.term_years ?? 15),
       })),
       highWind: (hwRes.data ?? []).map((h) => ({
         termYears: Number(h.term_years),

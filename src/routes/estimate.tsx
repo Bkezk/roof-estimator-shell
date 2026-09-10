@@ -58,7 +58,11 @@ import {
 } from "@/lib/engine/accessories";
 import { emptyMetalsState, normalizeMetalsState, type MetalsState } from "@/lib/engine/metals";
 import {
+  BUILDING_TYPES,
+  MAX_WIND_OPTIONS,
   buildBidInput,
+  cityStZip,
+  effectiveHighWind,
   emptyCustomer,
   markupTypeToMode,
   resolveBidComputeData,
@@ -66,6 +70,18 @@ import {
   type SavedBidState,
   type WarrantyData,
 } from "@/lib/proposal-bid";
+import { LEGACY_ROOF_SYSTEM_IDS, universalFastenerSpacing } from "@/lib/engine/fastener-spacing";
+import { DESIGN_TABLE_OPTIONS } from "@/lib/engine/fastener-spacing";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
@@ -346,12 +362,32 @@ function EstimatePage() {
   const [laborTemplateName, setLaborTemplateName] = useState("");
   const [warrantyName, setWarrantyName] = useState("");
   // Legacy Home > Defaults panel: material defaults for NEW roof sections.
-  const [sectionDefaults, setSectionDefaults] = useState({
+  const [sectionDefaults, setSectionDefaults] = useState<
+    NonNullable<SavedBidState["sectionDefaults"]>
+  >({
     deckType: "Wood",
     thickness: 40,
     color: "White",
     sheetSizeLabel: "1500 sf",
+    designTable: 60,
   });
+  // Legacy Home "5. Parapets Material" / "2. Wall Type" / "4. Underlayment Attached With" defaults.
+  const [parapetDefaults, setParapetDefaults] = useState<
+    NonNullable<SavedBidState["parapetDefaults"]>
+  >({ wallType: 1 });
+  const [underlaymentAttachmentDefault, setUnderlaymentAttachmentDefault] = useState<
+    "mechanical" | "adhesive" | "none"
+  >("mechanical");
+  // Legacy Home General Info: Building Type + Date Created (Estimate.StartDate, editable).
+  const [buildingType, setBuildingType] = useState<string>("Commercial");
+  const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  // Legacy per-estimate sales tax (null = the company settings; Tax Exempt zeroes it).
+  const [salesTaxRate, setSalesTaxRate] = useState<number | null>(null);
+  const [taxMaterialOnly, setTaxMaterialOnly] = useState<boolean | null>(null);
+  // Legacy Estimate.MaxWindExpected (the high-wind band picker on Home).
+  const [maxWindExpected, setMaxWindExpected] = useState<number | undefined>(undefined);
+  const [showLaborMarkup, setShowLaborMarkup] = useState(false);
+  const [confirmApplySections, setConfirmApplySections] = useState(false);
   const [selSection, setSelSection] = useState(0);
   const [selParapet, setSelParapet] = useState(0);
   const [selCurb, setSelCurb] = useState(0);
@@ -488,7 +524,22 @@ function EstimatePage() {
       setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
       setLaborTemplateName(d.laborTemplateName ?? "");
       setWarrantyName(d.warrantyName ?? "");
-      if (d.sectionDefaults) setSectionDefaults({ ...d.sectionDefaults });
+      if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
+      setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 1 });
+      setUnderlaymentAttachmentDefault(d.underlaymentAttachmentDefault ?? "mechanical");
+      if (d.underlaymentAttachmentDefault && d.underlaymentAttachmentDefault !== "none")
+        setUAttach(d.underlaymentAttachmentDefault);
+      setBuildingType(d.buildingType ?? "Commercial");
+      setStartDate(
+        d.startDate ??
+          ((loadedBid as { created_at?: string }).created_at ?? new Date().toISOString()).slice(
+            0,
+            10,
+          ),
+      );
+      setSalesTaxRate(d.salesTaxRate ?? null);
+      setTaxMaterialOnly(d.taxMaterialOnly ?? null);
+      setMaxWindExpected(d.maxWindExpected);
       setHighWind(d.highWind ?? false);
       setHighWindTermYears(d.highWindTermYears ?? 0);
       setHighWindBand(d.highWindBand ?? "");
@@ -571,10 +622,6 @@ function EstimatePage() {
     Object.keys(admin?.adhesiveTimes?.bySubstrate[adhesive] ?? {});
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
   const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
-  const hwTerms = [...new Set(warrantyData?.highWind.map((h) => h.termYears) ?? [])].sort(
-    (a, b) => a - b,
-  );
-  const hwBands = [...new Set(warrantyData?.highWind.map((h) => h.windBand) ?? [])];
 
   const saved: SavedBidState = {
     roofSystem,
@@ -607,12 +654,44 @@ function EstimatePage() {
     adjustInspectionPct,
     laborTemplateName,
     sectionDefaults,
+    parapetDefaults,
+    underlaymentAttachmentDefault,
+    buildingType,
+    startDate,
+    ...(salesTaxRate !== null ? { salesTaxRate } : {}),
+    ...(taxMaterialOnly !== null ? { taxMaterialOnly } : {}),
+    ...(maxWindExpected !== undefined ? { maxWindExpected } : {}),
     warrantyName,
     highWind,
     highWindTermYears,
     highWindBand,
   };
   const bid: BidInput = buildBidInput(saved, warrantyData);
+  // Legacy high-wind semantics: the warranty carries IsHighWind + its term; the bid picks the
+  // Max Expected Wind band (docs §17).
+  const effHighWind = warrantyData ? effectiveHighWind(saved, warrantyData) : null;
+  const selectedWarranty = warrantyData?.warranties.find((w) => w.name === warrantyName);
+  // Legacy frmMembTypeSelect: sections thinner than the warranty's ReqThickness.
+  const thinSections = selectedWarranty?.reqThickness
+    ? sections.filter((sec) => sec.thickness < selectedWarranty.reqThickness!)
+    : [];
+  // Legacy frmHome.TestForEnhancement on the default section (pull test 350, lap 60).
+  const defaultsEnhancement = (() => {
+    if (!fastenerLookup?.length || attachment !== "mechanical") return null;
+    const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
+    if (!rsId) return null;
+    const r = universalFastenerSpacing(fastenerLookup, {
+      roofSystemId: rsId,
+      thickness: sectionDefaults.thickness,
+      designTable: sectionDefaults.designTable ?? 60,
+      tabSpacings: [60],
+      pullTest: 350,
+      columnOffset: 0,
+    });
+    return r.ok ? null : "<- Enhancement Necessary";
+  })();
+  const effSalesTaxRate = salesTaxRate ?? admin?.settings.salesTax ?? 0;
+  const effTaxMaterialOnly = taxMaterialOnly ?? admin?.settings.taxMaterialOnly ?? false;
 
   const result = useMemo(() => {
     if (!admin) return null;
@@ -945,8 +1024,8 @@ function EstimatePage() {
         </div>
 
         <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"}>
-          {/* Legacy Home: "Setup" panel (Bid Info | Client | Job Site) on the left,
-            "Defaults" panel on the right. */}
+          {/* Legacy frmHome: "Setup" panel (Bid Info | Client | Job Site) on the left, the
+              "Defaults" panel on the right (docs §17). */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Setup</CardTitle>
@@ -961,21 +1040,38 @@ function EstimatePage() {
                 <TabsContent value="bidinfo" className="space-y-3 pt-2">
                   <LegacyGroup title="1. General Info">
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Customer name">
+                      <Field label="Customer Name">
                         <Input
                           value={customer.name}
                           onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
                         />
                       </Field>
-                      <Field label="Job name">
-                        <Input value={bidName} onChange={(e) => setBidName(e.target.value)} />
+                      <Field label="Job Name">
+                        <Input
+                          value={bidName}
+                          onChange={(e) => setBidName(e.target.value)}
+                          onBlur={() => {
+                            // Legacy txtEstimateTitle_LostFocus: "Bid Title cannot be left blank."
+                            if (bidName.trim() === "") {
+                              toast.error("Bid Title cannot be left blank.");
+                              setBidName("Untitled bid");
+                            }
+                          }}
+                        />
                       </Field>
-                      <Field label="Estimator's name">
+                      <Field label="Estimator's Name">
                         <Input
                           value={customer.estimatorName ?? ""}
                           onChange={(e) =>
                             setCustomer((c) => ({ ...c, estimatorName: e.target.value }))
                           }
+                        />
+                      </Field>
+                      <Field label="Date Created">
+                        <Input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
                         />
                       </Field>
                       <Field label="Status">
@@ -995,13 +1091,15 @@ function EstimatePage() {
                           </SelectContent>
                         </Select>
                       </Field>
-                      <Field label="Date created">
-                        <Input
-                          value={new Date(
-                            (loadedBid as { created_at?: string } | null | undefined)?.created_at ??
-                              Date.now(),
-                          ).toLocaleDateString()}
-                          disabled
+                      <Field label="Building Type">
+                        <PickOne
+                          value={buildingType}
+                          options={
+                            (BUILDING_TYPES as readonly string[]).includes(buildingType)
+                              ? BUILDING_TYPES
+                              : [buildingType, ...BUILDING_TYPES]
+                          }
+                          onChange={setBuildingType}
                         />
                       </Field>
                     </div>
@@ -1009,23 +1107,19 @@ function EstimatePage() {
                   <LegacyGroup title="2. Labor &amp; Markup Setup">
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                       <span>
-                        Labor:{" "}
-                        <span className="font-semibold">${laborRate.toFixed(2)} per hour</span>
+                        Labor: <span className="font-semibold">{money(laborRate)} per hour</span>
                       </span>
                       <span>
                         Markup:{" "}
                         <span className="font-semibold">
-                          {markup}% ({MARKUP_LABELS[markupMode]})
+                          {markupMode === 1
+                            ? `${money(markup)} per day`
+                            : markupMode === 2
+                              ? `${markup}% (Gross)`
+                              : `${markup}%`}
                         </span>
                       </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setShowPricingSettings(true);
-                          goStep(STEPS.findIndex((st) => st.key === "review"));
-                        }}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => setShowLaborMarkup(true)}>
                         Click here to edit
                       </Button>
                     </div>
@@ -1035,11 +1129,26 @@ function EstimatePage() {
                       <PickOne
                         value={laborTemplateName || "None"}
                         options={laborTemplateOptions}
-                        onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
+                        onChange={(v) => {
+                          // Legacy cboTemplate_SelectedIndexChanged warning on an existing bid.
+                          if (
+                            bidId &&
+                            laborTemplateName !== (v === "None" ? "" : v) &&
+                            !window.confirm(
+                              "Are you sure you want to change your labor template? This will override all manually entered labor settings.",
+                            )
+                          )
+                            return;
+                          setLaborTemplateName(v === "None" ? "" : v);
+                        }}
                       />
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Per-category labor modifiers (composed with the bid&apos;s adjust
+                        percentages).
+                      </p>
                     </LegacyGroup>
                     <LegacyGroup title="4. Estimator Commission">
-                      <Field label="Commission rate (%)">
+                      <Field label="Commission Rate (%)">
                         <Input
                           type="number"
                           step="0.1"
@@ -1050,17 +1159,50 @@ function EstimatePage() {
                     </LegacyGroup>
                   </div>
                   <LegacyGroup title="5. Tax Exempt">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Switch
-                        id="setup-taxexempt"
-                        checked={taxExempt}
-                        onCheckedChange={setTaxExempt}
-                      />
-                      <Label htmlFor="setup-taxexempt" className="text-xs">
-                        Tax exempt
-                      </Label>
-                      <span className="text-xs text-muted-foreground">
-                        Sales-tax rate &amp; only-tax-material come from Admin › General.
+                    <div className="flex flex-wrap items-end gap-4">
+                      <label className="flex items-center gap-2 pb-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={taxExempt}
+                          onChange={(e) => {
+                            // Legacy chkTaxExempt_CheckedChanged: exempt → SalesTax 0 and the
+                            // tax controls disabled; un-exempt → back to the company Settings.
+                            const on = e.target.checked;
+                            setTaxExempt(on);
+                            if (on) setSalesTaxRate(0);
+                            else {
+                              setSalesTaxRate(null);
+                              setTaxMaterialOnly(null);
+                            }
+                          }}
+                        />
+                        Tax Exempt
+                      </label>
+                      <Field label="Sales Tax (%)">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          className="w-[120px]"
+                          disabled={taxExempt}
+                          value={
+                            taxExempt ? "0.0" : Math.round(effSalesTaxRate * 100 * 10000) / 10000
+                          }
+                          onChange={(e) => setSalesTaxRate(num(e.target.value) / 100)}
+                        />
+                      </Field>
+                      <label className="flex items-center gap-2 pb-2 text-xs">
+                        <input
+                          type="checkbox"
+                          disabled={taxExempt}
+                          checked={effTaxMaterialOnly}
+                          onChange={(e) => setTaxMaterialOnly(e.target.checked)}
+                        />
+                        Only Tax Material
+                      </label>
+                      <span className="pb-2 text-xs text-muted-foreground">
+                        {salesTaxRate === null && taxMaterialOnly === null
+                          ? "Using Admin › General defaults for this bid."
+                          : "Bid-level override (Admin › General is the default)."}
                       </span>
                     </div>
                   </LegacyGroup>
@@ -1074,34 +1216,96 @@ function EstimatePage() {
                   </LegacyGroup>
                 </TabsContent>
                 <TabsContent value="client" className="pt-2">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Contact person">
-                      <Input
-                        value={customer.contact}
-                        onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Phone">
-                      <Input
-                        value={customer.phone ?? ""}
-                        onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="E-mail">
-                      <Input
-                        value={customer.email ?? ""}
-                        onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
-                      />
-                    </Field>
-                    <Field label="Client address (street, city/st/zip)">
-                      <Input
-                        value={customer.clientAddress ?? ""}
-                        onChange={(e) =>
-                          setCustomer((c) => ({ ...c, clientAddress: e.target.value }))
-                        }
-                      />
-                    </Field>
-                  </div>
+                  <LegacyGroup title="Client Information">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Company Name">
+                        <Input
+                          value={customer.name}
+                          onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                        />
+                      </Field>
+                      <Field label="Contact Person">
+                        <Input
+                          value={customer.contact}
+                          onChange={(e) => setCustomer((c) => ({ ...c, contact: e.target.value }))}
+                        />
+                      </Field>
+                      <Field label="Address 1">
+                        <Input
+                          value={customer.clientAddress ?? ""}
+                          onChange={(e) =>
+                            setCustomer((c) => ({ ...c, clientAddress: e.target.value }))
+                          }
+                        />
+                      </Field>
+                      <Field label="Address 2">
+                        <Input
+                          value={customer.clientAddress2 ?? ""}
+                          onChange={(e) =>
+                            setCustomer((c) => ({ ...c, clientAddress2: e.target.value }))
+                          }
+                        />
+                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="City St, Zip">
+                          <div className="grid grid-cols-[minmax(0,1fr)_70px_110px] gap-2">
+                            <Input
+                              placeholder="City"
+                              value={customer.clientCity ?? ""}
+                              onChange={(e) =>
+                                setCustomer((c) => ({ ...c, clientCity: e.target.value }))
+                              }
+                            />
+                            <Input
+                              placeholder="ST"
+                              value={customer.clientState ?? ""}
+                              onChange={(e) =>
+                                setCustomer((c) => ({ ...c, clientState: e.target.value }))
+                              }
+                            />
+                            <Input
+                              placeholder="Zip"
+                              value={customer.clientZip ?? ""}
+                              onChange={(e) =>
+                                setCustomer((c) => ({ ...c, clientZip: e.target.value }))
+                              }
+                            />
+                          </div>
+                        </Field>
+                      </div>
+                      <Field label="Phone x Ext">
+                        <div className="grid grid-cols-[minmax(0,1fr)_80px] gap-2">
+                          <Input
+                            value={customer.phone ?? ""}
+                            onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))}
+                          />
+                          <Input
+                            placeholder="ext"
+                            value={customer.phoneExt ?? ""}
+                            onChange={(e) =>
+                              setCustomer((c) => ({ ...c, phoneExt: e.target.value }))
+                            }
+                          />
+                        </div>
+                      </Field>
+                      <Field label="Fax">
+                        <Input
+                          value={customer.fax ?? ""}
+                          onChange={(e) => setCustomer((c) => ({ ...c, fax: e.target.value }))}
+                        />
+                      </Field>
+                      <Field label="E-Mail">
+                        <Input
+                          value={customer.email ?? ""}
+                          onChange={(e) => setCustomer((c) => ({ ...c, email: e.target.value }))}
+                        />
+                      </Field>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      The legacy client list (Edit Client Information) is not carried over; the
+                      client lives on this bid.
+                    </p>
+                  </LegacyGroup>
                 </TabsContent>
                 <TabsContent value="jobsite" className="space-y-3 pt-2">
                   <Button
@@ -1109,13 +1313,22 @@ function EstimatePage() {
                     size="sm"
                     className="h-6 px-2 text-xs"
                     onClick={() =>
-                      setCustomer((c) => ({ ...c, projectAddress: c.clientAddress ?? "" }))
+                      // Legacy llbCopyClient: Address 1/2, City, State, Zip from the client.
+                      setCustomer((c) => ({
+                        ...c,
+                        projectAddress: c.clientAddress ?? "",
+                        projectAddress2: c.clientAddress2 ?? "",
+                        jobCity: c.clientCity ?? "",
+                        jobState: c.clientState ?? "",
+                        jobZip: c.clientZip ?? "",
+                        jobCityStZip: cityStZip(c.clientCity, c.clientState, c.clientZip),
+                      }))
                     }
                   >
-                    <Copy className="mr-1 h-3 w-3" /> Copy client address
+                    <Copy className="mr-1 h-3 w-3" /> Copy Client Address
                   </Button>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Project address (street)">
+                    <Field label="Address 1">
                       <Input
                         value={customer.projectAddress}
                         onChange={(e) =>
@@ -1123,24 +1336,71 @@ function EstimatePage() {
                         }
                       />
                     </Field>
-                    <Field label="City / St. / Zip">
+                    <Field label="Address 2">
                       <Input
-                        value={customer.jobCityStZip ?? ""}
+                        value={customer.projectAddress2 ?? ""}
                         onChange={(e) =>
-                          setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))
+                          setCustomer((c) => ({ ...c, projectAddress2: e.target.value }))
                         }
                       />
                     </Field>
+                    <div className="sm:col-span-2">
+                      <Field label="City St, Zip">
+                        {!customer.jobCity &&
+                        !customer.jobState &&
+                        !customer.jobZip &&
+                        customer.jobCityStZip ? (
+                          <Input
+                            title="Older bid: combined city / state / zip line"
+                            value={customer.jobCityStZip}
+                            onChange={(e) =>
+                              setCustomer((c) => ({ ...c, jobCityStZip: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          <div className="grid grid-cols-[minmax(0,1fr)_70px_110px] gap-2">
+                            {(
+                              [
+                                ["jobCity", "City"],
+                                ["jobState", "ST"],
+                                ["jobZip", "Zip"],
+                              ] as const
+                            ).map(([key, ph]) => (
+                              <Input
+                                key={key}
+                                placeholder={ph}
+                                value={customer[key] ?? ""}
+                                onChange={(e) =>
+                                  setCustomer((c) => {
+                                    const nx = { ...c, [key]: e.target.value };
+                                    return {
+                                      ...nx,
+                                      jobCityStZip: cityStZip(nx.jobCity, nx.jobState, nx.jobZip),
+                                    };
+                                  })
+                                }
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </Field>
+                    </div>
                     <Field label="Job #">
                       <Input
                         value={customer.jobNumber ?? ""}
                         onChange={(e) => setCustomer((c) => ({ ...c, jobNumber: e.target.value }))}
                       />
                     </Field>
-                    <Field label="Ship via">
+                    <Field label="Ship Via">
                       <Input
                         value={customer.shipVia ?? ""}
                         onChange={(e) => setCustomer((c) => ({ ...c, shipVia: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Ship To">
+                      <Input
+                        value={customer.shipTo ?? ""}
+                        onChange={(e) => setCustomer((c) => ({ ...c, shipTo: e.target.value }))}
                       />
                     </Field>
                   </div>
@@ -1150,24 +1410,45 @@ function EstimatePage() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Defaults</CardTitle>
-              <CardDescription>
-                Used when adding new roof sections; existing sections keep their values unless you
-                apply.
-              </CardDescription>
+            <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+              <div>
+                <CardTitle className="text-base">Defaults</CardTitle>
+                <CardDescription>
+                  Manufacturer: Duro-Last. Used when adding new roof sections / parapets /
+                  underlayment; existing items keep their values unless you apply.
+                </CardDescription>
+              </div>
+              {frozenAsOf !== null && (
+                <Button variant="outline" size="sm" onClick={refreshPricing}>
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update Pricing &amp; Labor
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-3">
-              <LegacyGroup title="1. Deck Type">
-                <PickOne
-                  value={sectionDefaults.deckType}
-                  options={admin.deckOrder}
-                  onChange={(v) => setSectionDefaults((p) => ({ ...p, deckType: v }))}
-                />
-              </LegacyGroup>
-              <LegacyGroup title="2. Roof Sections Material">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <LegacyGroup title="1. Deck Type">
+                  <PickOne
+                    value={sectionDefaults.deckType}
+                    options={admin.deckOrder}
+                    onChange={(v) => setSectionDefaults((p) => ({ ...p, deckType: v }))}
+                  />
+                </LegacyGroup>
+                <LegacyGroup title="2. Wall Type">
+                  <PickOne
+                    value={parapetDefaults.wallType === 4 ? "Brick or Concrete" : "Wood or Metal"}
+                    options={["Wood or Metal", "Brick or Concrete"]}
+                    onChange={(v) =>
+                      setParapetDefaults((p) => ({
+                        ...p,
+                        wallType: v === "Brick or Concrete" ? 4 : 1,
+                      }))
+                    }
+                  />
+                </LegacyGroup>
+              </div>
+              <LegacyGroup title="3. Roof Sections Material">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <Field label="Roof system">
+                  <Field label="Roof System">
                     <Select value={roofSystem} onValueChange={setRoofSystem}>
                       <SelectTrigger>
                         <SelectValue />
@@ -1181,7 +1462,7 @@ function EstimatePage() {
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="Attached with">
+                  <Field label="Attached With">
                     <Select
                       value={attachment}
                       onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
@@ -1190,13 +1471,13 @@ function EstimatePage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="mechanical">Mechanical</SelectItem>
-                        <SelectItem value="adhered">Adhered</SelectItem>
+                        <SelectItem value="mechanical">Mechanically Fastened</SelectItem>
+                        <SelectItem value="adhered">(No Tab) Fully Adhered</SelectItem>
                       </SelectContent>
                     </Select>
                   </Field>
                   {attachment === "adhered" && (
-                    <Field label="Adhesive">
+                    <Field label="Attached To">
                       <PickOne
                         value={membraneAdhesive}
                         options={["Water Based Adhesive", "Solvent Based Adhesive"]}
@@ -1218,7 +1499,16 @@ function EstimatePage() {
                       onChange={(v) => setSectionDefaults((p) => ({ ...p, color: v }))}
                     />
                   </Field>
-                  <Field label="Avg sheet">
+                  <Field label="Design Table (psf)">
+                    <PickOne
+                      value={String(sectionDefaults.designTable ?? 60)}
+                      options={DESIGN_TABLE_OPTIONS.map(String)}
+                      onChange={(v) =>
+                        setSectionDefaults((p) => ({ ...p, designTable: Number(v) }))
+                      }
+                    />
+                  </Field>
+                  <Field label="Avg Sheet Size">
                     <PickOne
                       value={sectionDefaults.sheetSizeLabel}
                       options={sheetSizeOptions}
@@ -1226,37 +1516,352 @@ function EstimatePage() {
                     />
                   </Field>
                 </div>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={sections.length === 0}
+                    onClick={() => setConfirmApplySections(true)}
+                  >
+                    Apply To Existing Roof Sections
+                  </Button>
+                  {defaultsEnhancement && (
+                    <span className="text-xs font-medium text-destructive">
+                      {defaultsEnhancement}
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    Per-section perimeter &amp; enhancement lives on the Sections step.
+                  </span>
+                </div>
+              </LegacyGroup>
+              <LegacyGroup title="4. Underlayment Attached With">
+                <div className="flex flex-wrap items-center gap-3">
+                  <PickOne
+                    value={
+                      underlaymentAttachmentDefault === "none"
+                        ? "None"
+                        : underlaymentAttachmentDefault === "adhesive"
+                          ? "Adhesive"
+                          : "Mechanically Fastened"
+                    }
+                    options={["None", "Mechanically Fastened", "Adhesive"]}
+                    onChange={(v) => {
+                      const next =
+                        v === "None" ? "none" : v === "Adhesive" ? "adhesive" : "mechanical";
+                      setUnderlaymentAttachmentDefault(next);
+                      if (next !== "none") setUAttach(next);
+                    }}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    (will not apply to existing underlayment)
+                  </span>
+                </div>
+              </LegacyGroup>
+              <LegacyGroup title="5. Parapets Material">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <Field label="Roof System">
+                    <Input
+                      value={roofSystem}
+                      disabled
+                      title="Parapets follow the bid roof system"
+                    />
+                  </Field>
+                  <Field label="Attached With">
+                    <Input
+                      value={
+                        attachment === "adhered"
+                          ? "(No Tab) Fully Adhered"
+                          : "Mechanically Fastened"
+                      }
+                      disabled
+                    />
+                  </Field>
+                  <Field label="Type">
+                    <PickOne
+                      value={
+                        parapetDefaults.thicknessMil !== undefined
+                          ? String(parapetDefaults.thicknessMil)
+                          : "Bid default"
+                      }
+                      options={["Bid default", "40", "50", "60"]}
+                      onChange={(v) =>
+                        setParapetDefaults((p) => {
+                          const nx = { ...p };
+                          if (v === "Bid default") delete nx.thicknessMil;
+                          else nx.thicknessMil = Number(v);
+                          return nx;
+                        })
+                      }
+                    />
+                  </Field>
+                  <Field label="Color">
+                    <PickOne
+                      value={parapetDefaults.color ?? "Bid default"}
+                      options={["Bid default", ...colorOptions]}
+                      onChange={(v) =>
+                        setParapetDefaults((p) => {
+                          const nx = { ...p };
+                          if (v === "Bid default") delete nx.color;
+                          else nx.color = v;
+                          return nx;
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="mt-3"
+                  className="mt-2"
+                  disabled={parapets.length === 0}
                   onClick={() =>
-                    setSections((p) =>
-                      p.map((s) => ({
-                        ...s,
-                        deckType: sectionDefaults.deckType,
-                        thickness: sectionDefaults.thickness,
-                        color: sectionDefaults.color,
-                        sheetSizeLabel: sectionDefaults.sheetSizeLabel,
-                      })),
+                    // Legacy Button1_Click_1: membrane type + color onto every present parapet.
+                    setParapets((prev) =>
+                      prev.map((pp) => {
+                        const nx: ParapetInput = {
+                          ...pp,
+                          ...(parapetDefaults.wallType !== undefined
+                            ? { wallType: parapetDefaults.wallType }
+                            : {}),
+                        };
+                        if (parapetDefaults.thicknessMil !== undefined)
+                          nx.thicknessMil = parapetDefaults.thicknessMil;
+                        else delete nx.thicknessMil;
+                        if (parapetDefaults.color) nx.color = parapetDefaults.color;
+                        else delete nx.color;
+                        return nx;
+                      }),
                     )
                   }
                 >
-                  Apply to existing roof sections
+                  Apply to Existing Parapets
                 </Button>
               </LegacyGroup>
-              <LegacyGroup title="3. Select Type of Warranty">
-                <PickOne
-                  value={warrantyName || "None"}
-                  options={warrantyOptions}
-                  onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
-                />
-                <p className="mt-2 text-xs text-muted-foreground">
-                  High-wind term &amp; band are in the Review step's Settings panel.
-                </p>
+              <LegacyGroup title="6. Select Type of Warranty">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Warranty">
+                    <PickOne
+                      value={warrantyName || "None"}
+                      options={warrantyOptions}
+                      onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
+                    />
+                  </Field>
+                  <Field label="Max Expected Wind">
+                    <PickOne
+                      value={
+                        MAX_WIND_OPTIONS.find((o) => o.band === effHighWind?.band)?.label ?? "—"
+                      }
+                      options={["—", ...MAX_WIND_OPTIONS.map((o) => o.label)]}
+                      disabled={!effHighWind?.isHighWind}
+                      onChange={(v) =>
+                        setMaxWindExpected(MAX_WIND_OPTIONS.find((o) => o.label === v)?.value)
+                      }
+                    />
+                  </Field>
+                </div>
+                {effHighWind?.isHighWind && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    High-wind warranty ({effHighWind.termYears} yr): the upcharge follows the Max
+                    Expected Wind band and the attachment.
+                  </p>
+                )}
+                {thinSections.length > 0 && (
+                  <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                    <p>
+                      This warranty requires {selectedWarranty!.reqThickness} mil membrane;{" "}
+                      {thinSections.map((sec) => sec.name).join(", ")}{" "}
+                      {thinSections.length === 1 ? "is" : "are"} thinner.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-1 h-7"
+                      onClick={() =>
+                        setSections((prev) =>
+                          prev.map((sec) =>
+                            sec.thickness < selectedWarranty!.reqThickness!
+                              ? { ...sec, thickness: selectedWarranty!.reqThickness! }
+                              : sec,
+                          ),
+                        )
+                      }
+                    >
+                      Use These Thicknesses
+                    </Button>
+                  </div>
+                )}
               </LegacyGroup>
+              <div className="flex justify-end">
+                <Button onClick={() => goStep(1)}>Start!</Button>
+              </div>
             </CardContent>
           </Card>
+
+          {/* Legacy frmLaborTemplate ("Edit Markup & Labor") */}
+          <Dialog open={showLaborMarkup} onOpenChange={setShowLaborMarkup}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Edit Markup &amp; Labor</DialogTitle>
+              </DialogHeader>
+              <p className="text-xs text-muted-foreground">
+                Select an option to copy from and/or manually specify this bid&apos;s labor rate and
+                markup.
+              </p>
+              <div className="space-y-3 text-sm">
+                {(presets?.length ?? 0) > 0 && (
+                  <Field label="Available Markup &amp; Labor options">
+                    <Select value={presetName} onValueChange={applyPreset}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Copy from…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(presets ?? []).map((pr) => (
+                          <SelectItem key={pr.name} value={pr.name}>
+                            {pr.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Hourly Labor">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={laborRate}
+                      onChange={(e) => setLaborRate(num(e.target.value))}
+                    />
+                  </Field>
+                  <Field label="Hours per Man Day">
+                    <Input value={admin.settings.hoursPerDay} disabled />
+                  </Field>
+                  <Field label="Man-Day Labor">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      value={Math.round(laborRate * admin.settings.hoursPerDay * 100) / 100}
+                      onChange={(e) =>
+                        admin.settings.hoursPerDay > 0 &&
+                        setLaborRate(num(e.target.value) / admin.settings.hoursPerDay)
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="mb-1 text-xs font-semibold">Markup</p>
+                  <div className="space-y-1 text-xs">
+                    {(
+                      [
+                        [0, "Percentage of Total Costs"],
+                        [1, "Dollars per Man Day"],
+                        [2, "Gross Profit Percentage"],
+                      ] as Array<[MarkupMode, string]>
+                    ).map(([m, label]) => (
+                      <label key={m} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="markup-mode"
+                          checked={markupMode === m}
+                          onChange={() => setMarkupMode(m)}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-end gap-3">
+                    <Field label={markupMode === 1 ? "Markup ($ per man day)" : "Markup (%)"}>
+                      <Input
+                        type="number"
+                        className="w-[140px]"
+                        value={markup}
+                        onChange={(e) => setMarkup(num(e.target.value))}
+                      />
+                    </Field>
+                    <p className="pb-2 text-xs text-muted-foreground">
+                      {markupMode === 1
+                        ? "Adds X dollars to the bid for each man day calculated."
+                        : markupMode === 2
+                          ? "Price = cost ÷ (1 − markup%)."
+                          : "Price = cost × (1 + markup%)."}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-md border p-2">
+                  <p className="mb-1 text-xs font-semibold">Include prior to Markup</p>
+                  <div className="flex flex-wrap gap-4 text-xs">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={commissionInMarkup}
+                        onChange={(e) => setCommissionInMarkup(e.target.checked)}
+                      />
+                      Commission
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={perDiemInMarkup}
+                        onChange={(e) => setPerDiemInMarkup(e.target.checked)}
+                      />
+                      Per Diem
+                    </label>
+                    <Field label="Per Diem ($/man-day)">
+                      <Input
+                        type="number"
+                        className="h-8 w-[120px]"
+                        value={perDiem}
+                        onChange={(e) => setPerDiem(num(e.target.value))}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setShowLaborMarkup(false)}>Save</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Legacy Button1_Click: "Pressing OK will apply these Material Defaults to ALL
+              existing Roof Sections - Roof System, Design Table, Membrane Type, Color" */}
+          <AlertDialog open={confirmApplySections} onOpenChange={setConfirmApplySections}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Apply To Existing Roof Sections</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Pressing OK will apply these Material Defaults to ALL existing Roof Sections: Roof
+                  System, Attached With, Design Table, Membrane Type, Color.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() =>
+                    setSections((prev) =>
+                      prev.map((sec) => {
+                        // Roof System / Attached With / adhesive: clear the per-section
+                        // overrides so the bid defaults apply (legacy OverwriteWithDefault).
+                        const nx = { ...sec };
+                        delete nx.roofSystem;
+                        delete nx.attachment;
+                        delete nx.membraneAdhesiveName;
+                        return {
+                          ...nx,
+                          designTable: sectionDefaults.designTable ?? 60,
+                          thickness: sectionDefaults.thickness,
+                          color: sectionDefaults.color,
+                        };
+                      }),
+                    )
+                  }
+                >
+                  OK
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
 
         <div className={step === 1 ? "space-y-6" : "hidden"}>
@@ -2028,7 +2633,14 @@ function EstimatePage() {
                 onClick={() => {
                   setParapets((p) => [
                     ...p,
-                    newParapet({ heightBand: admin.parapetLabor?.bands[0] ?? "" }),
+                    newParapet({
+                      heightBand: admin.parapetLabor?.bands[0] ?? "",
+                      wallType: parapetDefaults.wallType ?? 1,
+                      ...(parapetDefaults.thicknessMil !== undefined
+                        ? { thicknessMil: parapetDefaults.thicknessMil }
+                        : {}),
+                      ...(parapetDefaults.color ? { color: parapetDefaults.color } : {}),
+                    }),
                   ]);
                   setSelParapet(parapets.length);
                 }}
@@ -3473,29 +4085,21 @@ function EstimatePage() {
                   onChange={(v) => setWarrantyName(v === "None" ? "" : v)}
                 />
               </Field>
-              <div className="flex items-center gap-2 pb-1">
-                <Switch id="hw" checked={highWind} onCheckedChange={setHighWind} />
-                <Label htmlFor="hw" className="text-xs">
-                  High wind
-                </Label>
-              </div>
-              {highWind && (
-                <>
-                  <Field label="Term (years)">
-                    <PickOne
-                      value={highWindTermYears ? String(highWindTermYears) : ""}
-                      options={hwTerms.map(String)}
-                      onChange={(v) => setHighWindTermYears(Number(v))}
-                    />
-                  </Field>
-                  <Field label="Max wind (mph band)">
-                    <PickOne
-                      value={highWindBand}
-                      options={hwBands}
-                      onChange={(v) => setHighWindBand(v)}
-                    />
-                  </Field>
-                </>
+              {effHighWind?.isHighWind ? (
+                <Field label={`Max Expected Wind (${effHighWind.termYears} yr high-wind warranty)`}>
+                  <PickOne
+                    value={MAX_WIND_OPTIONS.find((o) => o.band === effHighWind.band)?.label ?? "—"}
+                    options={["—", ...MAX_WIND_OPTIONS.map((o) => o.label)]}
+                    onChange={(v) =>
+                      setMaxWindExpected(MAX_WIND_OPTIONS.find((o) => o.label === v)?.value)
+                    }
+                  />
+                </Field>
+              ) : (
+                <p className="pb-2 text-xs text-muted-foreground">
+                  Not a high-wind warranty (the warranty itself carries the high-wind flag and
+                  term).
+                </p>
               )}
             </CardContent>
           </Card>
@@ -4103,13 +4707,15 @@ function PickOne({
   value,
   options,
   onChange,
+  disabled,
 }: {
   value: string;
   options: readonly string[];
   onChange: (v: string) => void;
+  disabled?: boolean;
 }) {
   return (
-    <Select value={value} onValueChange={onChange}>
+    <Select value={value} onValueChange={onChange} disabled={disabled ?? false}>
       <SelectTrigger>
         <SelectValue />
       </SelectTrigger>
