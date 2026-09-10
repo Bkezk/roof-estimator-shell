@@ -186,6 +186,8 @@ const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   wallTopInches: 12,
   dropInches: 0,
   girthInches: 36,
+  // Legacy Setup default "2. Wall Type": Wood or Metal (1) — drives the pre-drill labor column.
+  wallType: 1,
   // Legacy Pieces (membrane pieces wrapping the wall): AdjustedLength = length + 1 + pieces.
   pieces: 1,
   ...defaults,
@@ -2686,35 +2688,9 @@ function EstimatePage() {
                             />
                           </Field>
                           {/* Legacy §8.5: the labor drill column keys WallType (mech; adhered is
-                              always pre-drill) and the cant column keys Cant > 0 — derived, not
-                              separate toggles. Manual switches remain only for legacy walls
-                              saved without those fields. */}
-                          <div
-                            className="flex items-end gap-2 pb-1"
-                            title={
-                              p.wallType !== undefined
-                                ? "Follows Wall Type (legacy): Brick or Concrete pre-drills; adhered bids always pre-drill."
-                                : undefined
-                            }
-                          >
-                            <Switch
-                              id={`pd-${p.id}`}
-                              disabled={p.wallType !== undefined}
-                              checked={
-                                p.wallType !== undefined
-                                  ? attachment !== "mechanical" || p.wallType === 4
-                                  : p.predrill
-                              }
-                              onCheckedChange={(v) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
-                                )
-                              }
-                            />
-                            <Label htmlFor={`pd-${p.id}`} className="text-xs">
-                              Pre-drill{p.wallType !== undefined ? " (from Wall type)" : ""}
-                            </Label>
-                          </div>
+                              always pre-drill) and the cant column keys Cant > 0 — both derived,
+                              so no toggles. Manual switches appear only for legacy walls saved
+                              without those fields. */}
                           {(() => {
                             const hasDims =
                               p.skirtInches !== undefined ||
@@ -2722,29 +2698,63 @@ function EstimatePage() {
                               p.verticalInches !== undefined ||
                               p.wallTopInches !== undefined ||
                               p.dropInches !== undefined;
+                            const hasWallType = p.wallType !== undefined;
+                            const predrill = hasWallType
+                              ? attachment !== "mechanical" || p.wallType === 4
+                              : p.predrill;
+                            const canted = hasDims ? (p.cantInches ?? 0) > 0 : p.canted;
+                            if (hasDims && hasWallType) {
+                              return (
+                                <p
+                                  className="self-end pb-1 text-[11px] text-muted-foreground"
+                                  title="Legacy labor columns: pre-drill follows Wall Type (adhered bids always pre-drill); canted follows the Cant dimension."
+                                >
+                                  Labor: {predrill ? "pre-drill" : "no-drill"}
+                                  {canted ? ", canted" : ""}
+                                </p>
+                              );
+                            }
                             return (
-                              <div
-                                className="flex items-end gap-2 pb-1"
-                                title={
-                                  hasDims
-                                    ? "Follows the Cant dimension (legacy labor keys Cant > 0)."
-                                    : undefined
-                                }
-                              >
-                                <Switch
-                                  id={`ct-${p.id}`}
-                                  disabled={hasDims}
-                                  checked={hasDims ? (p.cantInches ?? 0) > 0 : p.canted}
-                                  onCheckedChange={(v) =>
-                                    setParapets((prev) =>
-                                      prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
-                                    )
-                                  }
-                                />
-                                <Label htmlFor={`ct-${p.id}`} className="text-xs">
-                                  Canted{hasDims ? " (from Cant)" : ""}
-                                </Label>
-                              </div>
+                              <>
+                                {!hasWallType && (
+                                  <div className="flex items-end gap-2 pb-1">
+                                    <Switch
+                                      id={`pd-${p.id}`}
+                                      checked={p.predrill}
+                                      onCheckedChange={(v) =>
+                                        setParapets((prev) =>
+                                          prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
+                                        )
+                                      }
+                                    />
+                                    <Label htmlFor={`pd-${p.id}`} className="text-xs">
+                                      Pre-drill
+                                    </Label>
+                                  </div>
+                                )}
+                                {!hasDims && (
+                                  <div className="flex items-end gap-2 pb-1">
+                                    <Switch
+                                      id={`ct-${p.id}`}
+                                      checked={p.canted}
+                                      onCheckedChange={(v) =>
+                                        setParapets((prev) =>
+                                          prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
+                                        )
+                                      }
+                                    />
+                                    <Label htmlFor={`ct-${p.id}`} className="text-xs">
+                                      Canted
+                                    </Label>
+                                  </div>
+                                )}
+                                {(hasDims || hasWallType) && (
+                                  <p className="self-end pb-1 text-[11px] text-muted-foreground">
+                                    Labor: {predrill ? "pre-drill" : "no-drill"}
+                                    {canted ? ", canted" : ""}
+                                  </p>
+                                )}
+                              </>
                             );
                           })()}
                         </div>
