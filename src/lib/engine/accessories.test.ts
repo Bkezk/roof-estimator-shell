@@ -32,10 +32,34 @@ const CATALOG = [
     data: screen(
       ["Description", "Part #", "White Price", "Tan Price", "Gray Price"],
       [
-        { Description: 'Drip Edge 2"', "Part #": "1220", "White Price": 8.4, "Tan Price": 9.98, "Gray Price": 9.98 },
-        { Description: 'Drip Edge 2" Clip', "Part #": "1228", "White Price": 0, "Tan Price": 0, "Gray Price": 0 },
-        { Description: 'Drip Edge 2" Corner', "Part #": "1558", "White Price": 0, "Tan Price": 0, "Gray Price": 0 },
-        { Description: 'Drip Edge 4"', "Part #": "1583", "White Price": 10.08, "Tan Price": 11.08, "Gray Price": 11.08 },
+        {
+          Description: 'Drip Edge 2"',
+          "Part #": "1220",
+          "White Price": 8.4,
+          "Tan Price": 9.98,
+          "Gray Price": 9.98,
+        },
+        {
+          Description: 'Drip Edge 2" Clip',
+          "Part #": "1228",
+          "White Price": 0,
+          "Tan Price": 0,
+          "Gray Price": 0,
+        },
+        {
+          Description: 'Drip Edge 2" Corner',
+          "Part #": "1558",
+          "White Price": 0,
+          "Tan Price": 0,
+          "Gray Price": 0,
+        },
+        {
+          Description: 'Drip Edge 4"',
+          "Part #": "1583",
+          "White Price": 10.08,
+          "Tan Price": 11.08,
+          "Gray Price": 11.08,
+        },
       ],
     ),
   },
@@ -103,8 +127,22 @@ const CATALOG = [
     data: screen(
       ["Description", "Size", "Price", "Tan Price", "Gray Price"],
       [
-        { Description: '1" Closed Only', Size: "1", Price: 11.7, "Tan Price": 12.7, "Gray Price": 12.7, "Open Part #": "0" },
-        { Description: '4"', Size: "4", Price: 20, "Tan Price": 21, "Gray Price": 21, "Open Part #": "1320" },
+        {
+          Description: '1" Closed Only',
+          Size: "1",
+          Price: 11.7,
+          "Tan Price": 12.7,
+          "Gray Price": 12.7,
+          "Open Part #": "0",
+        },
+        {
+          Description: '4"',
+          Size: "4",
+          Price: 20,
+          "Tan Price": 21,
+          "Gray Price": 21,
+          "Open Part #": "1320",
+        },
       ],
     ),
   },
@@ -114,10 +152,34 @@ const CATALOG = [
     data: screen(
       ["Description", "Part #", "Subtype", "Price/Box", "Fasteners/Box"],
       [
-        { Description: 'Metal Anchors', "Part #": "1241", Subtype: "", "Price/Box": 255, "Fasteners/Box": 1000 },
-        { Description: '1 1/2"', "Part #": "1442", Subtype: "Spade", "Price/Box": 208, "Fasteners/Box": 2000 },
-        { Description: '2" Poly Plates', "Part #": "1305P", Subtype: "DL-Plates", "Price/Box": 290, "Fasteners/Box": 1000 },
-        { Description: '3" Insulation Plates', "Part #": "1305I", Subtype: "DL-Plates", "Price/Box": 240, "Fasteners/Box": 1000 },
+        {
+          Description: "Metal Anchors",
+          "Part #": "1241",
+          Subtype: "",
+          "Price/Box": 255,
+          "Fasteners/Box": 1000,
+        },
+        {
+          Description: '1 1/2"',
+          "Part #": "1442",
+          Subtype: "Spade",
+          "Price/Box": 208,
+          "Fasteners/Box": 2000,
+        },
+        {
+          Description: '2" Poly Plates',
+          "Part #": "1305P",
+          Subtype: "DL-Plates",
+          "Price/Box": 290,
+          "Fasteners/Box": 1000,
+        },
+        {
+          Description: '3" Insulation Plates',
+          "Part #": "1305I",
+          Subtype: "DL-Plates",
+          "Price/Box": 240,
+          "Fasteners/Box": 1000,
+        },
       ],
     ),
   },
@@ -190,7 +252,12 @@ const section = (over: Partial<BidSectionInput>): BidSectionInput => ({
 
 /** The §12.0 anchor bid: section A 55×100 White + section B 1×1 with a 2" Drip Edge side. */
 function anchorArgs(state: AccessoriesState = emptyAccessoriesState()) {
-  const blankEdge = { isPerimeter: false, termination: "No Termination", blockingFt: 0, arpSizeIn: 0 };
+  const blankEdge = {
+    isPerimeter: false,
+    termination: "No Termination",
+    blockingFt: 0,
+    arpSizeIn: 0,
+  };
   return {
     state,
     ref,
@@ -255,7 +322,10 @@ describe("§12.0 anchors (captured legacy bid)", () => {
   it("entered fasteners net the needs and bill by whole boxes (§12.5 shared box count)", () => {
     const st = emptyAccessoriesState();
     st.fastenerQty = {
-      wood: { [fastenerKey('1 1/2"', "Spade")]: 900, [fastenerKey('2" Poly Plates', "DL-Plates")]: 925 },
+      wood: {
+        [fastenerKey('1 1/2"', "Spade")]: 900,
+        [fastenerKey('2" Poly Plates', "DL-Plates")]: 925,
+      },
       dripEdge: { [fastenerKey('1 1/2"', "Spade")]: 21 },
     };
     const r = computeAccessories(anchorArgs(st));
@@ -267,7 +337,9 @@ describe("§12.0 anchors (captured legacy bid)", () => {
     expect(spade.totalQty).toBe(921);
     expect(spade.boxes).toBe(1);
     expect(spade.cost).toBeCloseTo(208, 2);
-    const poly = r.fasteners.rows.find((x) => x.key === fastenerKey('2" Poly Plates', "DL-Plates"))!;
+    const poly = r.fasteners.rows.find(
+      (x) => x.key === fastenerKey('2" Poly Plates', "DL-Plates"),
+    )!;
     expect(poly.boxes).toBe(1);
     expect(r.fasteners.cost).toBeCloseTo(208 + 290, 2);
   });
@@ -275,7 +347,12 @@ describe("§12.0 anchors (captured legacy bid)", () => {
 
 describe("term bar (§12.2)", () => {
   it("prices per ten-rounded scrap foot per colour; fasteners at 21/10 ft; labor split by drill", () => {
-    const blankEdge = { isPerimeter: false, termination: "No Termination", blockingFt: 0, arpSizeIn: 0 };
+    const blankEdge = {
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    };
     const args = anchorArgs();
     args.sections = [
       section({
@@ -372,7 +449,15 @@ describe("pipe stacks & panduit (§12.3/§12.4)", () => {
     args.sections = [section({})];
     const st = emptyAccessoriesState();
     st.pipeStacks = [
-      { id: "ps1", usage: "Plumbing", color: "White", open: true, size: 4, quantity: 2, adjustPct: 0 },
+      {
+        id: "ps1",
+        usage: "Plumbing",
+        color: "White",
+        open: true,
+        size: 4,
+        quantity: 2,
+        adjustPct: 0,
+      },
     ];
     args.state = st;
     const r = computeAccessories(args);

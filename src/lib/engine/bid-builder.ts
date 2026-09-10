@@ -513,6 +513,8 @@ export interface BuildResult {
   curbMaterial: number;
   /** §12 Accessories calculated-screen results (absent when the snapshot lacks the ref data). */
   accessories?: AccessoriesResult;
+  /** Whole units per adhesive (§2.4 Ceil-once; the Adhesives screen's Calc Qty column). */
+  adhesiveWholeUnits?: Record<string, number>;
 }
 
 /**
@@ -973,11 +975,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // §12.4). Membrane and parapet-wall adhesive (above) join the same aggregate.
   const accState: AccessoriesState = normalizeAccessoriesState(bid.accessoriesCalc);
   let adhesiveMaterial = 0;
+  /** Whole units per adhesive (the Adhesives screen's Calc Qty column). */
+  const adhesiveWholeUnits: Record<string, number> = {};
   {
     const extraSeen = new Set<string>();
     for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
       const extra = accState.adhesivesExtra[name] ?? 0;
       extraSeen.add(name);
+      adhesiveWholeUnits[name] = Math.ceil(units);
       adhesiveMaterial += bankersRound(
         (Math.ceil(units) + extra) * (admin.adhesivePrices?.[name] ?? 0),
         0,
@@ -1343,7 +1348,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // The ARP row keeps its own dMaterial slot (review-ledger attribution); the rest of the
     // module's material joins the accessory slot.
     arpMaterial = accessoriesCalcResult.membraneAccs.arpCost;
-    accessoryMaterial += accessoriesCalcResult.totalCost - accessoriesCalcResult.membraneAccs.arpCost;
+    accessoryMaterial +=
+      accessoriesCalcResult.totalCost - accessoriesCalcResult.membraneAccs.arpCost;
     accessoryLaborHours += accessoriesCalcResult.manHours;
   }
 
@@ -1481,5 +1487,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adhesiveMaterial,
     curbMaterial,
     ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
+    adhesiveWholeUnits,
   };
 }

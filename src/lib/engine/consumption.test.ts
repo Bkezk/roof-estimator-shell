@@ -53,22 +53,42 @@ describe("consumption rules (§2 port)", () => {
   it("insulation: 5 per 32 sq ft default; doubled+ when membrane is adhered/Duro-Bond", () => {
     // 3200 sq ft → 100 boards
     expect(
-      insulationFasteners(3200, { fourByFour: false, membraneAdheredOrBond: false, perimeter: false }),
+      insulationFasteners(3200, {
+        fourByFour: false,
+        membraneAdheredOrBond: false,
+        perimeter: false,
+      }),
     ).toBe(500);
     expect(
-      insulationFasteners(3200, { fourByFour: false, membraneAdheredOrBond: true, perimeter: false }),
+      insulationFasteners(3200, {
+        fourByFour: false,
+        membraneAdheredOrBond: true,
+        perimeter: false,
+      }),
     ).toBe(1000);
     expect(
-      insulationFasteners(3200, { fourByFour: false, membraneAdheredOrBond: true, perimeter: true }),
+      insulationFasteners(3200, {
+        fourByFour: false,
+        membraneAdheredOrBond: true,
+        perimeter: true,
+      }),
     ).toBe(1600);
   });
 
   it("insulation 4×4 boards: 4 per 16 sq ft (5/8 under adhered field/perim)", () => {
     expect(
-      insulationFasteners(1600, { fourByFour: true, membraneAdheredOrBond: false, perimeter: false }),
+      insulationFasteners(1600, {
+        fourByFour: true,
+        membraneAdheredOrBond: false,
+        perimeter: false,
+      }),
     ).toBe(400);
     expect(
-      insulationFasteners(1600, { fourByFour: true, membraneAdheredOrBond: true, perimeter: false }),
+      insulationFasteners(1600, {
+        fourByFour: true,
+        membraneAdheredOrBond: true,
+        perimeter: false,
+      }),
     ).toBe(500);
     expect(
       insulationFasteners(1600, { fourByFour: true, membraneAdheredOrBond: true, perimeter: true }),
@@ -106,14 +126,54 @@ describe("consumption rules (§2 port)", () => {
   it("aggregates a bid: terminated edges + insulation + parapets; adhesive ceilinged once per estimate", () => {
     const s1 = section({
       edges: [
-        { side: "A", lengthFt: 100, isPerimeter: true, termination: "T-Bar", blockingFt: 0, arpSizeIn: 0 },
-        { side: "B", lengthFt: 100, isPerimeter: false, termination: '4" 2-pc Metal', blockingFt: 0, arpSizeIn: 0 },
-        { side: "C", lengthFt: 100, isPerimeter: false, termination: "No Termination", blockingFt: 0, arpSizeIn: 0 },
-        { side: "D", lengthFt: 100, isPerimeter: false, termination: '2" Drip Edge', blockingFt: 0, arpSizeIn: 0 },
+        {
+          side: "A",
+          lengthFt: 100,
+          isPerimeter: true,
+          termination: "T-Bar",
+          blockingFt: 0,
+          arpSizeIn: 0,
+        },
+        {
+          side: "B",
+          lengthFt: 100,
+          isPerimeter: false,
+          termination: '4" 2-pc Metal',
+          blockingFt: 0,
+          arpSizeIn: 0,
+        },
+        {
+          side: "C",
+          lengthFt: 100,
+          isPerimeter: false,
+          termination: "No Termination",
+          blockingFt: 0,
+          arpSizeIn: 0,
+        },
+        {
+          side: "D",
+          lengthFt: 100,
+          isPerimeter: false,
+          termination: '2" Drip Edge',
+          blockingFt: 0,
+          arpSizeIn: 0,
+        },
       ],
       layers: [
-        { board: "1\" ISO", attachment: "mechanical", fastenersPerBoard: 5, adhesiveName: "", substrate: "" },
-        { board: "X", attachment: "adhesive", fastenersPerBoard: 0, adhesiveName: "OlyBond500 Bag-in-Box", substrate: "Concrete" },
+        {
+          board: '1" ISO',
+          attachment: "mechanical",
+          fastenersPerBoard: 5,
+          adhesiveName: "",
+          substrate: "",
+        },
+        {
+          board: "X",
+          attachment: "adhesive",
+          fastenersPerBoard: 0,
+          adhesiveName: "OlyBond500 Bag-in-Box",
+          substrate: "Concrete",
+        },
       ],
     });
     const s2 = section({
@@ -121,7 +181,13 @@ describe("consumption rules (§2 port)", () => {
       length: 50,
       width: 50,
       layers: [
-        { board: "X", attachment: "adhesive", fastenersPerBoard: 0, adhesiveName: "OlyBond500 Bag-in-Box", substrate: "Concrete" },
+        {
+          board: "X",
+          attachment: "adhesive",
+          fastenersPerBoard: 0,
+          adhesiveName: "OlyBond500 Bag-in-Box",
+          substrate: "Concrete",
+        },
       ],
     });
     const r = computeNeededQuantities({
@@ -141,9 +207,7 @@ describe("consumption rules (§2 port)", () => {
     expect(r.breakdown.membraneScrews).toBe(2600 + 67 + 933);
     // Insulation (s1): perim 100ft(edge A only? perimeterFromEdges counts isPerimeter edges)=100*3=300 perim area.
     // field 10000-300=9700 → round(9700/32)*5=1515; perim round(300/32)*5... mechanical membrane → 5/32 both.
-    expect(r.breakdown.insulationScrews).toBe(
-      Math.round(9700 / 32) * 5 + Math.round(300 / 32) * 5,
-    );
+    expect(r.breakdown.insulationScrews).toBe(Math.round(9700 / 32) * 5 + Math.round(300 / 32) * 5);
     expect(r.breakdown.parapetDeckScrews).toBe(40);
     expect(r.polyPlates).toBe(40 + 3600); // parapet decks + 1 per membrane screw
     expect(r.insulationPlates).toBe(r.breakdown.insulationScrews);

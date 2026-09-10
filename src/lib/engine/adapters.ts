@@ -269,8 +269,7 @@ export function buildAccessoryRefData(
 ): AccessoryRefData {
   const cat = (id: string): MembraneScreen | undefined =>
     catalogRows.find((r) => r.id === `duro_last:${id}`)?.data;
-  const lab = (id: string): MembraneScreen | undefined =>
-    laborRows.find((r) => r.id === id)?.data;
+  const lab = (id: string): MembraneScreen | undefined => laborRows.find((r) => r.id === id)?.data;
   const labHours = (id: string, desc: string, col = "Labor(Hrs)"): number => {
     for (const r of lab(id)?.rows ?? []) {
       if (str(r["Description"]) === desc) return num(r[col] ?? r["Labor (Hrs)"]);
@@ -325,7 +324,8 @@ export function buildAccessoryRefData(
     }
     for (const r of lab("fascia_bars")?.rows ?? []) {
       const d = str(r["Description"]);
-      const size2: "3" | "4" | null = d.startsWith("1¾") || d.startsWith("1 3/4") ? "3" : d.startsWith('4"') ? "4" : null;
+      const size2: "3" | "4" | null =
+        d.startsWith("1¾") || d.startsWith("1 3/4") ? "3" : d.startsWith('4"') ? "4" : null;
       if (!size2) continue;
       fascia[size2].preDrillLaborPerFt = num(r["PreDrill Labor(Hrs)"]);
       fascia[size2].noDrillLaborPerFt = num(r["NoDrill Labor (Hrs)"]);
@@ -357,14 +357,18 @@ export function buildAccessoryRefData(
       const size = m[1] as "2" | "4";
       const part = m[2] ?? "";
       const prices = edgeColors(r);
-      const barLabor = labHours(laborId, `${baseName} ${size}"`, "Labor(Hrs)") ||
+      const barLabor =
+        labHours(laborId, `${baseName} ${size}"`, "Labor(Hrs)") ||
         labHours(laborId, `${baseName} ${size}"`, "NoDrill Labor (Hrs)");
-      const cornerLabor = labHours(laborId, `${baseName} ${size}" Corner`, "Labor(Hrs)") ||
+      const cornerLabor =
+        labHours(laborId, `${baseName} ${size}" Corner`, "Labor(Hrs)") ||
         labHours(laborId, `${baseName} ${size}" Corner`, "NoDrill Labor (Hrs)");
       if (part === "") group[size].bar = { priceByColor: prices, laborFactor: barLabor };
       else if (part === "Clip") group[size].clip = { priceByColor: prices, laborFactor: barLabor };
-      else if (part === "Corner") group[size].corner = { priceByColor: prices, laborFactor: cornerLabor };
-      else if (part === "Cover") group[size].cover = { priceByColor: prices, laborFactor: barLabor };
+      else if (part === "Corner")
+        group[size].corner = { priceByColor: prices, laborFactor: cornerLabor };
+      else if (part === "Cover")
+        group[size].cover = { priceByColor: prices, laborFactor: barLabor };
       else if (part === "Inside Corner")
         group[size].insideCorner = { priceByColor: prices, laborFactor: cornerLabor };
       else if (part === "Outside Corner")
@@ -403,8 +407,17 @@ export function buildAccessoryRefData(
     const d = str(r["Description"]);
     if (!d) continue;
     const priceByColor: Record<string, number> = {};
-    for (const col of ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta", "Rock-Ply", "Rock Ply"]) {
-      if (typeof r[col] === "number") priceByColor[col === "Rock-Ply" ? "Rock Ply" : col] = num(r[col]);
+    for (const col of [
+      "White",
+      "Tan",
+      "Gray",
+      "Dark Gray",
+      "Terra Cotta",
+      "Rock-Ply",
+      "Rock Ply",
+    ]) {
+      if (typeof r[col] === "number")
+        priceByColor[col === "Rock-Ply" ? "Rock Ply" : col] = num(r[col]);
     }
     corners.push({ description: d, priceByColor, hours: labHours("corners", d) });
   }
@@ -441,8 +454,12 @@ export function buildAccessoryRefData(
   const drainBoots = (cat("drain_boots")?.rows ?? []).map((r) => {
     const d = str(r["Description"]);
     // accessory_labor spells the halves "2½"; the catalog spells "2 1/2" — normalize to match.
-    const labD = d.replace(/(\d) 1\/2"/, "$1½\"");
-    return { description: d, price: num(r["Price"]), hours: labHours("drain_boots", labD) || labHours("drain_boots", d) };
+    const labD = d.replace(/(\d) 1\/2"/, '$1½"');
+    return {
+      description: d,
+      price: num(r["Price"]),
+      hours: labHours("drain_boots", labD) || labHours("drain_boots", d),
+    };
   });
   const drainRings = (cat("cdr_rings")?.rows ?? []).map((r) => ({
     description: str(r["Description"]),
@@ -486,14 +503,28 @@ export function buildAccessoryRefData(
   const tpRow = maRow("T-Patch");
   const membraneAccs: AccessoryRefData["membraneAccs"] = {
     ...(arpRow
-      ? { arp: { pricePerPack: num(arpRow["Price/Package"]), partsPerPack: num(arpRow["Parts/Package"]) || 1 } }
+      ? {
+          arp: {
+            pricePerPack: num(arpRow["Price/Package"]),
+            partsPerPack: num(arpRow["Parts/Package"]) || 1,
+          },
+        }
       : {}),
     ...(tpRow
-      ? { tPatch: { pricePerPack: num(tpRow["Price/Package"]), partsPerPack: num(tpRow["Parts/Package"]) || 1 } }
+      ? {
+          tPatch: {
+            pricePerPack: num(tpRow["Price/Package"]),
+            partsPerPack: num(tpRow["Parts/Package"]) || 1,
+          },
+        }
       : {}),
     arpHours: labHours("membrane_accs", "ARP (SqFt)", "Labor (Hrs)"),
     tPatchHours: labHours("membrane_accs", "T-Patch", "Labor (Hrs)"),
-    strippingHoursPerFt: labHours("membrane_accs", `1' of Stripping w/ 6"oc Fasteners`, "Labor (Hrs)"),
+    strippingHoursPerFt: labHours(
+      "membrane_accs",
+      `1' of Stripping w/ 6"oc Fasteners`,
+      "Labor (Hrs)",
+    ),
   };
   const vents = (cat("vents")?.rows ?? []).map((r) => ({
     color: str(r["Description"]),

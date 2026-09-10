@@ -27,10 +27,7 @@ import { bankersRound } from "./rounding";
 import type { BidSectionInput, ParapetInput, CurbInput } from "./bid-builder";
 import { sectionLayers } from "./bid-builder";
 import { perimeterFromEdges } from "./edges";
-import {
-  dlRowStyleFastenersField,
-  dlRowStyleFastenersPerim,
-} from "./membrane-fasteners";
+import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 import { insulationFasteners, parapetDeckFasteners } from "./consumption";
 
 /* ------------------------------------------------------------------------------------------------
@@ -471,7 +468,9 @@ export function emptyAccessoriesState(): AccessoriesState {
 }
 
 /** Fill later-added fields on a saved state (snapshot-drift protection — same class as admin). */
-export function normalizeAccessoriesState(s: Partial<AccessoriesState> | undefined | null): AccessoriesState {
+export function normalizeAccessoriesState(
+  s: Partial<AccessoriesState> | undefined | null,
+): AccessoriesState {
   const empty = emptyAccessoriesState();
   if (!s) return empty;
   return {
@@ -557,7 +556,7 @@ export function parapetEdgeFastenersCount(
   }
   if (flaggedDuroLast && warnings) {
     warnings.push(
-      "Parapet wall-tab fastener count: the Duro-Last tab-count model (§8.5 CalcTabCount) is not yet extracted — walls over 30\" vertical show 0 needed (entered fasteners still bill).",
+      'Parapet wall-tab fastener count: the Duro-Last tab-count model (§8.5 CalcTabCount) is not yet extracted — walls over 30" vertical show 0 needed (entered fasteners still bill).',
     );
   }
   return total;
@@ -578,7 +577,10 @@ interface GeoInputs {
 }
 
 /** Per-side roof-edge feet for one termination id, folded by colour (ToInt32 each side). */
-function roofEdgeFeetByColor(sections: BidSectionInput[], termId: number): Record<TermColor, number> {
+function roofEdgeFeetByColor(
+  sections: BidSectionInput[],
+  termId: number,
+): Record<TermColor, number> {
   const out: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
   for (const s of sections) {
     for (const e of s.edges ?? []) {
@@ -745,9 +747,13 @@ export interface AccessoriesResult {
   drains: SimpleScreenResult & { perDrainHours: Record<string, number> };
   strainers: SimpleScreenResult;
   walkPads: SimpleScreenResult;
-  panduit: { cost: number; calcByLength: Record<string, number>; boxesByRow: Record<string, number> };
+  panduit: {
+    cost: number;
+    calcByLength: Record<string, number>;
+    boxesByRow: Record<string, number>;
+  };
   sealants: { cost: number; calcByPart: Record<string, number> };
-  membraneAccs: SimpleScreenResult & { tPatchCalc: number; arpCost: number };
+  membraneAccs: SimpleScreenResult & { tPatchCalc: number; arpCost: number; arpCalc: number };
   vents: SimpleScreenResult & { calcByColor: Record<string, number> };
   fasteners: { cost: number; rows: FastenerRowTotal[] };
   parapetTabs: { fastenersNeeded: number; steelPlatesNeeded: number };
@@ -911,7 +917,8 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     // Vinyl covers: prefill byColor − metalCoverLength (entered qty wins once touched).
     const metalQty: Record<TermColor, number> = {
       White: fst.metalCovers.on
-        ? (fst.metalCovers.qty.White ?? Math.max(0, byColor.White - (fst.vinylCovers.qty.White ?? 0)))
+        ? (fst.metalCovers.qty.White ??
+          Math.max(0, byColor.White - (fst.vinylCovers.qty.White ?? 0)))
         : 0,
       Tan: fst.metalCovers.on ? (fst.metalCovers.qty.Tan ?? 0) : 0,
       Gray: fst.metalCovers.on ? (fst.metalCovers.qty.Gray ?? 0) : 0,
@@ -1033,10 +1040,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
           (sst.insideCorners ?? 0) +
           (sst.outsideCorners ?? 0);
         const a = adj(sst.adjustPct);
-        sizeHours += round(
-          sref.bar.laborFactor * roundToNextTen(totalCalc + totalExtra) * a,
-          4,
-        );
+        sizeHours += round(sref.bar.laborFactor * roundToNextTen(totalCalc + totalExtra) * a, 4);
         if (sref.corner) sizeHours += round(sref.corner.laborFactor * cornerPieces * a, 4);
         // Gravel-stop metal cover + its corners: corner parts (45/50) are per-piece; cover (55)
         // rides the no-drill formula on R10(pieces).
@@ -1108,7 +1112,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     snapFasteners += fasteners;
     snapCost += cost;
     snapHours += hours;
-    snapSizes[size] = { calcFt, totalLengthFt: totalLength, coversQty, fastenersNeeded: fasteners, cost, hours };
+    snapSizes[size] = {
+      calcFt,
+      totalLengthFt: totalLength,
+      coversQty,
+      fastenersNeeded: fasteners,
+      cost,
+      hours,
+    };
     snapCounts[size] = { roofEdgesFt: roofFt, parapetsFt: paraFt };
   }
   if (anyUnpricedSnapLength) {
@@ -1191,7 +1202,8 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const h =
       round(
         d.quantity *
-          ((roof?.cleanupHours ?? 0) + (d.reuseRings ? (roof?.reinstallHours ?? 0) : (boot?.hours ?? 0))),
+          ((roof?.cleanupHours ?? 0) +
+            (d.reuseRings ? (roof?.reinstallHours ?? 0) : (boot?.hours ?? 0))),
         2,
       ) * adj(d.adjustPct);
     perDrainHours[d.id] = h;
@@ -1237,7 +1249,11 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   // operator order flagged in docs §12.8 open questions.)
   const caulkByColor: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
   for (const c of TERM_COLORS) {
-    const barLf = tbNoDrillByColor[c] + tbPreDrillByColor[c] + colorVal(st.termBar.additionalNoDrill, c) + colorVal(st.termBar.additionalPreDrill, c);
+    const barLf =
+      tbNoDrillByColor[c] +
+      tbPreDrillByColor[c] +
+      colorVal(st.termBar.additionalNoDrill, c) +
+      colorVal(st.termBar.additionalPreDrill, c);
     const coverLf = fasciaResult["3"].coverFtByColor[c] + fasciaResult["4"].coverFtByColor[c];
     const lf = barLf + coverLf;
     caulkByColor[c] = lf > 0 ? Math.ceil(lf / 12) : 0;
@@ -1249,7 +1265,8 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   const drainCount = st.drains.reduce((s, d) => s + Math.max(0, d.quantity), 0);
   caulkByColor.Gray += drainCount + (washersQtyTotal > 0 ? Math.ceil(0.25 * washersQtyTotal) : 0);
   // Strip mastic: rolls = Ceil(totalFt / 350) — term bar + both fascia bars (§2.5).
-  const stripFtTotal = tbStripFt + fasciaResult["3"].stripMasticFt + fasciaResult["4"].stripMasticFt;
+  const stripFtTotal =
+    tbStripFt + fasciaResult["3"].stripMasticFt + fasciaResult["4"].stripMasticFt;
   const stripRolls = stripFtTotal > 0 ? Math.ceil(stripFtTotal / 350) : 0;
   // Duro-Roof seam sealant (RefID 19 → "Tab Sealer") — §2.5: over Duro-Roof sections only.
   let tabSealer = 0;
@@ -1287,8 +1304,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   let arpCost = 0;
   if (ma.arp) {
     const total = args.arpCalcSqFt + st.membraneAccs.arpExtra;
-    if (total > 0)
-      arpCost = round(ma.arp.pricePerPack * Math.ceil(total / ma.arp.partsPerPack), 2);
+    if (total > 0) arpCost = round(ma.arp.pricePerPack * Math.ceil(total / ma.arp.partsPerPack), 2);
     maCost += arpCost;
     // ARP labor: extra qty only, rate 0, adjust −2 (no %) — stays 0 (§12.4).
     maHours += st.membraneAccs.arpExtra * ma.arpHours;
@@ -1312,8 +1328,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     warnings.push(
       "DL stripping feet entered but the stripping price table (lookup category 5) is not captured — stripping bills labor only.",
     );
-    maHours +=
-      strippingFtTotal * ma.strippingHoursPerFt * adj(st.membraneAccs.strippingAdjustPct);
+    maHours += strippingFtTotal * ma.strippingHoursPerFt * adj(st.membraneAccs.strippingAdjustPct);
   }
 
   /* ---------------- Vents (§12.4 — derived) ---------------- */
@@ -1321,7 +1336,8 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   for (const s of args.sections) {
     // Mechanically-attached sections only: Ceil(L×W/1000) per section, by section colour.
     if (args.attachment === "mechanical" && s.length * s.width > 0) {
-      ventCalcByColor[s.color] = (ventCalcByColor[s.color] ?? 0) + Math.ceil((s.length * s.width) / 1000);
+      ventCalcByColor[s.color] =
+        (ventCalcByColor[s.color] ?? 0) + Math.ceil((s.length * s.width) / 1000);
     }
   }
   let ventsCost = 0;
@@ -1353,7 +1369,10 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
 
   /* ---------------- Items Required per deck bucket (§12.5) ---------------- */
   const deckNeeds: Record<DeckBucket, DeckBucketNeeds> = Object.fromEntries(
-    DECK_BUCKETS.map((b) => [b, { fasteners: 0, polyPlates: 0, insulPlates: 0, inductionPlates: 0 }]),
+    DECK_BUCKETS.map((b) => [
+      b,
+      { fasteners: 0, polyPlates: 0, insulPlates: 0, inductionPlates: 0 },
+    ]),
   ) as Record<DeckBucket, DeckBucketNeeds>;
   const isDuroBond = args.roofSystem === "Duro-Bond";
   const membraneAdheredOrBond = args.attachment === "adhered" || isDuroBond;
@@ -1551,7 +1570,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     walkPads: { cost: walkCost, hours: walkHours },
     panduit: { cost: panduitCost, calcByLength: panduitCalc, boxesByRow: panduitBoxes },
     sealants: { cost: sealantsCost, calcByPart: sealantCalcByPart },
-    membraneAccs: { cost: maCost, hours: maHours, tPatchCalc, arpCost },
+    membraneAccs: { cost: maCost, hours: maHours, tPatchCalc, arpCost, arpCalc: args.arpCalcSqFt },
     vents: { cost: ventsCost, hours: ventsHours, calcByColor: ventCalcByColor },
     fasteners: { cost: fastenersCost, rows: fastenerRows },
     parapetTabs: { fastenersNeeded: parapetTabsNeeded, steelPlatesNeeded },

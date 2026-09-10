@@ -1206,3 +1206,49 @@ Constants that are code, not data: 1.03 scrap (f32), ten-foot rounding, 21 / 42 
 17"/11" strap bands, 2 sealant beads per stack ÷ 10 ft, 0.25 h open-stack adder and the ×1.5 (>12")
 / ×2 (>18") size factors, drain 1 tube each, washers ¼ tube each, 350 LF strip mastic per pail,
 12 LF per caulk tube, adhesive cost rounded to whole dollars, box counts `Ceil`.
+
+### 12.8 Implementation status (web, 2026-09-10) + open questions
+
+IMPLEMENTED (src/lib/engine/accessories.ts + accessories-screens.tsx, anchors §12.0 reproduced
+in accessories.test.ts): the full §12 money path — edge terminations (term bar with the
+base-footage quirk and dead Peel Stop rows, fascia + vinyl/metal covers, drip/gravel generic
+edges, snap cover), corners, pipe stacks (usage/open/size labor factors + strap/sealant
+consumption), washers, drains + strainers, walk pads, panduit boxes, sealant CalcQty, membrane
+accs, derived vents, the 14-slot fastener model with shared per-row box counts, per-bucket Items
+Required (insulation plates over-counted per mechanical layer — quirk transcribed), parapet
+wall-tab / steel-plate counts, and the §12.4 whole-dollar adhesive rounding (+ Extra units).
+Billing: material → dMaterial[4] (ARP keeps its own slot), hours → crew-rate direct labor,
+hours billed unrounded (footer displays 2dp). Fastener subgroup membership is seeded from the
+captured screens' visible grids. The parapet Termination sub-tab (§12.6) is built (termination
+id / length / Use Term Bar on Base / Wall Type per wall).
+
+DELIBERATE HOLDS (no fabrication in the money path):
+
+1. **T-Patch CalcQty = 0** — CONTRADICTION: §12.4's `Σ non-Duro-Tuff sections
+   Round(AreaTotal/250)` gives 22 on the §12.0 anchor bid (55×100), but the captured Membrane
+   Accs screen shows Calc Qty 0 AND the reconciled footer ($264.25) carries no T-Patch. What is
+   `AreaTotal`, and which way does the Duro-Tuff filter cut? Extra-only billing until resolved.
+2. **Duro-Caulk tube rounding** — the §2.5 transcription reads literally
+   `Ceiling(termBarLF + fasciaCoverLF) / 12`; we implemented `Ceil(sum / 12)` ("1 tube per
+   12 LF", whole tubes). Please confirm the operator order.
+3. **Drain/washer tube colour** — "the White/Gray bucket, index 2": implemented as GRAY
+   (colour ids Tan 1 / Gray 2 / White 3). Confirm.
+4. **Parapets.EdgeFasteners, Duro-Last walls** — the §8.5 formula needs
+   CalcTabCount/TabCount from the frmParapets tab layout; walls over 30" vertical currently show
+   0 needed (typed fasteners still bill). Please extract the tab-count model.
+5. **Generic-edge parapet drill split** — the §12.2 parapet-index quirk reads
+   `ref_DeckTypes.Predrill` (flags uncaptured); we route all parapet footage no-drill. With
+   UsePreDrill=false everywhere the only divergence is labor on pre-drill footage.
+6. **Pitch Pocket Filler** — RefID 10 ↔ part number (1121 vs 1122)? Plus PitchPan.FillerAmount
+   values. CalcQty held at 0.
+7. **Term-bar strip mastic default length** — `GetTotalLength(false,false)` read as the SUM over
+   bars; confirm single-bar vs group.
+8. **Capstone sealant tubes** (§8.4 `Ceil(Ceil(len)/40)`) — which sealant row do they land on?
+9. **Tab Sealer** — the §2.5 Duro-Roof seam sealant (RefID 19) is attached to part 1119T
+   "Tab Sealer" (the only candidate row); confirm the RefID→part mapping.
+
+DATA CAPTURES still needed from the licensed app's admin grids (not IL): ref_TwoPieceMetal
+prices 3"–8" (labor is live; material bills $0 with a warning until captured) and the
+lookup category-5 stripping prices (stripping rows bill labor only). The §12.7 fascia
+cover/corner prices, drip/gravel corner+clip rows, and per-colour term-bar prices turned out to
+be ALREADY LIVE in the web pricing_catalog.

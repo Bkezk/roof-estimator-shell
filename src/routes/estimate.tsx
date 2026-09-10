@@ -59,6 +59,13 @@ import {
   type EdgeInput,
 } from "@/lib/engine/edges";
 import { SectionCalcDialog } from "@/components/section-calc-dialog";
+import { AccessoriesScreens } from "@/components/accessories-screens";
+import {
+  emptyAccessoriesState,
+  normalizeAccessoriesState,
+  TERMINATION_ID_BY_LABEL,
+  type AccessoriesState,
+} from "@/lib/engine/accessories";
 import {
   buildBidInput,
   emptyCustomer,
@@ -320,6 +327,9 @@ function EstimatePage() {
   const [membraneAdhesive, setMembraneAdhesive] = useState("Water Based Adhesive");
   const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
+  const [accessoriesCalc, setAccessoriesCalc] = useState<AccessoriesState>(() =>
+    emptyAccessoriesState(),
+  );
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [metals, setMetals] = useState<MetalLine[]>([]);
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
@@ -465,6 +475,7 @@ function EstimatePage() {
           : [newSection()],
       );
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
+      setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setMetals(Array.isArray(d.metals) ? d.metals : []);
       setParapets(Array.isArray(d.parapets) ? d.parapets : []);
@@ -582,6 +593,7 @@ function EstimatePage() {
     membraneAdhesiveName: membraneAdhesive,
     sections,
     accessories,
+    accessoriesCalc,
     nonDlLines,
     metals,
     parapets,
@@ -615,6 +627,8 @@ function EstimatePage() {
     const build = buildEstimateInputs(bid, admin);
     const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial } =
       build;
+    const accessoriesResult = build.accessories;
+    const adhesiveWholeUnits = build.adhesiveWholeUnits;
     const r = computeEstimate(inputs);
     return {
       r,
@@ -638,6 +652,9 @@ function EstimatePage() {
       // Own-rate direct-labor hours (metals + categorized non-DL); they join man-days but are
       // priced at each line's own rate, so they aren't in any crew-rate hour bucket.
       ownRateHours: inputs.ownRateDirectLaborHours ?? 0,
+      // §12 Accessories calculated-screen results + the adhesive whole-unit Calc Qtys.
+      accessories: accessoriesResult,
+      adhesiveWholeUnits,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -2930,6 +2947,83 @@ function EstimatePage() {
                             )}
                           </div>
                         </div>
+                        {/* Legacy Termination sub-tab (docs §12.6): feeds the Accessories edge
+                            screens' "Parapets:" footage — no direct money of its own. */}
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs font-medium text-muted-foreground">Termination</p>
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            <Field label="Termination">
+                              <PickOne
+                                value={
+                                  TERMINATION_OPTIONS.find(
+                                    (t) => TERMINATION_ID_BY_LABEL[t] === p.termOptionId,
+                                  ) ?? "No Termination"
+                                }
+                                options={[...TERMINATION_OPTIONS]}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) => {
+                                      if (j !== i) return x;
+                                      const nx = { ...x };
+                                      const id = TERMINATION_ID_BY_LABEL[v];
+                                      if (id === undefined) {
+                                        delete nx.termOptionId;
+                                        delete nx.termLengthFt;
+                                      } else nx.termOptionId = id;
+                                      return nx;
+                                    }),
+                                  )
+                                }
+                              />
+                            </Field>
+                            {(p.termOptionId ?? 0) > 0 && (
+                              <Field label="Term length (ft)">
+                                <NumInput
+                                  min={0}
+                                  value={p.termLengthFt ?? p.lengthFt}
+                                  onValue={(n) =>
+                                    setParapets((prev) =>
+                                      prev.map((x, j) => (j === i ? { ...x, termLengthFt: n } : x)),
+                                    )
+                                  }
+                                />
+                              </Field>
+                            )}
+                            <Field label="Wall type">
+                              <PickOne
+                                value={
+                                  (p.wallType ?? 1) === 1 ? "Wood or Metal" : "Brick or Concrete"
+                                }
+                                options={["Wood or Metal", "Brick or Concrete"]}
+                                onChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i
+                                        ? { ...x, wallType: v === "Wood or Metal" ? 1 : 4 }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                              />
+                            </Field>
+                            <div className="flex items-end gap-2 pb-1">
+                              <Switch
+                                id={`tbb-${p.id}`}
+                                checked={p.useTermBarOnBase ?? false}
+                                onCheckedChange={(v) =>
+                                  setParapets((prev) =>
+                                    prev.map((x, j) =>
+                                      j === i ? { ...x, useTermBarOnBase: v } : x,
+                                    ),
+                                  )
+                                }
+                              />
+                              <Label htmlFor={`tbb-${p.id}`} className="text-xs">
+                                Use Term Bar on Base
+                              </Label>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -3448,6 +3542,49 @@ function EstimatePage() {
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Accessories</CardTitle>
+              {result?.accessories && (
+                <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
+                  <span>
+                    Material Cost:{" "}
+                    <span className="font-semibold">
+                      {money(result.accessories.totalCost + accessoryTotal)}
+                    </span>
+                  </span>
+                  <span>
+                    Total Labor:{" "}
+                    <span className="font-semibold">
+                      {(result.accessories.manHours + accessoryLaborHours).toFixed(2)} h
+                    </span>
+                  </span>
+                  <span>
+                    Labor Cost:{" "}
+                    <span className="font-semibold">
+                      {money((result.accessories.manHours + accessoryLaborHours) * laborRate)}
+                    </span>
+                  </span>
+                </div>
+              )}
+            </CardHeader>
+            <CardContent>
+              <AccessoriesScreens
+                state={accessoriesCalc}
+                onChange={setAccessoriesCalc}
+                refData={admin?.accessories}
+                result={result?.accessories}
+                sections={sections.map((s) => ({ id: s.id, name: s.name, color: s.color }))}
+                adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
+                adhesiveCalc={result?.adhesiveWholeUnits}
+                arpCalcQty={result?.accessories?.membraneAccs.arpCalc ?? 0}
+              />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+              <CardTitle className="text-base">Extra catalog lines</CardTitle>
+              <CardDescription className="text-xs">
+                Manual price-list additions (kept for older bids); the calculated screens above are
+                the legacy money path.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <CatalogPicker

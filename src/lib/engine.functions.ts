@@ -101,6 +101,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       membraneAccsRes,
       uGroupRes,
       uBoardGroupRes,
+      accCatalogRes,
+      accLaborRes,
     ] = await Promise.all([
       sb.from("pricing_catalog").select("data").eq("id", MEMBRANE_SCREEN_ID).maybeSingle(),
       sb.from("rdl_combos").select("roof_system, attachment, data").order("sort"),
@@ -154,6 +156,9 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       // Legacy underlayment parent groups + priced-board mapping (hand-seeded tables).
       (sb as unknown as UntypedFrom).from("underlayment_group").select("*"),
       (sb as unknown as UntypedFrom).from("underlayment_board_group").select("*"),
+      // §12 Accessories: every duro_last pricing screen + the accessory_labor tables.
+      sb.from("pricing_catalog").select("id, category, data").eq("branch", "duro_last"),
+      sb.from("accessory_labor").select("id, category, data"),
     ]);
 
     if (membraneRes.error) throw membraneRes.error;
@@ -186,6 +191,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
     if (membraneAccsRes.error) throw membraneAccsRes.error;
     if (uGroupRes.error) throw new Error(uGroupRes.error.message);
     if (uBoardGroupRes.error) throw new Error(uBoardGroupRes.error.message);
+    if (accCatalogRes.error) throw accCatalogRes.error;
+    if (accLaborRes.error) throw accLaborRes.error;
 
     const membraneScreen = (membraneRes.data?.data ?? null) as MembraneScreen | null;
     const combos = (combosRes.data ?? []).map((c) => ({
@@ -257,6 +264,16 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         RawUnderlaymentGroupRow[] | null,
       underlaymentBoardGroupRows: (uBoardGroupRes.data ?? null) as unknown as
         RawUnderlaymentBoardGroupRow[] | null,
+      accessoryCatalogRows: (accCatalogRes.data ?? null) as unknown as Array<{
+        id: string;
+        category: string;
+        data: MembraneScreen;
+      }> | null,
+      accessoryLaborRows: (accLaborRes.data ?? null) as unknown as Array<{
+        id: string;
+        category: string;
+        data: MembraneScreen;
+      }> | null,
     });
   });
 
