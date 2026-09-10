@@ -16,6 +16,7 @@ import type {
 } from "@/lib/engine/bid-builder";
 import type { MarkupMode } from "@/lib/engine/money";
 import type { AccessoriesState } from "@/lib/engine/accessories";
+import type { MetalsState } from "@/lib/engine/metals";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
 
@@ -53,6 +54,8 @@ export interface SavedBidState {
   accessories: AccessoryLine[];
   /** §12 Accessories calculated-screen state (optional so older saved bids stay valid). */
   accessoriesCalc?: Partial<AccessoriesState>;
+  /** §13 EXCEPTIONAL Metals screen state (optional so older saved bids stay valid). */
+  metalsCalc?: Partial<MetalsState>;
   nonDlLines: NonDlLine[];
   /** Exceptional Metals lines (optional so older saved bids stay valid). */
   metals?: MetalLine[];
@@ -212,6 +215,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     sections: s.sections,
     accessories: s.accessories,
     ...(s.accessoriesCalc ? { accessoriesCalc: s.accessoriesCalc } : {}),
+    ...(s.metalsCalc ? { metalsCalc: s.metalsCalc } : {}),
     nonDlLines: s.nonDlLines,
     metals: s.metals ?? [],
     parapets: s.parapets ?? [],

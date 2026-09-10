@@ -55,6 +55,7 @@ import {
   type AccessoriesState,
   type AccessoriesResult,
 } from "./accessories";
+import { computeMetals, normalizeMetalsState, type MetalsState, type MetalsResult } from "./metals";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
@@ -409,10 +410,11 @@ export interface CurbInput {
 }
 
 /**
- * An Exceptional Metals line (gutters, downspouts, pitch pans, collection boxes, two-piece).
- * Same economics as a non-DL line (unit cost + labor/unit at the line's own rate), but the
- * MATERIAL belongs to the Duro-Last material subtotal M0 (§4.8 dMaterial metals slot), not
- * OtherMaterial. Labor $ routes to services (LaborSubtotal2) — FLAGGED FOR BID VALIDATION.
+ * A flat Exceptional Metals catalog line (older bids; the §13 calculated screen is the primary
+ * path now). Same economics as a non-DL line (unit cost + labor/unit at the line's own rate),
+ * but the MATERIAL belongs to the Duro-Last material subtotal M0 (§4.8 dMaterial[5] metals
+ * slot), not OtherMaterial. CONFIRMED by ReviewCalc IL: dLabor[5,0/1] = Metals.LaborCost/Labor —
+ * direct labor at the row's own rate inside LaborSubtotal1 (not LS2 services).
  */
 export type MetalLine = NonDlLine;
 
@@ -428,6 +430,8 @@ export interface BidInput {
   accessories: AccessoryLine[];
   /** §12 Accessories calculated-screen state (absent on older saved bids → empty state). */
   accessoriesCalc?: Partial<AccessoriesState>;
+  /** §13 EXCEPTIONAL Metals screen state (gutters/downspouts/pitch pans/collection boxes). */
+  metalsCalc?: Partial<MetalsState>;
   nonDlLines: NonDlLine[];
   metals: MetalLine[];
   parapets: ParapetInput[];
@@ -530,6 +534,8 @@ export interface BuildResult {
   curbMaterial: number;
   /** §12 Accessories calculated-screen results (absent when the snapshot lacks the ref data). */
   accessories?: AccessoriesResult;
+  /** §13 EXCEPTIONAL Metals screen results (absent when the snapshot lacks the ref data). */
+  metalsScreen?: MetalsResult;
   /** Whole units per adhesive (§2.4 Ceil-once; the Adhesives screen's Calc Qty column). */
   adhesiveWholeUnits?: Record<string, number>;
 }
@@ -1206,16 +1212,24 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
   }
 
-  // Exceptional Metals: material (price × qty) → M0 (dMaterial metals slot); labor at the line's
-  // own rate → services (LaborSubtotal2), like non-DL labor.
-  const metalsMaterial = bid.metals.reduce((sum, m) => sum + m.price * m.quantity, 0);
-  // Metals labor is DIRECT labor at each line's own rate (legacy dLabor[5] inside LaborSubtotal1,
-  // docs/legacy-money-parity.md §6); its hours join LS1 hours (man-days).
-  const metalsLaborCost = bid.metals.reduce(
-    (sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity,
-    0,
-  );
-  const metalsLaborHours = bid.metals.reduce((sum, m) => sum + m.laborPerUnit * m.quantity, 0);
+  // §13 EXCEPTIONAL Metals (docs/legacy-money-parity.md §13). Extracted wiring (ReviewCalc IL):
+  // dMaterial[5] = Metals.MaterialCost → inside M0; dLabor[5,0/1] = Metals.LaborCost/Labor —
+  // DIRECT labor at each row's OWN LaborRate (never the crew rate), hours join man-days.
+  // The calculated screen (metalsCalc) is the legacy 4-dialog model; flat `bid.metals` lines
+  // (older bids / extra catalog picks) keep billing identically alongside it.
+  let metalsResult: MetalsResult | undefined;
+  if (admin.metals) {
+    metalsResult = computeMetals(normalizeMetalsState(bid.metalsCalc), admin.metals);
+  }
+  const metalsMaterial =
+    bid.metals.reduce((sum, m) => sum + m.price * m.quantity, 0) +
+    (metalsResult?.materialCost ?? 0);
+  const metalsLaborCost =
+    bid.metals.reduce((sum, m) => sum + m.laborPerUnit * m.laborRate * m.quantity, 0) +
+    (metalsResult?.laborCost ?? 0);
+  const metalsLaborHours =
+    bid.metals.reduce((sum, m) => sum + m.laborPerUnit * m.quantity, 0) +
+    (metalsResult?.laborHours ?? 0);
 
   // ── Auto-priced NDL items (docs §8.3/§8.4/§8.6) ────────────────────────────────────────────
   // The legacy app computed these items' CalcQty from bid geometry and priced them off their
@@ -1505,6 +1519,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adhesiveMaterial,
     curbMaterial,
     ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
+    ...(metalsResult ? { metalsScreen: metalsResult } : {}),
     adhesiveWholeUnits,
   };
 }

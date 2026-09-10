@@ -59,12 +59,14 @@ import {
 } from "@/lib/engine/edges";
 import { SectionCalcDialog } from "@/components/section-calc-dialog";
 import { AccessoriesScreens } from "@/components/accessories-screens";
+import { MetalsScreens } from "@/components/metals-screens";
 import {
   emptyAccessoriesState,
   normalizeAccessoriesState,
   TERMINATION_ID_BY_LABEL,
   type AccessoriesState,
 } from "@/lib/engine/accessories";
+import { emptyMetalsState, normalizeMetalsState, type MetalsState } from "@/lib/engine/metals";
 import {
   buildBidInput,
   emptyCustomer,
@@ -337,6 +339,7 @@ function EstimatePage() {
   );
   const [nonDlLines, setNonDlLines] = useState<NonDlLine[]>([]);
   const [metals, setMetals] = useState<MetalLine[]>([]);
+  const [metalsCalc, setMetalsCalc] = useState<MetalsState>(() => emptyMetalsState());
   const [parapets, setParapets] = useState<ParapetInput[]>([]);
   const [curbs, setCurbs] = useState<CurbInput[]>([]);
   const [customer, setCustomer] = useState<CustomerInfo>(emptyCustomer());
@@ -484,6 +487,7 @@ function EstimatePage() {
       setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
       setMetals(Array.isArray(d.metals) ? d.metals : []);
+      setMetalsCalc(normalizeMetalsState(d.metalsCalc));
       setParapets(Array.isArray(d.parapets) ? d.parapets : []);
       setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
       setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
@@ -602,6 +606,7 @@ function EstimatePage() {
     accessoriesCalc,
     nonDlLines,
     metals,
+    metalsCalc,
     parapets,
     curbs,
     customer,
@@ -661,6 +666,8 @@ function EstimatePage() {
       // §12 Accessories calculated-screen results + the adhesive whole-unit Calc Qtys.
       accessories: accessoriesResult,
       adhesiveWholeUnits,
+      // §13 EXCEPTIONAL Metals screen results (summary lines + dMaterial[5]/dLabor[5] totals).
+      metalsScreen: build.metalsScreen,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -778,7 +785,7 @@ function EstimatePage() {
       case "accessories":
         return accessories.length;
       case "metals":
-        return metals.length;
+        return metals.length + (result?.metalsScreen?.lines.length ?? 0);
       case "tearoff":
         return sections.filter((s) => s.tearOff).length;
       case "nondl":
@@ -3711,41 +3718,71 @@ function EstimatePage() {
               netted against the quantities typed on that screen. */}
         </div>
 
+        {/* Legacy EXCEPTIONAL Metals screen (frmMetals): four entry tiles + the lvSummary grid.
+            Money per docs §13 (extracted IL): material → dMaterial[5] inside M0, labor at each
+            row's own rate → dLabor[5] direct labor. */}
         <div className={step === 6 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Metals</CardTitle>
+              <CardTitle className="text-base">EXCEPTIONAL Metals</CardTitle>
+              {result?.metalsScreen && result.metalsScreen.lines.length > 0 && (
+                <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                  <span>
+                    Material:{" "}
+                    <span className="font-semibold">{money(result.metalsScreen.materialCost)}</span>
+                  </span>
+                  <span>
+                    Hours:{" "}
+                    <span className="font-semibold">
+                      {result.metalsScreen.laborHours.toFixed(2)} h
+                    </span>
+                  </span>
+                  <span>
+                    Labor Cost:{" "}
+                    <span className="font-semibold">{money(result.metalsScreen.laborCost)}</span>
+                  </span>
+                </div>
+              )}
             </CardHeader>
             <CardContent>
-              <CatalogPicker
-                items={(metalsCatalog ?? []).map((m) => ({
-                  key: m.key,
-                  category: m.category,
-                  description: m.description,
-                  price: m.unitCost,
-                }))}
-                onAdd={(key) => {
-                  const item = metalsCatalog?.find((m) => m.key === key);
-                  if (!item) return;
-                  setMetals((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      price: item.unitCost,
-                      laborPerUnit: item.laborPerUnit,
-                      laborRate: item.laborRate,
-                      quantity: 1,
-                    },
-                  ]);
-                }}
+              <MetalsScreens
+                refData={admin?.metals}
+                state={metalsCalc}
+                onChange={setMetalsCalc}
+                result={result?.metalsScreen}
               />
-
-              {metals.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No metals. Gutters, downspouts, pitch pans, collection boxes — material folds into
-                  Duro-Last material; labor bills as direct labor at each line's own rate.
-                </p>
-              ) : (
+            </CardContent>
+          </Card>
+          {/* Old flat-picker lines: only rendered when a bid already carries them (pre-§13
+              saved bids) — the tile screens above are the legacy money path. */}
+          {metals.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                <CardTitle className="text-base">Extra catalog lines (older bid)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CatalogPicker
+                  items={(metalsCatalog ?? []).map((m) => ({
+                    key: m.key,
+                    category: m.category,
+                    description: m.description,
+                    price: m.unitCost,
+                  }))}
+                  onAdd={(key) => {
+                    const item = metalsCatalog?.find((m) => m.key === key);
+                    if (!item) return;
+                    setMetals((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        price: item.unitCost,
+                        laborPerUnit: item.laborPerUnit,
+                        laborRate: item.laborRate,
+                        quantity: 1,
+                      },
+                    ]);
+                  }}
+                />
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -3794,9 +3831,9 @@ function EstimatePage() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Legacy Tear-Off screen (mirrors the 2026-08-31 12:44 capture): section select grid,

@@ -1408,3 +1408,75 @@ $3.85/2604B; covers $3.70–$5.45; corners $30.60–$35.90 each side. `buildAcce
 reads them (grouped by the `N" 2-Piece Compression` header rows) and Base & Snap Cover bills
 material. Remaining captures: ONLY the lookup category-5 stripping prices and the §12.9 item-6
 pitch-pan behavioural capture (Filler values + the 1121-vs-1122 confirmation).
+
+## 13. EXCEPTIONAL Metals — the complete money path (IL-exact, 2026-09-10)
+
+Extracted in-session from the licensed install's `DataAccess.dll` (dnfile/dncil IL dump of
+`BidAdvantage.DataAccess.Gutter` 0xa16xx–0xa20xx, `GutterAcc(s)`, `DownSpout(Acc)(s)`,
+`PitchPan(s)`, `CollectionBox(es)`, `Metals`, `ReviewCalc.Recalculate` 0x4550c) and
+`Estimator.exe` (frmMetals/frmGutters/frmDownSpouts/frmPitchPans/frmCollectionBoxes designer IL
++ RefreshSummary 0x65758). All arithmetic in .NET Single (float32).
+
+### 13.1 Row money
+
+Length-based rows — **Gutter** (per Style+Size) and **DownSpout** (per size, Open/Closed):
+
+- `MaterialCost = increment10(Length) × PricePerFoot`
+- `increment10(x)`: `x ≤ 0 → 0`; `0 < x < 10 → 1` (**quirk** — the IL loads the literal
+  `1.0`, so a 6-ft run bills one foot of material, not ten); `x % 10 == 0 → x`; else
+  `x + 10 − x % 10` (round UP to the next 10 ft).
+- `Labor (hours) = Length × LaborPerFoot` (recomputed by `set_Length`; `set_Labor` back-derives
+  LaborPerFoot — an override facility, not a second formula).
+- `LaborCost = Labor × LaborRate` (the row's own ref-data $/hr).
+- Displayed `Qty` = "bars": `0 → 0`; `≤ 10 → 1`; else `Convert.ToInt32(Length/10)`
+  (banker's — 25 ft shows 2, 35 ft shows 4). Display only; money uses increment10.
+
+Qty-based rows — **GutterAcc**, **DownSpoutAcc**, **PitchPan**, **CollectionBox**:
+`MaterialCost = Price × Qty`; `Labor = Qty × LaborPerUnit`; `LaborCost = Labor × LaborRate`.
+
+### 13.2 Structure & roll-up
+
+- Gutter accessories (End Caps L/R, Splice Plates, Miters, Gutter Sealant, Rivets) are children
+  of their gutter (`Gutter.oGutterAccs`); `Gutters.OnRecalculate` sums
+  `Gutter.get_MaterialCost(true)` — that is why `GutterAccs` never appears in the `Metals`
+  sums (it is not top-level).
+- ALL downspout accessories — the per-size Drop/Outlet + elbows AND the General Downspout
+  Accessories (Straps, Square-To-Round, Rivets, Snow Diverter) — are one flat top-level
+  `DownSpoutAccs` collection.
+- `Metals.MaterialCost/LaborCost/Labor` = Gutters + DownSpouts + DownSpoutAccs + PitchPans +
+  CollectionBoxes (straight float32 sums, no rounding).
+
+### 13.3 ReviewCalc wiring (CONFIRMED — closes the old "FLAGGED FOR BID VALIDATION")
+
+`ReviewCalc.Recalculate`: `dMaterial[5] = GoodSingle(Metals.MaterialCost)` (inside M0 with the
+other dMaterial slots), `dLabor[5,0] = GoodSingle(Metals.LaborCost)`,
+`dLabor[5,1] = GoodSingle(Metals.Labor)`. Metals labor is DIRECT labor at each row's OWN
+LaborRate inside LaborSubtotal1 — never the bid crew rate, and NOT LaborSubtotal2 services
+(the web app already billed this way; the doubt in the MetalLine comment is resolved).
+
+### 13.4 Screen (frmMetals) & web implementation
+
+Legacy screen: "EXCEPTIONAL Metals" title, four tile buttons (Gutters / Downspouts /
+Pitch Pans / Collection Boxes — icon images recovered from the form resources into
+`public/metals-*.png`), lvSummary grid `Category | Item | Qty/LF | Cost/Quote |
+Hours PerUnit/LF | Hours | Labor Cost` + Edit; RefreshSummary itemizes each gutter/downspout
+with its OWN money (`get_MaterialCost(false)`) and each accessory as its own row
+(`"«acc» for «gutter»"`), LaborPerFoot at 3 dp / Hours at 2 dp (display rounding only).
+Dialogs: frmGutters = Style + Size dropdowns over a grid (gutter row edits Length; accessory
+rows edit Qty; grid rows 1+ map to GutterAccs[row−1]); frmDownSpouts = Size dropdown, grid rows
+0–1 are the Open/Closed DownSpouts (Length), rows 2+ are DownSpoutAccs[row−2] (Qty), plus the
+"General Downspout Accessories" grid; frmPitchPans = "Vinyl Coated Metal Pitch Pans" qty rows;
+frmCollectionBoxes = "Scupper Option" dropdown (Without/With Scupper) + qty rows. Footer
+`Total:` + `Finished` on each dialog.
+
+Web: engine module `src/lib/engine/metals.ts` (`buildMetalsRefData` from the seeded
+`duro_last:exceptional_metals` subscreens, `MetalsState`, `computeMetals` → summary lines +
+`dMaterial[5]`/`dLabor[5]` totals, float32 throughout), billed in `bid-builder.ts` alongside
+the old flat `MetalLine[]` lines (older bids keep computing identically; the flat picker is
+demoted to an "Extra catalog lines (older bid)" card). UI `src/components/metals-screens.tsx`
+mirrors the tile screen + four dialogs. Seed repair applied live (verify→apply→verify): the
+4"X4" downspout grid row 3 had `description: null` — restored to "Drop/Outlet" by grid
+position (the 6"X6" grid carries Drop/Outlet in the same slot); its money values (23.95 /
+0.75 h / $45) were already present, so no prices were invented. Note the seeded gutter grids
+carry $0 labor columns (installer defaults had no per-LF gutter labor) — gutter hours stay 0
+until the admin fills them; downspout/pitch-pan/collection-box labor is live.

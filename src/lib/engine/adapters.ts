@@ -14,6 +14,7 @@ import type { PriceMatrix, PriceTier, FreightStep } from "./pricing";
 import type { Band, DualValue } from "./labor";
 import type { SetupBandTable, InspectionBandTable } from "./quantities";
 import type { AccessoryRefData, TermColor, EdgeSizeRef } from "./accessories";
+import { buildMetalsRefData, type MetalsRefData } from "./metals";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Membrane price matrix (from pricing_catalog id "duro_last:duro_last_membrane")
@@ -387,8 +388,7 @@ export function buildAccessoryRefData(
   const twoPiece = {} as AccessoryRefData["twoPiece"];
   {
     const metalsData = catalogRows.find((r) => r.id === "duro_last:exceptional_metals")?.data as
-      | { subscreens?: { two_piece_metals?: { rows?: Array<Record<string, unknown>> } } }
-      | undefined;
+      { subscreens?: { two_piece_metals?: { rows?: Array<Record<string, unknown>> } } } | undefined;
     const tpRows = metalsData?.subscreens?.two_piece_metals?.rows ?? [];
     const priceBySize: Record<
       string,
@@ -1105,7 +1105,7 @@ export function buildAdhesivePrices(data: AdhesivesScreenData | null): Record<st
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface MetalRow {
-  description: string;
+  description?: string | null;
   unit_cost?: number | null;
   labor_per_unit_lf?: number | null;
   labor_rate?: number | null;
@@ -1116,13 +1116,19 @@ interface MetalRow {
 export interface MetalsScreenData {
   kind: string;
   subscreens?: {
-    gutters?: { rows?: MetalRow[]; captured_for?: { style?: string; size?: string } };
+    gutters?: {
+      rows?: MetalRow[];
+      styles?: string[];
+      sizes_by_style?: Record<string, string[]>;
+      captured_for?: { style?: string; size?: string };
+    };
     downspouts?: {
+      sizes?: string[];
       size_grid?: { rows_by_size?: Record<string, MetalRow[]> };
       general_downspout?: { rows?: MetalRow[] };
     };
     pitch_pans?: { rows?: MetalRow[] };
-    collection_boxes?: { rows_by_option?: Record<string, MetalRow[]> };
+    collection_boxes?: { options?: string[]; rows_by_option?: Record<string, MetalRow[]> };
     two_piece_metals?: { rows?: MetalRow[] };
   };
 }
@@ -1641,6 +1647,8 @@ export interface EngineAdminData {
   underlaymentGroups?: UnderlaymentGroupsData;
   /** §12 Accessories calculated-screen ref data (absent on older frozen snapshots). */
   accessories?: AccessoryRefData;
+  /** §13 EXCEPTIONAL Metals ref data (gutters/downspouts/pitch pans/collection boxes). */
+  metals?: MetalsRefData;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1733,6 +1741,12 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const accessories = raw.accessoryCatalogRows?.length
     ? buildAccessoryRefData(raw.accessoryCatalogRows, raw.accessoryLaborRows ?? [])
     : undefined;
+  const metalsScreenRow = raw.accessoryCatalogRows?.find(
+    (r) => r.id === "duro_last:exceptional_metals",
+  );
+  const metals = metalsScreenRow
+    ? buildMetalsRefData(metalsScreenRow.data as unknown as MetalsScreenData)
+    : undefined;
 
   return {
     deckOrder,
@@ -1756,5 +1770,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(Object.keys(autoRates).length ? { autoRates } : {}),
     ...(underlaymentGroups ? { underlaymentGroups } : {}),
     ...(accessories ? { accessories } : {}),
+    ...(metals ? { metals } : {}),
   };
 }
