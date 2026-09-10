@@ -1826,3 +1826,68 @@ too (the web's bids page / proposal).
 - Not carried: the client list (`frmEditClient`), Manufacturer switching (Duro-Last only), the
   per-option "Update Pricing & Labor" sub-choices (the web replaces the whole frozen snapshot),
   Reports.
+
+## 18. Underlayment labor — the complete legacy money path (IL-exact, 2026-09-10)
+
+Re-read in-session: `RoofSection.UnderlaymentCost` 0x4bcc4, `UnderlaymentBaseHours` 0x4c284 (+
+0x4c718 overload), `UnderlaymentQuoteHours` 0x4cba8, `UnderlaymentAdjustedBaseHours` 0x4cd48,
+`UnderlaymentLayerFieldFasteners` 0x4d23c, `RoofSections.UnderlaymentLaborHours` 0x4fed8,
+`RoofSystem.get_AdhesiveLaborRate` 0xa274, `SheetSize.get_SmartSheetMulti` 0xad268,
+`ReviewCalc.Recalculate` (slots), `frmUnderlayment` handlers (`llbItemLabor_LinkClicked`,
+`UpdateTotals`, `LoadAttachment`).
+
+### 18.1 The formula (per section, per priced layer; quote layers excluded)
+
+```
+base = Σ_layers [ AreaTotal / 2500 × LayoutTime
+                + mechanical: SingleFastenerTimeByDT(deck) × UnderlaymentFasteners(layer)
+                + adhered:    (AreaField × L + AreaPerimeter × L) / 2500
+                              L = RSAdhesiveCoverage.UnderlaymentAdhesiveLabor[group of the layer
+                                  below]  (bottom layer: DeckTypesAdhesiveLabor[deck])
+                + none:       nothing more ]
+base ×= ComplexityFactor.SmartValue × SheetSize.SmartSheetMulti(section)
+UnderlaymentAdjustedBaseHours = base × (1 + AdjustUnderlaymentLabor / 100)
+RoofSections.UnderlaymentLaborHours = Σ AdjustedBaseHours + Σ UnderlaymentQuoteHours (unadjusted)
+```
+`UnderlaymentFasteners(layer)` = the §10.3 field + perimeter rules: membrane mechanical → slip
+sheets (SubType 1) `Round(Ceil(area × 0.08))`, custom densities `Round(d × area)` (+ corner),
+4'×4' tiles (SubType 7/8) `Round(area/16) × 4`, else `Round(area/32) × 5`, the perimeter run on
+AreaPerimeter alone; membrane adhered / Duro-Bond → field `Round(AreaField/32) × 10` (4'×4':
+`/16 × 5`), perimeter `Round((AreaPerimeter + AreaCorner)/32) × 16` (4'×4': `/16 × 8`). The
+bare "Attached With = None" option bills layout only. ReviewCalc: `dMaterial[5+tile]` (tile 1…8
+→ slots 6…13) = `RoofSections.UnderlaymentCost(tile)`, `dLabor[5+tile]` = crew-rate labor of
+`UnderlaymentLaborHours(tile)`; `dTotals[6]` = MaterialTotalUnderlayment. Material (§6) is
+unchanged: area × 1.06 × $/sqft (Geotextile 1.03), quotes verbatim once per CustomQuoteID.
+
+### 18.2 Web corrections (2026-09-10)
+
+1. **Adhesive labor** was `area × labor / 1000` on the total area; now `(AreaField +
+   AreaPerimeter) × labor / 2500` (`underlaymentAdhesive` takes `laborPer2500SqFt`). With the
+   captured 6.5 h figure this removes a 2.5× over-bill on every adhered layer.
+2. **Complexity × sheet multiplier** now scale each section's underlayment base hours
+   (`uScale` in the builder loop) — previously not applied.
+3. **Fastener counts** follow the legacy rule (`underlaymentLayerFasteners`, module
+   `underlayment-fasteners.ts`) instead of a user-picked fasteners-per-board; the same rule now
+   feeds the Accessories fastener needs, the consumption/needed-quantities module and the
+   ordering summary. `UnderlaymentLayer.fastenersPerBoard` is retained for older saved bids but
+   no longer priced.
+4. **Per-section AdjustUnderlaymentLabor** (`BidSectionInput.adjustUnderlaymentLaborPct`): the
+   Underlayment step's "Adjustable Labor for selected Roof Sections" link sets it on the
+   selected sections; absent = the labor template's Underlayment Labor factor (the legacy
+   template writes the same field).
+5. **Quote labor is never adjusted** — the template factor / section adjust now scale priced
+   layers only.
+6. **Attached With "None"** is a valid layer attachment (layout labor only).
+7. **Substrate derivation** (`deriveAdhesiveSubstrate`): the bottom layer uses the deck type
+   (`ADHESIVE_SUBSTRATE_BY_LABOR_DECK`; Retrofit / Purlin have no adhesive row), higher layers use
+   the board below's AdhesiveGroup name (`underlaymentGroups.adhesiveGroupNameById`, the legacy
+   group description without its "N" prefix). The stored `substrate` is only a fallback for
+   older bids / underivable combinations; the screen shows the derived "Attached To".
+8. **Layout time** now bills for every priced layer regardless of attachment (legacy), and a
+   missing layout row warns.
+
+Units note: the captured "Fastening Times" figures (e.g. Wood 0.342) are treated as MINUTES per
+fastener (÷ 60). The legacy IL multiplies its stored `SingleFastenerTimeByDT` value directly, so
+its DB must hold the converted figure; the conversion point was not located in the IL —
+assumption, consistent with the captured admin display and with sane totals (≈2.2 h of
+fastening per 2,500 sq ft on wood).

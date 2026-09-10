@@ -690,6 +690,12 @@ export interface UnderlaymentGroupsData {
    * from the picker tile. Drives the §10.7 QuoteAdhesiveUnits path (groups 16/18/19).
    */
   adhesiveGroupIdByBoard: Record<string, number>;
+  /**
+   * AdhesiveGroupID → the Adhesive Times substrate row name (legacy underlayment_group
+   * description without its "N" prefix, e.g. "ISO 4'x8'") — derives the substrate an adhered
+   * layer sits on from the layer below (docs §18).
+   */
+  adhesiveGroupNameById: Record<number, string>;
 }
 
 export function buildUnderlaymentGroups(
@@ -703,6 +709,9 @@ export function buildUnderlaymentGroups(
     if (b.need_quote) needQuoteByBoard[b.board_name] = true;
     adhesiveGroupIdByBoard[b.board_name] = b.underlayment_group_id;
   }
+  const adhesiveGroupNameById: Record<number, string> = {};
+  for (const g of groupRows)
+    adhesiveGroupNameById[g.underlayment_group_id] = g.description.replace(/^N/, "");
   const hasSubtypes = boardRows.some((b) => typeof b.subtype === "number");
   if (hasSubtypes) {
     const boardsByTile = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -722,7 +731,13 @@ export function buildUnderlaymentGroups(
           .map((b) => b.board_name),
       }),
     );
-    return { groups, groupIdByBoard, needQuoteByBoard, adhesiveGroupIdByBoard };
+    return {
+      groups,
+      groupIdByBoard,
+      needQuoteByBoard,
+      adhesiveGroupIdByBoard,
+      adhesiveGroupNameById,
+    };
   }
   // Fallback (pre-subtype snapshot): tiles from the adhesive-group axis.
   const boardsByGroup = new Map<number, RawUnderlaymentBoardGroupRow[]>();
@@ -742,7 +757,13 @@ export function buildUnderlaymentGroups(
         .sort((a, b) => a.sort - b.sort)
         .map((b) => b.board_name),
     }));
-  return { groups, groupIdByBoard, needQuoteByBoard, adhesiveGroupIdByBoard };
+  return {
+    groups,
+    groupIdByBoard,
+    needQuoteByBoard,
+    adhesiveGroupIdByBoard,
+    adhesiveGroupNameById,
+  };
 }
 
 /**
@@ -761,6 +782,7 @@ export function normalizeAdminSnapshot(admin: EngineAdminData): EngineAdminData 
       groupIdByBoard: ug.groupIdByBoard ?? {},
       needQuoteByBoard: ug.needQuoteByBoard ?? {},
       adhesiveGroupIdByBoard: ug.adhesiveGroupIdByBoard ?? {},
+      adhesiveGroupNameById: ug.adhesiveGroupNameById ?? {},
     },
   };
 }
@@ -1022,21 +1044,18 @@ export function buildUnderlaymentLabor(data: RawUnderlaymentLayoutData): Underla
 }
 
 /**
- * Mechanical underlayment labor (the app's own header formula: "Labor = Layout Time + (Time for
- * One Fastener by Deck Type) × # Fasteners in 2500 SqFt", scaled by area):
- * hours = (area/2500) × layoutHoursPer2500 + (minutesPerFastener/60) × (fastenersPerBoard/32) × area
- * (a 4×8 board is 32 sq ft, so fasteners/sqft = count/32).
+ * Mechanical underlayment labor for one layer (legacy `RoofSection.UnderlaymentBaseHours`,
+ * docs §18): hours = AreaTotal / 2500 × LayoutTime + SingleFastenerTimeByDT × fastener count,
+ * where the count comes from the legacy per-layer rule (`underlaymentLayerFasteners`). The
+ * per-fastener time is the admin "Fastening Times" figure captured as MINUTES (÷ 60 here).
  */
 export function underlaymentMechanicalHours(i: {
-  areaSqFt: number;
+  areaTotal: number;
   layoutHoursPer2500: number;
   minutesPerFastener: number;
-  fastenersPerBoard: number;
+  fasteners: number;
 }): number {
-  return (
-    (i.areaSqFt / 2500) * i.layoutHoursPer2500 +
-    (i.minutesPerFastener / 60) * (i.fastenersPerBoard / 32) * i.areaSqFt
-  );
+  return (i.areaTotal / 2500) * i.layoutHoursPer2500 + (i.minutesPerFastener / 60) * i.fasteners;
 }
 
 /** Seeded rdl_labor_tables id "underlayment_adhesive_times". */
@@ -1069,23 +1088,41 @@ export function buildAdhesiveTimes(data: RawAdhesiveTimesData): AdhesiveTimesTab
 }
 
 /**
- * Adhesive underlayment attachment (§5.3): units = area ÷ coverage (sq ft per unit, by substrate);
- * labor hours = area × labor ÷ 1000. LABOR SCALE FLAGGED FOR BID VALIDATION: engine-truth §3.3
- * names the admin Adhesive Times table as GetAdhesiveBaseHours, "hrs per 1000 sq ft" — that scale
- * is applied here. Units are NOT rounded up (the spec states the bare formula; whole-unit
- * purchasing rounding is a validation question). Zero coverage (not-applicable row) → 0 units/hours.
+ * Adhesive underlayment attachment (legacy `RoofSection.UnderlaymentAdhesive` 0x4d470 +
+ * `UnderlaymentBaseHours` 0x4c284, docs §18): units = area ÷ coverage (sq ft per unit, by the
+ * substrate the layer sits on); labor hours = area × labor ÷ 2500 — the Adhesive Times "Labor"
+ * figure is hours per 2,500 sq ft (the IL divides by 2500; the earlier ÷ 1000 over-billed 2.5×).
+ * The legacy area basis is AreaField + AreaPerimeter (corner squares excluded) — pass that.
+ * Units are NOT rounded here (whole-unit rounding happens once per adhesive across the bid).
+ * Zero coverage (not-applicable row) → 0 units/hours.
  */
 export function underlaymentAdhesive(i: {
   areaSqFt: number;
   coverageSqFt: number;
-  laborPer1000SqFt: number;
+  laborPer2500SqFt: number;
 }): { units: number; hours: number } {
   if (i.coverageSqFt <= 0) return { units: 0, hours: 0 };
   return {
     units: i.areaSqFt / i.coverageSqFt,
-    hours: (i.areaSqFt * i.laborPer1000SqFt) / 1000,
+    hours: (i.areaSqFt * i.laborPer2500SqFt) / 2500,
   };
 }
+
+/**
+ * Labor deck name → the Adhesive Times grid's deck substrate row (legacy
+ * `RSAdhesiveCoverage.DeckTypesCoverage / DeckTypesAdhesiveLabor` keyed by DeckType). Retrofit and
+ * Purlin are labor-only deck multipliers with no adhesive row (undefined → not derivable).
+ */
+export const ADHESIVE_SUBSTRATE_BY_LABOR_DECK: Record<string, string> = {
+  Wood: "Wood",
+  Steel: "Structural Metal",
+  Concrete: "Concrete",
+  Gypsum: "Gypsum",
+  "LWC/Steel": "Lightweight Concrete/Corrugated Metal",
+  "LWC/Concrete": "Lightweight Concrete/Concrete",
+  "LWC/Other": "Lightweight Concrete/Other",
+  Tectum: "Tectum",
+};
 
 /** The seeded Adhesives master-detail (pricing_catalog kind "adhesives"), trimmed to what we read. */
 export interface AdhesivesScreenData {
@@ -1782,4 +1819,27 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(metals ? { metals } : {}),
     ...(nonDl ? { nonDl } : {}),
   };
+}
+
+/**
+ * The substrate an adhered underlayment layer sits on, the way the legacy IL derives it
+ * (`UnderlaymentBaseHours` / `UnderlaymentAdhesive`, docs §18): the layer below's AdhesiveGroup
+ * (→ the Adhesive Times row of that name) or, for the bottom layer, the deck type. `source`
+ * says which; `undefined` substrate = not derivable (unknown board group / labor-only deck) —
+ * callers fall back to the layer's stored substrate.
+ */
+export function deriveAdhesiveSubstrate(
+  admin: Pick<EngineAdminData, "underlaymentGroups">,
+  deckType: string,
+  layers: ReadonlyArray<{ board: string }>,
+  layerIndex: number,
+): { substrate: string | undefined; source: "deck" | "layer" } {
+  if (layerIndex <= 0) {
+    return { substrate: ADHESIVE_SUBSTRATE_BY_LABOR_DECK[deckType], source: "deck" };
+  }
+  const lower = layers[layerIndex - 1];
+  const gid = lower ? admin.underlaymentGroups?.adhesiveGroupIdByBoard?.[lower.board] : undefined;
+  const name =
+    gid !== undefined ? admin.underlaymentGroups?.adhesiveGroupNameById?.[gid] : undefined;
+  return { substrate: name, source: "layer" };
 }

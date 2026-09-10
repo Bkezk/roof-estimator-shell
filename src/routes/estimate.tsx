@@ -39,11 +39,17 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
-import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
+import { deriveAdhesiveSubstrate, normalizeAdminSnapshot } from "@/lib/engine/adapters";
 import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
 import type { MarkupMode } from "@/lib/engine/money";
-import { defaultEdges, summarizeEdges, TERMINATION_OPTIONS } from "@/lib/engine/edges";
+import {
+  defaultEdges,
+  resolveSectionZones,
+  summarizeEdges,
+  TERMINATION_OPTIONS,
+} from "@/lib/engine/edges";
+import { underlaymentLayerFasteners } from "@/lib/engine/underlayment-fasteners";
 import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
@@ -470,10 +476,11 @@ function EstimatePage() {
     }
     return undefined;
   };
-  const [uAttach, setUAttach] = useState<"mechanical" | "adhesive">("mechanical");
-  const [uFast, setUFast] = useState(0);
+  const [uAttach, setUAttach] = useState<"mechanical" | "adhesive" | "none">("mechanical");
+  // Legacy Underlayment "Adjustable Labor for selected Roof Sections" link (AdjustUnderlaymentLabor).
+  const [uLaborOpen, setULaborOpen] = useState(false);
+  const [uLaborPct, setULaborPct] = useState(0);
   const [uAdh, setUAdh] = useState("");
-  const [uSub, setUSub] = useState("");
 
   // Tear-Off step (legacy multi-select pattern): section selection + the pending options.
   const [toSel, setToSel] = useState<string[]>([]);
@@ -525,8 +532,7 @@ function EstimatePage() {
       if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
       setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 1 });
       setUnderlaymentAttachmentDefault(d.underlaymentAttachmentDefault ?? "mechanical");
-      if (d.underlaymentAttachmentDefault && d.underlaymentAttachmentDefault !== "none")
-        setUAttach(d.underlaymentAttachmentDefault);
+      if (d.underlaymentAttachmentDefault) setUAttach(d.underlaymentAttachmentDefault);
       setBuildingType(d.buildingType ?? "Commercial");
       setStartDate(
         d.startDate ??
@@ -614,10 +620,7 @@ function EstimatePage() {
   }, [admin]);
   const sheetSizeOptions = laborTable ? Object.keys(laborTable.sheetSizeMultiByLabel) : ["1500 sf"];
   const boardOptions = Object.keys(admin?.underlaymentPrices ?? {});
-  const fastenerOptions = admin?.underlaymentLabor?.fastenerCounts ?? [5];
   const adhesiveOptions = admin?.adhesiveTimes?.adhesives ?? [];
-  const substratesFor = (adhesive: string) =>
-    Object.keys(admin?.adhesiveTimes?.bySubstrate[adhesive] ?? {});
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
   const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
 
@@ -758,17 +761,40 @@ function EstimatePage() {
   const adhesiveUnitTotals: Record<string, number> = {};
   for (const s of sections) {
     const area = s.length * s.width;
-    for (const layer of sectionLayers(s)) {
+    const zones = resolveSectionZones(s);
+    const perimArea = Math.min(area, zones.perimLengthFt * s.enhancementWidthFt);
+    const cornerArea = Math.min(
+      Math.max(0, area - perimArea),
+      zones.cornerLengthFt * s.enhancementWidthFt,
+    );
+    const fieldArea = Math.max(0, area - perimArea - cornerArea);
+    const sLayers = sectionLayers(s);
+    for (const [li, layer] of sLayers.entries()) {
+      if (layer.quote) continue;
       if (layer.attachment === "mechanical") {
         insulationBoards += Math.ceil(area / 32);
-        const count = layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5;
-        insulationFasteners += Math.ceil((count / 32) * area);
-      } else {
-        const entry = admin?.adhesiveTimes?.bySubstrate[layer.adhesiveName]?.[layer.substrate];
+        // Legacy UnderlaymentFasteners rule (docs §18).
+        insulationFasteners += underlaymentLayerFasteners({
+          areaField: fieldArea,
+          areaPerim: perimArea,
+          areaCorner: cornerArea,
+          subtype: admin?.underlaymentGroups?.groupIdByBoard?.[layer.board],
+          fourByFour: /4'\s?x\s?4/.test(layer.board),
+          membraneMechanical: (s.attachment ?? attachment) === "mechanical",
+          custom: s.uCustomFastenerDensity,
+        }).total;
+      } else if (layer.attachment === "adhesive" && admin) {
+        insulationBoards += Math.ceil(area / 32);
+        const grid = admin.adhesiveTimes?.bySubstrate[layer.adhesiveName];
+        const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
+        const entry = grid?.[derived !== undefined && grid?.[derived] ? derived : layer.substrate];
         if (entry && entry.coverageSqFt > 0) {
           adhesiveUnitTotals[layer.adhesiveName] =
-            (adhesiveUnitTotals[layer.adhesiveName] ?? 0) + area / entry.coverageSqFt;
+            (adhesiveUnitTotals[layer.adhesiveName] ?? 0) +
+            (fieldArea + perimArea) / entry.coverageSqFt;
         }
+      } else {
+        insulationBoards += Math.ceil(area / 32);
       }
     }
   }
@@ -1548,7 +1574,7 @@ function EstimatePage() {
                       const next =
                         v === "None" ? "none" : v === "Adhesive" ? "adhesive" : "mechanical";
                       setUnderlaymentAttachmentDefault(next);
-                      if (next !== "none") setUAttach(next);
+                      setUAttach(next);
                     }}
                   />
                   <span className="text-xs text-muted-foreground">
@@ -1965,8 +1991,10 @@ function EstimatePage() {
                                     ? `${l.board} : quote “${l.quote.name}”`
                                     : `${l.board} : ${
                                         l.attachment === "mechanical"
-                                          ? `Mech (${l.fastenersPerBoard || 5}/bd)`
-                                          : l.adhesiveName || "Adhesive"
+                                          ? "Mech"
+                                          : l.attachment === "none"
+                                            ? "None"
+                                            : l.adhesiveName || "Adhesive"
                                       }`
                                   : "None : None"}
                               </TableCell>
@@ -1988,6 +2016,26 @@ function EstimatePage() {
                       .toLocaleString()}
                   </span>
                 </span>
+                <button
+                  type="button"
+                  className="font-medium text-primary underline underline-offset-2"
+                  disabled={uSel.length === 0}
+                  onClick={() => {
+                    const first = sections.find((x) => uSel.includes(x.id));
+                    setULaborPct(first?.adjustUnderlaymentLaborPct ?? 0);
+                    setULaborOpen(true);
+                  }}
+                >
+                  Adjustable Labor for selected Roof Sections
+                  {(() => {
+                    const sel = sections.filter((x) => uSel.includes(x.id));
+                    const pcts = [...new Set(sel.map((x) => x.adjustUnderlaymentLaborPct ?? null))];
+                    if (sel.length === 0) return "";
+                    if (pcts.length === 1)
+                      return pcts[0] === null ? " (template default)" : ` (${pcts[0]}%)`;
+                    return " (mixed)";
+                  })()}
+                </button>
                 <span>
                   Man hours (bid):{" "}
                   <span className="font-semibold tabular-nums">
@@ -2001,6 +2049,67 @@ function EstimatePage() {
                   </span>
                 </span>
               </div>
+
+              {/* Legacy frmLaborPopUp for the Underlayment screen: AdjustUnderlaymentLabor on the
+                  selected sections (the template writes the same field; quote labor is never
+                  adjusted). */}
+              <Dialog open={uLaborOpen} onOpenChange={setULaborOpen}>
+                <DialogContent className="sm:max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle>Underlayment Labor Adjustment</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3 text-xs">
+                    <p className="text-muted-foreground">
+                      Adjust the calculated underlayment labor of the{" "}
+                      {sections.filter((x) => uSel.includes(x.id)).length} selected section(s).
+                      Without an override the labor template&apos;s Underlayment Labor factor
+                      applies.
+                    </p>
+                    <Field label="Adjust Labor (%)">
+                      <Input
+                        type="number"
+                        className="h-8 w-[120px]"
+                        min={-100}
+                        step="1"
+                        value={uLaborPct}
+                        onChange={(e) => setULaborPct(numAdj(e.target.value))}
+                      />
+                    </Field>
+                  </div>
+                  <DialogFooter className="gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSections((prev) =>
+                          prev.map((x) => {
+                            if (!uSel.includes(x.id)) return x;
+                            const nx = { ...x };
+                            delete nx.adjustUnderlaymentLaborPct;
+                            return nx;
+                          }),
+                        );
+                        setULaborOpen(false);
+                      }}
+                    >
+                      Use template default
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setSections((prev) =>
+                          prev.map((x) =>
+                            uSel.includes(x.id)
+                              ? { ...x, adjustUnderlaymentLaborPct: uLaborPct }
+                              : x,
+                          ),
+                        );
+                        setULaborOpen(false);
+                      }}
+                    >
+                      Finished
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               <div className="grid items-start gap-4 lg:grid-cols-2">
                 {/* Layer tabs + stack visual (legacy bottom-left) */}
@@ -2168,39 +2277,59 @@ function EstimatePage() {
                     </span>
                   </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    <Field label="Attachment method">
+                    <Field label="Select Attachment Method">
                       <PickOne
-                        value={uAttach}
-                        options={["mechanical", "adhesive"]}
-                        onChange={(v) => setUAttach(v as "mechanical" | "adhesive")}
+                        value={
+                          uAttach === "none"
+                            ? "None"
+                            : uAttach === "adhesive"
+                              ? "Adhesive"
+                              : "Mechanically Fastened"
+                        }
+                        options={["Mechanically Fastened", "Adhesive", "None"]}
+                        onChange={(v) =>
+                          setUAttach(
+                            v === "None" ? "none" : v === "Adhesive" ? "adhesive" : "mechanical",
+                          )
+                        }
                       />
                     </Field>
-                    {uAttach === "mechanical" ? (
-                      <Field label="Fasteners / 4×8 board">
-                        <PickOne
-                          value={String(uFast || fastenerOptions[0] || 5)}
-                          options={fastenerOptions.map(String)}
-                          onChange={(v) => setUFast(Number(v))}
-                        />
-                      </Field>
-                    ) : (
+                    {uAttach === "mechanical" && (
+                      <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
+                        Fasteners follow the legacy rule: 5 per 4×8 board (4 per 4×4), 10 / 16 per
+                        board field / perimeter when the membrane is adhered, 0.08 per sq ft for
+                        slip sheets — override in Enhancement Options.
+                      </p>
+                    )}
+                    {uAttach === "none" && (
+                      <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
+                        Layout labor only — no fasteners or adhesive.
+                      </p>
+                    )}
+                    {uAttach === "adhesive" && (
                       <>
                         <Field label="Adhesive">
-                          <PickOne
-                            value={uAdh}
-                            options={adhesiveOptions}
-                            onChange={(v) => {
-                              setUAdh(v);
-                              setUSub("");
-                            }}
-                          />
+                          <PickOne value={uAdh} options={adhesiveOptions} onChange={setUAdh} />
                         </Field>
-                        <Field label="Substrate">
-                          <PickOne
-                            value={uSub}
-                            options={substratesFor(uAdh)}
-                            onChange={(v) => setUSub(v)}
-                          />
+                        <Field label="Attached To (derived)">
+                          <p className="pt-2 text-xs">
+                            {(() => {
+                              const sec = sections.find((x) => uSel.includes(x.id));
+                              if (!sec) return "select a section";
+                              const d = deriveAdhesiveSubstrate(
+                                admin,
+                                sec.deckType,
+                                sectionLayers(sec),
+                                uTab,
+                              );
+                              const ok =
+                                d.substrate !== undefined &&
+                                !!admin.adhesiveTimes?.bySubstrate[uAdh]?.[d.substrate];
+                              return d.substrate
+                                ? `${d.substrate} (${d.source === "deck" ? "deck" : "layer below"})${ok ? "" : " — no coverage row for this adhesive"}`
+                                : "not derivable for this deck / board";
+                            })()}
+                          </p>
                         </Field>
                         <Field label="Quote containers (over tapered)">
                           <NumInput min={0} value={uQAU} onValue={setUQAU} />
@@ -2221,10 +2350,10 @@ function EstimatePage() {
                             nextLayers[idx] = {
                               board: uBoard,
                               attachment: uAttach,
-                              fastenersPerBoard:
-                                uAttach === "mechanical" ? uFast || fastenerOptions[0] || 5 : 0,
+                              fastenersPerBoard: 0,
                               adhesiveName: uAttach === "adhesive" ? uAdh : "",
-                              substrate: uAttach === "adhesive" ? uSub : "",
+                              // The engine derives the substrate (deck / layer below, legacy).
+                              substrate: "",
                               // §10.7: containers billed verbatim when this layer sits over a
                               // tapered/crickets-group board (engine checks the group).
                               ...(uAttach === "adhesive" && uQAU > 0

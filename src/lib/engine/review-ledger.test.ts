@@ -39,6 +39,7 @@ const admin: EngineAdminData = {
     groupIdByBoard: { '1/2" ISO': 2, "Flute Filler": 4 },
     needQuoteByBoard: { "Flute Filler": true },
     adhesiveGroupIdByBoard: { '1/2" ISO': 2 },
+    adhesiveGroupNameById: { 2: "ISO 4'x8'" },
   },
   parapetLabor: {
     bands: ['0"-30"'],

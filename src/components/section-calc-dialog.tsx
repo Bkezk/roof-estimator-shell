@@ -11,10 +11,12 @@ import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
 import {
   TEAROFF_DECK_BY_LABOR_DECK,
   UNDERLAYMENT_DECK_BY_LABOR_DECK,
+  deriveAdhesiveSubstrate,
   underlaymentMechanicalHours,
   underlaymentAdhesive,
   type EngineAdminData,
 } from "@/lib/engine/adapters";
+import { underlaymentLayerFasteners } from "@/lib/engine/underlayment-fasteners";
 import { edgesArpSqFt, resolveSectionZones } from "@/lib/engine/edges";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,7 +73,8 @@ export function SectionCalcDialog({
   const tearOffRate = s.tearOff ? (admin.tearOff?.lookup[tDeck]?.[s.tearOffType] ?? 0) : 0;
 
   const uDeck = UNDERLAYMENT_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
-  const layers = sectionLayers(s).map((layer) => {
+  const sLayers = sectionLayers(s);
+  const layers = sLayers.map((layer, li) => {
     const uPrice = admin.underlaymentPrices?.[layer.board];
     const row: {
       label: string;
@@ -79,33 +82,46 @@ export function SectionCalcDialog({
       hours: number | null;
       extra: string;
     } = { label: `${layer.board} (${layer.attachment})`, material: null, hours: null, extra: "" };
+    if (layer.quote) return row;
     if (uPrice !== undefined) row.material = roofArea * uPrice;
+    const layout = admin.underlaymentLabor?.layoutHoursByProduct[layer.board];
     if (layer.attachment === "mechanical") {
-      const layout = admin.underlaymentLabor?.layoutHoursByProduct[layer.board];
       const minPerFast = admin.underlaymentLabor?.fastenerMinutesByDeck[uDeck];
       if (layout !== undefined && minPerFast !== undefined) {
-        const count = layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5;
+        const count = underlaymentLayerFasteners({
+          areaField: fieldArea,
+          areaPerim: perimArea,
+          areaCorner: cornerArea,
+          subtype: admin.underlaymentGroups?.groupIdByBoard?.[layer.board],
+          fourByFour: /4'\s?x\s?4/.test(layer.board),
+          membraneMechanical: (s.attachment ?? attachment) === "mechanical",
+          custom: s.uCustomFastenerDensity,
+        }).total;
         row.hours = underlaymentMechanicalHours({
-          areaSqFt: roofArea,
+          areaTotal: roofArea,
           layoutHoursPer2500: layout,
           minutesPerFastener: minPerFast,
-          fastenersPerBoard: count,
+          fasteners: count,
         });
-        row.extra = `${Math.ceil(roofArea / 32).toLocaleString()} boards · ${Math.ceil(
-          (count / 32) * roofArea,
-        ).toLocaleString()} fasteners`;
+        row.extra = `${Math.ceil(roofArea / 32).toLocaleString()} boards · ${count.toLocaleString()} fasteners (legacy rule)`;
       }
-    } else {
-      const entry = admin.adhesiveTimes?.bySubstrate[layer.adhesiveName]?.[layer.substrate];
+    } else if (layer.attachment === "adhesive") {
+      const grid = admin.adhesiveTimes?.bySubstrate[layer.adhesiveName];
+      const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
+      const substrate = derived !== undefined && grid?.[derived] ? derived : layer.substrate;
+      const entry = grid?.[substrate];
       if (entry && entry.coverageSqFt > 0) {
         const a = underlaymentAdhesive({
-          areaSqFt: roofArea,
+          areaSqFt: fieldArea + perimArea,
           coverageSqFt: entry.coverageSqFt,
-          laborPer1000SqFt: entry.labor,
+          laborPer2500SqFt: entry.labor,
         });
-        row.hours = a.hours;
-        row.extra = `${a.units.toFixed(2)} units of ${layer.adhesiveName}`;
+        row.hours = (layout !== undefined ? (roofArea / 2500) * layout : 0) + a.hours;
+        row.extra = `${a.units.toFixed(2)} units of ${layer.adhesiveName} on ${substrate}`;
       }
+    } else if (layout !== undefined) {
+      row.hours = (roofArea / 2500) * layout;
+      row.extra = "layout only (no fasteners)";
     }
     return row;
   });

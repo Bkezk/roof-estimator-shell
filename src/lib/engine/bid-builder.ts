@@ -66,6 +66,7 @@ import {
 } from "./nondl";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
 import { edgesArpSqFt, resolveSectionZones, type EdgeInput, type PerimCorners } from "./edges";
+import { underlaymentLayerFasteners } from "./underlayment-fasteners";
 import {
   membraneMaterialCost,
   membraneZoneShares,
@@ -84,7 +85,7 @@ import {
   UNDERLAYMENT_DECK_BY_LABOR_DECK,
   parapetModeRate,
   curbLaborHours as curbHoursCalc,
-  underlaymentMechanicalHours,
+  deriveAdhesiveSubstrate,
   underlaymentAdhesive,
   laborTemplateFactor,
   LEGACY_RS_ID_BY_NAME,
@@ -100,10 +101,21 @@ import {
  */
 export interface UnderlaymentLayer {
   board: string; // from the Underlayment prices screen (or a NeedQuote entry when quoted)
-  attachment: "mechanical" | "adhesive";
-  fastenersPerBoard: number; // mechanical: fasteners per 4×8 board (app default 5)
+  /** Legacy Attached With: mechanical, an adhesive, or "none" (layout labor only, no fasteners). */
+  attachment: "mechanical" | "adhesive" | "none";
+  /**
+   * LEGACY-WEB FIELD, no longer priced: the legacy fastener count is a rule of the board's
+   * SubType and the membrane attachment (docs §18; override via Enhancement Options). Kept so
+   * older saved bids stay valid; 0 on new layers.
+   */
+  fastenersPerBoard: number;
   adhesiveName: string; // adhesive: from the Adhesive Times table
-  substrate: string; // adhesive: substrate row in that adhesive's grid
+  /**
+   * adhesive: the Adhesive Times substrate row. The engine DERIVES it (deck type for the bottom
+   * layer, the board below's adhesive group otherwise — legacy behaviour) and only falls back to
+   * this stored value when it cannot (older bids / unknown groups).
+   */
+  substrate: string;
   /**
    * Legacy custom-quote layer (docs §10.5/§10.7 — NeedQuote entries: Flute Filler,
    * Tapered/Other, ISO/Rigid Quote). Bills the QUOTED amounts VERBATIM, IL-exact per §10.7:
@@ -247,6 +259,12 @@ export interface BidSectionInput {
    * × 12 / spacing (default ×1). Absent/0 = default coverage.
    */
   uAdhesiveSpacingIn?: number;
+  /**
+   * Per-section AdjustUnderlaymentLabor % (legacy Underlayment screen "Adjustable Labor for
+   * selected Roof Sections" link; the labor template writes the same field). Absent = the labor
+   * template's Underlayment Labor factor. Quote labor is never adjusted (legacy).
+   */
+  adjustUnderlaymentLaborPct?: number;
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -945,9 +963,26 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const cornerArea = zones.cornerLengthFt * s.enhancementWidthFt;
     const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
 
-    // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
-    // labor and adhesive labor → direct labor; adhesive units × price → M0.
+    // Legacy MechFieldLaborRate / AdheredFieldLaborRate multiply SheetSize.SmartSheetMulti AND
+    // ComplexityFactor.SmartValue (RSComplexityFactor rows only for Duro-Tuff / Duro-Fleece);
+    // UnderlaymentBaseHours multiplies both into the section's underlayment hours as well.
+    const sheetSizeMulti = sLt?.sheetSizeMultiByLabel[sheetLabel] ?? 1;
+    const complexity = sectionComplexityFactor(rsId, s.complexity, sheetSizeMulti);
+
+    // Insulation layers (§4.3, up to 4): board material → dTotals[6]; layout + fastener labor
+    // and adhesive labor → direct labor; adhesive units × price → M0. Labor follows legacy
+    // RoofSection.UnderlaymentBaseHours (docs §18): per priced layer AreaTotal/2500 × LayoutTime,
+    // + fastener time × the legacy count rule (mechanical) or (AreaField + AreaPerimeter) ×
+    // labor / 2500 (adhered, substrate derived from the layer below / deck); the section's
+    // base hours then × ComplexityFactor × SheetSize multiplier × (1 + AdjustUnderlaymentLabor
+    // /100). Quote labor bills verbatim, unadjusted (UnderlaymentQuoteHours).
     const sLayers = sectionLayers(s);
+    const uAdjust =
+      s.adjustUnderlaymentLaborPct !== undefined
+        ? 1 + s.adjustUnderlaymentLaborPct / 100
+        : tf("Underlayment Labor");
+    const uScale = complexity * sheetSizeMulti * uAdjust;
+    const zoneArea = fieldArea + perimArea; // legacy adhesive basis (corner squares excluded)
     for (const [li, layer] of sLayers.entries()) {
       const area = s.length * s.width;
       // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
@@ -980,39 +1015,38 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         underlaymentMaterial += area * waste * uPrice;
         addSub(uMatBySub, uTile, area * waste * uPrice);
       }
+      // Layout time applies to every priced layer whatever its attachment (incl. "none").
+      const layout = admin.underlaymentLabor?.layoutHoursByProduct[layer.board];
+      let layerHours = 0;
+      if (admin.underlaymentLabor && layout === undefined) {
+        warnings.push(`No underlayment layout time for "${layer.board}" — section "${s.name}".`);
+      } else if (layout !== undefined) {
+        layerHours += (area / 2500) * layout;
+      }
       if (layer.attachment === "mechanical") {
         if (admin.underlaymentLabor) {
-          const layout = admin.underlaymentLabor.layoutHoursByProduct[layer.board];
           const uDeck = UNDERLAYMENT_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
           const minPerFast = admin.underlaymentLabor.fastenerMinutesByDeck[uDeck];
-          if (layout === undefined || minPerFast === undefined) {
+          if (minPerFast === undefined) {
             warnings.push(
-              `No underlayment labor for "${layer.board}" on ${s.deckType} — section "${s.name}".`,
+              `No underlayment fastening time for ${s.deckType} — section "${s.name}".`,
             );
-          } else if (s.uCustomFastenerDensity) {
-            // Enhancement Options custom fastening (docs §10.3, rva 0x4d23c/0x4d00c): the
-            // per-layer fastener COUNT is Round(density × zone area) per zone (banker's
-            // Round), replacing the default per-board density entirely.
-            const d = s.uCustomFastenerDensity;
-            const count =
-              bankersRound(d.field * fieldArea, 0) +
-              bankersRound(d.perim * perimArea, 0) +
-              bankersRound(d.corner * cornerArea, 0);
-            const mh = (area / 2500) * layout + (minPerFast / 60) * count;
-            underlaymentLaborHours += mh;
-            addSub(uHrsBySub, uTile, mh);
           } else {
-            const mh = underlaymentMechanicalHours({
-              areaSqFt: area,
-              layoutHoursPer2500: layout,
-              minutesPerFastener: minPerFast,
-              fastenersPerBoard: layer.fastenersPerBoard > 0 ? layer.fastenersPerBoard : 5,
-            });
-            underlaymentLaborHours += mh;
-            addSub(uHrsBySub, uTile, mh);
+            // Legacy UnderlaymentLayerField/PerimFasteners (docs §10.3): count by the board's
+            // SubType and the MEMBRANE attachment; Enhancement Options densities override.
+            const count = underlaymentLayerFasteners({
+              areaField: fieldArea,
+              areaPerim: perimArea,
+              areaCorner: cornerArea,
+              subtype: admin.underlaymentGroups?.groupIdByBoard?.[layer.board],
+              fourByFour: /4'\s?x\s?4/.test(layer.board),
+              membraneMechanical: sys.attachment === "mechanical",
+              custom: s.uCustomFastenerDensity,
+            }).total;
+            layerHours += (minPerFast / 60) * count;
           }
         }
-      } else if (admin.adhesiveTimes) {
+      } else if (layer.attachment === "adhesive" && admin.adhesiveTimes) {
         // §10.7 target 3 (UnderlaymentAdhesive, rva 0x4d470): an adhered layer over a board
         // whose adhesive group ∈ {16 Tapered ISO, 18 Tapered Rigid, 19 Crickets/Other} skips
         // the coverage formula and bills the layer's raw QuoteAdhesiveUnits verbatim (no
@@ -1034,40 +1068,41 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
               `Adhesive over "${lowerBoard}" needs quote adhesive containers (tapered surface) — section "${s.name}".`,
             );
           }
-          continue;
-        }
-        const entry = admin.adhesiveTimes.bySubstrate[layer.adhesiveName]?.[layer.substrate];
-        if (!entry || entry.coverageSqFt <= 0) {
-          warnings.push(
-            `No adhesive coverage for ${layer.adhesiveName || "(no adhesive)"} / ${layer.substrate || "(no substrate)"} — section "${s.name}".`,
-          );
         } else {
-          const a = underlaymentAdhesive({
-            areaSqFt: area,
-            coverageSqFt: entry.coverageSqFt,
-            laborPer1000SqFt: entry.labor,
-          });
-          underlaymentLaborHours += a.hours;
-          addSub(uHrsBySub, uTile, a.hours);
-          if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
-            warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+          // Legacy: the substrate is the layer below's adhesive group, or the deck type.
+          const grid = admin.adhesiveTimes.bySubstrate[layer.adhesiveName];
+          const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
+          const substrate = derived !== undefined && grid?.[derived] ? derived : layer.substrate;
+          const entry = grid?.[substrate];
+          if (!entry || entry.coverageSqFt <= 0) {
+            warnings.push(
+              `No adhesive coverage for ${layer.adhesiveName || "(no adhesive)"} / ${substrate || "(no substrate)"} — section "${s.name}".`,
+            );
+          } else {
+            const a = underlaymentAdhesive({
+              areaSqFt: zoneArea,
+              coverageSqFt: entry.coverageSqFt,
+              laborPer2500SqFt: entry.labor,
+            });
+            layerHours += a.hours;
+            if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
+              warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+            }
+            // Enhancement Options custom ribbon spacing (docs §10.3, rva 0x4d470): units
+            // × 12 / spacing (default ×1); the spacing is ribbon on-center inches.
+            const spacingMult =
+              s.uAdhesiveSpacingIn && s.uAdhesiveSpacingIn > 0 ? 12 / s.uAdhesiveSpacingIn : 1;
+            // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
+            // adhesive after all sections (legacy AggregateCalcQtys), below.
+            adhesiveUnitsByName[layer.adhesiveName] =
+              (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units * spacingMult;
           }
-          // Enhancement Options custom ribbon spacing (docs §10.3, rva 0x4d470): units
-          // × 12 / spacing (default ×1); the spacing is ribbon on-center inches.
-          const spacingMult =
-            s.uAdhesiveSpacingIn && s.uAdhesiveSpacingIn > 0 ? 12 / s.uAdhesiveSpacingIn : 1;
-          // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
-          // adhesive after all sections (legacy AggregateCalcQtys), below.
-          adhesiveUnitsByName[layer.adhesiveName] =
-            (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units * spacingMult;
         }
       }
+      const scaled = layerHours * uScale;
+      underlaymentLaborHours += scaled;
+      addSub(uHrsBySub, uTile, scaled);
     }
-
-    // Legacy MechFieldLaborRate / AdheredFieldLaborRate multiply SheetSize.SmartSheetMulti AND
-    // ComplexityFactor.SmartValue (RSComplexityFactor rows only for Duro-Tuff / Duro-Fleece).
-    const sheetSizeMulti = sLt?.sheetSizeMultiByLabel[sheetLabel] ?? 1;
-    const complexity = sectionComplexityFactor(rsId, s.complexity, sheetSizeMulti);
 
     let tearOffLaborLookup = 0;
     if (s.tearOff && admin.tearOff) {
@@ -1637,6 +1672,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       attachment: bid.attachment,
       arpCalcSqFt: arpCalcQty,
       parapetEdgeFasteners: parapetEdgeFastenersCount(bid.parapets, bid.roofSystem, bid.attachment),
+      ...(admin.underlaymentGroups?.groupIdByBoard
+        ? { underlaymentSubtypeByBoard: admin.underlaymentGroups.groupIdByBoard }
+        : {}),
     });
     warnings.push(...accessoriesCalcResult.warnings);
     // The ARP row keeps its own dMaterial slot (review-ledger attribution); the rest of the
@@ -1650,8 +1688,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // Apply the template factors to the category hour seams.
   parapetLaborHours *= tf("Parapets Labor");
   curbLaborHours *= tf("Curbs Labor");
-  underlaymentLaborHours *= tf("Underlayment Labor");
-  for (const k of Object.keys(uHrsBySub)) uHrsBySub[Number(k)]! *= tf("Underlayment Labor");
 
   // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
   const duroLastMaterial =

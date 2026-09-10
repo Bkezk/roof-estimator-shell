@@ -7,8 +7,16 @@
 
 import type { BidSectionInput } from "./bid-builder";
 import { bankersRound } from "./rounding";
+import { underlaymentLayerFasteners } from "./underlayment-fasteners";
+
+export {
+  underlaymentLayerFasteners,
+  FOUR_BY_FOUR_SUBTYPES,
+  SLIP_SHEET_SUBTYPE,
+  type UnderlaymentLayerFastenerArgs,
+} from "./underlayment-fasteners";
 import { sectionLayers } from "./bid-builder";
-import { perimeterFromEdges } from "./edges";
+import { resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 
 /** Row-style tab systems whose membrane screws come from the DLRowStyle port (§2.2). */
@@ -37,10 +45,10 @@ export function insulationFasteners(
   if (areaSqFt <= 0) return 0;
   if (opts.fourByFour) {
     const per = opts.membraneAdheredOrBond ? (opts.perimeter ? 8 : 5) : 4;
-    return Math.round(areaSqFt / 16) * per;
+    return bankersRound(areaSqFt / 16, 0) * per;
   }
   const per = opts.membraneAdheredOrBond ? (opts.perimeter ? 16 : 10) : 5;
-  return Math.round(areaSqFt / 32) * per;
+  return bankersRound(areaSqFt / 32, 0) * per;
 }
 
 /**
@@ -142,6 +150,8 @@ export function computeNeededQuantities(args: {
   attachment: "mechanical" | "adhered";
   roofSystem: string;
   adhesiveCoverage?: Record<string, Record<string, { coverageSqFt: number }>> | undefined;
+  /** Board → legacy SubType (picker tile) for the slip-sheet / 4'×4' fastener rules. */
+  underlaymentSubtypeByBoard?: Record<string, number> | undefined;
 }): NeededQuantities {
   const bars = edgeBarBreakdown(args.sections);
   const barLf = bars.termBarLf + bars.fasciaLf + bars.dripEdgeLf + bars.gravelStopLf;
@@ -188,24 +198,26 @@ export function computeNeededQuantities(args: {
       });
     }
     const roofArea = s.length * s.width;
-    const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
-    const perimArea = Math.min(roofArea, perimLen * s.enhancementWidthFt);
-    const fieldArea = Math.max(0, roofArea - perimArea);
+    const zones = resolveSectionZones(s);
+    const perimArea = Math.min(roofArea, zones.perimLengthFt * s.enhancementWidthFt);
+    const cornerArea = Math.min(
+      Math.max(0, roofArea - perimArea),
+      zones.cornerLengthFt * s.enhancementWidthFt,
+    );
+    const fieldArea = Math.max(0, roofArea - perimArea - cornerArea);
     for (const layer of sectionLayers(s)) {
-      const fourByFour = /4'\s?x\s?4/.test(layer.board);
+      if (layer.quote) continue;
       if (layer.attachment === "mechanical") {
-        insulationScrews +=
-          insulationFasteners(fieldArea, {
-            fourByFour,
-            membraneAdheredOrBond,
-            perimeter: false,
-          }) +
-          insulationFasteners(perimArea, {
-            fourByFour,
-            membraneAdheredOrBond,
-            perimeter: true,
-          });
-      } else {
+        insulationScrews += underlaymentLayerFasteners({
+          areaField: fieldArea,
+          areaPerim: perimArea,
+          areaCorner: cornerArea,
+          subtype: args.underlaymentSubtypeByBoard?.[layer.board],
+          fourByFour: /4'\s?x\s?4/.test(layer.board),
+          membraneMechanical: !membraneAdheredOrBond,
+          custom: s.uCustomFastenerDensity,
+        }).total;
+      } else if (layer.attachment === "adhesive") {
         const entry = args.adhesiveCoverage?.[layer.adhesiveName]?.[layer.substrate];
         if (entry && entry.coverageSqFt > 0) {
           adhesiveRaw[layer.adhesiveName] =

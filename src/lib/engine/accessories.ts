@@ -28,7 +28,7 @@ import type { BidSectionInput, ParapetInput, CurbInput } from "./bid-builder";
 import { sectionLayers, parapetEffectiveCanted } from "./bid-builder";
 import { edgePerimLength, edgeTermLength, resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
-import { insulationFasteners, parapetDeckFasteners } from "./consumption";
+import { parapetDeckFasteners, underlaymentLayerFasteners } from "./consumption";
 
 /* ------------------------------------------------------------------------------------------------
  * Shared primitives (§12.0)
@@ -791,6 +791,8 @@ export interface ComputeAccessoriesArgs {
   arpCalcSqFt: number;
   /** §8.5 Parapets.EdgeFasteners total (wall-tab fasteners) — feeds slot 1 needs. */
   parapetEdgeFasteners: number;
+  /** Board → legacy SubType (picker tile) for the slip-sheet / 4'×4' fastener rules (§18). */
+  underlaymentSubtypeByBoard?: Record<string, number>;
 }
 
 const adj = (pct: number): number => 1 + (pct || 0) / 100;
@@ -1467,26 +1469,29 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     // uf — §2.3/§10.3 underlayment fasteners across all layers; insulPlates once per MECHANICAL
     // layer (LEGACY QUIRK §12.5: two mechanical layers double the plate count).
     const roofArea = s.length * s.width;
-    const perimLen = resolveSectionZones(s).perimLengthFt;
-    const perimArea = Math.min(roofArea, perimLen * s.enhancementWidthFt);
-    const fieldArea = Math.max(0, roofArea - perimArea);
+    const zones = resolveSectionZones(s);
+    const perimArea = Math.min(roofArea, zones.perimLengthFt * s.enhancementWidthFt);
+    const cornerArea = Math.min(
+      Math.max(0, roofArea - perimArea),
+      zones.cornerLengthFt * s.enhancementWidthFt,
+    );
+    const fieldArea = Math.max(0, roofArea - perimArea - cornerArea);
     let uf = 0;
     let mechLayers = 0;
     for (const layer of sectionLayers(s)) {
-      if (layer.attachment !== "mechanical") continue;
+      if (layer.attachment !== "mechanical" || layer.quote) continue;
       mechLayers += 1;
-      if (s.uCustomFastenerDensity) {
-        const d = s.uCustomFastenerDensity;
-        uf +=
-          bankersRound(d.field * fieldArea, 0) +
-          bankersRound(d.perim * perimArea, 0) +
-          bankersRound(d.corner * 0, 0);
-      } else {
-        const fourByFour = /4'\s?x\s?4/.test(layer.board);
-        uf +=
-          insulationFasteners(fieldArea, { fourByFour, membraneAdheredOrBond, perimeter: false }) +
-          insulationFasteners(perimArea, { fourByFour, membraneAdheredOrBond, perimeter: true });
-      }
+      // Legacy UnderlaymentFasteners (docs §10.3 / §18): SubType + membrane-attachment rule,
+      // Enhancement Options densities overriding.
+      uf += underlaymentLayerFasteners({
+        areaField: fieldArea,
+        areaPerim: perimArea,
+        areaCorner: cornerArea,
+        subtype: args.underlaymentSubtypeByBoard?.[layer.board],
+        fourByFour: /4'\s?x\s?4/.test(layer.board),
+        membraneMechanical: !membraneAdheredOrBond,
+        custom: s.uCustomFastenerDensity,
+      }).total;
     }
     const need = deckNeeds[bucket];
     need.fasteners += mf + uf;

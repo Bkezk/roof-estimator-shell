@@ -1294,9 +1294,10 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(adhesiveMaterial).toBeCloseTo(1798, 2);
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1798, 2);
     const r = computeEstimate(inputs);
-    // mech: 7.775 + (0.342/60)(5/32)(2500) = 10.0016 h; adhesive: 2500 x 6.5/1000 = 16.25 h
-    expect(r.underlaymentLaborHours).toBeCloseTo(10.0016 + 16.25, 3);
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 10.0016 + 16.25, 3);
+    // mech (legacy rule, docs §18): layout 7.775 + (0.342/60) × (Round(2500/32)=78 × 5 = 390)
+    // = 9.998 h; adhesive layer: layout 6.9 + (field 2500 + perim 0) × 6.5 / 2500 = 13.4 h
+    expect(r.underlaymentLaborHours).toBeCloseTo(9.998 + 13.4, 3);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 9.998 + 13.4, 3);
   });
 
   it("adhesive units sum fractionally per adhesive across sections, then Ceiling ONCE per adhesive", () => {
@@ -1354,7 +1355,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     const r = computeEstimate(inputs);
     expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2); // unchanged material
-    expect(r.underlaymentLaborHours).toBeCloseTo(10.0016, 3); // labor now bills (parity behavior)
+    expect(r.underlaymentLaborHours).toBeCloseTo(9.998, 3); // legacy 5-per-board rule (§18)
   });
 
   it("labor template scales categories: install, setup, tear-off, parapets (0 = default)", () => {
@@ -1804,7 +1805,8 @@ describe("Enhancement Options (§10.3: custom fastener densities + adhesive ribb
     // count = Round(0.05×1900) + Round(0.1×600) + Round(0.2×0) = 95 + 60 = 155
     // hours = 2500/2500 × 7.775 + 0.342/60 × 155 = 7.775 + 0.8835 = 8.6585
     expect(r.underlaymentLaborHours).toBeCloseTo(8.6585, 4);
-    // default (no custom): 7.775 + 0.342/60 × (5/32) × 2500 = 10.0016 — custom is a real change
+    // default (no custom, legacy rule §18): Round(1900/32)=59×5 + Round(600/32)=19×5 = 390 →
+    // 7.775 + 0.342/60 × 390 = 9.998 — custom is a real change
     const def = buildEstimateInputs(
       bid({
         sections: [
@@ -1818,7 +1820,7 @@ describe("Enhancement Options (§10.3: custom fastener densities + adhesive ribb
       }),
       withU,
     );
-    expect(computeEstimate(def.inputs).underlaymentLaborHours).toBeCloseTo(10.0016, 3);
+    expect(computeEstimate(def.inputs).underlaymentLaborHours).toBeCloseTo(9.998, 3);
   });
 
   it("custom ribbon spacing multiplies adhered-layer units by 12/spacing (labor unchanged)", () => {
@@ -1937,8 +1939,8 @@ describe("custom-quote underlayment layers (§10.5: Flute Filler / Tapered / ISO
     expect(warnings).toEqual([]);
     // priced: 2500 × 0.85 × 1.06 = 2252.50; quote adds 300 verbatim
     expect(inputs.materialUnderlayment).toBeCloseTo(2252.5 + 300, 2);
-    // priced labor 10.0016 + quote 1 h
-    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(11.0016, 3);
+    // priced labor 9.998 + quote 1 h
+    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(10.998, 3);
   });
 });
 
@@ -1958,6 +1960,7 @@ describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUni
       groupIdByBoard: {},
       needQuoteByBoard: { "Tapered ISO": true },
       adhesiveGroupIdByBoard: { "Tapered ISO": 16, '1/2" ISO': 2 },
+      adhesiveGroupNameById: { 16: "Tapered ISO", 2: "ISO 4'x8'" },
     },
   };
 
@@ -2258,5 +2261,209 @@ describe("a bid with no roof sections", () => {
     expect(r.roofSqFootage).toBe(0);
     expect(r.installHours).toBe(0);
     expect(r.money.grandTotal).toBe(0);
+  });
+});
+
+describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () => {
+  const mechLayer = (board: string): UnderlaymentLayer => ({
+    board,
+    attachment: "mechanical",
+    fastenersPerBoard: 0,
+    adhesiveName: "",
+    substrate: "",
+  });
+  const uAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Last|adhesive": admin.labor["Duro-Last|mechanical"]! },
+    underlaymentPrices: { '1/2" ISO': 0.85, "Duro-Fold": 0.3, "1\" ISO 4'x4'": 0.9 },
+    underlaymentLabor: {
+      layoutHoursByProduct: { '1/2" ISO': 7.775, "Duro-Fold": 6.9, "1\" ISO 4'x4'": 8 },
+      fastenerCounts: [5],
+      fastenerMinutesByDeck: { Wood: 0.342 },
+    },
+    underlaymentGroups: {
+      groups: [],
+      groupIdByBoard: { "Duro-Fold": 1, '1/2" ISO': 2, "1\" ISO 4'x4'": 7 },
+      needQuoteByBoard: {},
+      adhesiveGroupIdByBoard: { '1/2" ISO': 2 },
+      adhesiveGroupNameById: { 2: "ISO 4'x8'" },
+    },
+    adhesiveTimes: {
+      adhesives: ["Duro-Grip Adhesive(CR-20)"],
+      bySubstrate: {
+        "Duro-Grip Adhesive(CR-20)": {
+          Wood: { coverageSqFt: 2000, labor: 5 },
+          "ISO 4'x8'": { coverageSqFt: 1000, labor: 6.5 },
+        },
+      },
+    },
+    adhesivePrices: { "Duro-Grip Adhesive(CR-20)": 899 },
+  };
+  const perimSection = () => ({
+    ...bid().sections[0]!,
+    enhancementWidthFt: 3,
+    edges: [
+      {
+        side: "A",
+        lengthFt: 50,
+        isPerimeter: true,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "B",
+        lengthFt: 50,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "C",
+        lengthFt: 50,
+        isPerimeter: true,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "D",
+        lengthFt: 50,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+    ],
+    perimCorners: [false, false, false, false] as [boolean, boolean, boolean, boolean],
+  });
+  const uHours = (b: BidInput) =>
+    computeEstimate(buildEstimateInputs(b, uAdmin).inputs).underlaymentLaborHours;
+
+  it("fastener count follows the board tile and the MEMBRANE attachment (5 → 10/16 per board)", () => {
+    // field 2200 sf, perimeter 300 sf (two 50-ft perimeter sides × 3 ft), no corners
+    const mech = uHours(
+      bid({ sections: [{ ...perimSection(), layers: [mechLayer('1/2" ISO')] }] }),
+    );
+    // Round(2200/32)=69×5 + Round(300/32)=9×5 = 390 → 7.775 + 0.342/60×390
+    expect(mech).toBeCloseTo(7.775 + (0.342 / 60) * 390, 6);
+    const adhered = uHours(
+      bid({
+        attachment: "adhered",
+        sections: [{ ...perimSection(), layers: [mechLayer('1/2" ISO')] }],
+      }),
+    );
+    // adhered membrane: 69×10 + 9×16 = 834 fasteners
+    expect(adhered).toBeCloseTo(7.775 + (0.342 / 60) * 834, 6);
+  });
+
+  it("slip sheets (SubType 1) use 0.08 / sq ft; 4'×4' tiles use 4 per 16 sq ft", () => {
+    const slip = uHours(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer("Duro-Fold")] }] }),
+    );
+    expect(slip).toBeCloseTo(6.9 + (0.342 / 60) * Math.round(Math.ceil(2500 * 0.08)), 6); // 200
+    const four = uHours(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer("1\" ISO 4'x4'")] }] }),
+    );
+    // Round(2500/16) = 156 × 4 = 624 (banker's: 156.25 → 156)
+    expect(four).toBeCloseTo(8 + (0.342 / 60) * 624, 6);
+  });
+
+  it("adhered layers: substrate derived from the deck / layer below; labor per 2500 on field+perim", () => {
+    const layers: UnderlaymentLayer[] = [
+      {
+        board: '1/2" ISO',
+        attachment: "adhesive",
+        fastenersPerBoard: 0,
+        adhesiveName: "Duro-Grip Adhesive(CR-20)",
+        substrate: "",
+      },
+      {
+        board: "Duro-Fold",
+        attachment: "adhesive",
+        fastenersPerBoard: 0,
+        adhesiveName: "Duro-Grip Adhesive(CR-20)",
+        substrate: "",
+      },
+    ];
+    const { inputs, warnings, adhesiveWholeUnits } = buildEstimateInputs(
+      bid({ sections: [{ ...perimSection(), layers }] }),
+      uAdmin,
+    );
+    expect(warnings).toEqual([]);
+    // layer 1 on the Wood deck: labor 5 → (2200+300) × 5/2500 = 5 h; layer 2 over 1/2" ISO
+    // (group 2 → "ISO 4'x8'"): 2500 × 6.5/2500 = 6.5 h; plus both layout times
+    expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(7.775 + 5 + 6.9 + 6.5, 6);
+    // units: 2500/2000 + 2500/1000 = 3.75 → 4 whole units
+    expect(adhesiveWholeUnits?.["Duro-Grip Adhesive(CR-20)"]).toBe(4);
+  });
+
+  it("section base hours × complexity × sheet multiplier; per-section adjust overrides the template; quotes unscaled", () => {
+    const tuff: EngineAdminData = {
+      ...uAdmin,
+      labor: { ...uAdmin.labor, "Duro-Tuff|mechanical": uAdmin.labor["Duro-Last|mechanical"]! },
+      familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
+    };
+    const heavy = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            roofSystem: "Duro-Tuff",
+            complexity: 4,
+            layers: [mechLayer('1/2" ISO')],
+          },
+        ],
+      }),
+      tuff,
+    );
+    expect(computeEstimate(heavy.inputs).underlaymentLaborHours).toBeCloseTo(9.998 * 2.4, 3);
+    const adjusted = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            adjustUnderlaymentLaborPct: 10,
+            layers: [
+              mechLayer('1/2" ISO'),
+              {
+                board: "Flute Filler",
+                attachment: "mechanical",
+                fastenersPerBoard: 0,
+                adhesiveName: "",
+                substrate: "",
+                quote: { name: "Q", lumpSum: 100, laborAmount: 2 },
+              },
+            ],
+          },
+        ],
+      }),
+      uAdmin,
+    );
+    // priced 9.998 × 1.10 + quote 2 h (never adjusted)
+    expect(computeEstimate(adjusted.inputs).underlaymentLaborHours).toBeCloseTo(9.998 * 1.1 + 2, 3);
+  });
+
+  it("attachment None bills layout time only", () => {
+    const h = uHours(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [
+              {
+                board: '1/2" ISO',
+                attachment: "none",
+                fastenersPerBoard: 0,
+                adhesiveName: "",
+                substrate: "",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(h).toBeCloseTo(7.775, 6);
   });
 });

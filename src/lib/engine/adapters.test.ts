@@ -759,20 +759,20 @@ describe("underlayment labor (Layout & Mechanical + Adhesive Times)", () => {
     expect(UNDERLAYMENT_DECK_BY_LABOR_DECK["Purlin"]).toBe("Purlin Fastened");
   });
 
-  it("mechanical hours = layout×(area/2500) + (min/60)×(count/32)×area (the app's header formula)", () => {
-    // 2500 sqft of 1/2" ISO on Wood, 5 fasteners/board:
-    // layout 7.775 + (0.342/60)×(5/32)×2500 = 7.775 + 2.2266 = 10.0016 h
+  it("mechanical hours = layout×(area/2500) + (min/60)×fasteners (legacy UnderlaymentBaseHours)", () => {
+    // 2500 sqft of 1/2" ISO on Wood: legacy count Round(2500/32)×5 = 78×5 = 390 fasteners
+    // layout 7.775 + (0.342/60)×390 = 7.775 + 2.223 = 9.998 h
     const h = underlaymentMechanicalHours({
-      areaSqFt: 2500,
+      areaTotal: 2500,
       layoutHoursPer2500: 7.775,
       minutesPerFastener: 0.342,
-      fastenersPerBoard: 5,
+      fasteners: 390,
     });
-    expect(h).toBeCloseTo(7.775 + (0.342 / 60) * (5 / 32) * 2500, 6);
-    expect(h).toBeCloseTo(10.0016, 3);
+    expect(h).toBeCloseTo(7.775 + (0.342 / 60) * 390, 6);
+    expect(h).toBeCloseTo(9.998, 3);
   });
 
-  it("adhesive: units = area ÷ coverage; hours = area × labor ÷ 1000; 0-coverage rows inert", () => {
+  it("adhesive: units = area ÷ coverage; hours = area × labor ÷ 2500 (IL scale); 0-coverage rows inert", () => {
     const times = buildAdhesiveTimes({
       adhesives: [
         {
@@ -790,11 +790,11 @@ describe("underlayment labor (Layout & Mechanical + Adhesive Times)", () => {
     const r = underlaymentAdhesive({
       areaSqFt: 2500,
       coverageSqFt: wood.coverageSqFt,
-      laborPer1000SqFt: wood.labor,
+      laborPer2500SqFt: wood.labor,
     });
     expect(r.units).toBeCloseTo(1.25, 6); // 2500 / 2000
-    expect(r.hours).toBeCloseTo(16.25, 6); // 2500 × 6.5 / 1000
-    const na = underlaymentAdhesive({ areaSqFt: 2500, coverageSqFt: 0, laborPer1000SqFt: 0 });
+    expect(r.hours).toBeCloseTo(6.5, 6); // 2500 × 6.5 / 2500 (was ÷ 1000: 2.5× over)
+    const na = underlaymentAdhesive({ areaSqFt: 2500, coverageSqFt: 0, laborPer2500SqFt: 0 });
     expect(na).toEqual({ units: 0, hours: 0 });
   });
 
