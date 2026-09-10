@@ -2685,10 +2685,26 @@ function EstimatePage() {
                               }
                             />
                           </Field>
-                          <div className="flex items-end gap-2 pb-1">
+                          {/* Legacy §8.5: the labor drill column keys WallType (mech; adhered is
+                              always pre-drill) and the cant column keys Cant > 0 — derived, not
+                              separate toggles. Manual switches remain only for legacy walls
+                              saved without those fields. */}
+                          <div
+                            className="flex items-end gap-2 pb-1"
+                            title={
+                              p.wallType !== undefined
+                                ? "Follows Wall Type (legacy): Brick or Concrete pre-drills; adhered bids always pre-drill."
+                                : undefined
+                            }
+                          >
                             <Switch
                               id={`pd-${p.id}`}
-                              checked={p.predrill}
+                              disabled={p.wallType !== undefined}
+                              checked={
+                                p.wallType !== undefined
+                                  ? attachment !== "mechanical" || p.wallType === 4
+                                  : p.predrill
+                              }
                               onCheckedChange={(v) =>
                                 setParapets((prev) =>
                                   prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
@@ -2696,23 +2712,41 @@ function EstimatePage() {
                               }
                             />
                             <Label htmlFor={`pd-${p.id}`} className="text-xs">
-                              Pre-drill
+                              Pre-drill{p.wallType !== undefined ? " (from Wall type)" : ""}
                             </Label>
                           </div>
-                          <div className="flex items-end gap-2 pb-1">
-                            <Switch
-                              id={`ct-${p.id}`}
-                              checked={p.canted}
-                              onCheckedChange={(v) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
-                                )
-                              }
-                            />
-                            <Label htmlFor={`ct-${p.id}`} className="text-xs">
-                              Canted
-                            </Label>
-                          </div>
+                          {(() => {
+                            const hasDims =
+                              p.skirtInches !== undefined ||
+                              p.cantInches !== undefined ||
+                              p.verticalInches !== undefined ||
+                              p.wallTopInches !== undefined ||
+                              p.dropInches !== undefined;
+                            return (
+                              <div
+                                className="flex items-end gap-2 pb-1"
+                                title={
+                                  hasDims
+                                    ? "Follows the Cant dimension (legacy labor keys Cant > 0)."
+                                    : undefined
+                                }
+                              >
+                                <Switch
+                                  id={`ct-${p.id}`}
+                                  disabled={hasDims}
+                                  checked={hasDims ? (p.cantInches ?? 0) > 0 : p.canted}
+                                  onCheckedChange={(v) =>
+                                    setParapets((prev) =>
+                                      prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
+                                    )
+                                  }
+                                />
+                                <Label htmlFor={`ct-${p.id}`} className="text-xs">
+                                  Canted{hasDims ? " (from Cant)" : ""}
+                                </Label>
+                              </div>
+                            );
+                          })()}
                         </div>
                         {/* Legacy wall profile dims: girth (billed membrane height) = their sum;
                             wall adhesive bills on Vertical + Wall top only. */}

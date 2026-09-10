@@ -337,6 +337,23 @@ const parapetHasDims = (p: ParapetInput): boolean =>
   p.wallTopInches !== undefined ||
   p.dropInches !== undefined;
 
+/**
+ * Legacy cant flag (§8.5): the labor lookup keys `Cant > 0`, not a separate toggle — so when the
+ * wall carries profile dims, canted follows the Cant dimension; the manual toggle only drives
+ * walls saved girth-only (pre-dims bids).
+ */
+export const parapetEffectiveCanted = (p: ParapetInput): boolean =>
+  parapetHasDims(p) ? (p.cantInches ?? 0) > 0 : p.canted;
+
+/**
+ * Legacy drill flag (§8.5): the labor lookup keys WallType — mechanical attachment uses the
+ * wall's own WallType (1 Wood/Metal → no-drill, 4 Brick/Concrete → pre-drill); every other
+ * attachment keys WallType = 4 (pre-drill) FIXED. The manual toggle only drives walls with no
+ * WallType saved (pre-Termination-tab bids).
+ */
+export const parapetEffectivePredrill = (p: ParapetInput, attachment: Attachment): boolean =>
+  p.wallType !== undefined ? attachment !== "mechanical" || p.wallType === 4 : p.predrill;
+
 /** Membrane girth (in): Skirt+Cant+Vertical+WallTop+Drop when dims are present, else girthInches. */
 const parapetGirthInches = (p: ParapetInput): number =>
   parapetHasDims(p)
@@ -1060,7 +1077,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       } else {
         // Legacy BaseManHours (docs §8.5): (value / 50) × ADJUSTEDLENGTH — the padded
         // length + 1 ft + 1 ft/piece, the same basis the membrane bills — not raw Length.
-        itemHours += (adjustedLengthFt / 50) * parapetModeRate(entry, p.predrill, p.canted);
+        itemHours +=
+          (adjustedLengthFt / 50) *
+          parapetModeRate(
+            entry,
+            parapetEffectivePredrill(p, bid.attachment),
+            parapetEffectiveCanted(p),
+          );
       }
       // Legacy AdjustedHeight (family-dependent): Duro-Tuff ceils to 6" increments (half-foot
       // steps); everyone else In2Ft(Ceil(girth)).

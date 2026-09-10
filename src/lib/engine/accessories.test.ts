@@ -239,8 +239,16 @@ const LABOR = [
     data: screen(
       ["Description", "Labor (Hr/Ft)", "Corner Labor(Hr/Piece)"],
       [
-        { Description: '3" 2-Piece Compression', "Labor (Hr/Ft)": 0.043, "Corner Labor(Hr/Piece)": 0.2 },
-        { Description: '6" 2-Piece Compression', "Labor (Hr/Ft)": 0.043, "Corner Labor(Hr/Piece)": 0.2 },
+        {
+          Description: '3" 2-Piece Compression',
+          "Labor (Hr/Ft)": 0.043,
+          "Corner Labor(Hr/Piece)": 0.2,
+        },
+        {
+          Description: '6" 2-Piece Compression',
+          "Labor (Hr/Ft)": 0.043,
+          "Corner Labor(Hr/Piece)": 0.2,
+        },
       ],
     ),
   },
@@ -682,7 +690,12 @@ describe("Base & Snap Cover pricing (Exceptional Metals two-piece grid)", () => 
   it('prices bar/cover/corners from the captured admin subscreen; 3" at 42 fasteners/10 ft', () => {
     expect(ref.twoPiece["3"].priced).toBe(true);
     expect(ref.twoPiece["6"].pricePerFt).toBeCloseTo(3.25, 2);
-    const blankEdge = { isPerimeter: false, termination: "No Termination", blockingFt: 0, arpSizeIn: 0 };
+    const blankEdge = {
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    };
     const st = emptyAccessoriesState();
     st.snapCover["3"].coversOn = true;
     st.snapCover["3"].insideCorners = 2;
@@ -707,5 +720,32 @@ describe("Base & Snap Cover pricing (Exceptional Metals two-piece grid)", () => 
     // Labor: Round(30 × 0.043 + 2 × 0.2, 4) = 1.69 h.
     expect(s3.hours).toBeCloseTo(1.69, 4);
     expect(r.warnings.length).toBe(0);
+  });
+});
+
+describe("parapet canted / pre-drill derivation (§8.5)", () => {
+  it("cant column follows the Cant dimension when dims are present; toggle only for girth-only walls", async () => {
+    const { parapetEffectiveCanted, parapetEffectivePredrill } = await import("./bid-builder");
+    const base = {
+      id: "p",
+      name: "w",
+      lengthFt: 50,
+      heightBand: "",
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 36,
+    };
+    // Dims present: the toggle is ignored — Cant > 0 decides.
+    expect(parapetEffectiveCanted({ ...base, verticalInches: 24, canted: true })).toBe(false);
+    expect(parapetEffectiveCanted({ ...base, verticalInches: 24, cantInches: 4 })).toBe(true);
+    // Girth-only wall (no dims): the manual toggle drives.
+    expect(parapetEffectiveCanted({ ...base, canted: true })).toBe(true);
+    // WallType present: mech pre-drills only Brick/Concrete (4); adhered always pre-drills.
+    expect(parapetEffectivePredrill({ ...base, wallType: 1 }, "mechanical")).toBe(false);
+    expect(parapetEffectivePredrill({ ...base, wallType: 4 }, "mechanical")).toBe(true);
+    expect(parapetEffectivePredrill({ ...base, wallType: 1 }, "adhered")).toBe(true);
+    // No WallType saved: the manual toggle drives.
+    expect(parapetEffectivePredrill({ ...base, predrill: true }, "mechanical")).toBe(true);
   });
 });

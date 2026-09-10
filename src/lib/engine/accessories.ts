@@ -25,7 +25,7 @@
 
 import { bankersRound } from "./rounding";
 import type { BidSectionInput, ParapetInput, CurbInput } from "./bid-builder";
-import { sectionLayers } from "./bid-builder";
+import { sectionLayers, parapetEffectiveCanted } from "./bid-builder";
 import { perimeterFromEdges } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 import { insulationFasteners, parapetDeckFasteners } from "./consumption";
@@ -549,7 +549,7 @@ export function parapetEdgeFastenersCount(
     const adjHeight = Math.ceil(girth);
     const vertical = p.verticalInches ?? girth;
     const cant = p.cantInches ?? 0;
-    const hasCant = p.canted || cant > 0;
+    const hasCant = parapetEffectiveCanted(p);
     if (roofSystem === "Duro-Last") {
       if (vertical <= 30) continue; // durolast: vert ≤ 30 → 0
       const v6 = round6Inch(vertical);
