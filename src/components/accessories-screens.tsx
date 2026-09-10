@@ -21,7 +21,6 @@ import {
   type SnapSize,
 } from "@/lib/engine/accessories";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -30,6 +29,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+
+/**
+ * Native checkbox (legacy-style). Deliberately NOT the Radix Checkbox: this file was the app's
+ * first Radix-checkbox importer, and the new dep chunk re-optimized Vite's deps mid-session in
+ * the hosted preview, duplicating React (null hooks dispatcher → blank screen).
+ */
+function Checkbox(props: { checked: boolean; onCheckedChange: (v: boolean) => void }) {
+  return (
+    <input
+      type="checkbox"
+      className="h-3.5 w-3.5 accent-primary"
+      checked={props.checked}
+      onChange={(e) => props.onCheckedChange(e.target.checked)}
+    />
+  );
+}
 
 const usd = (v: number) =>
   "$" + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
