@@ -48,7 +48,6 @@ import {
   DESIGN_TABLE_OPTIONS,
   type SpacingError,
 } from "@/lib/engine/fastener-spacing";
-import { computeNeededQuantities, allowedScrewSubtypes } from "@/lib/engine/consumption";
 import type { MarkupMode } from "@/lib/engine/money";
 import {
   defaultEdges,
@@ -660,56 +659,6 @@ function EstimatePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
-
-  // Legacy red "needed" quantities (§2 consumption rules; display-only ordering guidance).
-  const neededQty = useMemo(
-    () =>
-      computeNeededQuantities({
-        sections,
-        parapets,
-        attachment,
-        roofSystem,
-        adhesiveCoverage: admin?.adhesiveTimes?.bySubstrate,
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(sections), JSON.stringify(parapets), attachment, roofSystem, admin],
-  );
-  const enteredQty = useMemo(() => {
-    let screws = 0;
-    let polyPlates = 0;
-    let insulationPlates = 0;
-    let caulk = 0;
-    // Legacy §2.6: a fastener line counts toward the screw bucket only when its SUBTYPE is
-    // allowed for a deck present in the bid (bits/tips/stainless/etc. never count).
-    const allowed = allowedScrewSubtypes([
-      ...sections.map((s) => s.deckType),
-      ...parapets.map((p) => p.deckType),
-    ]);
-    for (const line of accessories) {
-      const item = accCatalog?.find((a) => `${a.category} — ${a.description}` === line.description);
-      if (!item) continue;
-      if (item.category.includes("Fasteners") && item.fastenersPerBox) {
-        const d = item.description;
-        if (d.includes("Poly Plates")) polyPlates += line.quantity * item.fastenersPerBox;
-        else if (d.includes("Insulation Plates"))
-          insulationPlates += line.quantity * item.fastenersPerBox;
-        else if (d.includes("Plates") || d.includes("Cleat")) {
-          // other plate rows (induction/cleat) — not netted against a bucket yet
-        } else if (allowed.has((item.subtype ?? "").toLowerCase())) {
-          screws += line.quantity * item.fastenersPerBox;
-        }
-      } else if (item.category.includes("Sealant") && item.description.startsWith("Duro-Caulk")) {
-        caulk += line.quantity;
-      }
-    }
-    return { screws, polyPlates, insulationPlates, caulk };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    accessories,
-    accCatalog,
-    JSON.stringify(sections.map((s) => s.deckType)),
-    JSON.stringify(parapets.map((p) => p.deckType)),
-  ]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -3623,214 +3572,117 @@ function EstimatePage() {
               />
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Extra catalog lines</CardTitle>
-              <CardDescription className="text-xs">
-                Manual price-list additions (kept for older bids); the calculated screens above are
-                the legacy money path.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <CatalogPicker
-                items={(accCatalog ?? []).map((a) => ({
-                  key: a.key,
-                  category: a.category,
-                  description: a.description,
-                  price: a.price,
-                }))}
-                onAdd={(key) => {
-                  const item = accCatalog?.find((a) => a.key === key);
-                  if (!item) return;
-                  const baseDesc = item.variant
-                    ? item.description.slice(0, -` — ${item.variant}`.length)
-                    : item.description;
-                  const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
-                  setAccessories((p) => [
-                    ...p,
-                    {
-                      description: `${item.category} — ${item.description}`,
-                      price: item.price,
-                      quantity: 1,
-                      laborHoursPerUnit,
-                    },
-                  ]);
-                }}
-              />
+          {/* Old flat-picker lines: only rendered when a bid already carries them (pre-§12
+              saved bids) — the calculated screens above are the legacy money path. */}
+          {accessories.length > 0 && (
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+                <CardTitle className="text-base">Extra catalog lines (older bid)</CardTitle>
+                <CardDescription className="text-xs">
+                  Manual price-list additions (kept for older bids); the calculated screens above
+                  are the legacy money path.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <CatalogPicker
+                  items={(accCatalog ?? []).map((a) => ({
+                    key: a.key,
+                    category: a.category,
+                    description: a.description,
+                    price: a.price,
+                  }))}
+                  onAdd={(key) => {
+                    const item = accCatalog?.find((a) => a.key === key);
+                    if (!item) return;
+                    const baseDesc = item.variant
+                      ? item.description.slice(0, -` — ${item.variant}`.length)
+                      : item.description;
+                    const laborHoursPerUnit = accLaborLookup?.[baseDesc] ?? 0;
+                    setAccessories((p) => [
+                      ...p,
+                      {
+                        description: `${item.category} — ${item.description}`,
+                        price: item.price,
+                        quantity: 1,
+                        laborHoursPerUnit,
+                      },
+                    ]);
+                  }}
+                />
 
-              {accessories.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No accessories added.</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="w-[80px]">Unit</TableHead>
-                      <TableHead className="w-[90px]">Labor h/ea</TableHead>
-                      <TableHead className="w-[80px]">Qty</TableHead>
-                      <TableHead className="w-[100px] text-right">Total</TableHead>
-                      <TableHead className="w-[44px]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {accessories.map((a, i) => (
-                      <TableRow key={i}>
-                        <TableCell>{a.description}</TableCell>
-                        <TableCell>{money(a.price)}</TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            step="0.0001"
-                            className="h-8 w-[80px]"
-                            value={a.laborHoursPerUnit ?? 0}
-                            onChange={(e) =>
-                              setAccessories((p) =>
-                                p.map((x, j) =>
-                                  j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            type="number"
-                            className="h-8 w-[70px]"
-                            value={a.quantity}
-                            onChange={(e) =>
-                              setAccessories((p) =>
-                                p.map((x, j) =>
-                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {money(a.price * a.quantity)}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive"
-                            onClick={() => setAccessories((p) => p.filter((_, j) => j !== i))}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Legacy red/green "needed" quantities (docs/legacy-consumption-rules.md §2). */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Calculated needs (legacy ordering rules)</CardTitle>
-              <CardDescription>
-                Computed from your sections, edges, insulation and parapets — red means still needed
-                after what you&apos;ve added above, green means covered. Display only; never changes
-                the bid total.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {(() => {
-                const rows: { label: string; needed: number; entered: number | null }[] = [
-                  {
-                    label: `Screws (membrane ${neededQty.breakdown.membraneScrews} + bars ${neededQty.breakdown.edgeBarScrews} + two-piece ${neededQty.breakdown.twoPieceScrews} + insulation ${neededQty.breakdown.insulationScrews} + parapet decks ${neededQty.breakdown.parapetDeckScrews})`,
-                    needed: neededQty.screws,
-                    entered: enteredQty.screws,
-                  },
-                  {
-                    label: "Poly plates (1 per membrane screw + parapet decks)",
-                    needed: neededQty.polyPlates,
-                    entered: enteredQty.polyPlates,
-                  },
-                  {
-                    label: "Insulation plates (1 per insulation screw)",
-                    needed: neededQty.insulationPlates,
-                    entered: enteredQty.insulationPlates,
-                  },
-                  {
-                    label: "Duro-Caulk tubes (1 per 12 LF of term bar/fascia)",
-                    needed: neededQty.caulkTubes,
-                    entered: enteredQty.caulk,
-                  },
-                  ...Object.entries(neededQty.adhesiveUnits).map(([name, units]) => ({
-                    label: `${name} (units, whole-unit per estimate)`,
-                    needed: units,
-                    entered: null,
-                  })),
-                ].filter((r) => r.needed > 0 || (r.entered ?? 0) > 0);
-                if (rows.length === 0) {
-                  return (
-                    <p className="text-sm text-muted-foreground">
-                      Nothing to calculate yet — add edge terminations, insulation layers, or
-                      parapets and the needed fasteners, plates, caulk and adhesive units appear
-                      here.
-                    </p>
-                  );
-                }
-                return (
+                {accessories.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No accessories added.</p>
+                ) : (
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Item</TableHead>
-                        <TableHead className="text-right">Needed</TableHead>
-                        <TableHead className="text-right">Entered</TableHead>
-                        <TableHead className="text-right">Status</TableHead>
+                        <TableHead className="w-[80px]">Unit</TableHead>
+                        <TableHead className="w-[90px]">Labor h/ea</TableHead>
+                        <TableHead className="w-[80px]">Qty</TableHead>
+                        <TableHead className="w-[100px] text-right">Total</TableHead>
+                        <TableHead className="w-[44px]" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((r) => {
-                        const remaining = r.needed - (r.entered ?? 0);
-                        return (
-                          <TableRow key={r.label}>
-                            <TableCell className="whitespace-normal">{r.label}</TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {r.needed.toLocaleString()}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {r.entered === null ? "—" : r.entered.toLocaleString()}
-                            </TableCell>
-                            <TableCell
-                              className={`text-right font-semibold tabular-nums ${
-                                r.entered !== null && remaining > 0
-                                  ? "text-destructive"
-                                  : "text-green-700 dark:text-green-500"
-                              }`}
+                      {accessories.map((a, i) => (
+                        <TableRow key={i}>
+                          <TableCell>{a.description}</TableCell>
+                          <TableCell>{money(a.price)}</TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              step="0.0001"
+                              className="h-8 w-[80px]"
+                              value={a.laborHoursPerUnit ?? 0}
+                              onChange={(e) =>
+                                setAccessories((p) =>
+                                  p.map((x, j) =>
+                                    j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              className="h-8 w-[70px]"
+                              value={a.quantity}
+                              onChange={(e) =>
+                                setAccessories((p) =>
+                                  p.map((x, j) =>
+                                    j === i ? { ...x, quantity: num(e.target.value) } : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {money(a.price * a.quantity)}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => setAccessories((p) => p.filter((_, j) => j !== i))}
                             >
-                              {r.entered === null
-                                ? "order"
-                                : remaining > 0
-                                  ? `−${remaining.toLocaleString()} needed`
-                                  : "covered"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
-                );
-              })()}
-              <p className="text-xs text-muted-foreground">
-                Rules from the extracted legacy engine: membrane screws from the row-style
-                field/perimeter count (mark perimeter edges in Sections for the perimeter rows; the
-                legacy 30-ft perimeter strip constant is flagged for bid validation), 21 screws per
-                10-ft bar (42/63 for two-piece), insulation fasteners per board density (doubled
-                under adhered/Duro-Bond membranes), plates 1-per-screw, adhesive units area ÷
-                coverage ceilinged once per adhesive. Entered fastener boxes count toward Screws
-                only when the fastener&apos;s subtype is allowed for a deck in this bid (e.g. Augers
-                for Gypsum/Tectum, Drill Points for Wood/Steel) — same rule as legacy. Not included:
-                washer/drain caulk adders, pipe-stack sealant, and custom-layout sheets — add those
-                manually for now.
-              </p>
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* The pre-§12 "Calculated needs" summary panel was removed: each accessory screen
+              now carries its own legacy needed counters (red Fasteners Needed / Items Required),
+              netted against the quantities typed on that screen. */}
         </div>
 
         <div className={step === 6 ? "space-y-6" : "hidden"}>
