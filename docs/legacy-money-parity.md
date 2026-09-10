@@ -855,3 +855,354 @@ legacy deliberately hid it from the estimator; adding it to the pickable screen 
 what legacy suppressed. Revisit only if a live capture shows it in the legacy admin grid.
 Remaining §6 structural gaps (accessory calculated screens, parapet Termination/Wall Type,
 per-section overrides, Setup defaults, Reports/Export, plain gutter styles) are tracked there.
+
+## 12. Accessories tab — the complete money path (IL-exact, 2026-09-10)
+
+Answers `docs/extraction-requests/accessories-money-path.md` from the decompiled
+`DataAccess.dll` (data + math) and `Estimator.exe` (`frmAccTerminations`, `frmAccFasteners`,
+`frmAccessory1/2/5`, `frmAccReview`). Every formula below is transcribed from the named method;
+where a value is a ref-table column it is named so the licensed app's admin grid can be
+screenshotted. Notation: `R10(x)` = `DACommon.RoundToNextTen` (rva 0x41238): 0 → 0; x an exact
+multiple of 10 → x; otherwise `Ceil(x)` rounded UP to the next multiple of 10 (11 → 20, 10.3 →
+20, 1.03 → 10). `In2Ft(i)` = `Round(i/12, 2)`. `Round(x, n)` is VB/.NET `Math.Round` (banker's).
+`f32` marks a single-precision multiply (`ldc.r4 1.03` = 1.0299999713897705).
+
+### 12.0 Prediction ledger (registered before reading the IL, scored after)
+
+| # | prediction | result |
+|---|---|---|
+| P1 | drip-edge labor = raw length × NonPreDrillLaborFactor (0.0275) → 0.275 h | HELD — but on the ten-rounded length (§12.2), not the raw one |
+| P2 | drip-edge material = 10 ft × $8.40/ft = $84.00 | HELD |
+| P3 | fasteners = `Ceil(len/10 × 21)` = 21 | HELD (len is the ten-rounded 10 ft) |
+| P4 | "Calculated Total: 1" = one 10-ft piece | **MISS** — it is 1 FOOT of roof edge (`TotalRoofEdgeLength`, feet); the capture's edge was a 1-ft side (section B, 1×1), which R10(Ceil(1.03)) turns into 10 ft |
+| P5 | Wood "Fasteners 925 / Poly 925" = row-style membrane screws of sections A+B | HELD — 55×100 quick-bid, 64" lap, 15" oc → 924, plus 1×1 → 1; plates 1-per-screw |
+| P6 | Vents "White = 7" is user-entered | **MISS** — derived: `Ceil(area/1000)` per mechanically-attached section, by section color (A 5500 sf → 6, B 1 sf → 1) |
+
+Footer reconciliation (all four anchors on the same bid): material $180.25 (7 × $25.75 White
+Vent) + $84.00 = **$264.25** ✓; hours 3.5 + 0.275 = 3.775 → shown **3.78 h** ✓; labor cost
+3.775 × $45 = $169.875 → **$169.88** ✓ (so the footer bills the unrounded hours at the crew rate).
+Prices/rates used: White Vent $25.75 and Drip Edge 2" White $8.40/ft (captured admin grids, live
+in `pricing_catalog`), vent labor 0.5 h, Drip Edge 2" no-drill 0.0275 h/ft (`accessory_labor`).
+
+### 12.1 Shared frame (A)
+
+**Billing route.** `ReviewCalc.Recalculate`: `dMaterial[4] = Accessories.TotalCost` (the Review
+"Duro-Last › Accessories" purchase row, inside M0 → discounts, tax, freight basis) and
+`dLabor[4] = CalcLaborCost(Accessories.ManHours)` at the CREW rate (`Estimate.LaborRate`), hours
+in col 1 → LaborSubtotal1 → man-days. Nothing on this tab bills at an own rate or into LS2.
+
+`Accessories.TotalCost` (rva 0x10a8c) = AccOthers + Corners + DripEdges + Drains +
+**Fasteners.TotalBoxCost** + FasciaBars + GravelStops + **Panduits.TotalBoxCost** + PipeStacks +
+Sealants + **AdheredSystems** + Strainers + TermBars + TwoPieceMetals + Vents + Washers +
+MembraneAccs. `Accessories.ManHours` (rva 0x10940) = PipeStacks + Strainers + Corners + Drains +
+TermBars(no-drill + pre-drill) + AccOthers + DripEdges + FasciaBars + TwoPieceMetals +
+GravelStops + Vents + Washers + MembraneAccs. **Fasteners, Panduit, Sealants and Adhesives carry
+no labor** — pure material.
+
+**Labor link.** Every "Labor: X h. (Y%)" opens `frmLaborPopUp` seeded with the item's BASE hours
+and its `AdjustLabor`; OK stores `Round(pct) − 100` (§8.7). Composition everywhere:
+`ManHours = BaseHours × (1 + AdjustLabor/100)` (drip/gravel/fascia/term bar: `Round(…, 4)`).
+`Management.FormatLaborStr` prints "(N%)" only when the adjust argument ≠ −2; a plain "0 h." means
+the caller passed −2 = no adjustable labor on that row (Membrane Acc "ARP (SqFt)"). Which object
+the link edits differs per screen (table in §12.2/§12.3).
+
+**Extra / "Additional" columns (green).** User-entered, stored per item; they price at the same
+unit rate as the calculated quantity (`Cost = price × (calc + extra)` on every class) and DO add
+labor where the class has labor (vents, corners, generic-edge corners, two-piece extras). Units:
+edge-bar "Additional Required" is **feet**; corners/clips/covers are **pieces**; grids are
+pieces/units/feet as labelled. Green = editable (`CellType 1`, `LightGreen` in `FillLists`),
+white = computed read-only.
+
+**Accessories Summary** (`frmAccReview.UpdateList` over `Accessories.AccessoriesReviewTable`):
+read-only Qty / Name / UnitCost / TotalCost / Labor list. No inputs.
+
+### 12.2 Edge Terminations (B)
+
+**Common length pipeline.** Each bar family scans (a) every present roof section's four sides:
+`Termination(side).ID == <this product's id>` → `Convert.ToInt32(TerminationWidth(side))` (the
+per-side termination footage; roof edges are always the NO-DRILL split), (b) curbs (term bar and
+1¾" fascia only), (c) parapets with `TermOption.ID == id` → `ToInt32(TermLength)`, split by
+`WallType == 1` → no-drill else pre-drill. Termination ids (hardcoded `oRefTerminations`, §8.4):
+2 T-Bar · 3 1¾" Fascia · 4 4" Fascia · 5 2" Gravel Stop · 9 4" Gravel Stop · 6 2" Drip Edge ·
+10 4" Drip Edge · 11/7/12/8/13/14 = 3"/4"/5"/6"/7"/8" 2-pc Metal.
+
+Color keys: `TermBar.RoofColorToTermBarColor` and the generic-edge switch map the section /
+parapet / curb color **Tan→1, Gray→2, White→3, Dark Gray→2, Terra Cotta→1, Rock Ply→2** (the W/T/G
+columns; dark gray buys gray, terra cotta buys tan). Fascia `GetTotalLengthByColor` folds the same
+way and adds `GetExtraLength` (both Additional boxes) to WHITE — the "(Additional added as
+White)" note.
+
+**Term bar** (`TermBar`, one object per `ref_TermBars` row = per color).
+- Counts (`UpdateScreenTB`): Roof Edges = Σ `GetRoofEdgeLength` (all sides with id 2, colour
+  match); Curbs = Σ curbs with `TermOption ∈ {3 Lift & T-Bar, 4 No Lift & T-Bar}` and colour match:
+  `Round((2·A + 2·B + 12)/12 × qty, 4)` ft per curb (A,B inches) — no-drill; Parapets = Σ
+  `TermLength` of parapets with `TermOption.ID == 2` and colour match (`WallType 1` → no-drill,
+  else pre-drill). All three are feet.
+- Base term bar (`GetParapetBaseLength`, WHITE bar only, color 3): parapets with `UseTermBarOnBase`
+  add `Round(Length)` ft — WallType 1 → no-drill, else pre-drill. These are the "Parapets" boxes
+  in the No-Drill/Pre-Drill columns (`tbParaNoDrill/PreDrill`).
+- **"Peel Stop" rows are dead UI** — `tbPSNoDrill/PreDrill` are written from locals that are never
+  assigned (always 0).
+- Calculated Total per color (W/T/G) = `NoDrillLength` / `PredrillLength` accumulators (feet).
+  Additional (W/T/G/Dark Gray/Terra Cotta, per drill column) → `AdditionalNoDrillLength` /
+  `AdditionalPreDrillLength` (feet) on the bar of that color (dark gray and terra cotta bars exist
+  only as Additional).
+- Sub-totals: `TotalNoDrillLength = R10(Ceil(f32 1.03 × (Σ noDrill + Σ addlNoDrill)))`, same for
+  pre-drill (base-bar footage included).
+- Adj. Total Length = Σ bars `GetTotalLength(true,false)` = `R10(f32 1.03 × (roof + curb + parapet
+  + base + addlPre + addlNoDrill))` per bar.
+- **Material** `TermBar.Cost` = `GetTotalLength(true,false) × ref_TermBars.Price` — price is PER
+  FOOT of the ten-rounded, 3%-scrapped length. Summed over bars with length > 0.
+- **Fasteners** `TermBar.Fasteners` = `Ceil(GetTotalLength(false,false)/10 × 21)` — NOTE the
+  base-bar footage is EXCLUDED here (arg `includeBase = false`) while Cost includes it.
+- **Labor** per drill split: `Round(R10(f32 1.03 × (len + addl)) × rate × (1 + adj/100), 4)` with
+  rate = `CustomPredrillLaborFactor` if > 0 else `PredrillLabor` (and the NonPredrill pair);
+  `TermBars.OnRecalculate` sums per-bar hours then `Round(…, 2)`. The BILLED variant
+  (`get_ManHoursPreDrill/NoDrill`) omits the base-bar footage; the labor-link BASE variant
+  (`get_BaseManHours*`) includes it — the link's seed and the billed hours diverge when
+  `UseTermBarOnBase` is set (legacy inconsistency, transcribed as-is).
+- Strip Mastic: checkbox → `txt = GetTotalLength(false,false)`, stored on **bar[0] only**
+  (`StripMasticLength`, editable); Sealants then consume `GetStripMasticLen = R10(f32 1.03 ×
+  StripMasticLength)` — see §2.5 of legacy-consumption-rules (350 LF per pail).
+- Ref: `ref_TermBars` (TermBarID, Description, Color, PartNumber, Price, PredrillLabor,
+  NonPredrillLabor, CustomPreDrillLaborFactor, CustomNonPreDrillLaborFactor) — captured
+  (`accessory_labor` "Termination Bars": 0.035 / 0.0175 h/ft).
+
+**Fascia bars** (`FaciaBar`, one per `ref_FasciaBars` row; `Size` 3 = 1¾", 4 = 4"; colourless
+bar, colour lives in the covers).
+- Counts: roof sides with `Termination.ID == Size` (no-drill); curbs with `TermOption == 1
+  (Scupper/Fascia Bar 1¾")` onto the **Size 3** bar only, `Round((2A+2B+12)/12 × qty, 4)` ft
+  (no-drill); parapets with `TermOption.ID == Size`, WallType 1 → no-drill else pre-drill.
+- Sub-totals ND / D = raw `NoDrillLength` / `PreDrillLength` (feet). Additional Required ND / D =
+  `OtherNoDrillLength` / `OtherPreDrillLength` (feet).
+- `GetTotalLength = R10(f32 1.03 × (calc + otherND + otherD))`; Adj. Total Length shows it.
+- **Material** `FaciaBar.Cost = GetTotalLength × Price` (per foot) `+ cFaciaMetalCovers.Cost +
+  cFaciaVinylCovers.Cost`.
+- **Vinyl covers** (checkbox `chkSFV`): on check, the three colour boxes are PREFILLED with
+  `GetTotalLengthByColor(c) − MetalCoverLength(c)` (ft; White includes both Additional boxes),
+  editable; `WhiteCost = R10(whiteQty) × WhiteVinylCoverPrice` (per foot, ten-rounded, NO 1.03),
+  same for Tan/Gray. Unchecking zeroes them.
+- **Metal covers** (`chkSFM`): prefill White = `GetTotalLengthByColor(3) − vinylWhiteQty`; Tan /
+  Gray typed. `cFaciaMetalCovers.Cost = R10(Σ colour qty) × MetalCoverPrice + insideQty ×
+  InsideCornerPrice + outsideQty × OutsideCornerPrice` (corners are pieces, unrounded).
+- **Fasteners** = `Ceil(GetTotalLength/10 × 21)`; slot map §12.5.
+- **Labor** per drill split: `Round(R10(f32 1.03 × (len + other)) × rate × (1 + adj/100), 4)`,
+  rates `CustomPreDrillLaborFactor > 0 ? custom : PreDrillLaborFactor` (idem NonPreDrill). Covers
+  and corners add no labor. Link edits the bar's own adjust (ND and D separately).
+- Strip mastic: checkbox → `StripMasticLength = GetTotalLength(false)`, `GetStripMasticLen =
+  R10(f32 1.03 × it)`.
+- Ref: `ref_FasciaBars` (FasciaBarID, Description, PartNumber, Price, Size, PreDrillLaborFactor,
+  NonPreDrillLaborFactor, Custom*, {White,Tan,Gray}VinylCover{PartNumber,Price},
+  MetalCover{PartNumber,Price}, InsideCorner{PartNumber,Price}, OutsideCorner{PartNumber,Price}) —
+  **cover/corner prices NOT in the installer seed; capture the admin "Facia Bars/Vinyl Covers"
+  grid** (rates are seeded: 0.0374/0.0187 and 0.0395/0.0197 h/ft).
+
+**Drip edge and gravel stop** (`GenericEdges` group 6 / 5; each `GenericEdge` = one bar
+`BaseItem` + `Corners`(SubType 35) + `Clips`(40) + `Cover`(55) + `InsideCorners`(45) +
+`OutsideCorners`(50), assembled from `ref_GenericEdge WHERE EdgeGroup = g ORDER BY EdgeGroup,
+EdgeSize, EdgeSubType`; a row whose `EdgeSubType` is NOT one of 30/35/40/45/50/55 starts a new
+bar and its SubType IS the termination id — 6/10 drip, 5/9 gravel; SubType 30 rows are read but
+attached to nothing).
+- Counts: Roof Edges = Σ sides with `Termination.ID == SubType` (ft, by colour); Parapets = Σ
+  `TermLength` with `TermOption.ID == SubType` (WallType/deck split only affects the drill
+  accumulators; `CalcParapetLength` indexes `oRoofSections[i]` with the PARAPET index i to read
+  `DeckType.Predrill` — a legacy indexing quirk, transcribed). Curbs never feed these.
+- "Calculated Total" = roof + parapet FEET (drip edge one box; gravel stop per colour W/T/G).
+  "Additional Required" = `ExtraByColor` on the bar, FEET. "Corners" = `Corners`(35) pieces per
+  colour; gravel stop also has `Cover`(55) qty (Metal Cover checkbox), `InsideCorners`(45) and
+  `OutsideCorners`(50) pieces.
+- Adj. Total Length = `BaseItem.GetTotalLengthWithScrap` = Σ colours `R10(Ceil(f32 1.03 ×
+  (calc_c + extra_c)))` — this is the length shown in the tab caption "(N ft)".
+- **Material** per part: `Cost = Σ colours PriceByColor(c) × lengthWithScrap_c`. For the bar
+  (and for Clips, SubType 40) `lengthWithScrap_c = R10(Ceil(f32 1.03 × (calc_c + extra_c)))` —
+  price is PER FOOT of the ten-rounded length. Corners (35/45/50) and Cover (55) SKIP the scrap
+  loop: `cost = price_c × pieces_c` (per piece, unrounded).
+- **Fasteners** `GenericEdges.Fasteners` = `Ceil(Σ bars lengthWithScrap / 10 × 21)` per group
+  (2" and 4" summed).
+- **Labor** `GenericEdgeItem.BaseHours`: corners (SubType 35/45/50 in groups 5/6) = `LF_nonPre ×
+  pieces`; otherwise, `UsePreDrill == false` → `LF_nonPre × R10(noDrillLen + extra)` (Cover/Clips: their
+  calc length is 0, so `LF_nonPre × R10(pieces)`);
+  `UsePreDrill == true` → `R10(preLen) × LF_pre + R10(noDrillLen) × LF_nonPre + R10(extra) ×
+  Round(max(LF_pre, LF_nonPre), 4)`. LF = `Custom…LaborFactor > 0 ? custom : …LaborFactor`.
+  Group hours = Σ parts `Round(Base × (1 + adj/100), 4)`; a group only counts when its bar
+  length > 0. Drip-edge link edits the BAR item's adjust only (popup seeded with the bar's base);
+  gravel-stop link edits ALL parts (`GenericEdge.set_AdjustLabor`, seeded with the group base).
+- Ref: `ref_GenericEdge` (GenericEdgeID, Description, EdgeGroup, EdgeSubType, EdgeSize,
+  PartNumber, WhitePrice, TanPrice, GrayPrice, PreDrillLaborFactor, NonPreDrillLaborFactor,
+  Custom*, UsePreDrill). Bar prices captured (Drip Edge 2" 8.40/9.98/9.98, 4" 10.08/11.08/11.08);
+  the installer seed has only the four gravel-stop corner rows (10.19 / 11.06); **drip-edge
+  corner/clip prices and `UsePreDrill` flags need the admin "Drip Edge" / "Gravel Stops" grids**.
+
+**Base & Snap Cover** (`TwoPieceMetal`, one per `ref_TwoPieceMetal` row; `Size` index → id:
+0→7 (4"), 1→8 (6"), 2→11 (3"), 3→12 (5"), 4→13 (7"), 5→14 (8")).
+- Counts: roof sides with `Termination.ID == id` + parapets with that `TermOption` (feet, no
+  drill split). "Calculated Total" = roof + parapet ft; "Additional Required" = `OtherLength` ft.
+- `GetTotalLength = R10(f32 1.03 × (roof + parapet + other))` — tab caption "(N ft)".
+- **Material** = `TotalLength × Price` (per ft) `+ CoversQuantity × CoverPrice + ICQty ×
+  InsideCornersPrice + OCQty × OutsideCornersPrice`. Metal Snap Cover checkbox prefills
+  `CoversQuantity = GetTotalLength` (ft, editable, unrounded in cost).
+- **Fasteners** (`TwoPieceMetals.Fasteners`): sizes {0,2,3} (4", 3", 5") `Ceil(len/10 × 42)`,
+  others `Ceil(len/10 × 63)`.
+- **Labor** `Round(len × LaborFactor + (IC + OC) × CornerLaborFactor, 4)` then `× (1 +
+  adj/100)`, `Round 4`. Ref `ref_TwoPieceMetal` (…Price, CoverPrice, InsideCornerPrice,
+  OutsideCornerPrice, LaborFactor 0.043 h/ft, CornerLaborFactor 0.2 h/pc, Custom*); only the 3"
+  row is in the installer seed — **capture the "Two Piece Metals" admin grid for 4"–8" prices**.
+
+**Fastener grids on these screens** — no auto-distribution. Each screen shows `Fasteners Needed
+= max(0, GetEdgingFastenerTotals[k] − Σ Quantity(slot) over the screen's fastener group)`, red
+when > 0; the estimator types counts into the green cells. Group k / slot / totals index:
+term bar 0/0, 1¾" fascia 1/2, 4" fascia 2/3, drip edge 3/4, gravel stop 4/5, parapet wall-tabs
+5/1, snap cover 6/6 (`Accessories.GetEdgingFastenerTotals`, rva 0x107e8: [0] TermBars, [1]
+fascia size 3, [2] fascia size 4, [3] DripEdges, [4] GravelStops, [5] `Parapets.EdgeFasteners`,
+[6] TwoPieceMetals). Group membership = `ref_FastenersSubgroups` flags (ForTermBar,
+ForSmallFascia, ForLargeFascia, ForDripEdge, ForGravelStop, ForParapet, ForSnapOn — seeded).
+Money: §12.5.
+
+### 12.3 Flashing & Other Accessories (C)
+
+- **Corners** (`Corner`): six ref rows; qty per colour (6 colours; the capture's grid shows the
+  bid's colours). `Cost = Σ_c qty_c × price_c` (`ref_Corners`: Price=White, TanPrice, GrayPrice,
+  DarkGrayPrice, TerraCottaPrice, RockPlyPrice); hours = `Σ_c ManHours × qty_c × (1 + adj/100)`
+  (`ManHours`, `CustomLabor` — captured 0.1667–0.3333). Nothing auto-populates corners.
+- **Pipe Stacks** (`PipeStack`): Usage = `ref_StackUses` (1 Plumbing 0.5, 2 Hot Stack 1.0, 3
+  Pitch Pan 1.5 — `LaborAdjust`/`CustomLabor`, seeded); Size = `ref_Stacks` rows (1"–42",
+  `Price`/`PriceTan`/`PriceGray`/`PriceDarkGray`/`PriceTerraCotta`/`PriceRockPly`,
+  Open/ClosedPartNumber, `RequiredSealantMultiplyer` — the multiplier is persisted to XML and
+  **never used in pricing**). `Cost = size.Price(colour) × qty`. Labor
+  (`BaseManHours_4_0_236`): `h = qty × (IsOpen ? 1.25 : 1) × usage.LaborFactor`, then
+  `size > 18 → ×2`, else `size > 12 → ×1.5`; `× (1 + adj/100)` per stack ("Individual Pipe Stack
+  Labor" link edits that stack). Usage therefore DOES price (labor) — and Pitch Pan usage (id 3)
+  also drives pitch-pocket filler (§2.5). Consumption: circumference `c = Ceil((size + 0.25) ×
+  π)` in; `SealantLinealFt = c/12 × qty` → per colour tubes `Ceil(Σ ft × 2 / 10)`; panduit
+  straps per stack: 20" straps `= ⌊c/17⌋` while c ≥ 17, then 14" straps `Ceil(remainder/11)`
+  (each × qty) → §12.4 Panduit.
+- **Conduit Washers** (`Washer`): `ref_Washers` (Price, LaborRequired, CustomLaborRequired —
+  captured 0.3333 h). `Cost = price × qty`; `h = Round(rate × qty, 4) × (1 + adj/100)`; also 1
+  sealant tube per 4 washers (§2.5).
+- **Roof Drains & Boots** (`Drain`): fields Qty, Existing Roof (`ref_DrainRoofTypes` 1 None, 2
+  Single Ply, 3 BUR, 4 GS BUR with CleanupLabor / ReinstallLabor 0/0.25, 0.25/0.25, 0.5/0.5,
+  0.75/0.75 — seeded), "Reuse Existing Drain Rings" checkbox, Drain Boot Size (`ref_DrainsBoots`:
+  Price, PriceForColor, LaborFactor — captured 0.5 h), Drain Ring Size (`ref_DrainRings`: Price).
+  `Cost = ReuseRing ? 0 : qty × (boot.Price + ring.Price)` — **reuse zeroes the material** (boot
+  included) and the colour price column is not consulted. Labor `= Round(qty × (roof.CleanUp +
+  (ReuseRing ? roof.ReInstall : boot.LaborFactor)), 2) × (1 + adj/100)`; + 1 sealant tube per
+  drain (§2.5). Strainers (`Strainer`, `ref_Strainers`: Price, UnitLabor, CustomLabor): `cost =
+  price × qty`, `h = qty × UnitLabor × (1 + adj/100)` — Hours/Unit multiplies as captured.
+- **Walk Pads (& wall vents)** (`AccOther`, `ref_AccOther` SubType WalkPad/…): per-pad quantity
+  (no LF/SF conversion); `Cost = price × qty`; `h = qty × (CustomLabor > 0 ? custom : UnitLabor)
+  × (1 + adj/100)` (0.5 / 0.65 captured).
+
+### 12.4 Calculated Items (D)
+
+- **Panduit** (`Panduit`, `ref_Panduit`: Price = UNIT cost, NumberPerBox, Length): rows with
+  `Length == 14` get `CalculatedQty = PipeStacks.Panduit14Inch`, `== 20` →
+  `Panduit20Inch`, any other row (the tool) 0. `Boxes = Ceil((Qty_extra + Calc)/NumberPerBox)`;
+  `Cost = Boxes × (NumberPerBox × Price)`; no labor. The "Boxes" column is the billed unit.
+- **Sealants** (`Sealant`, `ref_Sealants`: Name, PartNumber, Price): `Cost = price × (CalcQty +
+  Quantity)`, no labor; `CalcQty` rules are §2.5 of legacy-consumption-rules (term bar / fascia
+  strip mastic → RefID 9 @ 350 LF/pail; Duro-Caulk by colour = `Ceil(termBarLF_c +
+  fasciaCoverLF_c)/12`; drains +1 tube each; washers `Ceil(0.25 × qty)`; pipe stacks per colour
+  per §12.3; pitch-pocket filler from usage-3 stacks and pitch pans; Duro-Roof seam sealant;
+  capstone parapets). "Show Discontinued Sealants": rows whose part number ∈ {1116, 1116B, 1114,
+  1115, 1126, 1126B, 1124, 1125} (hardcoded in `frmAccessory2`) are hidden unless checked, shown
+  red with the note "use Duro-Caulk Plus"; the count label sums their entered qty. Display only.
+- **Adhesives** (`AdheredSystem`): `Cost = Round((AdditionalQty + CalculatedQty) ×
+  PricePerUnit, 0)` — **rounded to whole dollars** per adhesive; no labor here (adhesive labor
+  rides in the underlayment/membrane hours). `CalculatedQty` = `AdheredSystems.AggregateCalcQtys`
+  (§2.4: membrane + every adhered layer + every parapet wall, summed per adhesive, `Ceil` once) —
+  the §10.7 `QuoteAdhesiveUnits` are part of the per-layer term inside that sum, so they are
+  billed exactly once, here. Extra = additional whole units.
+- **Membrane Acc.** (`MembraneAccs`/`GenericMaterial`, table `MembraneAcc`: PricePerPack,
+  ItemsPerPack, DefaultUnitLabor, CustomUnitLabor, ShowInEstimator): `Cost = Round(Price ×
+  Ceil((Qty + CalcQty)/ItemsPerPack), 2)`. Rows: id 1 **ARP (SqFt)** `CalcQty = Ceil(sections
+  ARPSqFt) + Ceil(parapets ARPSqFt)` — this IS the bill for ARP (roof-section ARP is subtracted
+  from membrane and priced here; parapet ARP is an add-on, §8.4); its labor = `Quantity(extra) ×
+  labor × (1 + adj)` only (the link shows no % — adjust −2). Id 2 **T-Patch** `CalcQty = Σ
+  non-Duro-Tuff sections Round(AreaTotal/250)` (1 per 250 sq ft). Id 3 **stripping** is a
+  template: per section a derived row "1' of 10" DL {mil}mil {Colour} Stripping" (part number
+  `baswf` + systemId(00) + colourId(00) + mil(000)) is created with price =
+  `lookup_DuroLastPrices[mil, category 5][colour column]` (Duro-Tuff: `lookup_DuroTuffPrices[mil]`,
+  name "…DT…"), labor = `stripping.Labor × durolastmech.DeckTypeMultiplier[section deck]`,
+  `CalcQty = 0` — quantity is user-entered feet. Rows are recreated on every recalc.
+- **Vents** (`Vent`, `ref_Vents`: Price, PriceForColor (unused in Cost), LaborFactor 0.5,
+  CustomLabor): DERIVED — `CalcQty(colour c) = Σ sections with Color == c and
+  FieldAttachmentSystem is cMechanicalSystem: Ceil(Length × Width / 1000)` (adhered sections
+  contribute 0); `VENT_IDs = [1..6]` so vent RefID == colour id. Shown qty = `CalcQty +
+  Quantity` (user delta, floored at −CalcQty). `Cost = price × total`; `h = Round(total ×
+  LaborFactor, 4) × (1 + adj/100)`.
+
+### 12.5 Fasteners & Related (E)
+
+**Storage.** `Management.oRefFasteners` = every `ref_Fasteners` row (PartNumber, Description,
+SubType, BoxPrice, BoxQuan, BoxWeight; joined to `ref_FastenersSubgroups` For* flags). Each
+`Fastener` carries `m_iQuantity[14]`: slots 0–6 = the seven edge groups (§12.2), 7 unused, 8–13 =
+deck buckets Wood / Metal(+Retrofit,Purlin) / Gypsum(+Tectum, LWC-Other) / Concrete /
+LW-over-Concrete / LW-over-Steel. Sums: `Quantity(255)` = all slots, `254` = 0–6, `253` = 8–13.
+
+**Money** (`Fasteners.TotalBoxCost` → dMaterial[4]): per catalog row `ReqBoxes = Ceil(Quantity(255)
+/ BoxQuan)`, `cost = Round(ReqBoxes × BoxPrice, 2)` — so a 1½" Spade typed on the drip-edge
+screen and on the Wood screen shares ONE box count. Bits, driver tips and plates are the same
+mechanism (each a `ref_Fasteners` row bought by the box/each). No labor.
+
+**Items Required** (`frmAccFasteners.InitializeTotals/UpdateTotals`), per bucket b; per present
+section: `mf = RoofSection.MembraneFasteners` (field + perimeter row-style counts, §2.2 — `Round`
+each), `uf = UnderlaymentFasteners(-1)` (all layers, §2.3); if the FIELD attachment is
+`durobondmech` → `induct += uf` else `poly += mf`; `insulPlates += uf` **once per layer whose
+attachment is `durolastmech`** (two mechanical layers double the plate count — legacy quirk,
+transcribed); deck id → bucket: 1→Wood; 2,3,10→Metal; 5,8,9→Gypsum; 4→Concrete; 7→LW/Concrete;
+6→LW/Steel. Per present parapet (its own deck type → bucket): `deckF += Parapet.DeckFasteners`
+(= `ToInt32(AdjustedLength)`, 1 per foot — **premise correction to §8.5: this IS consumed, here**)
+and `parapetEdge += Parapet.EdgeFasteners` (§8.5). Display for the selected bucket:
+- Fasteners = `mf + uf + deckF − Σ entered qty(slot b)` over rows whose `SubType` (lower-cased) is
+  allowed for the bucket: Wood {drill point, spade, xhd}; Metal {drill point, spade, purlin,
+  xhd}; LW/Steel same as Metal; Gypsum {ntb, auger}; Concrete {concrete screw, nail};
+  LW/Concrete {concrete screw, nail, ntb, auger} — prose-matched on the SubType string in legacy.
+- Poly Plates = `poly + deckF − entered(ID 255)`; Insul. Plates = `insulPlates − entered(257)`;
+  Induction Plates = `induct − entered(303)`; all clamped ≥ 0, red when > 0. **Gypsum bucket
+  forces Poly and Insul. plates to 0** (auger/NTB carry their own plate).
+- No default row: the count is an indicator; nothing lands in a row until typed. Fastener
+  length vs board stack is the estimator's choice.
+
+**Parapet Wall-Tabs and Steel Plates** (`frmAccessory5`): Fasteners Needed = `totals[5]
+(Parapets.EdgeFasteners) − Σ Quantity(slot 1)` over the ForParapet group; **Steel Plates Needed
+= max(needed, Σ entered parapet fasteners) − entered(ID 256, slot 1)** — one steel plate per
+wall-tab fastener, never fewer than the computed need (ID 256 = the "3" Square Steel DL" row;
+correction to §2.6 which called 256 "parapet-only fasteners"). Masonry Bits and Driver Tips grids everywhere:
+user-entered only, no computed need, priced as boxes/each like any fastener row.
+
+### 12.6 Parapet Termination tab (B.2) — model recap
+
+Fields: `cboTermType` (ids above; default XML `termoption = 1` Empty, `termlength = 0`);
+selecting a termination enables Length (`TermLength`), defaulting to the wall Length, editable
+(auto-shifts with Length changes, §8.4); `UseTermBarOnBase` checkbox (adds wall Length ft of
+WHITE term bar, drill split by WallType). Setup provides the parapet's WallType default ("2. Wall
+Type": Wood or Metal = 1, Brick or Concrete = 4) and the Parapets Material mil/colour/attachment;
+there is no Setup default for the termination itself. Money: nothing direct — every option only
+feeds the accessory footages above (term bar id 2 by colour; fascia 3/4 by size; drip/gravel
+5/9/6/10; two-piece 7/8/11–14), which then price per §12.2.
+
+### 12.7 Ref tables (F) — what is data, and which grids still need a screenshot
+
+| screen | table (columns used) | in web DB? |
+|---|---|---|
+| Term Bar | `ref_TermBars` (Color, Price/ft, Predrill/NonPredrillLabor, Custom*) | rates yes; price per colour: capture "Termination Bars" grid |
+| Fascia | `ref_FasciaBars` (Price/ft, Size, labor ×4, vinyl W/T/G price, metal cover price, inside/outside corner price) | rates yes; **cover/corner prices: capture** |
+| Drip Edge / Gravel Stop | `ref_GenericEdge` (EdgeGroup, EdgeSubType, EdgeSize, White/Tan/GrayPrice, PreDrill/NonPreDrillLaborFactor, Custom*, UsePreDrill) | bar prices + rates yes; **corner/clip/cover rows and UsePreDrill: capture** |
+| Base & Snap Cover | `ref_TwoPieceMetal` (Price, CoverPrice, Inside/OutsideCornerPrice, LaborFactor, CornerLaborFactor, Size) | 3" only; **4"–8": capture** |
+| all fastener grids | `ref_Fasteners` (BoxPrice, BoxQuan, SubType) + `ref_FastenersSubgroups` (For* flags) | 164 rows yes; subgroup flags seeded for 4 ids only — **capture the flag table** |
+| Corners | `ref_Corners` (6 colour prices, ManHours, CustomLabor) | yes |
+| Pipe Stacks | `ref_Stacks` (6 colour prices, Size), `ref_StackUses` (LaborAdjust) | yes |
+| Washers | `ref_Washers` (Price, LaborRequired) | yes |
+| Drains | `ref_DrainsBoots` (Price, PriceForColor, LaborFactor), `ref_DrainRings` (Price), `ref_DrainRoofTypes` (Cleanup/ReinstallLabor), `ref_Strainers` (Price, UnitLabor) | yes |
+| Walk pads | `ref_AccOther` (Price, UnitLabor, SubType) | yes |
+| Panduit | `ref_Panduit` (Price/unit, NumberPerBox, Length) | yes |
+| Sealants | `ref_Sealants` (Price) | yes |
+| Adhesives | `Adhesive` (Price, Unittype) + coverage tables (§2.4) | yes |
+| Membrane Acc | `MembraneAcc` (PricePerPack, ItemsPerPack, DefaultUnitLabor) + `lookup_DuroLastPrices` cat 5 (stripping) | yes |
+| Vents | `ref_Vents` (Price, LaborFactor) | yes |
+
+Constants that are code, not data: 1.03 scrap (f32), ten-foot rounding, 21 / 42 / 63 fasteners per
+10 ft, 1 vent per 1,000 sq ft (mechanical only), 1 T-Patch per 250 sq ft, pipe-stack π·(d+¼) and
+17"/11" strap bands, 2 sealant beads per stack ÷ 10 ft, 0.25 h open-stack adder and the ×1.5 (>12")
+/ ×2 (>18") size factors, drain 1 tube each, washers ¼ tube each, 350 LF strip mastic per pail,
+12 LF per caulk tube, adhesive cost rounded to whole dollars, box counts `Ceil`.
