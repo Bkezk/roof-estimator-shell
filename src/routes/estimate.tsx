@@ -3401,7 +3401,8 @@ function EstimatePage() {
                               return (
                                 <p className="text-[11px] text-muted-foreground">
                                   {t === 1 ? '1¾" fascia bar' : "Term bar (no-drill)"}:{" "}
-                                  {ft.toFixed(2)} ft — ordering quantity, not auto-priced.
+                                  {ft.toFixed(2)} ft — auto-priced on the Accessories{" "}
+                                  {t === 1 ? "Fascia" : "Term Bar"} screen (Curbs count).
                                   {t === 3 ? " Lift labor auto-added." : ""}
                                 </p>
                               );
