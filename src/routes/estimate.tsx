@@ -1955,7 +1955,7 @@ function EstimatePage() {
                             return (
                               <div
                                 key={li}
-                                className={`flex h-8 items-center justify-center rounded-sm border text-[11px] ${
+                                className={`flex min-h-8 flex-col items-center justify-center rounded-sm border px-1 py-0.5 text-[11px] ${
                                   li === uTab ? "ring-2 ring-primary" : ""
                                 } ${
                                   l
@@ -1963,17 +1963,21 @@ function EstimatePage() {
                                     : "border-dashed text-muted-foreground"
                                 }`}
                               >
-                                {l
-                                  ? `Layer ${li + 1}: ${l.board}${
-                                      l.quote
-                                        ? ` — “${l.quote.name}” ${money(
-                                            l.quote.pieceMode
-                                              ? (l.quote.pieces ?? 0) * (l.quote.costPerPiece ?? 0)
-                                              : (l.quote.lumpSum ?? 0),
-                                          )} + ${l.quote.laborAmount ?? 0}${l.quote.laborInDays ? "d" : "h"}`
-                                        : ""
-                                    }`
-                                  : `Layer ${li + 1}`}
+                                <span className="truncate">
+                                  {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
+                                </span>
+                                {l?.quote && (
+                                  <span className="max-w-full truncate text-[10px] font-normal text-muted-foreground">
+                                    “{l.quote.name}” —{" "}
+                                    {money(
+                                      l.quote.pieceMode
+                                        ? (l.quote.pieces ?? 0) * (l.quote.costPerPiece ?? 0)
+                                        : (l.quote.lumpSum ?? 0),
+                                    )}{" "}
+                                    + {l.quote.laborAmount ?? 0}
+                                    {l.quote.laborInDays ? "d" : "h"} labor
+                                  </span>
+                                )}
                               </div>
                             );
                           })}
