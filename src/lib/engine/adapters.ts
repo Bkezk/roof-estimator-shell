@@ -13,6 +13,7 @@
 import type { PriceMatrix, PriceTier, FreightStep } from "./pricing";
 import type { Band, DualValue } from "./labor";
 import type { SetupBandTable, InspectionBandTable } from "./quantities";
+import type { AccessoryRefData, TermColor, EdgeSizeRef } from "./accessories";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Membrane price matrix (from pricing_catalog id "duro_last:duro_last_membrane")
@@ -242,6 +243,300 @@ export function buildAccessoryLaborLookup(
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(seen)) if (v !== null) out[k] = v;
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Accessories ref data (§12) — the calculated screens' price/labor tables
+// ─────────────────────────────────────────────────────────────────────────────
+
+type CatalogRow = { id: string; category: string; data: MembraneScreen };
+
+const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+
+/**
+ * Assemble the §12 accessories ref data from the seeded pricing_catalog accessory screens +
+ * accessory_labor rows. Exact-Description joins on curated admin data throughout (the same
+ * convention as buildNdlAutoRates); a missing screen leaves its slice empty and the engine
+ * bills that screen at $0 with a warning rather than fabricating a rate.
+ *
+ * KNOWN CAPTURE GAPS (docs §12.7): Two-Piece Metal PRICES (labor is captured) — those rows get
+ * priced:false; the DL-stripping price table (lookup category 5).
+ */
+export function buildAccessoryRefData(
+  catalogRows: CatalogRow[],
+  laborRows: CatalogRow[],
+): AccessoryRefData {
+  const cat = (id: string): MembraneScreen | undefined =>
+    catalogRows.find((r) => r.id === `duro_last:${id}`)?.data;
+  const lab = (id: string): MembraneScreen | undefined =>
+    laborRows.find((r) => r.id === id)?.data;
+  const labHours = (id: string, desc: string, col = "Labor(Hrs)"): number => {
+    for (const r of lab(id)?.rows ?? []) {
+      if (str(r["Description"]) === desc) return num(r[col] ?? r["Labor (Hrs)"]);
+    }
+    return 0;
+  };
+
+  // Term bars: per-colour $/ft + the single Term Bar drill-rate pair.
+  const termBars: Record<TermColor, { pricePerFt: number }> = {
+    White: { pricePerFt: 0 },
+    Tan: { pricePerFt: 0 },
+    Gray: { pricePerFt: 0 },
+  };
+  for (const r of cat("termination_bars")?.rows ?? []) {
+    const c = str(r["Description"]) as TermColor;
+    if (c === "White" || c === "Tan" || c === "Gray") termBars[c] = { pricePerFt: num(r["Price"]) };
+  }
+  const tbLabRow = (lab("termination_bars")?.rows ?? [])[0] ?? {};
+  const termBarLabor = {
+    preDrillPerFt: num(tbLabRow["PreDrill Labor(Hrs)"]),
+    noDrillPerFt: num(tbLabRow["NoDrill Labor (Hrs)"]),
+  };
+
+  // Fascia: the catalog interleaves both sizes (bar row starts each size's group).
+  const fasciaEmpty = () => ({
+    barPricePerFt: 0,
+    vinylCoverPrice: { White: 0, Tan: 0, Gray: 0 } as Record<TermColor, number>,
+    metalCoverPrice: 0,
+    insideCornerPrice: 0,
+    outsideCornerPrice: 0,
+    preDrillLaborPerFt: 0,
+    noDrillLaborPerFt: 0,
+  });
+  const fascia = { "3": fasciaEmpty(), "4": fasciaEmpty() };
+  {
+    let size: "3" | "4" | null = null;
+    for (const r of cat("facia_bars_vinyl_covers")?.rows ?? []) {
+      const d = str(r["Description"]);
+      const price = num(r["Price"]);
+      if (/Fascia Bar/i.test(d)) {
+        size = d.startsWith("1 3/4") ? "3" : "4";
+        fascia[size].barPricePerFt = price;
+      } else if (size && /^(White|Tan|Gray) Vinyl Cover$/i.test(d)) {
+        fascia[size].vinylCoverPrice[d.split(" ")[0] as TermColor] = price;
+      } else if (size && d === "Metal Cover") {
+        fascia[size].metalCoverPrice = price;
+      } else if (size && d === "Metal Outside Corner") {
+        fascia[size].outsideCornerPrice = price;
+      } else if (size && d === "Metal Inside Corner") {
+        fascia[size].insideCornerPrice = price;
+      }
+    }
+    for (const r of lab("fascia_bars")?.rows ?? []) {
+      const d = str(r["Description"]);
+      const size2: "3" | "4" | null = d.startsWith("1¾") || d.startsWith("1 3/4") ? "3" : d.startsWith('4"') ? "4" : null;
+      if (!size2) continue;
+      fascia[size2].preDrillLaborPerFt = num(r["PreDrill Labor(Hrs)"]);
+      fascia[size2].noDrillLaborPerFt = num(r["NoDrill Labor (Hrs)"]);
+    }
+  }
+
+  // Drip edge / gravel stops: parts per size keyed off the row Description suffix.
+  const edgeColors = (r: Record<string, string | number | null>): Record<TermColor, number> => ({
+    White: num(r["White Price"]),
+    Tan: num(r["Tan Price"]),
+    Gray: num(r["Gray Price"]),
+  });
+  const buildEdgeGroup = (
+    id: "drip_edge" | "gravel_stops",
+    baseName: string,
+    laborId: string,
+  ): Record<"2" | "4", EdgeSizeRef> => {
+    const empty = (): EdgeSizeRef => ({
+      bar: { priceByColor: { White: 0, Tan: 0, Gray: 0 }, laborFactor: 0 },
+    });
+    const group: Record<"2" | "4", EdgeSizeRef> = {
+      "2": empty(),
+      "4": empty(),
+    };
+    for (const r of cat(id)?.rows ?? []) {
+      const d = str(r["Description"]);
+      const m = new RegExp(`^${baseName} (2|4)"(?: (.+))?$`).exec(d);
+      if (!m) continue;
+      const size = m[1] as "2" | "4";
+      const part = m[2] ?? "";
+      const prices = edgeColors(r);
+      const barLabor = labHours(laborId, `${baseName} ${size}"`, "Labor(Hrs)") ||
+        labHours(laborId, `${baseName} ${size}"`, "NoDrill Labor (Hrs)");
+      const cornerLabor = labHours(laborId, `${baseName} ${size}" Corner`, "Labor(Hrs)") ||
+        labHours(laborId, `${baseName} ${size}" Corner`, "NoDrill Labor (Hrs)");
+      if (part === "") group[size].bar = { priceByColor: prices, laborFactor: barLabor };
+      else if (part === "Clip") group[size].clip = { priceByColor: prices, laborFactor: barLabor };
+      else if (part === "Corner") group[size].corner = { priceByColor: prices, laborFactor: cornerLabor };
+      else if (part === "Cover") group[size].cover = { priceByColor: prices, laborFactor: barLabor };
+      else if (part === "Inside Corner")
+        group[size].insideCorner = { priceByColor: prices, laborFactor: cornerLabor };
+      else if (part === "Outside Corner")
+        group[size].outsideCorner = { priceByColor: prices, laborFactor: cornerLabor };
+    }
+    return group;
+  };
+  const dripEdge = buildEdgeGroup("drip_edge", "Drip Edge", "drip_edges");
+  const gravelStop = buildEdgeGroup("gravel_stops", "Gravel Stop", "gravel_stops");
+
+  // Two-piece metals: labor captured; PRICES are a §12.7 capture gap → priced:false.
+  const twoPiece = {} as AccessoryRefData["twoPiece"];
+  for (const size of ["3", "4", "5", "6", "7", "8"] as const) {
+    let laborPerFt = 0;
+    let cornerLabor = 0;
+    for (const r of lab("two_piece_metals")?.rows ?? []) {
+      if (str(r["Description"]).startsWith(`${size}"`)) {
+        laborPerFt = num(r["Labor (Hr/Ft)"]);
+        cornerLabor = num(r["Corner Labor(Hr/Piece)"]);
+      }
+    }
+    twoPiece[size] = {
+      pricePerFt: 0,
+      coverPrice: 0,
+      insideCornerPrice: 0,
+      outsideCornerPrice: 0,
+      laborPerFt,
+      cornerLaborPerPiece: cornerLabor,
+      priced: false,
+    };
+  }
+
+  // Corners: 6 rows × 6 colour columns + per-row hours.
+  const corners: AccessoryRefData["corners"] = [];
+  for (const r of cat("corners")?.rows ?? []) {
+    const d = str(r["Description"]);
+    if (!d) continue;
+    const priceByColor: Record<string, number> = {};
+    for (const col of ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta", "Rock-Ply", "Rock Ply"]) {
+      if (typeof r[col] === "number") priceByColor[col === "Rock-Ply" ? "Rock Ply" : col] = num(r[col]);
+    }
+    corners.push({ description: d, priceByColor, hours: labHours("corners", d) });
+  }
+
+  // Pipe stacks: sizes with colour prices; usages with labor multipliers.
+  const pipeStackSizes: AccessoryRefData["pipeStackSizes"] = [];
+  for (const r of cat("pipe_stacks")?.rows ?? []) {
+    const size = Number(r["Size"]);
+    if (!Number.isFinite(size) || size <= 0) continue;
+    pipeStackSizes.push({
+      size,
+      label: str(r["Description"]) || `${size}"`,
+      priceByColor: {
+        White: num(r["Price"]),
+        Tan: num(r["Tan Price"]),
+        Gray: num(r["Gray Price"]),
+        "Dark Gray": num(r["Dark Gray"]),
+        "Terra Cotta": num(r["Terra Cotta"]),
+        "Rock Ply": num(r["Rock Ply"] ?? r["Rock-Ply"]),
+      },
+      closedOnly: /Closed Only/i.test(str(r["Description"])) || str(r["Open Part #"]) === "0",
+    });
+  }
+  const pipeStackUsages: AccessoryRefData["pipeStackUsages"] = (
+    lab("pipe_stack_usages")?.rows ?? []
+  ).map((r) => ({ name: str(r["Description"]), laborFactor: num(r["Multiplier"]) }));
+
+  // Washers / drains / strainers / walk pads.
+  const washers = (cat("conduit_washers")?.rows ?? []).map((r) => ({
+    description: str(r["Description"]),
+    price: num(r["Price"]),
+    hours: labHours("washers", str(r["Description"])),
+  }));
+  const drainBoots = (cat("drain_boots")?.rows ?? []).map((r) => {
+    const d = str(r["Description"]);
+    // accessory_labor spells the halves "2½"; the catalog spells "2 1/2" — normalize to match.
+    const labD = d.replace(/(\d) 1\/2"/, "$1½\"");
+    return { description: d, price: num(r["Price"]), hours: labHours("drain_boots", labD) || labHours("drain_boots", d) };
+  });
+  const drainRings = (cat("cdr_rings")?.rows ?? []).map((r) => ({
+    description: str(r["Description"]),
+    price: num(r["Price"]),
+  }));
+  const drainRoofTypes = (lab("drain_roof_types")?.rows ?? []).map((r) => ({
+    name: str(r["Description"]),
+    cleanupHours: num(r["Area Prep Labor(Hrs)"]),
+    reinstallHours: num(r["Reinstallation Labor (Hrs)"]),
+  }));
+  const strainers = (cat("drain_boot_accessories")?.rows ?? []).map((r) => ({
+    description: str(r["Description"]),
+    price: num(r["Price"]),
+    hours: labHours("strainers", str(r["Description"])),
+  }));
+  const walkPads = (cat("walk_pads_wall_vents")?.rows ?? []).map((r) => ({
+    description: str(r["Description"]),
+    price: num(r["Price"]),
+    hours: labHours("accessory_others", str(r["Description"])),
+  }));
+
+  // Panduit / sealants / membrane accs / vents.
+  const panduit = (cat("panduit")?.rows ?? []).map((r) => {
+    const d = str(r["Description"]);
+    const m = /x (\d+)"/.exec(d);
+    return {
+      description: d,
+      pricePerPart: num(r["Price/Part"]),
+      partsPerBag: num(r["Parts/Bag"]) || 1,
+      lengthIn: m ? Number(m[1]) : null,
+    };
+  });
+  const sealants = (cat("sealants")?.rows ?? []).map((r) => ({
+    description: str(r["Description"]),
+    part: str(r["Part #"]),
+    price: num(r["Price"]),
+  }));
+  const membraneAccsRows = cat("membrane_accs")?.rows ?? [];
+  const maRow = (name: string) => membraneAccsRows.find((r) => str(r["Description"]) === name);
+  const arpRow = maRow("ARP (SqFt)");
+  const tpRow = maRow("T-Patch");
+  const membraneAccs: AccessoryRefData["membraneAccs"] = {
+    ...(arpRow
+      ? { arp: { pricePerPack: num(arpRow["Price/Package"]), partsPerPack: num(arpRow["Parts/Package"]) || 1 } }
+      : {}),
+    ...(tpRow
+      ? { tPatch: { pricePerPack: num(tpRow["Price/Package"]), partsPerPack: num(tpRow["Parts/Package"]) || 1 } }
+      : {}),
+    arpHours: labHours("membrane_accs", "ARP (SqFt)", "Labor (Hrs)"),
+    tPatchHours: labHours("membrane_accs", "T-Patch", "Labor (Hrs)"),
+    strippingHoursPerFt: labHours("membrane_accs", `1' of Stripping w/ 6"oc Fasteners`, "Labor (Hrs)"),
+  };
+  const vents = (cat("vents")?.rows ?? []).map((r) => ({
+    color: str(r["Description"]),
+    price: num(r["Price"]),
+  }));
+  const ventRow = (lab("vents")?.rows ?? [])[0];
+  const ventLaborHours = ventRow ? num(ventRow["Labor(Hrs)"]) : 0;
+
+  // Fasteners & bits: the full catalog, keyed `${Description}|${Subtype}`.
+  const fasteners = (cat("fasteners_and_bits")?.rows ?? [])
+    .filter((r) => str(r["Description"]))
+    .map((r) => ({
+      key: `${str(r["Description"])}|${str(r["Subtype"])}`,
+      description: str(r["Description"]),
+      subtype: str(r["Subtype"]),
+      part: str(r["Part #"]),
+      boxPrice: num(r["Price/Box"]),
+      perBox: num(r["Fasteners/Box"]),
+    }));
+
+  return {
+    termBars,
+    termBarLabor,
+    fascia,
+    dripEdge,
+    gravelStop,
+    twoPiece,
+    corners,
+    pipeStackSizes,
+    pipeStackUsages,
+    washers,
+    drainBoots,
+    drainRings,
+    drainRoofTypes,
+    strainers,
+    walkPads,
+    panduit,
+    sealants,
+    membraneAccs,
+    vents,
+    ventLaborHours,
+    fasteners,
+  };
 }
 
 /** One pickable non-Duro-Last catalog line (material Price + a labor component at its own rate). */
@@ -1234,6 +1529,9 @@ export interface RawAdminData {
   /** Legacy underlayment parent groups + board→group mapping (Select Insulation Type panel). */
   underlaymentGroupRows?: RawUnderlaymentGroupRow[] | null;
   underlaymentBoardGroupRows?: RawUnderlaymentBoardGroupRow[] | null;
+  /** Accessory pricing screens (duro_last:*) + accessory_labor rows for the §12 calculated tab. */
+  accessoryCatalogRows?: Array<{ id: string; category: string; data: MembraneScreen }> | null;
+  accessoryLaborRows?: Array<{ id: string; category: string; data: MembraneScreen }> | null;
 }
 
 export interface EngineSettings {
@@ -1283,6 +1581,8 @@ export interface EngineAdminData {
   autoRates?: NdlAutoRates;
   /** Legacy Underlayment parent-type structure (Select Insulation Type tiles → options). */
   underlaymentGroups?: UnderlaymentGroupsData;
+  /** §12 Accessories calculated-screen ref data (absent on older frozen snapshots). */
+  accessories?: AccessoryRefData;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1372,6 +1672,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     masonryScreen: raw.nonDlMasonryScreen ?? null,
     membraneAccsScreen: raw.membraneAccsScreen ?? null,
   });
+  const accessories = raw.accessoryCatalogRows?.length
+    ? buildAccessoryRefData(raw.accessoryCatalogRows, raw.accessoryLaborRows ?? [])
+    : undefined;
 
   return {
     deckOrder,
@@ -1394,5 +1697,6 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),
     ...(Object.keys(autoRates).length ? { autoRates } : {}),
     ...(underlaymentGroups ? { underlaymentGroups } : {}),
+    ...(accessories ? { accessories } : {}),
   };
 }

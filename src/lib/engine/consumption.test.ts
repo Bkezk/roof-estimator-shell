@@ -42,11 +42,12 @@ describe("consumption rules (§2 port)", () => {
     expect(edgeBarScrews(0)).toBe(0);
   });
 
-  it("two-piece: 42 per 10 ft except the 4\" size at 63", () => {
+  it('two-piece (§12.2): 3"/4"/5" at 42 per 10 ft; 6"/7"/8" at 63', () => {
     expect(twoPieceScrews(10, 3)).toBe(42);
+    expect(twoPieceScrews(10, 4)).toBe(42);
     expect(twoPieceScrews(10, 5)).toBe(42);
-    expect(twoPieceScrews(10, 6)).toBe(42);
-    expect(twoPieceScrews(10, 4)).toBe(63);
+    expect(twoPieceScrews(10, 6)).toBe(63);
+    expect(twoPieceScrews(10, 8)).toBe(63);
   });
 
   it("insulation: 5 per 32 sq ft default; doubled+ when membrane is adhered/Duro-Bond", () => {
@@ -130,9 +131,9 @@ describe("consumption rules (§2 port)", () => {
       roofSystem: "Duro-Last",
       adhesiveCoverage: { "OlyBond500 Bag-in-Box": { Concrete: { coverageSqFt: 1700 } } },
     });
-    // Bars: T-Bar 100 + Drip 100 → ceil(200/10*21)=420; two-piece 4" → ceil(100/10*63)=630.
+    // Bars: T-Bar 100 + Drip 100 → ceil(200/10*21)=420; two-piece 4" → ceil(100/10*42)=420 (§12.2).
     expect(r.breakdown.edgeBarScrews).toBe(420);
-    expect(r.breakdown.twoPieceScrews).toBe(630);
+    expect(r.breakdown.twoPieceScrews).toBe(420);
     // Membrane screws (lap 28, oc 18, side A perim):
     // s1 field: strip[0]=30 → fieldW=70, rows=Ceil(70/In2Ft(22)=1.83)=39, 3900/1.5=2600;
     // s1 perim (lap<120, side A): 100/1.5 → 67; s2 (50×50, no edges): rows=Ceil(50/1.83)=28,

@@ -48,6 +48,13 @@
 
 import { areaWithEdgeOverlap } from "./quantities";
 import { in2Ft, bankersRound } from "./rounding";
+import {
+  computeAccessories,
+  normalizeAccessoriesState,
+  parapetEdgeFastenersCount,
+  type AccessoriesState,
+  type AccessoriesResult,
+} from "./accessories";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
 import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
 import {
@@ -302,6 +309,18 @@ export interface ParapetInput {
   arpSizeIn?: number;
   /** Parapet ARP length (ft); absent = the wall length (which bills at AdjustedLength). */
   arpLengthFt?: number;
+  /**
+   * Parapet Termination tab (§12.6): the termination id (2 T-Bar, 3/4 fascia, 5/9 gravel,
+   * 6/10 drip, 7/8/11–14 two-piece; 0/absent = none). Feeds the §12.2 accessory footages only —
+   * no direct money.
+   */
+  termOptionId?: number;
+  /** Termination length (ft); absent = the wall length (legacy default, auto-shifting). */
+  termLengthFt?: number;
+  /** §12.6 "Use Term Bar on Base": adds Round(Length) ft of WHITE term bar (drill by WallType). */
+  useTermBarOnBase?: boolean;
+  /** Legacy WallType (Setup "2. Wall Type"): 1 = Wood or Metal (no-drill), 4 = Brick or Concrete. */
+  wallType?: number;
   // Legacy wall profile dims (inches); girth derives as their sum when any is present.
   skirtInches?: number;
   cantInches?: number;
@@ -390,6 +409,8 @@ export interface BidInput {
   membraneAdhesiveName?: string;
   sections: BidSectionInput[];
   accessories: AccessoryLine[];
+  /** §12 Accessories calculated-screen state (absent on older saved bids → empty state). */
+  accessoriesCalc?: Partial<AccessoriesState>;
   nonDlLines: NonDlLine[];
   metals: MetalLine[];
   parapets: ParapetInput[];
@@ -490,6 +511,8 @@ export interface BuildResult {
   adhesiveMaterial: number;
   /** Curb wrap membrane $ (inside duroLastMaterial/M0); split out for display/proposal. */
   curbMaterial: number;
+  /** §12 Accessories calculated-screen results (absent when the snapshot lacks the ref data). */
+  accessories?: AccessoriesResult;
 }
 
 /**
@@ -944,19 +967,34 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   }
 
   // Adhesive whole units (legacy AdheredSystems.AggregateCalcQtys, docs/legacy-consumption-rules
-  // §2.4): fractional units summed per adhesive across the WHOLE estimate, then Ceiling ONCE per
-  // adhesive; the whole units price into M0. Membrane and parapet-wall adhesive (above) join the
-  // same aggregate, exactly as in the legacy app.
+  // §2.4 + §12.4): fractional units summed per adhesive across the WHOLE estimate, then Ceiling
+  // ONCE per adhesive; whole units (+ any user EXTRA units from the Adhesives accessory screen)
+  // price into M0, each adhesive's cost rounded to WHOLE DOLLARS (legacy AdheredSystem.Cost —
+  // §12.4). Membrane and parapet-wall adhesive (above) join the same aggregate.
+  const accState: AccessoriesState = normalizeAccessoriesState(bid.accessoriesCalc);
   let adhesiveMaterial = 0;
-  for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
-    adhesiveMaterial += Math.ceil(units) * (admin.adhesivePrices?.[name] ?? 0);
+  {
+    const extraSeen = new Set<string>();
+    for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
+      const extra = accState.adhesivesExtra[name] ?? 0;
+      extraSeen.add(name);
+      adhesiveMaterial += bankersRound(
+        (Math.ceil(units) + extra) * (admin.adhesivePrices?.[name] ?? 0),
+        0,
+      );
+    }
+    for (const [name, extra] of Object.entries(accState.adhesivesExtra)) {
+      if (extra > 0 && !extraSeen.has(name)) {
+        adhesiveMaterial += bankersRound(extra * (admin.adhesivePrices?.[name] ?? 0), 0);
+      }
+    }
   }
 
   // Accessory material folds into M0 (dMaterial[4] sits within Σ dMaterial[0..6]).
-  const accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
+  let accessoryMaterial = bid.accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
 
   // Accessory install labor (Σ per-unit hrs × qty) → direct labor (LaborSubtotal1) at the crew rate.
-  const accessoryLaborHours = bid.accessories.reduce(
+  let accessoryLaborHours = bid.accessories.reduce(
     (sum, a) => sum + (a.laborHoursPerUnit ?? 0) * a.quantity,
     0,
   );
@@ -1258,21 +1296,55 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
   }
 
-  // ARP material (§8.6, the MembraneAccs "ARP (SqFt)" item → M0): CalcQty = Ceil(Σ section ARP)
-  // + Ceil(Σ parapet ARP) — each side ceiled separately, exactly as the legacy collections
+  // ARP material (§8.6/§12.4, the MembraneAccs "ARP (SqFt)" item → M0): CalcQty = Ceil(Σ section
+  // ARP) + Ceil(Σ parapet ARP) — each side ceiled separately, exactly as the legacy collections
   // aggregate. (Section ARP also deducts from membrane sq ft — §2.3, already applied above.)
+  // When the §12 accessories ref data is present, the accessories module OWNS the ARP row
+  // (calc + user extra, identical math at extra = 0); the legacy fallback below covers older
+  // frozen snapshots without it.
   let arpMaterial = 0;
-  {
-    const sectionArp = bid.sections.reduce((sum, s) => sum + edgesArpSqFt(s.edges ?? []), 0);
-    const qty = Math.ceil(sectionArp) + Math.ceil(parapetArpSqFt);
-    if (qty > 0) {
+  const arpCalcQty =
+    Math.ceil(bid.sections.reduce((sum, s) => sum + edgesArpSqFt(s.edges ?? []), 0)) +
+    Math.ceil(parapetArpSqFt);
+  if (!admin.accessories) {
+    if (arpCalcQty > 0) {
       const price = admin.autoRates?.arpPricePerSqFt;
-      if (price !== undefined) arpMaterial = qty * price;
+      if (price !== undefined) arpMaterial = arpCalcQty * price;
       else
         warnings.push(
-          `ARP: ${qty} sq ft needed but no "ARP (SqFt)" price row (Membrane Accs) — not auto-priced.`,
+          `ARP: ${arpCalcQty} sq ft needed but no "ARP (SqFt)" price row (Membrane Accs) — not auto-priced.`,
         );
     }
+  }
+
+  // §12 Accessories calculated screens: the whole tab's money path (edge terminations, flashing
+  // accessories, calculated items, fasteners) — material joins dMaterial[4], hours join the
+  // crew-rate direct labor. Runs only when the admin snapshot carries the §12 ref data (older
+  // frozen snapshots keep their previous totals).
+  let accessoriesCalcResult: AccessoriesResult | undefined;
+  if (admin.accessories) {
+    accessoriesCalcResult = computeAccessories({
+      state: accState,
+      ref: admin.accessories,
+      sections: bid.sections,
+      parapets: bid.parapets,
+      curbs: bid.curbs,
+      roofSystem: bid.roofSystem,
+      attachment: bid.attachment,
+      arpCalcSqFt: arpCalcQty,
+      parapetEdgeFasteners: parapetEdgeFastenersCount(
+        bid.parapets,
+        bid.roofSystem,
+        bid.attachment,
+        warnings,
+      ),
+    });
+    warnings.push(...accessoriesCalcResult.warnings);
+    // The ARP row keeps its own dMaterial slot (review-ledger attribution); the rest of the
+    // module's material joins the accessory slot.
+    arpMaterial = accessoriesCalcResult.membraneAccs.arpCost;
+    accessoryMaterial += accessoriesCalcResult.totalCost - accessoriesCalcResult.membraneAccs.arpCost;
+    accessoryLaborHours += accessoriesCalcResult.manHours;
   }
 
   // Apply the template factors to the category hour seams.
@@ -1408,5 +1480,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     metalsMaterial,
     adhesiveMaterial,
     curbMaterial,
+    ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
   };
 }

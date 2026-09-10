@@ -19,9 +19,9 @@ const OVERLAP_WIDTH_IN = 6;
 export const edgeBarScrews = (lengthFt: number): number =>
   lengthFt > 0 ? Math.ceil((lengthFt / 10) * 21) : 0;
 
-/** §2.1 — two-piece metal: sizes {0,2,3} → 42 per 10 ft; size 1 → 63. Sizes are 3/4/5/6". */
+/** §12.2 — two-piece metal: 3"/4"/5" → 42 per 10 ft; 6"/7"/8" → 63 (corrected 2026-09-10). */
 export const twoPieceScrews = (lengthFt: number, sizeInches: number): number =>
-  lengthFt > 0 ? Math.ceil((lengthFt / 10) * (sizeInches === 4 ? 63 : 42)) : 0;
+  lengthFt > 0 ? Math.ceil((lengthFt / 10) * (sizeInches >= 6 ? 63 : 42)) : 0;
 
 /**
  * §2.3 — insulation fasteners for one mechanically attached layer over an area.

@@ -1294,7 +1294,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // glueA: 1.25 + 1.25 = 2.5 -> Ceil 3 units x $899; glueB: 2500/500 = 5 (already whole) x $122.10.
     // Ceiling is PER ADHESIVE on the estimate total (AggregateCalcQtys) - not per layer (which
     // would give 2 + 2 = 4 units of glueA), not on the mixed total.
-    expect(adhesiveMaterial).toBeCloseTo(3 * 899 + 5 * 122.1, 2);
+    // §12.4: each adhesive's cost rounds to WHOLE dollars (banker's): 2697 + Round(610.5) = 3307.
+    expect(adhesiveMaterial).toBeCloseTo(3 * 899 + 610, 2);
   });
 
   it("legacy underlaymentBoard converts to one mechanical layer at 5 fasteners/board", () => {
@@ -1467,7 +1468,8 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
       bid({ attachment: "adhered" }),
       withCov(),
     );
-    expect(adhesiveMaterial).toBeCloseTo(4 * 122.1, 2);
+    // §12.4 whole-dollar rounding: Round(488.4, 0) = 488.
+    expect(adhesiveMaterial).toBeCloseTo(488, 2);
     expect(warnings.filter((w) => w.toLowerCase().includes("adhesive"))).toEqual([]);
   });
 
@@ -1492,7 +1494,8 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
       }),
       withCov(),
     );
-    expect(adhesiveMaterial).toBeCloseTo(5 * 122.1, 2);
+    // §12.4 whole-dollar rounding: Round(610.5, 0) = 610 (banker's).
+    expect(adhesiveMaterial).toBeCloseTo(610, 2);
   });
 
   it("wall adhesive with profile dims bills WallPlusTopSqFt = length x (Vertical+WallTop)/12", () => {
@@ -1522,7 +1525,8 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
       }),
       withCov(),
     );
-    expect(adhesiveMaterial).toBeCloseTo(5 * 122.1, 2);
+    // §12.4 whole-dollar rounding: Round(610.5, 0) = 610 (banker's).
+    expect(adhesiveMaterial).toBeCloseTo(610, 2);
   });
 
   it("warns instead of guessing when coverage is unknown (deck not in table)", () => {
