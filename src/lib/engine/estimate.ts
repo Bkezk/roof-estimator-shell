@@ -86,6 +86,16 @@ export interface RoofSection {
   complexity: number;
   fieldAttachment: Attachment;
   perimAttachment: Attachment;
+  /**
+   * Per-section labor tables (legacy: RoofSystem / attachment are PER SECTION). When set they
+   * replace the estimate-level `admin` tables for this section's rate resolution.
+   */
+  laborTables?: AdminLaborTables;
+  /**
+   * Per-section AdjustLabor % (legacy RoofSection.AdjustLabor — the estimate-level adjust sets
+   * every section's value; the section Labor link then edits one). Absent = estimate-level.
+   */
+  adjustLaborPct?: number;
   // adhered inputs (used when an attachment is "adhered")
   adhesiveBaseHoursPer1000: number;
   rollGoods: boolean;
@@ -283,7 +293,7 @@ export function computeSectionInstallHours(
       version,
     });
   }
-  const { fieldRate, perimRate, cornerRate } = resolveSectionRates(s, admin);
+  const { fieldRate, perimRate, cornerRate } = resolveSectionRates(s, s.laborTables ?? admin);
   return roofSectionLaborHours({
     fieldArea: s.fieldArea,
     fieldRate,
@@ -292,7 +302,7 @@ export function computeSectionInstallHours(
     cornerArea: s.cornerArea,
     cornerRate,
     thicknessLabor: s.thicknessLabor,
-    adjustLaborPct,
+    adjustLaborPct: s.adjustLaborPct ?? adjustLaborPct,
   });
 }
 

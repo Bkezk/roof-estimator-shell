@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 
 import {
   buildEstimateInputs,
+  derivedSheetSizeLabel,
   fluteFillerPieces,
+  perimeterEnhancementCalculator,
+  resolveSectionSheetLabel,
+  roofSystemHasComplexity,
+  sectionComplexityFactor,
   sectionMembraneDisplayPricing,
   type BidInput,
   type UnderlaymentLayer,
@@ -2086,5 +2091,142 @@ describe("sectionMembraneDisplayPricing — the calc dialog can never disagree w
     expect(disp.pricePerSqFt).toBe(1.23);
     const { inputs } = buildEstimateInputs(bid(), admin);
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2);
+  });
+});
+
+describe("§16 Roof Sections: per-section system / labor adjust / complexity / corner geometry", () => {
+  const tuffAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Tuff|mechanical": admin.labor["Duro-Last|mechanical"]! },
+    familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
+  };
+
+  it("a section AdjustLabor % overrides the bid-level adjust for that section only", () => {
+    const two = bid({
+      adjustLaborPct: 50,
+      sections: [bid().sections[0]!, { ...bid().sections[0]!, id: "s2", adjustLaborPct: 10 }],
+    });
+    const { inputs } = buildEstimateInputs(two, admin);
+    expect(inputs.sections[0]!.adjustLaborPct).toBeUndefined();
+    expect(inputs.sections[1]!.adjustLaborPct).toBeCloseTo(10, 9);
+    const r = computeEstimate(inputs);
+    expect(r.installHours).toBeCloseTo(15.125 * 1.5 + 15.125 * 1.1, 6);
+  });
+
+  it("Duro-Tuff section on a ×1.0 sheet multiplies the RSComplexityFactor into labor + tear-off", () => {
+    const withTearOff: EngineAdminData = {
+      ...tuffAdmin,
+      tearOff: {
+        deckColumns: ["Wood"],
+        tearoffTypes: ['BUR < 2"'],
+        lookup: { Wood: { 'BUR < 2"': 2.4876 / 100 } },
+      },
+    };
+    const heavy = bid({
+      sections: [
+        {
+          ...bid().sections[0]!,
+          roofSystem: "Duro-Tuff", // per-section override; the bid stays Duro-Last
+          complexity: 4, // Heavy → 2.4
+          tearOff: true,
+          tearOffType: 'BUR < 2"',
+        },
+      ],
+    });
+    const { inputs, warnings } = buildEstimateInputs(heavy, withTearOff);
+    expect(warnings).toEqual([]);
+    const s0 = inputs.sections[0]!;
+    expect(s0.complexity).toBe(2.4);
+    expect(s0.laborTables).toBeDefined(); // the section's own combo, not the bid's
+    expect(s0.tearOffSheetComplexityMulti).toBe(2.4);
+    const r = computeEstimate(inputs);
+    expect(r.installHours).toBeCloseTo(15.125 * 2.4, 6);
+    // TearOffBaseLabor = 2500 × 0.024876 × 1 × 2.4 = 149.256 → Round 3 → Ceiling to the cent
+    expect(r.tearOffLaborHours).toBeCloseTo(149.26, 2);
+    // Duro-Tuff flat membrane price applied (family price, no tab tiers)
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2);
+  });
+
+  it("complexity defaults to Moderate (×1) and is ignored on systems without RSComplexityFactor rows", () => {
+    const { inputs: tuff } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, roofSystem: "Duro-Tuff" }] }),
+      tuffAdmin,
+    );
+    expect(tuff.sections[0]!.complexity).toBe(1);
+    const { inputs: dl } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, complexity: 5 }] }),
+      admin,
+    );
+    expect(dl.sections[0]!.complexity).toBe(1);
+    expect(dl.sections[0]!.laborTables).toBeUndefined();
+    expect(sectionComplexityFactor(3, 5, 1)).toBe(4);
+    expect(sectionComplexityFactor(3, 5, 0.98)).toBe(1); // non-1.0 sheet → "None"
+    expect(roofSystemHasComplexity("Duro-Fleece")).toBe(true);
+    expect(roofSystemHasComplexity("Duro-Last")).toBe(false);
+  });
+
+  it("warns when a section's own system / attachment has no labor table", () => {
+    const { warnings } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, roofSystem: "Duro-Roof" }] }),
+      admin,
+    );
+    expect(
+      warnings.some((w) =>
+        w.includes('No labor table for Duro-Roof / mechanical — section "Main"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("marked corners carve corner squares out of the perimeter runs (legacy _230 geometry)", () => {
+    const mkEdge = (side: string, lengthFt: number) => ({
+      side,
+      lengthFt,
+      isPerimeter: true,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    });
+    const { inputs } = buildEstimateInputs(
+      bid({
+        sections: [
+          {
+            ...bid().sections[0]!,
+            enhancementWidthFt: 3,
+            edges: [mkEdge("A", 50), mkEdge("B", 50), mkEdge("C", 50), mkEdge("D", 50)],
+            perimCorners: [true, true, true, true],
+          },
+        ],
+      }),
+      admin,
+    );
+    const s0 = inputs.sections[0]!;
+    // each side 50 − 3 − 3 = 44 → 176 ft × 3 = 528 sf; corners 4 × 3 ft × 3 ft = 36 sf
+    expect(s0.perimArea).toBe(528);
+    expect(s0.cornerArea).toBe(36);
+    expect(s0.fieldArea).toBe(2500 - 528 - 36);
+  });
+
+  it("non-quick-bid sections derive the average sheet from the area (RoofSection.get_SheetSize)", () => {
+    const labels = ["Roll Good", "500 sf", "1000 sf", "1500 sf", "2000 sf", "2500 sf", "3000 sf"];
+    expect(derivedSheetSizeLabel(2400, labels)).toBe("2500 sf"); // next size up
+    expect(derivedSheetSizeLabel(2000, labels)).toBe("2000 sf"); // exact
+    expect(derivedSheetSizeLabel(50, labels)).toBe("Roll Good"); // within the first size
+    expect(derivedSheetSizeLabel(5000, labels)).toBe("3000 sf"); // beyond the largest
+    expect(
+      resolveSectionSheetLabel(
+        { ...bid().sections[0]!, isQuickBid: false, length: 60, width: 40 },
+        labels,
+      ),
+    ).toBe("2500 sf");
+    expect(resolveSectionSheetLabel({ ...bid().sections[0]!, length: 60, width: 40 }, labels)).toBe(
+      "1500 sf",
+    );
+  });
+
+  it("perimeter width calculator: min(0.4 × height, 0.1 × lesser dim), ceiling, floor 5", () => {
+    expect(perimeterEnhancementCalculator(20, 100)).toBe(8);
+    expect(perimeterEnhancementCalculator(5, 100)).toBe(5);
+    expect(perimeterEnhancementCalculator(30, 300)).toBe(12);
+    expect(perimeterEnhancementCalculator(31, 300)).toBe(13); // 12.4 → ceiling 13
   });
 });

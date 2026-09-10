@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  availableCorners,
+  cornerLengthFromEdges,
   defaultEdges,
   perimeterFromEdges,
   edgesArpSqFt,
+  resolveSectionZones,
   summarizeEdges,
   type EdgeInput,
 } from "./edges";
@@ -73,5 +76,95 @@ describe("summarizeEdges", () => {
     ]);
     expect(sum.blockingFt).toBe(110);
     expect(sum.arpSqFtTotal).toBeCloseTo(1.03 * (18 / 12) * 25, 9);
+  });
+});
+
+describe("legacy corner geometry (docs §16: PerimSideLengthMinusCorners_4_0_230 / CornerTotalLength)", () => {
+  const W = 12;
+  const square = () => [
+    edge({ side: "A", lengthFt: 100, isPerimeter: true }),
+    edge({ side: "B", lengthFt: 60, isPerimeter: true }),
+    edge({ side: "C", lengthFt: 100, isPerimeter: true }),
+    edge({ side: "D", lengthFt: 60, isPerimeter: true }),
+  ];
+
+  it("availableCorners offers a corner only while BOTH adjacent sides are perimeter", () => {
+    const e = square();
+    expect(availableCorners(e)).toEqual([true, true, true, true]);
+    e[1] = { ...e[1]!, isPerimeter: false }; // B off → corners 0 (A∧B) and 1 (B∧C) vanish
+    expect(availableCorners(e)).toEqual([false, false, true, true]);
+  });
+
+  it("each marked corner removes one enhancement width from BOTH adjacent perimeter runs", () => {
+    const e = square();
+    // all four corners: A 100−24, B 60−24, C 100−24, D 60−24 = 224; corners 4 × 12 = 48
+    expect(
+      perimeterFromEdges(e, { enhancementWidthFt: W, corners: [true, true, true, true] }),
+    ).toBe(224);
+    expect(cornerLengthFromEdges(e, W, [true, true, true, true])).toBe(48);
+    // only corner 0 (between A and B): A 100−12, B 60−12, C 100, D 60 = 296
+    expect(
+      perimeterFromEdges(e, { enhancementWidthFt: W, corners: [true, false, false, false] }),
+    ).toBe(296);
+    expect(cornerLengthFromEdges(e, W, [true, false, false, false])).toBe(12);
+  });
+
+  it("a marked corner whose side stopped being perimeter no longer counts (CheckCorners hides it)", () => {
+    const e = square();
+    e[1] = { ...e[1]!, isPerimeter: false, perimLengthFt: 0 };
+    // corners 0 and 1 unavailable; corner 2 (C∧D) and 3 (D∧A) still count
+    expect(
+      perimeterFromEdges(e, { enhancementWidthFt: W, corners: [true, true, true, true] }),
+    ).toBe(100 - 12 + 0 + (100 - 12) + (60 - 24));
+    expect(cornerLengthFromEdges(e, W, [true, true, true, true])).toBe(24);
+  });
+
+  it("perimeter runs clamp at 0 and honour a custom perimeter side length", () => {
+    const e = [
+      edge({ side: "A", lengthFt: 100, isPerimeter: true, perimLengthFt: 10 }),
+      edge({ side: "B", lengthFt: 60, isPerimeter: true, perimLengthFt: 60 }),
+      edge({ side: "C", lengthFt: 100 }),
+      edge({ side: "D", lengthFt: 60 }),
+    ];
+    // corner 0 only: A max(0, 10 − 12) = 0, B 60 − 12 = 48
+    expect(
+      perimeterFromEdges(e, { enhancementWidthFt: W, corners: [true, false, false, false] }),
+    ).toBe(48);
+    // without zone data: the plain sum of the perimeter runs (older callers)
+    expect(perimeterFromEdges(e)).toBe(70);
+  });
+
+  it("resolveSectionZones: edges + corners derive both lengths; edge-less sections keep manual values", () => {
+    const e = square();
+    expect(
+      resolveSectionZones({
+        edges: e,
+        perimLengthFt: 999,
+        cornerLengthFt: 999,
+        enhancementWidthFt: W,
+        perimCorners: [true, true, true, true],
+      }),
+    ).toEqual({ perimLengthFt: 224, cornerLengthFt: 48 });
+    // no corner data (older bid): perimeter from the edges, corner length kept manual
+    expect(
+      resolveSectionZones({
+        edges: e,
+        perimLengthFt: 999,
+        cornerLengthFt: 7,
+        enhancementWidthFt: W,
+      }),
+    ).toEqual({ perimLengthFt: 320, cornerLengthFt: 7 });
+    expect(
+      resolveSectionZones({ perimLengthFt: 50, cornerLengthFt: 6, enhancementWidthFt: W }),
+    ).toEqual({ perimLengthFt: 50, cornerLengthFt: 6 });
+  });
+
+  it("ARP / termination runs use their own lengths (legacy ARPLength / TerminationWidth)", () => {
+    const e = [
+      edge({ side: "A", lengthFt: 50, arpSizeIn: 12, arpLengthFt: 20 }),
+      edge({ side: "B", lengthFt: 40, termination: "T-Bar", termLengthFt: 15 }),
+    ];
+    expect(edgesArpSqFt(e)).toBeCloseTo(1.03 * (18 / 12) * 20, 9);
+    expect(summarizeEdges([e]).terminations).toEqual([{ termination: "T-Bar", totalFt: 15 }]);
   });
 });

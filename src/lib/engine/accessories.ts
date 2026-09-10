@@ -26,7 +26,7 @@
 import { bankersRound } from "./rounding";
 import type { BidSectionInput, ParapetInput, CurbInput } from "./bid-builder";
 import { sectionLayers, parapetEffectiveCanted } from "./bid-builder";
-import { perimeterFromEdges } from "./edges";
+import { edgePerimLength, edgeTermLength, resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 import { insulationFasteners, parapetDeckFasteners } from "./consumption";
 
@@ -597,8 +597,9 @@ function roofEdgeFeetByColor(
   const out: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
   for (const s of sections) {
     for (const e of s.edges ?? []) {
-      if ((TERMINATION_ID_BY_LABEL[e.termination] ?? 0) === termId && e.lengthFt > 0) {
-        out[foldColor(s.color)] += toInt32(e.lengthFt);
+      const termFt = edgeTermLength(e);
+      if ((TERMINATION_ID_BY_LABEL[e.termination] ?? 0) === termId && termFt > 0) {
+        out[foldColor(s.color)] += toInt32(termFt);
       }
     }
   }
@@ -1319,9 +1320,11 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     let seamLf = 0;
     for (const s of args.sections) {
       if (s.fieldLap > 0) seamLf += (s.width / (s.fieldLap / 12)) * s.length;
-      const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+      const zones = resolveSectionZones(s);
       if (s.perimFastenerOc > 0 && s.enhancementWidthFt > 0) {
-        seamLf += (s.enhancementWidthFt / (s.perimFastenerOc / 12)) * (perimLen + s.cornerLengthFt);
+        seamLf +=
+          (s.enhancementWidthFt / (s.perimFastenerOc / 12)) *
+          (zones.perimLengthFt + zones.cornerLengthFt);
       }
     }
     tabSealer = round(seamLf / 30 / 5, 0);
@@ -1453,16 +1456,18 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
         dlRowStyleFastenersPerim({
           fieldLapIn: s.fieldLap,
           spacingIn: s.fastenerOc,
-          perimSideLengthsFt: (["A", "B", "C", "D"] as const).map(
-            (side) => bySide(side)?.lengthFt ?? 0,
-          ) as [number, number, number, number],
+          // Legacy PerimSideLength(i): the perimeter run (0 on a non-perimeter side).
+          perimSideLengthsFt: (["A", "B", "C", "D"] as const).map((side) => {
+            const e = bySide(side);
+            return e ? edgePerimLength(e) : 0;
+          }) as [number, number, number, number],
           sideIsPerim,
         });
     }
     // uf — §2.3/§10.3 underlayment fasteners across all layers; insulPlates once per MECHANICAL
     // layer (LEGACY QUIRK §12.5: two mechanical layers double the plate count).
     const roofArea = s.length * s.width;
-    const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+    const perimLen = resolveSectionZones(s).perimLengthFt;
     const perimArea = Math.min(roofArea, perimLen * s.enhancementWidthFt);
     const fieldArea = Math.max(0, roofArea - perimArea);
     let uf = 0;

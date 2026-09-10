@@ -65,7 +65,7 @@ import {
   type NonDlState,
 } from "./nondl";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
-import { edgesArpSqFt, perimeterFromEdges, type EdgeInput } from "./edges";
+import { edgesArpSqFt, resolveSectionZones, type EdgeInput, type PerimCorners } from "./edges";
 import {
   membraneMaterialCost,
   membraneZoneShares,
@@ -203,6 +203,38 @@ export interface BidSectionInput {
    * Termination/blocking footage is an ordering summary only (no auto-pricing until validated).
    */
   edges?: EdgeInput[];
+  /**
+   * Legacy IsPerimCorner(0..3): corner i sits between side i and side i+1 (0 = A∧B … 3 = D∧A)
+   * and only counts while both sides are perimeter edges (docs §16). Each marked corner adds one
+   * enhancement-width square to the corner zone and removes it from BOTH adjacent perimeter
+   * runs. Absent = no corner data (older bids keep their manual cornerLengthFt).
+   */
+  perimCorners?: PerimCorners;
+  /**
+   * Per-section Roof System / Attached With / adhesive (legacy: RoofSystem and the attachment
+   * systems are section properties; the Home > Defaults panel only seeds new sections). Absent =
+   * the bid-level values, which stay the defaults for new sections.
+   */
+  roofSystem?: string;
+  attachment?: Attachment;
+  membraneAdhesiveName?: string;
+  /**
+   * Per-section AdjustLabor % delta (legacy RoofSection.AdjustLabor; the estimate-level adjust
+   * writes every section's value, the section's Labor link edits one). Absent = bid-level.
+   */
+  adjustLaborPct?: number;
+  /**
+   * Legacy Complexity (ComplexityID 0 Open … 5 Extreme; default 2 Moderate). Only roof systems
+   * with RSComplexityFactor rows (Duro-Tuff, Duro-Fleece) have a factor ≠ 1; for the others the
+   * legacy combo shows "None" (1.0) — see `sectionComplexityFactor`.
+   */
+  complexity?: number;
+  /**
+   * Legacy Quick Bid (default true) vs "Enter D/L Roof Sheets": a non-quick-bid section derives
+   * its average sheet size from its area (RoofSection.get_SheetSize) and hides the perimeter
+   * edge options.
+   */
+  isQuickBid?: boolean;
   /**
    * Legacy Enhancement Options (docs §10.3, frmUnderlaymentAdv): custom MECHANICAL fastener
    * densities in fasteners per sq ft, applied per zone to every mechanical layer:
@@ -501,6 +533,125 @@ export function sectionLayers(s: BidSectionInput): UnderlaymentLayer[] {
   return [];
 }
 
+/** Legacy Complexities table (ComplexityID → Description). */
+export const COMPLEXITY_LABELS = [
+  "Open",
+  "Minor",
+  "Moderate",
+  "Medium",
+  "Heavy",
+  "Extreme",
+] as const;
+
+/**
+ * Legacy RSComplexityFactor.DefaultLabor by RoofSystemID → ComplexityID (seeded rows exist only
+ * for Duro-Tuff (3) and Duro-Fleece (5), identical: 0.9, 0.98, 1, 1.2, 2.4, 4). Any other system
+ * has no rows → the legacy form lists a single "None" = 1.0.
+ */
+export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
+  3: [0.9, 0.98, 1, 1.2, 2.4, 4],
+  5: [0.9, 0.98, 1, 1.2, 2.4, 4],
+};
+
+/** Whether a roof system offers the legacy Complexity list (RSComplexityFactor rows). */
+export function roofSystemHasComplexity(roofSystem: string): boolean {
+  return RS_COMPLEXITY_FACTORS[LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1] !== undefined;
+}
+
+/**
+ * The section's ComplexityFactor.SmartValue (multiplied into every mech/adhered labor rate and
+ * the tear-off base labor). Legacy `RoofSection.set_SheetSize` resets the factor to "None" (1.0)
+ * whenever a non-roll sheet is picked, and `frmRoofSection.UpdatePreview` only enables the
+ * Complexity combo while the sheet multiplier is exactly 1.0 — so the factor applies only with a
+ * ×1.0 sheet. The legacy default selection is index 2 (Moderate).
+ */
+export function sectionComplexityFactor(
+  rsId: number,
+  complexity: number | undefined,
+  sheetSizeMulti: number,
+): number {
+  const table = RS_COMPLEXITY_FACTORS[rsId];
+  if (!table || sheetSizeMulti !== 1) return 1;
+  return table[complexity ?? 2] ?? 1;
+}
+
+/** Sheet-size label → sq ft (legacy SheetSize.Rolls × 100; the seeded labels carry that number). */
+export function sheetSizeSqFt(label: string): number {
+  const m = /(\d+)\s*sf/i.exec(label);
+  return m ? Number(m[1]) : 100;
+}
+
+/**
+ * Legacy `RoofSection.get_SheetSize` for a NON-quick-bid section ("Enter D/L Roof Sheets"): the
+ * sheet is derived from Ceiling(W × L) against each size's Rolls × 100 in list order — the last
+ * size the area exceeds picks the NEXT size up (or itself when it is the largest); an exact match
+ * picks that size; an area within the first size keeps the first (roll goods) entry.
+ */
+export function derivedSheetSizeLabel(areaSqFt: number, labels: string[]): string | undefined {
+  if (labels.length === 0) return undefined;
+  const area = Math.ceil(areaSqFt);
+  let pick = labels[0]!;
+  for (let i = 0; i < labels.length; i++) {
+    const cap = sheetSizeSqFt(labels[i]!);
+    if (area > cap) pick = i === labels.length - 1 ? labels[i]! : labels[i + 1]!;
+    else if (area === cap) pick = labels[i]!;
+  }
+  return pick;
+}
+
+/**
+ * Selectable Field Tab Spacing pitches per system (legacy RSSheetTabSpacing + MechTabMulti;
+ * systems not listed keep a free numeric input).
+ */
+export const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
+  "Duro-Last": [28, 60, 120],
+  "Duro-Roof": [57, 87, 120],
+  "Duro-Tuff": [30, 60, 120],
+};
+
+/**
+ * Legacy frmPerimCalculator (frmRoofSectionAdv.LinkLabel1_LinkClicked): perimeter enhancement
+ * width = Round(Ceiling(min(0.4 × building height, 0.1 × lesser roof dimension))), never below 5.
+ */
+export function perimeterEnhancementCalculator(
+  buildingHeightFt: number,
+  lesserDimFt: number,
+): number {
+  const a = buildingHeightFt * 0.4;
+  const b = lesserDimFt * 0.1;
+  const w = Math.round(Math.ceil(a < b ? a : b));
+  return w < 5 ? 5 : w;
+}
+
+/** A section's effective roof system / attachment / adhesive (section override, else bid). */
+export function resolveSectionSystem(
+  bid: Pick<BidInput, "roofSystem" | "attachment" | "membraneAdhesiveName">,
+  s: Pick<BidSectionInput, "roofSystem" | "attachment" | "membraneAdhesiveName">,
+): {
+  roofSystem: string;
+  attachment: Attachment;
+  adhesiveName: string;
+  rsId: number;
+  comboKey: string;
+} {
+  const roofSystem = s.roofSystem || bid.roofSystem;
+  const attachment = s.attachment ?? bid.attachment;
+  return {
+    roofSystem,
+    attachment,
+    adhesiveName: s.membraneAdhesiveName || bid.membraneAdhesiveName || "Water Based Adhesive",
+    rsId: LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1,
+    comboKey: comboKey(roofSystem, attachment),
+  };
+}
+
+/** The section's effective average-sheet label (derived from area for non-quick-bid sections). */
+export function resolveSectionSheetLabel(s: BidSectionInput, sheetLabels: string[]): string {
+  if (s.isQuickBid === false)
+    return derivedSheetSizeLabel(s.length * s.width, sheetLabels) ?? s.sheetSizeLabel;
+  return s.sheetSizeLabel;
+}
+
 /** The DB labor combo key uses "adhesive"; the engine attachment enum uses "adhered". */
 const comboKey = (system: string, attachment: Attachment): string =>
   `${system}|${attachment === "adhered" ? "adhesive" : "mechanical"}`;
@@ -567,7 +718,9 @@ export function sectionMembraneDisplayPricing(
   attachment: Attachment,
   s: BidSectionInput,
 ): { pricePerSqFt: number; tierLabel: string } {
-  const rsId = LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1;
+  const sys = resolveSectionSystem({ roofSystem, attachment }, s);
+  roofSystem = sys.roofSystem;
+  const rsId = sys.rsId;
   if (rsId === 2 || rsId === 3 || rsId === 5) {
     const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
     return {
@@ -575,7 +728,8 @@ export function sectionMembraneDisplayPricing(
       tierLabel: `${roofSystem} flat price`,
     };
   }
-  const lt = admin.labor[comboKey(roofSystem, attachment)];
+  const lt = admin.labor[sys.comboKey];
+  const sheetLabel = resolveSectionSheetLabel(s, Object.keys(lt?.sheetSizeMultiByLabel ?? {}));
   const midThresholdIn = rsId === 4 ? 57 : 60;
   const hasTabTable = admin.sheetTabSpacings?.[rsId] !== undefined;
   const isRollGoodSheet =
@@ -584,7 +738,7 @@ export function sectionMembraneDisplayPricing(
       : rsId !== 1 ||
         !hasTabTable ||
         !lt?.rollGoodsSheetLabel ||
-        s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+        sheetLabel === lt.rollGoodsSheetLabel;
   let tier: PriceTier = "rollGoods";
   if (!isRollGoodSheet) {
     const picked = selectMembranePriceTier({
@@ -613,8 +767,6 @@ export function sectionMembraneDisplayPricing(
 export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): BuildResult {
   const warnings: string[] = [];
   const version = CURRENT_FORMULAS_VERSION;
-  const isDuroRoof = bid.roofSystem === "Duro-Roof";
-
   const lt = admin.labor[comboKey(bid.roofSystem, bid.attachment)];
   if (!lt) {
     warnings.push(`No labor table for ${bid.roofSystem} / ${bid.attachment}; labor will be 0.`);
@@ -652,9 +804,21 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   /** Fractional adhesive units by adhesive name, summed across every section's layers. */
   const adhesiveUnitsByName: Record<string, number> = {};
 
-  const rsId = LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1;
+  const bidComboKey = comboKey(bid.roofSystem, bid.attachment);
   const sections: RoofSection[] = bid.sections.map((s) => {
+    // Per-section Roof System / Attached With (legacy section properties; bid-level = default).
+    const sys = resolveSectionSystem(bid, s);
+    const rsId = sys.rsId;
+    const sLt = sys.comboKey === bidComboKey ? lt : admin.labor[sys.comboKey];
+    if (!sLt && sys.comboKey !== bidComboKey) {
+      warnings.push(
+        `No labor table for ${sys.roofSystem} / ${sys.attachment} — section "${s.name}"; labor will be 0.`,
+      );
+    }
+    const isDuroRoof = sys.roofSystem === "Duro-Roof";
+    const sheetLabel = resolveSectionSheetLabel(s, Object.keys(sLt?.sheetSizeMultiByLabel ?? {}));
     const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
+    const zones = resolveSectionZones(s);
     // Membrane tier (legacy MembraneCost_4_0_230, docs/legacy-money-parity.md §1): the combo's
     // FIRST sheet size (the seeded "Roll Good") prices the whole MembraneWithOverlap at the
     // roll-goods tier; other sheets price the FIELD share at the fieldLap's tab tier, with the
@@ -670,10 +834,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // thickness-only bid reaches the non-Plus rows ("50mil"/"60mil"; Plus variants flagged).
     if (rsId === 2 || rsId === 3 || rsId === 5) {
       const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
-      const fPrice = admin.familyMembranePrices?.[bid.roofSystem]?.[variantKey];
+      const fPrice = admin.familyMembranePrices?.[sys.roofSystem]?.[variantKey];
       if (fPrice === undefined) {
         warnings.push(
-          `No ${bid.roofSystem} membrane price for "${variantKey}" — section "${s.name}".`,
+          `No ${sys.roofSystem} membrane price for "${variantKey}" — section "${s.name}".`,
         );
       }
       membraneMaterial += membraneWithOverlap * (fPrice ?? 0);
@@ -691,8 +855,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         ? !hasTabTable
         : rsId !== 1 ||
           !hasTabTable ||
-          !lt?.rollGoodsSheetLabel ||
-          s.sheetSizeLabel === lt.rollGoodsSheetLabel;
+          !sLt?.rollGoodsSheetLabel ||
+          sheetLabel === sLt.rollGoodsSheetLabel;
     let tier: PriceTier = "rollGoods";
     if (!isRollGoodSheet) {
       const tabList = admin.sheetTabSpacings?.[rsId] ?? [];
@@ -729,11 +893,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     } else if (isRollGoodSheet) {
       membraneMaterial += membraneMaterialCost(membraneWithOverlap, price ?? 0, isDuroRoof);
     } else {
-      const zonePerimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
       const shares = membraneZoneShares({
         areaTotal: s.length * s.width,
-        areaPerimeter: zonePerimLengthFt * s.enhancementWidthFt,
-        areaCorner: s.cornerLengthFt * s.enhancementWidthFt,
+        areaPerimeter: zones.perimLengthFt * s.enhancementWidthFt,
+        areaCorner: zones.cornerLengthFt * s.enhancementWidthFt,
         membraneWithOverlap,
       });
       membraneMaterial += membraneMaterialCost(shares.field, price ?? 0, isDuroRoof);
@@ -768,13 +931,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
 
     // Carve the perimeter/corner enhancement zones out of the field area (§2, _230 subtracts
-    // both). When per-side edges are defined, the perimeter-marked edges are the source of truth
-    // for the perimeter length (the UI keeps perimLengthFt in sync; recomputed here so saved
-    // bids agree). Computed BEFORE the layer loop — the §10.3 custom fastener densities bill
-    // per zone area.
-    const perimLengthFt = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
-    const perimArea = perimLengthFt * s.enhancementWidthFt;
-    const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
+    // both). With per-side edges the legacy geometry (perimeter runs minus the marked corners;
+    // corner length from the corner flags — docs §16) is the source of truth; edge-less sections
+    // keep their manual lengths. Computed BEFORE the layer loop — the §10.3 custom fastener
+    // densities bill per zone area.
+    const perimArea = zones.perimLengthFt * s.enhancementWidthFt;
+    const cornerArea = zones.cornerLengthFt * s.enhancementWidthFt;
     const fieldArea = Math.max(0, s.length * s.width - perimArea - cornerArea);
 
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; mechanical layout+fastener
@@ -896,6 +1058,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
     }
 
+    // Legacy MechFieldLaborRate / AdheredFieldLaborRate multiply SheetSize.SmartSheetMulti AND
+    // ComplexityFactor.SmartValue (RSComplexityFactor rows only for Duro-Tuff / Duro-Fleece).
+    const sheetSizeMulti = sLt?.sheetSizeMultiByLabel[sheetLabel] ?? 1;
+    const complexity = sectionComplexityFactor(rsId, s.complexity, sheetSizeMulti);
+
     let tearOffLaborLookup = 0;
     if (s.tearOff && admin.tearOff) {
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
@@ -918,7 +1085,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // §2.3: ARP-covered edges are subtracted from the bid's total membrane sq ft.
       arpSqFt: edgesArpSqFt(s.edges ?? []),
       thickness: s.thickness,
-      thicknessLabor: lt?.thicknessLaborByMil[s.thickness] ?? 1,
+      thicknessLabor: sLt?.thicknessLaborByMil[s.thickness] ?? 1,
       designTable: 60,
       pullTest: 0, // unused: fastenerOc supplied directly
       fieldLap: s.fieldLap,
@@ -927,17 +1094,33 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       customFieldFastenerSpacing: s.fastenerOc,
       customPerimFastenerSpacing: s.perimFastenerOc,
       customCornerFastenerSpacing: s.cornerFastenerOc,
-      deckTypeId: lt?.deckTypeIds[s.deckType] ?? 0,
-      sheetSizeMulti: lt?.sheetSizeMultiByLabel[s.sheetSizeLabel] ?? 1,
-      complexity: 1,
-      fieldAttachment: bid.attachment,
-      perimAttachment: bid.attachment,
+      deckTypeId: sLt?.deckTypeIds[s.deckType] ?? 0,
+      sheetSizeMulti,
+      complexity,
+      fieldAttachment: sys.attachment,
+      perimAttachment: sys.attachment,
+      ...(sys.comboKey !== bidComboKey
+        ? {
+            laborTables: {
+              deckTypeMulti: sLt?.deckTypeMulti ?? {},
+              tabBands: sLt?.tabBands ?? [],
+              onCenterBands: sLt?.onCenterBands ?? [],
+              fastenerSpacing: [],
+            },
+          }
+        : {}),
+      // Per-section AdjustLabor (composed with the labor template exactly like the bid-level).
+      ...(s.adjustLaborPct !== undefined
+        ? { adjustLaborPct: ((1 + s.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100 }
+        : {}),
       adhesiveBaseHoursPer1000: 0,
       rollGoods: true,
       rollGoodWidthMulti: 1,
       adheredPerimeterBump: false,
       tearOff: s.tearOff,
       tearOffLaborLookup,
+      // Legacy TearOffBaseLabor: W × L × lookup × SheetSize.SmartSheetMulti × ComplexityFactor.
+      tearOffSheetComplexityMulti: sheetSizeMulti * complexity,
       tearOffAdditionalPct: (tf("Tear-Off Labor") - 1) * 100,
       toThicknessInches: s.toThicknessInches,
     };
@@ -947,16 +1130,50 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // coverage — bare deck keyed by deck type; over insulation the captured coverage tables are
   // uniform per adhesive (the board→group mapping lives in uncaptured MySQL, so a non-uniform
   // table warns instead of guessing). Tapered/cricket top boards are quote-only → warned.
-  if (bid.attachment === "adhered") {
-    const advName = bid.membraneAdhesiveName || "Water Based Adhesive";
-    const rsId = LEGACY_RS_ID_BY_NAME[bid.roofSystem];
-    const cov = rsId !== undefined ? admin.membraneAdhesives?.[rsId]?.[advName] : undefined;
+  // Sections group by their effective (roof system, adhesive) — per-section overrides allowed.
+  const adheredGroups = new Map<
+    string,
+    { roofSystem: string; rsId: number; advName: string; sections: BidSectionInput[] }
+  >();
+  for (const s of bid.sections) {
+    const sys = resolveSectionSystem(bid, s);
+    if (sys.attachment !== "adhered") continue;
+    const key = `${sys.roofSystem}|${sys.adhesiveName}`;
+    const g = adheredGroups.get(key) ?? {
+      roofSystem: sys.roofSystem,
+      rsId: sys.rsId,
+      advName: sys.adhesiveName,
+      sections: [],
+    };
+    g.sections.push(s);
+    adheredGroups.set(key, g);
+  }
+  const bidAdvName = bid.membraneAdhesiveName || "Water Based Adhesive";
+  const bidCov =
+    bid.attachment === "adhered"
+      ? admin.membraneAdhesives?.[LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1]?.[bidAdvName]
+      : undefined;
+  // Parapet walls follow the BID-level attachment (parapets carry no roof system of their own);
+  // make sure that combo is examined even when every section overrides to mechanical.
+  if (bid.attachment === "adhered" && bid.parapets.length > 0) {
+    const key = `${bid.roofSystem}|${bidAdvName}`;
+    if (!adheredGroups.has(key))
+      adheredGroups.set(key, {
+        roofSystem: bid.roofSystem,
+        rsId: LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1,
+        advName: bidAdvName,
+        sections: [],
+      });
+  }
+  for (const g of adheredGroups.values()) {
+    const advName = g.advName;
+    const cov = admin.membraneAdhesives?.[g.rsId]?.[advName];
     if (!cov) {
       warnings.push(
-        `No membrane-adhesive coverage data for ${bid.roofSystem} / ${advName} — membrane adhesive units not billed.`,
+        `No membrane-adhesive coverage data for ${g.roofSystem} / ${advName} — membrane adhesive units not billed.`,
       );
     } else {
-      for (const s of bid.sections) {
+      for (const s of g.sections) {
         const area = s.length * s.width;
         const layers = sectionLayers(s);
         const topLayer = layers[layers.length - 1];
@@ -981,7 +1198,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Parapet wall adhesive (§2.4 wall coverage). Basis = legacy WallPlusTopSqFt (parity doc
       // §3): Length × (Vertical + WallTop)/12 — vertical + top only, no skirt/cant/drop. Walls
       // without profile dims (older saved bids) keep the full-girth stand-in they priced with.
-      if (bid.parapets.length > 0) {
+      if (bid.parapets.length > 0 && bid.attachment === "adhered" && cov === bidCov) {
         if (cov.wallCoverage) {
           const wallArea = bid.parapets.reduce(
             (sum, p) =>

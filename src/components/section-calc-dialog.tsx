@@ -15,7 +15,7 @@ import {
   underlaymentAdhesive,
   type EngineAdminData,
 } from "@/lib/engine/adapters";
-import { edgesArpSqFt, perimeterFromEdges } from "@/lib/engine/edges";
+import { edgesArpSqFt, resolveSectionZones } from "@/lib/engine/edges";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -56,10 +56,14 @@ export function SectionCalcDialog({
     attachment,
     s,
   );
-  const membraneCost = membraneMaterialCost(membraneWithOverlap, price, roofSystem === "Duro-Roof");
-  const perimLen = s.edges?.length ? perimeterFromEdges(s.edges) : s.perimLengthFt;
+  const membraneCost = membraneMaterialCost(
+    membraneWithOverlap,
+    price,
+    (s.roofSystem || roofSystem) === "Duro-Roof",
+  );
+  const { perimLengthFt: perimLen, cornerLengthFt: cornerLen } = resolveSectionZones(s);
   const perimArea = perimLen * s.enhancementWidthFt;
-  const cornerArea = s.cornerLengthFt * s.enhancementWidthFt;
+  const cornerArea = cornerLen * s.enhancementWidthFt;
   const fieldArea = Math.max(0, roofArea - perimArea - cornerArea);
   const arp = edgesArpSqFt(s.edges ?? []);
 
@@ -136,10 +140,7 @@ export function SectionCalcDialog({
           {perimArea > 0 &&
             line(`Perimeter zone (${perimLen} ft × ${s.enhancementWidthFt} ft)`, sf(perimArea))}
           {cornerArea > 0 &&
-            line(
-              `Corner zone (${s.cornerLengthFt} ft × ${s.enhancementWidthFt} ft)`,
-              sf(cornerArea),
-            )}
+            line(`Corner zone (${cornerLen} ft × ${s.enhancementWidthFt} ft)`, sf(cornerArea))}
           {line("Field area (after zones)", sf(fieldArea))}
           {arp > 0 && line("ARP (§2.3, subtracted from membrane)", sf(arp))}
 

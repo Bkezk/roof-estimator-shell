@@ -42,22 +42,9 @@ import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estima
 import { normalizeAdminSnapshot } from "@/lib/engine/adapters";
 import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
-import {
-  universalFastenerSpacing,
-  LEGACY_ROOF_SYSTEM_IDS,
-  DESIGN_TABLE_OPTIONS,
-  type SpacingError,
-} from "@/lib/engine/fastener-spacing";
 import type { MarkupMode } from "@/lib/engine/money";
-import {
-  defaultEdges,
-  perimeterFromEdges,
-  summarizeEdges,
-  TERMINATION_OPTIONS,
-  ARP_SIZE_OPTIONS,
-  type EdgeInput,
-} from "@/lib/engine/edges";
-import { SectionCalcDialog } from "@/components/section-calc-dialog";
+import { defaultEdges, summarizeEdges, TERMINATION_OPTIONS } from "@/lib/engine/edges";
+import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
 import { CurbsScreen } from "@/components/curbs-screen";
@@ -156,16 +143,14 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   // Legacy XML section defaults: Pull Test 350 lbs, Design Table 60 psf.
   pullTest: 350,
   designTable: 60,
+  // Legacy Edge Options: four sides (A/C = Length, B/D = Width), no corners, Quick Bid,
+  // Complexity "Moderate" (index 2 — only priced on systems with RSComplexityFactor rows).
+  edges: defaultEdges(100, 100),
+  perimCorners: [false, false, false, false],
+  isQuickBid: true,
+  complexity: 2,
   ...defaults,
 });
-
-// Selectable Field Tab Spacing pitches per system (legacy RSSheetTabSpacing + MechTabMulti;
-// systems not listed keep a free numeric input).
-const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
-  "Duro-Last": [28, 60, 120],
-  "Duro-Roof": [57, 87, 120],
-  "Duro-Tuff": [30, 60, 120],
-};
 
 let pseq = 1;
 const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
@@ -719,52 +704,6 @@ function EstimatePage() {
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
-
-  // Legacy pull-test autofill (§1): when the section has a pull test entered, re-derive the
-  // field/perim/corner o.c. from MechFastenerLookup whenever a lookup key changes. Manual OC
-  // edits still stick — the lookup only fires from pull-test / design-table / lap / thickness
-  // changes, exactly like the legacy screen.
-  const editSectionWithSpacing = (
-    i: number,
-    s: BidSectionInput,
-    patch: Partial<BidSectionInput>,
-  ) => {
-    const next = { ...s, ...patch };
-    const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
-    if (
-      !fastenerLookup?.length ||
-      !rsId ||
-      attachment !== "mechanical" ||
-      !next.pullTest ||
-      next.pullTest <= 0
-    ) {
-      editSection(i, patch);
-      return;
-    }
-    const base = {
-      roofSystemId: rsId,
-      thickness: next.thickness,
-      designTable: next.designTable ?? 60,
-      tabSpacings: [next.fieldLap],
-      pullTest: next.pullTest,
-    };
-    const field = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 0 });
-    const perim = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 1 });
-    const corner = universalFastenerSpacing(fastenerLookup, { ...base, columnOffset: 2 });
-    editSection(i, {
-      ...patch,
-      ...(field.ok ? { fastenerOc: field.inches } : {}),
-      ...(perim.ok ? { perimFastenerOc: perim.inches } : {}),
-      ...(corner.ok ? { cornerFastenerOc: corner.inches } : {}),
-    });
-  };
-
-  const SPACING_ERROR_TEXT: Record<SpacingError, string> = {
-    [-5]: "no lookup rows for this system/thickness",
-    [-1]: "no rows for this design table",
-    [-2]: "no rows for this tab spacing",
-    [-3]: "pull test too low — no permitted spacing",
-  };
 
   // Legacy-style stepped workflow: one screen per tab with Previous / Next, like the
   // Bid-Advantage ribbon. Steps stay mounted (hidden) so nothing is lost when switching.
@@ -1322,521 +1261,46 @@ function EstimatePage() {
 
         <div className={step === 1 ? "space-y-6" : "hidden"}>
           <Card>
-            <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-              <CardTitle className="text-base">Roof sections</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  // New sections start from the Setup step's Defaults panel.
-                  setSections((p) => [...p, newSection({ ...sectionDefaults })]);
-                  setSelSection(sections.length);
-                }}
-              >
-                <Plus className="mr-1 h-4 w-4" /> New section
-              </Button>
+            <CardHeader>
+              <CardTitle className="text-base">Roof Sections</CardTitle>
+              <CardDescription>
+                The legacy Roof Section screen: dimensions, deck, system / attachment, sheet size or
+                complexity, and the Edge Options (perimeter edges + corners, terminations, ARP, wood
+                blocking) per side.
+              </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-                {/* Left: editor for the selected section (legacy edits one section at a time) */}
-                {(() => {
-                  const i = Math.min(selSection, sections.length - 1);
-                  const s = sections[i]!;
-                  return (
-                    <div key={s.id} className="min-w-0 rounded-md border p-3">
-                      <div className="mb-2 flex items-center justify-between">
-                        <Input
-                          className="h-8 w-[220px] font-medium"
-                          value={s.name}
-                          onChange={(e) => editSection(i, { name: e.target.value })}
-                        />
-                        <div className="flex items-center gap-1">
-                          <SectionCalcDialog
-                            section={s}
-                            admin={admin}
-                            roofSystem={roofSystem}
-                            attachment={attachment}
-                          />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Duplicate this section"
-                            onClick={() => {
-                              setSections((p) => [
-                                ...p,
-                                { ...clone(s), id: `s${seq++}`, name: `${s.name} (copy)` },
-                              ]);
-                              setSelSection(sections.length);
-                            }}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive"
-                            onClick={() => {
-                              setSections((p) => p.filter((_, j) => j !== i));
-                              setSelSection((v) => Math.max(0, Math.min(v, sections.length - 2)));
-                            }}
-                            disabled={sections.length === 1}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                        <Field label="Length (ft)">
-                          <Input
-                            type="number"
-                            value={s.length}
-                            onChange={(e) => editSection(i, { length: num(e.target.value) })}
-                          />
-                        </Field>
-                        <Field label="Width (ft)">
-                          <Input
-                            type="number"
-                            value={s.width}
-                            onChange={(e) => editSection(i, { width: num(e.target.value) })}
-                          />
-                        </Field>
-                        <Field label="Deck">
-                          <PickOne
-                            value={s.deckType}
-                            options={admin.deckOrder}
-                            onChange={(v) => editSection(i, { deckType: v })}
-                          />
-                        </Field>
-                        <Field label="Thickness">
-                          <PickOne
-                            value={String(s.thickness)}
-                            options={["40", "50", "60"]}
-                            onChange={(v) => editSectionWithSpacing(i, s, { thickness: Number(v) })}
-                          />
-                        </Field>
-                        <Field label="Color">
-                          <PickOne
-                            value={s.color}
-                            options={colorOptions}
-                            onChange={(v) => editSection(i, { color: v })}
-                          />
-                        </Field>
-                        <Field label="Avg sheet">
-                          <PickOne
-                            value={s.sheetSizeLabel}
-                            options={sheetSizeOptions}
-                            onChange={(v) => editSection(i, { sheetSizeLabel: v })}
-                          />
-                        </Field>
-                        <Field label="Field tab spacing (in)">
-                          {TAB_OPTIONS_BY_SYSTEM[roofSystem] ? (
-                            <PickOne
-                              value={String(s.fieldLap)}
-                              options={[
-                                // Keep a legacy-invalid stored value visible rather than lying.
-                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem]!.includes(s.fieldLap)
-                                  ? []
-                                  : [String(s.fieldLap)]),
-                                ...TAB_OPTIONS_BY_SYSTEM[roofSystem]!.map(String),
-                              ]}
-                              onChange={(v) =>
-                                editSectionWithSpacing(i, s, { fieldLap: Number(v) })
-                              }
-                            />
-                          ) : (
-                            <Input
-                              type="number"
-                              value={s.fieldLap}
-                              onChange={(e) =>
-                                editSectionWithSpacing(i, s, { fieldLap: num(e.target.value) })
-                              }
-                            />
-                          )}
-                        </Field>
-                        <Field label="Fastener OC (in)">
-                          <Input
-                            type="number"
-                            value={s.fastenerOc}
-                            onChange={(e) => editSection(i, { fastenerOc: num(e.target.value) })}
-                          />
-                        </Field>
-                        <Field label="Pull test (lbs)">
-                          <Input
-                            type="number"
-                            value={s.pullTest ?? 0}
-                            onChange={(e) =>
-                              editSectionWithSpacing(i, s, { pullTest: num(e.target.value) })
-                            }
-                          />
-                        </Field>
-                        <Field label="Design table (psf)">
-                          <PickOne
-                            value={String(s.designTable ?? 60)}
-                            options={DESIGN_TABLE_OPTIONS.map(String)}
-                            onChange={(v) =>
-                              editSectionWithSpacing(i, s, { designTable: Number(v) })
-                            }
-                          />
-                        </Field>
-                      </div>
-                      {(s.pullTest ?? 0) > 0 &&
-                        attachment === "mechanical" &&
-                        fastenerLookup &&
-                        (() => {
-                          const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
-                          if (!rsId) return null;
-                          const res = universalFastenerSpacing(fastenerLookup, {
-                            roofSystemId: rsId,
-                            thickness: s.thickness,
-                            designTable: s.designTable ?? 60,
-                            tabSpacings: [s.fieldLap],
-                            pullTest: s.pullTest!,
-                            columnOffset: 0,
-                          });
-                          return (
-                            <p
-                              className={`mt-1 text-xs ${res.ok ? "text-muted-foreground" : "text-destructive"}`}
-                            >
-                              {res.ok
-                                ? `Pull test ${s.pullTest} lbs → ${res.inches}″ oc (legacy lookup; edit Fastener OC to override)`
-                                : `Pull-test lookup: ${SPACING_ERROR_TEXT[res.error]}`}
-                            </p>
-                          );
-                        })()}
-                      <div className="mt-3 border-t pt-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Edges &amp; perimeter / corner zones (leave length 0 to bill the whole
-                            section as field)
-                          </p>
-                          {(s.edges?.length ?? 0) === 0 ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                const edges = defaultEdges(s.length, s.width);
-                                editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
-                              }}
-                            >
-                              Define edges A–D
-                            </Button>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => editSection(i, { edges: [] })}
-                            >
-                              Remove edges
-                            </Button>
-                          )}
-                        </div>
-                        {(s.edges?.length ?? 0) > 0 && (
-                          <div className="mb-3 space-y-2">
-                            {(s.edges ?? []).map((e, ei) => {
-                              const editEdge = (patch: Partial<EdgeInput>) => {
-                                const edges = (s.edges ?? []).map((x, j) =>
-                                  j === ei ? { ...x, ...patch } : x,
-                                );
-                                editSection(i, { edges, perimLengthFt: perimeterFromEdges(edges) });
-                              };
-                              return (
-                                <div
-                                  key={e.side}
-                                  className="grid grid-cols-2 items-end gap-2 rounded-md border p-2 sm:grid-cols-3 lg:grid-cols-5"
-                                >
-                                  <Field label={`Side ${e.side} length (ft)`}>
-                                    <Input
-                                      type="number"
-                                      value={e.lengthFt}
-                                      onChange={(ev) =>
-                                        editEdge({ lengthFt: num(ev.target.value) })
-                                      }
-                                    />
-                                  </Field>
-                                  <Field label="Termination (ordering)">
-                                    <PickOne
-                                      value={e.termination}
-                                      options={TERMINATION_OPTIONS}
-                                      onChange={(v) => editEdge({ termination: v })}
-                                    />
-                                  </Field>
-                                  <Field label="Blocking (ft)">
-                                    <Input
-                                      type="number"
-                                      value={e.blockingFt}
-                                      onChange={(ev) =>
-                                        editEdge({ blockingFt: num(ev.target.value) })
-                                      }
-                                    />
-                                  </Field>
-                                  <Field label="ARP">
-                                    <PickOne
-                                      value={e.arpSizeIn === 0 ? "None" : `${e.arpSizeIn}"`}
-                                      options={ARP_SIZE_OPTIONS.map((a) =>
-                                        a === 0 ? "None" : `${a}"`,
-                                      )}
-                                      onChange={(v) =>
-                                        editEdge({
-                                          arpSizeIn: v === "None" ? 0 : Number(v.slice(0, -1)),
-                                        })
-                                      }
-                                    />
-                                  </Field>
-                                  <div className="flex items-end gap-2 pb-1">
-                                    <Switch
-                                      id={`pe-${s.id}-${e.side}`}
-                                      checked={e.isPerimeter}
-                                      onCheckedChange={(v) => editEdge({ isPerimeter: v })}
-                                    />
-                                    <Label htmlFor={`pe-${s.id}-${e.side}`} className="text-xs">
-                                      Perimeter edge
-                                    </Label>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                          <Field
-                            label={
-                              (s.edges?.length ?? 0) > 0
-                                ? "Perim len (from edges)"
-                                : "Perim len (ft)"
-                            }
-                          >
-                            <Input
-                              type="number"
-                              value={s.perimLengthFt}
-                              disabled={(s.edges?.length ?? 0) > 0}
-                              title={
-                                (s.edges?.length ?? 0) > 0
-                                  ? "Derived from the edges marked Perimeter edge"
-                                  : undefined
-                              }
-                              onChange={(e) =>
-                                editSection(i, { perimLengthFt: num(e.target.value) })
-                              }
-                            />
-                          </Field>
-                          <Field label="Corner len (ft)">
-                            <Input
-                              type="number"
-                              value={s.cornerLengthFt}
-                              onChange={(e) =>
-                                editSection(i, { cornerLengthFt: num(e.target.value) })
-                              }
-                            />
-                          </Field>
-                          <Field label="Zone width (ft)">
-                            <Input
-                              type="number"
-                              value={s.enhancementWidthFt}
-                              onChange={(e) =>
-                                editSection(i, { enhancementWidthFt: num(e.target.value) })
-                              }
-                            />
-                          </Field>
-                          <Field label="Perim OC (in)">
-                            <Input
-                              type="number"
-                              value={s.perimFastenerOc}
-                              onChange={(e) =>
-                                editSection(i, { perimFastenerOc: num(e.target.value) })
-                              }
-                            />
-                          </Field>
-                          <Field label="Corner OC (in)">
-                            <Input
-                              type="number"
-                              value={s.cornerFastenerOc}
-                              onChange={(e) =>
-                                editSection(i, { cornerFastenerOc: num(e.target.value) })
-                              }
-                            />
-                          </Field>
-                          {/* Custom zone laps (legacy default −1 = zone membrane unpriced on
-                              tab sheets); only meaningful off the roll-good sheet size. */}
-                          <Field label="Perim lap (in)">
-                            <PickOne
-                              value={
-                                s.perimLap !== undefined && s.perimLap !== -1
-                                  ? String(s.perimLap)
-                                  : "—"
-                              }
-                              options={[
-                                "—",
-                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem] ?? []).map(String),
-                              ]}
-                              onChange={(v) =>
-                                editSection(i, { perimLap: v === "—" ? -1 : Number(v) })
-                              }
-                            />
-                          </Field>
-                          <Field label="Corner lap (in)">
-                            <PickOne
-                              value={
-                                s.cornerLap !== undefined && s.cornerLap !== -1
-                                  ? String(s.cornerLap)
-                                  : "—"
-                              }
-                              options={[
-                                "—",
-                                ...(TAB_OPTIONS_BY_SYSTEM[roofSystem] ?? []).map(String),
-                              ]}
-                              onChange={(v) =>
-                                editSection(i, { cornerLap: v === "—" ? -1 : Number(v) })
-                              }
-                            />
-                          </Field>
-                        </div>
-                      </div>
-                      <div className="mt-3 border-t pt-3">
-                        <p className="text-xs text-muted-foreground">
-                          Insulation layers are managed on the{" "}
-                          <button
-                            type="button"
-                            className="font-medium text-primary underline"
-                            onClick={() => {
-                              setUSel([s.id]);
-                              goStep(2);
-                            }}
-                          >
-                            Underlayment step
-                          </button>{" "}
-                          ({sectionLayers(s).length} on this section).
-                        </p>
-                      </div>
-                      <div className="mt-3 border-t pt-3">
-                        <p className="text-xs text-muted-foreground">
-                          Tear-off is managed on the{" "}
-                          <button
-                            type="button"
-                            className="font-medium text-primary underline"
-                            onClick={() => goStep(7)}
-                          >
-                            Tear-Off step
-                          </button>
-                          {s.tearOff
-                            ? ` (on: ${s.tearOffType || "no type"})`
-                            : " (off for this section)"}
-                          .
-                        </p>
-                      </div>
-                      <div className="mt-3 border-t pt-3">
-                        <Field label="Section notes">
-                          <Input
-                            value={s.notes ?? ""}
-                            placeholder="Optional notes for this section…"
-                            onChange={(e) => editSection(i, { notes: e.target.value })}
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Right rail: legacy section diagram + Roof Sections Summary */}
-                <div className="space-y-4">
-                  <EdgeDiagram section={sections[Math.min(selSection, sections.length - 1)]!} />
-                  {/* Legacy Roof Sections Summary: Section | L | W | System | Attach | Deck | Color | Lap */}
-                  <div className="overflow-x-auto rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Section</TableHead>
-                          <TableHead className="text-right">L</TableHead>
-                          <TableHead className="text-right">W</TableHead>
-                          <TableHead>System</TableHead>
-                          <TableHead>Attach</TableHead>
-                          <TableHead>Deck Type</TableHead>
-                          <TableHead>Color</TableHead>
-                          <TableHead className="text-right">Lap</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sections.map((s2, i2) => (
-                          <TableRow
-                            key={s2.id}
-                            onClick={() => setSelSection(i2)}
-                            className={
-                              i2 === Math.min(selSection, sections.length - 1)
-                                ? "cursor-pointer bg-muted/60"
-                                : "cursor-pointer"
-                            }
-                          >
-                            <TableCell className="whitespace-nowrap font-medium">
-                              {s2.name}
-                            </TableCell>
-                            <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
-                            <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
-                            <TableCell className="whitespace-nowrap">{roofSystem}</TableCell>
-                            <TableCell className="capitalize">{attachment}</TableCell>
-                            <TableCell className="whitespace-nowrap">{s2.deckType}</TableCell>
-                            <TableCell>{s2.color}</TableCell>
-                            <TableCell className="text-right tabular-nums">{s2.fieldLap}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  {/* Legacy per-section Man Hours / Labor Cost readout for the selected section */}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border p-2 text-xs">
-                    <span>
-                      Man Hours:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {(
-                          result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0
-                        ).toFixed(2)}
-                      </span>
-                    </span>
-                    <span>
-                      Labor Cost:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {money(
-                          (result?.sectionHours[Math.min(selSection, sections.length - 1)] ?? 0) *
-                            laborRate,
-                        )}
-                      </span>
-                    </span>
-                    <span className="text-muted-foreground">(selected section, install labor)</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Click a row to edit that section. Copy or remove it with the buttons at the top
-                    of the editor.
-                  </p>
-                </div>
-              </div>
-
-              {/* Legacy bottom bar: Setup / Inspection / Roof SqFt / Membrane SqFt */}
-              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-1 border-t pt-3 text-xs">
-                <span>
-                  Setup time:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.r.setupHours ?? 0).toFixed(2)} h
-                  </span>
-                </span>
-                <span>
-                  Inspection time:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.r.inspectionHours ?? 0).toFixed(2)} h
-                  </span>
-                </span>
-                <span>
-                  Roof sq ft:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.r.roofSqFootage ?? 0).toLocaleString()}
-                  </span>
-                </span>
-                <span>
-                  Membrane sq ft:{" "}
-                  <span className="font-semibold tabular-nums">
-                    {(result?.r.sqFtTotalMembrane ?? 0).toLocaleString(undefined, {
-                      maximumFractionDigits: 0,
-                    })}
-                  </span>
-                </span>
-              </div>
+              <SectionsScreen
+                sections={sections}
+                onChange={setSections}
+                selected={selSection}
+                onSelect={setSelSection}
+                admin={admin}
+                bidDefaults={{ roofSystem, attachment, membraneAdhesiveName: membraneAdhesive }}
+                colorOptions={colorOptions}
+                fastenerLookup={fastenerLookup}
+                stdSizeDiscount={stdSizeDiscount}
+                onStdSizeDiscount={setStdSizeDiscount}
+                bidAdjustLaborPct={adjustLaborPct}
+                crewRate={laborRate}
+                totals={
+                  result
+                    ? {
+                        sectionHours: result.sectionHours,
+                        setupHours: result.r.setupHours,
+                        inspectionHours: result.r.inspectionHours,
+                        roofSqFt: result.r.roofSqFootage,
+                        membraneSqFt: result.r.sqFtTotalMembrane,
+                      }
+                    : null
+                }
+                newSection={() => newSection({ ...sectionDefaults })}
+                onGoUnderlayment={(id) => {
+                  setUSel([id]);
+                  goStep(2);
+                }}
+                onGoTearOff={() => goStep(7)}
+              />
             </CardContent>
           </Card>
         </div>
@@ -4393,73 +3857,6 @@ function EstimatePage() {
           </Button>
         </div>
       )}
-    </div>
-  );
-}
-
-/** Legacy Roof Sections diagram: the section rectangle with sides A (top), B (right),
-    C (bottom), D (left), annotated from the edges editor. Display-only. */
-function EdgeDiagram({ section }: { section: BidSectionInput }) {
-  const edges = section.edges ?? [];
-  const by = (side: string) => edges.find((e) => e.side === side);
-  const SideInfo = ({
-    side,
-    fallbackLen,
-    className,
-  }: {
-    side: string;
-    fallbackLen: number;
-    className?: string;
-  }) => {
-    const e = by(side);
-    return (
-      <div className={`text-[11px] leading-tight ${className ?? ""}`}>
-        <p className="font-semibold">
-          {side}: {e?.lengthFt ?? fallbackLen}′
-        </p>
-        {e ? (
-          <>
-            <p>{e.termination || "No Termination"}</p>
-            <p>{e.blockingFt > 0 ? `Blocking ${e.blockingFt}′` : "No Blocking"}</p>
-            <p>ARP: {e.arpSizeIn > 0 ? `${e.arpSizeIn}"` : "None"}</p>
-            {e.isPerimeter && <p className="text-muted-foreground">Perimeter edge</p>}
-          </>
-        ) : (
-          <p className="text-muted-foreground">—</p>
-        )}
-      </div>
-    );
-  };
-  return (
-    <div className="rounded-md border p-3">
-      <div className="mb-2 flex items-baseline justify-between">
-        <p className="text-xs font-semibold">{section.name}</p>
-        {edges.length === 0 && (
-          <p className="text-[11px] text-muted-foreground">Define edges A–D to annotate</p>
-        )}
-      </div>
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        <div />
-        <SideInfo side="A" fallbackLen={section.length} className="text-center" />
-        <div />
-        <SideInfo side="D" fallbackLen={section.width} className="text-right" />
-        <div className="relative h-28 w-24 border-2 border-foreground/50 bg-muted/30">
-          <div className="absolute inset-x-0 top-0 h-1.5 bg-yellow-400/90" title="Side A" />
-          <span className="absolute inset-x-0 bottom-1 text-center text-[10px] text-muted-foreground">
-            Length ⟷
-          </span>
-          <span
-            className="absolute inset-y-0 left-0.5 flex items-center text-[10px] text-muted-foreground"
-            style={{ writingMode: "vertical-rl" }}
-          >
-            Width ↕
-          </span>
-        </div>
-        <SideInfo side="B" fallbackLen={section.width} />
-        <div />
-        <SideInfo side="C" fallbackLen={section.length} className="text-center" />
-        <div />
-      </div>
     </div>
   );
 }

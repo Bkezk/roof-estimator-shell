@@ -1626,3 +1626,110 @@ redrawn schematic. Textbox defaults A 1, B 1, C 12, Skirt (D) 6; `VerifyFields` 
 Qty | A | B | C | D | Color with `UpdateScreenTotals` Man Hours + labor $; "Copy Settings from
 Roof Section" copies deck type + color (+ mil); the per-curb "Labor: X hours" link edits
 AdjustLabor. Web: `src/components/curbs-screen.tsx`.
+
+## 16. Roof Sections screen — geometry, per-section labor, complexity (IL-exact, 2026-09-10)
+
+Re-read in-session: `RoofSection` (DataAccess.dll) `PerimSideLengthMinusCorners_4_0_230`
+0x4b69c, `PerimTotalLength` 0x4ba14, `CornerTotalLength` 0x4b5f0, `AreaCorner` 0x4b61b,
+`get_AreaField` 0x4ba54, `FieldLength/FieldWidth` 0x4bafc/0x4bb5c, `ARPSqFt` 0x4bbd8,
+`BaseHours`/`AdjustedBaseHours` 0x4bc5c/0x4bc8a, `get_SheetSize`/`set_SheetSize` 0x478a8/0x479e8,
+`OnRecalculate` 0x4dc94 (BlockingLinealFt), `TearOffBaseLabor` 0x4da98, `RoofSections.AdjustLabor`
+0x4f8a4 / `get_ManHours` 0x4f9d8; `frmRoofSection` (Estimator.exe) `cbSideXIsPerim_CheckedChanged`,
+`CheckCorners`, `chkboxCornerN_CheckedChanged`, `txtPerimX_Leave`, `txtTermXLen/txtARPXLen/
+txtWoodXLen_TextChanged`, `chkBlocking_CheckedChanged`/`SetBlocking`, `cbComplexity_SelectedIndex
+Changed`, `LoadComplexityFactors`, `optQuick_CheckedChanged`, `optComplex_Click`, `txtLength_Leave`,
+`UpdatePreview`, `VerifyFields`; `frmRoofSectionAdv.LinkLabel1_LinkClicked` (perimeter calculator);
+`FrmRoofSectionsSummary.LoadSummary`; seeded `ref_SheetSizes`, `Complexities`, `RSComplexityFactor`.
+
+### 16.1 Geometry (money path)
+
+- Side lengths are the section dims (A/C = Length, B/D = Width). Checking **Is Perimeter Edge**
+  sets `PerimSideLength(i) = side length` and auto-marks the corners whose OTHER side is already
+  perimeter (side i marks corner i when side i+1 is perimeter and corner i−1 when side i−1 is);
+  unchecking zeroes the run, clears both adjacent corners and the tall-wall flag. `CheckCorners`
+  shows corner i only while sides i and i+1 are both perimeter (0 = A∧B, 1 = B∧C, 2 = C∧D,
+  3 = D∧A); a hidden corner is unchecked. `txtPerimX_Leave` stores `Round(value, 2)`.
+- `PerimTotalLength = Σ_i max(0, PerimSideLength(i) − W·[corner i] − W·[corner i−1])` (W =
+  PerimEnhancementWidth; ≥ 4.0.230 clamps each side at 0). `CornerTotalLength = Σ marked corners
+  × W`, `AreaCorner = CornerTotalLength × W`, `AreaPerimeter = PerimTotalLength × W`,
+  `AreaField = AreaTotal − AreaPerimeter − AreaCorner`.
+- `ARPSqFt = 1.03 × Σ ((ARP.Size + 6) / 12) × ARPLength[i]` — ARPLength is its own textbox
+  (`txtARPXLen`, default the side length). `TerminationWidth[i]` (`txtTermXLen`) likewise; both
+  feed the §12 roof-edge feet (ToInt32 per side).
+- Wood blocking: checking sets `Blocking = refBlockings[1]` (ID 2) and `BlockingWidth =
+  Round(side length)`; `BlockingLinealFt = Σ BlockingWidth where Blocking.ID == 2` → §14 edge
+  blocking. "w/ Wall > 2ft" (`SideHas2ftWall`) has no money callers — persisted only.
+- Web: `edges.ts` (`perimeterFromEdges` with `{enhancementWidthFt, corners}`,
+  `cornerLengthFromEdges`, `availableCorners`, `resolveSectionZones`; `EdgeInput` gained
+  `perimLengthFt / termLengthFt / arpLengthFt / hasTallWall`; `BidSectionInput.perimCorners`).
+  The former web behaviour (Σ perimeter side lengths, manual corner length) is what edge-less /
+  corner-less older bids still get. **Correction vs the earlier web port:** the perimeter length
+  ignored the corner subtraction and corner length was a free number — both now legacy-exact.
+
+### 16.2 Labor
+
+- `BaseHours = RoofSystem.RoofSectionLaborHours(this)`; `AdjustedBaseHours = BaseHours ×
+  (1 + AdjustLabor/100)`; `RoofSections.ManHours = Σ present sections' AdjustedBaseHours`.
+  The estimate-level "Adjust Labor" (`RoofSections.AdjustLabor(a, b, c)`) writes EVERY section's
+  AdjustLabor / AdjustUnderlaymentLabor / TO_Additional; the section's Labor link edits one.
+  Web: `BidSectionInput.adjustLaborPct` (override; bid-level remains the default), composed with
+  the labor template exactly like the bid-level value; `RoofSection.adjustLaborPct` on the engine
+  side.
+- Roof System / Attached With / Attached To are SECTION properties (Home > Defaults only seeds
+  new sections). Web: `roofSystem / attachment / membraneAdhesiveName` overrides on the section;
+  `resolveSectionSystem` resolves them; a section whose combo differs from the bid's carries its
+  own `laborTables` into the engine (`resolveSectionRates` uses them). Membrane pricing, the
+  tab-tier decision, sheet multipliers and the §2.4 membrane-adhesive grouping all follow the
+  section's system. Parapets / accessories keep the bid-level system (unchanged).
+- Complexity: `MechFieldLaborRate` / `AdheredFieldLaborRate` / perim rates multiply
+  `SheetSize.SmartSheetMulti` AND `ComplexityFactor.SmartValue`. `RSComplexityFactor` rows exist
+  only for RoofSystemID 3 (Duro-Tuff) and 5 (Duro-Fleece): ComplexityID 0..5 = Open 0.9, Minor
+  0.98, Moderate 1, Medium 1.2, Heavy 2.4, Extreme 4; other systems list a single "None" = 1.0.
+  `LoadComplexityFactors` defaults to index 2 (Moderate). `set_SheetSize` (durolast/durobond/
+  duroroof) resets the factor to "None" when a non-roll sheet is chosen, and `UpdatePreview`
+  enables the Complexity combo only while `SmartSheetMulti == 1.0` (the sheet combo is disabled
+  then) — so the factor only ever applies with a ×1.0 sheet. Web: `RS_COMPLEXITY_FACTORS`,
+  `sectionComplexityFactor(rsId, complexity, sheetSizeMulti)`; the screen mirrors the mutual
+  enable. **Correction:** the web engine hardcoded `complexity: 1`.
+- `TearOffBaseLabor = W × L × lookup(col 3 if > 0 else col 2) × SheetSize.SmartSheetMulti ×
+  ComplexityFactor.SmartValue`, Round 3, then × (1 + TO_Additional/100). Web now passes
+  `tearOffSheetComplexityMulti = sheetSizeMulti × complexity` (was omitted — ×1 for the seeded
+  Duro-Last "1500 sf" default, so existing hand-checked bids are unchanged).
+
+### 16.3 Sheet size, Quick Bid, validation
+
+- Quick Bid (default) vs "Enter D/L Roof Sheets": `optComplex_Click` warns "When entering
+  individual D/L roof sheets no automatic calculation is performed for necessary waste or
+  overlap…"; `optQuick_CheckedChanged` clears + hides the perimeter checkboxes / perim lengths /
+  tall-wall boxes and disables the sheet combo. Non-quick `get_SheetSize` derives the sheet from
+  `Ceiling(W × L)` vs each `SheetSize.Rolls × 100` in list order (last size exceeded → next size
+  up, or the largest; exact match → that size; else the first). `txtLength_Leave` on a non-quick
+  section > 3000 sf shows "Durolast does not manufacture sheets with a square footage greater
+  than 3,000 s.f." and resets the dim to 1 — the web shows the message and does NOT reset.
+  `ref_SheetSizes`: RollGood 4 (Rolls 1), 500 sf 2.4 (5), 1000 sf 1.2 (10), 1500 sf 1 (15),
+  2000 sf .98 (20), 2500 sf .9 (25), 3000 sf .82 (30) — the label number = Rolls × 100, which is
+  what `sheetSizeSqFt` parses. Web: `derivedSheetSizeLabel`, `resolveSectionSheetLabel`,
+  `BidSectionInput.isQuickBid`.
+- "Standard Size Sheet Discount" on the form mirrors `Estimate.StdSizeDiscount` (bid-level).
+- `VerifyFields` (all transcribed as non-blocking hints on the web screen): Width / Length ≤ 0;
+  Sheet Size; Need Custom Settings; Deck Type; durolast: "Perim Enhancement is greater than Roof
+  Dimension" when `Width < (perimA + perimC) × W` or `Length < (perimB + perimD) × W`;
+  Incompatible Decktype; Lap Spacing; durolastmech: "Pull Test is < 140"; sheet larger than the
+  section ("Are you sure…"); Incompatible Underlayment; Undefined Attachment Method; per
+  perimeter side: W ≤ 0 → "< 0", non-durotuff & non-durobondmech W < 12 → "< 12", durotuff W < 5
+  → "< 5"; ARP / Wood / Termination side lengths > 0 (ARP ≤ side length); Perimeter side
+  length > 0 and ≤ side length. ⚠ The web default enhancement width is 3 ft (pre-series
+  choice); with a perimeter side marked, the legacy rule flags anything < 12 ft on Duro-Last —
+  left as a visible hint, default unchanged (needs a human call on the intended default).
+- Perimeter calculator (frmPerimCalculator): `W = Round(Ceiling(min(0.4 × building height,
+  0.1 × lesser roof dimension)))`, floor 5 → `perimeterEnhancementCalculator`.
+- `UpdatePreview` captions: "A: n'" + ", <termination>" + ", n Blocking" + ", ARP: n"" per side,
+  "n' Perim" along perimeter sides, "No Membrane" when no system; 2500–3000 sf sheet warning
+  ("Any sheets ordered between 2500 and 3000 square feet have length and width limitations…").
+- Screen: `src/components/sections-screen.tsx` (Custom Name, L/W, Deck, Roof System, Attached
+  With, adhesive, Type, Color, Pull Test + calc'd spacing, Design Table, Field Tab Spacing,
+  Fastener OC, Avg Sheet / Complexity mutual enable, Std Size Sheet Discount, Quick Bid radios,
+  Perimeter & Enhancement dialog with the calculator, Labor dialog, Setup / Inspection readouts,
+  Man Hours / Labor Cost / sq ft; Edge Options tabs A–D; preview with corner boxes; lvSummary
+  Section | L | W | System | Attach | Deck Type | Color | Lap; Roof Sections Summary dialog with
+  the LoadSummary columns; New / Copy / Remove; Show Calculations; Notes).
