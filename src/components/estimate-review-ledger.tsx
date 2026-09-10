@@ -46,7 +46,8 @@ function ClickEdit(props: {
   }
   const commit = () => {
     const n = Number(text);
-    if (Number.isFinite(n)) props.onCommit(n);
+    // Ledger amounts (shipping, markup, per-diem, commission) are never negative.
+    if (Number.isFinite(n)) props.onCommit(Math.max(0, n));
     setEditing(false);
   };
   return (

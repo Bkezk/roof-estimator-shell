@@ -151,7 +151,8 @@ function Num(props: {
       onBlur={() => {
         if (text !== null) {
           const v = Number(text);
-          props.onCommit(Number.isFinite(v) ? v : 0);
+          // Quantities and footages are never negative.
+          props.onCommit(Number.isFinite(v) ? Math.max(0, v) : 0);
           setText(null);
         }
       }}
@@ -196,7 +197,8 @@ function LaborLink(props: {
             defaultValue={100 + (props.pct || 0)}
             onBlur={(e) => {
               const v = Number(e.target.value);
-              props.onPct!(Number.isFinite(v) ? Math.round(v) - 100 : 0);
+              // The percent is floored at 0 (adjust ≥ −100) so hours can never go negative.
+              props.onPct!(Number.isFinite(v) ? Math.max(0, Math.round(v)) - 100 : 0);
               setOpen(false);
             }}
           />

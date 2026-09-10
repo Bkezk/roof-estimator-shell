@@ -119,7 +119,11 @@ export const Route = createFileRoute("/estimate")({
 });
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
-const num = (v: string) => (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0;
+// No estimator value may go negative: the shared parser floors at 0. The legacy labor-adjust
+// DELTAS (AdjustLabor % − 100) are the one field family where a negative is meaningful
+// (−20 = 80% labor); numAdj floors those at −100 so hours can never invert.
+const num = (v: string) => Math.max(0, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
+const numAdj = (v: string) => Math.max(-100, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 
 let seq = 1;
@@ -2820,6 +2824,7 @@ function EstimatePage() {
                             </Field>
                             <Field label="Labor adj (%)">
                               <NumInput
+                                min={-100}
                                 value={p.adjustLaborPct ?? 0}
                                 onValue={(n) =>
                                   setParapets((prev) =>
@@ -3200,6 +3205,7 @@ function EstimatePage() {
                           </Field>
                           <Field label="Labor adj (%)">
                             <NumInput
+                              min={-100}
                               value={c.adjustLaborPct ?? 0}
                               onValue={(n) =>
                                 setCurbs((prev) =>
@@ -4180,21 +4186,21 @@ function EstimatePage() {
                 <Input
                   type="number"
                   value={adjustLaborPct}
-                  onChange={(e) => setAdjustLaborPct(num(e.target.value))}
+                  onChange={(e) => setAdjustLaborPct(numAdj(e.target.value))}
                 />
               </Field>
               <Field label="Adjust setup %">
                 <Input
                   type="number"
                   value={adjustSetupPct}
-                  onChange={(e) => setAdjustSetupPct(num(e.target.value))}
+                  onChange={(e) => setAdjustSetupPct(numAdj(e.target.value))}
                 />
               </Field>
               <Field label="Adjust inspection %">
                 <Input
                   type="number"
                   value={adjustInspectionPct}
-                  onChange={(e) => setAdjustInspectionPct(num(e.target.value))}
+                  onChange={(e) => setAdjustInspectionPct(numAdj(e.target.value))}
                 />
               </Field>
               <Field label="Labor template">
@@ -5197,7 +5203,7 @@ function NumInput({
       }}
       onChange={(e) => {
         setText(e.target.value);
-        onValue(num(e.target.value));
+        onValue(Math.max(min ?? 0, num(e.target.value)));
       }}
       onBlur={() => setText(null)}
     />
