@@ -1075,7 +1075,10 @@ function EstimatePage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => goStep(STEPS.findIndex((st) => st.key === "review"))}
+                        onClick={() => {
+                          setShowPricingSettings(true);
+                          goStep(STEPS.findIndex((st) => st.key === "review"));
+                        }}
                       >
                         Click here to edit
                       </Button>
@@ -4141,8 +4144,11 @@ function EstimatePage() {
 
         <div className={step === 9 && showPricingSettings ? "space-y-6" : "hidden"}>
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base">Pricing controls</CardTitle>
+              <Button variant="outline" size="sm" onClick={() => setShowPricingSettings(false)}>
+                Hide settings
+              </Button>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-4">
               {(presets?.length ?? 0) > 0 && (
@@ -4352,6 +4358,11 @@ function EstimatePage() {
                 </Button>
               </CardHeader>
               <CardContent>
+                {customer.notes.trim() !== "" && (
+                  <p className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                    <span className="font-medium">Notes (from Setup):</span> {customer.notes}
+                  </p>
+                )}
                 <EstimateReviewLedger
                   ledger={result.ledger}
                   est={result.r}
