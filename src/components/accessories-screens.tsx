@@ -573,6 +573,25 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     [refData],
   );
 
+  /** Screens with an unmet need (red counters) — their tree names show red until covered. */
+  const screenNeedsAttention = useMemo(() => {
+    const out = new Set<ScreenId>();
+    if (!result) return out;
+    if (result.termBar.fastenersNeeded > 0) out.add("termBar");
+    if (result.fascia["3"].fastenersNeeded > 0) out.add("fascia3");
+    if (result.fascia["4"].fastenersNeeded > 0) out.add("fascia4");
+    if (result.dripEdge.fastenersNeeded > 0) out.add("dripEdge");
+    if (result.gravelStop.fastenersNeeded > 0) out.add("gravelStop");
+    if (result.snapCover.fastenersNeeded > 0) out.add("snapCover");
+    if (result.parapetTabs.fastenersNeeded > 0 || result.parapetTabs.steelPlatesNeeded > 0)
+      out.add("parapetTabs");
+    for (const [bucket, n] of Object.entries(result.deckNeeds)) {
+      if (n.fasteners > 0 || n.polyPlates > 0 || n.insulPlates > 0 || n.inductionPlates > 0)
+        out.add(bucket as ScreenId);
+    }
+    return out;
+  }, [result]);
+
   if (!refData) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -1686,12 +1705,22 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                 <li key={it.id}>
                   <button
                     type="button"
+                    title={
+                      screenNeedsAttention.has(it.id)
+                        ? "This screen still has needed quantities — open it to cover them."
+                        : undefined
+                    }
                     className={`w-full rounded px-1 py-0.5 text-left ${
-                      screenId === it.id ? "bg-primary text-primary-foreground" : "hover:bg-muted"
+                      screenId === it.id
+                        ? "bg-primary text-primary-foreground"
+                        : screenNeedsAttention.has(it.id)
+                          ? "font-medium text-red-600 hover:bg-muted dark:text-red-400"
+                          : "hover:bg-muted"
                     }`}
                     onClick={() => setScreenId(it.id)}
                   >
                     {it.label}
+                    {screenNeedsAttention.has(it.id) && screenId === it.id ? " •" : ""}
                   </button>
                 </li>
               ))}
