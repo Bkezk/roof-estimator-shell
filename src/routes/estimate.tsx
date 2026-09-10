@@ -2778,6 +2778,9 @@ function EstimatePage() {
                 crewRate={laborRate}
                 hoursById={result?.parapetHoursById ?? {}}
                 baseHoursById={result?.parapetBaseHoursById ?? {}}
+                {...(result?.accessories
+                  ? { fastenersNeeded: result.accessories.parapetTabs.fastenersNeeded }
+                  : {})}
                 newParapet={() =>
                   newParapet({
                     wallType: parapetDefaults.wallType ?? 1,

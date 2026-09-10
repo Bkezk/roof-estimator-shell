@@ -254,6 +254,12 @@ export interface ParapetsScreenProps {
   hoursById: Record<string, number>;
   baseHoursById: Record<string, number>;
   newParapet: () => ParapetInput;
+  /**
+   * Legacy lblParapets "Fasteners Needed": the parapet wall-tab requirement NET of fasteners
+   * already entered on the Accessories → Parapet Wall-Tabs screen (frmParapets.UpdateTotals
+   * = iTotals[5] − Σ oEdgeFasteners[5] quantities, floored at 0). Absent = gross requirement.
+   */
+  fastenersNeeded?: number;
 }
 
 export function ParapetsScreen(p: ParapetsScreenProps) {
@@ -284,11 +290,12 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
 
   const bands = admin.parapetLabor?.bands ?? [];
   const totalHours = parapets.reduce((s, x) => s + (p.hoursById[x.id] ?? 0), 0);
-  const fastenersNeeded = parapetEdgeFastenersCount(
+  const grossFasteners = parapetEdgeFastenersCount(
     parapets,
     p.bidDefaults.roofSystem,
     p.bidDefaults.attachment,
   );
+  const fastenersNeeded = p.fastenersNeeded ?? grossFasteners;
   const girthOf = (x: ParapetInput) =>
     (x.skirtInches ?? 0) +
       (x.cantInches ?? 0) +
@@ -493,6 +500,11 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     : " (older wall — picked band)"}
               </span>
               <span>Height after tabs: {n2(remainIn)}&quot;</span>
+              {ps.roofSystem === "Duro-Last" && (w.verticalInches ?? 0) <= 30 ? (
+                <span className="text-muted-foreground">
+                  No wall tabs (Duro-Last needs Vertical over 30&quot;) — 0 tab fasteners
+                </span>
+              ) : null}
               <span>Style: {parapetStyleName(w)}</span>
             </div>
           </div>
@@ -810,9 +822,18 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                 {w.adjustLaborPct === undefined ? ", template" : ""})
               </button>
             </span>
-            <span className={fastenersNeeded > 0 ? "font-medium text-destructive" : ""}>
+            <span
+              className={fastenersNeeded > 0 ? "font-medium text-destructive" : ""}
+              title={
+                "Wall-tab fasteners still to order: the requirement across all walls " +
+                `(${grossFasteners.toLocaleString()}) less any entered on Accessories → ` +
+                "Parapet Wall-Tabs and Steel Plates."
+              }
+            >
               Fasteners Needed: {fastenersNeeded.toLocaleString()}
-              {parapets.length > 1 ? ` (this wall ${wallFasteners.toLocaleString()})` : ""}
+              {parapets.length > 1 || fastenersNeeded !== grossFasteners
+                ? ` (this wall ${wallFasteners.toLocaleString()}, all walls ${grossFasteners.toLocaleString()})`
+                : ""}
             </span>
             <span>
               Man Hours: <b className="tabular-nums">{n2(totalHours)}</b>
