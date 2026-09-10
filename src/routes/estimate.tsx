@@ -430,7 +430,8 @@ function EstimatePage() {
   // Adhered-layer quote containers over tapered surfaces (§10.7 QuoteAdhesiveUnits).
   const [uQAU, setUQAU] = useState(0);
   const openQuoteDialog = (board: string) => {
-    setQName("New Quote");
+    // When the selection already carries this board's quote, surface its name (the merge target).
+    setQName(existingQuoteFor(board)?.name ?? "New Quote");
     setQPieceMode(false);
     setQLump(0);
     setQPieces(0);
@@ -1883,11 +1884,13 @@ function EstimatePage() {
                             return (
                               <TableCell key={li} className="whitespace-nowrap text-xs">
                                 {l
-                                  ? `${l.board} : ${
-                                      l.attachment === "mechanical"
-                                        ? `Mech (${l.fastenersPerBoard || 5}/bd)`
-                                        : l.adhesiveName || "Adhesive"
-                                    }`
+                                  ? l.quote
+                                    ? `${l.board} : quote “${l.quote.name}”`
+                                    : `${l.board} : ${
+                                        l.attachment === "mechanical"
+                                          ? `Mech (${l.fastenersPerBoard || 5}/bd)`
+                                          : l.adhesiveName || "Adhesive"
+                                      }`
                                   : "None : None"}
                               </TableCell>
                             );
@@ -1960,7 +1963,17 @@ function EstimatePage() {
                                     : "border-dashed text-muted-foreground"
                                 }`}
                               >
-                                {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
+                                {l
+                                  ? `Layer ${li + 1}: ${l.board}${
+                                      l.quote
+                                        ? ` — “${l.quote.name}” ${money(
+                                            l.quote.pieceMode
+                                              ? (l.quote.pieces ?? 0) * (l.quote.costPerPiece ?? 0)
+                                              : (l.quote.lumpSum ?? 0),
+                                          )} + ${l.quote.laborAmount ?? 0}${l.quote.laborInDays ? "d" : "h"}`
+                                        : ""
+                                    }`
+                                  : `Layer ${li + 1}`}
                               </div>
                             );
                           })}
