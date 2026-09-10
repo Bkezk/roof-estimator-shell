@@ -128,25 +128,54 @@ multiplier 1 / 1.1 / 1.2 at 12" / 6" / 4" ribbons), `adhesive_labor_per_ksqft`,
   §3.3 scale question — our `underlaymentAdhesive` hrs/1000 model matches the binary.
 
 ### 2.5 Sealants & mastics (`Sealants.RecalcParents`, rva 0x22208)
-- **Duro-Caulk by color** (RefIDs 12–15 zone): per DL color,
-  `tubes = Ceiling(termBarLF(color) + fasciaCoverLF(color)) / 12` — **1 tube per 12 LF**.
-- **Drains**: + `1 tube per drain` (added to the White/Gray bucket, index 2).
-- **Washers**: + `Ceiling(0.25 × washerQty)` — **1 tube per 4 washers**.
+- **Duro-Caulk by color** — colour buckets are `eDLColorsIndex` (0-based: 0 Tan, 1 Gray,
+  2 White, 3 DarkGray, 4 TerraCotta, 5 RockPly) and land on `Sealants.DUROCAULK_ID =
+  [14, 15, 13, 15, 16, 15]` (Tan→14, Gray/DarkGray/RockPly→15, White→13, TerraCotta→16 —
+  the Duro-Caulk **Plus** rows; see money-parity §12.9 for the RefID→part map). CORRECTED
+  2026-09-10 (earlier text said "RefIDs 12–15 zone"; 12 is SB-240, which is zeroed every recalc
+  and never added to). Per colour index i, IL-exact:
+  `tubes[i] = Convert.ToInt32( Decimal.Ceiling(CDec(termBarLF(i) + fasciaCoverLF(i))) / 12 )`
+  — **Ceiling the FOOTAGE first, then divide by 12, then `Convert.ToInt32(Decimal)` which is
+  banker's rounding (to even), NOT a ceiling**: 6 ft → 0.5 → 0 tubes; 13 ft → 1.08 → 1;
+  18 ft → 1.5 → 2; 30 ft → 2.5 → 2. `termBarLF(i)` = `TermBars.GetTotalLengthByColor(i, False,
+  False)` = the FIRST present term bar whose `Color − 1 == i` (bars are keyed by `eDLColorsID`,
+  1-based), returning its `GetTotalLength(False, False)` = `R10(1.03f × (roof + curb + parapet
+  edge + other pre-drill + other no-drill))`, no base footage; `fasciaCoverLF(i)` =
+  `FaciaBars.TotalCoverLengthByColor(i)` = Σ over fascia bars of vinyl cover length for colour
+  `i+1` + metal cover length for index i. Quirk: RefIDs 12–15 are reset to 0 before the add
+  but 16 (TerraCotta → Bronze) is not, so its CalcQty accumulates across recalcs on bids with
+  Terra Cotta edges.
+- **Drains**: + `1 tube per drain` (Σ `Drain.Quantity` over present drains) into bucket index 2
+  = **White** (RefID 13). CORRECTED 2026-09-10: earlier text said "White/Gray"; index 2 of the
+  0-based `eDLColorsIndex` is White (Gray is 1).
+- **Washers**: + `Ceiling(0.25 × washerQty)` — **1 tube per 4 washers**, same White bucket.
 - **Pipe stacks**: per-color tube counts from `PipeStacks.SealantAmount` =
   `Ceil(Σ SealantLinealFt × 2 / 10)` per color, where `SealantLinealFt = Ceil((size + 0.25) × π)
   / 12 × qty` (`PipeStack.OnRecalculate`, rva 0x201e0). CORRECTED 2026-09-10: the
   `ref_Stacks.RequiredSealantMultiplyer` column is only persisted (`PipeStackSize.WriteXML`) —
   no pricing path reads it, so it needs no capture (see money-parity §12.3).
-- **Strip mastic** (RefID 9): per bar `RoundToNextTen(Ceil(len × 1.03))` (3% scrap, round up to
-  10 ft; applied twice in the summation — once in `GetStripMasticLen`, once in the caller), then
-  `rolls = Ceiling(totalFt / 350)` — **350 LF per unit**.
-- **Pitch pocket filler** (RefID 10): pipe stacks with Usage ID 3 contribute
-  `(qty + (isOpen ? 1 : 0)) × rate` with rate by size: >15" → 4, >11" → 3, >8" → 2, else 1;
-  plus `Σ PitchPan.Qty × PitchPan.FillerAmount`.
+- **Strip mastic** (RefID 9): `Sealants.RecalcParents` loops every term bar and every fascia
+  bar; a bar contributes when `IsPresent OrElse GetCalculatedLength(False, False) > 0`, and its
+  contribution is `R10(Ceil(1.03f × GetStripMasticLen))` where `GetStripMasticLen = R10(1.03f ×
+  StripMasticLength)` — scrap + ten-rounding applied twice here. The bar's `StripMasticLength`
+  is a stored field: the Term Bar screen writes it on **bar[0] only**, and the checkbox seeds it
+  with `TermBars.GetTotalLength(False, False)` = **Σ over present bars** of `TermBar.GetTotalLength`
+  (each already `R10(1.03f × …)`) — so the default path carries scrap three times (re-read
+  2026-09-10, `frmAccTerminations.chkTBStripMastic_CheckedChanged` + `TermBars.GetTotalLength`
+  rva 0x262f8). Then `pails = Ceiling(totalFt / 350)` — **350 LF per unit**. `UseStripMastic` is
+  not consulted by the sealant path; unchecking writes length 0, which is what zeroes it.
+- **Pitch pocket filler** (RefID 10): pipe stacks with Usage ID 3 ("Pitch Pan") contribute
+  `(qty + (isOpen ? 0 : 1)) × rate` with rate by size: >15" → 4, >11" → 3, >8" → 2, else 1;
+  plus `Σ PitchPan.Qty × PitchPan.FillerAmount`. CORRECTED 2026-09-10: the IL is
+  `IIf(IsOpen, 0, 1)` — a CLOSED stack adds one, an open one adds nothing (earlier text had it
+  reversed).
 - **Duro-Roof seam sealant** (RefID 19): over Duro-Roof sections only,
   `seamLF = FieldWidth/In2Ft(FieldLap) × FieldLength + PerimEnhWidth/(PerimSpacing/12) ×
   (PerimLF + CornerLF)`; `CalcQty = Round(seamLF / 30 / 5)`.
-- Capstone parapets (option ID 2): `Ceiling(Ceil(length)/40)` units per parapet.
+- Capstone parapets (option ID 2 = Remove & Reinstall): `Ceiling(Ceil(Parapet.Length)/40)`
+  tubes per present parapet — the WALL length, not `CapstoneLength2` — added to bucket index 2
+  = White, i.e. RefID 13 (Duro-Caulk Plus White), before the per-colour add above (re-read
+  2026-09-10).
 
 ### 2.7 Edge-hardware auto-lengths (term bar / fascia / drip edge / gravel stop)
 The legacy accessory screens derive each bar's length from the estimate's geometry; the estimator

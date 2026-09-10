@@ -366,9 +366,11 @@ differs** (wired this round: per-parapet mil/color override).
 Per-parapet **Attachment** changes:
 - Tab layout (`Parapet.Recalculate`): attachment `'durolastmech'` → intermediate tabs at 25"
   (vert' > 30), 23"/28" (vert' > 53/59), 23"/28" (vert' > 83/89); `'durobondmech'` → no
-  intermediate tabs; `AdheredSystem` → one tab at 60" when vert' > 59. (vert' = `Round6Inch`:
-  >102 → 102; ≤30 → as-is; else nearest 6" of (v+2), except values just above 30 that would
-  round DOWN to 30 stay as-is.) The remaining height + wrap fills the last tab.
+  intermediate tabs; `AdheredSystem` → one tab at 60" when vert' > 59. (vert' = `Round6Inch`,
+  rva 0x421e0, re-read 2026-09-10: `v > 30 AND Round(v/6)×6 == 30` → v as-is; else `v > 102`
+  → 102; else `Round((v+2)/6)×6` — so v ≤ 30 is ALSO rounded (the earlier "≤30 → as-is" was
+  wrong; harmless for the thresholds since no v ≤ 30 rounds above 30).) The remaining height +
+  wrap fills the last tab.
 - `EdgeFasteners` (rva 0x42588), by roof-system ShortName:
   durolast: vert ≤ 30 → 0; mech → `Ceil(AdjustedLength / In2Ft(12) × CalcTabCount)`; else
   `Round(AdjustedLength / In2Ft(15) × TabCount)`. durotuff: mech →
@@ -1100,10 +1102,12 @@ Money: §12.5.
   `Cost = Boxes × (NumberPerBox × Price)`; no labor. The "Boxes" column is the billed unit.
 - **Sealants** (`Sealant`, `ref_Sealants`: Name, PartNumber, Price): `Cost = price × (CalcQty +
   Quantity)`, no labor; `CalcQty` rules are §2.5 of legacy-consumption-rules (term bar / fascia
-  strip mastic → RefID 9 @ 350 LF/pail; Duro-Caulk by colour = `Ceil(termBarLF_c +
-  fasciaCoverLF_c)/12`; drains +1 tube each; washers `Ceil(0.25 × qty)`; pipe stacks per colour
-  per §12.3; pitch-pocket filler from usage-3 stacks and pitch pans; Duro-Roof seam sealant;
-  capstone parapets). "Show Discontinued Sealants": rows whose part number ∈ {1116, 1116B, 1114,
+  strip mastic → RefID 9 @ 350 LF/pail; Duro-Caulk by colour = `ToInt32(Ceil(termBarLF_c +
+  fasciaCoverLF_c) / 12)` — ceiling the feet, then divide, then banker's-round to whole tubes
+  (NOT `Ceil(sum/12)`; clarified 2026-09-10); drains +1 tube each and washers `Ceil(0.25 × qty)`,
+  both into the White bucket (RefID 13); pipe stacks per colour per §12.3; pitch-pocket filler
+  from usage-3 stacks and pitch pans; Duro-Roof seam sealant; capstone parapets → White).
+  "Show Discontinued Sealants": rows whose part number ∈ {1116, 1116B, 1114,
   1115, 1126, 1126B, 1124, 1125} (hardcoded in `frmAccessory2`) are hidden unless checked, shown
   red with the note "use Duro-Caulk Plus"; the count label sums their entered qty. Display only.
 - **Adhesives** (`AdheredSystem`): `Cost = Round((AdditionalQty + CalculatedQty) ×
@@ -1118,7 +1122,12 @@ Money: §12.5.
   ARPSqFt) + Ceil(parapets ARPSqFt)` — this IS the bill for ARP (roof-section ARP is subtracted
   from membrane and priced here; parapet ARP is an add-on, §8.4); its labor = `Quantity(extra) ×
   labor × (1 + adj)` only (the link shows no % — adjust −2). Id 2 **T-Patch** `CalcQty = Σ
-  non-Duro-Tuff sections Round(AreaTotal/250)` (1 per 250 sq ft). Id 3 **stripping** is a
+  **Duro-Tuff** sections Round(AreaTotal/250)` (1 per 250 sq ft; `AreaTotal = Length × Width`,
+  raw, no scrap; `Math.Round` = banker's). CORRECTED 2026-09-10: the first transcription said
+  "non-Duro-Tuff" — the IL (`MembraneAccs.RecalcParents`, rva 0x1edb4) branches PAST the add
+  when `CompareString(ShortName, "durotuff") ≠ 0`, i.e. only Duro-Tuff sections count. That is
+  why the §12.0 anchor bid (Duro-Last) shows Calc Qty 0 and no T-Patch in the footer — the
+  web's hold-at-0 was the right call. Id 3 **stripping** is a
   template: per section a derived row "1' of 10" DL {mil}mil {Colour} Stripping" (part number
   `baswf` + systemId(00) + colourId(00) + mil(000)) is created with price =
   `lookup_DuroLastPrices[mil, category 5][colour column]` (Duro-Tuff: `lookup_DuroTuffPrices[mil]`,
