@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeAccessories,
+  parapetEdgeFastenersCount,
   emptyAccessoriesState,
   normalizeAccessoriesState,
   roundToNextTen,
@@ -467,7 +468,7 @@ describe("pipe stacks & panduit (§12.3/§12.4)", () => {
     expect(r.pipeStacks.panduit20).toBe(0);
     expect(r.pipeStacks.panduit14).toBe(4);
     // Sealant: 14/12 × 2 = 2.33 ft → Ceil(2.33 × 2 / 10) = 1 White tube.
-    expect(r.pipeStacks.sealantTubesByColor.White).toBe(1);
+    expect(r.pipeStacks.sealantTubesByColor["White"]).toBe(1);
     expect(r.sealants.calcByPart["1136"]).toBe(1);
     // Panduit boxes: 4 × 14" straps → Ceil(4/50) = 1 bag = 50 × $0.88.
     expect(r.panduit.boxesByRow['3/8" x 14"']).toBe(1);
@@ -489,5 +490,158 @@ describe("state normalization (snapshot drift)", () => {
     expect(foldColor("Rock Ply")).toBe("Gray");
     expect(foldColor("Terra Cotta")).toBe("Tan");
     expect(foldColor("White")).toBe("White");
+  });
+});
+
+describe("§12.9 corrections", () => {
+  it("Duro-Caulk tubes = ToInt32(Ceil(feet)/12) banker's: 6→0, 13→1, 18→2, 30→2", () => {
+    // Drive the footage through fascia vinyl covers (raw feet, no scrap).
+    const tubesFor = (ft: number) => {
+      const st = emptyAccessoriesState();
+      st.fascia["3"].vinylCovers = { on: true, qty: { White: ft } };
+      const r = computeAccessories(anchorArgs(st));
+      return r.sealants.calcByPart["1136"];
+    };
+    expect(tubesFor(6)).toBe(0);
+    expect(tubesFor(13)).toBe(1);
+    expect(tubesFor(18)).toBe(2);
+    expect(tubesFor(30)).toBe(2);
+    expect(tubesFor(42)).toBe(4);
+  });
+
+  it("caulk colour buckets: term-bar footage is the TEN-ROUNDED scrap length per colour", () => {
+    const blankEdge = {
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    };
+    const args = anchorArgs();
+    args.sections = [
+      section({
+        color: "Terra Cotta", // folds to the TAN bar; caulk lands on the Tan row (1138)
+        edges: [
+          { side: "A", lengthFt: 40, ...blankEdge, termination: "T-Bar" },
+          { side: "B", lengthFt: 100, ...blankEdge },
+          { side: "C", lengthFt: 55, ...blankEdge },
+          { side: "D", lengthFt: 100, ...blankEdge },
+        ],
+      }),
+    ];
+    const r = computeAccessories(args);
+    // Bar length R10(1.03f × 40) = 50 → ToInt32(Ceil(50)/12) = ToInt32(4.1667) = 4 tubes (Tan).
+    expect(r.sealants.calcByPart["1138"]).toBe(4);
+    expect(r.sealants.calcByPart["1136"]).toBe(0);
+  });
+
+  it("drains/washers/capstone tubes land on WHITE (RefID 13 → part 1136)", () => {
+    const st = emptyAccessoriesState();
+    st.drains = [
+      {
+        id: "d1",
+        quantity: 2,
+        roofType: "None",
+        reuseRings: false,
+        bootSize: "",
+        ringSize: "",
+        adjustPct: 0,
+      },
+    ];
+    const args = anchorArgs(st);
+    args.parapets = [
+      {
+        id: "p1",
+        name: "w",
+        lengthFt: 45,
+        heightBand: "",
+        deckType: "Wood",
+        predrill: false,
+        canted: false,
+        girthInches: 24,
+        capstoneOption: 2,
+      },
+    ];
+    const r = computeAccessories(args);
+    // 2 drains + Ceil(Ceil(45)/40) = 2 capstone tubes → 4 on White (washer tubes ride the
+    // same bucket via washersQtyTotal; this suite's mini-catalog has no washer rows).
+    expect(r.sealants.calcByPart["1136"]).toBe(4);
+    expect(r.sealants.calcByPart["1134"]).toBe(0);
+  });
+
+  it("T-Patch counts DURO-TUFF sections only: Round(L×W/250)", () => {
+    const dl = computeAccessories(anchorArgs());
+    expect(dl.membraneAccs.tPatchCalc).toBe(0); // Duro-Last → 0 (the §12.0 anchor)
+    const args = anchorArgs();
+    args.roofSystem = "Duro-Tuff";
+    const dt = computeAccessories(args);
+    expect(dt.membraneAccs.tPatchCalc).toBe(22); // Round(5500/250) + Round(1/250) = 22 + 0
+  });
+
+  it("pitch-pocket filler: CLOSED pitch-pan stacks add one; rate by size (→ part 1121)", () => {
+    const st = emptyAccessoriesState();
+    st.pipeStacks = [
+      {
+        id: "a",
+        usage: "Pitch Pan",
+        color: "White",
+        open: false,
+        size: 4,
+        quantity: 2,
+        adjustPct: 0,
+      },
+      {
+        id: "b",
+        usage: "Pitch Pan",
+        color: "White",
+        open: true,
+        size: 16,
+        quantity: 1,
+        adjustPct: 0,
+      },
+      {
+        id: "c",
+        usage: "Plumbing",
+        color: "White",
+        open: false,
+        size: 4,
+        quantity: 3,
+        adjustPct: 0,
+      },
+    ];
+    const r = computeAccessories(anchorArgs(st));
+    // (2 + 1) × 1  +  (1 + 0) × 4  = 7; the Plumbing stack contributes nothing.
+    expect(r.sealants.calcByPart["1121"]).toBe(7);
+  });
+
+  it('EdgeFasteners (§12.9 worked values): Duro-Last 40 ft adjusted, 36" vertical', () => {
+    const wall = (over: object) => ({
+      id: "p1",
+      name: "w",
+      lengthFt: 38,
+      pieces: 1,
+      heightBand: "",
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 60,
+      verticalInches: 36,
+      ...over,
+    });
+    // AdjustedLength = 38 + 1 + 1 = 40. Mechanical, no cant → CalcTabCount 1 → 40.
+    expect(parapetEdgeFastenersCount([wall({}) as never], "Duro-Last", "mechanical")).toBe(40);
+    // With a cant → 2 tabs → 80.
+    expect(
+      parapetEdgeFastenersCount(
+        [wall({ canted: true, cantInches: 4 }) as never],
+        "Duro-Last",
+        "mechanical",
+      ),
+    ).toBe(80);
+    // Adhered, no cant → TabCount 1 → Round(40 / 1.25 × 1) = 32.
+    expect(parapetEdgeFastenersCount([wall({}) as never], "Duro-Last", "adhered")).toBe(32);
+    // Vertical ≤ 30 → 0 regardless.
+    expect(
+      parapetEdgeFastenersCount([wall({ verticalInches: 30 }) as never], "Duro-Last", "mechanical"),
+    ).toBe(0);
   });
 });

@@ -1387,3 +1387,15 @@ it fixes IDENTITY ids exactly, but any PRICE in it is historical, not current.
 Not answered here (unchanged captures): `ref_TwoPieceMetal` current prices for ids 1–6 (the
 ledger shows the row structure — ids 3, 1, 4, 2, 5, 6 = 3", 4", 5", 6", 7", 8", `Size` 2, 0, 3,
 1, 4, 5 — with historical prices only), and `lookup_DuroLastPrices` category 5.
+
+**§12.9 web implementation status (2026-09-10):** items 1–5 and 7–9 are implemented in
+`src/lib/engine/accessories.ts` with tests pinning the §12.9 vectors — T-Patch Duro-Tuff-only;
+Duro-Caulk `ToInt32(Ceil(ft)/12)` (6→0, 13→1, 18→2, 30→2, 42→4) over the ten-rounded term-bar
+scrap lengths + raw cover feet, on the 6-bucket eDLColorsIndex with DUROCAULK parts
+1138/1134/1136/1135; drains/washers/capstone tubes on WHITE (1136); pitch-pocket stack term on
+1121 (pan term awaits the item-6 behavioural capture); the Duro-Last CalcTabCount model (mech
+40/80, adhered 32 worked values reproduce; Duro-Roof → 0 as a non-listed ShortName); the
+IsPreDrill seed noted at the generic-edge split (inert while every row has UsePreDrill=false);
+strip-mastic sealant path now applies the third scrap pass. The Bronze-row accumulation quirk
+(RefID 16 never zeroed between recalcs) is legacy session state, not a formula — a pure
+recompute matches the first-recalc value and the drift is deliberately not reproduced.

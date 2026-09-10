@@ -95,9 +95,12 @@ describe("consumption rules (§2 port)", () => {
     ).toBe(800);
   });
 
-  it("caulk: 1 tube per 12 LF of bar; parapet deck fasteners: 1 per foot", () => {
+  it("caulk (§12.9): ToInt32(Ceil(ft)/12) banker's; parapet deck fasteners: 1 per foot", () => {
+    expect(caulkTubes(6)).toBe(0); // 0.5 → 0 (half-to-even)
     expect(caulkTubes(12)).toBe(1);
-    expect(caulkTubes(13)).toBe(2);
+    expect(caulkTubes(13)).toBe(1); // 1.083 → 1
+    expect(caulkTubes(18)).toBe(2); // 1.5 → 2
+    expect(caulkTubes(30)).toBe(2); // 2.5 → 2
     expect(parapetDeckFasteners(48.4)).toBe(48);
   });
 
@@ -213,8 +216,8 @@ describe("consumption rules (§2 port)", () => {
     expect(r.insulationPlates).toBe(r.breakdown.insulationScrews);
     // Adhesive: 10000/1700 + 2500/1700 = 7.35... → ceil once = 8 (NOT ceil(5.88)+ceil(1.47)=7+2=9).
     expect(r.adhesiveUnits["OlyBond500 Bag-in-Box"]).toBe(8);
-    // Caulk: T-Bar 100 LF (no fascia) → ceil(100/12)=9.
-    expect(r.caulkTubes).toBe(9);
+    // Caulk (§12.9): T-Bar 100 LF (no fascia) → ToInt32(Ceil(100)/12) = ToInt32(8.33) = 8.
+    expect(r.caulkTubes).toBe(8);
   });
 });
 

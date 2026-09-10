@@ -1337,12 +1337,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       roofSystem: bid.roofSystem,
       attachment: bid.attachment,
       arpCalcSqFt: arpCalcQty,
-      parapetEdgeFasteners: parapetEdgeFastenersCount(
-        bid.parapets,
-        bid.roofSystem,
-        bid.attachment,
-        warnings,
-      ),
+      parapetEdgeFasteners: parapetEdgeFastenersCount(bid.parapets, bid.roofSystem, bid.attachment),
     });
     warnings.push(...accessoriesCalcResult.warnings);
     // The ARP row keeps its own dMaterial slot (review-ledger attribution); the rest of the

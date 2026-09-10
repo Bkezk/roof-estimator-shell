@@ -6,6 +6,7 @@
  */
 
 import type { BidSectionInput } from "./bid-builder";
+import { bankersRound } from "./rounding";
 import { sectionLayers } from "./bid-builder";
 import { perimeterFromEdges } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
@@ -67,9 +68,12 @@ export function allowedScrewSubtypes(deckTypes: string[]): Set<string> {
   return out;
 }
 
-/** §2.5 — Duro-Caulk: 1 tube per 12 LF of termination bar + fascia cover. */
+/**
+ * §2.5 (corrected 2026-09-10) — Duro-Caulk tubes = ToInt32(Ceil(feet)/12): ceiling the FOOTAGE,
+ * decimal divide by 12, then .NET banker's rounding (6 ft → 0; 13 → 1; 18 → 2; 30 → 2).
+ */
 export const caulkTubes = (barLengthFt: number): number =>
-  barLengthFt > 0 ? Math.ceil(barLengthFt / 12) : 0;
+  barLengthFt > 0 ? bankersRound(Math.ceil(barLengthFt) / 12, 0) : 0;
 
 /** §2.2 — parapet deck fasteners: 1 per foot of parapet length (also 1 poly plate each). */
 export const parapetDeckFasteners = (lengthFt: number): number =>

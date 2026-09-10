@@ -506,21 +506,30 @@ export function normalizeAccessoriesState(
 }
 
 /**
+ * §8.5 Round6Inch (rva 0x421e0): v > 30 that rounds to 30 stays as-is; cap 102; else nearest
+ * 6" of (v + 2), banker's.
+ */
+export function round6Inch(v: number): number {
+  if (v > 30 && bankersRound(v / 6, 0) * 6 === 30) return v;
+  if (v > 102) return 102;
+  return bankersRound((v + 2) / 6, 0) * 6;
+}
+
+/**
  * §8.5 Parapets.EdgeFasteners (wall-tab fasteners), summed across walls — feeds the Parapet
  * Wall-Tabs "Fasteners Needed" / "Steel Plates Needed" counts (display; money bills only what
- * is typed). The Duro-Last branch needs the intermediate-tab count model (CalcTabCount /
- * TabCount) which §8.5 leaves under-specified — those walls contribute 0 and raise a warning
- * (docs §12.8 open question) rather than a fabricated count.
+ * is typed). Duro-Last uses the §12.9 CalcTabCount model: tab count = cant (when present) +
+ * intermediate tabs at vert' > 30 / 53 / 83 (mech); adhered = max(1, cant + (vert' > 59)) —
+ * matching the §12.9 worked values (40 ft adjusted, 36" no cant → 40 mech / 32 adhered; with
+ * cant → 80). Duro-Roof is not a §8.5 ShortName case → 0.
  */
 export function parapetEdgeFastenersCount(
   parapets: ParapetInput[],
   roofSystem: string,
   attachment: "mechanical" | "adhered",
-  warnings?: string[],
 ): number {
   const in2Ft = (i: number): number => bankersRound(i / 12, 2);
   let total = 0;
-  let flaggedDuroLast = false;
   for (const p of parapets) {
     if (p.lengthFt <= 0) continue;
     const pieces = p.pieces ?? 1;
@@ -540,9 +549,18 @@ export function parapetEdgeFastenersCount(
     const adjHeight = Math.ceil(girth);
     const vertical = p.verticalInches ?? girth;
     const cant = p.cantInches ?? 0;
-    if (roofSystem === "Duro-Last" || roofSystem === "Duro-Roof") {
+    const hasCant = p.canted || cant > 0;
+    if (roofSystem === "Duro-Last") {
       if (vertical <= 30) continue; // durolast: vert ≤ 30 → 0
-      flaggedDuroLast = true; // CalcTabCount / TabCount model uncaptured
+      const v6 = round6Inch(vertical);
+      const c = hasCant ? 1 : 0;
+      if (attachment === "mechanical") {
+        const tabs = c + (v6 > 30 ? 1 : 0) + (v6 > 53 ? 1 : 0) + (v6 > 83 ? 1 : 0);
+        total += Math.ceil((adjLen / in2Ft(12)) * tabs);
+      } else {
+        const tabs = Math.max(1, c + (v6 > 59 ? 1 : 0));
+        total += bankersRound((adjLen / in2Ft(15)) * tabs, 0);
+      }
     } else if (roofSystem === "Duro-Tuff") {
       total +=
         attachment === "mechanical"
@@ -553,11 +571,6 @@ export function parapetEdgeFastenersCount(
     } else if (roofSystem === "Duro-Fleece") {
       total += bankersRound((((cant + vertical) / 60) * adjLen) / in2Ft(15), 0);
     }
-  }
-  if (flaggedDuroLast && warnings) {
-    warnings.push(
-      'Parapet wall-tab fastener count: the Duro-Last tab-count model (§8.5 CalcTabCount) is not yet extracted — walls over 30" vertical show 0 needed (entered fasteners still bill).',
-    );
   }
   return total;
 }
@@ -741,7 +754,7 @@ export interface AccessoriesResult {
     perStackHours: Record<string, number>;
     panduit14: number;
     panduit20: number;
-    sealantTubesByColor: Record<TermColor, number>;
+    sealantTubesByColor: Record<string, number>;
   };
   washers: SimpleScreenResult;
   drains: SimpleScreenResult & { perDrainHours: Record<string, number> };
@@ -1002,8 +1015,9 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       const sref = refSizes[size];
       const roofBy = roofEdgeFeetByColor(geo.sections, termId);
       const paraBy = parapetFeetByColor(geo.parapets, termId, defaultColor);
-      // FLAGGED: the §12.2 parapet-index drill quirk needs ref_DeckTypes.Predrill (uncaptured);
-      // with UsePreDrill=false on every captured part, all footage rides the no-drill split.
+      // §12.9 item 5: the parapet drill split needs BOTH the edge row's UsePreDrill AND the
+      // section-at-parapet-index deck's global_DeckType.IsPreDrill; every seeded generic-edge
+      // row has UsePreDrill = false, so all footage rides the no-drill split (IL-equivalent).
       const calcBy: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
       for (const c of TERM_COLORS) calcBy[c] = roofBy[c] + paraBy.noDrill[c] + paraBy.preDrill[c];
       roofTotal += sumColors(roofBy);
@@ -1147,7 +1161,9 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   const perStackHours: Record<string, number> = {};
   let panduit14 = 0;
   let panduit20 = 0;
-  const stackSealantFtByColor: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
+  /** Pitch-pocket filler tubes from usage-3 stacks (§2.5): a CLOSED stack adds one. */
+  let pitchFillerFromStacks = 0;
+  const stackSealantFt: Record<string, number> = {};
   for (const ps of st.pipeStacks) {
     if (ps.quantity <= 0) continue;
     const sizeRef = ref.pipeStackSizes.find((s) => s.size === ps.size);
@@ -1160,21 +1176,27 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     h = h * adj(ps.adjustPct);
     perStackHours[ps.id] = h;
     stacksHours += h;
-    // Consumption (§12.3): circumference c = Ceil((size + ¼)π) in; sealant ft = c/12 × qty;
+    // Consumption (§12.3): circumference c = Ceil((size + ¼)π) in; sealant ft = c/12 × qty
+    // (per the stack's OWN colour — the 6 eDLColorsIndex buckets, not the bar fold);
     // panduit 20" straps = ⌊c/17⌋, then 14" straps = Ceil(remainder/11), each × qty.
     const c = Math.ceil((ps.size + 0.25) * Math.PI);
-    stackSealantFtByColor[foldColor(ps.color)] += (c / 12) * ps.quantity;
+    stackSealantFt[ps.color] = (stackSealantFt[ps.color] ?? 0) + (c / 12) * ps.quantity;
     const n20 = Math.floor(c / 17);
     const rem = c - n20 * 17;
     const n14 = rem > 0 ? Math.ceil(rem / 11) : 0;
     panduit20 += n20 * ps.quantity;
     panduit14 += n14 * ps.quantity;
+    // §2.5 pitch-pocket filler (RefID 10 → part 1121): usage "Pitch Pan" stacks contribute
+    // (qty + (isOpen ? 0 : 1)) × rate, rate by size >15" → 4, >11" → 3, >8" → 2, else 1.
+    if (ps.usage === "Pitch Pan") {
+      const rate = ps.size > 15 ? 4 : ps.size > 11 ? 3 : ps.size > 8 ? 2 : 1;
+      pitchFillerFromStacks += (ps.quantity + (ps.open ? 0 : 1)) * rate;
+    }
   }
-  const stackTubesByColor: Record<TermColor, number> = {
-    White: stackSealantFtByColor.White > 0 ? Math.ceil((stackSealantFtByColor.White * 2) / 10) : 0,
-    Tan: stackSealantFtByColor.Tan > 0 ? Math.ceil((stackSealantFtByColor.Tan * 2) / 10) : 0,
-    Gray: stackSealantFtByColor.Gray > 0 ? Math.ceil((stackSealantFtByColor.Gray * 2) / 10) : 0,
-  };
+  const stackTubesByColor: Record<string, number> = {};
+  for (const [color, ft] of Object.entries(stackSealantFt)) {
+    stackTubesByColor[color] = ft > 0 ? Math.ceil((ft * 2) / 10) : 0;
+  }
 
   /* ---------------- Conduit washers (§12.3) ---------------- */
   let washersCost = 0;
@@ -1243,32 +1265,55 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     panduitCost += boxes * (row.partsPerBag * row.pricePerPart);
   }
 
-  /* ---------------- Sealants (§12.4 + §2.5) ---------------- */
-  // Duro-Caulk Plus colour tubes: Ceil((termBarLF_c + fasciaCoverLF_c) / 12) — 1 tube / 12 LF.
-  // (The §2.5 transcription's literal text is `Ceiling(x)/12`; whole tubes per the stated rule —
-  // operator order flagged in docs §12.8 open questions.)
-  const caulkByColor: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
-  for (const c of TERM_COLORS) {
-    const barLf =
-      tbNoDrillByColor[c] +
-      tbPreDrillByColor[c] +
-      colorVal(st.termBar.additionalNoDrill, c) +
-      colorVal(st.termBar.additionalPreDrill, c);
-    const coverLf = fasciaResult["3"].coverFtByColor[c] + fasciaResult["4"].coverFtByColor[c];
-    const lf = barLf + coverLf;
-    caulkByColor[c] = lf > 0 ? Math.ceil(lf / 12) : 0;
-    // Pipe-stack tubes join the same colour rows (§2.5).
-    caulkByColor[c] += stackTubesByColor[c];
+  /* ---------------- Sealants (§12.9 + corrected §2.5) ---------------- */
+  // Colour buckets are eDLColorsIndex (0-based): 0 Tan, 1 Gray, 2 White, 3 Dark Gray,
+  // 4 Terra Cotta, 5 Rock Ply → DUROCAULK_ID [14,15,13,15,16,15] → parts:
+  const SEALANT_INDEX_COLORS = ["Tan", "Gray", "White", "Dark Gray", "Terra Cotta", "Rock Ply"];
+  // termBarLF(i) = GetTotalLengthByColor(i,false,false): the bar's ten-rounded scrap length
+  // (roof + curb + parapet + both Additionals, NO base footage); bars exist for W/T/G only.
+  const tubesByIndex = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < 6; i++) {
+    const colorName = SEALANT_INDEX_COLORS[i]!;
+    let lf = 0;
+    if (i <= 2) {
+      const c = colorName as TermColor;
+      const rawBar =
+        tbNoDrillByColor[c] +
+        tbPreDrillByColor[c] +
+        colorVal(st.termBar.additionalNoDrill, c) +
+        colorVal(st.termBar.additionalPreDrill, c);
+      const termBarLf = rawBar > 0 ? roundToNextTen(F32_SCRAP * rawBar) : 0;
+      const coverLf = fasciaResult["3"].coverFtByColor[c] + fasciaResult["4"].coverFtByColor[c];
+      lf = termBarLf + coverLf;
+    }
+    // §12.9 item 2: tubes = ToInt32(Ceil(FEET)/12) — ceiling the footage, decimal divide,
+    // then .NET banker's rounding (6 ft → 0; 13 → 1; 18 → 2; 30 → 2).
+    tubesByIndex[i] = lf > 0 ? bankersRound(Math.ceil(lf) / 12, 0) : 0;
+    // Pipe-stack tubes join the same rows, per the stack's own colour (§12.3).
+    tubesByIndex[i]! += stackTubesByColor[colorName] ?? 0;
   }
-  // Drains: +1 tube per drain into the index-2 colour bucket (§2.5 — colour ids Tan 1 / Gray 2 /
-  // White 3 → Gray); washers: +Ceil(0.25 × qty) into the same bucket.
+  // §12.9 item 3: drains (+1 tube each), washers (Ceil(0.25 × qty)) and capstone parapets
+  // (Ceil(Ceil(WALL Length)/40) per Remove-&-Reinstall wall) all land on index 2 = WHITE.
   const drainCount = st.drains.reduce((s, d) => s + Math.max(0, d.quantity), 0);
-  caulkByColor.Gray += drainCount + (washersQtyTotal > 0 ? Math.ceil(0.25 * washersQtyTotal) : 0);
-  // Strip mastic: rolls = Ceil(totalFt / 350) — term bar + both fascia bars (§2.5).
+  const capstoneTubes = args.parapets.reduce(
+    (s, p) =>
+      p.capstoneOption === 2 && p.lengthFt > 0 ? s + Math.ceil(Math.ceil(p.lengthFt) / 40) : s,
+    0,
+  );
+  tubesByIndex[2]! +=
+    drainCount + (washersQtyTotal > 0 ? Math.ceil(0.25 * washersQtyTotal) : 0) + capstoneTubes;
+  // Strip mastic (corrected §2.5): each bar's sealant contribution is R10(Ceil(1.03f ×
+  // GetStripMasticLen)) — one more scrap+ten pass over the stored/displayed length — then
+  // pails = Ceil(totalFt / 350). (The legacy Bronze-row accumulation quirk — RefID 16 is not
+  // zeroed between recalcs — is session state, not a formula; a pure recompute matches the
+  // legacy value on its FIRST recalc and is deliberately not reproduced.)
+  const stripPass = (x: number): number => (x > 0 ? roundToNextTen(Math.ceil(F32_SCRAP * x)) : 0);
   const stripFtTotal =
-    tbStripFt + fasciaResult["3"].stripMasticFt + fasciaResult["4"].stripMasticFt;
+    stripPass(tbStripFt) +
+    stripPass(fasciaResult["3"].stripMasticFt) +
+    stripPass(fasciaResult["4"].stripMasticFt);
   const stripRolls = stripFtTotal > 0 ? Math.ceil(stripFtTotal / 350) : 0;
-  // Duro-Roof seam sealant (RefID 19 → "Tab Sealer") — §2.5: over Duro-Roof sections only.
+  // Duro-Roof seam sealant (RefID 19 ↔ 1119T, confirmed §12.9): Duro-Roof sections only.
   let tabSealer = 0;
   if (args.roofSystem === "Duro-Roof") {
     let seamLf = 0;
@@ -1282,12 +1327,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     tabSealer = round(seamLf / 30 / 5, 0);
   }
   const sealantCalcByPart: Record<string, number> = {
-    "1136": caulkByColor.White, // Duro-Caulk Plus - White
-    "1138": caulkByColor.Tan, // Duro-Caulk Plus - Tan
-    "1134": caulkByColor.Gray, // Duro-Caulk Plus - Gray
-    "1129": stripRolls, // Strip Mastic (Pail)
-    "1119T": tabSealer, // Tab Sealer (Duro-Roof seam sealant)
-    // Pitch Pocket Filler (1121/1122): RefID→part mapping + PitchPan.FillerAmount uncaptured — 0.
+    "1138": tubesByIndex[0]!, // Duro-Caulk Plus - Tan (RefID 14)
+    "1134": tubesByIndex[1]! + tubesByIndex[3]! + tubesByIndex[5]!, // Plus - Gray (RefID 15)
+    "1136": tubesByIndex[2]!, // Duro-Caulk Plus - White (RefID 13)
+    "1135": tubesByIndex[4]!, // Plus - Bronze (RefID 16 ← Terra Cotta)
+    "1129": stripRolls, // Strip Mastic (Pail) (RefID 9)
+    "1121": pitchFillerFromStacks, // Pitch Pocket Filler 10.2 oz (RefID 10; pan term
+    // awaits the §12.9 item-6 behavioural capture of ref_MetalsPitchPans.Filler)
+    "1119T": tabSealer, // Tab Sealer (RefID 19)
   };
   let sealantsCost = 0;
   for (const row of ref.sealants) {
@@ -1309,11 +1356,12 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     // ARP labor: extra qty only, rate 0, adjust −2 (no %) — stays 0 (§12.4).
     maHours += st.membraneAccs.arpExtra * ma.arpHours;
   }
-  // §12.4 states T-Patch CalcQty = Σ non-Duro-Tuff sections Round(AreaTotal/250) — but the §12.0
-  // anchor bid (a 55×100 section) shows Calc Qty 0 on the captured screen AND a footer without
-  // the $10 a 22-patch calc would add. CONTRADICTION → calc held at 0 (extra-only billing) until
-  // the decompiler session resolves AreaTotal / the Duro-Tuff filter direction (docs §12.8).
-  tPatchCalc = 0;
+  // §12.9 item 1: T-Patch counts DURO-TUFF sections only — Round(Length × Width / 250)
+  // (banker's, raw area). The §12.8 "contradiction" was an inverted filter in the first §12.4
+  // transcription; a Duro-Last bid correctly shows 0.
+  if (args.roofSystem === "Duro-Tuff") {
+    for (const s of args.sections) tPatchCalc += round((s.length * s.width) / 250, 0);
+  }
   if (ma.tPatch) {
     const total = tPatchCalc + st.membraneAccs.tPatchExtra;
     if (total > 0)
