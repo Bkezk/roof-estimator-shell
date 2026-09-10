@@ -379,26 +379,53 @@ export function buildAccessoryRefData(
   const dripEdge = buildEdgeGroup("drip_edge", "Drip Edge", "drip_edges");
   const gravelStop = buildEdgeGroup("gravel_stops", "Gravel Stop", "gravel_stops");
 
-  // Two-piece metals: labor captured; PRICES are a §12.7 capture gap → priced:false.
+  // Two-piece metals: labor from accessory_labor; PRICES from the captured Exceptional Metals
+  // admin grid (pricing_catalog duro_last:exceptional_metals → subscreens.two_piece_metals —
+  // the legacy Base & Snap bar/cover/corner rows live on that admin screen). Row order groups
+  // by size: an `N" 2-Piece Compression` row starts a group; its Cover / Outside Corner /
+  // Inside Corner rows follow.
   const twoPiece = {} as AccessoryRefData["twoPiece"];
-  for (const size of ["3", "4", "5", "6", "7", "8"] as const) {
-    let laborPerFt = 0;
-    let cornerLabor = 0;
-    for (const r of lab("two_piece_metals")?.rows ?? []) {
-      if (str(r["Description"]).startsWith(`${size}"`)) {
-        laborPerFt = num(r["Labor (Hr/Ft)"]);
-        cornerLabor = num(r["Corner Labor(Hr/Piece)"]);
-      }
+  {
+    const metalsData = catalogRows.find((r) => r.id === "duro_last:exceptional_metals")?.data as
+      | { subscreens?: { two_piece_metals?: { rows?: Array<Record<string, unknown>> } } }
+      | undefined;
+    const tpRows = metalsData?.subscreens?.two_piece_metals?.rows ?? [];
+    const priceBySize: Record<
+      string,
+      { bar: number; cover: number; inside: number; outside: number }
+    > = {};
+    let current: { bar: number; cover: number; inside: number; outside: number } | null = null;
+    for (const r of tpRows) {
+      const d = str(r["description"]);
+      const price = num(r["price"]);
+      const m = /^(\d)" 2-Piece Compression$/.exec(d);
+      if (m) {
+        current = { bar: price, cover: 0, inside: 0, outside: 0 };
+        priceBySize[m[1]!] = current;
+      } else if (current && d === "Cover") current.cover = price;
+      else if (current && d === "Inside Corner") current.inside = price;
+      else if (current && d === "Outside Corner") current.outside = price;
     }
-    twoPiece[size] = {
-      pricePerFt: 0,
-      coverPrice: 0,
-      insideCornerPrice: 0,
-      outsideCornerPrice: 0,
-      laborPerFt,
-      cornerLaborPerPiece: cornerLabor,
-      priced: false,
-    };
+    for (const size of ["3", "4", "5", "6", "7", "8"] as const) {
+      let laborPerFt = 0;
+      let cornerLabor = 0;
+      for (const r of lab("two_piece_metals")?.rows ?? []) {
+        if (str(r["Description"]).startsWith(`${size}"`)) {
+          laborPerFt = num(r["Labor (Hr/Ft)"]);
+          cornerLabor = num(r["Corner Labor(Hr/Piece)"]);
+        }
+      }
+      const p = priceBySize[size];
+      twoPiece[size] = {
+        pricePerFt: p?.bar ?? 0,
+        coverPrice: p?.cover ?? 0,
+        insideCornerPrice: p?.inside ?? 0,
+        outsideCornerPrice: p?.outside ?? 0,
+        laborPerFt,
+        cornerLaborPerPiece: cornerLabor,
+        priced: (p?.bar ?? 0) > 0,
+      };
+    }
   }
 
   // Corners: 6 rows × 6 colour columns + per-row hours.

@@ -1399,3 +1399,12 @@ IsPreDrill seed noted at the generic-edge split (inert while every row has UsePr
 strip-mastic sealant path now applies the third scrap pass. The Bronze-row accumulation quirk
 (RefID 16 never zeroed between recalcs) is legacy session state, not a formula — a pure
 recompute matches the first-recalc value and the drift is deliberately not reproduced.
+
+**Two-Piece Metal prices: FOUND (2026-09-10).** The ref_TwoPieceMetal prices were captured all
+along — they live on the EXCEPTIONAL Metals admin screen (pricing_catalog
+`duro_last:exceptional_metals` → `subscreens.two_piece_metals`), all six sizes with part
+numbers: bars 3"–8" $2.50/2597, $3.00/2600B, $3.05/2601B, $3.25/2602B, $3.60/2603B,
+$3.85/2604B; covers $3.70–$5.45; corners $30.60–$35.90 each side. `buildAccessoryRefData` now
+reads them (grouped by the `N" 2-Piece Compression` header rows) and Base & Snap Cover bills
+material. Remaining captures: ONLY the lookup category-5 stripping prices and the §12.9 item-6
+pitch-pan behavioural capture (Filler values + the 1121-vs-1122 confirmation).

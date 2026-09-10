@@ -148,6 +148,27 @@ const CATALOG = [
     ),
   },
   {
+    id: "duro_last:exceptional_metals",
+    category: "Exceptional Metals",
+    // Live shape: the two-piece prices ride the metals subscreens, not a rows/columns screen.
+    data: {
+      subscreens: {
+        two_piece_metals: {
+          rows: [
+            { description: '3" 2-Piece Compression', part_no: "2597", price: 2.5 },
+            { description: "Cover", part_no: "2598", price: 3.7 },
+            { description: "Outside Corner", part_no: "2298", price: 30.6 },
+            { description: "Inside Corner", part_no: "2299", price: 30.6 },
+            { description: '6" 2-Piece Compression', part_no: "2602B", price: 3.25 },
+            { description: "Cover", part_no: "2602T", price: 4.7 },
+            { description: "Outside Corner", part_no: "2303", price: 33.85 },
+            { description: "Inside Corner", part_no: "2302", price: 33.85 },
+          ],
+        },
+      },
+    } as unknown as MembraneScreen,
+  },
+  {
     id: "duro_last:fasteners_and_bits",
     category: "Fasteners & Bits",
     data: screen(
@@ -210,6 +231,17 @@ const LABOR = [
     data: screen(
       ["Description", "PreDrill Labor(Hrs)", "NoDrill Labor (Hrs)"],
       [{ Description: "Term Bar", "PreDrill Labor(Hrs)": 0.035, "NoDrill Labor (Hrs)": 0.0175 }],
+    ),
+  },
+  {
+    id: "two_piece_metals",
+    category: "Two Piece Metals",
+    data: screen(
+      ["Description", "Labor (Hr/Ft)", "Corner Labor(Hr/Piece)"],
+      [
+        { Description: '3" 2-Piece Compression', "Labor (Hr/Ft)": 0.043, "Corner Labor(Hr/Piece)": 0.2 },
+        { Description: '6" 2-Piece Compression', "Labor (Hr/Ft)": 0.043, "Corner Labor(Hr/Piece)": 0.2 },
+      ],
     ),
   },
   {
@@ -643,5 +675,37 @@ describe("§12.9 corrections", () => {
     expect(
       parapetEdgeFastenersCount([wall({ verticalInches: 30 }) as never], "Duro-Last", "mechanical"),
     ).toBe(0);
+  });
+});
+
+describe("Base & Snap Cover pricing (Exceptional Metals two-piece grid)", () => {
+  it('prices bar/cover/corners from the captured admin subscreen; 3" at 42 fasteners/10 ft', () => {
+    expect(ref.twoPiece["3"].priced).toBe(true);
+    expect(ref.twoPiece["6"].pricePerFt).toBeCloseTo(3.25, 2);
+    const blankEdge = { isPerimeter: false, termination: "No Termination", blockingFt: 0, arpSizeIn: 0 };
+    const st = emptyAccessoriesState();
+    st.snapCover["3"].coversOn = true;
+    st.snapCover["3"].insideCorners = 2;
+    const args = anchorArgs(st);
+    args.sections = [
+      section({
+        edges: [
+          { side: "A", lengthFt: 25, ...blankEdge, termination: '3" 2-pc Metal' },
+          { side: "B", lengthFt: 100, ...blankEdge },
+          { side: "C", lengthFt: 55, ...blankEdge },
+          { side: "D", lengthFt: 100, ...blankEdge },
+        ],
+      }),
+    ];
+    const r = computeAccessories(args);
+    const s3 = r.snapCover.sizes["3"];
+    // 25 ft → R10(1.03f × 25) = 30 ft; covers prefill the total length.
+    expect(s3.totalLengthFt).toBe(30);
+    expect(s3.coversQty).toBe(30);
+    expect(s3.cost).toBeCloseTo(30 * 2.5 + 30 * 3.7 + 2 * 30.6, 2);
+    expect(s3.fastenersNeeded).toBe(Math.ceil((30 / 10) * 42));
+    // Labor: Round(30 × 0.043 + 2 × 0.2, 4) = 1.69 h.
+    expect(s3.hours).toBeCloseTo(1.69, 4);
+    expect(r.warnings.length).toBe(0);
   });
 });
