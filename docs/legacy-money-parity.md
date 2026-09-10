@@ -370,7 +370,18 @@ Per-parapet **Attachment** changes:
   rva 0x421e0, re-read 2026-09-10: `v > 30 AND Round(v/6)×6 == 30` → v as-is; else `v > 102`
   → 102; else `Round((v+2)/6)×6` — so v ≤ 30 is ALSO rounded (the earlier "≤30 → as-is" was
   wrong; harmless for the thresholds since no v ≤ 30 rounds above 30).) The remaining height +
-  wrap fills the last tab.
+  wrap fills the last tab. **`CalcTabCount` model** (`Parapet.Recalculate`, rva 0x41df8): the
+  6-slot tab array is filled slot 0 = `Round6Inch(Skirt)` (0 if no skirt), slot 1 = Cant when
+  `ParapetStyle.HasCant` (then `c = 1`, else `c = 0`), slots `1+c`, `2+c`, `3+c` = the
+  intermediate tabs by attachment as listed, slot `4+c` = 0, slot 5 = 0; then it scans slot
+  `4 − c` down to 0 for the first non-zero value, sets `m_iCalcTabCount` = that slot index and
+  writes `RemainingPlusWrap` into the slot after it. So `CalcTabCount` = number of tab rows
+  above the skirt slot, **cant included** (Duro-Last mech, 36" vertical, no cant → 1; with cant
+  → 2; 60" → 2 / 3; 90" → 3 / 4). `TabCount` is the same field (recalculating first when the
+  tabs are stale). Quirk: the `AdheredSystem` branch writes slot `1+c` only when vert' > 59, so
+  a stale value from an earlier recalc can survive there; the two mech branches always
+  overwrite. `EdgeFasteners` calls `Parapet.Recalculate` unconditionally first, so user-edited
+  TabA–F never reach the fastener count.
 - `EdgeFasteners` (rva 0x42588), by roof-system ShortName:
   durolast: vert ≤ 30 → 0; mech → `Ceil(AdjustedLength / In2Ft(12) × CalcTabCount)`; else
   `Round(AdjustedLength / In2Ft(15) × TabCount)`. durotuff: mech →
@@ -1261,3 +1272,118 @@ prices 3"–8" (labor is live; material bills $0 with a warning until captured) 
 lookup category-5 stripping prices (stripping rows bill labor only). The §12.7 fascia
 cover/corner prices, drip/gravel corner+clip rows, and per-colour term-bar prices turned out to
 be ALREADY LIVE in the web pricing_catalog.
+
+### 12.9 Answers to §12.8 (decompiler session, 2026-09-10) — IL-exact, report-only
+
+Scorecard against what the web implemented or held: items 1 (hold), 7 (sum), 9 (1119T) were
+right; items 2 (rounding) and 3 (colour) were wrong; 4–6 and 8 were open and are closed below.
+Methods are cited so a skeptic can re-dump them. The embedded upgrade ledger
+`BidAdvantage.DataAccess.SqlScript.xml` (shipped inside the DataAccess assembly; a history of
+`INSERT`/`UPDATE`/`DELETE`/`DBCC CHECKIDENT` statements) is used where the IL cannot see a table —
+it fixes IDENTITY ids exactly, but any PRICE in it is historical, not current.
+
+1. **T-Patch** — the §12.4 filter was inverted; corrected in place (commit "correct six stale
+   claims"): only **Duro-Tuff** sections contribute `Round(Length × Width / 250)` (banker's).
+   `AreaTotal = Length × Width` (`RoofSection.get_AreaTotal`, rva 0x4b5a4), no scrap, no
+   parapets. On a Duro-Last bid CalcQty is 0 — the captured screen and footer were right and the
+   web's hold at 0 is the correct value, not a hold. Implement as Duro-Tuff-only.
+
+2. **Duro-Caulk tubes** — neither literal reading. IL (`Sealants.RecalcParents`, rva 0x22208):
+   `tubes[i] = Convert.ToInt32( Math.Ceiling(CDec(termBarLF(i) + fasciaCoverLF(i))) / 12D )`.
+   Ceiling applies to the FEET, the division is decimal, and `Convert.ToInt32(Decimal)` rounds
+   half-to-even. Test vectors: 6 ft → 0; 12 → 1; 13 → 1; 17 → 1; 18 → 2; 19 → 2; 30 → 2; 42 →
+   4 (3.5 → 4). The web's `Ceil(sum/12)` gives 1, 1, 2, 2, 2, 2, 3, 4 — wrong on 6, 13, 17, 30.
+   `termBarLF(i)` is `TermBars.GetTotalLengthByColor(i, False, False)` (rva 0x2633c) = the
+   **first** present bar with `Color − 1 == i`, returning `R10(1.03f × (roof + curb + parapet +
+   otherPreDrill + otherNoDrill))` — no base footage; `fasciaCoverLF(i)` =
+   `FaciaBars.TotalCoverLengthByColor(i)` (rva 0x182d8) = Σ bars vinyl(colour i+1) +
+   metal(index i).
+
+3. **Colour index 2 = WHITE.** Two enums: `eDLColorsIndex` is 0-based (Tan 0, Gray 1, White 2,
+   DarkGray 3, TerraCotta 4, RockPly 5) and drives the sealant buckets; `eDLColorsID` is 1-based
+   (Tan 1, Gray 2, White 3 …) and is what term bars / fascia colours carry (`GetTotalLengthByColor`
+   compares `Color − 1` to the index; `TotalCoverLengthByColor` parses `i + 1` as `eDLColorsID`).
+   Drains, washers and capstone tubes therefore land on White → `DUROCAULK_ID[2] = 13`.
+   The web's GRAY needs to move to WHITE.
+
+   **RefID → part map for `ref_Sealants`** (from the upgrade ledger's identity history, cross-
+   checked against the code arrays `DUROCAULK_ID = [14, 15, 13, 15, 16, 15]` (Tan, Gray, White,
+   DarkGray, TerraCotta, RockPly) and `PARASEAL_ID = [6, 7, 5]` (Tan, Gray, White), the
+   `SetStripMastic → 9` / `SetPitchPocket → 10` setters, the `RefID 19` seam-sealant loop, and the
+   estimator grid order, which is `SELECT * FROM ref_Sealants` with no ORDER BY):
+
+   | SealantID | part | name | how it is set |
+   |---|---|---|---|
+   | 1–4 | 1116 / 1116B / 1114 / 1115 | Duro-Caulk W/T/G/Bronze | discontinued; extra only |
+   | 5–8 | 1126 / 1126B / 1124 / 1125 | Paraseal W/T/G/Bronze | discontinued; `PARASEAL_ID` (W 5, T 6, G 7) referenced but no calc path adds to them |
+   | 9 | 1129 | Strip Mastic (Pail) | `SetStripMastic` |
+   | 10 | 1121 | Pitch Pocket Filler (10.2 oz) | `SetPitchPocket` — see item 6 |
+   | 11 | 1122 | Pitch Pocket Filler (30 oz) | extra only |
+   | 12 | 1123 | SB-240 Mastic | zeroed each recalc, never added to — extra only |
+   | 13 | 1136 | Duro-Caulk Plus – White | index 2 (White) + drains + washers + capstone |
+   | 14 | 1138 | Duro-Caulk Plus – Tan | index 0 (Tan) |
+   | 15 | 1134 | Duro-Caulk Plus – Gray | indices 1, 3, 5 (Gray, DarkGray, RockPly) |
+   | 16 | 1135 | Duro-Caulk Plus – Bronze | index 4 (TerraCotta); NOT zeroed before the add |
+   | 17, 18 | — | (deleted rows: water/solvent base adhesive) | — |
+   | 19 | 1119T | Tab Sealer | seam-sealant loop (item 9) |
+
+   Ledger evidence: ids 13–16 were inserted after `DBCC CHECKIDENT('ref_Sealants', RESEED, 13)`
+   as White 1136, Tan 1138, Gray 1138→`1134`, Bronze 1139→`1135`, then 1111, 1112-010, 1119T as
+   17, 18, 19, then `DELETE … WHERE SealantID = 17 or 18`. The 10 vs 11 split is the one row the
+   ledger does not name: 10 is priced 4.88 in it (tube-scale, matching the 10.2 oz row) and the
+   grid lists 1121 before 1122 in id order. Treat 10 ↔ 1121 as evidenced, not proven; item 6
+   gives a one-screen confirmation.
+
+4. **`Parapets.EdgeFasteners` for Duro-Last walls** — the tab model is now written into §8.5
+   (`CalcTabCount` = index of the highest non-zero slot in the tab array = number of tab rows
+   above the skirt, cant included). Worked values, `In2Ft(12) = 1`, `In2Ft(15) = 1.25`:
+   Duro-Last mech, 40 ft adjusted length, vertical 36", no cant → CalcTabCount 1 →
+   `Ceil(40 / 1 × 1) = 40`; same wall with cant → 2 → 80; vertical 60", no cant → 2 → 80;
+   Duro-Last adhered (non-mech), 40 ft, 36", no cant → `Round(40 / 1.25 × 1) = 32`. Vertical ≤ 30
+   → 0 regardless. The walls "over 30" showing 0" in the web are exactly the CalcTabCount gap.
+
+5. **Deck pre-drill flags** — the table is `global_DeckType` (not `ref_DeckTypes`), column
+   `IsPreDrill`, loaded by `Management` (`SELECT * FROM global_DeckType`, ordinal 3 →
+   `DeckType.Predrill`). The upgrade ledger seeds it: Wood 0, Structural Metal 0, Metal Retrofit
+   0, **Concrete 1**, Gypsum 0, **LWC/Steel 1, LWC/Concrete 1, LWC/Other 1, Tectum 1, Purlin
+   Fastened 1** (ids 1–10). There is no admin UI for it, so this seed is the best available value;
+   it is a `global_` (vendor) table, not a contractor-editable one. Consumer:
+   `GenericEdgeItem.CalcParapetLength` (rva 0x1c008) — for parapet i whose `TermOption.ID ==
+   SubType`, `len = IsPresent ? TermLength : 0`; if the edge row's `UsePreDrill` AND
+   `RoofSections(i).DeckType.Predrill` → the pre-drill bucket, else the no-drill bucket (the
+   `RoofSections(i)` index is the parapet's index — the §12.2 quirk, unchanged). With `UsePreDrill`
+   false on every seeded generic-edge row, routing everything no-drill is IL-equivalent; the flags
+   above make it exact if a row ever has `UsePreDrill = 1`.
+
+6. **Pitch Pocket Filler** — RefID 10 ↔ 1121 (10.2 oz) per the table in item 3. `FillerAmount`
+   is `ref_MetalsPitchPans.Filler` (columns: MetalsPitchPansID, Description, PartNumber, Price,
+   LaborPerUnit, LaborRate, DimensionA/B/C, Filler), read by `PitchPans` from the ref table and
+   copied per row. **Not in the IL, not in the ledger, and not shown by any admin grid** (the
+   Pitch Pans grid shows Description / Unit Cost / Labor Per Unit / Labor Rate only) — the only
+   capture route is behavioural: in the licensed Estimator, with no pipe stacks of usage "Pitch
+   Pan", set Qty 1 on ONE pitch-pan size (Metals → Pitch Pans), then read Accessories → Sealants
+   → the row whose Calc Qty moved: the row identifies RefID 10's part number (1121 vs 1122) and
+   the value is `Filler` for that size. Repeat for 6×6×8 and 8×8×8 (three screenshots). Until
+   then the web's hold at 0 for the pan term is the honest value; the pipe-stack term
+   `(qty + (isOpen ? 0 : 1)) × {>15" 4, >11" 3, >8" 2, else 1}` for usage id 3 is IL-complete
+   and can ship now.
+
+7. **Strip mastic default** — SUM over present bars (`TermBars.GetTotalLength(False, False)`,
+   rva 0x262f8, loops all bars and adds each `TermBar.GetTotalLength`), so the web's sum is
+   right; note the stored value lives on bar[0] and the sealant path then applies
+   `R10(1.03f × ·)` twice more (three scrap passes on the default path — §2.5 corrected).
+   Fascia bars carry their own `StripMasticLength` per bar and are summed the same way.
+
+8. **Capstone sealant tubes** — `Ceiling(Ceiling(Parapet.Length) / 40)` per present parapet with
+   `Capstone.ID == 2` (Remove & Reinstall), added to colour index 2 = White → **RefID 13,
+   Duro-Caulk Plus White (1136)**, regardless of the parapet's colour. Uses the wall `Length`,
+   not `CapstoneLength2`.
+
+9. **Tab Sealer** — confirmed: RefID 19 ↔ part 1119T. The ledger inserts 'Tab Sealer','1119T' as
+   the third row after the reseed-to-13 batch (14, 15, 16, then 17, 18, 19) and only 17 and 18
+   are deleted. The seam loop is `If Sealant.RefID = 19 Then CalcQty = CInt(Round(seamLF / 30 /
+   5))` over Duro-Roof sections only.
+
+Not answered here (unchanged captures): `ref_TwoPieceMetal` current prices for ids 1–6 (the
+ledger shows the row structure — ids 3, 1, 4, 2, 5, 6 = 3", 4", 5", 6", 7", 8", `Size` 2, 0, 3,
+1, 4, 5 — with historical prices only), and `lookup_DuroLastPrices` category 5.
