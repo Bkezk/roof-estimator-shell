@@ -18,6 +18,7 @@ import {
   buildInspectionTable,
   buildParapetLabor,
   parapetModeRate,
+  parapetBandForVertical,
   buildCurbLabor,
   curbLaborHours,
   buildMetalsCatalog,
@@ -589,6 +590,26 @@ describe("buildParapetLabor (deck × wall-height band × drill/cant → hrs per 
     expect(t.bands).toEqual(['0"-30"', '31"-48"']);
     expect(t.lookup["Wood"]!['0"-30"']!.noDrillNoCant).toBe(2.25);
     expect(t.lookup["Structural Metal"]!['0"-30"']!.predrillCanted).toBe(5.25);
+  });
+
+  it("parapetBandForVertical keys the band from Vertical like LookupParapetTimes (§19)", () => {
+    const bands = ['0"-30"', '31"-48"', '49"-72"', '73"-99"', '100"+'];
+    expect(parapetBandForVertical(bands, 0)).toBe('0"-30"');
+    expect(parapetBandForVertical(bands, 30)).toBe('0"-30"');
+    expect(parapetBandForVertical(bands, 31)).toBe('31"-48"');
+    expect(parapetBandForVertical(bands, 36)).toBe('31"-48"');
+    expect(parapetBandForVertical(bands, 48)).toBe('31"-48"');
+    expect(parapetBandForVertical(bands, 49)).toBe('49"-72"');
+    expect(parapetBandForVertical(bands, 72)).toBe('49"-72"');
+    expect(parapetBandForVertical(bands, 73)).toBe('73"-99"');
+    expect(parapetBandForVertical(bands, 99)).toBe('73"-99"');
+    expect(parapetBandForVertical(bands, 100)).toBe('100"+');
+    expect(parapetBandForVertical(bands, 240)).toBe('100"+');
+    // Fractional inches between integer bands fall to the lower band (raw double compare).
+    expect(parapetBandForVertical(bands, 30.5)).toBe('0"-30"');
+    // Negative input clamps to 0; unknown labels return undefined.
+    expect(parapetBandForVertical(bands, -5)).toBe('0"-30"');
+    expect(parapetBandForVertical(["Tall"], 40)).toBeUndefined();
   });
 
   it("parapetModeRate picks the drill × cant cell", () => {

@@ -528,10 +528,50 @@ export function parapetEdgeFastenersCount(
   roofSystem: string,
   attachment: "mechanical" | "adhered",
 ): number {
+  // Per-parapet Roof System / Attached With (legacy Membrane Options) override the bid's.
+  return parapets.reduce(
+    (sum, p) =>
+      sum + parapetEdgeFasteners(p, p.roofSystem || roofSystem, p.attachment ?? attachment),
+    0,
+  );
+}
+
+/**
+ * Legacy `Parapet.RemainingHeight` (0x423c8, docs §19): Vertical minus the intermediate tabs
+ * laid out by `Parapet.Recalculate` (Duro-Last mech: 25" above 30", 28"/23" above 59"/53",
+ * 28"/23" above 89"/83" of the 6"-rounded vertical; adhered: one 60" tab above 59"; Duro-Bond:
+ * none), clamped at 0 — the "Height after tabs" readout.
+ */
+export function parapetRemainingHeightIn(
+  p: ParapetInput,
+  roofSystem: string,
+  attachment: "mechanical" | "adhered",
+): number {
+  const vertical = p.verticalInches ?? 0;
+  if (vertical <= 0) return 0;
+  const v6 = round6Inch(vertical);
+  let tabs = 0;
+  if (roofSystem === "Duro-Bond") tabs = 0;
+  else if (attachment === "mechanical") {
+    if (v6 > 30) tabs += 25;
+    if (v6 > 59) tabs += 28;
+    else if (v6 > 53) tabs += 23;
+    if (v6 > 89) tabs += 28;
+    else if (v6 > 83) tabs += 23;
+  } else if (v6 > 59) tabs += 60;
+  return Math.max(0, vertical - tabs);
+}
+
+/** One wall's legacy `Parapet.EdgeFasteners` (docs §8.5) for the given system / attachment. */
+export function parapetEdgeFasteners(
+  p: ParapetInput,
+  roofSystem: string,
+  attachment: "mechanical" | "adhered",
+): number {
   const in2Ft = (i: number): number => bankersRound(i / 12, 2);
   let total = 0;
-  for (const p of parapets) {
-    if (p.lengthFt <= 0) continue;
+  {
+    if (p.lengthFt <= 0) return 0;
     const pieces = p.pieces ?? 1;
     const adjLen = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
     const girth =
@@ -551,7 +591,7 @@ export function parapetEdgeFastenersCount(
     const cant = p.cantInches ?? 0;
     const hasCant = parapetEffectiveCanted(p);
     if (roofSystem === "Duro-Last") {
-      if (vertical <= 30) continue; // durolast: vert ≤ 30 → 0
+      if (vertical <= 30) return 0; // durolast: vert ≤ 30 → 0
       const v6 = round6Inch(vertical);
       const c = hasCant ? 1 : 0;
       if (attachment === "mechanical") {

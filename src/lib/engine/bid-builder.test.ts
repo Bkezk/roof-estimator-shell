@@ -776,6 +776,206 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.77, 4);
   });
 
+  it("parapets: the labor band derives from Vertical (LookupParapetTimes), not the saved band (§19)", () => {
+    const withBands: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"', '31"-48"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+            '31"-48"': {
+              noDrillNoCant: 4.5,
+              noDrillCanted: 6.75,
+              predrillNoCant: 7,
+              predrillCanted: 10.5,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+    };
+    const wall = {
+      id: "p1",
+      name: "Wall",
+      lengthFt: 100,
+      heightBand: '0"-30"', // stale saved band — ignored once profile dims exist
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 0,
+      skirtInches: 6,
+      cantInches: 0,
+      verticalInches: 36,
+      wallTopInches: 12,
+      dropInches: 0,
+      wallType: 1,
+    };
+    const { inputs, warnings } = buildEstimateInputs(bid({ parapets: [wall] }), withBands);
+    expect(warnings).toEqual([]);
+    // 36" vertical → '31"-48"' row: AdjustedLength 102 / 50 × 4.5 = 9.18
+    expect(computeEstimate(inputs).parapetLaborHours).toBeCloseTo(9.18, 6);
+    // 24" vertical → '0"-30"' row: 102 / 50 × 2.25 = 4.59
+    const lower = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, verticalInches: 24 }] }),
+      withBands,
+    );
+    expect(computeEstimate(lower.inputs).parapetLaborHours).toBeCloseTo(4.59, 6);
+    // Walls saved without profile dims keep their picked band.
+    const legacySaved = buildEstimateInputs(
+      bid({
+        parapets: [
+          {
+            id: "p1",
+            name: "Wall",
+            lengthFt: 100,
+            heightBand: '31"-48"',
+            deckType: "Wood",
+            predrill: false,
+            canted: false,
+            girthInches: 30,
+          },
+        ],
+      }),
+      withBands,
+    );
+    expect(computeEstimate(legacySaved.inputs).parapetLaborHours).toBeCloseTo(9.18, 6);
+  });
+
+  it("parapets: per-wall Membrane Options attachment drives pre-drill and wall adhesive (§19)", () => {
+    const withAll: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+      adhesivePrices: { "Water Based Adhesive": 122.1 },
+      membraneAdhesives: {
+        1: {
+          "Water Based Adhesive": {
+            byDeckName: { Wood: 700 },
+            underlaymentUniform: 700,
+            wallCoverage: 350,
+          },
+        },
+      },
+    };
+    const wall = {
+      id: "p1",
+      name: "Wall",
+      lengthFt: 100,
+      heightBand: '0"-30"',
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 0,
+      skirtInches: 6,
+      cantInches: 0,
+      verticalInches: 24,
+      wallTopInches: 12,
+      dropInches: 0,
+      wallType: 1, // Wood or Metal: mechanical walls don't pre-drill
+    };
+    // Mechanical bid, wall inherits mechanical: no-drill rate, no wall adhesive.
+    const mech = buildEstimateInputs(bid({ parapets: [wall] }), withAll);
+    expect(computeEstimate(mech.inputs).parapetLaborHours).toBeCloseTo(4.59, 6);
+    expect(mech.adhesiveWholeUnits?.["Water Based Adhesive"] ?? 0).toBe(0);
+    // Same mechanical bid, the WALL alone is adhered (legacy Membrane Options): legacy
+    // Predrill = attachment != mechanical → pre-drill column (3.5), and the wall adhesive
+    // bills for this wall only — 100 × (24 + 12)/12 = 300 sq ft / 350 = 0.857 → Ceil 1 unit.
+    const adheredWall = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, attachment: "adhered" }] }),
+      withAll,
+    );
+    expect(adheredWall.warnings.filter((w) => /adhesive/i.test(w))).toEqual([]);
+    expect(computeEstimate(adheredWall.inputs).parapetLaborHours).toBeCloseTo((102 / 50) * 3.5, 6);
+    expect(adheredWall.adhesiveWholeUnits?.["Water Based Adhesive"]).toBe(1);
+    expect(adheredWall.adhesiveMaterial).toBeCloseTo(122, 2);
+    // Adhered bid, the WALL alone mechanical: no wall adhesive (membrane adhesive only:
+    // 2500/700 = 3.571 → 4), no-drill rate.
+    const mechWall = buildEstimateInputs(
+      bid({ attachment: "adhered", parapets: [{ ...wall, attachment: "mechanical" }] }),
+      withAll,
+    );
+    expect(mechWall.adhesiveWholeUnits?.["Water Based Adhesive"]).toBe(4);
+    expect(computeEstimate(mechWall.inputs).parapetLaborHours).toBeCloseTo(4.59, 6);
+    // Per-wall Roof System override: an unknown system with no parapet labor row warns.
+    const oddSystem = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, roofSystem: "Duro-Tuff" }] }),
+      { ...withAll, priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } } },
+    );
+    // Duro-Tuff bills 24" panels at 30": girth 42 → 6"-steps 3.5 ft → Ceil(42/24)=2 × 2.5 = 5 ft.
+    expect(oddSystem.inputs.duroLastMaterial).toBeCloseTo(3199.23 + 5 * 102 * 1.4, 2);
+  });
+
+  it("parapets: a wall's own labor % REPLACES the template factor; per-wall hours are reported (§19)", () => {
+    const withTpl: EngineAdminData = {
+      ...admin,
+      parapetLabor: {
+        bands: ['0"-30"'],
+        lookup: {
+          Wood: {
+            '0"-30"': {
+              noDrillNoCant: 2.25,
+              noDrillCanted: 3.375,
+              predrillNoCant: 3.5,
+              predrillCanted: 5.25,
+            },
+          },
+        },
+      },
+      priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
+      laborTemplates: { names: ["Heavy"], byName: { Heavy: { "Parapets Labor": 110 } } },
+    };
+    const wall = {
+      id: "p1",
+      name: "Wall",
+      lengthFt: 100,
+      heightBand: '0"-30"',
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 30,
+    };
+    // Template only: 4.59 × 1.1.
+    const tpl = buildEstimateInputs(
+      bid({ laborTemplateName: "Heavy", parapets: [wall, { ...wall, id: "p2", lengthFt: 50 }] }),
+      withTpl,
+    );
+    expect(tpl.breakdown.parapetBaseHoursById).toEqual({ p1: 4.59, p2: (52 / 50) * 2.25 });
+    expect(tpl.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59 * 1.1, 6);
+    expect(tpl.breakdown.parapetHoursById["p2"]).toBeCloseTo((52 / 50) * 2.25 * 1.1, 6);
+    // The wall's own AdjustLabor (legacy frmLaborPopUp writes the SAME field the template
+    // seeds) replaces the template: -20 → 4.59 × 0.8, not × 1.1 × 0.8.
+    const own = buildEstimateInputs(
+      bid({ laborTemplateName: "Heavy", parapets: [{ ...wall, adjustLaborPct: -20 }] }),
+      withTpl,
+    );
+    expect(own.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59 * 0.8, 6);
+    expect(computeEstimate(own.inputs).parapetLaborHours).toBeCloseTo(4.59 * 0.8, 6);
+    // An explicit 0 also replaces it (the user reset the link to 0%).
+    const zero = buildEstimateInputs(
+      bid({ laborTemplateName: "Heavy", parapets: [{ ...wall, adjustLaborPct: 0 }] }),
+      withTpl,
+    );
+    expect(zero.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59, 6);
+  });
+
   it("per-item labor %: adjustLaborPct scales the WHOLE item's hours (curbs and parapets)", () => {
     // Legacy frmLaborPopUp link (docs §8.7): ManHours = BaseHours × (1 + AdjustLabor/100),
     // wrapping every per-item adder (curb ISO/lift labor, parapet slipsheet labor).

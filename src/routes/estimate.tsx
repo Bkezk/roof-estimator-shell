@@ -54,6 +54,7 @@ import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
 import { CurbsScreen } from "@/components/curbs-screen";
+import { ParapetsScreen } from "@/components/parapets-screen";
 import { NonDlScreens } from "@/components/nondl-screens";
 import { emptyNonDlState, normalizeNonDlState, type NonDlState } from "@/lib/engine/nondl";
 import {
@@ -178,18 +179,20 @@ let pseq = 1;
 const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   id: `p${pseq++}`,
   name: `Parapet ${pseq - 1}`,
-  lengthFt: 50,
+  // Legacy frmParapets.ResetFields defaults: Length 1, Pieces 1, Skirt 6", every other dim 0.
+  // Height band is derived from Vertical (LookupParapetTimes) so it starts empty.
+  lengthFt: 1,
   heightBand: "",
   deckType: "Wood",
   predrill: false,
   canted: false,
-  // Legacy wall profile dims (in); girth = their sum. Defaults keep the prior 36" girth.
-  skirtInches: 0,
+  // Legacy wall profile dims (in); girth = their sum.
+  skirtInches: 6,
   cantInches: 0,
-  verticalInches: 24,
-  wallTopInches: 12,
+  verticalInches: 0,
+  wallTopInches: 0,
   dropInches: 0,
-  girthInches: 36,
+  girthInches: 6,
   // Legacy Setup default "2. Wall Type": Wood or Metal (1) — drives the pre-drill labor column.
   wallType: 1,
   // Legacy Pieces (membrane pieces wrapping the wall): AdjustedLength = length + 1 + pieces.
@@ -733,6 +736,9 @@ function EstimatePage() {
       nonDl: build.nonDl,
       // Per-curb legacy ManHours for the Curbs screen "Labor: X hours" readout.
       curbHoursById: build.breakdown.curbHoursById,
+      // Per-wall legacy ManHours / BaseManHours for the Parapets screen labor link (§19).
+      parapetHoursById: build.breakdown.parapetHoursById,
+      parapetBaseHoursById: build.breakdown.parapetBaseHoursById,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -2750,608 +2756,38 @@ function EstimatePage() {
           </Card>
         </div>
 
+        {/* Legacy Parapets screen (frmParapets): deck / wall type / length / pieces, the
+            Skirt-Cant-Vertical-Top-Drop profile, termination / capstone / ARP tabs, Membrane
+            Options (per-wall Roof System / Attachment / adhesive / mil / color), the frmLaborPopUp
+            labor link, Fasteners Needed and lvSummary — docs §19. */}
         <div className={step === 3 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Parapets</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setParapets((p) => [
-                    ...p,
-                    newParapet({
-                      heightBand: admin.parapetLabor?.bands[0] ?? "",
-                      wallType: parapetDefaults.wallType ?? 1,
-                      ...(parapetDefaults.thicknessMil !== undefined
-                        ? { thicknessMil: parapetDefaults.thicknessMil }
-                        : {}),
-                      ...(parapetDefaults.color ? { color: parapetDefaults.color } : {}),
-                    }),
-                  ]);
-                  setSelParapet(parapets.length);
-                }}
-              >
-                <Plus className="mr-1 h-4 w-4" /> New parapet
-              </Button>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {parapets.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No parapet walls. Labor bills from the deck × wall-height matrix; membrane girth ×
-                  length prices at the bid's default membrane.
-                </p>
-              ) : (
-                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  {(() => {
-                    const i = Math.min(selParapet, parapets.length - 1);
-                    const p = parapets[i]!;
-                    return (
-                      <div key={p.id} className="min-w-0 rounded-md border p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <Input
-                            className="h-8 w-[200px] font-medium"
-                            value={p.name}
-                            onChange={(e) =>
-                              setParapets((prev) =>
-                                prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
-                              )
-                            }
-                          />
-                          <div className="flex items-center">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Duplicate this parapet"
-                              onClick={() => {
-                                setParapets((prev) => [
-                                  ...prev,
-                                  { ...clone(p), id: `p${pseq++}`, name: `${p.name} (copy)` },
-                                ]);
-                                setSelParapet(parapets.length);
-                              }}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive"
-                              onClick={() => {
-                                setParapets((prev) => prev.filter((_, j) => j !== i));
-                                setSelParapet((v) => Math.max(0, Math.min(v, parapets.length - 2)));
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-                          <Field label="Length (ft)">
-                            <NumInput
-                              value={p.lengthFt}
-                              onValue={(n) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, lengthFt: n } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Wall height">
-                            <PickOne
-                              value={p.heightBand}
-                              options={admin.parapetLabor?.bands ?? []}
-                              onChange={(v) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, heightBand: v } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Deck">
-                            <PickOne
-                              value={p.deckType}
-                              options={admin.deckOrder}
-                              onChange={(v) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Pieces">
-                            <NumInput
-                              min={0}
-                              value={p.pieces ?? 1}
-                              onValue={(n) =>
-                                setParapets((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, pieces: n } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          {/* Legacy §8.5: the labor drill column keys WallType (mech; adhered is
-                              always pre-drill) and the cant column keys Cant > 0 — both derived,
-                              so no toggles. Manual switches appear only for legacy walls saved
-                              without those fields. */}
-                          {(() => {
-                            const hasDims =
-                              p.skirtInches !== undefined ||
-                              p.cantInches !== undefined ||
-                              p.verticalInches !== undefined ||
-                              p.wallTopInches !== undefined ||
-                              p.dropInches !== undefined;
-                            const hasWallType = p.wallType !== undefined;
-                            const predrill = hasWallType
-                              ? attachment !== "mechanical" || p.wallType === 4
-                              : p.predrill;
-                            const canted = hasDims ? (p.cantInches ?? 0) > 0 : p.canted;
-                            if (hasDims && hasWallType) {
-                              return (
-                                <p
-                                  className="self-end pb-1 text-[11px] text-muted-foreground"
-                                  title="Legacy labor columns: pre-drill follows Wall Type (adhered bids always pre-drill); canted follows the Cant dimension."
-                                >
-                                  Labor: {predrill ? "pre-drill" : "no-drill"}
-                                  {canted ? ", canted" : ""}
-                                </p>
-                              );
-                            }
-                            return (
-                              <>
-                                {!hasWallType && (
-                                  <div className="flex items-end gap-2 pb-1">
-                                    <Switch
-                                      id={`pd-${p.id}`}
-                                      checked={p.predrill}
-                                      onCheckedChange={(v) =>
-                                        setParapets((prev) =>
-                                          prev.map((x, j) => (j === i ? { ...x, predrill: v } : x)),
-                                        )
-                                      }
-                                    />
-                                    <Label htmlFor={`pd-${p.id}`} className="text-xs">
-                                      Pre-drill
-                                    </Label>
-                                  </div>
-                                )}
-                                {!hasDims && (
-                                  <div className="flex items-end gap-2 pb-1">
-                                    <Switch
-                                      id={`ct-${p.id}`}
-                                      checked={p.canted}
-                                      onCheckedChange={(v) =>
-                                        setParapets((prev) =>
-                                          prev.map((x, j) => (j === i ? { ...x, canted: v } : x)),
-                                        )
-                                      }
-                                    />
-                                    <Label htmlFor={`ct-${p.id}`} className="text-xs">
-                                      Canted
-                                    </Label>
-                                  </div>
-                                )}
-                                {(hasDims || hasWallType) && (
-                                  <p className="self-end pb-1 text-[11px] text-muted-foreground">
-                                    Labor: {predrill ? "pre-drill" : "no-drill"}
-                                    {canted ? ", canted" : ""}
-                                  </p>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                        {/* Legacy wall profile dims: girth (billed membrane height) = their sum;
-                            wall adhesive bills on Vertical + Wall top only. */}
-                        {(() => {
-                          const setDim = (
-                            key:
-                              | "skirtInches"
-                              | "cantInches"
-                              | "verticalInches"
-                              | "wallTopInches"
-                              | "dropInches",
-                            v: number,
-                          ) =>
-                            setParapets((prev) =>
-                              prev.map((x, j) => {
-                                if (j !== i) return x;
-                                const nx = { ...x, [key]: v };
-                                nx.girthInches =
-                                  (nx.skirtInches ?? 0) +
-                                  (nx.cantInches ?? 0) +
-                                  (nx.verticalInches ?? 0) +
-                                  (nx.wallTopInches ?? 0) +
-                                  (nx.dropInches ?? 0);
-                                return nx;
-                              }),
-                            );
-                          const dims: Array<
-                            [
-                              string,
-                              (
-                                | "skirtInches"
-                                | "cantInches"
-                                | "verticalInches"
-                                | "wallTopInches"
-                                | "dropInches"
-                              ),
-                            ]
-                          > = [
-                            ["Skirt", "skirtInches"],
-                            ["Cant", "cantInches"],
-                            ["Vertical", "verticalInches"],
-                            ["Top of Wall", "wallTopInches"],
-                            ["Drop", "dropInches"],
-                          ];
-                          return (
-                            <div className="space-y-1">
-                              <p className="text-xs font-medium text-muted-foreground">
-                                Wall profile (in) — membrane girth is the sum
-                              </p>
-                              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                                {dims.map(([label, key]) => (
-                                  <Field key={key} label={label}>
-                                    <NumInput
-                                      min={0}
-                                      value={p[key] ?? 0}
-                                      onValue={(n) => setDim(key, n)}
-                                    />
-                                  </Field>
-                                ))}
-                                <Field label="Girth (in)">
-                                  <Input type="number" value={p.girthInches} readOnly disabled />
-                                </Field>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        {/* Legacy Membrane Options + flags (docs §8.5/§8.6): the parapet's OWN
-                            mil/color price its membrane; Use Slipsheet adds poly labor; the
-                            labor %% mirrors the legacy per-item labor link. */}
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Membrane options
-                          </p>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <Field label="Mil">
-                              <PickOne
-                                value={
-                                  p.thicknessMil !== undefined
-                                    ? `${p.thicknessMil}mil`
-                                    : "Bid default"
-                                }
-                                options={["Bid default", "40mil", "50mil", "60mil"]}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "Bid default") delete nx.thicknessMil;
-                                      else nx.thicknessMil = parseInt(v, 10);
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="Color">
-                              <PickOne
-                                value={p.color ?? "Bid default"}
-                                options={["Bid default", ...colorOptions]}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "Bid default") delete nx.color;
-                                      else nx.color = v;
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="Labor adj (%)">
-                              <NumInput
-                                min={-100}
-                                value={p.adjustLaborPct ?? 0}
-                                onValue={(n) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, adjustLaborPct: n } : x)),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <div className="flex items-end gap-2 pb-1">
-                              <Switch
-                                id={`ss-${p.id}`}
-                                checked={p.useSlipsheet ?? false}
-                                onCheckedChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, useSlipsheet: v } : x)),
-                                  )
-                                }
-                              />
-                              <Label htmlFor={`ss-${p.id}`} className="text-xs">
-                                Use Slipsheet
-                              </Label>
-                            </div>
-                          </div>
-                        </div>
-                        {/* Legacy wall extras (docs §8.4/§8.6): wood blocking (labor-only
-                            TopOfParapet item), capstone masonry, and parapet ARP — all
-                            auto-priced from the seeded rates. */}
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Wall extras (auto-priced)
-                          </p>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                            <div className="flex items-end gap-2 pb-1">
-                              <Switch
-                                id={`bk-${p.id}`}
-                                checked={p.hasBlocking ?? false}
-                                onCheckedChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, hasBlocking: v } : x)),
-                                  )
-                                }
-                              />
-                              <Label htmlFor={`bk-${p.id}`} className="text-xs">
-                                Wood blocking
-                              </Label>
-                            </div>
-                            <Field label="Capstones">
-                              <PickOne
-                                value={
-                                  p.capstoneOption === 1
-                                    ? "Remove only"
-                                    : p.capstoneOption === 2
-                                      ? "Remove & reinstall"
-                                      : "None"
-                                }
-                                options={["None", "Remove only", "Remove & reinstall"]}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "None") {
-                                        delete nx.capstoneOption;
-                                        delete nx.capstoneLengthFt;
-                                      } else nx.capstoneOption = v === "Remove only" ? 1 : 2;
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            {(p.capstoneOption ?? 0) > 0 && (
-                              <Field label="Capstone len (ft)">
-                                <NumInput
-                                  min={0}
-                                  value={p.capstoneLengthFt ?? p.lengthFt}
-                                  onValue={(n) =>
-                                    setParapets((prev) =>
-                                      prev.map((x, j) =>
-                                        j === i ? { ...x, capstoneLengthFt: n } : x,
-                                      ),
-                                    )
-                                  }
-                                />
-                              </Field>
-                            )}
-                            <Field label="ARP size">
-                              <PickOne
-                                value={(p.arpSizeIn ?? 0) > 0 ? `${p.arpSizeIn}"` : "None"}
-                                options={["None", '12"', '18"', '24"', '30"']}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      if (v === "None") {
-                                        delete nx.arpSizeIn;
-                                        delete nx.arpLengthFt;
-                                      } else nx.arpSizeIn = parseInt(v, 10);
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            {(p.arpSizeIn ?? 0) > 0 && (
-                              <Field label="ARP len (ft)">
-                                <NumInput
-                                  min={0}
-                                  value={p.arpLengthFt ?? p.lengthFt}
-                                  onValue={(n) =>
-                                    setParapets((prev) =>
-                                      prev.map((x, j) => (j === i ? { ...x, arpLengthFt: n } : x)),
-                                    )
-                                  }
-                                />
-                              </Field>
-                            )}
-                          </div>
-                        </div>
-                        {/* Legacy Termination sub-tab (docs §12.6): feeds the Accessories edge
-                            screens' "Parapets:" footage — no direct money of its own. */}
-                        <div className="mt-2 space-y-1">
-                          <p className="text-xs font-medium text-muted-foreground">Termination</p>
-                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                            <Field label="Termination">
-                              <PickOne
-                                value={
-                                  TERMINATION_OPTIONS.find(
-                                    (t) => TERMINATION_ID_BY_LABEL[t] === p.termOptionId,
-                                  ) ?? "No Termination"
-                                }
-                                options={[...TERMINATION_OPTIONS]}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = { ...x };
-                                      const id = TERMINATION_ID_BY_LABEL[v];
-                                      if (id === undefined) {
-                                        delete nx.termOptionId;
-                                        delete nx.termLengthFt;
-                                      } else nx.termOptionId = id;
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                              />
-                            </Field>
-                            {(p.termOptionId ?? 0) > 0 && (
-                              <Field label="Term length (ft)">
-                                <NumInput
-                                  min={0}
-                                  value={p.termLengthFt ?? p.lengthFt}
-                                  onValue={(n) =>
-                                    setParapets((prev) =>
-                                      prev.map((x, j) => (j === i ? { ...x, termLengthFt: n } : x)),
-                                    )
-                                  }
-                                />
-                              </Field>
-                            )}
-                            <Field label="Wall type">
-                              <PickOne
-                                value={
-                                  (p.wallType ?? 1) === 1 ? "Wood or Metal" : "Brick or Concrete"
-                                }
-                                options={["Wood or Metal", "Brick or Concrete"]}
-                                onChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i
-                                        ? { ...x, wallType: v === "Wood or Metal" ? 1 : 4 }
-                                        : x,
-                                    ),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <div className="flex items-end gap-2 pb-1">
-                              <Switch
-                                id={`tbb-${p.id}`}
-                                checked={p.useTermBarOnBase ?? false}
-                                onCheckedChange={(v) =>
-                                  setParapets((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i ? { ...x, useTermBarOnBase: v } : x,
-                                    ),
-                                  )
-                                }
-                              />
-                              <Label htmlFor={`tbb-${p.id}`} className="text-xs">
-                                Use Term Bar on Base
-                              </Label>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Right rail: legacy wall-profile diagram + parapet summary */}
-                  <div className="space-y-2">
-                    <ParapetProfileDiagram
-                      p={parapets[Math.min(selParapet, parapets.length - 1)]!}
-                    />
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Parapet</TableHead>
-                            <TableHead className="text-right">Len (ft)</TableHead>
-                            <TableHead>Height</TableHead>
-                            <TableHead>Deck</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {parapets.map((p2, i2) => (
-                            <TableRow
-                              key={p2.id}
-                              onClick={() => setSelParapet(i2)}
-                              className={
-                                i2 === Math.min(selParapet, parapets.length - 1)
-                                  ? "cursor-pointer bg-muted/60"
-                                  : "cursor-pointer"
-                              }
-                            >
-                              <TableCell className="font-medium">{p2.name}</TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {p2.lengthFt}
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap">{p2.heightBand}</TableCell>
-                              <TableCell>{p2.deckType}</TableCell>
-                            </TableRow>
-                          ))}
-                          <TableRow>
-                            <TableCell className="font-semibold">Total LF</TableCell>
-                            <TableCell
-                              colSpan={3}
-                              className="text-right font-semibold tabular-nums"
-                            >
-                              {parapets.reduce((s2, p2) => s2 + p2.lengthFt, 0).toLocaleString()}
-                            </TableCell>
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </div>
-                    {/* Legacy bottom readouts: Vertical Wall / Total Wall / Parapet Membrane */}
-                    {(() => {
-                      const girthOf = (p2: ParapetInput) =>
-                        (p2.skirtInches ?? 0) +
-                          (p2.cantInches ?? 0) +
-                          (p2.verticalInches ?? 0) +
-                          (p2.wallTopInches ?? 0) +
-                          (p2.dropInches ?? 0) || p2.girthInches;
-                      const vertSqFt = parapets.reduce(
-                        (s2, p2) => s2 + (p2.lengthFt * (p2.verticalInches ?? 0)) / 12,
-                        0,
-                      );
-                      const totalSqFt = parapets.reduce(
-                        (s2, p2) => s2 + (p2.lengthFt * girthOf(p2)) / 12,
-                        0,
-                      );
-                      const membraneSqFt = parapets.reduce((s2, p2) => {
-                        const pieces = p2.pieces ?? 1;
-                        const adjLen = pieces >= 1 ? p2.lengthFt + 1 + pieces : 0;
-                        return s2 + (Math.ceil(girthOf(p2)) / 12) * adjLen;
-                      }, 0);
-                      return (
-                        <div className="flex flex-wrap justify-between gap-2 rounded-md border px-3 py-2 text-[11px]">
-                          <span>
-                            Vertical Wall Sq Ft:{" "}
-                            <span className="font-semibold tabular-nums">
-                              {vertSqFt.toFixed(2)}
-                            </span>
-                          </span>
-                          <span>
-                            Total Wall Sq Ft:{" "}
-                            <span className="font-semibold tabular-nums">
-                              {totalSqFt.toFixed(2)}
-                            </span>
-                          </span>
-                          <span>
-                            Parapet Membrane Sq Ft:{" "}
-                            <span className="font-semibold tabular-nums">
-                              {membraneSqFt.toFixed(2)}
-                            </span>
-                          </span>
-                        </div>
-                      );
-                    })()}
-                    <p className="text-xs text-muted-foreground">
-                      Click a row to edit that parapet.
-                    </p>
-                  </div>
-                </div>
-              )}
+            <CardContent>
+              <ParapetsScreen
+                parapets={parapets}
+                onChange={setParapets}
+                selected={selParapet}
+                onSelect={setSelParapet}
+                admin={admin}
+                bidDefaults={{ roofSystem, attachment, membraneAdhesiveName: membraneAdhesive }}
+                sections={sections}
+                colorOptions={colorOptions}
+                crewRate={laborRate}
+                hoursById={result?.parapetHoursById ?? {}}
+                baseHoursById={result?.parapetBaseHoursById ?? {}}
+                newParapet={() =>
+                  newParapet({
+                    wallType: parapetDefaults.wallType ?? 1,
+                    ...(parapetDefaults.thicknessMil !== undefined
+                      ? { thicknessMil: parapetDefaults.thicknessMil }
+                      : {}),
+                    ...(parapetDefaults.color ? { color: parapetDefaults.color } : {}),
+                  })
+                }
+              />
             </CardContent>
           </Card>
         </div>
@@ -4588,100 +4024,6 @@ function EstimatePage() {
           </Button>
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * Legacy Parapets screen wall-profile diagram: the membrane path over the wall drawn live from
- * the five profile dims (skirt along the roof, cant diagonal, vertical up, top-of-wall across,
- * drop down the far side), with red inch labels like the legacy app.
- */
-function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
-  const skirt = p.skirtInches ?? 0;
-  const cant = p.cantInches ?? 0;
-  const vert = p.verticalInches ?? 0;
-  const top = p.wallTopInches ?? 0;
-  const drop = p.dropInches ?? 0;
-  const girth = skirt + cant + vert + top + drop || p.girthInches;
-  const c707 = 0.7071;
-  // Membrane path in inch-space, y up.
-  const pts: Array<[number, number]> = [[0, 0]];
-  const push = (dx: number, dy: number) => {
-    const [x, y] = pts[pts.length - 1]!;
-    pts.push([x + dx, y + dy]);
-  };
-  push(skirt, 0); // skirt along the roof
-  push(cant * c707, cant * c707); // cant up at 45°
-  push(0, vert); // vertical wall
-  push(top, 0); // top of wall
-  push(0, -drop); // drop down the outside
-  const xs = pts.map((q) => q[0]);
-  const ys = pts.map((q) => q[1]);
-  const w = Math.max(1, Math.max(...xs) - Math.min(...xs));
-  const h = Math.max(1, Math.max(...ys) - Math.min(...ys));
-  const scale = Math.min(150 / w, 120 / h);
-  const X = (x: number) => 40 + (x - Math.min(...xs)) * scale;
-  const Y = (y: number) => 150 - (y - Math.min(...ys)) * scale;
-  const path = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${X(x)},${Y(y)}`).join(" ");
-  const mid = (i: number): [number, number] => {
-    const a = pts[i]!;
-    const b = pts[i + 1]!;
-    return [(X(a[0]) + X(b[0])) / 2, (Y(a[1]) + Y(b[1])) / 2];
-  };
-  const labels: Array<{ v: number; at: [number, number]; dx: number; dy: number }> = [
-    { v: skirt, at: mid(0), dx: 0, dy: 14 },
-    { v: cant, at: mid(1), dx: 14, dy: 6 },
-    { v: vert, at: mid(2), dx: -8, dy: 0 },
-    { v: top, at: mid(3), dx: 0, dy: -8 },
-    { v: drop, at: mid(4), dx: 14, dy: 0 },
-  ];
-  return (
-    <div className="rounded-md border p-3">
-      <p className="mb-1 text-xs font-semibold">{p.name} — wall profile</p>
-      {girth <= 0 ? (
-        <p className="text-[11px] text-muted-foreground">
-          Enter the wall dims to draw the profile.
-        </p>
-      ) : (
-        <svg viewBox="0 0 230 170" className="h-40 w-full text-foreground">
-          {/* roof deck baseline */}
-          <line
-            x1="8"
-            y1={Y(0)}
-            x2={X(0) + 4}
-            y2={Y(0)}
-            stroke="currentColor"
-            strokeWidth="1"
-            opacity="0.35"
-          />
-          <path d={path} fill="none" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-          {labels
-            .filter((l) => l.v > 0)
-            .map((l, i) => (
-              <text
-                key={i}
-                x={l.at[0] + l.dx}
-                y={l.at[1] + l.dy}
-                textAnchor="middle"
-                className="fill-red-600 text-[10px] font-semibold dark:fill-red-400"
-              >
-                {l.v}"
-              </text>
-            ))}
-          <text
-            x="222"
-            y="164"
-            textAnchor="end"
-            className="fill-red-600 text-[10px] font-semibold dark:fill-red-400"
-          >
-            Girth: {girth}"
-          </text>
-        </svg>
-      )}
-      <p className="text-[11px] text-muted-foreground">
-        Skirt → cant → vertical → top of wall → drop
-      </p>
     </div>
   );
 }

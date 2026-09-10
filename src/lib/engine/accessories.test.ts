@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeAccessories,
   parapetEdgeFastenersCount,
+  parapetRemainingHeightIn,
   emptyAccessoriesState,
   normalizeAccessoriesState,
   roundToNextTen,
@@ -683,6 +684,57 @@ describe("§12.9 corrections", () => {
     expect(
       parapetEdgeFastenersCount([wall({ verticalInches: 30 }) as never], "Duro-Last", "mechanical"),
     ).toBe(0);
+  });
+});
+
+describe("parapet Height after tabs (legacy frmParapets.Recalculate RemainingHeight, §19)", () => {
+  type ParapetInput = import("./bid-builder").ParapetInput;
+  const wall = (over: Partial<ParapetInput>): ParapetInput => ({
+    id: "p1",
+    name: "P1",
+    lengthFt: 38,
+    pieces: 1,
+    heightBand: "",
+    deckType: "Wood",
+    predrill: false,
+    canted: false,
+    girthInches: 60,
+    verticalInches: 36,
+    ...over,
+  });
+  it('mechanical: 25 above 30", then 28/23 above 59/53, then 28/23 above 89/83', () => {
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 30 }), "Duro-Last", "mechanical")).toBe(
+      30,
+    );
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 36 }), "Duro-Last", "mechanical")).toBe(
+      11,
+    );
+    // 54" → Round6Inch 54 > 53 → 25 + 23 = 48 → 6.
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 54 }), "Duro-Last", "mechanical")).toBe(
+      6,
+    );
+    // 60" → 25 + 28 = 53 → 7.
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 60 }), "Duro-Last", "mechanical")).toBe(
+      7,
+    );
+    // 96" → 25 + 28 + 28 = 81 → 15.
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 96 }), "Duro-Last", "mechanical")).toBe(
+      15,
+    );
+    // Never below 0.
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 31 }), "Duro-Last", "mechanical")).toBe(
+      6,
+    );
+  });
+  it('adhered: one 60" tab above 59"; Duro-Bond never tabs; no vertical → 0', () => {
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 48 }), "Duro-Last", "adhered")).toBe(48);
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 72 }), "Duro-Last", "adhered")).toBe(12);
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 72 }), "Duro-Bond", "mechanical")).toBe(
+      72,
+    );
+    expect(parapetRemainingHeightIn(wall({ verticalInches: 0 }), "Duro-Last", "mechanical")).toBe(
+      0,
+    );
   });
 });
 

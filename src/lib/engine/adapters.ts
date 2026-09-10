@@ -983,6 +983,30 @@ export function buildParapetLabor(rows: RawParapetRow[]): ParapetLaborTables {
   return { bands, lookup };
 }
 
+/**
+ * Legacy `LookupParapetTimes.DataTableLookup` keys the wall-height BAND from the parapet's
+ * Vertical dimension (inches) with breaks at 31 / 49 / 73 / 100 (docs §19). The seeded band
+ * labels carry those ranges ('0"-30"', '31"-48"', '49"-72"', '73"-99"', '100"+'); this parses
+ * them so the rule stays data-driven. undefined = no band covers the value.
+ */
+export function parapetBandForVertical(bands: string[], verticalIn: number): string | undefined {
+  const v = Math.max(0, verticalIn);
+  for (const b of bands) {
+    const range = /^(\d+)"?\s*-\s*(\d+)"?$/.exec(b.trim());
+    if (range) {
+      const lo = Number(range[1]);
+      const hi = Number(range[2]);
+      if (v >= lo && v <= hi) return b;
+      // Legacy compares the raw double: 30.5" falls between the integer bands → the lower one.
+      if (v > hi && v < hi + 1) return b;
+      continue;
+    }
+    const open = /^(\d+)"?\s*\+$/.exec(b.trim());
+    if (open && v >= Number(open[1])) return b;
+  }
+  return undefined;
+}
+
 /** Pick the install-mode rate (hrs per 50 LF) from a parapet matrix entry. */
 export function parapetModeRate(e: ParapetModeRates, predrill: boolean, canted: boolean): number {
   if (predrill) return canted ? e.predrillCanted : e.predrillNoCant;

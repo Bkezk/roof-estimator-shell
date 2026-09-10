@@ -86,6 +86,7 @@ import {
   parapetModeRate,
   curbLaborHours as curbHoursCalc,
   deriveAdhesiveSubstrate,
+  parapetBandForVertical,
   underlaymentAdhesive,
   laborTemplateFactor,
   LEGACY_RS_ID_BY_NAME,
@@ -378,6 +379,18 @@ export interface ParapetInput {
   termLengthFt?: number;
   /** §12.6 "Use Term Bar on Base": adds Round(Length) ft of WHITE term bar (drill by WallType). */
   useTermBarOnBase?: boolean;
+  /**
+   * Legacy Membrane Options (frmParapets): the wall's OWN Roof System / Attached With /
+   * adhesive. Absent = the bid-level values. Attachment drives the labor key (non-mechanical
+   * walls key WallType 4), wall adhesive (adhered walls only) and the edge-fastener tab model.
+   */
+  roofSystem?: string;
+  attachment?: Attachment;
+  membraneAdhesiveName?: string;
+  /** Legacy wood-blocking length (txtWoodLength): persisted, never priced (docs §8.4). */
+  blockingLengthFt?: number;
+  /** Free-text notes (legacy Notes link). */
+  notes?: string;
   /** Legacy WallType (Setup "2. Wall Type"): 1 = Wood or Metal (no-drill), 4 = Brick or Concrete. */
   wallType?: number;
   // Legacy wall profile dims (inches); girth derives as their sum when any is present.
@@ -414,6 +427,31 @@ export const parapetEffectivePredrill = (p: ParapetInput, attachment: Attachment
   p.wallType !== undefined ? attachment !== "mechanical" || p.wallType === 4 : p.predrill;
 
 /** Membrane girth (in): Skirt+Cant+Vertical+WallTop+Drop when dims are present, else girthInches. */
+/** A parapet's effective roof system / attachment / adhesive (wall override, else bid). */
+export function resolveParapetSystem(
+  bid: Pick<BidInput, "roofSystem" | "attachment" | "membraneAdhesiveName">,
+  p: Pick<ParapetInput, "roofSystem" | "attachment" | "membraneAdhesiveName">,
+): { roofSystem: string; attachment: Attachment; adhesiveName: string; rsId: number } {
+  const roofSystem = p.roofSystem || bid.roofSystem;
+  return {
+    roofSystem,
+    attachment: p.attachment ?? bid.attachment,
+    adhesiveName: p.membraneAdhesiveName || bid.membraneAdhesiveName || "Water Based Adhesive",
+    rsId: LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1,
+  };
+}
+
+/**
+ * The labor band a wall prices in: derived from its Vertical dimension like the legacy lookup
+ * (`parapetBandForVertical`); walls saved without profile dims keep their picked band.
+ */
+export function parapetLaborBand(p: ParapetInput, bands: string[]): string {
+  if (parapetHasDims(p) && p.verticalInches !== undefined) {
+    return parapetBandForVertical(bands, p.verticalInches) ?? p.heightBand;
+  }
+  return p.heightBand;
+}
+
 const parapetGirthInches = (p: ParapetInput): number =>
   parapetHasDims(p)
     ? (p.skirtInches ?? 0) +
@@ -697,6 +735,9 @@ export interface ReviewBreakdown {
   underlaymentHoursBySubtype: Record<number, number>;
   /** Per-curb legacy Curb.ManHours (the Curbs screen "Labor: X hours" link), by curb id. */
   curbHoursById: Record<string, number>;
+  /** Per-parapet legacy Parapet.ManHours (adjusted) and BaseManHours, by parapet id. */
+  parapetHoursById: Record<string, number>;
+  parapetBaseHoursById: Record<string, number>;
   /** Auto-priced NDL items (§8.3/§8.4) for the non-DL ledger rows. */
   auto: {
     counterflash: { material: number; laborCost: number; hours: number };
@@ -1189,20 +1230,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     g.sections.push(s);
     adheredGroups.set(key, g);
   }
-  const bidAdvName = bid.membraneAdhesiveName || "Water Based Adhesive";
-  const bidCov =
-    bid.attachment === "adhered"
-      ? admin.membraneAdhesives?.[LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1]?.[bidAdvName]
-      : undefined;
-  // Parapet walls follow the BID-level attachment (parapets carry no roof system of their own);
-  // make sure that combo is examined even when every section overrides to mechanical.
-  if (bid.attachment === "adhered" && bid.parapets.length > 0) {
-    const key = `${bid.roofSystem}|${bidAdvName}`;
+  // Adhered PARAPETS (their own Membrane Options attachment, else the bid's) add their combo
+  // so the wall adhesive is examined even when no section is adhered.
+  for (const p of bid.parapets) {
+    const ps = resolveParapetSystem(bid, p);
+    if (ps.attachment !== "adhered") continue;
+    const key = `${ps.roofSystem}|${ps.adhesiveName}`;
     if (!adheredGroups.has(key))
       adheredGroups.set(key, {
-        roofSystem: bid.roofSystem,
-        rsId: LEGACY_RS_ID_BY_NAME[bid.roofSystem] ?? -1,
-        advName: bidAdvName,
+        roofSystem: ps.roofSystem,
+        rsId: ps.rsId,
+        advName: ps.adhesiveName,
         sections: [],
       });
   }
@@ -1239,9 +1277,19 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Parapet wall adhesive (§2.4 wall coverage). Basis = legacy WallPlusTopSqFt (parity doc
       // §3): Length × (Vertical + WallTop)/12 — vertical + top only, no skirt/cant/drop. Walls
       // without profile dims (older saved bids) keep the full-girth stand-in they priced with.
-      if (bid.parapets.length > 0 && bid.attachment === "adhered" && cov === bidCov) {
+      // Legacy Parapet.WallAdhesive: ONLY walls whose OWN attachment is adhered (Membrane
+      // Options), grouped here by the wall's (roof system, adhesive).
+      const adheredWalls = bid.parapets.filter((p) => {
+        const ps = resolveParapetSystem(bid, p);
+        return (
+          ps.attachment === "adhered" &&
+          ps.roofSystem === g.roofSystem &&
+          ps.adhesiveName === advName
+        );
+      });
+      if (adheredWalls.length > 0) {
         if (cov.wallCoverage) {
-          const wallArea = bid.parapets.reduce(
+          const wallArea = adheredWalls.reduce(
             (sum, p) =>
               sum +
               (parapetHasDims(p)
@@ -1313,6 +1361,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let parapetArpSqFt = 0;
   /** Σ parapet slipsheet polyethylene sq ft (§8.6) — the §14 Others "Slipsheet" CalcQty. */
   let parapetPolySqFt = 0;
+  /** Per-parapet legacy ManHours / BaseManHours (the Parapets screen "N MHS (x%)" link). */
+  const parapetHoursById: Record<string, number> = {};
+  const parapetBaseHoursById: Record<string, number> = {};
   if (bid.parapets.length > 0) {
     const first = bid.sections[0];
     const anyWall = bid.parapets.some((p) => parapetGirthInches(p) > 0 && p.lengthFt > 0);
@@ -1341,18 +1392,22 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // No sections at all: keep the old diagnostic — real walls are pricing at $0.
       warnings.push("No membrane price for the parapet material (bid-default thickness/color).");
     }
-    const isDuroTuff = bid.roofSystem === "Duro-Tuff";
     for (const p of bid.parapets) {
+      // Per-wall Roof System / Attached With (legacy Membrane Options), bid-level by default.
+      const ps = resolveParapetSystem(bid, p);
+      const isDuroTuff = ps.roofSystem === "Duro-Tuff";
       const tDeck = TEAROFF_DECK_BY_LABOR_DECK[p.deckType] ?? p.deckType;
       const girth = parapetGirthInches(p);
       const pieces = p.pieces ?? 1;
       const adjustedLengthFt = pieces >= 1 ? p.lengthFt + 1 + pieces : 0;
-      const entry = admin.parapetLabor?.lookup[tDeck]?.[p.heightBand];
+      // Legacy LookupParapetTimes keys the band from the Vertical dimension (docs §19).
+      const band = parapetLaborBand(p, admin.parapetLabor?.bands ?? []);
+      const entry = admin.parapetLabor?.lookup[tDeck]?.[band];
       let itemHours = 0;
       if (!entry) {
         if (p.lengthFt > 0)
           warnings.push(
-            `No parapet labor for ${p.deckType} / ${p.heightBand || "(no band)"} — "${p.name}".`,
+            `No parapet labor for ${p.deckType} / ${band || "(no band)"} — "${p.name}".`,
           );
       } else {
         // Legacy BaseManHours (docs §8.5): (value / 50) × ADJUSTEDLENGTH — the padded
@@ -1361,7 +1416,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           (adjustedLengthFt / 50) *
           parapetModeRate(
             entry,
-            parapetEffectivePredrill(p, bid.attachment),
+            parapetEffectivePredrill(p, ps.attachment),
             parapetEffectiveCanted(p),
           );
       }
@@ -1382,8 +1437,14 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         parapetPolySqFt += polySqFt;
       }
       // Per-item labor % (docs §8.7): legacy ManHours = BaseManHours × (1 + AdjustLabor/100),
-      // wrapping the whole item (matrix labor + slipsheet labor).
-      parapetLaborHours += itemHours * (1 + (p.adjustLaborPct ?? 0) / 100);
+      // wrapping the whole item (matrix labor + slipsheet labor). The labor template WRITES
+      // the same AdjustLabor field, so a wall's own value REPLACES the template factor (§19).
+      const pAdjust =
+        p.adjustLaborPct !== undefined ? 1 + p.adjustLaborPct / 100 : tf("Parapets Labor");
+      const manHours = itemHours * pAdjust;
+      parapetLaborHours += manHours;
+      parapetBaseHoursById[p.id] = itemHours;
+      parapetHoursById[p.id] = manHours;
       // Parapet ARP (docs §8.6): ((size+6)/12) × (ARPLength == Length ? AdjustedLength :
       // ARPLength) — no ×1.03, no membrane deduction (both section-side-only).
       if ((p.arpSizeIn ?? 0) > 0) {
@@ -1686,7 +1747,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   }
 
   // Apply the template factors to the category hour seams.
-  parapetLaborHours *= tf("Parapets Labor");
   curbLaborHours *= tf("Curbs Labor");
 
   // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
@@ -1869,6 +1929,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     underlaymentMaterialBySubtype: uMatBySub,
     underlaymentHoursBySubtype: uHrsBySub,
     curbHoursById,
+    parapetHoursById,
+    parapetBaseHoursById,
     auto: bAuto,
   };
   return {

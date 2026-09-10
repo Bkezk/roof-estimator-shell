@@ -1891,3 +1891,77 @@ fastener (÷ 60). The legacy IL multiplies its stored `SingleFastenerTimeByDT` v
 its DB must hold the converted figure; the conversion point was not located in the IL —
 assumption, consistent with the captured admin display and with sane totals (≈2.2 h of
 fastening per 2,500 sq ft on wood).
+
+## 19. Parapets screen — labor band, per-wall system, template composition (IL-exact, 2026-09-10)
+
+Sources: `frmParapets` (Estimator.exe: `LookupParapetTimes`, `Recalculate`, `VerifyFields`,
+`ResetFields`, `ShowMembraneOptions`, `CopySettingsFromRoofSection`), `Parapet.BaseManHours` /
+`Parapet.ManHours` / `Parapet.WallAdhesive` / `Parapet.EdgeFasteners` (DataAccess.dll) and the
+default-parapet XML in `BidAdvantage.DataAccess.SqlScript.xml`. Builds on §8.5–§8.7.
+
+### 19.1 The legacy rules
+
+1. **Labor band is DERIVED from Vertical**, never picked. `LookupParapetTimes(vertical)` walks
+   the ParapetTimes rows and returns the one whose range contains the raw double: breaks at
+   31 / 49 / 73 / 100 (`0"-30"`, `31"-48"`, `49"-72"`, `73"-99"`, `100"+`). A fractional
+   height between two integer bands (30.5") stays in the lower band.
+2. **Labor key** (`Parapet.BaseManHours`): mechanical attachment keys
+   `[WallType, DeckType, HasCant, band]`; every other attachment keys WallType = 4 (pre-drill
+   column). Hours = `value / 50 × AdjustedLength` (+ `Poly / 100 × 0.25` when Use Slipsheet),
+   AdjustedLength = Length + 1 + Pieces.
+3. **ManHours = BaseManHours × (1 + AdjustLabor / 100)**. The labor template writes the SAME
+   `AdjustLabor` field on the parapet when applied, so a wall's own "N MHS (x%)" link value
+   REPLACES the template factor — they never multiply.
+4. **Per-wall Membrane Options**: each parapet carries its own RoofSystem / Attachment /
+   membrane adhesive / mil / color (`ShowMembraneOptions`), seeded from the bid defaults;
+   "Copy Settings from Roof Section" copies a section's system, attachment, mil and color.
+   The wall's attachment drives (a) the pre-drill column above, (b) `Parapet.WallAdhesive` —
+   only walls whose OWN attachment is adhered bill wall adhesive, grouped by the wall's
+   (roof system, adhesive), basis Length × (Vertical + WallTop) / 12 ÷ wall coverage — and
+   (c) `Parapet.EdgeFasteners` tab count (mechanical vs adhered tab model).
+5. **Recalculate tab model** (screen "Height after tabs" readout only — no price term):
+   `Round6Inch(Vertical)`; mechanical: 25 above 30", +28 above 59" (else +23 above 53"),
+   +28 above 89" (else +23 above 83"); adhered: one 60" tab above 59"; Duro-Bond: none.
+   `RemainingHeight = max(0, Vertical − Σ tabs)`.
+6. **ResetFields defaults**: Length 1, Pieces 1, Skirt 6", Cant / Vertical / Top / Drop 0,
+   flags off. `VerifyFields` requires Vertical, Length and Pieces > 0 before a wall saves.
+7. **Wall styles toolstrip** (four icons: Vertical, Canted Vertical, Up & Over, Canted Up &
+   Over) only enables / clears the Skirt / Cant / Top / Drop inputs; the dims themselves are
+   what price. HasCant = Cant > 0. Not ported (see §19.3).
+
+### 19.2 Web corrections (2026-09-10)
+
+1. `parapetBandForVertical(bands, verticalIn)` (adapters) + `parapetLaborBand(p, bands)`
+   (bid-builder): the band derives from `verticalInches` whenever a wall has profile dims;
+   walls saved without dims keep their stored `heightBand`. The screen shows the derived band
+   read-only.
+2. `ParapetInput` gains `roofSystem?`, `attachment?`, `membraneAdhesiveName?`,
+   `blockingLengthFt?`, `notes?`; `resolveParapetSystem(bid, p)` resolves the wall's system
+   (bid defaults when unset). The labor loop, Duro-Tuff panel rule, pre-drill flag, wall
+   adhesive grouping and the Accessories `parapetEdgeFastenersCount` all use the per-wall
+   system now (previously the bid's).
+3. Wall adhesive was billed for EVERY wall when the bid was adhered; now only walls whose own
+   attachment is adhered (an adhered wall on a mechanical bid also bills — the bid needs no
+   adhered section for the wall's adhesive combo to be examined).
+4. `adjustLaborPct` on a parapet REPLACES the template's Parapets Labor factor instead of
+   compounding with it (`pAdjust` in the builder loop; the later `× tf("Parapets Labor")` was
+   removed). Curbs still compose template × per-item adjust (unchanged, not yet audited).
+5. `ReviewBreakdown.parapetHoursById` / `parapetBaseHoursById` feed the screen's labor link
+   and the frmLaborPopUp dialog (Adjust % ⇄ Change Hours, "Use template default" clears the
+   override).
+6. `parapetRemainingHeightIn(p, roofSystem, attachment)` (accessories) implements the
+   Recalculate tab model for the "Height after tabs" readout.
+7. New-wall defaults follow ResetFields (Length 1, Pieces 1, Skirt 6", other dims 0); the
+   Setup "Wall Type" default still seeds `wallType` (web default 1 = Wood or Metal; the legacy
+   default XML carries 4 = Brick or Concrete — see §8.6, open question).
+8. `src/components/parapets-screen.tsx` replaces the inline step: Deck / Wall Type / Length /
+   Pieces, the profile dims with girth and derived band, Height after tabs, Use Slipsheet,
+   Term Bar Base, Termination (+ wood blocking length) / Capstones / ARP tabs, Membrane
+   Options expander, Copy Settings from Roof Section, Fasteners Needed, Notes, VerifyFields
+   hints and the lvSummary (Style | Color | # | Skirt | Cant | Vert | Top | Drop | Length |
+   Termination | Wood | Caps | ARP) with Vertical / Total / Parapet Membrane Sq Ft totals.
+
+### 19.3 Not ported
+
+- The wall-style toolstrip (§19.1 item 7). The web screen leaves all five dims editable; a
+  style picker would only gray out / zero the dims a style excludes. No money impact.
