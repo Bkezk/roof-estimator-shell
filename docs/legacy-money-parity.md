@@ -385,7 +385,10 @@ Per-parapet **Attachment** changes:
   `(value / 50) × AdjustedLength + Polyethylene/100 × 0.25`. Mechanical attachment uses the
   parapet's WallType in the key; every other attachment keys WallType = **4** (fixed).
   Stock values DB-resident. `ManHours = BaseManHours × (1 + AdjustLabor/100)`.
-- `DeckFasteners` (= ToInt32(AdjustedLength)) has NO consumers — dead code.
+- `DeckFasteners` (= ToInt32(AdjustedLength)) — CORRECTED 2026-09-10: it IS consumed, by
+  `frmAccFasteners.InitializeTotals` (Estimator.exe), where it adds 1 screw + 1 poly plate per
+  foot of parapet to the parapet's deck bucket on the fasteners-by-deck screens (§12.5). The
+  earlier "dead code" reading only searched DataAccess.dll.
 
 ### 8.6 Parapet wall styles & flags
 

@@ -132,9 +132,11 @@ multiplier 1 / 1.1 / 1.2 at 12" / 6" / 4" ribbons), `adhesive_labor_per_ksqft`,
   `tubes = Ceiling(termBarLF(color) + fasciaCoverLF(color)) / 12` — **1 tube per 12 LF**.
 - **Drains**: + `1 tube per drain` (added to the White/Gray bucket, index 2).
 - **Washers**: + `Ceiling(0.25 × washerQty)` — **1 tube per 4 washers**.
-- **Pipe stacks**: per-color tube counts from `PipeStacks.SealantAmount`
-  (`SealantLinealFt = linealDiameter × qty` feeds it; per-size multiplier in
-  `PipeStackSize.SealantMultiplyer` — MySQL values not captured).
+- **Pipe stacks**: per-color tube counts from `PipeStacks.SealantAmount` =
+  `Ceil(Σ SealantLinealFt × 2 / 10)` per color, where `SealantLinealFt = Ceil((size + 0.25) × π)
+  / 12 × qty` (`PipeStack.OnRecalculate`, rva 0x201e0). CORRECTED 2026-09-10: the
+  `ref_Stacks.RequiredSealantMultiplyer` column is only persisted (`PipeStackSize.WriteXML`) —
+  no pricing path reads it, so it needs no capture (see money-parity §12.3).
 - **Strip mastic** (RefID 9): per bar `RoundToNextTen(Ceil(len × 1.03))` (3% scrap, round up to
   10 ft; applied twice in the summation — once in `GetStripMasticLen`, once in the caller), then
   `rolls = Ceiling(totalFt / 350)` — **350 LF per unit**.
@@ -167,9 +169,11 @@ GetCurbEdgeLength rva 0x25144; FaciaBar / GenericEdgeItem follow the same shape)
 - Strip mastic per bar and the fastener counts for these lengths are §2.5 / §2.1.
 
 ### 2.6 Which catalog items satisfy which "needed" bucket (UpdateTotals)
-Special ref_Fasteners IDs: **255** → Poly Plates, **256** → parapet-only fasteners,
-**257** → Insulation Plates, **303** → Induction Plates (display names live in the MySQL
-`ref_Fasteners` — not captured). Every other fastener line counts against the screw bucket only
+Special ref_Fasteners IDs: **255** → Poly Plates, **256** → the 3" Square Steel plate
+(`Fasteners.steelPlateIndex`; CORRECTED 2026-09-10 — it is the steel PLATE row, consumed by the
+Parapet Wall-Tabs screen's "Steel Plates Needed", not a parapet-only fastener), **257** →
+Insulation Plates, **303** → Induction Plates (display names live in the Azure `ref_Fasteners`
+— not captured). Every other fastener line counts against the screw bucket only
 when its `Subtype` is allowed for the section's deck family:
 
 | deck family (bucket) | allowed subtypes |
@@ -216,9 +220,9 @@ multiplier 1.5125 is a *different selectable pitch* whose labor premium the admi
   RefIDs 9/10/12–15/19) and per-box quantities (`Fastener.RoundUnitsToBoxes/ReqBoxes` reads
   box sizes from the catalog).
 - `ref_UnderlaymentTypes.SubType` meanings (which boards are SubTypes 1/7/8).
-- `PipeStackSize.SealantMultiplyer` values and pitch-pan `FillerAmount` values.
+- Pitch-pan `FillerAmount` values (`PipeStackSize.SealantMultiplyer` is NOT needed — unused
+  in pricing, see §2.5).
 - The adhered-membrane ribbon-spacing branch of `MembraneAdhesive` for spacing ≠ -1 adhesives
   (OlyBond/Millennium: field 12" / perim 6" defaults are in `legacy_adhesive`) and the `durogrip`
   special path — traced only partially.
-- Term/fascia/edge *auto-lengths* (`GetRoofEdgeLength`/`GetParapetLength`/`GetCurbEdgeLength` —
-  which roof edges feed each bar type) — present in IL, not yet transcribed.
+- ~~Term/fascia/edge auto-lengths~~ — transcribed 2026-09-10 in legacy-money-parity §12.2.
