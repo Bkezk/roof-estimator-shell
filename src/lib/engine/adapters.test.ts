@@ -634,6 +634,19 @@ describe("buildCurbLabor / curbLaborHours (§5.3)", () => {
       }),
     ).toBeCloseTo((2 * 83) / 60, 6);
   });
+
+  it("legacy BaseHours order: the style multiplier wraps the setup term too (§8.2)", () => {
+    // Scupper ×4: (7.5 × 10 × 2 + 8 × 2) / 60 × 4 = 166/60 × 4 = 11.0667 h
+    expect(
+      curbLaborHours({
+        quantity: 2,
+        setupMinutes: t.setupMinutes,
+        minutesPerLF: t.minutesByDeck["Wood"]!,
+        typeMultiplier: t.multiplierByType["Scupper"]!,
+        perimeterFt: 10,
+      }),
+    ).toBeCloseTo((166 / 60) * 4, 6);
+  });
 });
 
 describe("buildMetalsCatalog (Exceptional Metals master-detail → flat list)", () => {

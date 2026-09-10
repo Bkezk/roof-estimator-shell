@@ -1589,3 +1589,40 @@ edge + wall, Roof Decking, Sheet Metal, Masonry, Custom Apps, Other ← Others; 
 Subcontractors / Services row per item). UI `src/components/nondl-screens.tsx` mirrors the
 six-tile screen and dialogs. `Settings.DumpsterYards` now reads the services screen's
 `extras.yardage` (was hard-coded 30).
+
+## 15. Curbs screen — web implementation status (2026-09-10)
+
+Re-verified against the IL in-session (`Curb.BaseHours` 0x333a4, `ManHours` 0x3365b, `LinealFt`
+0x3334a, `ISO_Labor` 0x33718, `ISO_Fasteners` 0x33764, `PolyethyleneSqF` 0x33684, `SF_ISO`
+0x336e4, `Curbs.OnRecalculate` 0x33afc, `ReviewCalc.Recalculate` slots; `frmCurbs`
+InitializeComponent / FillFields / ResetFields / VerifyFields / UpdateView / picCurb_Paint /
+optNone_CheckedChanged / style button handlers).
+
+**Wiring (confirmed):** `dMaterial[3] = Curbs.TotalCost` (Σ `Curb.Cost`, the §2 wrap model),
+`dLabor[3,0] = CalcLaborCost(Curbs.ManHours)` at the ESTIMATE crew rate, `dLabor[3,1]` = hours —
+the web already billed both this way. Term options → ids 0 None, 1 Scupper/Fascia, 2 Lift & Tuck,
+3 Lift & T-Bar, 4 No Lift & T-Bar, 5 No Lift & Counter Flash (radio order on the form: None,
+No Lift & Counter Flash, No Lift & T-Bar, Lift & T-Bar, Lift & Tuck, Scupper/Fascia); With Top
+forces None (and disables the group), Scupper / Metal Scupper force Scupper/Fascia. Style
+buttons → `CurbStyle` index 0..6 = ids 1..7 (Open, Closed, Open Canted, Closed Canted, With Top,
+Scupper, Metal Scupper); the canted pair are menu items under Open / Closed.
+
+**Two web divergences corrected (both against §8.2, already transcribed there):**
+1. `curbLaborHours` applied the style multiplier to the per-LF term only; the legacy multiplies
+   `(perLF × perimeter × qty + base × qty)` — the setup/base term too. Fixed (test: Scupper ×4
+   → 166/60 × 4 h).
+2. "Plastic on Curb(s)" labor `PolyethyleneSqF / 400` hours (inside BaseHours, so under the
+   per-item adjust %) was missing. Fixed (test: 37.5 sq ft → 0.09375 h). The poly / ISO sq ft
+   also now feed the §14 Non-DL "Others" rows.
+
+**Screen:** the legacy curb drawings were recovered from the frmCurbs ImageList streams
+(`iltLarge` 150×115 → `public/curb-style-0..5.png`, `iltCurbs` 58×58 → `public/curb-icon-0..5.png`;
+image index by style: 1→0, 2→1, 3/4→2, 5→3, 6→4, 7→5 per `FillFields`). The A/B/C/D dimension
+letters are drawn INTO those images; `picCurb_Paint` only writes the numeric readout
+("A: n" … "D: n", Arial 12 bold) down the left of the picture box at y = 35/60/85/110 — the web
+now does the same (readout column + legacy image) instead of positioning its own letters over a
+redrawn schematic. Textbox defaults A 1, B 1, C 12, Skirt (D) 6; `VerifyFields` requires all four
+> 0 and warns when C < 8 ("Minimum height for curbs is 8\"…"); the lvSummary is Label | Option |
+Qty | A | B | C | D | Color with `UpdateScreenTotals` Man Hours + labor $; "Copy Settings from
+Roof Section" copies deck type + color (+ mil); the per-curb "Labor: X hours" link edits
+AdjustLabor. Web: `src/components/curbs-screen.tsx`.

@@ -60,6 +60,7 @@ import {
 import { SectionCalcDialog } from "@/components/section-calc-dialog";
 import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
+import { CurbsScreen } from "@/components/curbs-screen";
 import { NonDlScreens } from "@/components/nondl-screens";
 import { emptyNonDlState, normalizeNonDlState, type NonDlState } from "@/lib/engine/nondl";
 import {
@@ -79,7 +80,6 @@ import {
   type WarrantyData,
 } from "@/lib/proposal-bid";
 import type { EngineAdminData } from "@/lib/engine/adapters";
-import { CURB_TYPE_BY_STYLE_ID } from "@/lib/engine/curb-wrap";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
@@ -161,16 +161,6 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
 
 // Selectable Field Tab Spacing pitches per system (legacy RSSheetTabSpacing + MechTabMulti;
 // systems not listed keep a free numeric input).
-// Legacy curb termination options by id (docs §8.3).
-const CURB_TERM_LABELS = [
-  "None",
-  'Scupper/Fascia Bar (1¾")',
-  "Lift & Tuck",
-  "Lift & T-Bar",
-  "No Lift & T-Bar",
-  "No Lift & Counter Flash",
-];
-
 const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
   "Duro-Last": [28, 60, 120],
   "Duro-Roof": [57, 87, 120],
@@ -205,15 +195,16 @@ const newCurb = (defaults: Partial<CurbInput> = {}): CurbInput => ({
   id: `c${cseq++}`,
   name: `Curb ${cseq - 1}`,
   quantity: 1,
-  widthIn: 24,
-  lengthIn: 36,
+  // Legacy frmCurbs textbox defaults: A 1, B 1, C 12, Skirt (D) 6.
+  widthIn: 1,
+  lengthIn: 1,
   // One legacy style selection drives BOTH the wrap model and the labor type (docs §8.1):
   // default style 1 = Open.
   curbType: "Open",
   deckType: "Wood",
   styleId: 1,
   dimCIn: 12,
-  dimDIn: 0,
+  dimDIn: 6,
   ...defaults,
 });
 
@@ -675,6 +666,8 @@ function EstimatePage() {
       metalsScreen: build.metalsScreen,
       // §14 Non-Duro-Last Items results (six dialogs + auto rows; OtherMaterial / LS1 / LS2).
       nonDl: build.nonDl,
+      // Per-curb legacy ManHours for the Curbs screen "Labor: X hours" readout.
+      curbHoursById: build.breakdown.curbHoursById,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -3160,414 +3153,34 @@ function EstimatePage() {
           </Card>
         </div>
 
+        {/* Legacy Curbs screen (frmCurbs): style toolstrip, dims, termination, insulation /
+            plastic, the picCurb drawing with the A/B/C/D readout and the lvSummary — docs
+            §8.1–§8.3. Wrap material via curb-wrap.ts (§2); labor per §8.2 BaseHours. */}
         <div className={step === 4 ? "space-y-6" : "hidden"}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Curbs</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setCurbs((p) => [...p, newCurb()]);
-                  setSelCurb(curbs.length);
-                }}
-              >
-                <Plus className="mr-1 h-4 w-4" /> New curb
-              </Button>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {curbs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No curbs. Labor bills per curb: setup + minutes/LF for the deck × curb-type
-                  multiplier × perimeter.
-                </p>
-              ) : (
-                <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  {(() => {
-                    const i = Math.min(selCurb, curbs.length - 1);
-                    const c = curbs[i]!;
-                    return (
-                      <div key={c.id} className="min-w-0 rounded-md border p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <Input
-                            className="h-8 w-[200px] font-medium"
-                            value={c.name}
-                            onChange={(e) =>
-                              setCurbs((prev) =>
-                                prev.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)),
-                              )
-                            }
-                          />
-                          <div className="flex items-center">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Duplicate this curb"
-                              onClick={() => {
-                                setCurbs((prev) => [
-                                  ...prev,
-                                  { ...clone(c), id: `c${cseq++}`, name: `${c.name} (copy)` },
-                                ]);
-                                setSelCurb(curbs.length);
-                              }}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive"
-                              onClick={() => {
-                                setCurbs((prev) => prev.filter((_, j) => j !== i));
-                                setSelCurb((v) => Math.max(0, Math.min(v, curbs.length - 2)));
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-                          <Field label="Quantity">
-                            <NumInput
-                              value={c.quantity}
-                              onValue={(n) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, quantity: n } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Labor adj (%)">
-                            <NumInput
-                              min={-100}
-                              value={c.adjustLaborPct ?? 0}
-                              onValue={(n) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, adjustLaborPct: n } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Deck">
-                            <PickOne
-                              value={c.deckType}
-                              options={admin.deckOrder}
-                              onChange={(v) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, deckType: v } : x)),
-                                )
-                              }
-                            />
-                          </Field>
-                          {/* Legacy curb screen has its OWN Mil/Color — the wrap rate keys on
-                              them, not the bid default. */}
-                          <Field label="Mil">
-                            <PickOne
-                              value={
-                                c.thicknessMil !== undefined
-                                  ? `${c.thicknessMil}mil`
-                                  : "Bid default"
-                              }
-                              options={["Bid default", "40mil", "50mil", "60mil"]}
-                              onChange={(v) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) => {
-                                    if (j !== i) return x;
-                                    const nx = { ...x };
-                                    if (v === "Bid default") delete nx.thicknessMil;
-                                    else nx.thicknessMil = parseInt(v, 10);
-                                    return nx;
-                                  }),
-                                )
-                              }
-                            />
-                          </Field>
-                          <Field label="Color">
-                            <PickOne
-                              value={c.color ?? "Bid default"}
-                              options={["Bid default", ...colorOptions]}
-                              onChange={(v) =>
-                                setCurbs((prev) =>
-                                  prev.map((x, j) => {
-                                    if (j !== i) return x;
-                                    const nx = { ...x };
-                                    if (v === "Bid default") delete nx.color;
-                                    else nx.color = v;
-                                    return nx;
-                                  }),
-                                )
-                              }
-                            />
-                          </Field>
-                        </div>
-                        {/* Legacy wrap-material model: style 1..6 + the A/B/C/D dims. Styles 3/4
-                            are quote-required in legacy (no auto price). */}
-                        <div className="mt-2 space-y-2">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Select curb style — one selection drives the wrap membrane AND the labor
-                            type (canted styles need a quote)
-                          </p>
-                          <div className="flex flex-wrap gap-2">
-                            {(
-                              [
-                                [1, "Open"],
-                                [2, "Closed"],
-                                [3, "Open Canted"],
-                                [4, "Closed Canted"],
-                                [5, "With Top"],
-                                [6, "Scupper"],
-                                [7, "Metal Scupper"],
-                              ] as Array<[number, string]>
-                            ).map(([id, name]) => (
-                              <button
-                                key={id}
-                                type="button"
-                                title={`${name}${id === 3 || id === 4 ? " (quote required)" : ""}`}
-                                onClick={() =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => {
-                                      if (j !== i) return x;
-                                      const nx = {
-                                        ...x,
-                                        styleId: id,
-                                        curbType: CURB_TYPE_BY_STYLE_ID[id] ?? "",
-                                      };
-                                      // Legacy forcing: With Top → termination None;
-                                      // Scupper/Metal Scupper → Scupper-Fascia Bar.
-                                      if (id === 5) nx.termOption = 0;
-                                      if (id === 6 || id === 7) nx.termOption = 1;
-                                      return nx;
-                                    }),
-                                  )
-                                }
-                                className={`flex flex-col items-center rounded-md border px-2 py-1.5 ${
-                                  c.styleId === id
-                                    ? "border-primary bg-primary/10"
-                                    : "hover:bg-muted"
-                                }`}
-                              >
-                                <CurbStyleIcon styleId={id} />
-                                <span className="text-[10px] font-medium">
-                                  {name}
-                                  {id === 3 || id === 4 ? " (quote)" : ""}
-                                </span>
-                              </button>
-                            ))}
-                          </div>
-                          <p className="text-xs font-medium text-muted-foreground">
-                            Enter curb dimensions in nearest .25&quot;
-                          </p>
-                          <div className="grid grid-cols-4 gap-2">
-                            <Field label="A:">
-                              <NumInput
-                                value={c.widthIn}
-                                onValue={(n) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, widthIn: n } : x)),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="B:">
-                              <NumInput
-                                value={c.lengthIn}
-                                onValue={(n) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, lengthIn: n } : x)),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="C:">
-                              <NumInput
-                                min={0}
-                                value={c.dimCIn ?? 0}
-                                onValue={(n) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, dimCIn: n } : x)),
-                                  )
-                                }
-                              />
-                            </Field>
-                            <Field label="Skirt (D):">
-                              <NumInput
-                                min={0}
-                                value={c.dimDIn ?? 0}
-                                onValue={(n) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) => (j === i ? { ...x, dimDIn: n } : x)),
-                                  )
-                                }
-                              />
-                            </Field>
-                          </div>
-                          {/* Legacy termination options (docs §8.3): With Top forces None;
-                              scuppers force Scupper-Fascia. Lift options auto-price their labor;
-                              hardware footage is an ordering quantity (rates DB-resident). */}
-                          <div className="max-w-xs">
-                            <Field label="Termination option">
-                              <PickOne
-                                value={CURB_TERM_LABELS[c.termOption ?? 0] ?? "None"}
-                                options={
-                                  c.styleId === 5
-                                    ? ["None"]
-                                    : c.styleId === 6 || c.styleId === 7
-                                      ? ['Scupper/Fascia Bar (1¾")']
-                                      : CURB_TERM_LABELS
-                                }
-                                onChange={(v) =>
-                                  setCurbs((prev) =>
-                                    prev.map((x, j) =>
-                                      j === i
-                                        ? { ...x, termOption: CURB_TERM_LABELS.indexOf(v) }
-                                        : x,
-                                    ),
-                                  )
-                                }
-                              />
-                            </Field>
-                          </div>
-                          {(() => {
-                            const t = c.termOption ?? 0;
-                            if (t === 1 || t === 3 || t === 4) {
-                              const ft = ((2 * c.widthIn + 2 * c.lengthIn + 12) / 12) * c.quantity;
-                              return (
-                                <p className="text-[11px] text-muted-foreground">
-                                  {t === 1 ? '1¾" fascia bar' : "Term bar (no-drill)"}:{" "}
-                                  {ft.toFixed(2)} ft — auto-priced on the Accessories{" "}
-                                  {t === 1 ? "Fascia" : "Term Bar"} screen (Curbs count).
-                                  {t === 3 ? " Lift labor auto-added." : ""}
-                                </p>
-                              );
-                            }
-                            if (t === 2)
-                              return (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Lift labor auto-added.
-                                </p>
-                              );
-                            if (t === 5) {
-                              // §8.3: (A+B) × qty × 2 inches, fraction up to ¼", ÷12, Ceil ft.
-                              const ft = Math.ceil(
-                                ((c.widthIn + c.lengthIn) * c.quantity * 2) / 12,
-                              );
-                              return (
-                                <p className="text-[11px] text-muted-foreground">
-                                  Curb counter flashing: ≈{ft} ft — auto-priced off the Sheet Metal
-                                  Work rate.
-                                </p>
-                              );
-                            }
-                            return null;
-                          })()}
-                          {/* Legacy Insulation/Plastic on Curb(s): insulation adds the §2 ISO
-                              labor; both drive ordering quantities (shown, not auto-priced). */}
-                          {(() => {
-                            const linealFt = (c.widthIn + c.lengthIn) / 6;
-                            const isoFasteners = Math.ceil(Math.ceil(linealFt * c.quantity) / 3);
-                            const polySqFt =
-                              (linealFt * ((c.dimCIn ?? 0) + (c.dimDIn ?? 0)) * 5 * c.quantity) /
-                              48;
-                            return (
-                              <div className="flex flex-wrap items-center gap-4 pt-1">
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    id={`ci-${c.id}`}
-                                    checked={c.hasInsulation ?? false}
-                                    onCheckedChange={(v) =>
-                                      setCurbs((prev) =>
-                                        prev.map((x, j) =>
-                                          j === i ? { ...x, hasInsulation: v } : x,
-                                        ),
-                                      )
-                                    }
-                                  />
-                                  <Label htmlFor={`ci-${c.id}`} className="text-xs">
-                                    Insulation on curb(s)
-                                  </Label>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    id={`cp-${c.id}`}
-                                    checked={c.hasPlastic ?? false}
-                                    onCheckedChange={(v) =>
-                                      setCurbs((prev) =>
-                                        prev.map((x, j) => (j === i ? { ...x, hasPlastic: v } : x)),
-                                      )
-                                    }
-                                  />
-                                  <Label htmlFor={`cp-${c.id}`} className="text-xs">
-                                    Plastic on curb(s)
-                                  </Label>
-                                </div>
-                                {(c.hasInsulation || c.hasPlastic) && (
-                                  <p className="text-[11px] text-muted-foreground">
-                                    {c.hasInsulation &&
-                                      `ISO: ${(linealFt * c.quantity).toFixed(1)} sq ft, ${isoFasteners} fasteners. `}
-                                    {c.hasPlastic && `Poly: ${polySqFt.toFixed(1)} sq ft.`} Ordering
-                                    quantities — not auto-priced.
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Right rail: legacy dim readout + diagram, then the curb summary */}
-                  <div className="space-y-2">
-                    <CurbDiagram c={curbs[Math.min(selCurb, curbs.length - 1)]!} />
-                    <div className="overflow-x-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Curb</TableHead>
-                            <TableHead className="text-right">Qty</TableHead>
-                            <TableHead className="text-right">A (in)</TableHead>
-                            <TableHead className="text-right">B (in)</TableHead>
-                            <TableHead>Type</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {curbs.map((c2, i2) => (
-                            <TableRow
-                              key={c2.id}
-                              onClick={() => setSelCurb(i2)}
-                              className={
-                                i2 === Math.min(selCurb, curbs.length - 1)
-                                  ? "cursor-pointer bg-muted/60"
-                                  : "cursor-pointer"
-                              }
-                            >
-                              <TableCell className="font-medium">{c2.name}</TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {c2.quantity}
-                              </TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {c2.widthIn}
-                              </TableCell>
-                              <TableCell className="text-right tabular-nums">
-                                {c2.lengthIn}
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap">{c2.curbType}</TableCell>
-                            </TableRow>
-                          ))}
-                          <TableRow>
-                            <TableCell className="font-semibold">Total curbs</TableCell>
-                            <TableCell className="text-right font-semibold tabular-nums">
-                              {curbs.reduce((s2, c2) => s2 + c2.quantity, 0).toLocaleString()}
-                            </TableCell>
-                            <TableCell colSpan={3} />
-                          </TableRow>
-                        </TableBody>
-                      </Table>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Click a row to edit that curb.</p>
-                  </div>
-                </div>
-              )}
+            <CardContent>
+              <CurbsScreen
+                curbs={curbs}
+                onChange={setCurbs}
+                selected={selCurb}
+                onSelect={setSelCurb}
+                sections={sections.map((s) => ({
+                  id: s.id,
+                  name: s.name,
+                  deckType: s.deckType,
+                  thickness: s.thickness,
+                  color: s.color,
+                }))}
+                deckOptions={admin.deckOrder}
+                colorOptions={colorOptions}
+                crewRate={laborRate}
+                hoursById={result?.curbHoursById ?? {}}
+                totalHours={result?.r.curbLaborHours ?? 0}
+                newCurb={() => newCurb()}
+              />
             </CardContent>
           </Card>
         </div>
@@ -4940,247 +4553,6 @@ function ParapetProfileDiagram({ p }: { p: ParapetInput }) {
       )}
       <p className="text-[11px] text-muted-foreground">
         Skirt → cant → vertical → top of wall → drop
-      </p>
-    </div>
-  );
-}
-
-/** Small legacy-style curb thumbnail per CurbStyle.ID (schematic; 3 & 4 are quote-required). */
-function CurbStyleArt({ styleId }: { styleId: number }) {
-  // Faithful redraws of the legacy drawings (shared by the picker tiles and the info panel): a curb box on a flared skirt with corner lobes
-  // (open w/ membrane flap, open, capped) and the through-wall scupper (plate—chute—plate,
-  // plain or "Metal"). Ids 3/4 are the quote-required styles.
-  const tan = "fill-amber-50 dark:fill-amber-300/20";
-  const tanSide = "fill-amber-100 dark:fill-amber-300/10";
-  const skirt = (
-    <>
-      <polygon
-        points="4,34 32,22 60,34 32,46"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <ellipse
-        cx="7"
-        cy="34"
-        rx="4"
-        ry="2.5"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      <ellipse
-        cx="57"
-        cy="34"
-        rx="4"
-        ry="2.5"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      <ellipse
-        cx="32"
-        cy="44.5"
-        rx="4"
-        ry="2.5"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-    </>
-  );
-  const box = (open: boolean) => (
-    <>
-      {/* wall top rim (outer diamond, hole punched when open) */}
-      <polygon
-        points="17,20 32,12.5 47,20 32,27.5"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      {open && (
-        <>
-          <polygon
-            points="23,20 32,15.5 41,20 32,24.5"
-            className="fill-background"
-            stroke="currentColor"
-            strokeWidth="1.2"
-          />
-          <line x1="23" y1="20" x2="23" y2="23" stroke="currentColor" strokeWidth="0.8" />
-          <line x1="32" y1="24.5" x2="32" y2="27.5" stroke="currentColor" strokeWidth="0.8" />
-        </>
-      )}
-      {/* outer walls */}
-      <polygon
-        points="17,20 32,27.5 32,36.5 17,29"
-        className={tanSide}
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-      <polygon
-        points="32,27.5 47,20 47,29 32,36.5"
-        className={tanSide}
-        stroke="currentColor"
-        strokeWidth="1.4"
-      />
-    </>
-  );
-  const scupper = (metal: boolean) => (
-    <>
-      {/* left plate with the punched opening the chute passes through (open-ended prism) */}
-      <polygon
-        points="6,8 20,3 20,31 6,36"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <line
-        x1="8.5"
-        y1="9.5"
-        x2="8.5"
-        y2="33.5"
-        stroke="currentColor"
-        strokeWidth="0.8"
-        strokeDasharray="1.2,1.6"
-      />
-      <polygon
-        points="13,13 19,10.5 19,21.5 13,24"
-        className="fill-background"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      {/* chute: rectangular prism, open at both ends, entering each plate mid-face */}
-      <polygon
-        points="20,12.5 26,10 50,23 44,25.5"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <polygon
-        points="20,12.5 44,25.5 44,34.5 20,21.5"
-        className={tanSide}
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      {/* right plate with the through-opening where the chute arrives */}
-      <polygon
-        points="44,16 58,11 58,39 44,44"
-        className={tan}
-        stroke="currentColor"
-        strokeWidth="1.2"
-      />
-      <line
-        x1="55.5"
-        y1="13.5"
-        x2="55.5"
-        y2="41.5"
-        stroke="currentColor"
-        strokeWidth="0.8"
-        strokeDasharray="1.2,1.6"
-      />
-      <polygon
-        points="47,26.5 53,24 53,33 47,35.5"
-        className="fill-background"
-        stroke="currentColor"
-        strokeWidth="1"
-      />
-      {metal && (
-        <text
-          x="32"
-          y="25"
-          textAnchor="middle"
-          transform="rotate(28.5 32 25)"
-          className="fill-current text-[4.5px] font-semibold"
-        >
-          Metal
-        </text>
-      )}
-    </>
-  );
-  return (
-    <>
-      {(styleId === 1 || styleId === 2 || styleId === 5) && skirt}
-      {(styleId === 3 || styleId === 4) && <g transform="skewX(-10) translate(7,0)">{skirt}</g>}
-      {styleId === 1 && (
-        <>
-          {box(true)}
-          {/* peeled membrane flap at the front-right corner */}
-          <path
-            d="M36,34 a9,9 0 0 0 9,-9 l3,2 a11,11 0 0 1 -10,10 z"
-            className="fill-amber-100 dark:fill-amber-300/25"
-            stroke="currentColor"
-            strokeWidth="1.1"
-          />
-        </>
-      )}
-      {styleId === 2 && box(true)}
-      {/* canted variants (quote): the same curb with sloped sides */}
-      {styleId === 3 && <g transform="skewX(-10) translate(7,0)">{box(true)}</g>}
-      {styleId === 4 && <g transform="skewX(-10) translate(7,0)">{box(false)}</g>}
-      {styleId === 5 && box(false)}
-      {styleId === 6 && scupper(false)}
-      {styleId === 7 && scupper(true)}
-    </>
-  );
-}
-
-/** Small picker tile wrapping the shared style art. */
-function CurbStyleIcon({ styleId }: { styleId: number }) {
-  return (
-    <svg viewBox="0 0 64 48" className="h-11 w-14 text-foreground">
-      <CurbStyleArt styleId={styleId} />
-    </svg>
-  );
-}
-
-/** Legacy Curbs screen info panel: red A/B/C/D readout + the SELECTED style's drawing. */
-function CurbDiagram({ c }: { c: CurbInput }) {
-  const styleId = c.styleId ?? 0;
-  const isScupper = styleId === 6 || styleId === 7;
-  const L = ({ x, y, t }: { x: number; y: number; t: string }) => (
-    <text x={x} y={y} className="fill-red-600 text-[6px] font-bold dark:fill-red-400">
-      {t}
-    </text>
-  );
-  return (
-    <div className="rounded-md border p-3">
-      <div className="flex items-center gap-4">
-        <div className="space-y-0.5 text-sm font-semibold text-red-600 dark:text-red-400">
-          <p>A: {c.widthIn}</p>
-          <p>B: {c.lengthIn}</p>
-          <p>C: {c.dimCIn ?? 0}</p>
-          <p>D: {c.dimDIn ?? 0}</p>
-        </div>
-        <svg viewBox="0 0 64 48" className="h-36 min-w-0 flex-1 text-foreground">
-          {styleId >= 1 && styleId <= 7 && <CurbStyleArt styleId={styleId} />}
-          {styleId >= 1 && !isScupper && (
-            <>
-              <L x={20} y={13} t="A" />
-              <L x={41} y={13} t="B" />
-              <L x={49.5} y={27} t="C" />
-              <L x={44} y={43.5} t="D" />
-            </>
-          )}
-          {isScupper && (
-            <>
-              <L x={11} y={4.5} t="A" />
-              <L x={33} y={9} t="B" />
-              <L x={60} y={26} t="C" />
-              <L x={38} y={44} t="D" />
-            </>
-          )}
-          {styleId === 0 && (
-            <text x="32" y="26" textAnchor="middle" className="fill-current text-[6px] opacity-60">
-              Pick a curb style
-            </text>
-          )}
-        </svg>
-      </div>
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        {styleId >= 1
-          ? `Style: ${styleId}${styleId === 3 || styleId === 4 ? " (quote required)" : ""} — `
-          : ""}
-        A × B footprint, C curb height, D skirt — nearest ¼"
       </p>
     </div>
   );

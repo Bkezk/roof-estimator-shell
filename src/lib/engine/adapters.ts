@@ -1244,8 +1244,11 @@ export function buildCurbLabor(
 }
 
 /**
- * Curb labor hours (§5.3): per curb, setup minutes + (min/LF for the deck × curb-type multiplier)
- * × curb perimeter LF; total = quantity × that, converted to hours.
+ * Curb type labor hours — legacy `Curb.BaseHours` (rva 0x333a4, docs §8.2) type term, IL-exact
+ * order: `(perLF × perimeter × qty + base × qty) × styleMultiplier`. The style multiplier wraps
+ * the SETUP/base term too (an earlier web transcription applied it to the per-LF term only —
+ * corrected 2026-09-10). The seeded tables carry minutes; the legacy lookups are hours, hence
+ * the ÷60. ISO / polyethylene / lift labor are added by the caller AFTER this (not multiplied).
  */
 export function curbLaborHours(i: {
   quantity: number;
@@ -1254,8 +1257,8 @@ export function curbLaborHours(i: {
   typeMultiplier: number;
   perimeterFt: number;
 }): number {
-  const minutesPerCurb = i.setupMinutes + i.minutesPerLF * i.typeMultiplier * i.perimeterFt;
-  return (i.quantity * minutesPerCurb) / 60;
+  const minutes = i.minutesPerLF * i.perimeterFt * i.quantity + i.setupMinutes * i.quantity;
+  return (minutes / 60) * i.typeMultiplier;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

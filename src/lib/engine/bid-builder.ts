@@ -520,6 +520,8 @@ export interface ReviewBreakdown {
   /** Underlayment material/labor by insulation TILE (SubType 1..8; 0 = unmapped board). */
   underlaymentMaterialBySubtype: Record<number, number>;
   underlaymentHoursBySubtype: Record<number, number>;
+  /** Per-curb legacy Curb.ManHours (the Curbs screen "Labor: X hours" link), by curb id. */
+  curbHoursById: Record<string, number>;
   /** Auto-priced NDL items (§8.3/§8.4) for the non-DL ledger rows. */
   auto: {
     counterflash: { material: number; laborCost: number; hours: number };
@@ -1148,19 +1150,33 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // labor. Perimeter = 2 × (In2Ft(A) + In2Ft(B)); insulation-on-curb ISO labor adds per §2.
   // Membrane material auto-computes below via the legacy wrap model.
   let curbLaborHours = 0;
+  /** Per-curb Curb.ManHours (the legacy "Labor: X hours" link on the Curbs screen). */
+  const curbHoursById: Record<string, number> = {};
   for (const c of bid.curbs) {
     if (c.quantity <= 0) continue;
     // Per-item hours accumulate here, then × (1 + adjustLaborPct/100), Round 8dp — the legacy
     // Curb.ManHours composition (docs §8.7) wrapping type labor + ISO + lift labor.
     let itemHours = 0;
     const addItem = () => {
-      curbLaborHours += bankersRound(itemHours * (1 + (c.adjustLaborPct ?? 0) / 100), 8);
+      const manHours = bankersRound(itemHours * (1 + (c.adjustLaborPct ?? 0) / 100), 8);
+      curbLaborHours += manHours;
+      curbHoursById[c.id] = manHours;
     };
     // Legacy "Insulation on Curb(s)" (parity doc §2): ISO_Labor = Round((0.25 + LinealFt ×
     // 0.0167) × qty, 2) hours, LinealFt = (A+B)/6 (the footprint perimeter in feet).
     if (c.hasInsulation) {
       const linealFt = (c.widthIn + c.lengthIn) / 6;
       itemHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
+    }
+    // Legacy "Plastic on Curb(s)" labor (BaseHours: PolyethyleneSqF / 400 hours, docs §8.2),
+    // PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8).
+    if (c.hasPlastic) {
+      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      const polySqFt = bankersRound(
+        ((linealFt * ((c.dimCIn ?? 0) + (c.dimDIn ?? 0)) * 5) / 48) * c.quantity,
+        8,
+      );
+      itemHours += polySqFt / 400;
     }
     // Lift termination labor (docs §8.2/§8.3): TermOption 2 (Lift & Tuck) / 3 (Lift & T-Bar)
     // add 1 + LF × 0.020833 (12 < LF ≤ 32) or 1 + LF × 0.041667 (LF > 32) hours — ONCE per
@@ -1593,6 +1609,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     metalsLaborHours,
     underlaymentMaterialBySubtype: uMatBySub,
     underlaymentHoursBySubtype: uHrsBySub,
+    curbHoursById,
     auto: bAuto,
   };
   return {

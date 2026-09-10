@@ -697,6 +697,41 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
   });
 
+  it("curbs: plastic-on-curb adds PolyethyleneSqF / 400 hours (legacy BaseHours, §8.2)", () => {
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { Wood: 7.5 },
+        multiplierByType: { Closed: 1 },
+        curbTypes: ["Closed"],
+      },
+    };
+    const { inputs, breakdown } = buildEstimateInputs(
+      bid({
+        curbs: [
+          {
+            id: "c1",
+            name: "RTU curb",
+            quantity: 2,
+            widthIn: 24,
+            lengthIn: 36,
+            dimCIn: 12,
+            dimDIn: 6,
+            curbType: "Closed",
+            deckType: "Wood",
+            hasPlastic: true,
+          },
+        ],
+      }),
+      withCurb,
+    );
+    const r = computeEstimate(inputs);
+    // LinealFt = 60/6 = 10; poly = 10 × 18 × 5/48 × 2 = 37.5 sq ft → 0.09375 h on top of 166/60.
+    expect(r.curbLaborHours).toBeCloseTo(166 / 60 + 0.09375, 6);
+    expect(breakdown.curbHoursById["c1"]).toBeCloseTo(166 / 60 + 0.09375, 6);
+  });
+
   it("curbs: per-curb mil/color drives the wrap rate; insulation-on-curb adds the ISO labor", () => {
     const withCurb: EngineAdminData = {
       ...admin,
