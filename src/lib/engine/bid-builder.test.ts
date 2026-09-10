@@ -2249,3 +2249,14 @@ describe("§17 Home: per-bid sales tax overrides the company settings", () => {
     expect(r.money.salesTaxValue).toBe(0);
   });
 });
+
+describe("a bid with no roof sections", () => {
+  it("builds and totals $0 with no warnings (the estimator starts empty)", () => {
+    const { inputs, warnings } = buildEstimateInputs(bid({ sections: [] }), admin);
+    expect(warnings).toEqual([]);
+    const r = computeEstimate(inputs);
+    expect(r.roofSqFootage).toBe(0);
+    expect(r.installHours).toBe(0);
+    expect(r.money.grandTotal).toBe(0);
+  });
+});

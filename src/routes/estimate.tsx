@@ -326,7 +326,9 @@ function EstimatePage() {
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
   const [membraneAdhesive, setMembraneAdhesive] = useState("Water Based Adhesive");
-  const [sections, setSections] = useState<BidSectionInput[]>([newSection()]);
+  // A bid starts with NO roof sections (the total starts at $0 — legacy "Existing Bids" opens
+  // on Home with an empty section list); sections are added on the Sections step.
+  const [sections, setSections] = useState<BidSectionInput[]>([]);
   const [accessories, setAccessories] = useState<AccessoryLine[]>([]);
   const [accessoriesCalc, setAccessoriesCalc] = useState<AccessoriesState>(() =>
     emptyAccessoriesState(),
@@ -493,11 +495,7 @@ function EstimatePage() {
       setRoofSystem(d.roofSystem ?? "Duro-Last");
       setAttachment(d.attachment ?? "mechanical");
       setMembraneAdhesive(d.membraneAdhesiveName ?? "Water Based Adhesive");
-      setSections(
-        d.sections.length
-          ? d.sections.map((s) => ({ ...s, layers: sectionLayers(s) }))
-          : [newSection()],
-      );
+      setSections(d.sections.map((s) => ({ ...s, layers: sectionLayers(s) })));
       setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
       setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
       setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);

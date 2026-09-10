@@ -264,7 +264,9 @@ export function SectionsScreen(p: SectionsScreenProps) {
   if (!s) {
     return (
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">No roof sections.</p>
+        <p className="text-sm text-muted-foreground">
+          No roof sections yet — the bid total starts at $0. Add the first section to begin.
+        </p>
         <Button
           size="sm"
           onClick={() => {
@@ -623,7 +625,6 @@ export function SectionsScreen(p: SectionsScreenProps) {
           <Button
             variant="outline"
             size="sm"
-            disabled={sections.length === 1}
             onClick={() => {
               onChange(sections.filter((_, j) => j !== i));
               p.onSelect(Math.max(0, Math.min(i, sections.length - 2)));
