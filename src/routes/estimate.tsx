@@ -370,6 +370,8 @@ function EstimatePage() {
   const [markupMode, setMarkupMode] = useState<MarkupMode>(2);
   const [markup, setMarkup] = useState(35);
   const [laborRate, setLaborRate] = useState(50);
+  // Legacy frmLaborTemplate txtHrsPerDay: hours per man-day is per estimate (admin default).
+  const [hoursPerDay, setHoursPerDay] = useState<number | undefined>(undefined);
   const [extraShipping, setExtraShipping] = useState(0);
   // The legacy Review screen shows the ledger; the auxiliary knobs (warranty picker, labor
   // rate, templates…) sit behind this toggle instead of always-on forms.
@@ -553,6 +555,7 @@ function EstimatePage() {
       setMarkupMode((d.markupMode ?? 2) as MarkupMode);
       setMarkup(d.markup ?? 35);
       setLaborRate(d.laborRate ?? 50);
+      setHoursPerDay(d.hoursPerDay !== undefined && d.hoursPerDay > 0 ? d.hoursPerDay : undefined);
       setCommission(d.commission ?? 3);
       setTaxExempt(d.taxExempt ?? false);
       setPrepayDiscount(d.prepayDiscount ?? false);
@@ -681,6 +684,9 @@ function EstimatePage() {
   const adhesiveOptions = admin?.adhesiveTimes?.adhesives ?? [];
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
   const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
+  /** The estimate's hours per man-day: its own value, else the admin default. */
+  const effectiveHoursPerDay =
+    hoursPerDay !== undefined && hoursPerDay > 0 ? hoursPerDay : (admin?.settings.hoursPerDay ?? 9);
   // The selected template's percent adjustments (legacy Template fields). They are WRITTEN into
   // the items on selection (frmHome.updateTemplate) and seed new items (RoofSection / Parapet /
   // Curb ctors) — the engine never composes them at compute time (docs §20.3).
@@ -720,6 +726,7 @@ function EstimatePage() {
     markupMode,
     markup,
     laborRate,
+    ...(hoursPerDay !== undefined && hoursPerDay > 0 ? { hoursPerDay } : {}),
     commission,
     taxExempt,
     prepayDiscount,
@@ -1852,16 +1859,25 @@ function EstimatePage() {
                     />
                   </Field>
                   <Field label="Hours per Man Day">
-                    <Input value={admin.settings.hoursPerDay} disabled />
+                    <Input
+                      type="number"
+                      step="0.5"
+                      min={0}
+                      value={hoursPerDay ?? admin.settings.hoursPerDay}
+                      onChange={(e) => {
+                        const v = num(e.target.value);
+                        setHoursPerDay(v > 0 && v !== admin.settings.hoursPerDay ? v : undefined);
+                      }}
+                    />
                   </Field>
                   <Field label="Man-Day Labor">
                     <Input
                       type="number"
                       step="0.01"
-                      value={Math.round(laborRate * admin.settings.hoursPerDay * 100) / 100}
+                      value={Math.round(laborRate * effectiveHoursPerDay * 100) / 100}
                       onChange={(e) =>
-                        admin.settings.hoursPerDay > 0 &&
-                        setLaborRate(num(e.target.value) / admin.settings.hoursPerDay)
+                        effectiveHoursPerDay > 0 &&
+                        setLaborRate(num(e.target.value) / effectiveHoursPerDay)
                       }
                     />
                   </Field>
@@ -2612,9 +2628,7 @@ function EstimatePage() {
                           .filter((s) => uSel.includes(s.id))
                           .reduce((sum, s) => sum + s.length * s.width, 0);
                         const material = qPieceMode ? qPieces * qCpp : qLump;
-                        const hours = qLaborDays
-                          ? qLabor * (admin?.settings.hoursPerDay ?? 9)
-                          : qLabor;
+                        const hours = qLaborDays ? qLabor * effectiveHoursPerDay : qLabor;
                         const preview = material + hours * laborRate;
                         return (
                           <div className="space-y-3 text-sm">
@@ -2791,7 +2805,7 @@ function EstimatePage() {
                             // (§10.7 dedup). Merge sums LumpSum + labor hours (days converted
                             // × hours-per-man-day), like frmQuoteDecision's merge path.
                             type Q = NonNullable<UnderlaymentLayer["quote"]>;
-                            const hpd = admin?.settings.hoursPerDay ?? 9;
+                            const hpd = effectiveHoursPerDay;
                             const norm = (q: Q) =>
                               q.laborInDays ? (q.laborAmount ?? 0) * hpd : (q.laborAmount ?? 0);
                             const lumpOf = (q: Q) =>

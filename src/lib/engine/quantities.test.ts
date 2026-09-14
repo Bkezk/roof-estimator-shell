@@ -4,8 +4,11 @@ import {
   areaTotal,
   roofSqFootage,
   areaWithEdgeOverlap,
-  composeMembraneQty,
-  rollGoodsOverlapLength,
+  rollGoodsMembraneCalc,
+  sheetsMembraneCalc,
+  numSheetsReq,
+  sheetRollsFromLabel,
+  legacyMembraneWithOverlap,
   arpSqFt,
   sqFtTotalMembrane,
   setupTime,
@@ -16,7 +19,6 @@ import {
   tearOffVolume,
   type SetupBandTable,
   type InspectionBandTable,
-  type RollGoodsSection,
 } from "./quantities";
 
 describe("roof area (§2.1)", () => {
@@ -39,29 +41,116 @@ describe("membrane area with overlap (§2.2)", () => {
     expect(areaWithEdgeOverlap(10, 20, "4.0.230")).toBe(11 * 21);
   });
 
-  it('ANCHOR (§9): roll-goods return line — 1×1 section, 6" overlap → 4 + 1×0.5 = 4.5', () => {
-    expect(composeMembraneQty(4, 1, 6)).toBe(4.5);
-  });
-
-  it("rollGoodsOverlapLength computes the documented field-term arithmetic (structure, not a bid anchor)", () => {
-    // L=W=1, corners 0, fieldLap 6\" ⇒ fieldLapFt 0.5; run=(2/0.5)=4; term=ceil(4×2)=8; no perim rows.
-    const s: RollGoodsSection = {
+  it('RollGoodsMembraneCalc reproduces the Show Calculations 1×1 trace: 4 + 1 × 0.5 = 4.5 at a 60" lap', () => {
+    const base = {
       length: 1,
       width: 1,
-      overlapWidthInches: 6,
-      fieldLapInches: 6,
+      overlapWidthIn: 6,
       customFieldLapFt: 0,
-      customPerimeterLapInches: 0,
-      perimEnhancementWidth: 0,
-      corners: [0, 0, 0, 0],
-      sides: [
-        { isPerim: false, length: 1, cornerAdj: 0 },
-        { isPerim: false, length: 1, cornerAdj: 0 },
-        { isPerim: false, length: 1, cornerAdj: 0 },
-        { isPerim: false, length: 1, cornerAdj: 0 },
-      ],
+      customPerimeterLapIn: 0,
+      perimEnhancementWidthFt: 3,
+      sides: [],
+      isQuickBid: true,
+      rolls: 1,
     };
-    expect(rollGoodsOverlapLength(s)).toBe(8);
+    // lap = ToInteger(In2Ft(60)) = 5 → overlapLength = Ceil(2/5 × 2) = 1 → 4 + 1 × In2Ft(6)
+    expect(rollGoodsMembraneCalc({ ...base, fieldLapIn: 60 }, "4.0.237")).toBe(4.5);
+    // 28" lap → ToInteger(2.33) = 2 → Ceil(2/2 × 2) = 2 → 4 + 2 × 0.5 = 5 (integer-lap quirk)
+    expect(rollGoodsMembraneCalc({ ...base, fieldLapIn: 28 }, "4.0.237")).toBe(5);
+    // 50×50 at 64": Ceil(51/5 × 51) = 521 seam-ft → 2601 + 260.5
+    expect(
+      rollGoodsMembraneCalc({ ...base, length: 50, width: 50, fieldLapIn: 64 }, "4.0.237"),
+    ).toBe(2861.5);
+    // Duro-Fleece LapOver 3": the same seam length × In2Ft(3) = 0.25
+    expect(
+      rollGoodsMembraneCalc(
+        { ...base, length: 50, width: 50, fieldLapIn: 28, overlapWidthIn: 3 },
+        "4.0.237",
+      ),
+    ).toBe(2601 + 1301 * 0.25);
+  });
+
+  it("RollGoodsMembraneCalc: perimeter rows only narrow the field run (the per-side sums are overwritten in the IL)", () => {
+    // 100×50, CustomPerimeterLap 60" on the two length sides (A, C), enhancement 3 ft:
+    // rows = Round(Ceil(3 / In2Ft(60 − 6) = 4.5)) = 1; pw = 4.5 ft on sides 0 and 2 (they trim
+    // the WIDTH run); lap 60 → 5: overlapLength = Ceil((51 − 4.5 − 4.5) / 5 × 101) = Ceil(848.4)
+    const q = rollGoodsMembraneCalc(
+      {
+        length: 100,
+        width: 50,
+        overlapWidthIn: 6,
+        fieldLapIn: 60,
+        customFieldLapFt: 0,
+        customPerimeterLapIn: 60,
+        perimEnhancementWidthFt: 3,
+        sides: [
+          { isPerim: true, perimLengthFt: 100 },
+          { isPerim: false, perimLengthFt: 0 },
+          { isPerim: true, perimLengthFt: 100 },
+          { isPerim: false, perimLengthFt: 0 },
+        ],
+        isQuickBid: true,
+        rolls: 1,
+      },
+      "4.0.237",
+    );
+    expect(q).toBe(101 * 51 + 849 * 0.5);
+  });
+
+  it("SheetsMembraneCalc: AreaWithEdgeOverlap + Floor(2n − 2√n) × √(area / n), n from NumSheetsReq", () => {
+    const s = {
+      length: 50,
+      width: 50,
+      overlapWidthIn: 6,
+      fieldLapIn: 60,
+      customFieldLapFt: 0,
+      customPerimeterLapIn: 0,
+      perimEnhancementWidthFt: 3,
+      sides: [],
+      isQuickBid: true,
+      rolls: 15, // "1500 sf"
+    };
+    expect(numSheetsReq(s, "4.0.237")).toBe(2); // Ceil(2601 / 1500)
+    expect(sheetsMembraneCalc(s, "4.0.237")).toBeCloseTo(2601 + 1 * Math.sqrt(2601 / 2), 9);
+    expect(numSheetsReq({ ...s, rolls: 5 }, "4.0.237")).toBe(6); // 500 sf
+    expect(sheetsMembraneCalc({ ...s, rolls: 5 }, "4.0.237")).toBeCloseTo(
+      2601 + 7 * Math.sqrt(2601 / 6),
+      9,
+    );
+    // Non-quick-bid: one derived sheet, no overlaps → bare AreaWithEdgeOverlap.
+    expect(numSheetsReq({ ...s, isQuickBid: false }, "4.0.237")).toBe(1);
+    expect(sheetsMembraneCalc({ ...s, isQuickBid: false }, "4.0.237")).toBe(2601);
+  });
+
+  it("sheetRollsFromLabel / legacyMembraneWithOverlap dispatch per roof system", () => {
+    expect(sheetRollsFromLabel("Roll Good")).toBe(1);
+    expect(sheetRollsFromLabel("1500 sf")).toBe(15);
+    expect(sheetRollsFromLabel("1000 sf ")).toBe(10);
+    expect(sheetRollsFromLabel("")).toBe(0);
+    const s = {
+      length: 50,
+      width: 50,
+      overlapWidthIn: 6,
+      fieldLapIn: 64,
+      customFieldLapFt: 0,
+      customPerimeterLapIn: 0,
+      perimEnhancementWidthFt: 3,
+      sides: [],
+      isQuickBid: true,
+      rolls: 1,
+    };
+    const v = "4.0.237";
+    const sheets2 = 2601 + Math.sqrt(1300.5);
+    expect(legacyMembraneWithOverlap(1, s, v)).toBe(2861.5); // Duro-Last roll goods
+    expect(legacyMembraneWithOverlap(4, { ...s, rolls: 15 }, v)).toBeCloseTo(sheets2, 9); // Duro-Roof sheets
+    expect(legacyMembraneWithOverlap(2, s, v)).toBe(2601); // Duro-Bond: rolls 1 → area
+    expect(legacyMembraneWithOverlap(2, { ...s, rolls: 15 }, v)).toBeCloseTo(sheets2, 9);
+    // Duro-Fleece: always roll goods (LapOver 3")
+    expect(legacyMembraneWithOverlap(5, { ...s, rolls: 0, overlapWidthIn: 3 }, v)).toBe(
+      2601 + 521 * 0.25,
+    );
+    expect(legacyMembraneWithOverlap(3, s, v)).toBe(2601); // Duro-Tuff: not ported → area
+    expect(legacyMembraneWithOverlap(1, { ...s, rolls: 0 }, v)).toBe(2601);
   });
 });
 

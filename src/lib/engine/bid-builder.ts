@@ -46,7 +46,7 @@
  *    WallPlusTopSqFt = Length × (Vertical+WallTop)/12. Height band is still picked by hand.
  */
 
-import { areaWithEdgeOverlap, tearOffVolume } from "./quantities";
+import { legacyMembraneWithOverlap, sheetRollsFromLabel, tearOffVolume } from "./quantities";
 import { in2Ft, bankersRound } from "./rounding";
 import {
   computeAccessories,
@@ -65,7 +65,14 @@ import {
   type NonDlState,
 } from "./nondl";
 import { curbWrapCost, curbWrapRate } from "./curb-wrap";
-import { edgesArpSqFt, resolveSectionZones, type EdgeInput, type PerimCorners } from "./edges";
+import {
+  edgePerimLength,
+  edgeSideIndex,
+  edgesArpSqFt,
+  resolveSectionZones,
+  type EdgeInput,
+  type PerimCorners,
+} from "./edges";
 import { underlaymentLayerFasteners } from "./underlayment-fasteners";
 import {
   membraneMaterialCost,
@@ -544,6 +551,11 @@ export interface BidInput {
   markupMode: MarkupMode;
   markup: number;
   crewLaborRatePerHour: number;
+  /**
+   * Per-estimate hours per man-day (legacy frmLaborTemplate txtHrsPerDay writes
+   * Settings.HoursPerDay for the open estimate). Absent = the admin default.
+   */
+  hoursPerDay?: number;
   commission: number;
   commissionInMarkup: boolean;
   perDiem: number;
@@ -615,6 +627,13 @@ export const COMPLEXITY_LABELS = [
  * for Duro-Tuff (3) and Duro-Fleece (5), identical: 0.9, 0.98, 1, 1.2, 2.4, 4). Any other system
  * has no rows → the legacy form lists a single "None" = 1.0.
  */
+/**
+ * Legacy RoofSystem.LapOver → `RoofSystem.OverlapWidth` (in) by roof-system id, from the shipped
+ * installer's RoofSystem rows: 6" for every membrane system except Duro-Fleece (3"). Not an
+ * admin-editable value in BAManager.
+ */
+export const LEGACY_OVERLAP_WIDTH_IN: Record<number, number> = { 1: 6, 2: 6, 3: 6, 4: 6, 5: 3 };
+
 export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
   3: [0.9, 0.98, 1, 1.2, 2.4, 4],
   5: [0.9, 0.98, 1, 1.2, 2.4, 4],
@@ -849,6 +868,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // same on the Setup step (`applyLaborTemplate`), so the engine reads ONLY the item fields;
   // `bid.laborTemplateName` is informational.
 
+  const hoursPerDay =
+    bid.hoursPerDay !== undefined && bid.hoursPerDay > 0
+      ? bid.hoursPerDay
+      : admin.settings.hoursPerDay;
+
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
   let underlaymentLaborHours = 0;
@@ -881,8 +905,32 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
     const isDuroRoof = sys.roofSystem === "Duro-Roof";
     const sheetLabel = resolveSectionSheetLabel(s, Object.keys(sLt?.sheetSizeMultiByLabel ?? {}));
-    const membraneWithOverlap = areaWithEdgeOverlap(s.length, s.width, version);
     const zones = resolveSectionZones(s);
+    // Legacy MembraneWithOverlap = RoofSystem.CalculateMembraneQty (docs §21): roll goods add
+    // the field seam overlap, sheet sizes add the seam length between sheets; both start from
+    // AreaWithEdgeOverlap. Feeds the membrane material AND (via the zone shares) install labor.
+    const edgeList = s.edges?.length
+      ? [...s.edges].sort((a, b) => edgeSideIndex(a) - edgeSideIndex(b))
+      : undefined;
+    const membraneWithOverlap = legacyMembraneWithOverlap(
+      rsId,
+      {
+        length: s.length,
+        width: s.width,
+        overlapWidthIn: LEGACY_OVERLAP_WIDTH_IN[rsId] ?? 6,
+        fieldLapIn: s.fieldLap,
+        customFieldLapFt: 0,
+        customPerimeterLapIn: s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0,
+        perimEnhancementWidthFt: s.enhancementWidthFt,
+        sides: (edgeList ?? []).map((e) => ({
+          isPerim: e.isPerimeter,
+          perimLengthFt: edgePerimLength(e),
+        })),
+        isQuickBid: s.isQuickBid !== false,
+        rolls: sheetRollsFromLabel(sheetLabel),
+      },
+      version,
+    );
     // Membrane tier (legacy MembraneCost_4_0_230, docs/legacy-money-parity.md §1): the combo's
     // FIRST sheet size (the seeded "Roll Good") prices the whole MembraneWithOverlap at the
     // roll-goods tier; other sheets price the FIELD share at the fieldLap's tab tier, with the
@@ -1037,7 +1085,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         underlaymentMaterial += qMaterial;
         addSub(uMatBySub, uTile, qMaterial);
         const amt = layer.quote.laborAmount ?? 0;
-        const qHours = layer.quote.laborInDays ? amt * admin.settings.hoursPerDay : amt;
+        const qHours = layer.quote.laborInDays ? amt * hoursPerDay : amt;
         underlaymentLaborHours += qHours;
         addSub(uHrsBySub, uTile, qHours);
         continue;
@@ -1169,6 +1217,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // else × SheetSize.SmartSheetMulti; × ComplexityFactor. Perimeter/corner ×1.2 only for the
     // "durogrip" adhesive with a PerimeterSpacing (code constant).
     let adhesiveBaseHoursPer1000 = 0;
+    let adheredSheetMulti = sheetSizeMulti;
     let rollGoods = true;
     let rollGoodWidthMulti = 1;
     let adheredPerimeterBump = false;
@@ -1180,8 +1229,15 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         );
       }
       const rollLabel = sLt?.rollGoodsSheetLabel ?? "";
+      // SheetSize.SmartSheetMulti on an adhered section is the PER-ADHESIVE table (legacy
+      // SSAdheredMulti, seeded in rdl_adhered_sheet_multi); the combo's single column is the
+      // fallback when no per-adhesive row exists.
+      const perAdhesive = admin.adheredSheetMulti?.[rsId]?.[sheetLabel]?.[sys.adhesiveName];
+      if (perAdhesive !== undefined) adheredSheetMulti = perAdhesive;
       rollGoods =
-        rollLabel === "" || sheetLabel === rollLabel || !sLt?.sheetSizeMultiByLabel[sheetLabel];
+        rollLabel === "" ||
+        sheetLabel === rollLabel ||
+        (perAdhesive === undefined && !sLt?.sheetSizeMultiByLabel[sheetLabel]);
       if (rollGoods) {
         const w = admin.rollGoodWidthMulti?.[rsId]?.[s.fieldLap];
         if (w === undefined) {
@@ -1218,7 +1274,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       customPerimFastenerSpacing: s.perimFastenerOc,
       customCornerFastenerSpacing: s.cornerFastenerOc,
       deckTypeId: sLt?.deckTypeIds[s.deckType] ?? 0,
-      sheetSizeMulti,
+      sheetSizeMulti: sys.attachment === "adhered" ? adheredSheetMulti : sheetSizeMulti,
       complexity,
       fieldAttachment: sys.attachment,
       perimAttachment: sys.attachment,
@@ -1948,7 +2004,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     perDiemInMarkup: bid.perDiemInMarkup,
     commission: bid.commission,
     commissionInMarkup: bid.commissionInMarkup,
-    hoursPerDay: admin.settings.hoursPerDay,
+    hoursPerDay,
     warranty: {
       costPerSqFt: bid.warrantyCostPerSqFt,
       nonEliteMasterCharge: bid.warrantyNonEliteMasterCharge,

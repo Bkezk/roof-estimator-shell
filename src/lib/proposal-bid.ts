@@ -110,6 +110,8 @@ export interface SavedBidState {
   markupMode: MarkupMode;
   markup: number;
   laborRate: number;
+  /** Per-estimate hours per man-day (legacy Labor & Markup form); absent = admin default. */
+  hoursPerDay?: number;
   commission: number;
   taxExempt: boolean;
   // Money controls (optional so older saved bids stay valid; default off).
@@ -322,6 +324,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     markupMode: s.markupMode,
     markup: s.markup,
     crewLaborRatePerHour: s.laborRate,
+    ...(s.hoursPerDay !== undefined && s.hoursPerDay > 0 ? { hoursPerDay: s.hoursPerDay } : {}),
     commission: s.commission,
     commissionInMarkup: s.commissionInMarkup ?? false,
     perDiem: s.perDiem ?? 0,

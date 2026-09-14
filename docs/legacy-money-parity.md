@@ -2047,16 +2047,14 @@ tables.
   Base × (1 + AdjustLabor/100)). A user following that help text and entering 108 would get
   +108% in the legacy estimator. The web follows the runtime (percent adjustment, 0 = none) and
   says so on its admin page.
-- **Membrane quantity — OPEN (code port).** `MembraneWithOverlap = RoofSystem.CalculateMembraneQty`: `Rolls == 1` →
+- **Membrane quantity — PORTED (§21).** `MembraneWithOverlap = RoofSystem.CalculateMembraneQty`: `Rolls == 1` →
   `RollGoodsMembraneCalc`, `Rolls > 1` → `SheetsMembraneCalc`, else `AreaWithEdgeOverlap`. The
   seeded sheet sizes carry Rolls 1 (Roll Good) / 5…25 (sheets), so legacy uses the roll or sheet
   geometry, not `(L+1)(W+1)`. The web bills `(L+1)(W+1)` for material AND (now) labor; the two
   geometry ports remain open (quantities.ts `rollGoodsMembraneQty` is drafted but unwired).
-- **`SSAdheredMulti` is keyed per ADHESIVE — OPEN (seed port)** (SheetSize × Adhesive); the
-  captured adhesive combo has one column. The installer seed carries the full table; the
-  Duro-Last values are identical across adhesives.
-- **Hours per man-day — OPEN (small UI port)**: per-estimate in legacy (`frmLaborTemplate`
-  writes `Settings.HoursPerDay`); the web keeps it admin-level.
+- **`SSAdheredMulti` keyed per ADHESIVE — PORTED (§21)**: `rdl_adhered_sheet_multi` seeded
+  from the installer; the combo column stays the fallback.
+- **Hours per man-day — PORTED (§21)**: per-estimate field on the Labor & Markup dialog.
 
 ### 20.3 Labor templates — the legacy model (replaces the compute-time factors)
 
@@ -2078,3 +2076,50 @@ tables.
   ×0.1, and template × adjust compounding never existed in legacy. `laborTemplateFactor` now
   returns 1 + value/100. Areas the web template stores but legacy has no single field for
   (corners / strainers / vents / washers / walk pads) are left untouched.
+
+## 21. Membrane quantity, per-adhesive sheet multipliers, hours per man-day (IL-exact, 2026-09-14)
+
+### 21.1 MembraneWithOverlap = `RoofSystem.CalculateMembraneQty`
+
+Dispatch (DuroLastSystem rva 0xd370, DuroRoofSystem 0xde78, DuroBondSystem 0xbd24,
+DuroFleeceSystem 0xc123): `SheetSize.Rolls == 1` → `RollGoodsMembraneCalc`; `Rolls > 1` →
+`SheetsMembraneCalc`; else `AreaWithEdgeOverlap`. Duro-Fleece is always roll goods; Duro-Bond has
+no roll-goods branch (sheets or area). `Rolls` is RSSheetSize.Rolls: "Roll Good" 1, "N sf" N/100
+(`sheetRollsFromLabel`). Duro-Tuff has its own multi-width roll optimiser
+(`DuroTuffSystem.CalculateMembraneQty`, ~46 KB of IL) — NOT ported; it stays AreaWithEdgeOverlap
+(flagged).
+
+- **`RollGoodsMembraneCalc`** (DuroLastFunctions rva 0xa4b28):
+  `rows = CustomPerimeterLap(0) > 0 ? Round(Ceil(PerimEnhancementWidth / In2Ft(CustomPerimeterLap
+  − OverlapWidth))) : 0`; `pw[i] = rows × In2Ft(CustomPerimeterLap − OverlapWidth) ×
+  SideIsPerim(i)`; `overlapLength = Ceil(((W+1) − pw[2] − pw[0]) / lap × ((L+1) − pw[1] −
+  pw[3]))` with `lap = ToInteger(CustomFieldLap > 0 ? CustomFieldLap : In2Ft(FieldLap))` — an
+  INTEGER (28" → 2, 60"/64" → 5); result `AreaWithEdgeOverlap + overlapLength × In2Ft(OverlapWidth)`.
+  The four "(PerimSideLength + 1) × rows" sums computed first are overwritten by the field term
+  (stloc.3 at 0x22b) and survive only in the Show Calculations text — ported verbatim, so the
+  perimeter rows only narrow the field run. Reproduces the §9 trace (1×1, 60" lap → 4.5).
+- **`SheetsMembraneCalc_4_0_223`** (rva 0xa45e4): `n = NumSheetsReq`; `avgSheetSide =
+  √(AreaWithEdgeOverlap / n)`; `numOverlaps = Round(Floor(2n − 2√n))`; result
+  `AreaWithEdgeOverlap + numOverlaps × avgSheetSide` (the bare seam length; the × In2Ft(OverlapWidth)
+  variant only appears in the printed percentage). `NumSheetsReq` (0xa453c): quick bid on sheets →
+  `Ceil(AreaWithEdgeOverlap / (Rolls × 100))`; non-quick-bid → 1.
+- `OverlapWidth` = RoofSystem.LapOver (installer: 6" all systems, Duro-Fleece 3") —
+  `LEGACY_OVERLAP_WIDTH_IN`.
+- Effect on the 50×50 "1500 sf" fixture: 2601 → 2601 + √1300.5 = 2637.06 sq ft (+1.4%) for
+  material AND install labor (the §20.1 share basis); roll goods at 64" → 2861.5.
+
+### 21.2 Adhered sheet multiplier per adhesive
+
+`SheetSize.get_SmartSheetMulti` (rva 0xad268) reads `m_dAdheredSheetMulti[adhesive.ID]` for an
+adhered field attachment (custom first if > 0), i.e. the SSAdheredMulti table keyed by sheet AND
+adhesive. New table `rdl_adhered_sheet_multi` (roof_system_id, sheet_label, adhesive_id) seeded
+verbatim from the installer (Duro-Last Roll Good 4 / 500 sf 2.4 / 1000 sf 1.2 for adhesives 1–2;
+Duro-Tuff and Duro-Fleece Roll Good 1); `EngineAdminData.adheredSheetMulti` resolves it by
+adhesive long name, falling back to the combo's column when no row exists.
+
+### 21.3 Hours per man-day per estimate
+
+`frmLaborTemplate.btnSave_Click` writes `Settings.HoursPerDay` (and UseManDays) for the open
+estimate. `BidInput.hoursPerDay` / `SavedBidState.hoursPerDay` (absent = admin default) feed
+man-days, the $/man-day markup mode, the Man-Day Labor readout and quote labor in days; the Labor &
+Markup dialog's "Hours per Man Day" is now editable.

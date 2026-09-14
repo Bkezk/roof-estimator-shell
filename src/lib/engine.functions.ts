@@ -41,6 +41,7 @@ import {
   type RawTabMultiRow,
   type RawLegacyAdhesiveRow,
   RawRollGoodWidthRow,
+  RawAdheredSheetMultiRow,
   type RawAdhesiveCoverageRow,
   type RawUnderlaymentGroupRow,
   type RawUnderlaymentBoardGroupRow,
@@ -97,6 +98,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       covUnderRes,
       covWallRes,
       rollWidthRes,
+      adheredSheetRes,
       ndlSheetMetalRes,
       ndlBlockingRes,
       ndlMasonryRes,
@@ -148,6 +150,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       (sb as unknown as UntypedFrom).from("adhesive_wall_coverage").select("*"),
       // Legacy RSRollGoodWidth (adhered roll-goods labor multiplier by width, hand-seeded table).
       (sb as unknown as UntypedFrom).from("rdl_roll_good_width").select("*"),
+      // Legacy SSAdheredMulti (adhered sheet × adhesive labor multiplier, hand-seeded table).
+      (sb as unknown as UntypedFrom).from("rdl_adhered_sheet_multi").select("*"),
       // Screens holding the auto-priced NDL rate rows (§8.3/§8.4 counterflash / blocking /
       // capstone masonry / ARP).
       sb.from("pricing_catalog").select("data").eq("id", "non_dl:sheet_metal_work").maybeSingle(),
@@ -239,6 +243,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       RawAdhesiveCoverageRow[] | null;
     const rollGoodWidthRows = (rollWidthRes.data ?? null) as unknown as
       RawRollGoodWidthRow[] | null;
+    const adheredSheetMultiRows = (adheredSheetRes.data ?? null) as unknown as
+      RawAdheredSheetMultiRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -266,6 +272,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       adhesiveCoverageUnderlayment,
       adhesiveWallCoverage,
       rollGoodWidthRows,
+      adheredSheetMultiRows,
       nonDlSheetMetalScreen: (ndlSheetMetalRes.data?.data ?? null) as MembraneScreen | null,
       nonDlBlockingScreen: (ndlBlockingRes.data?.data ?? null) as MembraneScreen | null,
       nonDlMasonryScreen: (ndlMasonryRes.data?.data ?? null) as MembraneScreen | null,

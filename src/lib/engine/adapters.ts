@@ -1569,6 +1569,15 @@ export interface RawLegacyAdhesiveRow {
   perim_spacing_in?: number | null;
 }
 
+/** A seeded rdl_adhered_sheet_multi row (legacy SSAdheredMulti: sheet × adhesive labor multi). */
+export interface RawAdheredSheetMultiRow {
+  roof_system_id: number;
+  sheet_label: string;
+  adhesive_id: number;
+  multiplier: number | string;
+  custom_multiplier?: number | string | null;
+}
+
 /** A seeded rdl_roll_good_width row (legacy RSRollGoodWidth: adhered roll-goods labor multi). */
 export interface RawRollGoodWidthRow {
   roof_system_id: number;
@@ -1705,6 +1714,8 @@ export interface RawAdminData {
   legacyAdhesiveRows?: RawLegacyAdhesiveRow[] | null;
   /** Legacy RSRollGoodWidth rows (adhered roll-goods width → labor multiplier, by system). */
   rollGoodWidthRows?: RawRollGoodWidthRow[] | null;
+  /** Legacy SSAdheredMulti rows (adhered sheet-size labor multiplier by system × sheet × adhesive). */
+  adheredSheetMultiRows?: RawAdheredSheetMultiRow[] | null;
   adhesiveCoverageDeck?: RawAdhesiveCoverageRow[] | null;
   adhesiveCoverageUnderlayment?: RawAdhesiveCoverageRow[] | null;
   adhesiveWallCoverage?: RawAdhesiveCoverageRow[] | null;
@@ -1781,6 +1792,11 @@ export interface EngineAdminData {
    * `RoofSystem.RollGoodWidthAdhesiveMulti(FieldLap)`, table RSRollGoodWidth; docs §20.1).
    */
   rollGoodWidthMulti?: Record<number, Record<number, number>>;
+  /**
+   * Adhered sheet-size labor multiplier by legacy roof-system id → sheet label → adhesive long
+   * name (legacy SSAdheredMulti via SheetSize.SmartSheetMulti's per-adhesive table; docs §21).
+   */
+  adheredSheetMulti?: Record<number, Record<string, Record<string, number>>>;
   /**
    * Legacy adhesive flags by long name: `AdheredPerimLaborRate` bumps the perimeter/corner rate
    * ×1.2 only for ShortName "durogrip" with PerimeterSpacing ≠ -1 (docs §20.1).
@@ -1872,6 +1888,17 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     const v = custom > 0 ? custom : Number(r.multiplier);
     if (Number.isFinite(v)) (rollGoodWidthMulti[r.roof_system_id] ??= {})[r.width_in] = v;
   }
+  const adhesiveNameById: Record<number, string> = {};
+  for (const a of raw.legacyAdhesiveRows ?? []) adhesiveNameById[a.adhesive_id] = a.long_name;
+  const adheredSheetMulti: Record<number, Record<string, Record<string, number>>> = {};
+  for (const r of raw.adheredSheetMultiRows ?? []) {
+    const name = adhesiveNameById[r.adhesive_id];
+    if (!name) continue;
+    const custom = Number(r.custom_multiplier ?? 0);
+    const v = custom > 0 ? custom : Number(r.multiplier);
+    if (!Number.isFinite(v)) continue;
+    ((adheredSheetMulti[r.roof_system_id] ??= {})[r.sheet_label.trim()] ??= {})[name] = v;
+  }
   const adhesiveFlags: Record<string, { shortName: string; perimSpacingIn: number }> = {};
   for (const a of raw.legacyAdhesiveRows ?? []) {
     if (a.short_name)
@@ -1925,6 +1952,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(metals ? { metals } : {}),
     ...(nonDl ? { nonDl } : {}),
     ...(Object.keys(rollGoodWidthMulti).length ? { rollGoodWidthMulti } : {}),
+    ...(Object.keys(adheredSheetMulti).length ? { adheredSheetMulti } : {}),
     ...(Object.keys(adhesiveFlags).length ? { adhesiveFlags } : {}),
   };
 }

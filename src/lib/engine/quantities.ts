@@ -36,70 +36,124 @@ export function areaWithEdgeOverlap(length: number, width: number, version: stri
   return (length + lap) * (width + lap);
 }
 
-/**
- * The confirmed roll-goods RETURN line (analysis/quantities.md §1.3):
- *   MembraneQty = AreaWithEdgeOverlap + overlapLength × In2Ft(OverlapWidth)
- * Reconciled to the Show_Calculations trace: 1×1 section, 6" overlap → 4 + 1×0.5 = 4.5.
- */
-export const composeMembraneQty = (
-  areaWithLap: number,
-  overlapLength: number,
-  overlapWidthInches: number,
-): number => areaWithLap + overlapLength * in2Ft(overlapWidthInches);
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.2b Legacy MembraneWithOverlap — RoofSystem.CalculateMembraneQty (IL-exact, docs §21)
+// ─────────────────────────────────────────────────────────────────────────────
 
-export interface RollGoodsSection {
+/** VB `Conversions.ToInteger(Double)` — banker's rounding to a whole number. */
+const toInteger = (v: number): number => {
+  const f = Math.floor(v);
+  const frac = v - f;
+  if (frac > 0.5) return f + 1;
+  if (frac < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+};
+
+export interface LegacyMembraneSection {
   length: number;
   width: number;
-  overlapWidthInches: number; // RoofSystem.OverlapWidth (e.g. 6)
-  fieldLapInches: number; // FieldLap
-  customFieldLapFt: number; // CustomFieldLap in ft; ≤0 means use In2Ft(FieldLap)
-  customPerimeterLapInches: number; // CustomPerimeterLap(0); >0 enables enhancement rows
-  perimEnhancementWidth: number;
-  corners: [number, number, number, number]; // corner0..3
-  /** Four sides; only perimeter sides contribute. cornerAdj trims sides 1 & 3. */
-  sides: Array<{ isPerim: boolean; length: number; cornerAdj: number }>;
+  /** RoofSystem.OverlapWidth (LapOver, in): 6 for every system but Duro-Fleece (3). */
+  overlapWidthIn: number;
+  fieldLapIn: number;
+  /** CustomFieldLap (ft, > 0 enables); legacy int compare. */
+  customFieldLapFt: number;
+  /** CustomPerimeterLap(0) (in); > 0 enables the perimeter rows. */
+  customPerimeterLapIn: number;
+  perimEnhancementWidthFt: number;
+  /** Per side A..D: legacy PerimSideLength(i) (0 unless perimeter) and SideIsPerim(i). */
+  sides: Array<{ isPerim: boolean; perimLengthFt: number }>;
+  isQuickBid: boolean;
+  /** SheetSize.Rolls: 1 = roll goods, > 1 = sheets (sq ft ÷ 100), 0 = neither. */
+  rolls: number;
 }
 
 /**
- * RollGoodsMembraneCalc overlapLength (engine-truth §2.2). STRUCTURE is IL-recovered, but the
- * per-section perimeter/field geometry has no standalone unit anchor in the source — it is only
- * confirmed end-to-end for the 1×1 trace. Treat the numeric output as UNVALIDATED until checked
- * against a captured multi-section bid (Phase 6). The confirmed part is the return-line identity
- * in composeMembraneQty().
+ * `DuroLastFunctions.RollGoodsMembraneCalc` (rva 0xa4b28), verbatim:
+ *   rows  = CustomPerimeterLap(0) > 0 ? Round(Ceiling(PerimEnhancementWidth /
+ *           In2Ft(CustomPerimeterLap(0) − OverlapWidth))) : 0
+ *   pw[i] = rows × In2Ft(CustomPerimeterLap(0) − OverlapWidth) × (SideIsPerim(i) ? 1 : 0)
+ *   overlapLength = Ceiling( ((W+1) − pw[2] − pw[0]) / lap × ((L+1) − pw[1] − pw[3]) )
+ *     where lap = ToInteger(CustomFieldLap > 0 ? CustomFieldLap : In2Ft(FieldLap)) — an INTEGER
+ *   return AreaWithEdgeOverlap + overlapLength × In2Ft(OverlapWidth)
+ * The per-side "(PerimSideLength + 1) × rows" sums that precede this in the IL are overwritten
+ * by the field-term assignment (stloc.3 at 0x22b) and only survive in the Show Calculations
+ * text — the perimeter rows never reach the returned quantity (legacy bug, ported verbatim).
  */
-export function rollGoodsOverlapLength(s: RollGoodsSection): number {
+export function rollGoodsMembraneCalc(s: LegacyMembraneSection, version: string): number {
+  const area = areaWithEdgeOverlap(s.length, s.width, version);
+  const rowWidthFt = in2Ft(s.customPerimeterLapIn - s.overlapWidthIn);
   const rows =
-    s.customPerimeterLapInches > 0
-      ? Math.round(
-          Math.ceil(
-            s.perimEnhancementWidth / in2Ft(s.customPerimeterLapInches - s.overlapWidthInches),
-          ),
-        )
+    s.customPerimeterLapIn > 0 && rowWidthFt > 0
+      ? Math.round(Math.ceil(s.perimEnhancementWidthFt / rowWidthFt))
       : 0;
-
-  const [c0, c1, c2, c3] = s.corners;
-  const fieldLapFt = s.customFieldLapFt > 0 ? s.customFieldLapFt : in2Ft(s.fieldLapInches);
-  const fieldRun = (s.length + 1 - c1 - c3) / fieldLapFt;
-  const fieldTerm = Math.ceil(fieldRun * (s.width + 1 - c2 - c0));
-
-  let perimContribution = 0;
-  s.sides.forEach((side, idx) => {
-    if (!side.isPerim) return;
-    // sides 0 & 2: (len + 1) × rows; sides 1 & 3: (len − cornerAdj) × rows
-    perimContribution +=
-      (idx === 0 || idx === 2 ? side.length + 1 : side.length - side.cornerAdj) * rows;
-  });
-
-  return fieldTerm + perimContribution;
+  const pw = [0, 1, 2, 3].map((i) => rows * rowWidthFt * (s.sides[i]?.isPerim ? 1 : 0));
+  const lapFt = s.customFieldLapFt > 0 ? s.customFieldLapFt : in2Ft(s.fieldLapIn);
+  const lap = toInteger(lapFt);
+  if (lap <= 0) return area;
+  const lengthRun = s.length + 1 - pw[1]! - pw[3]!;
+  const overlapLength = Math.ceil(((s.width + 1 - pw[2]! - pw[0]!) / lap) * lengthRun);
+  return area + overlapLength * in2Ft(s.overlapWidthIn);
 }
 
-/** Full roll-goods membrane quantity for a section (§2.2). See rollGoodsOverlapLength caveat. */
-export function rollGoodsMembraneQty(s: RollGoodsSection, version: string): number {
-  return composeMembraneQty(
-    areaWithEdgeOverlap(s.length, s.width, version),
-    rollGoodsOverlapLength(s),
-    s.overlapWidthInches,
-  );
+/**
+ * `DuroLastFunctions.NumSheetsReq` (rva 0xa453c): a quick-bid section on a sheet size covers
+ * Ceiling(AreaWithEdgeOverlap / (Rolls × 100)) sheets; a non-quick-bid section (whose sheet is
+ * derived from its area) is one sheet.
+ */
+export function numSheetsReq(s: LegacyMembraneSection, version: string): number {
+  if (!s.isQuickBid) return 1;
+  if (s.rolls > 1)
+    return Math.ceil(areaWithEdgeOverlap(s.length, s.width, version) / (s.rolls * 100));
+  return s.rolls === 1 ? 0 : 1;
+}
+
+/**
+ * `DuroLastFunctions.SheetsMembraneCalc_4_0_223` (rva 0xa45e4), verbatim:
+ *   n = NumSheetsReq; avgSheetSide = Sqrt(AreaWithEdgeOverlap / n)
+ *   numOverlaps = Round(Floor(2n − 2·Sqrt(n)))
+ *   return AreaWithEdgeOverlap + numOverlaps × avgSheetSide
+ * (The Show Calculations text also prints a variant × In2Ft(OverlapWidth); the RETURNED total
+ * adds the bare seam length — ported verbatim.)
+ */
+export function sheetsMembraneCalc(s: LegacyMembraneSection, version: string): number {
+  const area = areaWithEdgeOverlap(s.length, s.width, version);
+  const n = numSheetsReq(s, version);
+  if (n <= 0) return area;
+  const avgSheetSide = Math.sqrt(area / n);
+  const numOverlaps = Math.round(Math.floor(2 * n - 2 * Math.sqrt(n)));
+  return area + numOverlaps * avgSheetSide;
+}
+
+/** Legacy RSSheetSize.Rolls for a sheet label: "Roll Good" → 1, "N sf" → N ÷ 100, else 0. */
+export function sheetRollsFromLabel(label: string | undefined): number {
+  const t = (label ?? "").trim().toLowerCase();
+  if (!t) return 0;
+  if (t.startsWith("roll")) return 1;
+  const m = /^(\d+)\s*sf/.exec(t);
+  return m ? Math.round(Number(m[1]) / 100) : 0;
+}
+
+/**
+ * `RoofSystem.CalculateMembraneQty` dispatch per legacy roof-system id (docs §21): Duro-Last (1)
+ * and Duro-Roof (4): Rolls == 1 → roll goods, Rolls > 1 → sheets, else AreaWithEdgeOverlap;
+ * Duro-Bond (2): Rolls > 1 → sheets, else area; Duro-Fleece (5): always roll goods. Duro-Tuff (3)
+ * has its own multi-width roll optimiser (not ported — area with edge overlap, flagged).
+ */
+export function legacyMembraneWithOverlap(
+  rsId: number,
+  s: LegacyMembraneSection,
+  version: string,
+): number {
+  if (rsId === 5) return rollGoodsMembraneCalc(s, version);
+  if (rsId === 2)
+    return s.rolls > 1
+      ? sheetsMembraneCalc(s, version)
+      : areaWithEdgeOverlap(s.length, s.width, version);
+  if (rsId === 1 || rsId === 4) {
+    if (s.rolls === 1) return rollGoodsMembraneCalc(s, version);
+    if (s.rolls > 1) return sheetsMembraneCalc(s, version);
+  }
+  return areaWithEdgeOverlap(s.length, s.width, version);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

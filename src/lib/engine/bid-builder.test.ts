@@ -46,8 +46,22 @@ const combo: LaborCombo = {
  * Install hours for the 50×50 fixture. Legacy labor bills the zone SHARES of MembraneWithOverlap
  * ((L+1)(W+1) = 2601 sq ft), not the raw 2500 sq ft takeoff (docs §20.1): INSTALL h × 2601/2500.
  */
-const MWO_RATIO = 2601 / 2500;
+/**
+ * Legacy MembraneWithOverlap for the fixture (docs §21): a quick-bid 50×50 on the "1500 sf" sheet
+ * → SheetsMembraneCalc: AreaWithEdgeOverlap 2601 + numOverlaps × avgSheetSide, n = Ceil(2601/1500)
+ * = 2 sheets, numOverlaps = Floor(2·2 − 2·√2) = 1, avgSheetSide = √(2601/2).
+ */
+const MWO = 2601 + Math.sqrt(2601 / 2);
+const MWO_RATIO = MWO / 2500;
 const INSTALL = 15.125 * MWO_RATIO;
+/**
+ * Roll-goods quantity for the same 50×50 (RollGoodsMembraneCalc): 2601 + Ceil(51 / lap × 51) ×
+ * In2Ft(OverlapWidth), lap = ToInteger(In2Ft(FieldLap)) (28" → 2, 60"/64" → 5).
+ */
+const rollQty = (lapInt: number, overlapFt: number): number =>
+  2601 + Math.ceil((51 / lapInt) * 51) * overlapFt;
+/** Sheets quantity on the "500 sf" sheet: n = 6, overlaps = Floor(12 − 2√6) = 7. */
+const MWO_SHEET_500 = 2601 + 7 * Math.sqrt(2601 / 6);
 
 const admin: EngineAdminData = {
   deckOrder,
@@ -125,14 +139,14 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
 
     // membrane material: AreaWithEdgeOverlap(50,50) = 51×51 = 2601 sf × $1.23 = $3,199.23
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23, 2);
     // install labor (legacy MaterialTotalField basis, §20.1): field share 1 × MembraneWithOverlap
     // 2601 sf × rate (10×1×1.5125×1/2500) = INSTALL hrs (15.125 × 2601/2500)
     expect(r.installHours).toBeCloseTo(INSTALL, 6);
     // $50/hr × INSTALL = $786.80
     expect(r.laborSubtotal1).toBeCloseTo(INSTALL * 50, 2);
     // tax-exempt, no markup/commission/discount ⇒ purchases + labor
-    expect(r.money.grandTotal).toBeCloseTo(3199.23 + INSTALL * 50, 2);
+    expect(r.money.grandTotal).toBeCloseTo(MWO * 1.23 + INSTALL * 50, 2);
   });
 
   it("gross-profit markup flows: 35% on the built Subtotal 1", () => {
@@ -152,10 +166,10 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       }),
       admin,
     );
-    // 7×25.75 + 3×10.20 = 180.25 + 30.60 = 210.85, added to membrane 3199.23
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 210.85, 2);
+    // 7×25.75 + 3×10.20 = 180.25 + 30.60 = 210.85, added to membrane MWO * 1.23
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 210.85, 2);
     // membrane-before-discount stays membrane-only (std-sheet discount basis)
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2);
   });
 
   it("underlayment material = board $/sqft × area × 1.06 waste (1.03 for Geotextile)", () => {
@@ -170,7 +184,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(warnings).toEqual([]);
     // 50×50 = 2500 sf × $0.85 × 1.06 waste = $2,252.50 (legacy UnderlaymentCost, parity doc §6)
     expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2);
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23, 2); // membrane unchanged
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23, 2); // membrane unchanged
     const r = computeEstimate(inputs);
     expect(r.money.dTotals[6]).toBeCloseTo(2252.5, 2);
     // Geotextile carries the reduced 1.03 factor: 2500 × 0.85 × 1.03 = 2188.75
@@ -280,7 +294,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         { fromThreshold: 5001, cost: 975 },
       ],
     };
-    // M0 stays 3199.23, but board material 2500 × 0.85 × 1.06 = 2252.50 lifts material-before-tax
+    // M0 stays MWO * 1.23, but board material 2500 × 0.85 × 1.06 = 2252.50 lifts material-before-tax
     // to 5451.73 > 5001 → the 975 band. (On the old M0 basis this bid shipped at 800.)
     const { inputs } = buildEstimateInputs(
       bid({
@@ -299,7 +313,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         { fromThreshold: 5001, cost: 975 },
       ],
     };
-    // base bid material = membrane 3199.23 (no accessories) → 0 < 3199.23 ≤ 5001 → 800 freight
+    // base bid material = membrane MWO * 1.23 (no accessories) → 0 < MWO * 1.23 ≤ 5001 → 800 freight
     const { inputs } = buildEstimateInputs(bid(), withShip);
     expect(inputs.shipping).toBeCloseTo(800, 2);
     // an accessory line pushes M0 over 5001 → next band
@@ -307,7 +321,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       bid({ accessories: [{ description: "Big", price: 2000, quantity: 1 }] }),
       withShip,
     );
-    expect(hi.shipping).toBeCloseTo(975, 2); // 3199.23 + 2000 = 5199.23 > 5001
+    expect(hi.shipping).toBeCloseTo(975, 2); // MWO * 1.23 + 2000 = 5199.23 > 5001
   });
 
   it("freight: percent mode multiplies material-before-tax by shipping_percent/100", () => {
@@ -317,12 +331,12 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },
     };
     // Board material (2500 × 0.85 × 1.06 = 2252.50) separates the basis from M0: the percent
-    // applies to material-before-tax 3199.23 + 2252.50 = 5451.73 → 5% = 272.5865 → GoodSingle.
+    // applies to material-before-tax MWO * 1.23 + 2252.50 = 5451.73 → 5% = 272.5865 → GoodSingle.
     const { inputs } = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
       pct,
     );
-    expect(inputs.shipping).toBeCloseTo(272.59, 2);
+    expect(inputs.shipping).toBeCloseTo((MWO * 1.23 + 2252.5) * 0.05, 2);
   });
 
   it("accessory labor (per-unit hrs × qty) folds into direct labor (LaborSubtotal1)", () => {
@@ -357,7 +371,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     expect(inputs.otherMaterial).toBeCloseTo(40, 2); // 10 × $4 material
     expect(inputs.servicesCost).toBeCloseTo(7.515, 3); // 10 × 0.0167 h × $45/h
-    expect(inputs.materialTotalBeforeTax).toBeCloseTo(3199.23 + 40, 2); // OtherMaterial is taxable
+    expect(inputs.materialTotalBeforeTax).toBeCloseTo(MWO * 1.23 + 40, 2); // OtherMaterial is taxable
     const r = computeEstimate(inputs);
     expect(r.money.dTotals[7]).toBeCloseTo(40, 2); // OtherMaterial row
     expect(r.laborSubtotal2).toBeCloseTo(7.515, 3); // subs + services
@@ -443,8 +457,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // material (legacy Parapet.MembraneCost): girth Ceil(30.4)=31" -> In2Ft = 2.58 ft;
     // AdjustedLength = 100 + 1 + pieces(default 1) = 102; PARAPETS-tier price $1.40:
     // Round(2.58 x 102 x 1.4, 2) = 368.42 into M0
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2); // membrane-only basis unchanged
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2); // membrane-only basis unchanged
     const r = computeEstimate(inputs);
     // AdjustedLength = 100 + 1 + pieces(1) = 102 (legacy BaseManHours multiplies
     // AdjustedLength, not raw Length — docs §8.5): 102/50 × 2.25 = 4.59
@@ -586,7 +600,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // girth Ceil(30.4)=31" → 2.58 ft; AdjustedLength = 102.
     // p1 @ bid default 40/White $1.40 → Round(2.58×102×1.4, 2)  = 368.42
     // p2 @ own 60/Gray $2.50        → Round(2.58×102×2.5, 2)  = 657.90
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 657.9, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42 + 657.9, 2);
   });
 
   it("parapets: girth derives from the legacy profile dims (Skirt+Cant+Vertical+WallTop+Drop)", () => {
@@ -631,7 +645,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     expect(warnings).toEqual([]);
     // dims sum to 30.4 -> Ceil 31" -> 2.58 ft x 102 x $1.40 = $368.42, same as the girth test
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42, 2);
   });
 
   it('parapets: Duro-Tuff bills 24" panels at 30" each on 6"-increment heights', () => {
@@ -652,7 +666,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         },
       },
       priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
-      // Duro-Tuff membrane is flat-family priced now; 1.23 keeps the fixture's 3199.23 membrane.
+      // Duro-Tuff membrane is flat-family priced now; 1.23 keeps the fixture's MWO * 1.23 membrane.
       familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
     };
     const { inputs } = buildEstimateInputs(
@@ -675,7 +689,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     // AdjustedHeight = Ceil(30.4/6)/2 = 3 ft -> Ceil(36/24) = 2 panels x 30" = 5 ft billed;
     // Round(5 x 102 x 1.4, 2) = 714.00 (vs 368.42 non-Duro-Tuff)
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 714, 2);
+    // Duro-Tuff membrane quantity stays AreaWithEdgeOverlap (its roll optimiser is not ported).
+    expect(inputs.duroLastMaterial).toBeCloseTo(2601 * 1.23 + 714, 2);
   });
 
   it("curbs: setup + min/LF x type x perimeter, x qty, /60 -> direct labor", () => {
@@ -929,7 +944,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       { ...withAll, priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } } },
     );
     // Duro-Tuff bills 24" panels at 30": girth 42 → 6"-steps 3.5 ft → Ceil(42/24)=2 × 2.5 = 5 ft.
-    expect(oddSystem.inputs.duroLastMaterial).toBeCloseTo(3199.23 + 5 * 102 * 1.4, 2);
+    expect(oddSystem.inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 5 * 102 * 1.4, 2);
   });
 
   it("parapets: only the wall's own AdjustLabor field applies; per-wall hours are reported (§19/§20.3)", () => {
@@ -1139,7 +1154,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     expect(warnings).toEqual([]);
     expect(curbMaterial).toBeCloseTo(34.0035, 3);
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 34.0035, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 34.0035, 2);
     // Style 3 = quote required: warned, nothing billed.
     const quoted = buildEstimateInputs(bid({ curbs: [{ ...curb, styleId: 3 }] }), withCurb);
     expect(quoted.curbMaterial).toBe(0);
@@ -1175,8 +1190,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       }),
       tabAdmin,
     );
-    // MembraneWithOverlap(50x50, _230) x $1.10: 3199.23/1.23 x 1.10 = 2861.10
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.1, 2);
+    // MembraneWithOverlap(50x50, _230) x $1.10: MWO * 1.23/1.23 x 1.10 = 2861.10
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(((MWO * 1.23) / 1.23) * 1.1, 2);
 
     // With a perimeter zone marked, only the field SHARE is priced (legacy skips zones whose
     // custom lap is -1): areas 2500 total, perim 100x3 -> field share 2200/2500.
@@ -1194,11 +1209,14 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       }),
       tabAdmin,
     );
-    expect(zoned.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.1 * (2200 / 2500), 2);
+    expect(zoned.membraneCostBeforeDiscount).toBeCloseTo(
+      ((MWO * 1.23) / 1.23) * 1.1 * (2200 / 2500),
+      2,
+    );
 
     // The roll-good sheet (the combo's FIRST label) keeps the roll-goods tier on the full area.
     const { inputs: rg } = buildEstimateInputs(bid(), tabAdmin);
-    expect(rg.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+    expect(rg.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2);
   });
 
   it("membrane tier: custom zone laps price the perim/corner shares (≥60→tab60, ≥24→tab28, no 120 tier)", () => {
@@ -1221,7 +1239,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         ),
       },
     };
-    const mwo = 3199.23 / 1.23; // MembraneWithOverlap × 1 (price factored out)
+    const mwo = (MWO * 1.23) / 1.23; // MembraneWithOverlap × 1 (price factored out)
     // Perim zone marked with a custom 28" lap: field share at tab60, perim share at tab28.
     const { inputs } = buildEstimateInputs(
       bid({
@@ -1300,7 +1318,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     };
     const { inputs, warnings } = buildEstimateInputs(bid(), seededAdmin); // default: 1500 sf, lap 28
     expect(warnings).toEqual([]);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo((3199.23 / 1.23) * 1.35, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(((MWO * 1.23) / 1.23) * 1.35, 2);
   });
 
   it("membrane tier: a pre-series adminSnapshot (LaborTables without rollGoodsSheetLabel) keeps roll goods with NO warnings", () => {
@@ -1312,7 +1330,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     };
     const { inputs, warnings } = buildEstimateInputs(bid(), snapshotAdmin);
     expect(warnings).toEqual([]);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2);
   });
 
   it("membrane tier: flat-family systems (Duro-Tuff) never hit the tab-pitch path — flat price, no tab warnings", () => {
@@ -1339,7 +1357,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       dtAdmin,
     );
     expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2); // Duro-Tuff: area basis
   });
 
   it("family membrane pricing: Duro-Bond/Tuff are flat thickness-keyed; Duro-Fleece keys by membrane type", () => {
@@ -1351,7 +1369,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         "Duro-Fleece": { "50mil": 1.39, "50mil Plus": 1.92 },
       },
     };
-    const mwo = 3199.23 / 1.23; // MembraneWithOverlap for the 50×50 fixture section
+    const mwo = MWO; // Duro-Bond on the "1500 sf" sheet: SheetsMembraneCalc, like Duro-Last
     // Duro-Bond 40mil: flat price, no color, no tier, no "No price" warning.
     const bond = buildEstimateInputs(bid({ roofSystem: "Duro-Bond" }), famAdmin);
     expect(bond.warnings.filter((w) => w.includes("price"))).toEqual([]);
@@ -1364,7 +1382,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       }),
       famAdmin,
     );
-    expect(fleece.inputs.membraneCostBeforeDiscount).toBeCloseTo(mwo * 1.39, 2);
+    // Duro-Fleece is ALWAYS roll goods (CalculateMembraneQty), LapOver 3": 28" lap → int 2.
+    expect(fleece.inputs.membraneCostBeforeDiscount).toBeCloseTo(rollQty(2, 0.25) * 1.39, 2);
     // Missing row → warning + $0 (never a silent roll-goods fallback for these families).
     const missing = buildEstimateInputs(
       bid({
@@ -1383,7 +1402,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       priceMatrix: { 40: { rollGoods: { White: 1.23 }, tab60: { White: 1.1 } } },
       sheetTabSpacings: { 4: [57, 87, 120] },
     };
-    const mwo = 3199.23 / 1.23;
+    const mwo = (MWO * 1.23) / 1.23;
     // Field lap 87 (≥57, <120) → the 60"-Tabs row (Category 4), ×1.05 — even on the default
     // sheet label (legacy Duro-Roof has NO roll-good sheet branch).
     const { inputs, warnings } = buildEstimateInputs(
@@ -1420,7 +1439,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // existed. Zoned pricing must not engage (it would warn "not a selectable tab pitch").
     const { inputs, warnings } = buildEstimateInputs(bid({ roofSystem: "Duro-Roof" }), admin);
     expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(3199.23 * 1.05, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23 * 1.05, 2);
   });
 
   it("metals: material folds into M0 (not OtherMaterial); labor $ into services", () => {
@@ -1438,8 +1457,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       }),
       admin,
     );
-    // material: 2 x 550 = 1100 -> M0 alongside membrane 3199.23; OtherMaterial untouched
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1100, 2);
+    // material: 2 x 550 = 1100 -> M0 alongside membrane MWO * 1.23; OtherMaterial untouched
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 1100, 2);
     expect(inputs.otherMaterial).toBeCloseTo(0, 6);
     // labor: 2 x 1.5 h x $40 = $120 at the LINE's own rate -> DIRECT labor (legacy dLabor[5]
     // inside LaborSubtotal1), NOT services; the 3 hours join LS1 hours (man-days).
@@ -1502,7 +1521,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // adhesive material (legacy AggregateCalcQtys): 2500/2000 = 1.25 units, ceilinged once per
     // adhesive across the estimate -> 2 whole units x $899 = $1798 -> M0
     expect(adhesiveMaterial).toBeCloseTo(1798, 2);
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 1798, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 1798, 2);
     const r = computeEstimate(inputs);
     // mech (legacy rule, docs §18): layout 7.775 + (0.342/60) × (Round(2500/32)=78 × 5 = 390)
     // = 9.998 h; adhesive layer: layout 6.9 + (field 2500 + perim 0) × 6.5 / 2500 = 13.4 h
@@ -1940,14 +1959,14 @@ describe("auto-priced NDL items (§8.3/§8.4/§8.6: counterflash / blocking / ca
     );
     expect(warnings).toEqual([]);
     // (18+6)/12 = 2 ft wide × AdjustedLength 102 (arp length defaults to the wall length) =
-    // 204 sq ft → Ceil 204 × $3 = $612, on top of membrane 3199.23 + parapet membrane 368.42
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 612, 2);
+    // 204 sq ft → Ceil 204 × $3 = $612, on top of membrane MWO * 1.23 + parapet membrane 368.42
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42 + 612, 2);
     // a custom ARP length bills RAW (not adjusted): 2 × 30 = 60 → $180
     const custom = buildEstimateInputs(
       bid({ parapets: [{ ...wall, arpSizeIn: 18, arpLengthFt: 30 }] }),
       withParapet,
     );
-    expect(custom.inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + 180, 2);
+    expect(custom.inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42 + 180, 2);
   });
 
   it("section and parapet ARP are ceiled SEPARATELY before pricing", () => {
@@ -1971,7 +1990,7 @@ describe("auto-priced NDL items (§8.3/§8.4/§8.6: counterflash / blocking / ca
     // section: 1.03 × ((12+6)/12) × 10 = 15.45 → Ceil 16; parapet: 204 → Ceil 204;
     // qty = 16 + 204 = 220 × $3 = $660
     const arpMaterial = 220 * 3;
-    expect(inputs.duroLastMaterial).toBeCloseTo(3199.23 + 368.42 + arpMaterial, 2);
+    expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 368.42 + arpMaterial, 2);
   });
 
   it("geometry that needs a missing rate row warns instead of silently billing $0", () => {
@@ -2315,7 +2334,7 @@ describe("sectionMembraneDisplayPricing — the calc dialog can never disagree w
     expect(disp.pricePerSqFt).toBe(1.28);
     const { inputs } = buildEstimateInputs(bid({ sections: [s] }), withTabs);
     // default section (no zones): engine membrane = withOverlap × the SAME price
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.28, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.28, 2);
   });
 
   it("roll-good sheet (no tab table): helper and engine both bill roll goods", () => {
@@ -2324,7 +2343,7 @@ describe("sectionMembraneDisplayPricing — the calc dialog can never disagree w
     expect(disp.tierLabel).toBe("Roll Goods");
     expect(disp.pricePerSqFt).toBe(1.23);
     const { inputs } = buildEstimateInputs(bid(), admin);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2);
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2);
   });
 });
 
@@ -2379,7 +2398,8 @@ describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
       },
     };
     // Roll goods on a 64" roll: 5.215/1000 × RollGoodWidthAdhesiveMulti(64)=1 × complexity 1
-    // over the whole MembraneWithOverlap (2601 sf, field share 1): 13.564 h × thickness 1.
+    // over the whole MembraneWithOverlap (RollGoodsMembraneCalc, lap int 5; field share 1).
+    const ROLL_64 = rollQty(5, 0.5);
     const roll = buildEstimateInputs(
       bid({
         attachment: "adhered",
@@ -2389,7 +2409,7 @@ describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
       withAdhered,
     );
     expect(roll.warnings.filter((w) => /install labor|roll-goods/.test(w))).toEqual([]);
-    expect(computeEstimate(roll.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601, 6);
+    expect(computeEstimate(roll.inputs).installHours).toBeCloseTo((5.215 / 1000) * ROLL_64, 6);
     // A sheet size uses SheetSize.SmartSheetMulti instead: 500 sf → ×2.4.
     const sheet = buildEstimateInputs(
       bid({
@@ -2399,7 +2419,10 @@ describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
       }),
       withAdhered,
     );
-    expect(computeEstimate(sheet.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601 * 2.4, 6);
+    expect(computeEstimate(sheet.inputs).installHours).toBeCloseTo(
+      (5.215 / 1000) * MWO_SHEET_500 * 2.4,
+      6,
+    );
     // Unknown roll width → ×1 with a warning; no adhesive labor row → 0 h with a warning.
     const oddWidth = buildEstimateInputs(
       bid({
@@ -2410,7 +2433,7 @@ describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
       withAdhered,
     );
     expect(oddWidth.warnings.some((w) => w.includes('60" roll width'))).toBe(true);
-    expect(computeEstimate(oddWidth.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601, 6);
+    expect(computeEstimate(oddWidth.inputs).installHours).toBeCloseTo((5.215 / 1000) * ROLL_64, 6);
     const noRow = buildEstimateInputs(
       bid({
         attachment: "adhered",
@@ -2439,9 +2462,92 @@ describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
       withAdhered,
     );
     const rate = 5.8408 / 1000;
+    const rollRatio = ROLL_64 / 2500;
     expect(computeEstimate(grip.inputs).installHours).toBeCloseTo(
-      (1900 * MWO_RATIO * rate + 600 * MWO_RATIO * rate * 1.2) * 1,
+      (1900 * rollRatio * rate + 600 * rollRatio * rate * 1.2) * 1,
       6,
+    );
+  });
+
+  it("adhered sheet multiplier is keyed per ADHESIVE (legacy SSAdheredMulti); combo column is the fallback", () => {
+    const adhesiveCombo = buildLaborTables(
+      {
+        roof_system: "Duro-Last",
+        attachment: "adhesive",
+        sheet_size_multipliers: [
+          { label: "Roll Good", roof_section: 4, underlayment: 4 },
+          { label: "500 sf", roof_section: 2.4, underlayment: 2.4 },
+        ],
+        thickness_multipliers: [{ mil: 40, multiplier: 1 }],
+        adhesive: {
+          base_hours_per_1000_sqft_by_substrate: [
+            { substrate: "Water Based Adhesive", labor_per_1000_sqft: 5.215 },
+            { substrate: "Solvent Based Adhesive", labor_per_1000_sqft: 6.95 },
+          ],
+        },
+      },
+      deckOrder,
+    );
+    const withPerAdhesive: EngineAdminData = {
+      ...admin,
+      labor: { ...admin.labor, "Duro-Last|adhesive": adhesiveCombo },
+      rollGoodWidthMulti: { 1: { 64: 1 } },
+      // Solvent Based on 500 sf carries its own (hypothetical) 3.0 row; Water Based has none.
+      adheredSheetMulti: { 1: { "500 sf": { "Solvent Based Adhesive": 3 } } },
+    };
+    const sheet500 = (adhesive: string) =>
+      buildEstimateInputs(
+        bid({
+          attachment: "adhered",
+          membraneAdhesiveName: adhesive,
+          sections: [{ ...bid().sections[0]!, sheetSizeLabel: "500 sf", fieldLap: 64 }],
+        }),
+        withPerAdhesive,
+      );
+    expect(computeEstimate(sheet500("Solvent Based Adhesive").inputs).installHours).toBeCloseTo(
+      (6.95 / 1000) * MWO_SHEET_500 * 3,
+      6,
+    );
+    expect(computeEstimate(sheet500("Water Based Adhesive").inputs).installHours).toBeCloseTo(
+      (5.215 / 1000) * MWO_SHEET_500 * 2.4,
+      6,
+    );
+  });
+
+  it("hours per man-day is per estimate: bid.hoursPerDay overrides the admin default for man-days and quote days", () => {
+    const base = buildEstimateInputs(bid(), admin);
+    expect(base.inputs.hoursPerDay).toBe(admin.settings.hoursPerDay);
+    const own = buildEstimateInputs(bid({ hoursPerDay: 10 }), admin);
+    expect(own.inputs.hoursPerDay).toBe(10);
+    // Man-days follow it: LS1 hours / hoursPerDay.
+    const r = computeEstimate(own.inputs);
+    expect(r.money.totalManDays).toBeCloseTo(r.laborSubtotal1Hours / 10, 1); // GoodSingle
+    // A quote layer's labor in DAYS converts at the estimate's own figure.
+    const quoted = buildEstimateInputs(
+      bid({
+        hoursPerDay: 10,
+        sections: [
+          {
+            ...bid().sections[0]!,
+            layers: [
+              {
+                board: "Flute Filler",
+                attachment: "mechanical",
+                fastenersPerBoard: 0,
+                adhesiveName: "",
+                substrate: "",
+                quote: { name: "Q", lumpSum: 100, laborAmount: 2, laborInDays: true },
+              },
+            ],
+          },
+        ],
+      }),
+      admin,
+    );
+    expect(computeEstimate(quoted.inputs).underlaymentLaborHours).toBeCloseTo(20, 6);
+    // 0 / absent falls back to the admin default.
+    expect(buildEstimateInputs(bid({ hoursPerDay: 0 }), admin).inputs.hoursPerDay).toBe(
+      admin.settings.hoursPerDay,
     );
   });
 
@@ -2527,7 +2633,8 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     expect(s0.laborTables).toBeDefined(); // the section's own combo, not the bid's
     expect(s0.tearOffSheetComplexityMulti).toBe(2.4);
     const r = computeEstimate(inputs);
-    expect(r.installHours).toBeCloseTo(INSTALL * 2.4, 6);
+    // Duro-Tuff membrane quantity = AreaWithEdgeOverlap (2601): labor basis 2601/2500.
+    expect(r.installHours).toBeCloseTo(15.125 * (2601 / 2500) * 2.4, 6);
     // TearOffBaseLabor = 2500 × 0.024876 × 1 × 2.4 = 149.256 → Round 3 → Ceiling to the cent
     expect(r.tearOffLaborHours).toBeCloseTo(149.26, 2);
     // Duro-Tuff flat membrane price applied (family price, no tab tiers)
