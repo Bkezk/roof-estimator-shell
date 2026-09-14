@@ -14,6 +14,8 @@ import {
   RefreshCw,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import {
@@ -433,6 +435,23 @@ function EstimatePage() {
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
+  // Bid total panel starts minimized (just the grand total); the choice is remembered per browser.
+  const [bidTotalOpen, setBidTotalOpen] = useState<boolean>(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem("bidTotalOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleBidTotal = () =>
+    setBidTotalOpen((o) => {
+      try {
+        localStorage.setItem("bidTotalOpen", o ? "0" : "1");
+      } catch {
+        /* storage unavailable — keep in-memory state only */
+      }
+      return !o;
+    });
 
   // Underlayment step (legacy Underlayment/Insulation screen): section multi-select + the
   // pending layer being configured (board / attachment) before it's applied to the selection.
@@ -970,7 +989,11 @@ function EstimatePage() {
   if (!admin) return <p className="text-sm text-muted-foreground">Could not load engine data.</p>;
 
   return (
-    <div className="grid gap-6 pb-16 lg:grid-cols-[1fr_320px] lg:pb-0">
+    <div
+      className={`grid gap-6 pb-16 lg:pb-0 ${
+        bidTotalOpen ? "lg:grid-cols-[1fr_320px]" : "lg:grid-cols-[1fr_220px]"
+      }`}
+    >
       <div className="space-y-6">
         {loadedBidEmpty && (
           <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
@@ -3865,10 +3888,41 @@ function EstimatePage() {
 
       <div id="bid-total-panel" className="lg:sticky lg:top-4 lg:self-start">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Bid total</CardTitle>
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">
+            <div className="min-w-0">
+              <CardTitle className="text-base">Bid total</CardTitle>
+              {!bidTotalOpen && result && (
+                <p className="flex items-center gap-1.5 text-lg font-semibold tabular-nums">
+                  {money(result.r.money.grandTotal)}
+                  {result.warnings.length > 0 && (
+                    <AlertTriangle
+                      className="h-4 w-4 text-amber-500"
+                      aria-label={`${result.warnings.length} input warning(s)`}
+                    />
+                  )}
+                </p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 shrink-0 px-2"
+              onClick={toggleBidTotal}
+              aria-expanded={bidTotalOpen}
+              aria-controls="bid-total-body"
+            >
+              {bidTotalOpen ? (
+                <>
+                  <ChevronUp className="mr-1 h-4 w-4" /> Minimize
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="mr-1 h-4 w-4" /> Details
+                </>
+              )}
+            </Button>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent id="bid-total-body" className={bidTotalOpen ? "space-y-3" : "hidden"}>
             {result?.warnings.length ? (
               <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
                 <div className="mb-1 flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
@@ -4043,9 +4097,10 @@ function EstimatePage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              document.getElementById("bid-total-panel")?.scrollIntoView({ behavior: "smooth" })
-            }
+            onClick={() => {
+              if (!bidTotalOpen) toggleBidTotal();
+              document.getElementById("bid-total-panel")?.scrollIntoView({ behavior: "smooth" });
+            }}
           >
             Details
           </Button>
