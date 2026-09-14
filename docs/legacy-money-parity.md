@@ -2023,25 +2023,40 @@ tables.
    per-item `× (1 + AdjustLabor/100)`); metals / non-DL own-rate; labor rate from the Markup &
    Labor Options preset (`MLOptions.LaborRate` → `markup_options.hourly_rate`).
 
-### 20.2 Not fixable from the captured data (flagged)
+### 20.2 Open items — status after the admin-screenshot check (2026-09-14)
 
-- **`lookup_Decktimes`** — `DuroLastSystem.MechFieldLaborRate` multiplies the mechanical FIELD
-  rate by `Decktimes[(tab == 64 ? 60 : tab), deckId, snappedOC]` when that table's Version ≥ 4
-  and the value ≠ -1 (snappedOC = OC − OC mod 3, min 6). The captured "Roof Deck Labor"
-  fastener-spacing multipliers ARE the installer's `MechOnCenterMulti` rows (24"→0.91 …
-  6"→1.41, verified against the seed), so Decktimes is an ADDITIONAL Azure-only factor with no
-  captured values. Web: factor 1. If the live table is all -1 the web is exact.
-- **Membrane quantity.** `MembraneWithOverlap = RoofSystem.CalculateMembraneQty`: `Rolls == 1` →
+- **`lookup_Decktimes` — RESOLVED, inactive.** `DuroLastSystem.MechFieldLaborRate` calls
+  `oLookupDecktimes.DataTableLookup(4, [tab == 64 ? 60 : tab, deckId, snappedOC])` and
+  multiplies only when the result ≠ -1. `LookupTable.get_DataTableLookup(col, keys)` (rva
+  0xabc60) matches the leading key columns and returns COLUMN `col` — column 4 of
+  `lookup_Decktimes(TabSpacing, DeckType, FastenerSpacing, Value, CustomValue)` is
+  **CustomValue**, which the installer sets to -1 on every row (`UPDATE lookup_Decktimes SET
+  CustomValue = -1`, release 2.1), and BAManager has no editor for it (its Roof Deck Labor
+  screen, capture 110935, shows the product 10 × deck × tab × spacing — e.g. Wood 24" = 13.76 —
+  with no deck-times grid). The factor never fires; the web's ×1 is exact.
+- **Setup band modes — RESOLVED.** The Setup Times admin screen (capture 110813) offers only
+  Square Feet / Multiplier rows (Hour = sqft × multiplier shown read-only) over a Minimum of 16:
+  6000 / 20000 / 100000 × 0.003 — every band is the multiply mode, matching the seed.
+- **Tear-off scale — RESOLVED by the screen's own caption.** The Tearoff Times tab states
+  "Custom values entered in Hours per 100 sqft"; the seeded grid is that grid, so ÷100 gives the
+  hours the screen defines.
+- **Labor template values — legacy help text vs runtime.** The Labor Templates admin screen
+  (capture 110851) says "100 = Standard/Baseline, 95 = 5% decrease, 108 = 8% increase", but the
+  shipped Standard template stores 0 in every row and the runtime writes the stored number
+  straight into AdjustLabor (`DBLoadLookupTables` → `DACommon.toSingle`, no rescale; ManHours =
+  Base × (1 + AdjustLabor/100)). A user following that help text and entering 108 would get
+  +108% in the legacy estimator. The web follows the runtime (percent adjustment, 0 = none) and
+  says so on its admin page.
+- **Membrane quantity — OPEN (code port).** `MembraneWithOverlap = RoofSystem.CalculateMembraneQty`: `Rolls == 1` →
   `RollGoodsMembraneCalc`, `Rolls > 1` → `SheetsMembraneCalc`, else `AreaWithEdgeOverlap`. The
   seeded sheet sizes carry Rolls 1 (Roll Good) / 5…25 (sheets), so legacy uses the roll or sheet
   geometry, not `(L+1)(W+1)`. The web bills `(L+1)(W+1)` for material AND (now) labor; the two
   geometry ports remain open (quantities.ts `rollGoodsMembraneQty` is drafted but unwired).
-- **`SSAdheredMulti` is keyed per ADHESIVE** (SheetSize × Adhesive); the captured adhesive
-  combo has one column. The seed values are identical across adhesives for Duro-Last.
-- **Tear-off lookup scale** (÷100 of the "Hours/100SqFt" grid) and the **setup band mode
-  flags** (all captured as mode 1) stay as captured — the Azure values were not exportable.
-- **Hours per man-day** is per-estimate in legacy (`frmLaborTemplate` writes
-  `Settings.HoursPerDay`); the web keeps it admin-level.
+- **`SSAdheredMulti` is keyed per ADHESIVE — OPEN (seed port)** (SheetSize × Adhesive); the
+  captured adhesive combo has one column. The installer seed carries the full table; the
+  Duro-Last values are identical across adhesives.
+- **Hours per man-day — OPEN (small UI port)**: per-estimate in legacy (`frmLaborTemplate`
+  writes `Settings.HoursPerDay`); the web keeps it admin-level.
 
 ### 20.3 Labor templates — the legacy model (replaces the compute-time factors)
 
