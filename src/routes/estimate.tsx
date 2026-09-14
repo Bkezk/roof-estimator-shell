@@ -92,6 +92,7 @@ import {
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
+import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -248,14 +249,22 @@ function EstimatePage() {
   const getWarrantyFn = useServerFn(getWarrantyData);
   const getPresetsFn = useServerFn(getMarkupPresets);
   const getBidFn = useServerFn(getBid);
+  const listEstimatorsFn = useServerFn(listEstimatorNames);
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { bid: bidParam } = Route.useSearch();
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const authed = !!session;
+
+  // Estimator roster (admin General → Estimators) for the Setup "Estimator's Name" dropdown.
+  const { data: estimatorNames } = useQuery({
+    queryKey: ["estimator-names"],
+    queryFn: () => listEstimatorsFn(),
+    enabled: authed,
+  });
 
   const { data: liveAdmin, isLoading } = useQuery({
     queryKey: ["engine-admin"],
@@ -569,6 +578,14 @@ function EstimatePage() {
   // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
   // $45/hr, 35% gross profit) instead of hardcoded fallbacks; saved bids keep their own values.
   const appliedDefaultPreset = useRef(false);
+  // New bids default "Estimator's Name" to the signed-in user (a loaded bid keeps its own).
+  useEffect(() => {
+    if (bidParam) return;
+    const me = (profile?.full_name ?? "").trim() || (profile?.email ?? "").trim();
+    if (!me) return;
+    setCustomer((c) => (c.estimatorName ? c : { ...c, estimatorName: me }));
+  }, [profile, bidParam]);
+
   useEffect(() => {
     if (appliedDefaultPreset.current || bidParam || !presets?.length) return;
     const def = presets.find((x) => x.isDefault) ?? presets[0];
@@ -1090,11 +1107,18 @@ function EstimatePage() {
                         />
                       </Field>
                       <Field label="Estimator's Name">
-                        <Input
+                        <PickOne
                           value={customer.estimatorName ?? ""}
-                          onChange={(e) =>
-                            setCustomer((c) => ({ ...c, estimatorName: e.target.value }))
-                          }
+                          // Roster from admin General → Estimators; a saved bid whose estimator
+                          // is no longer on it keeps showing that name.
+                          options={[
+                            ...(estimatorNames ?? []),
+                            ...(customer.estimatorName &&
+                            !(estimatorNames ?? []).includes(customer.estimatorName)
+                              ? [customer.estimatorName]
+                              : []),
+                          ]}
+                          onChange={(v) => setCustomer((c) => ({ ...c, estimatorName: v }))}
                         />
                       </Field>
                       <Field label="Date Created">

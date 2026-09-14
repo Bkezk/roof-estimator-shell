@@ -27,11 +27,7 @@ async function admin() {
 // RLS lets every user read their own profiles row, so the caller's client is
 // enough to verify the admin role.
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userId)
-    .single();
+  const { data, error } = await supabase.from("profiles").select("role").eq("id", userId).single();
   if (error || !data || data.role !== "admin") {
     throw new Error("Forbidden: admin access required");
   }
@@ -64,6 +60,27 @@ export const listUsers = createServerFn({ method: "GET" })
       .order("created_at", { ascending: true });
     if (error) throw error;
     return (data ?? []) as UserProfile[];
+  });
+
+// The estimator roster for the Estimate → Setup "Estimator's Name" dropdown (the accounts the
+// admin General → Estimators page manages). Any signed-in user may read it, but only the
+// display names leave the server: profiles RLS hides other users' rows from non-admins, so
+// this reads through the service-role client and strips ids / emails / roles before returning.
+export const listEstimatorNames = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async (): Promise<string[]> => {
+    const supabaseAdmin = await admin();
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, email")
+      .order("full_name", { ascending: true });
+    if (error) throw new Error(error.message);
+    const names = new Set<string>();
+    for (const row of data ?? []) {
+      const name = (row.full_name ?? "").trim() || (row.email ?? "").trim();
+      if (name) names.add(name);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
   });
 
 const createUserSchema = z.object({
@@ -129,11 +146,7 @@ export const updateUserRole = createServerFn({ method: "POST" })
         .from("profiles")
         .select("id", { count: "exact", head: true })
         .eq("role", "admin");
-      const { data: target } = await sb
-        .from("profiles")
-        .select("role")
-        .eq("id", data.id)
-        .single();
+      const { data: target } = await sb.from("profiles").select("role").eq("id", data.id).single();
       if ((count ?? 0) <= 1 && target?.role === "admin") {
         throw new Error("Cannot remove the last admin");
       }
