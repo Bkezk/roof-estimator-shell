@@ -57,6 +57,13 @@ import { AccessoriesScreens } from "@/components/accessories-screens";
 import { MetalsScreens } from "@/components/metals-screens";
 import { CurbsScreen } from "@/components/curbs-screen";
 import { ParapetsScreen } from "@/components/parapets-screen";
+import {
+  applyLaborTemplate,
+  laborTemplateDeltas,
+  seedCurbAdjust,
+  seedParapetAdjust,
+  seedSectionAdjust,
+} from "@/lib/engine/labor-template";
 import { NonDlScreens } from "@/components/nondl-screens";
 import { emptyNonDlState, normalizeNonDlState, type NonDlState } from "@/lib/engine/nondl";
 import {
@@ -605,6 +612,18 @@ function EstimatePage() {
     setCustomer((c) => (c.estimatorName ? c : { ...c, estimatorName: me }));
   }, [profile, bidParam]);
 
+  // NEW bids start on the admin default labor template (legacy Estimate ctor seeds its adjusts
+  // from oRefTemplates' default); saved bids keep whatever was written when they were built.
+  const appliedDefaultTemplate = useRef(false);
+  useEffect(() => {
+    if (appliedDefaultTemplate.current || bidParam || !admin?.laborTemplates) return;
+    appliedDefaultTemplate.current = true;
+    const def = admin.laborTemplates.defaultName;
+    if (def) applyTemplate(def);
+    // applyTemplate closes over state; the ref guard makes this run once per new bid.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [admin, bidParam]);
+
   useEffect(() => {
     if (appliedDefaultPreset.current || bidParam || !presets?.length) return;
     const def = presets.find((x) => x.isDefault) ?? presets[0];
@@ -662,6 +681,26 @@ function EstimatePage() {
   const adhesiveOptions = admin?.adhesiveTimes?.adhesives ?? [];
   const warrantyOptions = ["None", ...(warrantyData?.warranties.map((w) => w.name) ?? [])];
   const laborTemplateOptions = ["None", ...(admin?.laborTemplates?.names ?? [])];
+  // The selected template's percent adjustments (legacy Template fields). They are WRITTEN into
+  // the items on selection (frmHome.updateTemplate) and seed new items (RoofSection / Parapet /
+  // Curb ctors) — the engine never composes them at compute time (docs §20.3).
+  const templateDeltas = useMemo(
+    () => laborTemplateDeltas(admin, laborTemplateName),
+    [admin, laborTemplateName],
+  );
+  /** Legacy frmHome.updateTemplate: select a template and write it into every item. */
+  const applyTemplate = (name: string) => {
+    setLaborTemplateName(name);
+    const d = laborTemplateDeltas(admin, name);
+    const w = applyLaborTemplate({ sections, parapets, curbs, accessoriesCalc }, d);
+    setAdjustLaborPct(w.adjustLaborPct);
+    setAdjustSetupPct(w.adjustSetupPct);
+    setAdjustInspectionPct(w.adjustInspectionPct);
+    setSections(w.sections);
+    setParapets(w.parapets);
+    setCurbs(w.curbs);
+    setAccessoriesCalc(w.accessoriesCalc);
+  };
 
   const saved: SavedBidState = {
     roofSystem,
@@ -1216,12 +1255,13 @@ function EstimatePage() {
                             )
                           )
                             return;
-                          setLaborTemplateName(v === "None" ? "" : v);
+                          applyTemplate(v === "None" ? "" : v);
                         }}
                       />
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Per-category labor modifiers (composed with the bid&apos;s adjust
-                        percentages).
+                        Selecting a template writes its % adjustments into every item&apos;s labor
+                        (sections, underlayment, tear-off, parapets, curbs, accessories, setup,
+                        inspection) — edit any of them afterwards.
                       </p>
                     </LegacyGroup>
                     <LegacyGroup title="4. Estimator Commission">
@@ -1976,7 +2016,11 @@ function EstimatePage() {
                       }
                     : null
                 }
-                newSection={() => newSection({ ...sectionDefaults })}
+                newSection={() =>
+                  // Legacy RoofSection ctor: seeds AdjustUnderlaymentLabor / TO_Additional from the
+                  // estimate's template (AdjustLabor comes from the bid-level default).
+                  newSection({ ...sectionDefaults, ...seedSectionAdjust(templateDeltas) })
+                }
                 onGoUnderlayment={(id) => {
                   setUSel([id]);
                   goStep(2);
@@ -2134,17 +2178,16 @@ function EstimatePage() {
                       variant="outline"
                       onClick={() => {
                         setSections((prev) =>
-                          prev.map((x) => {
-                            if (!uSel.includes(x.id)) return x;
-                            const nx = { ...x };
-                            delete nx.adjustUnderlaymentLaborPct;
-                            return nx;
-                          }),
+                          prev.map((x) =>
+                            uSel.includes(x.id)
+                              ? { ...x, adjustUnderlaymentLaborPct: templateDeltas.underlayment }
+                              : x,
+                          ),
                         );
                         setULaborOpen(false);
                       }}
                     >
-                      Use template default
+                      Use template default ({templateDeltas.underlayment}%)
                     </Button>
                     <Button
                       onClick={() => {
@@ -2828,8 +2871,11 @@ function EstimatePage() {
                 {...(result?.accessories
                   ? { fastenersNeeded: result.accessories.parapetTabs.fastenersNeeded }
                   : {})}
+                templateAdjustPct={templateDeltas.roofSection}
                 newParapet={() =>
                   newParapet({
+                    // Legacy Parapet ctor: a new wall seeds AdjustLabor from Template.ParapetsLabor.
+                    adjustLaborPct: seedParapetAdjust(templateDeltas),
                     wallType: parapetDefaults.wallType ?? 1,
                     ...(parapetDefaults.thicknessMil !== undefined
                       ? { thicknessMil: parapetDefaults.thicknessMil }
@@ -2868,7 +2914,7 @@ function EstimatePage() {
                 crewRate={laborRate}
                 hoursById={result?.curbHoursById ?? {}}
                 totalHours={result?.r.curbLaborHours ?? 0}
-                newCurb={() => newCurb()}
+                newCurb={() => newCurb({ adjustLaborPct: seedCurbAdjust(templateDeltas) })}
               />
             </CardContent>
           </Card>
@@ -3612,7 +3658,17 @@ function EstimatePage() {
                 <PickOne
                   value={laborTemplateName || "None"}
                   options={laborTemplateOptions}
-                  onChange={(v) => setLaborTemplateName(v === "None" ? "" : v)}
+                  onChange={(v) => {
+                    if (
+                      bidId &&
+                      laborTemplateName !== (v === "None" ? "" : v) &&
+                      !window.confirm(
+                        "Are you sure you want to change your labor template? This will override all manually entered labor settings.",
+                      )
+                    )
+                      return;
+                    applyTemplate(v === "None" ? "" : v);
+                  }}
                 />
               </Field>
               <Field label="Per-diem $/man-day">

@@ -872,6 +872,17 @@ export interface LaborCombo {
     underlayment: number;
   }> | null;
   thickness_multipliers?: Array<{ mil: number; multiplier: number }> | null;
+  /**
+   * Adhered combos: legacy AdhesiveCoverage.DefaultLabor / `RSAdhesiveCoverage.HoursPerKSqFt` —
+   * install labor HOURS PER 1,000 SQ FT keyed by the adhesive's long name (the "substrate" key
+   * is the captured screen's column caption).
+   */
+  adhesive?: {
+    base_hours_per_1000_sqft_by_substrate: Array<{
+      substrate: string;
+      labor_per_1000_sqft: number | string | null;
+    }>;
+  } | null;
 }
 
 export interface LaborTables {
@@ -894,6 +905,11 @@ export interface LaborTables {
    * price by zone at tab tiers ("" when the combo has no sheet list → treat as roll goods).
    */
   rollGoodsSheetLabel: string;
+  /**
+   * Adhered combos: `GetAdhesiveBaseHours(adhesive).SmartValue` — hours per 1,000 sq ft by
+   * adhesive long name (legacy AdhesiveCoverage.DefaultLabor). Empty on mechanical combos.
+   */
+  adhesiveBaseHoursByName: Record<string, number>;
 }
 
 /**
@@ -920,12 +936,23 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     : [];
 
   const sheetSizeMultiByLabel: Record<string, number> = {};
-  for (const s of combo.sheet_size_multipliers ?? [])
-    sheetSizeMultiByLabel[s.label] = s.roof_section;
+  for (const s of combo.sheet_size_multipliers ?? []) {
+    // Blank cells (the captured adhesive combo leaves 1500 sf+ empty) carry no multiplier: the
+    // section builder warns and uses 1 rather than legacy's -1 (which zeroes the hours).
+    const v = Number(s.roof_section);
+    if (s.roof_section !== null && s.roof_section !== undefined && Number.isFinite(v))
+      sheetSizeMultiByLabel[s.label] = v;
+  }
   const rollGoodsSheetLabel = combo.sheet_size_multipliers?.[0]?.label ?? "";
 
   const thicknessLaborByMil: Record<number, number> = {};
   for (const t of combo.thickness_multipliers ?? []) thicknessLaborByMil[t.mil] = t.multiplier;
+
+  const adhesiveBaseHoursByName: Record<string, number> = {};
+  for (const a of combo.adhesive?.base_hours_per_1000_sqft_by_substrate ?? []) {
+    const v = Number(a.labor_per_1000_sqft);
+    if (a.substrate && Number.isFinite(v) && v > 0) adhesiveBaseHoursByName[a.substrate] = v;
+  }
 
   return {
     deckTypeMulti,
@@ -935,6 +962,7 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     sheetSizeMultiByLabel,
     thicknessLaborByMil,
     rollGoodsSheetLabel,
+    adhesiveBaseHoursByName,
   };
 }
 
@@ -1330,6 +1358,7 @@ export interface RawLaborTemplate {
   id: string;
   name: string;
   sort?: number;
+  is_default?: boolean | null;
 }
 export interface RawLaborTemplateAdjustment {
   template_id: string;
@@ -1341,8 +1370,14 @@ export interface RawLaborTemplateAdjustment {
 export interface LaborTemplates {
   /** Template names in sort order. */
   names: string[];
-  /** byName[template][area] = stored value (0 = use-default sentinel ≡ 100). */
+  /**
+   * byName[template][area] = the stored PERCENT ADJUSTMENT (legacy Template fields, written
+   * straight into each item's AdjustLabor by frmHome.updateTemplate: 0 = no change, 10 = +10%,
+   * -10 = 10% less). NOT 100-based.
+   */
   byName: Record<string, Record<string, number>>;
+  /** The template new estimates start on (legacy Estimate ctor: oRefTemplates default). */
+  defaultName?: string;
 }
 
 export function buildLaborTemplates(
@@ -1352,25 +1387,34 @@ export function buildLaborTemplates(
   const names: string[] = [];
   const byId: Record<string, string> = {};
   const byName: LaborTemplates["byName"] = {};
+  let defaultName: string | undefined;
   for (const tpl of [...templates].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))) {
     names.push(tpl.name);
     byId[tpl.id] = tpl.name;
     byName[tpl.name] = {};
+    if (tpl.is_default && defaultName === undefined) defaultName = tpl.name;
   }
   for (const a of adjustments) {
     const name = byId[a.template_id];
     if (name) byName[name]![a.area] = Number(a.value);
   }
-  return { names, byName };
+  return {
+    names,
+    byName,
+    ...((defaultName ?? names[0]) !== undefined ? { defaultName: defaultName ?? names[0]! } : {}),
+  };
 }
 
-/** Template factor for one area: 0 (or missing) is the use-default sentinel ≡ ×1; else value/100. */
+/**
+ * Template multiplier for one area: the stored value is a percent ADJUSTMENT (legacy writes it
+ * into AdjustLabor, where ManHours = Base × (1 + AdjustLabor/100)) → 1 + value/100; missing = ×1.
+ */
 export function laborTemplateFactor(
   areas: Record<string, number> | undefined,
   area: string,
 ): number {
   const v = areas?.[area];
-  return v === undefined || v === 0 ? 1 : v / 100;
+  return v === undefined || !Number.isFinite(v) ? 1 : 1 + v / 100;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1519,6 +1563,18 @@ export interface RawAdhesiveCoverageRow {
 export interface RawLegacyAdhesiveRow {
   adhesive_id: number;
   long_name: string;
+  /** Legacy Adhesive.ShortName (e.g. "durogrip") — the adhered perimeter labor bump key. */
+  short_name?: string | null;
+  /** Legacy Adhesive.PerimeterSpacing (-1 = none). */
+  perim_spacing_in?: number | null;
+}
+
+/** A seeded rdl_roll_good_width row (legacy RSRollGoodWidth: adhered roll-goods labor multi). */
+export interface RawRollGoodWidthRow {
+  roof_system_id: number;
+  width_in: number;
+  multiplier: number | string;
+  custom_multiplier?: number | string | null;
 }
 
 /** global_DeckType id → our labor-deck name. */
@@ -1647,6 +1703,8 @@ export interface RawAdminData {
   sheetTabRows?: Array<{ roof_system_id: number; spacing: number }> | null;
   /** Legacy adhesive-coverage tables (membrane/wall adhesive units for adhered systems). */
   legacyAdhesiveRows?: RawLegacyAdhesiveRow[] | null;
+  /** Legacy RSRollGoodWidth rows (adhered roll-goods width → labor multiplier, by system). */
+  rollGoodWidthRows?: RawRollGoodWidthRow[] | null;
   adhesiveCoverageDeck?: RawAdhesiveCoverageRow[] | null;
   adhesiveCoverageUnderlayment?: RawAdhesiveCoverageRow[] | null;
   adhesiveWallCoverage?: RawAdhesiveCoverageRow[] | null;
@@ -1718,6 +1776,16 @@ export interface EngineAdminData {
   metals?: MetalsRefData;
   /** §14 Non-Duro-Last Items ref data (the nine legacy NDL collections). */
   nonDl?: NonDlRefData;
+  /**
+   * Adhered roll-goods labor multiplier by legacy roof-system id → roll width (in) (legacy
+   * `RoofSystem.RollGoodWidthAdhesiveMulti(FieldLap)`, table RSRollGoodWidth; docs §20.1).
+   */
+  rollGoodWidthMulti?: Record<number, Record<number, number>>;
+  /**
+   * Legacy adhesive flags by long name: `AdheredPerimLaborRate` bumps the perimeter/corner rate
+   * ×1.2 only for ShortName "durogrip" with PerimeterSpacing ≠ -1 (docs §20.1).
+   */
+  adhesiveFlags?: Record<string, { shortName: string; perimSpacingIn: number }>;
 }
 
 /** Assemble the engine's admin inputs from the raw fetched rows (pure; no I/O). */
@@ -1798,6 +1866,20 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const laborTemplates = raw.laborTemplateRows?.length
     ? buildLaborTemplates(raw.laborTemplateRows, raw.laborTemplateAdjustments ?? [])
     : undefined;
+  const rollGoodWidthMulti: Record<number, Record<number, number>> = {};
+  for (const r of raw.rollGoodWidthRows ?? []) {
+    const custom = Number(r.custom_multiplier ?? 0);
+    const v = custom > 0 ? custom : Number(r.multiplier);
+    if (Number.isFinite(v)) (rollGoodWidthMulti[r.roof_system_id] ??= {})[r.width_in] = v;
+  }
+  const adhesiveFlags: Record<string, { shortName: string; perimSpacingIn: number }> = {};
+  for (const a of raw.legacyAdhesiveRows ?? []) {
+    if (a.short_name)
+      adhesiveFlags[a.long_name] = {
+        shortName: a.short_name,
+        perimSpacingIn: Number(a.perim_spacing_in ?? -1),
+      };
+  }
   const underlaymentGroups = raw.underlaymentBoardGroupRows?.length
     ? buildUnderlaymentGroups(raw.underlaymentGroupRows ?? [], raw.underlaymentBoardGroupRows)
     : undefined;
@@ -1842,6 +1924,8 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(accessories ? { accessories } : {}),
     ...(metals ? { metals } : {}),
     ...(nonDl ? { nonDl } : {}),
+    ...(Object.keys(rollGoodWidthMulti).length ? { rollGoodWidthMulti } : {}),
+    ...(Object.keys(adhesiveFlags).length ? { adhesiveFlags } : {}),
   };
 }
 

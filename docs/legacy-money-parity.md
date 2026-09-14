@@ -1943,9 +1943,9 @@ default-parapet XML in `BidAdvantage.DataAccess.SqlScript.xml`. Builds on §8.5�
 3. Wall adhesive was billed for EVERY wall when the bid was adhered; now only walls whose own
    attachment is adhered (an adhered wall on a mechanical bid also bills — the bid needs no
    adhered section for the wall's adhesive combo to be examined).
-4. `adjustLaborPct` on a parapet REPLACES the template's Parapets Labor factor instead of
-   compounding with it (`pAdjust` in the builder loop; the later `× tf("Parapets Labor")` was
-   removed). Curbs still compose template × per-item adjust (unchanged, not yet audited).
+4. `adjustLaborPct` on a parapet is the only adjust applied (the template's value is written
+   INTO that field on selection — §20.3 replaced the compute-time template factors everywhere,
+   curbs included).
 5. `ReviewBreakdown.parapetHoursById` / `parapetBaseHoursById` feed the screen's labor link
    and the frmLaborPopUp dialog (Adjust % ⇄ Change Hours, "Use template default" clears the
    override).
@@ -1965,3 +1965,101 @@ default-parapet XML in `BidAdvantage.DataAccess.SqlScript.xml`. Builds on §8.5�
 
 - The wall-style toolstrip (§19.1 item 7). The web screen leaves all five dims editable; a
   style picker would only gray out / zero the dims a style excludes. No money impact.
+
+## 20. Labor audit — install labor basis, adhered labor, templates (IL-exact, 2026-09-14)
+
+Full pass over every labor term against the IL and the admin → engine data path. Sources:
+`RoofSystem.MechField/MechPerim/AdheredField/AdheredPerimLaborRate` (DataAccess rva 0xa5d4 /
+0xa810 / 0xa790 / 0xae7c), `DuroLastSystem.MechFieldLaborRate` (0xc4c4), every
+`*System.RoofSectionLaborHours_4_0_230`, `RoofSection.get_MaterialTotalField/Perim/Corner`,
+`RoofSections.get_BaseSetupTime / get_BaseInspectionTime / get_TearOffLabor`,
+`cMechanicalSystem.get_SmartOnCenterMultiplier / get_SmartTabSpacingMultiplier`
+(DescendingIntegerComparer), `Template.*`, `frmHome.updateTemplate` (Estimator rva 0x5a394),
+`frmLaborTemplate.btnSave_Click`, the RoofSection / Parapet / Curb / Estimate constructors, the
+accessory `*.BaseManHours / ManHours` family, and the installer's seeded MechOnCenterMulti /
+MechTabMulti / SSMechMulti / SSAdheredMulti / RSRollGoodWidth / AdhesiveCoverage / RSMembraneType
+tables.
+
+### 20.1 Section install labor — corrections
+
+1. **Labor AREA basis.** `RoofSectionLaborHours_4_0_230` (every system) bills
+   `MaterialTotalField × fieldRate + MaterialTotalPerim × perimRate + MaterialTotalCorner ×
+   cornerRate`, then × `MembraneType.Labor` (thickness factor), floored at 0.
+   `MaterialTotalX = (AreaX / AreaTotal) × MembraneWithOverlap` — the zone SHARE of the
+   membrane quantity, not the raw takeoff area. (A running negative carry exists but only fires
+   when a share is negative.) The web billed raw `L×W − zones`; it now passes share ×
+   MembraneWithOverlap (`laborArea` in the builder). For the 50×50 fixture that is ×2601/2500.
+2. **Adhered install labor was 0.** `AdheredFieldLaborRate = GetAdhesiveBaseHours(adhesive)
+   .SmartValue / 1000 × (SheetSize.Layout == rollgood ? RollGoodWidthAdhesiveMulti(FieldLap) :
+   SheetSize.SmartSheetMulti) × ComplexityFactor`; perimeter/corner the same with a ×1.2 bump
+   ONLY when the adhesive ShortName is "durogrip" and its PerimeterSpacing ≠ -1. The base hours
+   are `AdhesiveCoverage.DefaultLabor` (hours per 1,000 sq ft: Water Based 5.215, Solvent Based
+   6.95, Duro-Grip 5.8408 …) — captured in each adhered `rdl_combos` row under
+   `adhesive.base_hours_per_1000_sqft_by_substrate` but never read. `buildLaborTables` now
+   exposes `adhesiveBaseHoursByName`; the builder resolves the section's adhesive, the roll-good
+   width multiplier (new table `rdl_roll_good_width`, seeded verbatim from RSRollGoodWidth:
+   Duro-Last 64"→1; Duro-Tuff 30"→2.6, 60"→1.3, 120"→1; Duro-Roof 64"→1; Duro-Fleece 60"→1.3,
+   120"→1) and the durogrip flag (`legacy_adhesive.short_name / perim_spacing_in`). A missing
+   adhesive row → 0 h WITH a warning; a missing roll width → ×1 with a warning (legacy would
+   throw on a Nothing lookup); a blank adhered sheet cell (the captured combo leaves 1500 sf+
+   empty; legacy returns -1 there, zeroing the hours) → ×1 with the roll-goods path.
+3. **Perimeter / corner tab multiplier.** `MechPerimLaborRate` keys `CustomPerimeterLap ≠ -1 ?
+   CustomPerimeterLap : PerimeterLap` (corner: `CustomCornerLap ≠ -1 ? … : PerimeterLap`), and
+   `RoofSection.PerimeterLap` (`_perimTabSizeOrRollWidth`) has NO writer anywhere in the two
+   assemblies — it is always 0. The descending tab walk then returns its LAST entry (smallest
+   tab: Duro-Last 28" → 1.5125) for every perimeter / corner zone without a custom lap. The web
+   keyed the field lap (60" → ×1.0, under-billing perimeter labor ×1.5125). Ported verbatim:
+   the section's Advanced perim/corner lap when set, else 0.
+4. **On-center multiplier fallback.** The `SmartOnCenterMultiplier` walk has no catch-all: a
+   spacing below every key leaves the initial 1.0 (the TAB walk is the one that returns the last
+   entry). `onCenterLookup` (labor.ts) replaces `bandLookup` for OC; only matters for OC < 6".
+5. **Confirmed matching** (no change): 10 × deck × tab × oc / 2500 × sheet × complexity; field
+   uses SmartDeckTypeMultiplier, perim/corner the DEFAULT deck column; DescendingIntegerComparer
+   on both multiplier lists; thickness factor once per section; tear-off `W×L×lookup ×
+   SheetMulti × Complexity`, Round 3, ×(1+TO_Additional/100), bid Ceiling-to-cent; setup band
+   walk (mode-1 = Ceiling(sqft) × value, Minimum floor, top band above the table); inspection
+   flat bands; parapet / curb / underlayment (§18/§19/§8.2); accessory BaseManHours (stacks
+   `qty × (open ? 1.25 : 1) × usage × size factor`, drains `Round(qty × (cleanup + boot | reinstall), 2)`,
+   per-item `× (1 + AdjustLabor/100)`); metals / non-DL own-rate; labor rate from the Markup &
+   Labor Options preset (`MLOptions.LaborRate` → `markup_options.hourly_rate`).
+
+### 20.2 Not fixable from the captured data (flagged)
+
+- **`lookup_Decktimes`** — `DuroLastSystem.MechFieldLaborRate` multiplies the mechanical FIELD
+  rate by `Decktimes[(tab == 64 ? 60 : tab), deckId, snappedOC]` when that table's Version ≥ 4
+  and the value ≠ -1 (snappedOC = OC − OC mod 3, min 6). The captured "Roof Deck Labor"
+  fastener-spacing multipliers ARE the installer's `MechOnCenterMulti` rows (24"→0.91 …
+  6"→1.41, verified against the seed), so Decktimes is an ADDITIONAL Azure-only factor with no
+  captured values. Web: factor 1. If the live table is all -1 the web is exact.
+- **Membrane quantity.** `MembraneWithOverlap = RoofSystem.CalculateMembraneQty`: `Rolls == 1` →
+  `RollGoodsMembraneCalc`, `Rolls > 1` → `SheetsMembraneCalc`, else `AreaWithEdgeOverlap`. The
+  seeded sheet sizes carry Rolls 1 (Roll Good) / 5…25 (sheets), so legacy uses the roll or sheet
+  geometry, not `(L+1)(W+1)`. The web bills `(L+1)(W+1)` for material AND (now) labor; the two
+  geometry ports remain open (quantities.ts `rollGoodsMembraneQty` is drafted but unwired).
+- **`SSAdheredMulti` is keyed per ADHESIVE** (SheetSize × Adhesive); the captured adhesive
+  combo has one column. The seed values are identical across adhesives for Duro-Last.
+- **Tear-off lookup scale** (÷100 of the "Hours/100SqFt" grid) and the **setup band mode
+  flags** (all captured as mode 1) stay as captured — the Azure values were not exportable.
+- **Hours per man-day** is per-estimate in legacy (`frmLaborTemplate` writes
+  `Settings.HoursPerDay`); the web keeps it admin-level.
+
+### 20.3 Labor templates — the legacy model (replaces the compute-time factors)
+
+- A `Template` holds PERCENT ADJUSTMENTS (0 = none, 10 = +10%). `frmHome.updateTemplate`
+  writes them straight into each item's AdjustLabor: `Estimate.AdjustSetupLabor ←
+  SetUpTimeLabor`, `AdjustInspectionTime ← InspectionTimeLabor`; every RoofSection ←
+  `RoofSectionLabor` / `UnderlaymentLabor` / `TO_Additional ← Convert.ToInt32(TearOffLabor)`;
+  every Parapet ← **`RoofSectionLabor`** (the IL calls `get_RoofSectionLabor` in the parapet
+  loop — a legacy quirk, ported; only the Parapet CTOR seeds `ParapetsLabor`); every Curb ←
+  `CurbsLabor`; Drains / PipeStacks / TermBars / edges … ← their areas. New items seed from the
+  estimate's current template (constructors); a new estimate starts on the default template
+  (`oRefTemplates`).
+- Web: `labor-template.ts` (`laborTemplateDeltas`, `applyLaborTemplate`, `seed*Adjust`) does
+  exactly that on the Setup step / Labor & Markup dialog (with the legacy "override all manually
+  entered labor settings" confirm on an existing bid), new bids apply the admin default template,
+  new sections / parapets / curbs seed from it, and the engine reads ONLY the item fields
+  (`bid.laborTemplateName` is informational). The earlier web model (value/100 factor, 0 ≡ 100,
+  composed multiplicatively with the item adjusts) was wrong on both counts: a stored 10 meant
+  ×0.1, and template × adjust compounding never existed in legacy. `laborTemplateFactor` now
+  returns 1 + value/100. Areas the web template stores but legacy has no single field for
+  (corners / strainers / vents / washers / walk pads) are left untouched.

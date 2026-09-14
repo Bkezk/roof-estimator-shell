@@ -833,16 +833,17 @@ describe("underlayment labor (Layout & Mechanical + Adhesive Times)", () => {
 });
 
 describe("buildLaborTemplates / laborTemplateFactor", () => {
-  it("keys areas by template name; 0 (or missing) is the use-default sentinel ≡ ×1", () => {
+  it("keys areas by template name; values are percent adjustments (legacy AdjustLabor writes)", () => {
     const t = buildLaborTemplates(
       [{ id: "t1", name: "Standard", sort: 0 }],
       [
         { template_id: "t1", area: "Roof Section Labor", value: "0", sort: 0 },
-        { template_id: "t1", area: "Parapets Labor", value: "110", sort: 3 },
+        { template_id: "t1", area: "Parapets Labor", value: "10", sort: 3 },
       ],
     );
     expect(t.names).toEqual(["Standard"]);
-    expect(laborTemplateFactor(t.byName["Standard"], "Roof Section Labor")).toBe(1); // 0 sentinel
+    expect(t.defaultName).toBe("Standard"); // no is_default flag → first template
+    expect(laborTemplateFactor(t.byName["Standard"], "Roof Section Labor")).toBe(1); // 0 = no change
     expect(laborTemplateFactor(t.byName["Standard"], "Parapets Labor")).toBeCloseTo(1.1, 6);
     expect(laborTemplateFactor(t.byName["Standard"], "Missing Area")).toBe(1);
     expect(laborTemplateFactor(undefined, "Anything")).toBe(1);

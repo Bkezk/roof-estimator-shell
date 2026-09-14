@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  universalFastenerSpacing,
-  type MechFastenerRow,
-} from "./fastener-spacing";
+import { universalFastenerSpacing, type MechFastenerRow } from "./fastener-spacing";
 
 // Verbatim subset of the seeded mech_fastener_lookup (docs/legacy-consumption-rules.md §1).
 const R = (
@@ -54,7 +51,7 @@ describe("universalFastenerSpacing (§1 port)", () => {
     expect(r).toEqual({ ok: true, inches: 18 });
   });
 
-  it("takes the largest threshold satisfied (450 at pull 450 → 24\")", () => {
+  it('takes the largest threshold satisfied (450 at pull 450 → 24")', () => {
     const r = universalFastenerSpacing(ROWS, {
       roofSystemId: 1,
       thickness: 60,
@@ -148,7 +145,7 @@ describe("universalFastenerSpacing (§1 port)", () => {
     expect(r).toEqual({ ok: false, error: -3 });
   });
 
-  it("tab-spacing filter keeps rows apart: tab 60 at pull 350 → 15\", not the 28-tab row", () => {
+  it('tab-spacing filter keeps rows apart: tab 60 at pull 350 → 15", not the 28-tab row', () => {
     const r = universalFastenerSpacing(ROWS, {
       roofSystemId: 1,
       thickness: 40,

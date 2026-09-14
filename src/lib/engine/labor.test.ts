@@ -4,6 +4,7 @@ import {
   smartValue,
   directLookup,
   bandLookup,
+  onCenterLookup,
   universalFastenerSpacing,
   mechLaborRate,
   snapFieldOc,
@@ -37,6 +38,20 @@ describe("admin-data lookup primitives (§3.6/§4)", () => {
     expect(bandLookup(bands, 57)).toBe(1.2); // between 24 and 60 → 24 tier
     expect(bandLookup(bands, 200)).toBe(0.8); // above top → 120 tier
     expect(bandLookup(bands, 10)).toBe(1.2); // below all → smallest-key catch-all
+  });
+
+  it("onCenterLookup has NO catch-all: below every key the legacy local stays 1.0", () => {
+    const oc = [
+      { key: 24, value: 0.91 },
+      { key: 18, value: 1 },
+      { key: 12, value: 1.1 },
+      { key: 6, value: 1.41 },
+    ];
+    expect(onCenterLookup(oc, 18)).toBe(1);
+    expect(onCenterLookup(oc, 15)).toBe(1.1); // between 12 and 18 → 12 tier
+    expect(onCenterLookup(oc, 30)).toBe(0.91); // above top → 24 tier
+    expect(onCenterLookup(oc, 3)).toBe(1); // below all → 1.0, not the 6" tier
+    expect(onCenterLookup([], 12)).toBe(1);
   });
 });
 

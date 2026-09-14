@@ -42,6 +42,13 @@ const combo: LaborCombo = {
   thickness_multipliers: [{ mil: 40, multiplier: 1 }],
 };
 
+/**
+ * Install hours for the 50×50 fixture. Legacy labor bills the zone SHARES of MembraneWithOverlap
+ * ((L+1)(W+1) = 2601 sq ft), not the raw 2500 sq ft takeoff (docs §20.1): INSTALL h × 2601/2500.
+ */
+const MWO_RATIO = 2601 / 2500;
+const INSTALL = 15.125 * MWO_RATIO;
+
 const admin: EngineAdminData = {
   deckOrder,
   priceMatrix: { 40: { rollGoods: { White: 1.23 } } },
@@ -119,12 +126,13 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
 
     // membrane material: AreaWithEdgeOverlap(50,50) = 51×51 = 2601 sf × $1.23 = $3,199.23
     expect(inputs.duroLastMaterial).toBeCloseTo(3199.23, 2);
-    // install labor: field 2500 sf × rate (10×1×1.5125×1/2500) = 15.125 hrs
-    expect(r.installHours).toBeCloseTo(15.125, 6);
-    // $50/hr × 15.125 = $756.25
-    expect(r.laborSubtotal1).toBeCloseTo(756.25, 2);
+    // install labor (legacy MaterialTotalField basis, §20.1): field share 1 × MembraneWithOverlap
+    // 2601 sf × rate (10×1×1.5125×1/2500) = INSTALL hrs (15.125 × 2601/2500)
+    expect(r.installHours).toBeCloseTo(INSTALL, 6);
+    // $50/hr × INSTALL = $786.80
+    expect(r.laborSubtotal1).toBeCloseTo(INSTALL * 50, 2);
     // tax-exempt, no markup/commission/discount ⇒ purchases + labor
-    expect(r.money.grandTotal).toBeCloseTo(3199.23 + 756.25, 2);
+    expect(r.money.grandTotal).toBeCloseTo(3199.23 + INSTALL * 50, 2);
   });
 
   it("gross-profit markup flows: 35% on the built Subtotal 1", () => {
@@ -194,11 +202,12 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       admin,
     );
     const s0 = inputs.sections[0]!;
-    expect(s0.perimArea).toBe(600);
-    expect(s0.fieldArea).toBe(1900); // 2500 − 600
+    // Labor areas = zone share × MembraneWithOverlap (2601): 600/2500 and 1900/2500 of it.
+    expect(s0.perimArea).toBeCloseTo(600 * MWO_RATIO, 6);
+    expect(s0.fieldArea).toBeCloseTo(1900 * MWO_RATIO, 6); // (2500 − 600) share
     const r = computeEstimate(inputs);
     // field 1900 × 0.00605 (OC 18) + perim 600 × 0.006655 (OC 12 → ×1.1) = 11.495 + 3.993
-    expect(r.installHours).toBeCloseTo(15.488, 3);
+    expect(r.installHours).toBeCloseTo(15.488 * MWO_RATIO, 3);
   });
 
   it("tear-off wires the seeded rate: deck→tearoff-deck map, ÷100 scale, adds disposal + hours", () => {
@@ -227,8 +236,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     // tear-off labor: 2500 sf × 0.024876 = 62.19 hrs → Round(3dp)=62.19, Ceiling(×100)/100 = 62.19
     expect(r.tearOffLaborHours).toBeCloseTo(62.19, 2);
-    // it rolls into the direct-labor hours (install 15.125 + tear-off 62.19)
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 62.19, 2);
+    // it rolls into the direct-labor hours (install INSTALL + tear-off 62.19)
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 62.19, 2);
     // disposal: (4/36)(2500/9)/1 = 30.86 yd / 30 → ceil = 2 units
     expect(r.disposalUnits).toBe(2);
   });
@@ -258,8 +267,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     expect(r.setupHours).toBeCloseTo(16, 6); // Ceiling(2500)×0.003 = 7.5, floored to min 16
     expect(r.inspectionHours).toBeCloseTo(5, 6); // 2500 < 5001 → first band = 5
-    // they roll into direct-labor hours alongside install (15.125)
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 16 + 5, 3);
+    // they roll into direct-labor hours alongside install (INSTALL)
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 16 + 5, 3);
   });
 
   it("freight: stepped table bills on MATERIAL BEFORE TAX (dMaterial[20]), not M0", () => {
@@ -327,8 +336,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     expect(inputs.accessoryLaborHours).toBeCloseTo(1.0002, 4); // 6 × 0.1667
     const r = computeEstimate(inputs);
-    // install 15.125 + accessory 1.0002 = 16.1252 direct-labor hours
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 1.0002, 3);
+    // install INSTALL + accessory 1.0002 = 16.1252 direct-labor hours
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 1.0002, 3);
   });
 
   it("non-DL lines: material → OtherMaterial (taxable basis), labor $ → services (LaborSubtotal2)", () => {
@@ -389,8 +398,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.ownRateDirectLaborHours).toBeCloseTo(2, 6);
     const r = computeEstimate(inputs);
     expect(r.laborSubtotal2).toBeCloseTo(620 + 40, 2);
-    expect(r.laborSubtotal1).toBeCloseTo(756.25 + 90, 2);
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 2, 6);
+    expect(r.laborSubtotal1).toBeCloseTo(INSTALL * 50 + 90, 2);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 2, 6);
   });
 
   it("parapets: matrix labor rolls into direct labor; girth × length × membrane $ into M0", () => {
@@ -440,8 +449,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // AdjustedLength = 100 + 1 + pieces(1) = 102 (legacy BaseManHours multiplies
     // AdjustedLength, not raw Length — docs §8.5): 102/50 × 2.25 = 4.59
     expect(r.parapetLaborHours).toBeCloseTo(4.59, 6);
-    // rolls into direct labor alongside install 15.125
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 4.59, 3);
+    // rolls into direct labor alongside install INSTALL
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 4.59, 3);
   });
 
   it("parapets: a missing tier for an OVERRIDE mil/color warns with the parapet's name", () => {
@@ -699,7 +708,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     const r = computeEstimate(inputs);
     // perimeter = 2 x (2 + 3) = 10 ft; (8 + 7.5x1x10)/60 = 83/60 h per curb; x2 = 2.7667 h
     expect(r.curbLaborHours).toBeCloseTo((2 * 83) / 60, 4);
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + (2 * 83) / 60, 3);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + (2 * 83) / 60, 3);
   });
 
   it("curbs: plastic-on-curb adds PolyethyleneSqF / 400 hours (legacy BaseHours, §8.2)", () => {
@@ -923,7 +932,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(oddSystem.inputs.duroLastMaterial).toBeCloseTo(3199.23 + 5 * 102 * 1.4, 2);
   });
 
-  it("parapets: a wall's own labor % REPLACES the template factor; per-wall hours are reported (§19)", () => {
+  it("parapets: only the wall's own AdjustLabor field applies; per-wall hours are reported (§19/§20.3)", () => {
     const withTpl: EngineAdminData = {
       ...admin,
       parapetLabor: {
@@ -940,7 +949,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         },
       },
       priceMatrix: { 40: { rollGoods: { White: 1.23 }, parapet: { White: 1.4 } } },
-      laborTemplates: { names: ["Heavy"], byName: { Heavy: { "Parapets Labor": 110 } } },
+      laborTemplates: { names: ["Heavy"], byName: { Heavy: { "Parapets Labor": 10 } } },
     };
     const wall = {
       id: "p1",
@@ -952,28 +961,29 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       canted: false,
       girthInches: 30,
     };
-    // Template only: 4.59 × 1.1.
+    // The template NAME is informational (legacy writes the template into each wall's AdjustLabor
+    // at selection time — applyLaborTemplate); walls without a value bill their base hours.
     const tpl = buildEstimateInputs(
       bid({ laborTemplateName: "Heavy", parapets: [wall, { ...wall, id: "p2", lengthFt: 50 }] }),
       withTpl,
     );
+    expect(tpl.warnings).toEqual([]);
     expect(tpl.breakdown.parapetBaseHoursById).toEqual({ p1: 4.59, p2: (52 / 50) * 2.25 });
-    expect(tpl.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59 * 1.1, 6);
-    expect(tpl.breakdown.parapetHoursById["p2"]).toBeCloseTo((52 / 50) * 2.25 * 1.1, 6);
-    // The wall's own AdjustLabor (legacy frmLaborPopUp writes the SAME field the template
-    // seeds) replaces the template: -20 → 4.59 × 0.8, not × 1.1 × 0.8.
+    expect(tpl.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59, 6);
+    expect(tpl.breakdown.parapetHoursById["p2"]).toBeCloseTo((52 / 50) * 2.25, 6);
+    // The wall's own AdjustLabor (legacy frmLaborPopUp / template write): -20 → 4.59 × 0.8.
     const own = buildEstimateInputs(
       bid({ laborTemplateName: "Heavy", parapets: [{ ...wall, adjustLaborPct: -20 }] }),
       withTpl,
     );
     expect(own.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59 * 0.8, 6);
     expect(computeEstimate(own.inputs).parapetLaborHours).toBeCloseTo(4.59 * 0.8, 6);
-    // An explicit 0 also replaces it (the user reset the link to 0%).
-    const zero = buildEstimateInputs(
-      bid({ laborTemplateName: "Heavy", parapets: [{ ...wall, adjustLaborPct: 0 }] }),
+    // +10 (what applying the template's ParapetsLabor to a NEW wall writes) → 4.59 × 1.1.
+    const seeded = buildEstimateInputs(
+      bid({ parapets: [{ ...wall, adjustLaborPct: 10 }] }),
       withTpl,
     );
-    expect(zero.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59, 6);
+    expect(seeded.breakdown.parapetHoursById["p1"]).toBeCloseTo(4.59 * 1.1, 6);
   });
 
   it("per-item labor %: adjustLaborPct scales the WHOLE item's hours (curbs and parapets)", () => {
@@ -1438,9 +1448,9 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.ownRateDirectLaborHours).toBeCloseTo(3, 6);
     const r = computeEstimate(inputs);
     expect(r.laborSubtotal2).toBeCloseTo(0, 6);
-    // base bid crew labor = 15.125 h x $50 = 756.25; + metals $120 own-rate
-    expect(r.laborSubtotal1).toBeCloseTo(756.25 + 120, 2);
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 3, 6);
+    // base bid crew labor = INSTALL h x $50 = 786.80; + metals $120 own-rate
+    expect(r.laborSubtotal1).toBeCloseTo(INSTALL * 50 + 120, 2);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 3, 6);
   });
 
   it("insulation layers: mechanical layout+fastener labor and adhesive coverage flow", () => {
@@ -1497,7 +1507,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     // mech (legacy rule, docs §18): layout 7.775 + (0.342/60) × (Round(2500/32)=78 × 5 = 390)
     // = 9.998 h; adhesive layer: layout 6.9 + (field 2500 + perim 0) × 6.5 / 2500 = 13.4 h
     expect(r.underlaymentLaborHours).toBeCloseTo(9.998 + 13.4, 3);
-    expect(r.laborSubtotal1Hours).toBeCloseTo(15.125 + 9.998 + 13.4, 3);
+    expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 9.998 + 13.4, 3);
   });
 
   it("adhesive units sum fractionally per adhesive across sections, then Ceiling ONCE per adhesive", () => {
@@ -1558,15 +1568,16 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.underlaymentLaborHours).toBeCloseTo(9.998, 3); // legacy 5-per-board rule (§18)
   });
 
-  it("labor template scales categories: install, setup, tear-off, parapets (0 = default)", () => {
+  it("labor adjusts are the item fields the template writes: install, setup, inspection, tear-off, parapets (§20.3)", () => {
     const withTpl: EngineAdminData = {
       ...admin,
-      setupTable: { minimum: 16, bands: [{ upTo: 100000, value: 0.003, multiply: true }] },
       tearOff: {
         deckColumns: ["Wood"],
         tearoffTypes: ['BUR < 2"'],
         lookup: { Wood: { 'BUR < 2"': 2.4876 / 100 } },
       },
+      setupTable: { minimum: 16, bands: [{ upTo: 6000, value: 0.003, multiply: true }] },
+      inspectionTable: { minimum: 5, bands: [{ edge: 0, value: 5 }] },
       parapetLabor: {
         bands: ['0"-30"'],
         lookup: {
@@ -1580,47 +1591,66 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
           },
         },
       },
+      // The template exists, but the engine never composes it: its values reach the estimate
+      // only through the fields applyLaborTemplate writes (legacy frmHome.updateTemplate).
       laborTemplates: {
         names: ["Heavy"],
         byName: {
           Heavy: {
-            "Roof Section Labor": 90,
-            "Setup Time Labor": 120,
-            "Tear-Off Labor": 150,
-            "Parapets Labor": 110,
-            "Inspection Time Labor": 0, // use-default sentinel
+            "Roof Section Labor": -10,
+            "Setup Time Labor": 20,
+            "Tear-Off Labor": 50,
+            "Parapets Labor": 10,
+            "Inspection Time Labor": 0,
           },
         },
       },
     };
-    const { inputs, warnings } = buildEstimateInputs(
+    const wall = {
+      id: "p1",
+      name: "Wall",
+      lengthFt: 100,
+      heightBand: '0"-30"',
+      deckType: "Wood",
+      predrill: false,
+      canted: false,
+      girthInches: 0,
+    };
+    const section = {
+      ...bid().sections[0]!,
+      tearOff: true,
+      tearOffType: 'BUR < 2"',
+      toThicknessInches: 4,
+    };
+    // Name only → nothing adjusted.
+    const nameOnly = buildEstimateInputs(
+      bid({ laborTemplateName: "Heavy", sections: [section], parapets: [wall] }),
+      withTpl,
+    );
+    expect(nameOnly.warnings).toEqual([]);
+    const r0 = computeEstimate(nameOnly.inputs);
+    expect(r0.installHours).toBeCloseTo(INSTALL, 6);
+    expect(r0.setupHours).toBeCloseTo(16, 6);
+    expect(r0.tearOffLaborHours).toBeCloseTo(62.19, 1);
+    expect(r0.parapetLaborHours).toBeCloseTo(4.59, 6);
+    // The written fields (what selecting "Heavy" stores on the bid / items) drive the hours.
+    const written = buildEstimateInputs(
       bid({
         laborTemplateName: "Heavy",
-        sections: [
-          { ...bid().sections[0]!, tearOff: true, tearOffType: 'BUR < 2"', toThicknessInches: 4 },
-        ],
-        parapets: [
-          {
-            id: "p1",
-            name: "Wall",
-            lengthFt: 100,
-            heightBand: '0"-30"',
-            deckType: "Wood",
-            predrill: false,
-            canted: false,
-            girthInches: 0,
-          },
-        ],
+        adjustLaborPct: -10,
+        adjustSetupPct: 20,
+        adjustInspectionPct: 0,
+        sections: [{ ...section, tearOffAdditionalPct: 50 }],
+        parapets: [{ ...wall, adjustLaborPct: 10 }],
       }),
       withTpl,
     );
-    expect(warnings).toEqual([]);
-    const r = computeEstimate(inputs);
-    expect(r.installHours).toBeCloseTo(15.125 * 0.9, 3); // Roof Section Labor 90
-    expect(r.setupHours).toBeCloseTo(16 * 1.2, 3); // Setup 120 (min 16 x 1.2)
-    // tear-off: base 62.19 x 1.5 (per-section additional %), then Ceiling-to-cent
+    const r = computeEstimate(written.inputs);
+    expect(r.installHours).toBeCloseTo(INSTALL * 0.9, 3); // Roof Section Labor -10
+    expect(r.setupHours).toBeCloseTo(16 * 1.2, 3); // Setup +20 (min 16 x 1.2)
+    // tear-off: base 62.19 x 1.5 (per-section TO_Additional), then Ceiling-to-cent
     expect(r.tearOffLaborHours).toBeCloseTo(62.19 * 1.5, 1);
-    expect(r.parapetLaborHours).toBeCloseTo(4.59 * 1.1, 3); // Parapets 110, AdjustedLength 102
+    expect(r.parapetLaborHours).toBeCloseTo(4.59 * 1.1, 3); // Parapets +10, AdjustedLength 102
   });
 
   it("edges: perimeter-marked sides drive the perimeter zone; ARP edges reduce membrane sqft (§2.3)", () => {
@@ -1653,8 +1683,9 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     const s0 = inputs.sections[0]!;
     // perimeter from the two marked 50 ft sides: 100 ft × 3 ft zone = 300 sf carved from field
-    expect(s0.perimArea).toBe(300);
-    expect(s0.fieldArea).toBe(2200);
+    // (labor areas carry the legacy share × MembraneWithOverlap basis, §20.1)
+    expect(s0.perimArea).toBeCloseTo(300 * MWO_RATIO, 6);
+    expect(s0.fieldArea).toBeCloseTo(2200 * MWO_RATIO, 6);
     // ARP on side A: 1.03 × ((12+6)/12) × 50 = 77.25 sf, subtracted from total membrane
     expect(s0.arpSqFt).toBeCloseTo(77.25, 6);
     const r = computeEstimate(inputs);
@@ -2297,6 +2328,159 @@ describe("sectionMembraneDisplayPricing — the calc dialog can never disagree w
   });
 });
 
+describe("§20 install labor — legacy RoofSectionLaborHours details", () => {
+  it("adhered sections bill AdhesiveCoverage hours/1000 sq ft × roll-width or sheet multiplier × complexity", () => {
+    const adhesiveCombo = buildLaborTables(
+      {
+        roof_system: "Duro-Last",
+        attachment: "adhesive",
+        sheet_size_multipliers: [
+          { label: "Roll Good", roof_section: 4, underlayment: 4 },
+          { label: "500 sf", roof_section: 2.4, underlayment: 2.4 },
+          { label: "1500 sf", roof_section: null as unknown as number, underlayment: 1 },
+        ],
+        thickness_multipliers: [{ mil: 40, multiplier: 1 }],
+        adhesive: {
+          base_hours_per_1000_sqft_by_substrate: [
+            { substrate: "Water Based Adhesive", labor_per_1000_sqft: 5.215 },
+            { substrate: "Duro-Grip Adhesive(CR-20)", labor_per_1000_sqft: "5.8408" },
+          ],
+        },
+      },
+      deckOrder,
+    );
+    expect(adhesiveCombo.adhesiveBaseHoursByName).toEqual({
+      "Water Based Adhesive": 5.215,
+      "Duro-Grip Adhesive(CR-20)": 5.8408,
+    });
+    expect(adhesiveCombo.sheetSizeMultiByLabel["1500 sf"]).toBeUndefined(); // blank cell
+    const withAdhered: EngineAdminData = {
+      ...admin,
+      labor: { ...admin.labor, "Duro-Last|adhesive": adhesiveCombo },
+      rollGoodWidthMulti: { 1: { 64: 1 } },
+      adhesiveFlags: {
+        "Water Based Adhesive": { shortName: "waterbasedadhesive", perimSpacingIn: -1 },
+        "Duro-Grip Adhesive(CR-20)": { shortName: "durogrip", perimSpacingIn: 6 },
+      },
+      adhesivePrices: { "Water Based Adhesive": 122.1, "Duro-Grip Adhesive(CR-20)": 486.75 },
+      membraneAdhesives: {
+        1: {
+          "Water Based Adhesive": {
+            byDeckName: { Wood: 700 },
+            underlaymentUniform: 700,
+            wallCoverage: 350,
+          },
+          "Duro-Grip Adhesive(CR-20)": {
+            byDeckName: { Wood: 700 },
+            underlaymentUniform: 700,
+            wallCoverage: 350,
+          },
+        },
+      },
+    };
+    // Roll goods on a 64" roll: 5.215/1000 × RollGoodWidthAdhesiveMulti(64)=1 × complexity 1
+    // over the whole MembraneWithOverlap (2601 sf, field share 1): 13.564 h × thickness 1.
+    const roll = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        membraneAdhesiveName: "Water Based Adhesive",
+        sections: [{ ...bid().sections[0]!, sheetSizeLabel: "Roll Good", fieldLap: 64 }],
+      }),
+      withAdhered,
+    );
+    expect(roll.warnings.filter((w) => /install labor|roll-goods/.test(w))).toEqual([]);
+    expect(computeEstimate(roll.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601, 6);
+    // A sheet size uses SheetSize.SmartSheetMulti instead: 500 sf → ×2.4.
+    const sheet = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        membraneAdhesiveName: "Water Based Adhesive",
+        sections: [{ ...bid().sections[0]!, sheetSizeLabel: "500 sf", fieldLap: 64 }],
+      }),
+      withAdhered,
+    );
+    expect(computeEstimate(sheet.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601 * 2.4, 6);
+    // Unknown roll width → ×1 with a warning; no adhesive labor row → 0 h with a warning.
+    const oddWidth = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        membraneAdhesiveName: "Water Based Adhesive",
+        sections: [{ ...bid().sections[0]!, sheetSizeLabel: "Roll Good", fieldLap: 60 }],
+      }),
+      withAdhered,
+    );
+    expect(oddWidth.warnings.some((w) => w.includes('60" roll width'))).toBe(true);
+    expect(computeEstimate(oddWidth.inputs).installHours).toBeCloseTo((5.215 / 1000) * 2601, 6);
+    const noRow = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        membraneAdhesiveName: "Solvent Based Adhesive",
+        sections: [{ ...bid().sections[0]!, sheetSizeLabel: "Roll Good", fieldLap: 64 }],
+      }),
+      withAdhered,
+    );
+    expect(noRow.warnings.some((w) => w.includes("No adhesive install labor"))).toBe(true);
+    expect(computeEstimate(noRow.inputs).installHours).toBe(0);
+    // Duro-Grip (durogrip + PerimeterSpacing 6): perimeter / corner rate × 1.2 (code constant).
+    const grip = buildEstimateInputs(
+      bid({
+        attachment: "adhered",
+        membraneAdhesiveName: "Duro-Grip Adhesive(CR-20)",
+        sections: [
+          {
+            ...bid().sections[0]!,
+            sheetSizeLabel: "Roll Good",
+            fieldLap: 64,
+            perimLengthFt: 200,
+            enhancementWidthFt: 3, // 600 sf perimeter zone
+          },
+        ],
+      }),
+      withAdhered,
+    );
+    const rate = 5.8408 / 1000;
+    expect(computeEstimate(grip.inputs).installHours).toBeCloseTo(
+      (1900 * MWO_RATIO * rate + 600 * MWO_RATIO * rate * 1.2) * 1,
+      6,
+    );
+  });
+
+  it("perimeter / corner tab multiplier keys the custom zone lap, else legacy PerimeterLap = 0 → last (smallest) tab", () => {
+    // Full Duro-Last mech_tab_multi set (28 → 1.5125, 60/64 → 1, 120 → 0.8).
+    const full: EngineAdminData = {
+      ...admin,
+      labor: {
+        ...admin.labor,
+        "Duro-Last|mechanical": {
+          ...admin.labor["Duro-Last|mechanical"]!,
+          tabBands: [
+            { key: 28, value: 1.5125 },
+            { key: 60, value: 1 },
+            { key: 64, value: 1 },
+            { key: 120, value: 0.8 },
+          ],
+        },
+      },
+    };
+    const zoned = {
+      ...bid().sections[0]!,
+      fieldLap: 60, // field at the 60" tab → ×1
+      perimLengthFt: 200,
+      enhancementWidthFt: 3, // 600 sf perimeter zone
+      perimFastenerOc: 12, // OC 12 → ×1.1
+    };
+    const dflt = buildEstimateInputs(bid({ sections: [zoned] }), full);
+    // field: 1900 × 10×1×1×1/2500; perim: 600 × 10×1×1.5125×1.1/2500 (PerimeterLap 0 → 28" tab)
+    const fieldH = 1900 * MWO_RATIO * (10 / 2500);
+    const perimDefault = 600 * MWO_RATIO * ((10 * 1.5125 * 1.1) / 2500);
+    expect(computeEstimate(dflt.inputs).installHours).toBeCloseTo(fieldH + perimDefault, 6);
+    // A custom perimeter lap (Advanced Roof Section Options) keys its own tab: 60 → ×1.
+    const custom = buildEstimateInputs(bid({ sections: [{ ...zoned, perimLap: 60 }] }), full);
+    const perimCustom = 600 * MWO_RATIO * ((10 * 1 * 1.1) / 2500);
+    expect(computeEstimate(custom.inputs).installHours).toBeCloseTo(fieldH + perimCustom, 6);
+  });
+});
+
 describe("§16 Roof Sections: per-section system / labor adjust / complexity / corner geometry", () => {
   const tuffAdmin: EngineAdminData = {
     ...admin,
@@ -2313,7 +2497,7 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     expect(inputs.sections[0]!.adjustLaborPct).toBeUndefined();
     expect(inputs.sections[1]!.adjustLaborPct).toBeCloseTo(10, 9);
     const r = computeEstimate(inputs);
-    expect(r.installHours).toBeCloseTo(15.125 * 1.5 + 15.125 * 1.1, 6);
+    expect(r.installHours).toBeCloseTo(INSTALL * 1.5 + INSTALL * 1.1, 6);
   });
 
   it("Duro-Tuff section on a ×1.0 sheet multiplies the RSComplexityFactor into labor + tear-off", () => {
@@ -2343,7 +2527,7 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     expect(s0.laborTables).toBeDefined(); // the section's own combo, not the bid's
     expect(s0.tearOffSheetComplexityMulti).toBe(2.4);
     const r = computeEstimate(inputs);
-    expect(r.installHours).toBeCloseTo(15.125 * 2.4, 6);
+    expect(r.installHours).toBeCloseTo(INSTALL * 2.4, 6);
     // TearOffBaseLabor = 2500 × 0.024876 × 1 × 2.4 = 149.256 → Round 3 → Ceiling to the cent
     expect(r.tearOffLaborHours).toBeCloseTo(149.26, 2);
     // Duro-Tuff flat membrane price applied (family price, no tab tiers)
@@ -2404,9 +2588,10 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     );
     const s0 = inputs.sections[0]!;
     // each side 50 − 3 − 3 = 44 → 176 ft × 3 = 528 sf; corners 4 × 3 ft × 3 ft = 36 sf
-    expect(s0.perimArea).toBe(528);
-    expect(s0.cornerArea).toBe(36);
-    expect(s0.fieldArea).toBe(2500 - 528 - 36);
+    // (labor areas = share × MembraneWithOverlap, §20.1)
+    expect(s0.perimArea).toBeCloseTo(528 * MWO_RATIO, 6);
+    expect(s0.cornerArea).toBeCloseTo(36 * MWO_RATIO, 6);
+    expect(s0.fieldArea).toBeCloseTo((2500 - 528 - 36) * MWO_RATIO, 6);
   });
 
   it("non-quick-bid sections derive the average sheet from the area (RoofSection.get_SheetSize)", () => {

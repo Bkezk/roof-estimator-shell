@@ -40,6 +40,7 @@ import {
   type RawLaborTemplateAdjustment,
   type RawTabMultiRow,
   type RawLegacyAdhesiveRow,
+  RawRollGoodWidthRow,
   type RawAdhesiveCoverageRow,
   type RawUnderlaymentGroupRow,
   type RawUnderlaymentBoardGroupRow,
@@ -95,6 +96,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       covDeckRes,
       covUnderRes,
       covWallRes,
+      rollWidthRes,
       ndlSheetMetalRes,
       ndlBlockingRes,
       ndlMasonryRes,
@@ -134,7 +136,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         .eq("id", "underlayment_adhesive_times")
         .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", "duro_last:adhesives").maybeSingle(),
-      sb.from("labor_templates").select("id, name, sort").order("sort"),
+      sb.from("labor_templates").select("id, name, sort, is_default").order("sort"),
       sb.from("labor_template_adjustments").select("template_id, area, value, sort").order("sort"),
       // Legacy mech_tab_multi (hand-seeded migration, not in the generated Database types).
       (sb as unknown as UntypedFrom).from("mech_tab_multi").select("*"),
@@ -144,6 +146,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       (sb as unknown as UntypedFrom).from("adhesive_coverage_deck").select("*"),
       (sb as unknown as UntypedFrom).from("adhesive_coverage_underlayment").select("*"),
       (sb as unknown as UntypedFrom).from("adhesive_wall_coverage").select("*"),
+      // Legacy RSRollGoodWidth (adhered roll-goods labor multiplier by width, hand-seeded table).
+      (sb as unknown as UntypedFrom).from("rdl_roll_good_width").select("*"),
       // Screens holding the auto-priced NDL rate rows (§8.3/§8.4 counterflash / blocking /
       // capstone masonry / ARP).
       sb.from("pricing_catalog").select("data").eq("id", "non_dl:sheet_metal_work").maybeSingle(),
@@ -233,6 +237,8 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       RawAdhesiveCoverageRow[] | null;
     const adhesiveWallCoverage = (covWallRes.data ?? null) as unknown as
       RawAdhesiveCoverageRow[] | null;
+    const rollGoodWidthRows = (rollWidthRes.data ?? null) as unknown as
+      RawRollGoodWidthRow[] | null;
 
     return assembleEngineAdminData({
       membraneScreen,
@@ -259,6 +265,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
       adhesiveCoverageDeck,
       adhesiveCoverageUnderlayment,
       adhesiveWallCoverage,
+      rollGoodWidthRows,
       nonDlSheetMetalScreen: (ndlSheetMetalRes.data?.data ?? null) as MembraneScreen | null,
       nonDlBlockingScreen: (ndlBlockingRes.data?.data ?? null) as MembraneScreen | null,
       nonDlMasonryScreen: (ndlMasonryRes.data?.data ?? null) as MembraneScreen | null,

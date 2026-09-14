@@ -260,6 +260,11 @@ export interface ParapetsScreenProps {
    * = iTotals[5] − Σ oEdgeFasteners[5] quantities, floored at 0). Absent = gross requirement.
    */
   fastenersNeeded?: number;
+  /**
+   * What "Use template default" writes: the bid's labor template value for walls. Legacy
+   * frmHome.updateTemplate writes Template.RoofSectionLabor into existing parapets (quirk ported).
+   */
+  templateAdjustPct?: number;
 }
 
 export function ParapetsScreen(p: ParapetsScreenProps) {
@@ -818,8 +823,7 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                   setShowLabor(true);
                 }}
               >
-                {n2(baseHours)} MHS ({100 + (w.adjustLaborPct ?? 0)}%
-                {w.adjustLaborPct === undefined ? ", template" : ""})
+                {n2(baseHours)} MHS ({100 + (w.adjustLaborPct ?? 0)}%)
               </button>
             </span>
             <span
@@ -959,8 +963,7 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
           <DialogHeader>
             <DialogTitle>Labor Adjustment — {w.name}</DialogTitle>
             <DialogDescription>
-              Calculated Man Hours: {n2(baseHours)}. Without an override the labor template&apos;s
-              Parapets Labor factor applies.
+              Calculated Man Hours: {n2(baseHours)}. Man Hours = base × (1 + Adjust Labor / 100).
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-end gap-3 text-xs">
@@ -995,13 +998,11 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
             <Button
               variant="outline"
               onClick={() => {
-                const nx = { ...w };
-                delete nx.adjustLaborPct;
-                onChange(parapets.map((x, j) => (j === i ? nx : x)));
+                upd({ adjustLaborPct: p.templateAdjustPct ?? 0 });
                 setShowLabor(false);
               }}
             >
-              Use template default
+              Use template default ({p.templateAdjustPct ?? 0}%)
             </Button>
             <Button
               onClick={() => {

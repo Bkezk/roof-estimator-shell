@@ -362,8 +362,9 @@ function TemplatesTab({ data, onSaved }: { data: LaborEngines; onSaved: () => vo
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        A template nudges the program's labor up or down per area. 0 (or 100) = no change; a
-        positive number is a percent increase, negative a decrease.
+        A template is a set of percent adjustments, one per labor area, written into every item of a
+        bid when the template is selected (and seeded into new items): 0 = no change, 10 = 10% more
+        labor, -10 = 10% less. Changing a template here does not alter bids already built on it.
       </p>
       {tpls.map((t, ti) => (
         <Card key={t.id || ti}>

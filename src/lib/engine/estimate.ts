@@ -37,6 +37,7 @@ import {
   adheredFieldLaborRate,
   adheredPerimCornerLaborRate,
   bandLookup,
+  onCenterLookup,
   directLookup,
   universalFastenerSpacing,
   roofSectionLaborHours,
@@ -63,7 +64,11 @@ export interface RoofSection {
   id: string;
   length: number;
   width: number;
-  /** Field/perim/corner areas, resolved upstream per the §8 version-branched basis. */
+  /**
+   * Field/perim/corner LABOR areas. Legacy `RoofSectionLaborHours_4_0_230` (every system) bills
+   * `MaterialTotalField/Perim/Corner` = (zone area ÷ AreaTotal) × MembraneWithOverlap — the zone
+   * SHARES of the membrane quantity, not the raw takeoff areas (docs §20.1). Resolved upstream.
+   */
   fieldArea: number;
   perimArea: number;
   cornerArea: number;
@@ -215,7 +220,7 @@ export function resolveSectionRates(
     fieldRate = mechLaborRate({
       deckMulti: directLookup(admin.deckTypeMulti, s.deckTypeId),
       tabMulti: bandLookup(admin.tabBands, s.fieldLap),
-      ocMulti: bandLookup(admin.onCenterBands, oc),
+      ocMulti: onCenterLookup(admin.onCenterBands, oc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
     });
@@ -248,14 +253,14 @@ export function resolveSectionRates(
     perimRate = mechLaborRate({
       deckMulti: deckDefault,
       tabMulti: bandLookup(admin.tabBands, s.perimLap),
-      ocMulti: bandLookup(admin.onCenterBands, perimOc),
+      ocMulti: onCenterLookup(admin.onCenterBands, perimOc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
     });
     cornerRate = mechLaborRate({
       deckMulti: deckDefault,
       tabMulti: bandLookup(admin.tabBands, s.cornerLap),
-      ocMulti: bandLookup(admin.onCenterBands, cornerOc),
+      ocMulti: onCenterLookup(admin.onCenterBands, cornerOc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
     });

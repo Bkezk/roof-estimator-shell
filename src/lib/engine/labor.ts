@@ -51,6 +51,20 @@ export function bandLookup(bands: Band[], value: number): number {
   return smallest ? smallest.value : 1;
 }
 
+/**
+ * The on-center multiplier loop (legacy `SmartOnCenterMultiplier` walk in MechField/PerimLaborRate,
+ * DataAccess rva 0xa5d4 / 0xa810): largest key ≤ value, but with NO catch-all — when the spacing
+ * is below every key the local keeps its initial 1.0. (The tab-spacing walk differs: it returns
+ * the LAST entry — the smallest key — as its catch-all, which is `bandLookup`.)
+ */
+export function onCenterLookup(bands: Band[], value: number): number {
+  const sorted = [...bands].sort((a, b) => b.key - a.key);
+  for (const b of sorted) {
+    if (b.key <= value) return b.value;
+  }
+  return 1;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Pull test → fastener spacing (§3.5)
 // ─────────────────────────────────────────────────────────────────────────────

@@ -88,7 +88,6 @@ import {
   deriveAdhesiveSubstrate,
   parapetBandForVertical,
   underlaymentAdhesive,
-  laborTemplateFactor,
   LEGACY_RS_ID_BY_NAME,
   type EngineAdminData,
   type NdlAutoRateItem,
@@ -266,6 +265,12 @@ export interface BidSectionInput {
    * template's Underlayment Labor factor. Quote labor is never adjusted (legacy).
    */
   adjustUnderlaymentLaborPct?: number;
+  /**
+   * Per-section TO_Additional % (legacy RoofSection.TO_Additional — an INTEGER percent seeded
+   * from the labor template's Tear-Off Labor on section creation / template change; no other
+   * legacy UI writes it). Absent = 0.
+   */
+  tearOffAdditionalPct?: number;
   sheetSizeLabel: string; // e.g. "1500 sf"
   tearOff: boolean;
   tearOffType: string; // e.g. "BUR < 2\"" (from the Tearoff Times table)
@@ -837,18 +842,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     warnings.push(`No labor table for ${bid.roofSystem} / ${bid.attachment}; labor will be 0.`);
   }
 
-  // Per-category labor template (§3.2): value/100 scales that category's hours; 0 = use default.
-  // Applied via the engine's existing adjust knobs (install/setup/inspection/tear-off) and by
-  // scaling the parapet/curb/underlayment hour seams. The three accessory sub-areas (Pipe Stacks /
-  // Drains / Edge Termination) are NOT applied — the accessory hours are one lump and attributing
-  // them would be a fabricated split (FLAGGED; all-zero in the seeded Standard template anyway).
-  const tplAreas = bid.laborTemplateName
-    ? admin.laborTemplates?.byName[bid.laborTemplateName]
-    : undefined;
-  if (bid.laborTemplateName && admin.laborTemplates && !tplAreas) {
-    warnings.push(`Unknown labor template "${bid.laborTemplateName}" — no adjustment applied.`);
-  }
-  const tf = (area: string) => laborTemplateFactor(tplAreas, area);
+  // Labor templates (docs §20.3): the legacy template is NOT a compute-time factor. Selecting one
+  // (frmHome.updateTemplate) WRITES its percent adjustments into every item's AdjustLabor field
+  // (sections / underlayment / TO_Additional / parapets / curbs / accessories / setup /
+  // inspection), and new items seed from it (RoofSection / Parapet / Curb ctors). The web does the
+  // same on the Setup step (`applyLaborTemplate`), so the engine reads ONLY the item fields;
+  // `bid.laborTemplateName` is informational.
 
   let membraneMaterial = 0;
   let underlaymentMaterial = 0;
@@ -1018,10 +1017,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // base hours then × ComplexityFactor × SheetSize multiplier × (1 + AdjustUnderlaymentLabor
     // /100). Quote labor bills verbatim, unadjusted (UnderlaymentQuoteHours).
     const sLayers = sectionLayers(s);
-    const uAdjust =
-      s.adjustUnderlaymentLaborPct !== undefined
-        ? 1 + s.adjustUnderlaymentLaborPct / 100
-        : tf("Underlayment Labor");
+    const uAdjust = 1 + (s.adjustUnderlaymentLaborPct ?? 0) / 100;
     const uScale = complexity * sheetSizeMulti * uAdjust;
     const zoneArea = fieldArea + perimArea; // legacy adhesive basis (corner squares excluded)
     for (const [li, layer] of sLayers.entries()) {
@@ -1156,13 +1152,58 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
     }
 
+    // ── Install-labor inputs (legacy RoofSystem.RoofSectionLaborHours_4_0_230, docs §20.1) ──
+    // Labor areas are the zone SHARES of MembraneWithOverlap (MaterialTotalField/Perim/Corner =
+    // AreaX / AreaTotal × MembraneWithOverlap), not the raw takeoff areas.
+    const areaTotal = s.length * s.width;
+    const laborArea = (zone: number): number =>
+      areaTotal > 0 ? (zone / areaTotal) * membraneWithOverlap : 0;
+    // Perimeter / corner tab multipliers key `CustomPerimeterLap ≠ -1 ? CustomPerimeterLap :
+    // PerimeterLap` — and legacy never assigns PerimeterLap (`_perimTabSizeOrRollWidth` has no
+    // writer), so the default is 0 → the descending tab walk returns its LAST entry (the smallest
+    // tab, e.g. Duro-Last 28" → 1.5125). Corner: CustomCornerLap ≠ -1 ? CustomCornerLap : 0.
+    const laborPerimLap = s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0;
+    const laborCornerLap = s.cornerLap !== undefined && s.cornerLap !== -1 ? s.cornerLap : 0;
+    // Adhered attachment (AdheredField/PerimLaborRate): base = AdhesiveCoverage hours / 1000 sq ft
+    // for the section's adhesive; × RollGoodWidthAdhesiveMulti(FieldLap) on the roll-good sheet,
+    // else × SheetSize.SmartSheetMulti; × ComplexityFactor. Perimeter/corner ×1.2 only for the
+    // "durogrip" adhesive with a PerimeterSpacing (code constant).
+    let adhesiveBaseHoursPer1000 = 0;
+    let rollGoods = true;
+    let rollGoodWidthMulti = 1;
+    let adheredPerimeterBump = false;
+    if (sys.attachment === "adhered") {
+      adhesiveBaseHoursPer1000 = sLt?.adhesiveBaseHoursByName[sys.adhesiveName] ?? 0;
+      if (adhesiveBaseHoursPer1000 <= 0 && sLt) {
+        warnings.push(
+          `No adhesive install labor (hours / 1,000 sq ft) for ${sys.roofSystem} / ${sys.adhesiveName} — section "${s.name}" bills 0 membrane install hours.`,
+        );
+      }
+      const rollLabel = sLt?.rollGoodsSheetLabel ?? "";
+      rollGoods =
+        rollLabel === "" || sheetLabel === rollLabel || !sLt?.sheetSizeMultiByLabel[sheetLabel];
+      if (rollGoods) {
+        const w = admin.rollGoodWidthMulti?.[rsId]?.[s.fieldLap];
+        if (w === undefined) {
+          rollGoodWidthMulti = 1;
+          if (adhesiveBaseHoursPer1000 > 0)
+            warnings.push(
+              `No adhered roll-goods labor multiplier for ${sys.roofSystem} at a ${s.fieldLap}" roll width — section "${s.name}" uses ×1.`,
+            );
+        } else rollGoodWidthMulti = w;
+      }
+      const flags = admin.adhesiveFlags?.[sys.adhesiveName];
+      adheredPerimeterBump =
+        !!flags && flags.shortName === "durogrip" && flags.perimSpacingIn !== -1;
+    }
+
     return {
       id: s.id,
       length: s.length,
       width: s.width,
-      fieldArea,
-      perimArea,
-      cornerArea,
+      fieldArea: laborArea(fieldArea),
+      perimArea: laborArea(perimArea),
+      cornerArea: laborArea(cornerArea),
       membraneWithOverlap,
       // §2.3: ARP-covered edges are subtracted from the bid's total membrane sq ft.
       arpSqFt: edgesArpSqFt(s.edges ?? []),
@@ -1171,8 +1212,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       designTable: 60,
       pullTest: 0, // unused: fastenerOc supplied directly
       fieldLap: s.fieldLap,
-      perimLap: s.fieldLap,
-      cornerLap: s.fieldLap,
+      perimLap: laborPerimLap,
+      cornerLap: laborCornerLap,
       customFieldFastenerSpacing: s.fastenerOc,
       customPerimFastenerSpacing: s.perimFastenerOc,
       customCornerFastenerSpacing: s.cornerFastenerOc,
@@ -1191,19 +1232,18 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             },
           }
         : {}),
-      // Per-section AdjustLabor (composed with the labor template exactly like the bid-level).
-      ...(s.adjustLaborPct !== undefined
-        ? { adjustLaborPct: ((1 + s.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100 }
-        : {}),
-      adhesiveBaseHoursPer1000: 0,
-      rollGoods: true,
-      rollGoodWidthMulti: 1,
-      adheredPerimeterBump: false,
+      // Per-section AdjustLabor (legacy RoofSection.AdjustLabor); absent = the bid-level value.
+      ...(s.adjustLaborPct !== undefined ? { adjustLaborPct: s.adjustLaborPct } : {}),
+      adhesiveBaseHoursPer1000,
+      rollGoods,
+      rollGoodWidthMulti,
+      adheredPerimeterBump,
       tearOff: s.tearOff,
       tearOffLaborLookup,
       // Legacy TearOffBaseLabor: W × L × lookup × SheetSize.SmartSheetMulti × ComplexityFactor.
       tearOffSheetComplexityMulti: sheetSizeMulti * complexity,
-      tearOffAdditionalPct: (tf("Tear-Off Labor") - 1) * 100,
+      // Legacy TearOffLabor = base × (1 + TO_Additional/100), TO_Additional per section.
+      tearOffAdditionalPct: s.tearOffAdditionalPct ?? 0,
       toThicknessInches: s.toThicknessInches,
     };
   });
@@ -1438,9 +1478,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
       // Per-item labor % (docs §8.7): legacy ManHours = BaseManHours × (1 + AdjustLabor/100),
       // wrapping the whole item (matrix labor + slipsheet labor). The labor template WRITES
-      // the same AdjustLabor field, so a wall's own value REPLACES the template factor (§19).
-      const pAdjust =
-        p.adjustLaborPct !== undefined ? 1 + p.adjustLaborPct / 100 : tf("Parapets Labor");
+      // the same AdjustLabor field (§19/§20.3), so only the wall's own value applies.
+      const pAdjust = 1 + (p.adjustLaborPct ?? 0) / 100;
       const manHours = itemHours * pAdjust;
       parapetLaborHours += manHours;
       parapetBaseHoursById[p.id] = itemHours;
@@ -1746,9 +1785,6 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     accessoryLaborHours += accessoriesCalcResult.manHours;
   }
 
-  // Apply the template factors to the category hour seams.
-  curbLaborHours *= tf("Curbs Labor");
-
   // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
   const duroLastMaterial =
     membraneMaterial +
@@ -1878,10 +1914,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       ...(admin.setupTable ? { setupTable: admin.setupTable } : {}),
       ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },
-    adjustLaborPct: ((1 + bid.adjustLaborPct / 100) * tf("Roof Section Labor") - 1) * 100,
-    adjustSetupLaborPct: ((1 + (bid.adjustSetupPct ?? 0) / 100) * tf("Setup Time Labor") - 1) * 100,
-    adjustInspectionPct:
-      ((1 + (bid.adjustInspectionPct ?? 0) / 100) * tf("Inspection Time Labor") - 1) * 100,
+    // Legacy per-estimate adjusts (RoofSection.AdjustLabor default / Estimate.AdjustSetupLabor /
+    // Estimate.AdjustInspectionTime) — the labor template seeds these fields (§20.3).
+    adjustLaborPct: bid.adjustLaborPct,
+    adjustSetupLaborPct: bid.adjustSetupPct ?? 0,
+    adjustInspectionPct: bid.adjustInspectionPct ?? 0,
     accessoryLaborHours,
     ownRateDirectLaborCost: metalsLaborCost + nonDlOwnRateCost,
     ownRateDirectLaborHours: metalsLaborHours + nonDlOwnRateHours,
