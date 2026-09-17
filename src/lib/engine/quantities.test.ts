@@ -9,6 +9,7 @@ import {
   numSheetsReq,
   sheetRollsFromLabel,
   legacyMembraneWithOverlap,
+  duroTuffMembraneCalc,
   arpSqFt,
   sqFtTotalMembrane,
   setupTime,
@@ -149,8 +150,97 @@ describe("membrane area with overlap (§2.2)", () => {
     expect(legacyMembraneWithOverlap(5, { ...s, rolls: 0, overlapWidthIn: 3 }, v)).toBe(
       2601 + 521 * 0.25,
     );
-    expect(legacyMembraneWithOverlap(3, s, v)).toBe(2601); // Duro-Tuff: not ported → area
+    expect(legacyMembraneWithOverlap(3, s, v)).toBe(2601); // Duro-Tuff: dispatched by the builder
     expect(legacyMembraneWithOverlap(1, { ...s, rolls: 0 }, v)).toBe(2601);
+  });
+});
+
+describe("Duro-Tuff membrane layout (DuroTuffSystem.CalculateMembraneQty, §21.4)", () => {
+  const base = {
+    length: 50,
+    width: 50,
+    overlapWidthIn: 6,
+    fieldLapIn: 30,
+    customFieldLapIn: -1,
+    mechanical: true,
+    useCustomSettings: false,
+    customRows: [0, 0] as [number, number],
+    customPerimLapIn: [-1, -1] as [number, number],
+    customCornerLapIn: [-1, -1] as [number, number],
+    sides: [0, 1, 2, 3].map(() => ({ isPerim: false, perimLengthFt: 0, has2ftWall: false })),
+    corners: [false, false, false, false] as [boolean, boolean, boolean, boolean],
+    rollLengthFt: 100,
+    rollWidthsIn: [30, 60, 120],
+  };
+
+  it('no perimeter sides: the 51×51 field fills with 30" strips lapped 6", ½ ft butt joint per roll, partial strip at its width', () => {
+    // 612" of width / 24" per strip → 25 full strips (rem 12"): 25 × 51 = 1275 ft + Ceil(12.75)
+    // × 0.5 = 1281.5 ft × 2.5 ft = 3203.75; + 51 × In2Ft(12) = 51 → 3254.75
+    const r = duroTuffMembraneCalc(base);
+    expect(r.qty).toBeCloseTo(3254.75, 9);
+    // BA-default written-back laps for a mechanical section: 30" outer, 30" inner (lap ≤ 30").
+    expect(r.rows).toEqual([1, 2]);
+    expect(r.perimLapIn).toEqual([30, 30]);
+    expect(r.cornerLapIn).toEqual([30, 30]);
+    expect(r.customFieldLapIn).toBe(-1);
+    // A 60" field lap → 60" inner rows; adhered (not durotuffmech) → no rows, same field fill.
+    expect(duroTuffMembraneCalc({ ...base, fieldLapIn: 60 }).perimLapIn).toEqual([30, 60]);
+    const adhered = duroTuffMembraneCalc({ ...base, mechanical: false });
+    expect(adhered.rows).toEqual([0, 0]);
+    expect(adhered.qty).toBeCloseTo(3254.75, 9);
+  });
+
+  it('perimeter sides A and C on a 100×50 at a 60" lap: 30" outer row, two 60" inner rows, field between', () => {
+    // outerW = 24" on A/C; innerW = 108" on A/C; OP = 2 × 101 = 202 + 1 (butt) = 203 ft × 2.5;
+    // IP = 2 × 101 × 2 = 404 + 2 = 406 ft × 5; field 101 ft × (50 − 11 − 11 + 1 = 29 ft →
+    // 348" / 54" → 6 strips, rem 24") = 606 + 3.5 = 609.5 ft × 5 + 101 × 2 → total 5787.
+    const r = duroTuffMembraneCalc({
+      ...base,
+      length: 100,
+      fieldLapIn: 60,
+      sides: [
+        { isPerim: true, perimLengthFt: 100, has2ftWall: false },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+        { isPerim: true, perimLengthFt: 100, has2ftWall: false },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+      ],
+    });
+    expect(r.qty).toBeCloseTo(5787, 9);
+    // A 2 ft wall on side A drops that side's outer row (BA-default mode only).
+    const wall = duroTuffMembraneCalc({
+      ...base,
+      length: 100,
+      fieldLapIn: 60,
+      sides: [
+        { isPerim: true, perimLengthFt: 100, has2ftWall: true },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+        { isPerim: true, perimLengthFt: 100, has2ftWall: false },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+      ],
+    });
+    // outerW[A] = 0, OP = 101 (C only) + 0.5 = 101.5 ft × 2.5; IP unchanged 406 × 5;
+    // fieldWidth = 50 − In2Ft(108)=9 − 11 + 1 = 31 ft → 372" / 54" → 6 strips, rem 48":
+    // 606 + 3.5 = 609.5 × 5 + 101 × In2Ft(48)=4 → 253.75 + 2030 + 3047.5 + 404 = 5735.25
+    expect(wall.qty).toBeCloseTo(5735.25, 9);
+  });
+
+  it("perimeter overflow drops the rows and writes the row width as the field lap", () => {
+    // 4 ft wide section, A and C perimeter: outerW 24" each → In2Ft(48) = 4 > 4? no; inner 108"
+    // each → In2Ft(48 + 216) = 22 > length 10 → inner rows dropped, CustomFieldLap ← 60.
+    const r = duroTuffMembraneCalc({
+      ...base,
+      length: 10,
+      width: 4,
+      fieldLapIn: 60,
+      sides: [
+        { isPerim: true, perimLengthFt: 10, has2ftWall: false },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+        { isPerim: true, perimLengthFt: 10, has2ftWall: false },
+        { isPerim: false, perimLengthFt: 0, has2ftWall: false },
+      ],
+    });
+    expect(r.rows).toEqual([1, 0]);
+    expect(r.customFieldLapIn).toBe(60);
   });
 });
 

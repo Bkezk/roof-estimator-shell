@@ -124,6 +124,229 @@ export function sheetsMembraneCalc(s: LegacyMembraneSection, version: string): n
   return area + numOverlaps * avgSheetSide;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 2.2c Duro-Tuff — DuroTuffSystem.CalculateMembraneQty (IL-exact, docs §21.4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** VB `DACommon.Ft2In(Double)` — Round(ft × 12) as an integer. */
+const ft2In = (ft: number): number => Math.round(ft * 12);
+
+export interface DuroTuffSection {
+  length: number;
+  width: number;
+  /** RoofSystem.OverlapWidth (6" for Duro-Tuff). */
+  overlapWidthIn: number;
+  fieldLapIn: number;
+  /** CustomFieldLap (in); -1 = none. */
+  customFieldLapIn: number;
+  /** True when the section's perimeter attachment is "durotuffmech" (mechanical Duro-Tuff). */
+  mechanical: boolean;
+  /** RoofSection.UseCustomSettings — the Advanced "custom rows / widths" checkbox. */
+  useCustomSettings: boolean;
+  /** NumCustomRows(0) / (1) and CustomPerimeterLap / CustomCornerLap (0) / (1) when custom. */
+  customRows: [number, number];
+  customPerimLapIn: [number, number];
+  customCornerLapIn: [number, number];
+  /** Sides A..D: SideIsPerim, PerimSideLength (0 unless perimeter), SideHas2ftWall. */
+  sides: Array<{ isPerim: boolean; perimLengthFt: number; has2ftWall: boolean }>;
+  /** IsPerimCorner(0..3): corner i sits between side i and side i+1 (3 = D∧A). */
+  corners: [boolean, boolean, boolean, boolean];
+  /** MembraneType.DefaultRollLength (ft) — RSMembraneType.RollLength, 100 in the seed. */
+  rollLengthFt: number;
+  /** RoofSystem.RollGoodWidths (in) — RSRollGoodWidth widths (Duro-Tuff: 30, 60, 120). */
+  rollWidthsIn: number[];
+}
+
+export interface DuroTuffMembraneResult {
+  /** The returned MembraneWithOverlap (sq ft). */
+  qty: number;
+  /**
+   * What the routine WRITES BACK onto the section (it mutates RoofSection): NumCustomRows,
+   * CustomPerimeterLap / CustomCornerLap (0, 1) and, on a perimeter overflow, CustomFieldLap —
+   * the later labor / material lookups read these.
+   */
+  rows: [number, number];
+  perimLapIn: [number, number];
+  cornerLapIn: [number, number];
+  customFieldLapIn: number;
+}
+
+/**
+ * `DuroTuffSystem.CalculateMembraneQty` (rva 0xdec0), verbatim. Mechanical Duro-Tuff lays an
+ * outer perimeter row of 30" membrane and inner rows of 60" (30" when the field lap is ≤ 30"),
+ * fills the field with `fieldRollWidth` strips (6" side laps), converts every roll length to
+ * square feet at its own width, and adds ½ ft of butt-joint per whole roll length. Quirks kept:
+ * the outer/inner overflow tests compare the A/C widths against LENGTH (and B/D against WIDTH);
+ * the corner deductions on the perimeter runs are single widths (not × rows) on the outer run and
+ * on the A/C inner run, × rows on the B/D inner run; only the 30" and 60" buckets are cashed out
+ * before the field fill; BA-default outer rows skip sides with a 2 ft wall.
+ */
+export function duroTuffMembraneCalc(s: DuroTuffSection): DuroTuffMembraneResult {
+  const L = s.length;
+  const W = s.width;
+  const ovl = s.overlapWidthIn;
+  const lengths = new Map<number, number>();
+  for (const w of s.rollWidthsIn) lengths.set(w, 0);
+  const addLen = (w: number, v: number) => lengths.set(w, (lengths.get(w) ?? 0) + v);
+  const getLen = (w: number) => lengths.get(w) ?? 0;
+  const outerW = [0, 0, 0, 0];
+  const innerW = [0, 0, 0, 0];
+  const side = (i: number) => s.sides[i] ?? { isPerim: false, perimLengthFt: 0, has2ftWall: false };
+  const isPerim = (i: number) => side(i).isPerim;
+  const perimLen = (i: number) => side(i).perimLengthFt;
+  const corner = (i: number) => s.corners[i] ?? false;
+  const prevSide = (i: number) => (i > 0 ? i - 1 : 3);
+  const nextSide = (i: number) => (i === 3 ? 0 : i + 1);
+  const prevCorner = (i: number) => (i > 0 ? i - 1 : 3);
+  const nextCorner = (i: number) => i;
+  const customOrNoSideWall = (i: number) => (s.useCustomSettings ? 1 : side(i).has2ftWall ? 0 : 1);
+  let fieldRollWidth = s.customFieldLapIn !== -1 ? s.customFieldLapIn : s.fieldLapIn;
+  let customFieldLapIn = s.customFieldLapIn;
+
+  let rows: [number, number] = [...s.customRows];
+  let perimLap: [number, number] = [...s.customPerimLapIn];
+  let cornerLap: [number, number] = [...s.customCornerLapIn];
+  if (s.mechanical) {
+    if (!s.useCustomSettings) {
+      rows = [1, 2];
+      perimLap = [30, s.fieldLapIn > 30 ? 60 : 30];
+      cornerLap = [30, s.fieldLapIn > 30 ? 60 : 30];
+    }
+  } else {
+    rows = [0, 0];
+  }
+
+  let total = 0;
+  let fieldLength: number;
+  let fieldWidth: number;
+  if (!s.mechanical) {
+    fieldLength = L + 1;
+    fieldWidth = W + 1;
+  } else {
+    // Expected outer perimeter widths (in); overflow → drop every perimeter row.
+    outer: for (let i = 0; i < 4; i++) {
+      if (!isPerim(i)) continue;
+      outerW[i] =
+        (perimLap[0] - ovl) * rows[0] * (s.useCustomSettings ? 1 : side(i).has2ftWall ? 0 : 1);
+      const overflow =
+        i === 0 || i === 2
+          ? in2Ft(outerW[0]! + outerW[2]!) > L
+          : in2Ft(outerW[1]! + outerW[3]!) > W;
+      if (overflow) {
+        customFieldLapIn = perimLap[0];
+        fieldRollWidth = perimLap[0];
+        rows = [0, 0];
+        for (let k = 0; k < 4; k++) {
+          outerW[k] = 0;
+          innerW[k] = 0;
+        }
+        break outer;
+      }
+    }
+    // Expected inner perimeter widths (in); overflow → drop the inner rows.
+    inner: for (let i = 0; i < 4; i++) {
+      if (!isPerim(i)) continue;
+      innerW[i] = (perimLap[1] - ovl) * rows[1];
+      const overflow =
+        i === 0 || i === 2
+          ? in2Ft(outerW[0]! + outerW[2]! + innerW[0]! + innerW[2]!) > L
+          : in2Ft(outerW[1]! + outerW[3]! + innerW[1]! + innerW[3]!) > W;
+      if (overflow) {
+        customFieldLapIn = perimLap[1];
+        fieldRollWidth = perimLap[1];
+        rows = [rows[0], 0];
+        for (let k = 0; k < 4; k++) innerW[k] = 0;
+        break inner;
+      }
+    }
+    // Outer perimeter length (ft) → lengths[perimLap(0)].
+    if (rows[0] > 0) {
+      let op = 0;
+      for (const i of [0, 2]) {
+        if (!isPerim(i)) continue;
+        op += (perimLen(i) + 1) * rows[0] * customOrNoSideWall(i);
+      }
+      for (const i of [1, 3]) {
+        if (!isPerim(i)) continue;
+        op += (perimLen(i) + 1) * rows[0] * customOrNoSideWall(i);
+        op -= corner(prevCorner(i)) ? in2Ft(outerW[prevSide(i)]!) : 0;
+        op -= corner(nextCorner(i)) ? in2Ft(outerW[nextSide(i)]!) : 0;
+      }
+      op += Math.floor(op / s.rollLengthFt) * 0.5;
+      addLen(perimLap[0], op);
+    }
+    // Inner perimeter length (ft) → lengths[perimLap(1)].
+    if (rows[1] > 0) {
+      let ip = 0;
+      for (const i of [0, 2]) {
+        if (!isPerim(i)) continue;
+        ip += (perimLen(i) + 1) * rows[1];
+        ip -= corner(prevCorner(i)) ? in2Ft(outerW[prevSide(i)]!) : 0;
+        ip -= corner(nextCorner(i)) ? in2Ft(outerW[nextSide(i)]!) : 0;
+      }
+      for (const i of [1, 3]) {
+        if (!isPerim(i)) continue;
+        ip += (perimLen(i) + 1) * rows[1];
+        ip -=
+          (corner(prevCorner(i)) ? in2Ft(innerW[prevSide(i)]! + outerW[prevSide(i)]!) : 0) *
+          rows[1];
+        ip -=
+          (corner(nextCorner(i)) ? in2Ft(innerW[nextSide(i)]! + outerW[nextSide(i)]!) : 0) *
+          rows[1];
+      }
+      ip += Math.floor(ip / s.rollLengthFt) * 0.5;
+      addLen(perimLap[1], ip);
+    }
+    // Cash out the 30" and 60" buckets (fixed keys, verbatim).
+    total = getLen(30) * in2Ft(30) + getLen(60) * in2Ft(60);
+    lengths.set(30, 0);
+    lengths.set(60, 0);
+    // The non-perimeter remainder of each perimeter side's strip is filled with field rolls.
+    const fillStrip = (run: number, widthIn: number) => {
+      let rem = widthIn;
+      while (rem > 0) {
+        if (rem > fieldRollWidth - ft2In(0.5)) {
+          addLen(fieldRollWidth, run);
+          rem -= fieldRollWidth - ft2In(0.5);
+        } else {
+          total += run * in2Ft(rem);
+          rem = 0;
+        }
+      }
+    };
+    if (rows[0] > 0) {
+      for (const i of [0, 2]) if (isPerim(i)) fillStrip(L - perimLen(i), outerW[i]! + innerW[i]!);
+    }
+    if (rows[1] > 0) {
+      for (const i of [1, 3]) if (isPerim(i)) fillStrip(W - perimLen(i), outerW[i]! + innerW[i]!);
+    }
+    fieldLength =
+      L -
+      (isPerim(1) ? in2Ft(outerW[1]! + innerW[1]!) : 0) -
+      (isPerim(3) ? in2Ft(outerW[3]! + innerW[3]!) : 0) +
+      1;
+    fieldWidth =
+      W -
+      (isPerim(0) ? in2Ft(outerW[0]! + innerW[0]!) : 0) -
+      (isPerim(2) ? in2Ft(outerW[2]! + innerW[2]!) : 0) +
+      1;
+  }
+  // Fill the field with strips of the field roll width (6" side laps), then cash the bucket.
+  let rem = ft2In(fieldWidth);
+  while (rem > 0) {
+    if (rem > fieldRollWidth - ft2In(0.5)) {
+      addLen(fieldRollWidth, fieldLength);
+      rem -= fieldRollWidth - ft2In(0.5);
+    } else {
+      addLen(fieldRollWidth, Math.ceil(getLen(fieldRollWidth) / s.rollLengthFt) * 0.5);
+      total += getLen(fieldRollWidth) * in2Ft(fieldRollWidth);
+      total += fieldLength * in2Ft(rem);
+      rem = 0;
+    }
+  }
+  return { qty: total, rows, perimLapIn: perimLap, cornerLapIn: cornerLap, customFieldLapIn };
+}
+
 /** Legacy RSSheetSize.Rolls for a sheet label: "Roll Good" → 1, "N sf" → N ÷ 100, else 0. */
 export function sheetRollsFromLabel(label: string | undefined): number {
   const t = (label ?? "").trim().toLowerCase();
@@ -137,7 +360,7 @@ export function sheetRollsFromLabel(label: string | undefined): number {
  * `RoofSystem.CalculateMembraneQty` dispatch per legacy roof-system id (docs §21): Duro-Last (1)
  * and Duro-Roof (4): Rolls == 1 → roll goods, Rolls > 1 → sheets, else AreaWithEdgeOverlap;
  * Duro-Bond (2): Rolls > 1 → sheets, else area; Duro-Fleece (5): always roll goods. Duro-Tuff (3)
- * has its own multi-width roll optimiser (not ported — area with edge overlap, flagged).
+ * has its own multi-width roll layout (`duroTuffMembraneCalc`, dispatched by the bid builder).
  */
 export function legacyMembraneWithOverlap(
   rsId: number,
@@ -153,6 +376,7 @@ export function legacyMembraneWithOverlap(
     if (s.rolls === 1) return rollGoodsMembraneCalc(s, version);
     if (s.rolls > 1) return sheetsMembraneCalc(s, version);
   }
+  // Duro-Tuff (3): `duroTuffMembraneCalc` (needs the attachment / edge inputs — bid-builder).
   return areaWithEdgeOverlap(s.length, s.width, version);
 }
 

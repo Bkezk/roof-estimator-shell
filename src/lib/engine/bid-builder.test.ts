@@ -60,6 +60,24 @@ const INSTALL = 15.125 * MWO_RATIO;
  */
 const rollQty = (lapInt: number, overlapFt: number): number =>
   2601 + Math.ceil((51 / lapInt) * 51) * overlapFt;
+/**
+ * Duro-Tuff quantity for the 50×50 fixture with no perimeter sides (DuroTuffSystem
+ * .CalculateMembraneQty, docs §21.4): the 51 ft × 51 ft field is filled with `fw`-inch strips
+ * lapped 6", the strip lengths get ½ ft of butt joint per whole 100 ft roll, and the last
+ * partial strip bills at its remaining width.
+ */
+const tuffQty = (fw: number): number => {
+  const step = fw - 6;
+  let rem = 612;
+  let k = 0;
+  while (rem > step) {
+    k++;
+    rem -= step;
+  }
+  const len = k * 51 + Math.ceil((k * 51) / 100) * 0.5;
+  const in2Ft = (i: number) => Math.round((i / 12) * 100) / 100;
+  return len * in2Ft(fw) + 51 * in2Ft(rem);
+};
 /** Sheets quantity on the "500 sf" sheet: n = 6, overlaps = Floor(12 − 2√6) = 7. */
 const MWO_SHEET_500 = 2601 + 7 * Math.sqrt(2601 / 6);
 
@@ -689,8 +707,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     );
     // AdjustedHeight = Ceil(30.4/6)/2 = 3 ft -> Ceil(36/24) = 2 panels x 30" = 5 ft billed;
     // Round(5 x 102 x 1.4, 2) = 714.00 (vs 368.42 non-Duro-Tuff)
-    // Duro-Tuff membrane quantity stays AreaWithEdgeOverlap (its roll optimiser is not ported).
-    expect(inputs.duroLastMaterial).toBeCloseTo(2601 * 1.23 + 714, 2);
+    // Duro-Tuff membrane quantity: 30" roll layout at the 28" field lap (docs §21.4).
+    expect(inputs.duroLastMaterial).toBeCloseTo(tuffQty(28) * 1.23 + 714, 2);
   });
 
   it("curbs: setup + min/LF x type x perimeter, x qty, /60 -> direct labor", () => {
@@ -1357,7 +1375,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       dtAdmin,
     );
     expect(warnings.filter((w) => w.includes("tab pitch"))).toEqual([]);
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2); // Duro-Tuff: area basis
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(tuffQty(30) * 1.23, 2); // Duro-Tuff layout
   });
 
   it("family membrane pricing: Duro-Bond/Tuff are flat thickness-keyed; Duro-Fleece keys by membrane type", () => {
@@ -2633,12 +2651,12 @@ describe("§16 Roof Sections: per-section system / labor adjust / complexity / c
     expect(s0.laborTables).toBeDefined(); // the section's own combo, not the bid's
     expect(s0.tearOffSheetComplexityMulti).toBe(2.4);
     const r = computeEstimate(inputs);
-    // Duro-Tuff membrane quantity = AreaWithEdgeOverlap (2601): labor basis 2601/2500.
-    expect(r.installHours).toBeCloseTo(15.125 * (2601 / 2500) * 2.4, 6);
+    // Duro-Tuff membrane quantity = the 30" roll layout at the 28" lap: labor basis qty/2500.
+    expect(r.installHours).toBeCloseTo(15.125 * (tuffQty(28) / 2500) * 2.4, 6);
     // TearOffBaseLabor = 2500 × 0.024876 × 1 × 2.4 = 149.256 → Round 3 → Ceiling to the cent
     expect(r.tearOffLaborHours).toBeCloseTo(149.26, 2);
-    // Duro-Tuff flat membrane price applied (family price, no tab tiers)
-    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(2601 * 1.23, 2);
+    // Duro-Tuff flat membrane price applied (family price, no tab tiers) on the roll layout qty
+    expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(tuffQty(28) * 1.23, 2);
   });
 
   it("complexity defaults to Moderate (×1) and is ignored on systems without RSComplexityFactor rows", () => {

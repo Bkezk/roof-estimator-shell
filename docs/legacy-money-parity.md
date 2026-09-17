@@ -2085,9 +2085,7 @@ Dispatch (DuroLastSystem rva 0xd370, DuroRoofSystem 0xde78, DuroBondSystem 0xbd2
 DuroFleeceSystem 0xc123): `SheetSize.Rolls == 1` → `RollGoodsMembraneCalc`; `Rolls > 1` →
 `SheetsMembraneCalc`; else `AreaWithEdgeOverlap`. Duro-Fleece is always roll goods; Duro-Bond has
 no roll-goods branch (sheets or area). `Rolls` is RSSheetSize.Rolls: "Roll Good" 1, "N sf" N/100
-(`sheetRollsFromLabel`). Duro-Tuff has its own multi-width roll optimiser
-(`DuroTuffSystem.CalculateMembraneQty`, ~46 KB of IL) — NOT ported; it stays AreaWithEdgeOverlap
-(flagged).
+(`sheetRollsFromLabel`). Duro-Tuff has its own roll layout — §21.4.
 
 - **`RollGoodsMembraneCalc`** (DuroLastFunctions rva 0xa4b28):
   `rows = CustomPerimeterLap(0) > 0 ? Round(Ceil(PerimEnhancementWidth / In2Ft(CustomPerimeterLap
@@ -2107,6 +2105,49 @@ no roll-goods branch (sheets or area). `Rolls` is RSSheetSize.Rolls: "Roll Good"
   `LEGACY_OVERLAP_WIDTH_IN`.
 - Effect on the 50×50 "1500 sf" fixture: 2601 → 2601 + √1300.5 = 2637.06 sq ft (+1.4%) for
   material AND install labor (the §20.1 share basis); roll goods at 64" → 2861.5.
+
+### 21.4 Duro-Tuff — `DuroTuffSystem.CalculateMembraneQty` (rva 0xdec0, ported verbatim)
+
+`duroTuffMembraneCalc` (quantities.ts). Inputs: L, W, OverlapWidth 6", FieldLap (= the field
+roll width), CustomFieldLap, the perimeter attachment ("durotuffmech" or not), UseCustomSettings,
+NumCustomRows(0/1), CustomPerimeterLap / CustomCornerLap (0/1), per side SideIsPerim /
+PerimSideLength / SideHas2ftWall, IsPerimCorner(0..3), MembraneType.DefaultRollLength (100 ft),
+RoofSystem.RollGoodWidths (30 / 60 / 120).
+
+1. **Setup.** Mechanical ("durotuffmech") and NOT UseCustomSettings → the routine WRITES
+   `NumCustomRows = (1, 2)`, `CustomPerimeterLap(0) = CustomCornerLap(0) = 30`, and (1) =
+   `FieldLap > 30 ? 60 : 30` onto the section ("BA set"); custom → the user's values. Any other
+   attachment → rows (0, 0) and the plain `(L+1) × (W+1)` field.
+2. **Expected outer widths** per perimeter side: `(lap0 − 6) × rows0 × (custom ? 1 :
+   has2ftWall ? 0 : 1)`; if `In2Ft(outer[A] + outer[C]) > LENGTH` (A/C compared against Length,
+   B/D against Width — verbatim) → `CustomFieldLap ← lap0`, rows (0, 0), all widths 0. **Inner
+   widths**: `(lap1 − 6) × rows1`, overflow test on outer + inner → `CustomFieldLap ← lap1`,
+   rows1 = 0.
+3. **Outer run (ft)** into `lengths[lap0]`: Σ perimeter sides `(PerimSideLength + 1) × rows0 ×
+   (custom ? 1 : has2ftWall ? 0 : 1)`; sides B/D also subtract `In2Ft(outer[adjacent side])` per
+   marked adjacent corner (single width, not × rows); then `+ Floor(run / 100) × 0.5` butt joints.
+   **Inner run** into `lengths[lap1]`: A/C `(PerimSideLength + 1) × rows1` minus `In2Ft(outer
+   [adjacent])` per marked corner; B/D the same with `In2Ft(inner + outer [adjacent]) × rows1`;
+   `+ Floor(run / 100) × 0.5`.
+4. **Cash-out** `total = lengths[30] × 2.5 + lengths[60] × 5` (fixed keys), both reset.
+5. **Side leftovers**: for each perimeter A/C (rows0 > 0) and B/D (rows1 > 0) the
+   non-perimeter remainder `(L or W − PerimSideLength)` is filled across `outer + inner` inches
+   with field strips: while `rem > fieldRollWidth − 6` → `lengths[fw] += run`, `rem −= fw − 6`;
+   else `total += run × In2Ft(rem)`.
+6. **Field**: `fieldLength = L − In2Ft(outer + inner)[B] − …[D] + 1`, `fieldWidth = W − …[A] −
+   …[C] + 1`; fill `Ft2In(fieldWidth)` inches the same way; on the last strip `lengths[fw] +=
+   Ceil(lengths[fw] / 100) × 0.5`, `total += lengths[fw] × In2Ft(fw) + fieldLength ×
+   In2Ft(rem)`.
+7. Return `total`. The written-back laps matter downstream: `MechPerimLaborRate` then keys the
+   30" tab (×2.8 on Duro-Tuff) for perimeter / corner zones, and an overflow's CustomFieldLap
+   re-keys the field tab. The builder passes them into the labor inputs (`laborPerimLap` /
+   `laborCornerLap` / `laborFieldLap`).
+
+Effect: a default 50×50 Duro-Tuff mechanical section at the 30" lap bills 3,254.75 sq ft (25 full
+30" strips lapped 6" + a 12" remainder + butt joints) instead of 2,601 — the 30" roll waste is the
+legacy figure. Web mapping: `UseCustomSettings` ≡ a custom perimeter lap on the section (one outer
+row at that lap, no inner rows — the legacy Advanced form's separate inner row / width fields have
+no web counterpart yet, flagged); 2 ft walls come from the edge "w/ Wall > 2ft" flag.
 
 ### 21.2 Adhered sheet multiplier per adhesive
 

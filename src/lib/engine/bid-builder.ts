@@ -46,7 +46,12 @@
  *    WallPlusTopSqFt = Length × (Vertical+WallTop)/12. Height band is still picked by hand.
  */
 
-import { legacyMembraneWithOverlap, sheetRollsFromLabel, tearOffVolume } from "./quantities";
+import {
+  duroTuffMembraneCalc,
+  legacyMembraneWithOverlap,
+  sheetRollsFromLabel,
+  tearOffVolume,
+} from "./quantities";
 import { in2Ft, bankersRound } from "./rounding";
 import {
   computeAccessories,
@@ -69,6 +74,7 @@ import {
   edgePerimLength,
   edgeSideIndex,
   edgesArpSqFt,
+  effectiveCorners,
   resolveSectionZones,
   type EdgeInput,
   type PerimCorners,
@@ -633,6 +639,8 @@ export const COMPLEXITY_LABELS = [
  * admin-editable value in BAManager.
  */
 export const LEGACY_OVERLAP_WIDTH_IN: Record<number, number> = { 1: 6, 2: 6, 3: 6, 4: 6, 5: 3 };
+/** Legacy MembraneType.DefaultRollLength (ft) — RSMembraneType.RollLength, 100 for every seeded type. */
+export const LEGACY_ROLL_LENGTH_FT = 100;
 
 export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
   3: [0.9, 0.98, 1, 1.2, 2.4, 4],
@@ -912,25 +920,61 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const edgeList = s.edges?.length
       ? [...s.edges].sort((a, b) => edgeSideIndex(a) - edgeSideIndex(b))
       : undefined;
-    const membraneWithOverlap = legacyMembraneWithOverlap(
-      rsId,
-      {
-        length: s.length,
-        width: s.width,
-        overlapWidthIn: LEGACY_OVERLAP_WIDTH_IN[rsId] ?? 6,
-        fieldLapIn: s.fieldLap,
-        customFieldLapFt: 0,
-        customPerimeterLapIn: s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0,
-        perimEnhancementWidthFt: s.enhancementWidthFt,
-        sides: (edgeList ?? []).map((e) => ({
-          isPerim: e.isPerimeter,
-          perimLengthFt: edgePerimLength(e),
-        })),
-        isQuickBid: s.isQuickBid !== false,
-        rolls: sheetRollsFromLabel(sheetLabel),
-      },
-      version,
-    );
+    // Duro-Tuff: DuroTuffSystem.CalculateMembraneQty lays 30"/60" perimeter rows + field strips
+    // and WRITES the custom laps it used back onto the section (docs §21.4) — those feed the
+    // labor tab lookups below. Custom settings (a user perimeter lap) map to one outer row.
+    const tuffCustom = s.perimLap !== undefined && s.perimLap !== -1;
+    const tuff =
+      rsId === 3
+        ? duroTuffMembraneCalc({
+            length: s.length,
+            width: s.width,
+            overlapWidthIn: LEGACY_OVERLAP_WIDTH_IN[3] ?? 6,
+            fieldLapIn: s.fieldLap,
+            customFieldLapIn: -1,
+            mechanical: sys.attachment === "mechanical",
+            useCustomSettings: tuffCustom,
+            customRows: tuffCustom ? [1, 0] : [0, 0],
+            customPerimLapIn: [s.perimLap ?? -1, s.perimLap ?? -1],
+            customCornerLapIn: [s.cornerLap ?? -1, s.cornerLap ?? -1],
+            sides: [0, 1, 2, 3].map((i) => {
+              const e = edgeList?.[i];
+              return {
+                isPerim: e?.isPerimeter ?? false,
+                perimLengthFt: e ? edgePerimLength(e) : 0,
+                has2ftWall: e?.hasTallWall ?? false,
+              };
+            }),
+            corners: edgeList
+              ? effectiveCorners(edgeList, s.perimCorners)
+              : [false, false, false, false],
+            rollLengthFt: LEGACY_ROLL_LENGTH_FT,
+            rollWidthsIn: Object.keys(
+              admin.rollGoodWidthMulti?.[3] ?? { 30: 1, 60: 1, 120: 1 },
+            ).map(Number),
+          })
+        : undefined;
+    const membraneWithOverlap = tuff
+      ? tuff.qty
+      : legacyMembraneWithOverlap(
+          rsId,
+          {
+            length: s.length,
+            width: s.width,
+            overlapWidthIn: LEGACY_OVERLAP_WIDTH_IN[rsId] ?? 6,
+            fieldLapIn: s.fieldLap,
+            customFieldLapFt: 0,
+            customPerimeterLapIn: s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0,
+            perimEnhancementWidthFt: s.enhancementWidthFt,
+            sides: (edgeList ?? []).map((e) => ({
+              isPerim: e.isPerimeter,
+              perimLengthFt: edgePerimLength(e),
+            })),
+            isQuickBid: s.isQuickBid !== false,
+            rolls: sheetRollsFromLabel(sheetLabel),
+          },
+          version,
+        );
     // Membrane tier (legacy MembraneCost_4_0_230, docs/legacy-money-parity.md §1): the combo's
     // FIRST sheet size (the seeded "Roll Good") prices the whole MembraneWithOverlap at the
     // roll-goods tier; other sheets price the FIELD share at the fieldLap's tab tier, with the
@@ -1210,8 +1254,21 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // PerimeterLap` — and legacy never assigns PerimeterLap (`_perimTabSizeOrRollWidth` has no
     // writer), so the default is 0 → the descending tab walk returns its LAST entry (the smallest
     // tab, e.g. Duro-Last 28" → 1.5125). Corner: CustomCornerLap ≠ -1 ? CustomCornerLap : 0.
-    const laborPerimLap = s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0;
-    const laborCornerLap = s.cornerLap !== undefined && s.cornerLap !== -1 ? s.cornerLap : 0;
+    // Duro-Tuff: the membrane routine's written-back CustomPerimeterLap(0) / CustomCornerLap(0)
+    // (30" by default) and, on overflow, CustomFieldLap are what the labor lookups then read.
+    const laborPerimLap =
+      tuff && tuff.rows[0] > 0
+        ? tuff.perimLapIn[0]
+        : s.perimLap !== undefined && s.perimLap !== -1
+          ? s.perimLap
+          : 0;
+    const laborCornerLap =
+      tuff && tuff.rows[0] > 0
+        ? tuff.cornerLapIn[0]
+        : s.cornerLap !== undefined && s.cornerLap !== -1
+          ? s.cornerLap
+          : 0;
+    const laborFieldLap = tuff && tuff.customFieldLapIn !== -1 ? tuff.customFieldLapIn : s.fieldLap;
     // Adhered attachment (AdheredField/PerimLaborRate): base = AdhesiveCoverage hours / 1000 sq ft
     // for the section's adhesive; × RollGoodWidthAdhesiveMulti(FieldLap) on the roll-good sheet,
     // else × SheetSize.SmartSheetMulti; × ComplexityFactor. Perimeter/corner ×1.2 only for the
@@ -1267,7 +1324,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       thicknessLabor: sLt?.thicknessLaborByMil[s.thickness] ?? 1,
       designTable: 60,
       pullTest: 0, // unused: fastenerOc supplied directly
-      fieldLap: s.fieldLap,
+      fieldLap: laborFieldLap,
       perimLap: laborPerimLap,
       cornerLap: laborCornerLap,
       customFieldFastenerSpacing: s.fastenerOc,
