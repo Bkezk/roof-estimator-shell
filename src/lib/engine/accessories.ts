@@ -340,6 +340,13 @@ export interface TermBarState {
   /** Additional Required (FEET) per colour per drill column (§12.1: edge Additional is feet). */
   additionalNoDrill: ColorFeet;
   additionalPreDrill: ColorFeet;
+  /**
+   * Legacy frmAccTerminations also has Dark Gray and Terra Cotta "Additional" boxes; with only
+   * three ref bars, `TermBars.get_ItemByColor(4|5)` (0x25834) falls back to bar[0] = WHITE, so
+   * these feet price on the White bar (docs §22.9).
+   */
+  additionalNoDrillOther?: Partial<Record<"Dark Gray" | "Terra Cotta", number>>;
+  additionalPreDrillOther?: Partial<Record<"Dark Gray" | "Terra Cotta", number>>;
   stripMastic: boolean;
   /** Editable strip-mastic feet; absent = the computed GetTotalLength(false,false). */
   stripMasticLengthFt?: number;
@@ -832,7 +839,14 @@ export interface AccessoriesResult {
     boxesByRow: Record<string, number>;
   };
   sealants: { cost: number; calcByPart: Record<string, number> };
-  membraneAccs: SimpleScreenResult & { tPatchCalc: number; arpCost: number; arpCalc: number };
+  membraneAccs: SimpleScreenResult & {
+    tPatchCalc: number;
+    arpCost: number;
+    arpCalc: number;
+    /** Stripping rows: $/ft per section id and the billed cost (Round(price × Ceil(Σ ft), 2) per part). */
+    strippingPriceBySection: Record<string, number>;
+    strippingCost: number;
+  };
   vents: SimpleScreenResult & { calcByColor: Record<string, number> };
   fasteners: { cost: number; rows: FastenerRowTotal[] };
   parapetTabs: { fastenersNeeded: number; steelPlatesNeeded: number };
@@ -853,6 +867,15 @@ export interface ComputeAccessoriesArgs {
   roofSystem: string;
   attachment: "mechanical" | "adhered";
   /** §8.6 section+parapet ARP sq ft calc (already billed via the MembraneAccs ARP row). */
+  /**
+   * Stripping rows (MembraneAccs.RecalcParents 0x1edb4, docs §22.9): per present section a
+   * `1' of 10" DL/DT <mil> <colour> Stripping` row priced at the section's ROLL-GOODS $/sqft
+   * (lookup_DuroLastPrices category 5 by mil × colour; Duro-Tuff: lookup_DuroTuffPrices by mil)
+   * per FOOT, one row per (system, colour, mil) part number; labor = feet × the MembraneAccs
+   * item-3 rate × the Duro-Last mechanical deck multiplier of the section's deck. Supplied by the
+   * bid builder (it owns the price matrix); absent = older callers, stripping bills labor only.
+   */
+  strippingBySection?: Record<string, { pricePerFt: number; deckMulti: number; partKey: string }>;
   arpCalcSqFt: number;
   /** §8.5 Parapets.EdgeFasteners total (wall-tab fasteners) — feeds slot 1 needs. */
   parapetEdgeFasteners: number;
@@ -905,8 +928,19 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const preDrill = tbPara.preDrill[c];
     tbNoDrillByColor[c] = noDrill;
     tbPreDrillByColor[c] = preDrill;
-    const addlND = colorVal(st.termBar.additionalNoDrill, c);
-    const addlPD = colorVal(st.termBar.additionalPreDrill, c);
+    // Dark Gray / Terra Cotta Additional boxes land on the White bar (legacy ItemByColor fallback).
+    const otherND =
+      c === "White"
+        ? (st.termBar.additionalNoDrillOther?.["Dark Gray"] ?? 0) +
+          (st.termBar.additionalNoDrillOther?.["Terra Cotta"] ?? 0)
+        : 0;
+    const otherPD =
+      c === "White"
+        ? (st.termBar.additionalPreDrillOther?.["Dark Gray"] ?? 0) +
+          (st.termBar.additionalPreDrillOther?.["Terra Cotta"] ?? 0)
+        : 0;
+    const addlND = colorVal(st.termBar.additionalNoDrill, c) + otherND;
+    const addlPD = colorVal(st.termBar.additionalPreDrill, c) + otherPD;
     const base = c === "White" ? baseND + basePD : 0;
     const lenWith = roundToNextTen(F32_SCRAP * (noDrill + preDrill + base + addlND + addlPD));
     const lenWithout = roundToNextTen(F32_SCRAP * (noDrill + preDrill + addlND + addlPD));
@@ -1457,15 +1491,40 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       maCost += round(ma.tPatch.pricePerPack * Math.ceil(total / ma.tPatch.partsPerPack), 2);
     maHours += st.membraneAccs.tPatchExtra * ma.tPatchHours * adj(st.membraneAccs.tPatchAdjustPct);
   }
-  // Stripping rows (per section, user-entered feet): price uncaptured (lookup cat 5) → $0 +
-  // warning when used; labor = ft × 0.04 (deck multiplier pending capture — docs §12.7).
-  let strippingFtTotal = 0;
-  for (const ft of Object.values(st.membraneAccs.strippingFtBySection)) strippingFtTotal += ft || 0;
-  if (strippingFtTotal > 0) {
-    warnings.push(
-      "DL stripping feet entered but the stripping price table (lookup category 5) is not captured — stripping bills labor only.",
-    );
-    maHours += strippingFtTotal * ma.strippingHoursPerFt * adj(st.membraneAccs.strippingAdjustPct);
+  // Stripping rows (docs §22.9): user-entered feet per section; one legacy row per
+  // (system, colour, mil) part number → GenericMaterial.Cost = Round(price × Ceil(Σ ft / 1), 2);
+  // labor = ft × item-3 rate × Duro-Last-mech deck multiplier (per section), adjustable.
+  const strippingPriceBySection: Record<string, number> = {};
+  let strippingCost = 0;
+  {
+    const feetByPart: Record<string, { price: number; feet: number }> = {};
+    let unpricedFt = 0;
+    for (const s of args.sections) {
+      const ft = st.membraneAccs.strippingFtBySection[s.id] ?? 0;
+      const info = args.strippingBySection?.[s.id];
+      strippingPriceBySection[s.id] = info?.pricePerFt ?? 0;
+      if (ft <= 0) continue;
+      maHours +=
+        ft *
+        ma.strippingHoursPerFt *
+        (info?.deckMulti ?? 1) *
+        adj(st.membraneAccs.strippingAdjustPct);
+      if (!info || info.pricePerFt <= 0) {
+        unpricedFt += ft;
+        continue;
+      }
+      const part = (feetByPart[info.partKey] ??= { price: info.pricePerFt, feet: 0 });
+      part.feet += ft;
+    }
+    for (const part of Object.values(feetByPart)) {
+      strippingCost += round(part.price * Math.ceil(part.feet), 2);
+    }
+    if (unpricedFt > 0) {
+      warnings.push(
+        `Stripping: ${unpricedFt} ft entered on a section with no roll-goods price for its mil/colour — bills labor only.`,
+      );
+    }
+    maCost += strippingCost;
   }
 
   /* ---------------- Vents (§12.4 — derived) ---------------- */
@@ -1713,7 +1772,15 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     walkPads: { cost: walkCost, hours: walkHours },
     panduit: { cost: panduitCost, calcByLength: panduitCalc, boxesByRow: panduitBoxes },
     sealants: { cost: sealantsCost, calcByPart: sealantCalcByPart },
-    membraneAccs: { cost: maCost, hours: maHours, tPatchCalc, arpCost, arpCalc: args.arpCalcSqFt },
+    membraneAccs: {
+      cost: maCost,
+      hours: maHours,
+      tPatchCalc,
+      arpCost,
+      strippingPriceBySection,
+      strippingCost,
+      arpCalc: args.arpCalcSqFt,
+    },
     vents: { cost: ventsCost, hours: ventsHours, calcByColor: ventCalcByColor },
     fasteners: { cost: fastenersCost, rows: fastenerRows },
     parapetTabs: { fastenersNeeded: parapetTabsNeeded, steelPlatesNeeded },

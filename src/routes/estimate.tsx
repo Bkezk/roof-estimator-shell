@@ -203,8 +203,8 @@ const newParapet = (defaults: Partial<ParapetInput> = {}): ParapetInput => ({
   wallTopInches: 0,
   dropInches: 0,
   girthInches: 6,
-  // Legacy Setup default "2. Wall Type": Wood or Metal (1) — drives the pre-drill labor column.
-  wallType: 1,
+  // Legacy Setup default "2. Wall Type" = 4 (Brick or Concrete, pre-drill) — docs §22.9.
+  wallType: 4,
   // Legacy Pieces (membrane pieces wrapping the wall): AdjustedLength = length + 1 + pieces.
   pieces: 1,
   ...defaults,
@@ -405,7 +405,7 @@ function EstimatePage() {
   // Legacy Home "5. Parapets Material" / "2. Wall Type" / "4. Underlayment Attached With" defaults.
   const [parapetDefaults, setParapetDefaults] = useState<
     NonNullable<SavedBidState["parapetDefaults"]>
-  >({ wallType: 1 });
+  >({ wallType: 4 });
   const [underlaymentAttachmentDefault, setUnderlaymentAttachmentDefault] = useState<
     "mechanical" | "adhesive" | "none"
   >("mechanical");
@@ -414,6 +414,10 @@ function EstimatePage() {
   const [startDate, setStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
   // Legacy per-estimate sales tax (null = the company settings; Tax Exempt zeroes it).
   const [salesTaxRate, setSalesTaxRate] = useState<number | null>(null);
+  // Legacy frmULSqFtPopUp: per-bid underlayment $/sqft by board (0/absent = admin price).
+  const [underlaymentPriceOverrides, setUnderlaymentPriceOverrides] = useState<
+    Record<string, number>
+  >({});
   const [taxMaterialOnly, setTaxMaterialOnly] = useState<boolean | null>(null);
   // Legacy Estimate.MaxWindExpected (the high-wind band picker on Home).
   const [maxWindExpected, setMaxWindExpected] = useState<number | undefined>(undefined);
@@ -572,7 +576,7 @@ function EstimatePage() {
       setLaborTemplateName(d.laborTemplateName ?? "");
       setWarrantyName(d.warrantyName ?? "");
       if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
-      setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 1 });
+      setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 4 });
       setUnderlaymentAttachmentDefault(d.underlaymentAttachmentDefault ?? "mechanical");
       if (d.underlaymentAttachmentDefault) setUAttach(d.underlaymentAttachmentDefault);
       setBuildingType(d.buildingType ?? "Commercial");
@@ -584,6 +588,7 @@ function EstimatePage() {
           ),
       );
       setSalesTaxRate(d.salesTaxRate ?? null);
+      setUnderlaymentPriceOverrides(d.underlaymentPriceOverrides ?? {});
       setTaxMaterialOnly(d.taxMaterialOnly ?? null);
       setMaxWindExpected(d.maxWindExpected);
       setHighWind(d.highWind ?? false);
@@ -743,6 +748,9 @@ function EstimatePage() {
     sectionDefaults,
     parapetDefaults,
     underlaymentAttachmentDefault,
+    ...(Object.values(underlaymentPriceOverrides).some((v) => v > 0)
+      ? { underlaymentPriceOverrides }
+      : {}),
     buildingType,
     startDate,
     ...(salesTaxRate !== null ? { salesTaxRate } : {}),
@@ -2391,12 +2399,35 @@ function EstimatePage() {
                       </>
                     );
                   })()}
-                  <p className="text-xs text-muted-foreground">
-                    Underlayment price per sq ft:{" "}
-                    <span className="font-semibold tabular-nums">
-                      {(admin.underlaymentPrices?.[uBoard] ?? 0).toFixed(2)}
-                    </span>
-                  </p>
+                  <div className="flex flex-wrap items-end gap-3 text-xs text-muted-foreground">
+                    <p>
+                      Underlayment price per sq ft:{" "}
+                      <span className="font-semibold tabular-nums">
+                        {(admin.underlaymentPrices?.[uBoard] ?? 0).toFixed(2)}
+                      </span>
+                      {(underlaymentPriceOverrides[uBoard] ?? 0) > 0 && (
+                        <span className="ml-1 text-amber-700">
+                          (this bid: {underlaymentPriceOverrides[uBoard]!.toFixed(2)})
+                        </span>
+                      )}
+                    </p>
+                    {uBoard && (
+                      <Field label="Bid $/sq ft (0 = admin price)">
+                        <NumInput
+                          min={0}
+                          value={underlaymentPriceOverrides[uBoard] ?? 0}
+                          onValue={(v) =>
+                            setUnderlaymentPriceOverrides((prev) => {
+                              const next = { ...prev };
+                              if (v > 0) next[uBoard] = v;
+                              else delete next[uBoard];
+                              return next;
+                            })
+                          }
+                        />
+                      </Field>
+                    )}
+                  </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <Field label="Select Attachment Method">
                       <PickOne
@@ -2913,7 +2944,7 @@ function EstimatePage() {
                   newParapet({
                     // Legacy Parapet ctor: a new wall seeds AdjustLabor from Template.ParapetsLabor.
                     adjustLaborPct: seedParapetAdjust(templateDeltas),
-                    wallType: parapetDefaults.wallType ?? 1,
+                    wallType: parapetDefaults.wallType ?? 4,
                     ...(parapetDefaults.thicknessMil !== undefined
                       ? { thicknessMil: parapetDefaults.thicknessMil }
                       : {}),
@@ -2990,7 +3021,12 @@ function EstimatePage() {
                 onChange={setAccessoriesCalc}
                 refData={admin?.accessories}
                 result={result?.accessories}
-                sections={sections.map((s) => ({ id: s.id, name: s.name, color: s.color }))}
+                sections={sections.map((s) => ({
+                  id: s.id,
+                  name: s.name,
+                  color: s.color,
+                  roofSystem: s.roofSystem ?? roofSystem,
+                }))}
                 adhesiveNames={Object.keys(admin?.adhesivePrices ?? {})}
                 adhesiveCalc={result?.adhesiveWholeUnits}
                 arpCalcQty={result?.accessories?.membraneAccs.arpCalc ?? 0}

@@ -53,6 +53,7 @@ import {
   tearOffVolume,
 } from "./quantities";
 import { in2Ft, bankersRound, goodSingle } from "./rounding";
+import { directLookup } from "./labor";
 import {
   computeAccessories,
   normalizeAccessoriesState,
@@ -593,6 +594,12 @@ export interface BidInput {
   // money params
   markupMode: MarkupMode;
   markup: number;
+  /**
+   * Per-bid underlayment $/sqft overrides by board name (legacy frmULSqFtPopUp →
+   * `DualValue.set_CustomValue` on the estimate's copy of the board; `SmartValue` = custom when
+   * > 0 else the admin default — docs §22.9). Absent / ≤ 0 = the admin price.
+   */
+  underlaymentPriceOverrides?: Record<string, number>;
   crewLaborRatePerHour: number;
   /**
    * Per-estimate hours per man-day (legacy frmLaborTemplate txtHrsPerDay writes
@@ -901,6 +908,40 @@ export function sectionMembraneDisplayPricing(
     parapet: "Parapets",
   };
   return { pricePerSqFt: price ?? 0, tierLabel: TIER_LABELS[tier] ?? tier };
+}
+
+/**
+ * Stripping row pricing per section (legacy `MembraneAccs.RecalcParents` 0x1edb4, docs §22.9): a
+ * Duro-Tuff section's `1' of 10" DT` row prices at `lookup_DuroTuffPrices[mil]`; every other
+ * Duro-Last-manufacturer section's `1' of 10" DL` row at `lookup_DuroLastPrices[mil, category 5 =
+ * Roll Goods][colour]` — the roll-goods $/sqft billed PER FOOT. Labor multiplies the Duro-Last
+ * mechanical system's deck multiplier for the section's deck. One legacy row per part number
+ * (`baswf` + system + colour + mil), so feet aggregate per part before the Ceiling.
+ */
+export function strippingBySection(
+  bid: BidInput,
+  admin: EngineAdminData,
+): Record<string, { pricePerFt: number; deckMulti: number; partKey: string }> {
+  const out: Record<string, { pricePerFt: number; deckMulti: number; partKey: string }> = {};
+  const dlMech = admin.labor[comboKey("Duro-Last", "mechanical")];
+  for (const s of bid.sections) {
+    const sys = resolveSectionSystem(bid, s);
+    let pricePerFt: number;
+    if (sys.rsId === 3) {
+      pricePerFt = admin.familyMembranePrices?.["Duro-Tuff"]?.[String(s.thickness)] ?? 0;
+    } else {
+      pricePerFt = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color) ?? 0;
+    }
+    const deckId = dlMech?.deckTypeIds[s.deckType];
+    const deckMulti =
+      dlMech && deckId !== undefined ? directLookup(dlMech.deckTypeMulti, deckId) : 1;
+    out[s.id] = {
+      pricePerFt,
+      deckMulti,
+      partKey: `baswf${sys.rsId}|${s.color}|${s.thickness}`,
+    };
+  }
+  return out;
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
@@ -1245,7 +1286,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         if (layer.attachment === "adhesive") billLayerAdhesive(layer, li, false);
         continue;
       }
-      const uPrice = admin.underlaymentPrices?.[layer.board];
+      // SmartValue: the bid's custom $/sqft when > 0, else the admin default (docs §22.9).
+      const uOverride = bid.underlaymentPriceOverrides?.[layer.board];
+      const uPrice =
+        uOverride !== undefined && uOverride > 0
+          ? uOverride
+          : admin.underlaymentPrices?.[layer.board];
       if (uPrice === undefined) {
         warnings.push(`No underlayment price for "${layer.board}" — section "${s.name}".`);
       } else {
@@ -1477,7 +1523,15 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         // boards take manual QuoteAdhesiveUnits) — never auto-covered.
         else if (topLayer?.quote || (topBoard && /tapered|crickets/i.test(topBoard)))
           coverage = undefined;
-        else coverage = cov.underlaymentUniform ?? undefined;
+        else {
+          // Legacy UnderlaymentCoverage[AdheredTo group]: the top board's group when the admin
+          // Adhesives grid gave a per-group cell (docs §22.9), else the uniform seed value.
+          const topGid = topBoard
+            ? admin.underlaymentGroups?.adhesiveGroupIdByBoard?.[topBoard]
+            : undefined;
+          const byGroup = topGid !== undefined ? cov.byUnderlaymentGroup?.[topGid] : undefined;
+          coverage = byGroup !== undefined ? byGroup : (cov.underlaymentUniform ?? undefined);
+        }
         if (coverage && coverage > 0) {
           adhesiveUnitsByName[advName] = (adhesiveUnitsByName[advName] ?? 0) + area / coverage;
         } else {
@@ -1941,6 +1995,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       roofSystem: bid.roofSystem,
       attachment: bid.attachment,
       arpCalcSqFt: arpCalcQty,
+      strippingBySection: strippingBySection(bid, admin),
       parapetEdgeFasteners: parapetEdgeFastenersCount(bid.parapets, bid.roofSystem, bid.attachment),
       ...(admin.underlaymentGroups?.groupIdByBoard
         ? { underlaymentSubtypeByBoard: admin.underlaymentGroups.groupIdByBoard }

@@ -239,10 +239,11 @@ export function AdhesivesTab() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Reference capture of the legacy Adhesives screen. The estimator&apos;s adhesive
-                QUANTITIES currently read the seeded legacy coverage tables (adhesive coverage by
-                deck / insulation group / wall, and the Labor &rsaquo; Adhesive Times grid for
-                insulation layers), not this grid — edits here change the PRICE above only.
+                This grid IS the estimator&apos;s adhesive coverage (legacy AdhesiveCoverage): the
+                Duro-Last / Duro-Tuff / Duro-Fleece groups drive membrane and Walls units for that
+                system, the Insulations group drives insulation-layer units. A blank cell keeps the
+                installer-seeded value; 0 means &quot;needs a quote&quot;. Labor hours stay on Labor
+                &rsaquo; Adhesive Times.
               </p>
               <div className="overflow-x-auto rounded-md border">
                 <Table>

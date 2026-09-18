@@ -123,7 +123,7 @@ export interface AccessoriesScreensProps {
   refData: AccessoryRefData | undefined;
   result: AccessoriesResult | undefined;
   /** Sections for the derived stripping rows + colour columns. */
-  sections: Array<{ id: string; name: string; color: string }>;
+  sections: Array<{ id: string; name: string; color: string; roofSystem?: string }>;
   /** Adhesive names + the engine's §2.4 whole-unit Calc Qty per adhesive. */
   adhesiveNames: string[];
   adhesiveCalc: Record<string, number> | undefined;
@@ -926,6 +926,35 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                           />
                         </td>
                       </tr>
+                      {(["Dark Gray", "Terra Cotta"] as const).map((c) => (
+                        <tr key={c}>
+                          <td className="border px-2 py-0.5">
+                            {c}{" "}
+                            <span className="text-[10px] text-muted-foreground">(→ White bar)</span>
+                          </td>
+                          <td className="border px-1 py-0.5 text-right">
+                            <RO v={0} />
+                          </td>
+                          <td className="border px-1 py-0.5">
+                            <Num
+                              value={
+                                (drill === "noDrill"
+                                  ? tb.additionalNoDrillOther
+                                  : tb.additionalPreDrillOther)?.[c] ?? 0
+                              }
+                              onCommit={(v) =>
+                                upd((d) => {
+                                  const key =
+                                    drill === "noDrill"
+                                      ? "additionalNoDrillOther"
+                                      : "additionalPreDrillOther";
+                                  d.termBar[key] = { ...(d.termBar[key] ?? {}), [c]: v };
+                                })
+                              }
+                            />
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1500,13 +1529,16 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                 {props.sections.map((s) => (
                   <tr key={s.id}>
                     <td className="border px-2 py-0.5">
-                      1' of 10" DL {s.color} Stripping — {s.name}
-                      <span className="ml-1 text-[10px] text-amber-600">
-                        (price uncaptured — labor only)
-                      </span>
+                      1' of 10" {s.roofSystem === "Duro-Tuff" ? "DT" : "DL"} {s.color} Stripping —{" "}
+                      {s.name}
+                      {(result?.membraneAccs.strippingPriceBySection[s.id] ?? 0) <= 0 && (
+                        <span className="ml-1 text-[10px] text-amber-600">
+                          (no roll-goods price for this mil/colour — labor only)
+                        </span>
+                      )}
                     </td>
                     <td className="border px-1 py-0.5 text-right">
-                      <RO v={0} w="w-14" />
+                      <RO v={result?.membraneAccs.strippingPriceBySection[s.id] ?? 0} w="w-14" />
                     </td>
                     <td className="border px-1 py-0.5">
                       <Num

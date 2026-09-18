@@ -32,6 +32,7 @@ import {
   laborTemplateFactor,
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
+  applyAdhesivesScreenCoverage,
 } from "./adapters";
 import { freightStepped } from "./pricing";
 import { setupTime, inspectionTime } from "./quantities";
@@ -1143,5 +1144,96 @@ describe("accessory catalog: Price/Part (Panduit) and '+ for Color' (Drain Boots
       ['2" Drain Boot', 20.9],
       ['2" Drain Boot — Color', 21.9],
     ]);
+  });
+});
+
+describe("§22.9 applyAdhesivesScreenCoverage — the admin Adhesives grid feeds the coverage tables", () => {
+  const seedMembrane = {
+    1: {
+      "Water Based Adhesive": {
+        byDeckName: { Wood: 700, Concrete: 700 },
+        underlaymentUniform: 700,
+        wallCoverage: 350,
+      },
+    },
+  };
+  const seedTimes = {
+    adhesives: ["Duro-Grip Adhesive(CR-20)"],
+    bySubstrate: {
+      "Duro-Grip Adhesive(CR-20)": {
+        Wood: { coverageSqFt: 2000, labor: 2.5 },
+        "ISO 4'x8'": { coverageSqFt: 2000, labor: 3 },
+      },
+    },
+  };
+  const screen = {
+    kind: "adhesives",
+    products: [
+      {
+        name: "Water Based Adhesive",
+        price: 241,
+        coverage: [
+          { group: "Duro-Last", substrate: "Wood", field_coverage: 650 },
+          { group: "Duro-Last", substrate: "Concrete", field_coverage: null }, // uncaptured
+          { group: "Duro-Last", substrate: "Structural Metal", field_coverage: 500 },
+          { group: "Duro-Last", substrate: "ISO 4'x8'", field_coverage: 600 },
+          { group: "Duro-Last", substrate: "DensDeck Prime", field_coverage: 550 },
+          { group: "Duro-Last", substrate: "Tapered ISO", field_coverage: 0 },
+          { group: "Duro-Last", substrate: "Walls", field_coverage: 300 },
+        ],
+      },
+      {
+        name: "Duro-Grip Adhesive(CR-20)",
+        price: 899,
+        coverage: [
+          { group: "Insulations", substrate: "Wood", field_coverage: 1800 },
+          { group: "Insulations", substrate: "Tectum", field_coverage: 1000 },
+        ],
+      },
+    ],
+  };
+  const groupIdByName = { "ISO 4'x8'": 2, "DensDeck Prime": 8, "Tapered ISO": 16 };
+
+  it("membrane: deck cells by deck name, Walls → wallCoverage, board groups → per-group (uniform when equal)", () => {
+    const r = applyAdhesivesScreenCoverage({
+      screen,
+      membraneAdhesives: seedMembrane,
+      adhesiveTimes: seedTimes,
+      groupIdByName,
+    });
+    const c = r.membraneAdhesives[1]!["Water Based Adhesive"]!;
+    expect(c.byDeckName["Wood"]).toBe(650); // screen wins
+    expect(c.byDeckName["Concrete"]).toBe(700); // null cell keeps the seed
+    expect(c.byDeckName["Steel"]).toBe(500); // "Structural Metal" → Steel
+    expect(c.wallCoverage).toBe(300);
+    expect(c.byUnderlaymentGroup).toEqual({ 2: 600, 8: 550, 16: 0 });
+    expect(c.underlaymentUniform).toBeNull(); // 600 ≠ 550 → callers must key the group
+    expect(r.applied).toBe(8);
+    // inputs are not mutated
+    expect(seedMembrane[1]["Water Based Adhesive"].byDeckName.Wood).toBe(700);
+  });
+
+  it("Insulations group → Adhesive Times coverage (labor untouched); unknown rows get coverage with 0 labor", () => {
+    const r = applyAdhesivesScreenCoverage({
+      screen,
+      membraneAdhesives: seedMembrane,
+      adhesiveTimes: seedTimes,
+      groupIdByName,
+    });
+    const t = r.adhesiveTimes!.bySubstrate["Duro-Grip Adhesive(CR-20)"]!;
+    expect(t["Wood"]).toEqual({ coverageSqFt: 1800, labor: 2.5 });
+    expect(t["ISO 4'x8'"]).toEqual({ coverageSqFt: 2000, labor: 3 });
+    expect(t["Tectum"]).toEqual({ coverageSqFt: 1000, labor: 0 });
+  });
+
+  it("no screen → tables pass through unchanged", () => {
+    const r = applyAdhesivesScreenCoverage({
+      screen: null,
+      membraneAdhesives: seedMembrane,
+      adhesiveTimes: seedTimes,
+      groupIdByName,
+    });
+    expect(r.applied).toBe(0);
+    expect(r.membraneAdhesives).toEqual(seedMembrane);
   });
 });

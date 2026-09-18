@@ -112,6 +112,8 @@ export interface SavedBidState {
   laborRate: number;
   /** Per-estimate hours per man-day (legacy Labor & Markup form); absent = admin default. */
   hoursPerDay?: number;
+  /** Per-bid underlayment $/sqft overrides by board (legacy frmULSqFtPopUp custom value). */
+  underlaymentPriceOverrides?: Record<string, number>;
   commission: number;
   taxExempt: boolean;
   // Money controls (optional so older saved bids stay valid; default off).
@@ -325,6 +327,10 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     markup: s.markup,
     crewLaborRatePerHour: s.laborRate,
     ...(s.hoursPerDay !== undefined && s.hoursPerDay > 0 ? { hoursPerDay: s.hoursPerDay } : {}),
+    ...(s.underlaymentPriceOverrides &&
+    Object.values(s.underlaymentPriceOverrides).some((v) => v > 0)
+      ? { underlaymentPriceOverrides: s.underlaymentPriceOverrides }
+      : {}),
     commission: s.commission,
     commissionInMarkup: s.commissionInMarkup ?? false,
     perDiem: s.perDiem ?? 0,

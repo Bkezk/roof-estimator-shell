@@ -11,6 +11,7 @@ import {
   sectionMembraneDisplayPricing,
   type BidInput,
   type UnderlaymentLayer,
+  strippingBySection,
 } from "./bid-builder";
 import { computeEstimate } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
@@ -1810,6 +1811,34 @@ describe("membrane adhesive units for adhered systems (§2.4)", () => {
     },
   });
 
+  it("§22.9 coverage over insulation keys the TOP board's group when the admin grid gave one", () => {
+    const withGroups: EngineAdminData = {
+      ...withCov(),
+      underlaymentPrices: { '1/2" ISO': 0.85 },
+      underlaymentGroups: {
+        groups: [],
+        groupIdByBoard: { '1/2" ISO': 2 },
+        needQuoteByBoard: {},
+        adhesiveGroupIdByBoard: { '1/2" ISO': 2 },
+        adhesiveGroupNameById: { 2: "ISO 4'x8'" },
+      },
+    };
+    withGroups.membraneAdhesives![1]!["Water Based Adhesive"]!.byUnderlaymentGroup = { 2: 500 };
+    const layer = {
+      board: '1/2" ISO',
+      attachment: "none" as const,
+      fastenersPerBoard: 0,
+      adhesiveName: "",
+      substrate: "",
+    };
+    const r = buildEstimateInputs(
+      bid({ attachment: "adhered", sections: [{ ...bid().sections[0]!, layers: [layer] }] }),
+      withGroups,
+    );
+    // 2500 / 500 = 5 units (not 2500/700 → 4) × $122.10 = 610.5 → Round 610
+    expect(r.adhesiveWholeUnits?.["Water Based Adhesive"]).toBe(5);
+  });
+
   it("bare-deck sections bill area/coverage, ceilinged once at the estimate level", () => {
     // 50×50 = 2500 sq ft on Wood at 700 sq ft/unit → 3.571… → Ceil 4 units × $122.10.
     const { adhesiveMaterial, warnings } = buildEstimateInputs(
@@ -2990,6 +3019,32 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
     expect(four).toBeCloseTo(8 + (0.342 / 60) * 624, 6);
   });
 
+  it("§22.9 per-bid underlayment $/sqft override replaces the admin price (SmartValue: custom > 0)", () => {
+    const layers = [mechLayer('1/2" ISO')];
+    const base = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers }] }),
+      uAdmin,
+    );
+    expect(base.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
+    const over = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, layers }],
+        underlaymentPriceOverrides: { '1/2" ISO': 1.1, "Duro-Fold": 0 },
+      }),
+      uAdmin,
+    );
+    expect(over.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 1.1, 2);
+    // A 0 override means "admin price" for that board.
+    const zero = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, layers }],
+        underlaymentPriceOverrides: { '1/2" ISO': 0 },
+      }),
+      uAdmin,
+    );
+    expect(zero.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
+  });
+
   it("§22.1 Slip Sheets (tile 1) material is DURO-LAST material (dMaterial[6] inside M0), not Underlayment", () => {
     const r = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer("Duro-Fold")] }] }),
@@ -3108,5 +3163,26 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       }),
     );
     expect(h).toBeCloseTo(7.775, 6);
+  });
+});
+
+describe("§22.9 strippingBySection — roll-goods $/sqft per foot, Duro-Tuff family price, deck multiplier", () => {
+  it("Duro-Last section → rollGoods price for its mil/colour; Duro-Tuff → family price; part key per (system, colour, mil)", () => {
+    const withTuff: EngineAdminData = {
+      ...admin,
+      familyMembranePrices: { "Duro-Tuff": { "50": 1.9 } },
+    };
+    const b = bid({
+      sections: [
+        bid().sections[0]!,
+        { ...bid().sections[0]!, id: "t", name: "T", roofSystem: "Duro-Tuff", thickness: 50 },
+      ],
+    });
+    const r = strippingBySection(b, withTuff);
+    expect(r["s1"]!.pricePerFt).toBe(1.23); // the fixture's 40mil White roll-goods price
+    expect(r["s1"]!.partKey).toBe("baswf1|White|40");
+    expect(r["t"]!.pricePerFt).toBe(1.9);
+    expect(r["t"]!.partKey).toBe("baswf3|White|50");
+    expect(r["s1"]!.deckMulti).toBeGreaterThan(0);
   });
 });

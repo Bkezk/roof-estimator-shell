@@ -858,3 +858,46 @@ describe("§22.5 IL-exact corrections (2026-09-18)", () => {
     expect(r.warnings.some((w) => w.includes("legacy bills ONE box"))).toBe(true);
   });
 });
+
+describe("§22.9 stripping rows and the Dark Gray / Terra Cotta Additional boxes", () => {
+  it("stripping bills the section's roll-goods $/sqft PER FOOT, Round(price × Ceil(Σ ft), 2) per part", () => {
+    const args = anchorArgs();
+    args.sections = [section({}), section({ id: "s2", name: "B" })];
+    const st = emptyAccessoriesState();
+    st.membraneAccs.strippingFtBySection = { s1: 12.5, s2: 7 };
+    args.state = st;
+    // Both sections share the (system, colour, mil) part → one legacy row: Ceil(19.5) = 20 ft.
+    const r = computeAccessories({
+      ...args,
+      strippingBySection: {
+        s1: { pricePerFt: 1.23, deckMulti: 1, partKey: "baswf1|White|40" },
+        s2: { pricePerFt: 1.23, deckMulti: 1.2, partKey: "baswf1|White|40" },
+      },
+    });
+    expect(r.membraneAccs.strippingCost).toBeCloseTo(1.23 * 20, 2);
+    expect(r.membraneAccs.strippingPriceBySection["s1"]).toBe(1.23);
+    // Labor: feet × item-3 rate × the section's deck multiplier (s2 ×1.2).
+    expect(r.membraneAccs.hours).toBeCloseTo(
+      12.5 * ref.membraneAccs.strippingHoursPerFt + 7 * ref.membraneAccs.strippingHoursPerFt * 1.2,
+      6,
+    );
+    expect(r.warnings.some((w) => w.includes("Stripping"))).toBe(false);
+    // Without a price the row warns and bills labor only.
+    const none = computeAccessories(args);
+    expect(none.membraneAccs.strippingCost).toBe(0);
+    expect(none.warnings.some((w) => w.includes("Stripping"))).toBe(true);
+  });
+
+  it("Dark Gray / Terra Cotta Additional feet price on the WHITE bar (legacy ItemByColor fallback)", () => {
+    const args = anchorArgs();
+    args.sections = [section({})];
+    const white = emptyAccessoriesState();
+    white.termBar.additionalNoDrill = { White: 30 };
+    const other = emptyAccessoriesState();
+    other.termBar.additionalNoDrillOther = { "Dark Gray": 10, "Terra Cotta": 20 };
+    const a = computeAccessories({ ...args, state: white });
+    const b = computeAccessories({ ...args, state: other });
+    expect(b.termBar.cost).toBeCloseTo(a.termBar.cost, 6);
+    expect(b.termBar.fastenersNeeded).toBe(a.termBar.fastenersNeeded);
+  });
+});

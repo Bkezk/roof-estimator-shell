@@ -1179,7 +1179,17 @@ export const ADHESIVE_SUBSTRATE_BY_LABOR_DECK: Record<string, string> = {
 /** The seeded Adhesives master-detail (pricing_catalog kind "adhesives"), trimmed to what we read. */
 export interface AdhesivesScreenData {
   kind: string;
-  products?: Array<{ name: string; price?: number | null }>;
+  products?: Array<{
+    name: string;
+    price?: number | null;
+    /**
+     * The legacy Manager Adhesives grid: membrane group ("Duro-Last" / "Duro-Tuff" / "Duro-Fleece"
+     * = AdhesiveCoverage rows of that roof system; "Insulations" = roof system 0, the coverage
+     * `RoofSection.UnderlaymentAdhesive` reads) × substrate (a deck name, an insulation group
+     * description, or "Walls") → sq ft per unit. null = not captured (seed value stands).
+     */
+    coverage?: Array<{ group: string; substrate: string; field_coverage?: number | null }>;
+  }>;
 }
 
 /** Adhesive product name → price per unit (exact-name join; all 6 Times-table names match). */
@@ -1612,6 +1622,12 @@ export interface MembraneAdhesiveCoverage {
   underlaymentUniform: number | null;
   /** Parapet wall coverage; null when absent or the source rows are ambiguous (RS3 duplicates). */
   wallCoverage: number | null;
+  /**
+   * Coverage over insulation BY underlayment group id (legacy `UnderlaymentCoverage[groupId]`,
+   * keyed by the section's AdheredTo group). Filled from the admin Adhesives grid; the caller
+   * prefers the top board's group here and falls back to `underlaymentUniform`.
+   */
+  byUnderlaymentGroup?: Record<number, number>;
 }
 
 export function buildMembraneAdhesives(raw: {
@@ -1662,6 +1678,112 @@ export function buildMembraneAdhesives(raw: {
     ensure(rs, name).wallCoverage = only !== null && only > 0 ? only : null;
   }
   return out;
+}
+
+/** Adhesives-grid deck substrate name → our labor deck name (inverse of ADHESIVE_SUBSTRATE_BY_LABOR_DECK). */
+const LABOR_DECK_BY_ADHESIVE_SUBSTRATE: Record<string, string> = Object.fromEntries(
+  Object.entries(ADHESIVE_SUBSTRATE_BY_LABOR_DECK).map(([deck, sub]) => [sub, deck]),
+);
+
+/**
+ * Wire the admin Adhesives screen's coverage grid into the engine tables — the legacy Manager's
+ * Adhesives screen edits the very `AdhesiveCoverage` rows `RoofSystem.LookupCoverageRate` reads
+ * (docs §22.9). The captured screen WINS over the installer-seeded tables cell by cell; a null
+ * (uncaptured) cell leaves the seed value. Groups: a membrane family name → that roof system's
+ * membrane / wall coverage; "Insulations" → roof system 0 = the Adhesive Times coverage the
+ * underlayment layers use (labor there is untouched). 0 = "needs quote" (tapered / crickets).
+ */
+export function applyAdhesivesScreenCoverage(i: {
+  screen: AdhesivesScreenData | null | undefined;
+  membraneAdhesives: Record<number, Record<string, MembraneAdhesiveCoverage>>;
+  adhesiveTimes: AdhesiveTimesTables | undefined;
+  /** Underlayment group description → id (for the board-group substrates). */
+  groupIdByName: Record<string, number>;
+}): {
+  membraneAdhesives: Record<number, Record<string, MembraneAdhesiveCoverage>>;
+  adhesiveTimes: AdhesiveTimesTables | undefined;
+  applied: number;
+} {
+  const membrane: Record<number, Record<string, MembraneAdhesiveCoverage>> = {};
+  for (const [rs, byName] of Object.entries(i.membraneAdhesives)) {
+    membrane[Number(rs)] = Object.fromEntries(
+      Object.entries(byName).map(([n, c]) => [
+        n,
+        {
+          ...c,
+          byDeckName: { ...c.byDeckName },
+          ...(c.byUnderlaymentGroup ? { byUnderlaymentGroup: { ...c.byUnderlaymentGroup } } : {}),
+        },
+      ]),
+    );
+  }
+  const times: AdhesiveTimesTables | undefined = i.adhesiveTimes
+    ? {
+        adhesives: [...i.adhesiveTimes.adhesives],
+        bySubstrate: Object.fromEntries(
+          Object.entries(i.adhesiveTimes.bySubstrate).map(([a, subs]) => [
+            a,
+            Object.fromEntries(Object.entries(subs).map(([k, v]) => [k, { ...v }])),
+          ]),
+        ),
+      }
+    : undefined;
+  let applied = 0;
+  const ensure = (rs: number, name: string): MembraneAdhesiveCoverage =>
+    ((membrane[rs] ??= {})[name] ??= {
+      byDeckName: {},
+      underlaymentUniform: null,
+      wallCoverage: null,
+    });
+  for (const product of i.screen?.products ?? []) {
+    for (const row of product.coverage ?? []) {
+      if (typeof row.field_coverage !== "number") continue;
+      const cov = row.field_coverage;
+      const group = row.group.trim();
+      const substrate = row.substrate.trim();
+      if (group === "Insulations") {
+        if (!times) continue;
+        const subs = (times.bySubstrate[product.name] ??= {});
+        const cell = subs[substrate];
+        if (cell) cell.coverageSqFt = cov;
+        else subs[substrate] = { coverageSqFt: cov, labor: 0 };
+        if (!times.adhesives.includes(product.name)) times.adhesives.push(product.name);
+        applied++;
+        continue;
+      }
+      const rs = LEGACY_RS_ID_BY_NAME[group];
+      if (rs === undefined) continue;
+      const entry = ensure(rs, product.name);
+      if (substrate === "Walls") {
+        entry.wallCoverage = cov > 0 ? cov : null;
+        applied++;
+        continue;
+      }
+      const deck = LABOR_DECK_BY_ADHESIVE_SUBSTRATE[substrate];
+      if (deck) {
+        if (cov > 0) entry.byDeckName[deck] = cov;
+        else delete entry.byDeckName[deck];
+        applied++;
+        continue;
+      }
+      const gid = i.groupIdByName[substrate];
+      if (gid !== undefined) {
+        (entry.byUnderlaymentGroup ??= {})[gid] = cov;
+        applied++;
+      }
+    }
+  }
+  // Recompute the uniform insulation coverage from the positive per-group cells (legacy tables
+  // are uniform per (system, adhesive); a disagreement → null, the caller then needs the group).
+  for (const byName of Object.values(membrane)) {
+    for (const c of Object.values(byName)) {
+      if (!c.byUnderlaymentGroup) continue;
+      const vals = new Set(Object.values(c.byUnderlaymentGroup).filter((v) => v > 0));
+      c.underlaymentUniform =
+        vals.size === 1 ? [...vals][0]! : vals.size === 0 ? c.underlaymentUniform : null;
+    }
+  }
+  return { membraneAdhesives: membrane, adhesiveTimes: times, applied };
 }
 
 /**
@@ -1910,6 +2032,19 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const underlaymentGroups = raw.underlaymentBoardGroupRows?.length
     ? buildUnderlaymentGroups(raw.underlaymentGroupRows ?? [], raw.underlaymentBoardGroupRows)
     : undefined;
+  // Admin Adhesives grid → coverage tables (docs §22.9). The screen's cells win over the seed.
+  const groupIdByName: Record<string, number> = {};
+  for (const [gid, name] of Object.entries(underlaymentGroups?.adhesiveGroupNameById ?? {}))
+    groupIdByName[name] = Number(gid);
+  const wired = applyAdhesivesScreenCoverage({
+    screen: raw.adhesivesScreen,
+    membraneAdhesives: membraneAdhesives ?? {},
+    adhesiveTimes,
+    groupIdByName,
+  });
+  const membraneAdhesivesWired =
+    membraneAdhesives || wired.applied > 0 ? wired.membraneAdhesives : undefined;
+  const adhesiveTimesWired = wired.adhesiveTimes;
   const autoRates = buildNdlAutoRates({
     sheetMetalScreen: raw.nonDlSheetMetalScreen ?? null,
     blockingScreen: raw.nonDlBlockingScreen ?? null,
@@ -1940,9 +2075,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(parapetLabor ? { parapetLabor } : {}),
     ...(curbLabor ? { curbLabor } : {}),
     ...(underlaymentLabor ? { underlaymentLabor } : {}),
-    ...(adhesiveTimes ? { adhesiveTimes } : {}),
+    ...(adhesiveTimesWired ? { adhesiveTimes: adhesiveTimesWired } : {}),
     ...(adhesivePrices ? { adhesivePrices } : {}),
-    ...(membraneAdhesives ? { membraneAdhesives } : {}),
+    ...(membraneAdhesivesWired ? { membraneAdhesives: membraneAdhesivesWired } : {}),
     ...(laborTemplates ? { laborTemplates } : {}),
     ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
     ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),

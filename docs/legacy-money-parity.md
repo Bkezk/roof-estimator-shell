@@ -2305,4 +2305,35 @@ below) → +Infinity — the web warns and bills 0 there.
   the White bar).
 - Membrane high-wind upcharge column follows the DEFAULT section's attachment class (mechanical /
   adhered; any other class → 0) — the web keys the bid-level attachment.
-- Still open from earlier rounds: legacy default Wall Type 4 vs web 1; flute filler attachment.
+- Flute filler "Attached With": legacy keeps the combo on a quote layer but it never touches the
+  quote's material or labor (only the plain-board fastener / adhesive-unit quirk, §10.7); the web
+  asks for no attachment on quote layers. Kept as is (decided 2026-09-18).
+
+### 22.9 Implemented from the §22.8 list (2026-09-18) — IL-exact
+
+- **Stripping** (`MembraneAccs.RecalcParents` 0x1edb4, re-read to the end): per present section
+  a `1' of 10" DL <mil>mil <Colour> Stripping` row, part number `baswf` + system + colour + mil
+  (one row per combination), `ItemsInPurchaseUnit = 1`, price = `lookup_DuroLastPrices[mil,
+  category 5 = Roll Goods][ColorToPriceIndex(colour)]` — the roll-goods $/sqft billed PER FOOT
+  (Duro-Tuff sections: `1' of 10" DT`, price `lookup_DuroTuffPrices[mil]`); CalcQty 0, the user
+  enters feet; `GenericMaterial.Cost = Round(price × Ceil(qty), 2)`. Labor = MembraneAccs item
+  3's rate × `durolastmech` `SmartDeckTypeMultiplier[deck]`. Web: `strippingBySection`
+  (bid-builder) feeds `computeAccessories`; feet aggregate per part before the Ceiling; the
+  screen shows the $/ft.
+- **Admin Adhesives coverage grid → engine** (`applyAdhesivesScreenCoverage`): the grid is the
+  legacy `AdhesiveCoverage` table `RoofSystem.LookupCoverageRate` reads. Membrane groups →
+  `byDeckName` (deck substrates), `byUnderlaymentGroup` (board-group substrates, keyed by the top
+  board's group — legacy `UnderlaymentCoverage[AdheredTo]`), "Walls" → `wallCoverage`;
+  "Insulations" → the Adhesive Times COVERAGE cells (labor stays). Screen cells win over the
+  installer seed; null keeps the seed; 0 = needs quote.
+- **Per-bid underlayment $/sqft** (`frmULSqFtPopUp` → `DualValue.CustomValue`; `SmartValue` =
+  custom > 0 else default): `BidInput.underlaymentPriceOverrides[board]`, entered under the board
+  price on the Underlayment step, saved with the bid.
+- **Dark Gray / Terra Cotta term-bar "Additional" boxes**: `TermBars.get_ItemByColor(4|5)`
+  (0x25834) finds no bar of that colour and returns bar[0] = White, so those feet price on the
+  White bar (`additionalNoDrillOther` / `additionalPreDrillOther`).
+- **Wall Type default** = 4 (Brick or Concrete) for new parapets and the Setup default.
+- **High-wind column**: `defaultRoofSection` is the estimate-level defaults section (set only in
+  `Estimate..ctor`), so the column follows the bid-level attachment — `cMechanicalSystem`
+  (typedef 0x3d) → column 2, `AdheredSystem` (0x31) → column 3. The web already does this;
+  verified, no change.
