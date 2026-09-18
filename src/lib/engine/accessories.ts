@@ -34,8 +34,28 @@ import { parapetDeckFasteners, underlaymentLayerFasteners } from "./consumption"
  * Shared primitives (§12.0)
  * ---------------------------------------------------------------------------------------------- */
 
-/** `DACommon.RoundToNextTen` (§12.0): 0 → 0; else Ceil up to the next multiple of 10. */
-export const roundToNextTen = (x: number): number => (x <= 0 ? 0 : Math.ceil(x / 10) * 10);
+/**
+ * `DACommon.RoundToNextTen` (rva 0x41238, IL-exact — docs §22.5): 0 → 0; an exact multiple of
+ * ten passes through; otherwise n = Ceil(x) and the result is n + 10 − (n mod 10). When Ceil(x)
+ * itself lands on a multiple of ten (9.27 → 10, 19.57 → 20) the legacy STILL adds a full ten
+ * (→ 20, → 30): one extra 10-ft stick on roughly a tenth of all footages. The earlier web
+ * reading "Ceil up to the next multiple of 10" gave 10 / 20 there.
+ */
+export const roundToNextTen = (x: number): number => {
+  if (x === 0) return 0;
+  if (x % 10 === 0) return Math.ceil(x);
+  const n = Math.ceil(x);
+  return n + 10 - (n % 10);
+};
+
+/**
+ * LEGACY QUIRK (`Accessories.get_TotalCost` rva 0x10a8c adds `Panduits.get_TotalBoxCost`, not
+ * `TotalCost`; `Panduits.OnRecalculate` 0x1fa88 sums `Panduit.BoxCost` = ONE box per present
+ * row — docs §22.5): the shipped Bid-Advantage bills a single box of each Panduit row whatever
+ * the box count (its own Accessories Summary shows boxes × box cost). Reproduced; flip to
+ * `false` to bill boxes × box cost (a deliberate departure from legacy).
+ */
+export const LEGACY_PANDUIT_ONE_BOX_PER_ROW = true;
 
 /** The legacy `ldc.r4 1.03` single-precision scrap factor (1.0299999713897705). */
 export const F32_SCRAP = Math.fround(1.03);
@@ -646,7 +666,12 @@ function roofEdgeFeetByColor(
   return out;
 }
 
-/** Curb footage (§12.2): Round((2A + 2B + 12)/12 × qty, 4) ft per curb with the given options. */
+/**
+ * Curb footage (§12.2): Round((2A + 2B + 12)/12 × qty, 4) ft per curb with the given options,
+ * then `Convert.ToInt32` per curb — legacy `TermBar.GetCurbEdgeLength` (0x25144) /
+ * `FaciaBar.GetCurbEdgeLength` (0x175cc) accumulate into an INTEGER field (`m_iCurbEdgeLen`), so
+ * each curb's feet are banker's-rounded to a whole foot before summing (docs §22.5).
+ */
 function curbFeetByColor(
   curbs: CurbInput[],
   termOptions: number[],
@@ -655,7 +680,7 @@ function curbFeetByColor(
   const out: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
   for (const c of curbs) {
     if (termOptions.includes(c.termOption ?? 0) && c.quantity > 0) {
-      const ft = round(((2 * c.widthIn + 2 * c.lengthIn + 12) / 12) * c.quantity, 4);
+      const ft = toInt32(round(((2 * c.widthIn + 2 * c.lengthIn + 12) / 12) * c.quantity, 4));
       out[foldColor(c.color ?? defaultColor)] += ft;
     }
   }
@@ -964,12 +989,16 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const otherND = fst.additionalNoDrillFt || 0;
     const otherPD = fst.additionalPreDrillFt || 0;
     const totalLength = roundToNextTen(F32_SCRAP * (calc + otherND + otherPD));
-    // GetTotalLengthByColor: source feet folded per colour; White adds both Additional boxes.
+    // FaciaBar.GetTotalLengthByColor (0x16f80, docs §22.5): per colour
+    // R10(1.03f × (roof + curb + parapet [+ GetExtraLength on White])) — the ten-rounded,
+    // scrapped colour length is what the cover check-boxes prefill (chkSFV/chkSFM).
     const byColor: Record<TermColor, number> = { White: 0, Tan: 0, Gray: 0 };
     for (const c of TERM_COLORS) {
-      byColor[c] = roofBy[c] + curbBy[c] + paraBy.noDrill[c] + paraBy.preDrill[c];
+      const extra = c === "White" ? otherND + otherPD : 0;
+      byColor[c] = roundToNextTen(
+        F32_SCRAP * (roofBy[c] + curbBy[c] + paraBy.noDrill[c] + paraBy.preDrill[c] + extra),
+      );
     }
-    byColor.White += otherND + otherPD;
     // Vinyl covers: prefill byColor − metalCoverLength (entered qty wins once touched).
     const metalQty: Record<TermColor, number> = {
       White: fst.metalCovers.on
@@ -1305,7 +1334,18 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const total = calcQty + (st.panduitExtra[row.description] ?? 0);
     const boxes = total > 0 && row.partsPerBag > 0 ? Math.ceil(total / row.partsPerBag) : 0;
     panduitBoxes[row.description] = boxes;
-    panduitCost += boxes * (row.partsPerBag * row.pricePerPart);
+    const boxCost = row.partsPerBag * row.pricePerPart;
+    if (LEGACY_PANDUIT_ONE_BOX_PER_ROW) {
+      // Legacy TotalBoxCost: one box per present row (see the constant's note).
+      if (boxes > 0) panduitCost += boxCost;
+      if (boxes > 1) {
+        warnings.push(
+          `Panduit "${row.description}": ${boxes} boxes needed but legacy bills ONE box ($${boxCost.toFixed(2)}) per row — parity quirk (docs §22.5).`,
+        );
+      }
+    } else {
+      panduitCost += boxes * boxCost;
+    }
   }
 
   /* ---------------- Sealants (§12.9 + corrected §2.5) ---------------- */
@@ -1357,10 +1397,12 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     stripPass(fasciaResult["4"].stripMasticFt);
   const stripRolls = stripFtTotal > 0 ? Math.ceil(stripFtTotal / 350) : 0;
   // Duro-Roof seam sealant (RefID 19 ↔ 1119T, confirmed §12.9): Duro-Roof sections only.
+  // Legacy tests each SECTION's RoofSystem.ShortName ("duroroof"); a per-section override counts.
   let tabSealer = 0;
-  if (args.roofSystem === "Duro-Roof") {
+  {
     let seamLf = 0;
     for (const s of args.sections) {
+      if ((s.roofSystem ?? args.roofSystem) !== "Duro-Roof") continue;
       if (s.fieldLap > 0) seamLf += (s.width / (s.fieldLap / 12)) * s.length;
       const zones = resolveSectionZones(s);
       if (s.perimFastenerOc > 0 && s.enhancementWidthFt > 0) {
@@ -1404,8 +1446,10 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   // §12.9 item 1: T-Patch counts DURO-TUFF sections only — Round(Length × Width / 250)
   // (banker's, raw area). The §12.8 "contradiction" was an inverted filter in the first §12.4
   // transcription; a Duro-Last bid correctly shows 0.
-  if (args.roofSystem === "Duro-Tuff") {
-    for (const s of args.sections) tPatchCalc += round((s.length * s.width) / 250, 0);
+  // Per SECTION RoofSystem (legacy ShortName "durotuff" test is per section).
+  for (const s of args.sections) {
+    if ((s.roofSystem ?? args.roofSystem) === "Duro-Tuff")
+      tPatchCalc += round((s.length * s.width) / 250, 0);
   }
   if (ma.tPatch) {
     const total = tPatchCalc + st.membraneAccs.tPatchExtra;
@@ -1427,8 +1471,9 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   /* ---------------- Vents (§12.4 — derived) ---------------- */
   const ventCalcByColor: Record<string, number> = {};
   for (const s of args.sections) {
-    // Mechanically-attached sections only: Ceil(L×W/1000) per section, by section colour.
-    if (args.attachment === "mechanical" && s.length * s.width > 0) {
+    // Mechanically-attached sections only (legacy RoofSections.VentsRequired tests EACH
+    // section's FieldAttachmentSystem): Ceil(L×W/1000) per section, by section colour.
+    if ((s.attachment ?? args.attachment) === "mechanical" && s.length * s.width > 0) {
       ventCalcByColor[s.color] =
         (ventCalcByColor[s.color] ?? 0) + Math.ceil((s.length * s.width) / 1000);
     }

@@ -801,3 +801,60 @@ describe("parapet canted / pre-drill derivation (§8.5)", () => {
     expect(parapetEffectivePredrill({ ...base, predrill: true }, "mechanical")).toBe(true);
   });
 });
+
+describe("§22.5 IL-exact corrections (2026-09-18)", () => {
+  it("RoundToNextTen adds a full ten when Ceil(x) already lands on a multiple of ten", () => {
+    expect(roundToNextTen(0)).toBe(0);
+    expect(roundToNextTen(20)).toBe(20); // exact multiple passes through
+    expect(roundToNextTen(9.27)).toBe(20); // Ceil 10 → 10 + 10 − 0
+    expect(roundToNextTen(19.57)).toBe(30);
+    expect(roundToNextTen(11)).toBe(20);
+    expect(roundToNextTen(1.03)).toBe(10);
+    expect(roundToNextTen(F32_SCRAP * 9)).toBe(20); // 9 ft of term bar buys 20 ft in legacy
+    expect(roundToNextTen(F32_SCRAP * 22)).toBe(30);
+  });
+
+  it("curb footage is Convert.ToInt32'd PER CURB before summing (m_iCurbEdgeLen is an Integer)", () => {
+    const args = anchorArgs();
+    args.sections = [section({})];
+    args.curbs = [
+      {
+        id: "c1",
+        name: "curb",
+        quantity: 1,
+        widthIn: 20,
+        lengthIn: 15,
+        curbType: "Open",
+        deckType: "Wood",
+        termOption: 3,
+      },
+    ];
+    const r = computeAccessories(args);
+    // (40 + 30 + 12)/12 = 6.8333 → 7 ft (banker's to a whole foot)
+    expect(r.termBar.counts.curbsFt).toBe(7);
+  });
+
+  it("Panduit bills ONE box per present row (Accessories.TotalCost adds Panduits.TotalBoxCost) + warns", () => {
+    const args = anchorArgs();
+    args.sections = [section({})];
+    const st = emptyAccessoriesState();
+    st.pipeStacks = [
+      {
+        id: "ps1",
+        usage: "Plumbing",
+        color: "White",
+        open: true,
+        size: 4,
+        quantity: 30,
+        adjustPct: 0,
+      },
+    ];
+    args.state = st;
+    const r = computeAccessories(args);
+    // 14" straps = Ceil(14/11) = 2 × 30 = 60 → 2 bags of 50, but the legacy bill is one bag.
+    expect(r.pipeStacks.panduit14).toBe(60);
+    expect(r.panduit.boxesByRow['3/8" x 14"']).toBe(2);
+    expect(r.panduit.cost).toBeCloseTo(50 * 0.88, 2);
+    expect(r.warnings.some((w) => w.includes("legacy bills ONE box"))).toBe(true);
+  });
+});

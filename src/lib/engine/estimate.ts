@@ -147,6 +147,11 @@ export interface EstimateInputs {
   curbLaborHours?: number;
   /** Underlayment install labor hours (layout + fastener time, or adhesive labor); direct labor. */
   underlaymentLaborHours?: number;
+  /**
+   * The same hours split by insulation tile (legacy dLabor[6..13], one GoodSingle'd labor cost per
+   * tile — docs §22.3). When present, LaborSubtotal1 rounds per tile; otherwise as one component.
+   */
+  underlaymentLaborHoursByTile?: Record<number, number>;
 
   // tear-off / disposal
   tearOffFillFraction: number; // Estimate.TearOff_VolumeMod
@@ -360,6 +365,23 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
   // categories (install/setup/inspection/tear-off/accessory/parapet/curb/underlayment) PLUS the
   // own-rate dollar entries (metals dLabor[5]; non-DL categories dLabor[14..19]). Row 11
   // (LaborSubtotal2) is subcontractors + services ONLY — no double count.
+  //
+  // Rounding (docs §22.3): every dLabor row is `GoodSingle(CalcLaborCost(rate, hours_k))` for
+  // ITS OWN hours — roof sections (one row for all sections), parapets, curbs, accessories, each
+  // underlayment tile, setup, inspection, tear-off — and LaborSubtotal1 is GoodSingle(Σ rows).
+  // Rounding the crew rate × the SUMMED hours once can land a penny away from the legacy.
+  const crewRateComponents: number[] = [
+    installHours,
+    e.parapetLaborHours ?? 0,
+    e.curbLaborHours ?? 0,
+    e.accessoryLaborHours ?? 0,
+    ...(e.underlaymentLaborHoursByTile
+      ? Object.values(e.underlaymentLaborHoursByTile)
+      : [e.underlaymentLaborHours ?? 0]),
+    setupHours,
+    inspectionHours,
+    tearOffLaborHours,
+  ];
   const crewRateHours =
     installHours +
     setupHours +
@@ -369,13 +391,18 @@ export function computeEstimate(e: EstimateInputs): EstimateResult {
     (e.parapetLaborHours ?? 0) +
     (e.curbLaborHours ?? 0) +
     (e.underlaymentLaborHours ?? 0);
-  // LS1 hours include the own-rate entries' hours (they drive TotalManDays -> per-diem and the
-  // $/man-day markup mode), but their DOLLARS come in at each line's own rate, not the crew rate.
-  const laborSubtotal1Hours = crewRateHours + (e.ownRateDirectLaborHours ?? 0);
-  const laborSubtotal1 = goodSingle(
-    calcLaborCost(e.crewLaborRatePerHour, crewRateHours) + (e.ownRateDirectLaborCost ?? 0),
+  const crewRateCost = crewRateComponents.reduce(
+    (sum, h) => sum + goodSingle(calcLaborCost(e.crewLaborRatePerHour, h)),
+    0,
   );
-  const laborSubtotal2 = e.subsCost + e.servicesCost;
+  // LS1 hours include the own-rate entries' hours (they drive TotalManDays -> per-diem and the
+  // $/man-day markup mode), but their DOLLARS come in at each line's own rate, not the crew rate
+  // (the caller GoodSingle's each own-rate row — metals, non-DL groups — before summing).
+  const laborSubtotal1Hours = crewRateHours + (e.ownRateDirectLaborHours ?? 0);
+  const laborSubtotal1 = goodSingle(crewRateCost + (e.ownRateDirectLaborCost ?? 0));
+  // dLabor[last] = GoodSingle(Σ GoodSingle(item material + labor)) over subs + services rows; the
+  // caller rounds per item, the total is rounded here.
+  const laborSubtotal2 = goodSingle(e.subsCost + e.servicesCost);
 
   const warranty = warrantyTotalCost({ ...e.warranty, sqFtTotalMembrane: sqFt });
 

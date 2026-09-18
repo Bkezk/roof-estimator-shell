@@ -134,9 +134,13 @@ export function freightStepped(materialTotal: number, steps: FreightStep[]): num
   return 0;
 }
 
-/** dTotals[9] shipping = GoodSingle(DL freight + hand-entered ExtraShipping). */
+/**
+ * dTotals[9] shipping = GoodSingle(dMaterial[22] + ExtraShipping). Legacy stores dMaterial[22]
+ * already GoodSingle'd in BOTH freight modes and `Estimate.ExtraShipping` is a Single, so the
+ * freight is rounded first and the hand-entered extra widened from float32.
+ */
 export const shippingTotal = (freight: number, extraShipping: number): number =>
-  goodSingle(freight + extraShipping);
+  goodSingle(goodSingle(freight) + Math.fround(extraShipping));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Material subtotals (dMaterial aggregation)

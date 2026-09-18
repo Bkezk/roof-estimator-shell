@@ -238,6 +238,12 @@ export function AdhesivesTab() {
                   <Plus className="mr-1 h-4 w-4" /> Add row
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Reference capture of the legacy Adhesives screen. The estimator&apos;s adhesive
+                QUANTITIES currently read the seeded legacy coverage tables (adhesive coverage by
+                deck / insulation group / wall, and the Labor &rsaquo; Adhesive Times grid for
+                insulation layers), not this grid — edits here change the PRICE above only.
+              </p>
               <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>

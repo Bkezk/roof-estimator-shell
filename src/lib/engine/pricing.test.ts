@@ -111,3 +111,15 @@ describe("material subtotals (dMaterial aggregation)", () => {
     expect(materialTotalBeforeTax([1000, 200, 150, 300, 80, 40, 0, 500])).toBe(2270);
   });
 });
+
+describe("§22.2 shippingTotal — freight (dMaterial[22]) is GoodSingle'd BEFORE the extra is added", () => {
+  it("GoodSingle(GoodSingle(freight) + extra) — a half-cent freight rounds on its own first", () => {
+    // 249.995 → GoodSingle 250.00 (banker's on the exact binary value: 249.995 ≈ 249.99499… → 249.99?)
+    // Use values whose double representation is unambiguous:
+    expect(shippingTotal(250.004, 0.004)).toBeCloseTo(250, 4); // 250.00 + 0.004 → 250.00
+    expect(shippingTotal(250.006, 0.006)).toBeCloseTo(250.02, 4); // 250.01 + 0.006 → 250.02
+    // Freight-first rounding vs a single rounding of the sum: 0.004 + 0.004 = 0.008 → 0.01 in one
+    // pass, but 0.00 + 0.004 → 0.00 legacy-style.
+    expect(shippingTotal(0.004, 0.004)).toBe(0);
+  });
+});

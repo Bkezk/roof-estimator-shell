@@ -190,16 +190,23 @@ describe("buildReviewLedger — rows ATTRIBUTE the engine totals (never recomput
   const ledger = buildReviewLedger({ bid, result, est, crewRate: 45 });
   const sum = (rows: Array<{ cost: number }>) => rows.reduce((s, r) => s + r.cost, 0);
 
-  it("Duro-Last purchase rows sum to M0 (duroLastMaterial)", () => {
-    expect(sum(ledger.purchases.duroLast)).toBeCloseTo(
-      result.inputs.duroLastMaterial - result.inputs.materialUnderlayment * 0,
+  // Legacy dMaterial[6] (Slip Sheets, tile 1) sits INSIDE Duro-Last Material (docs §22.1) but the
+  // Review screen lists it with the insulation tiles — the attribution sums move it across.
+  const slipSheets = ledger.purchases.insulation.find((r) => r.label === "Slip Sheets")!.cost;
+
+  it("Duro-Last purchase rows (+ the Slip Sheets tile) sum to M0 (duroLastMaterial)", () => {
+    expect(sum(ledger.purchases.duroLast) + slipSheets).toBeCloseTo(
+      result.inputs.duroLastMaterial,
       2,
     );
-    expect(sum(ledger.purchases.duroLast)).toBeCloseTo(result.inputs.duroLastMaterial, 2);
+    expect(result.slipSheetMaterial).toBeCloseTo(slipSheets, 2);
   });
 
-  it("insulation purchase rows sum to materialUnderlayment; quote lands on its tile", () => {
-    expect(sum(ledger.purchases.insulation)).toBeCloseTo(result.inputs.materialUnderlayment, 2);
+  it("insulation purchase rows (minus Slip Sheets) sum to materialUnderlayment; quote lands on its tile", () => {
+    expect(sum(ledger.purchases.insulation) - slipSheets).toBeCloseTo(
+      result.inputs.materialUnderlayment,
+      2,
+    );
     const ff = ledger.purchases.insulation.find((r) => r.label === "Flute Filler")!;
     expect(ff.cost).toBeCloseTo(1200, 2);
   });

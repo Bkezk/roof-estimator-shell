@@ -884,8 +884,11 @@ Answers `docs/extraction-requests/accessories-money-path.md` from the decompiled
 `frmAccessory1/2/5`, `frmAccReview`). Every formula below is transcribed from the named method;
 where a value is a ref-table column it is named so the licensed app's admin grid can be
 screenshotted. Notation: `R10(x)` = `DACommon.RoundToNextTen` (rva 0x41238): 0 → 0; x an exact
-multiple of 10 → x; otherwise `Ceil(x)` rounded UP to the next multiple of 10 (11 → 20, 10.3 →
-20, 1.03 → 10). `In2Ft(i)` = `Round(i/12, 2)`. `Round(x, n)` is VB/.NET `Math.Round` (banker's).
+multiple of 10 → x; otherwise `n = Ceil(x)`, result `n + 10 − (n mod 10)` — so 11 → 20, 10.3 →
+20, 1.03 → 10 **and 9.27 → 20, 19.57 → 30** (when Ceil lands on a multiple of ten the legacy still
+adds a full ten; corrected 2026-09-18, §22.5 — the first transcription read it as "Ceil up to the
+next multiple of 10", which gave 10 / 20 there). `In2Ft(i)` = `Round(i/12, 2)`. `Round(x, n)` is
+VB/.NET `Math.Round` (banker's).
 `f32` marks a single-precision multiply (`ldc.r4 1.03` = 1.0299999713897705).
 
 ### 12.0 Prediction ledger (registered before reading the IL, scored after)
@@ -1000,8 +1003,10 @@ bar, colour lives in the covers).
 - **Material** `FaciaBar.Cost = GetTotalLength × Price` (per foot) `+ cFaciaMetalCovers.Cost +
   cFaciaVinylCovers.Cost`.
 - **Vinyl covers** (checkbox `chkSFV`): on check, the three colour boxes are PREFILLED with
-  `GetTotalLengthByColor(c) − MetalCoverLength(c)` (ft; White includes both Additional boxes),
-  editable; `WhiteCost = R10(whiteQty) × WhiteVinylCoverPrice` (per foot, ten-rounded, NO 1.03),
+  `GetTotalLengthByColor(c) − MetalCoverLength(c)` where `GetTotalLengthByColor` (0x16f80) is
+  **`R10(f32 1.03 × (roof_c + curb_c + parapet_c [+ both Additional boxes on White]))`** — the
+  ten-rounded, scrapped colour length, not raw feet (corrected §22.5; Tan sums colours 1+5, Gray
+  2+4+6), editable; `WhiteCost = R10(whiteQty) × WhiteVinylCoverPrice` (per foot, ten-rounded, NO 1.03),
   same for Tan/Gray. Unchecking zeroes them.
 - **Metal covers** (`chkSFM`): prefill White = `GetTotalLengthByColor(3) − vinylWhiteQty`; Tan /
   Gray typed. `cFaciaMetalCovers.Cost = R10(Σ colour qty) × MetalCoverPrice + insideQty ×
@@ -1118,7 +1123,11 @@ Money: §12.5.
 - **Panduit** (`Panduit`, `ref_Panduit`: Price = UNIT cost, NumberPerBox, Length): rows with
   `Length == 14` get `CalculatedQty = PipeStacks.Panduit14Inch`, `== 20` →
   `Panduit20Inch`, any other row (the tool) 0. `Boxes = Ceil((Qty_extra + Calc)/NumberPerBox)`;
-  `Cost = Boxes × (NumberPerBox × Price)`; no labor. The "Boxes" column is the billed unit.
+  `Panduit.Cost = Boxes × (NumberPerBox × Price)` is what the Accessories Summary SHOWS — but
+  `Accessories.get_TotalCost` (0x10a8c) adds **`Panduits.TotalBoxCost`** = Σ `Panduit.BoxCost`
+  (`NumberPerBox × Price`, ONE box) over present rows (`Panduits.OnRecalculate` 0x1fa88), so the
+  bid carries one box per row whatever the count (corrected §22.5; reproduced behind
+  `LEGACY_PANDUIT_ONE_BOX_PER_ROW`). No labor.
 - **Sealants** (`Sealant`, `ref_Sealants`: Name, PartNumber, Price): `Cost = price × (CalcQty +
   Quantity)`, no labor; `CalcQty` rules are §2.5 of legacy-consumption-rules (term bar / fascia
   strip mastic → RefID 9 @ 350 LF/pail; Duro-Caulk by colour = `ToInt32(Ceil(termBarLF_c +
@@ -2164,3 +2173,136 @@ adhesive long name, falling back to the combo's column when no row exists.
 estimate. `BidInput.hoursPerDay` / `SavedBidState.hoursPerDay` (absent = admin default) feed
 man-days, the $/man-day markup mode, the Man-Day Labor readout and quote labor in days; the Labor &
 Markup dialog's "Hours per Man Day" is now editable.
+
+## 22. Non-labor pricing audit — every material / hardware dollar vs `ReviewCalc.Recalculate` (IL-exact, 2026-09-18)
+
+Scope: every admin price and every non-labor dollar on every step, traced admin screen → table →
+`getEngineAdminData` → adapter → engine → `computeMoney`, and the assembled totals re-read against
+`ReviewCalc.Recalculate` (rva 0x4550c) instruction by instruction. Verdict per area (details in the
+sub-sections): **WIRED-OK** — membrane price matrix (tiers, colours, Duro-Roof ×1.05, family
+prices §1/§7), warranties + high-wind (`RoofSections.WarrantyTotalCost` 0x5018c), discounts
+(prepay 5 % of M0, std-sheet 4 % of membrane at ≥ 50 000 sq ft, volume 5 % at > 100 000),
+sales tax (both modes, exempt), freight (stepped / percent basis dMaterial[20]), markup modes
+(`CalcMarkupValue` 0x46e18), per-diem / commission in and out of markup, parapet membrane +
+ARP, curb wrap constants, metals, non-DL item money and routing, accessories (drip / gravel,
+corners, pipe stacks, washers, drains, walk pads, sealants, fasteners, adhesives), underlayment
+board material, quote layers, adhesive prices. **Corrected** — the items below.
+
+### 22.1 Slip-Sheet underlayment is Duro-Last material (dMaterial[6] ⊂ dTotals[0])
+
+`Recalculate` writes `dMaterial[5 + tile] = GoodSingle(RoofSections.UnderlaymentCost(tile))` for
+tiles 1..8 (slots 6..13), then `dTotals[0] = GoodSingle(Σ dMaterial[0..6])` — the loop bound is
+`ldc.i4.6 ble`, so **slot 6 = tile 1 = Slip Sheets** (Duro-Fold, Ultra-Fold, Duro-Blue, Geotextile,
+Duro-Weave) is inside Duro-Last Material, the 5 % prepay base and the volume-discount base.
+`dTotals[6] = GoodSingle(MaterialTotalUnderlayment(False))` (0x470e4) sums **dMaterial[7..13]**
+only (tiles 2..8). Web: `slipSheetMaterial` (new on `BuildResult`) joins `duroLastMaterial`;
+`materialUnderlayment` is tiles 2..8 (+ unmapped tile 0 + the manual seam). The Review ledger
+keeps the Slip Sheets row with the insulation tiles (as the legacy screen does) and the
+attribution tests move it across; the estimator's purchases panel and the proposal split it out
+of the membrane line.
+
+### 22.2 Per-slot GoodSingle (material)
+
+Every `dMaterial` slot is stored `GoodSingle`'d — [1] MembraneCostBeforeDiscount, [2]
+Parapets.TotalCost, [3] Curbs.TotalCost, [4] Accessories.TotalCost (edge terms, flashing,
+fasteners, **adhesives** and the MembraneAccs ARP row are all inside it — `Accessories.
+get_TotalCost` 0x10a8c), [5] Metals.MaterialCost, [6..13] per underlayment tile, [14..19] per
+`ReviewCalc.NonDL` group — and the totals round again: `dTotals[0] = GoodSingle(Σ[0..6])`,
+`dTotals[6] = GoodSingle(Σ[7..13])`, `dTotals[7] = GoodSingle(NonDL.MaterialCost)` (the RAW
+six-group sum, 0xa915c). `dMaterial[20]` (tax / freight basis) = Σ of the rounded slots.
+`dMaterial[22]` (freight) is GoodSingle'd in both modes before `dTotals[9] = GoodSingle(
+dMaterial[22] + ExtraShipping)`. The web previously summed raw floats and rounded once; the
+builder now rounds each slot (`goodSingle`), `computeMoney` rounds d[0]/d[6]/d[7], and
+`shippingTotal` rounds the freight first. Penny-level, but it is where old Review sheets differ.
+
+### 22.3 Labor rows, Single fields, per-diem, LaborSubtotal2
+
+- `dLabor[k,0] = GoodSingle(CalcLaborCost(hours_k))` per row — roof sections (one row for all
+  sections), parapets, curbs, accessories, EACH underlayment tile (6..13), setup, inspection,
+  tear-off; own-rate rows `GoodSingle(Metals.LaborCost)` and `GoodSingle(NonDL(group))`;
+  `LaborSubtotal1 = GoodSingle(Σ dLabor[0..21])`. `computeEstimate` now rounds per component
+  (`underlaymentLaborHoursByTile` carries the tile split) instead of once on the summed hours.
+- `dLabor[24 + k,0] = GoodSingle(item.MaterialCost + item.LaborCost)` per subs / services item,
+  `LaborSubtotal2 = GoodSingle(Σ)`; the builder rounds per line, `computeEstimate` the total.
+- `Estimate.Markup`, `Commission`, `SalesTax`, `PerDiem`, `ExtraShipping` are `Single`; the
+  percents are divided by `100!` in single precision before widening (`ldc.r4 100; div;
+  conv.r8`) — `money.ts` reproduces the float32 fractions (`pctSingle`), including mode 2's
+  `1! − x/100!`.
+- `dTotals[13]` adds the RAW `PerDiem × TotalManDays` when PerDiemInMarkup; only `dTotals[17]`
+  is GoodSingle'd. Fixed.
+- Non-DL flat catalog lines / frozen auto-rate rows with `Labor Rate 0` bill at the estimate
+  crew rate (`NDLCollectionBase.ReadRefData` 0xa78cc) — the §14 module already did; the older
+  paths now do too. Metals keep the raw rate (no fallback in `Gutter.get_LaborRate`).
+
+### 22.4 LEGACY QUIRK — the non-DL "Others" group's labor never reaches Labor Subtotal 1
+
+`Recalculate` fills `dLabor[14 + i]` for the six NonDL groups (i = 0..5 → 14..19; group 6 =
+`NDLOthers`), then writes **Setup** labor to `dLabor[19]`, inspection to [20], tear-off to [21]
+and sums [0..21]. Slot 19 is overwritten: the Others group's labor $ and hours are dropped from
+LaborSubtotal1 and man-days in the shipped Bid-Advantage (an off-by-one; its own Review shows
+Setup on that row). Reproduced behind `LEGACY_NDL_OTHERS_LABOR_DROPPED` (bid-builder) with a
+warning whenever that labor is non-zero; the ledger's "Other" labor row shows 0. Flip the
+constant to bill it. Others-group MATERIAL (dMaterial[19]) is unaffected.
+
+### 22.5 Accessories corrections (IL re-read)
+
+- `DACommon.RoundToNextTen` (0x41238): `n = Ceil(x); n + 10 − (n mod 10)` unless x is an exact
+  multiple of ten — 9.27 → 20, 19.57 → 30 (the first transcription gave 10 / 20). Affects term
+  bars, fascia bars (bar and per-colour lengths), strip mastic, two-piece metals; drip / gravel
+  (`R10(Ceil(...))`, integer input) were already right.
+- Curb termination footage: `TermBar/FaciaBar.GetCurbEdgeLength` accumulate `Convert.ToInt32(
+  Round((2A + 2B + 12)/12 × qty, 4))` into an INTEGER field — whole feet per curb.
+- `FaciaBar.GetTotalLengthByColor` (0x16f80) = `R10(1.03f × (roof_c + curb_c + parapet_c [+ both
+  Additional boxes on White]))` — the vinyl / metal cover prefill basis is the ten-rounded,
+  scrapped colour length, not raw feet.
+- Panduit: `Accessories.get_TotalCost` adds `Panduits.get_TotalBoxCost` = Σ `Panduit.BoxCost`
+  (ONE box per present row, `Panduits.OnRecalculate` 0x1fa88), not boxes × box cost — the
+  Accessories Summary shows the latter. Reproduced behind `LEGACY_PANDUIT_ONE_BOX_PER_ROW`
+  with a warning when more than one box is needed.
+- Tab sealer (Duro-Roof seams), T-Patch (Duro-Tuff) and vents (mechanical) test EACH section's
+  roof system / attachment, not the bid default.
+
+### 22.6 `RoofSection.UnderlaymentAdhesive` (0x4d470) — ported verbatim
+
+For an adhered layer: if the layer's **OWN** board's adhesive group ∈ {16, 18, 19} →
+`+= QuoteAdhesiveUnits` (no coverage, no multiplier; the previous web tested the board BELOW).
+Otherwise k = coverage of the substrate (board below's group, or the deck for the bottom layer)
+and `units += AreaField/k × m0 + AreaPerimeter/k × m1 + AreaCorner/k × m1` — the corner squares
+ARE in the units basis (labor keeps field + perimeter, §18); `m0 / m1 = UUseAdheredCustomSettings
+? ToInteger(12 / UCustomAdhesiveSpacing(0 | 1)) : 1` — an INTEGER multiplier (8" → ×2, 9" → ×1,
+24" → ×0), separate field and perimeter/corner spacings, both required. No NeedQuote guard: an
+adhered quote layer bills its adhesive too. `BidSectionInput.uAdhesiveSpacingPerimIn` (Enhancement
+Options now has both boxes; absent = the field spacing). Legacy divides by coverage 0 (tapered
+below) → +Infinity — the web warns and bills 0 there.
+
+### 22.7 Data & fallback corrections
+
+- `adhesive_wall_coverage`: the Duro-Tuff (RS3) 350 / 300 rows are COMMENTED OUT in the shipped
+  installer (SqlScript.xml 2213–2214); only the release-2.1 `-1` rows exist. Removed from the
+  live table and the seed (migration `20260918100000`). Legacy divides `WallPlusTopSqFt / −1`
+  and SUBTRACTS units for an adhered Duro-Tuff wall — a vendor defect; the web warns and bills 0.
+- `non_dl:others` (NDLOthers: "DL Approved Slipsheet" = Ceil(parapet + curb polyethylene sq ft),
+  curb ISO sq ft) existed only in the live database; migration `20260918110000` records it
+  (rows `_uncaptured`, $0 — prices must come from the licensed Estimator).
+- Frozen-snapshot fallback: parapet wood blocking bills the row's MATERIAL too (`ReviewCalc.NonDL`
+  case 1 = WallBlockings + EdgeBlockings `get_MaterialCost`), not labor only.
+
+### 22.8 Flagged (not changed — decisions or captures needed)
+
+- Duro-Tuff parapet `AdjustedSqFt` = panels × **30** × AdjustedLength in the IL (no ÷ 12); the
+  web bills panels × 2.5 ft (§3 / §7.3 HUMAN GATE — unchanged, needs a validation bid).
+- Admin › Duro-Last › Adhesives: the Substrate → Field Coverage grid is a reference capture; the
+  engine reads coverage from the seeded legacy tables (`adhesive_coverage_*`, wall coverage) and
+  the Labor › Adhesive Times grid. Edits there change the PRICE only (the editor now says so).
+  Wiring the grid to the engine, or replacing it with editors for those tables, is a follow-up.
+- No per-bid underlayment $/sqft override (legacy `frmULSqFtPopUp` → `DualValue.CustomValue`).
+- Metals: any gutter row whose description lacks the `STYLE-N (dims) — part` prefix is treated as
+  a shared accessory on every gutter (admin free-text risk); D/L/E/M-Style gutters have no priced
+  rows in the seed (vendor-DB only).
+- Uncaptured prices (bill $0, already flagged): Duro-Last stripping (lookup cat 5), pitch-pan
+  Filler, drip-edge corners / clips, Rock Ply pipe stacks, no Rock Ply corner column,
+  `non_dl:others` rows, Dark Gray / Terra Cotta term-bar "Additional" boxes (legacy prices them on
+  the White bar).
+- Membrane high-wind upcharge column follows the DEFAULT section's attachment class (mechanical /
+  adhered; any other class → 0) — the web keys the bid-level attachment.
+- Still open from earlier rounds: legacy default Wall Type 4 vs web 1; flute filler attachment.

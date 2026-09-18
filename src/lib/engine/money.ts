@@ -16,9 +16,22 @@ import { goodSingle } from "./rounding";
 
 export type MarkupMode = 0 | 1 | 2;
 
+/**
+ * `Estimate.Markup`, `Estimate.Commission`, `Estimate.SalesTax` and `Estimate.PerDiem` are
+ * stored as .NET `Single` in the legacy Estimate object; `Recalculate` divides the percents by
+ * `100!` in single precision before widening (`ldc.r4 100; div; conv.r8`). Reproducing the
+ * float32 fractions keeps the half-cent boundaries where the legacy lands them.
+ */
+const f32 = Math.fround;
+/** `x / 100!` in single precision (percent → fraction, legacy widening order). */
+const pctSingle = (x: number): number => f32(f32(x) / 100);
+
 export interface MoneyInputs {
   // ── Material (Duro-Last catalog), §4.2 / §4.8 row 0 ──
-  /** M0 — Duro-Last material subtotal, dTotals[0] (Σ dMaterial[0..6]). */
+  /**
+   * M0 basis — Σ dMaterial[0..6] (membrane, parapets, curbs, accessories, metals, Slip-Sheet
+   * underlayment tile), each slot already GoodSingle'd by the caller; dTotals[0] rounds the sum.
+   */
   duroLastMaterial: number;
   /** MB — membrane cost before discount (basis for the std-sheet discount). */
   membraneCostBeforeDiscount: number;
@@ -33,8 +46,8 @@ export interface MoneyInputs {
   // ── Other purchase lines, §4.1 / §4.8 rows 5-9 ──
   /** Raw WarrantyTotalCost (§6); this module applies GoodSingle → dTotals[5]. */
   warrantyTotalCost: number;
-  materialUnderlayment: number; // dTotals[6]
-  otherMaterial: number; // dTotals[7] (non-DL catalog materials)
+  materialUnderlayment: number; // dTotals[6] basis — Σ GoodSingle'd tiles 2..8 (rounded here)
+  otherMaterial: number; // dTotals[7] basis — raw NonDL.MaterialCost (rounded here)
   shipping: number; // dTotals[9] — already GoodSingle(DL freight + ExtraShipping)
 
   // ── Labor, §4.1 / §4.6 ──
@@ -84,12 +97,12 @@ export interface MoneyResult {
 /** Markup value, `CalcMarkupValue` (§4.3). S = TotalSub1, MD = TotalManDays, x = markup. */
 export function calcMarkupValue(mode: MarkupMode, x: number, S: number, MD: number): number {
   switch (mode) {
-    case 0: // "% × Total Cost"
-      return goodSingle((S * x) / 100);
-    case 1: // flat "$ / Per Man Day"
-      return goodSingle(MD * x);
-    case 2: // "Gross Profit %" (margin)
-      return goodSingle(S / (1 - x / 100) - S);
+    case 0: // "% × Total Cost" — TotalSub1 × (Markup / 100!)
+      return goodSingle(S * pctSingle(x));
+    case 1: // flat "$ / Per Man Day" — TotalManDays × Markup
+      return goodSingle(MD * f32(x));
+    case 2: // "Gross Profit %" (margin) — TotalSub1 / (1! − Markup / 100!) − TotalSub1
+      return goodSingle(S / f32(1 - pctSingle(x)) - S);
     default:
       return 0;
   }
@@ -101,10 +114,14 @@ export function calcMarkupValue(mode: MarkupMode, x: number, S: number, MD: numb
  */
 export function computeMoney(i: MoneyInputs): MoneyResult {
   const d: Record<number, number> = {};
-  const rate = i.taxExempt ? 0 : i.salesTax;
+  const rate = i.taxExempt ? 0 : f32(i.salesTax);
+  const commissionFrac = pctSingle(i.commission);
+  const perDiemRate = f32(i.perDiem);
 
   // ── Material subtotal & discounts (§4.2) ──
-  const M0 = i.duroLastMaterial;
+  // dTotals[0] = GoodSingle(Σ dMaterial[0..6]) — the caller supplies the slot sum (each slot
+  // already GoodSingle'd, docs §22.2); the total is rounded once more here, exactly as legacy.
+  const M0 = goodSingle(i.duroLastMaterial);
   d[0] = M0;
   d[1] = -goodSingle(M0 * 0.05); // Prepay: 5% of DL material (stored negative)
   d[2] = i.sqFtTotalMembrane >= 50000 ? -goodSingle(i.membraneCostBeforeDiscount * 0.04) : 0;
@@ -118,8 +135,8 @@ export function computeMoney(i: MoneyInputs): MoneyResult {
 
   // ── Purchases (§4.1) ──
   d[5] = goodSingle(i.warrantyTotalCost); // TotalWarrantyAdditions
-  d[6] = i.materialUnderlayment;
-  d[7] = i.otherMaterial;
+  d[6] = goodSingle(i.materialUnderlayment); // GoodSingle(MaterialTotalUnderlayment(False))
+  d[7] = goodSingle(i.otherMaterial); // GoodSingle(NonDL.MaterialCost)
   const materialTax =
     i.taxMaterialOnly && !i.taxExempt ? goodSingle(rate * i.materialTotalBeforeTax) : 0;
   // TotalPurchases — RAW ADD (§7.3), no extra GoodSingle.
@@ -132,12 +149,15 @@ export function computeMoney(i: MoneyInputs): MoneyResult {
   // ── Per-diem & man-days (§4.6) ──
   const totalManDays = goodSingle(i.laborSubtotal1Hours / i.hoursPerDay);
   d[21] = totalManDays;
-  const perDiemValue = goodSingle(i.perDiem * totalManDays);
+  // dTotals[17] = GoodSingle(PerDiem × TotalManDays); the in-markup add below uses the RAW
+  // product (legacy adds `PerDiem * TotalManDays` to dTotals[13] without GoodSingle).
+  const perDiemRaw = perDiemRate * totalManDays;
+  const perDiemValue = goodSingle(perDiemRaw);
   d[17] = perDiemValue;
 
   // Commission when folded into markup: pre-markup base × rate (§4.6).
   const commissionInMarkupValue = goodSingle(
-    (d[8]! + d[9]! + d[10]! + d[11]! + perDiemValue) * (i.commission / 100),
+    (d[8]! + d[9]! + d[10]! + d[11]! + perDiemValue) * commissionFrac,
   );
 
   // ── Subtotal 1 (§4.1) — RAW ADD, plus in-markup commission/per-diem ──
@@ -147,7 +167,7 @@ export function computeMoney(i: MoneyInputs): MoneyResult {
     d[10]! +
     d[11]! +
     (i.commissionInMarkup ? commissionInMarkupValue : 0) +
-    (i.perDiemInMarkup ? perDiemValue : 0);
+    (i.perDiemInMarkup ? perDiemRaw : 0);
 
   // ── Markup (§4.3) ──
   d[14] = calcMarkupValue(i.markupMode, i.markup, d[13]!, totalManDays);
@@ -160,9 +180,9 @@ export function computeMoney(i: MoneyInputs): MoneyResult {
   if (i.commissionInMarkup) {
     commissionValue = commissionInMarkupValue; // already folded into Subtotal 1
   } else if (!i.perDiemInMarkup) {
-    commissionValue = goodSingle((d[16]! + perDiemValue) * (i.commission / 100));
+    commissionValue = goodSingle((d[16]! + perDiemValue) * commissionFrac);
   } else {
-    commissionValue = goodSingle(d[16]! * (i.commission / 100)); // per-diem already inside Subtotal 2
+    commissionValue = goodSingle(d[16]! * commissionFrac); // per-diem already inside Subtotal 2
   }
   d[18] = commissionValue;
 

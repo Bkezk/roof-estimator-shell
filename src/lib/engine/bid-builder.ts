@@ -52,7 +52,7 @@ import {
   sheetRollsFromLabel,
   tearOffVolume,
 } from "./quantities";
-import { in2Ft, bankersRound } from "./rounding";
+import { in2Ft, bankersRound, goodSingle } from "./rounding";
 import {
   computeAccessories,
   normalizeAccessoriesState,
@@ -66,6 +66,7 @@ import {
   normalizeNonDlState,
   parseInches,
   type NonDlGeometry,
+  type NonDlGroup,
   type NonDlResult,
   type NonDlState,
 } from "./nondl";
@@ -268,10 +269,17 @@ export interface BidSectionInput {
    */
   uCustomFastenerDensity?: { field: number; perim: number; corner: number };
   /**
-   * Legacy custom adhesive RIBBON spacing (inches, docs §10.3): adhered-layer adhesive units
-   * × 12 / spacing (default ×1). Absent/0 = default coverage.
+   * Legacy custom adhesive RIBBON spacing — FIELD zone (inches, docs §10.3 / §22.6,
+   * `UCustomAdhesiveSpacing(0)`): adhered-layer adhesive units × ToInteger(12 / spacing)
+   * (banker's; default ×1). Absent/0 = default coverage.
    */
   uAdhesiveSpacingIn?: number;
+  /**
+   * PERIMETER + CORNER zone ribbon spacing (`UCustomAdhesiveSpacing(1)`). Legacy applies the
+   * custom multipliers only when BOTH spacings are set; absent here = the field spacing (the
+   * web's single-entry form).
+   */
+  uAdhesiveSpacingPerimIn?: number;
   /**
    * Per-section AdjustUnderlaymentLabor % (legacy Underlayment screen "Adjustable Labor for
    * selected Roof Sections" link; the labor template writes the same field). Absent = the labor
@@ -325,6 +333,35 @@ export const NON_DL_LS2_CATEGORIES: ReadonlySet<string> = new Set([
   "Subcontractors",
   "3rd Party Services",
 ]);
+
+/** Curated non-DL catalog category → legacy ReviewCalc.NonDL group slot (docs §14.3 / §22.2). */
+const NDL_SLOT_BY_CATEGORY: Record<string, number> = {
+  "Roof Edge Blocking": 1,
+  "Parapet Wall Blocking": 1,
+  "Structural Deck Materials": 2,
+  "Sheet Metal Work": 3,
+  Masonry: 4,
+  "Preset Custom Applications": 5,
+};
+/** §14 module group → legacy ReviewCalc.NonDL group slot (subs/services are LaborSubtotal2). */
+const NDL_SLOT_BY_GROUP: Record<Exclude<NonDlGroup, "services" | "subcontractors">, number> = {
+  roofEdgeBlocking: 1,
+  wallBlocking: 1,
+  deckMaterials: 2,
+  sheetMetal: 3,
+  masonry: 4,
+  customApps: 5,
+  others: 6,
+};
+
+/**
+ * LEGACY QUIRK (ReviewCalc.Recalculate rva 0x4550c, docs §22.4): the six NonDL groups fill
+ * dLabor[14..19], then Setup labor is written to dLabor[19] — the Others group's row — before
+ * LaborSubtotal1 sums dLabor[0..21]. The Others group's labor cost and hours are therefore
+ * dropped from Labor Subtotal 1 and man-days in the shipped Bid-Advantage. Reproduced for parity;
+ * flip to `false` to bill that labor (a deliberate departure from legacy).
+ */
+export const LEGACY_NDL_OTHERS_LABOR_DROPPED = true;
 
 /**
  * A parapet wall on a bid (§4.4/§5.3). The height BAND is picked from the seeded band list. Wall
@@ -773,7 +810,7 @@ export interface ReviewBreakdown {
   /** Auto-priced NDL items (§8.3/§8.4) for the non-DL ledger rows. */
   auto: {
     counterflash: { material: number; laborCost: number; hours: number };
-    blocking: { laborCost: number; hours: number };
+    blocking: { material: number; laborCost: number; hours: number };
     masonry: { material: number; laborCost: number; hours: number };
   };
 }
@@ -792,6 +829,12 @@ export interface BuildResult {
   adhesiveMaterial: number;
   /** Curb wrap membrane $ (inside duroLastMaterial/M0); split out for display/proposal. */
   curbMaterial: number;
+  /**
+   * Slip-Sheet underlayment (insulation tile 1) material $ — legacy dMaterial[6], which sits INSIDE
+   * Σ dMaterial[0..6] = Duro-Last Material (M0, prepay-discountable); the other seven tiles form
+   * dTotals[6] Underlayment (docs §22.1). Split out for display/proposal.
+   */
+  slipSheetMaterial: number;
   /** §12 Accessories calculated-screen results (absent when the snapshot lacks the ref data). */
   accessories?: AccessoriesResult;
   /** §13 EXCEPTIONAL Metals screen results (absent when the snapshot lacks the ref data). */
@@ -894,7 +937,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   };
   const bAuto = {
     counterflash: { material: 0, laborCost: 0, hours: 0 },
-    blocking: { laborCost: 0, hours: 0 },
+    blocking: { material: 0, laborCost: 0, hours: 0 },
     masonry: { material: 0, laborCost: 0, hours: 0 },
   };
   /** Fractional adhesive units by adhesive name, summed across every section's layers. */
@@ -1111,7 +1154,72 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const sLayers = sectionLayers(s);
     const uAdjust = 1 + (s.adjustUnderlaymentLaborPct ?? 0) / 100;
     const uScale = complexity * sheetSizeMulti * uAdjust;
-    const zoneArea = fieldArea + perimArea; // legacy adhesive basis (corner squares excluded)
+    const zoneArea = fieldArea + perimArea; // legacy adhesive LABOR basis (corner squares excluded)
+    /**
+     * Legacy `RoofSection.UnderlaymentAdhesive` (rva 0x4d470, IL-exact — docs §22.6). For an
+     * adhered layer: if the layer's OWN board's adhesive group ∈ {16 Tapered ISO, 18 Tapered
+     * Rigid, 19 Crickets/Other} → `+= QuoteAdhesiveUnits` verbatim (no coverage, no spacing
+     * multiplier). Otherwise k = coverage of the substrate (the board below's adhesive group,
+     * or the deck for the bottom layer) and
+     *   units += AreaField/k × m0 + AreaPerimeter/k × m1 + AreaCorner/k × m1,
+     * m0/m1 = UUseAdheredCustomSettings ? ToInteger(12 / UCustomAdhesiveSpacing(0|1)) : 1 —
+     * both spacings must be set, the multiplier is a banker's-rounded INTEGER, and the corner
+     * squares ARE in the units basis (labor keeps field + perimeter, §18). Legacy applies this
+     * to quote (NeedQuote) layers too, so `withHours` is false for those (their labor is the
+     * quote's own hours). Returns the layer's adhesive LABOR hours.
+     */
+    const billLayerAdhesive = (layer: UnderlaymentLayer, li: number, withHours: boolean) => {
+      if (!admin.adhesiveTimes) return 0;
+      const ownGroup = admin.underlaymentGroups?.adhesiveGroupIdByBoard?.[layer.board];
+      if (ownGroup !== undefined && QUOTE_ADHESIVE_GROUPS.has(ownGroup)) {
+        const units = layer.quoteAdhesiveUnits ?? 0;
+        if (units > 0) {
+          if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
+            warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+          }
+          adhesiveUnitsByName[layer.adhesiveName] =
+            (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + units;
+        } else {
+          warnings.push(
+            `Adhesive on "${layer.board}" needs quote adhesive containers (tapered surface) — section "${s.name}".`,
+          );
+        }
+        return 0;
+      }
+      // Legacy: the substrate is the layer below's adhesive group, or the deck type.
+      const grid = admin.adhesiveTimes.bySubstrate[layer.adhesiveName];
+      const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
+      const substrate = derived !== undefined && grid?.[derived] ? derived : layer.substrate;
+      const entry = grid?.[substrate];
+      if (!entry || entry.coverageSqFt <= 0) {
+        warnings.push(
+          `No adhesive coverage for ${layer.adhesiveName || "(no adhesive)"} / ${substrate || "(no substrate)"} — section "${s.name}".`,
+        );
+        return 0;
+      }
+      if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
+        warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
+      }
+      const k = entry.coverageSqFt;
+      const fieldSp = s.uAdhesiveSpacingIn ?? 0;
+      const perimSp = s.uAdhesiveSpacingPerimIn ?? fieldSp;
+      const useCustom = fieldSp > 0 && perimSp > 0;
+      const m0 = useCustom ? bankersRound(12 / fieldSp, 0) : 1;
+      const m1 = useCustom ? bankersRound(12 / perimSp, 0) : 1;
+      // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
+      // adhesive after all sections (legacy AggregateCalcQtys), below.
+      adhesiveUnitsByName[layer.adhesiveName] =
+        (adhesiveUnitsByName[layer.adhesiveName] ?? 0) +
+        (fieldArea / k) * m0 +
+        (perimArea / k) * m1 +
+        (cornerArea / k) * m1;
+      if (!withHours) return 0;
+      return underlaymentAdhesive({
+        areaSqFt: zoneArea,
+        coverageSqFt: k,
+        laborPer2500SqFt: entry.labor,
+      }).hours;
+    };
     for (const [li, layer] of sLayers.entries()) {
       const area = s.length * s.width;
       // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
@@ -1132,6 +1240,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         const qHours = layer.quote.laborInDays ? amt * hoursPerDay : amt;
         underlaymentLaborHours += qHours;
         addSub(uHrsBySub, uTile, qHours);
+        // Legacy UnderlaymentAdhesive has no NeedQuote test: an ADHERED quote layer still bills
+        // its adhesive units (quote containers for the tapered groups, else coverage).
+        if (layer.attachment === "adhesive") billLayerAdhesive(layer, li, false);
         continue;
       }
       const uPrice = admin.underlaymentPrices?.[layer.board];
@@ -1176,57 +1287,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           }
         }
       } else if (layer.attachment === "adhesive" && admin.adhesiveTimes) {
-        // §10.7 target 3 (UnderlaymentAdhesive, rva 0x4d470): an adhered layer over a board
-        // whose adhesive group ∈ {16 Tapered ISO, 18 Tapered Rigid, 19 Crickets/Other} skips
-        // the coverage formula and bills the layer's raw QuoteAdhesiveUnits verbatim (no
-        // custom-spacing multiplier — that rides the coverage formula).
-        const lowerBoard = li > 0 ? sLayers[li - 1]!.board : undefined;
-        const lowerGroup = lowerBoard
-          ? admin.underlaymentGroups?.adhesiveGroupIdByBoard?.[lowerBoard]
-          : undefined;
-        if (lowerGroup !== undefined && QUOTE_ADHESIVE_GROUPS.has(lowerGroup)) {
-          const units = layer.quoteAdhesiveUnits ?? 0;
-          if (units > 0) {
-            if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
-              warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
-            }
-            adhesiveUnitsByName[layer.adhesiveName] =
-              (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + units;
-          } else {
-            warnings.push(
-              `Adhesive over "${lowerBoard}" needs quote adhesive containers (tapered surface) — section "${s.name}".`,
-            );
-          }
-        } else {
-          // Legacy: the substrate is the layer below's adhesive group, or the deck type.
-          const grid = admin.adhesiveTimes.bySubstrate[layer.adhesiveName];
-          const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
-          const substrate = derived !== undefined && grid?.[derived] ? derived : layer.substrate;
-          const entry = grid?.[substrate];
-          if (!entry || entry.coverageSqFt <= 0) {
-            warnings.push(
-              `No adhesive coverage for ${layer.adhesiveName || "(no adhesive)"} / ${substrate || "(no substrate)"} — section "${s.name}".`,
-            );
-          } else {
-            const a = underlaymentAdhesive({
-              areaSqFt: zoneArea,
-              coverageSqFt: entry.coverageSqFt,
-              laborPer2500SqFt: entry.labor,
-            });
-            layerHours += a.hours;
-            if (admin.adhesivePrices?.[layer.adhesiveName] === undefined) {
-              warnings.push(`No adhesive price for "${layer.adhesiveName}" — section "${s.name}".`);
-            }
-            // Enhancement Options custom ribbon spacing (docs §10.3, rva 0x4d470): units
-            // × 12 / spacing (default ×1); the spacing is ribbon on-center inches.
-            const spacingMult =
-              s.uAdhesiveSpacingIn && s.uAdhesiveSpacingIn > 0 ? 12 / s.uAdhesiveSpacingIn : 1;
-            // Fractional units accumulate per adhesive; whole-unit rounding happens ONCE per
-            // adhesive after all sections (legacy AggregateCalcQtys), below.
-            adhesiveUnitsByName[layer.adhesiveName] =
-              (adhesiveUnitsByName[layer.adhesiveName] ?? 0) + a.units * spacingMult;
-          }
-        }
+        layerHours += billLayerAdhesive(layer, li, true);
       }
       const scaled = layerHours * uScale;
       underlaymentLaborHours += scaled;
@@ -1739,22 +1800,18 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   // OtherMaterial, labor at the row's OWN rate → direct labor (LS1) with its hours in man-days —
   // exactly how a hand-added line from the same screen routes. A missing rate row leaves the
   // quantity unpriced WITH a warning (no silent $0 when the geometry asked for the item).
-  let autoNdlMaterial = 0;
-  let autoOwnRateCost = 0;
-  let autoOwnRateHours = 0;
+  // The bAuto slots below are the ONLY accumulator (they feed the legacy group slots later).
+  // Legacy NDLCollectionBase.ReadRefData substitutes the estimate crew rate when a ref row's
+  // Labor Rate is 0 (docs §14.1) — the same fallback applies to these seeded rate rows.
   const addAutoItem = (
     qty: number,
     rate: NdlAutoRateItem,
     laborOnly: boolean,
     slot: { material?: number; laborCost: number; hours: number },
   ) => {
-    if (!laborOnly) {
-      autoNdlMaterial += qty * rate.price;
-      if (slot.material !== undefined) slot.material += qty * rate.price;
-    }
-    autoOwnRateCost += qty * rate.laborPerUnit * rate.laborRate;
-    autoOwnRateHours += qty * rate.laborPerUnit;
-    slot.laborCost += qty * rate.laborPerUnit * rate.laborRate;
+    const laborRate = rate.laborRate !== 0 ? rate.laborRate : bid.crewLaborRatePerHour;
+    if (!laborOnly && slot.material !== undefined) slot.material += qty * rate.price;
+    slot.laborCost += qty * rate.laborPerUnit * laborRate;
     slot.hours += qty * rate.laborPerUnit;
   };
 
@@ -1790,9 +1847,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   }
 
   // Parapet wood blocking (§8.4, TopOfParapet): CalcQty = Ceil(Σ blocked-wall Length × 1.03).
-  // The legacy dialog total is labor-only (TotalCost = LaborCost), but ReviewCalc bills the
-  // row's material into dMaterial[14] (§14) — the §14 module does; this older path keeps its
-  // previous labor-only behaviour for frozen snapshots.
+  // The legacy dialog FOOTER is labor-only, but ReviewCalc.NonDL case 1 bills
+  // WallBlockings.MaterialCost into dMaterial[14] (§14.3) — so this frozen-snapshot fallback
+  // bills the row's material too (corrected 2026-09-18, docs §22.7).
   const parapetBlockingLinealFt = bid.parapets.reduce(
     (sum, p) => (p.hasBlocking ? sum + p.lengthFt : sum),
     0,
@@ -1800,7 +1857,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   if (!nonDlOwnsAuto && parapetBlockingLinealFt > 0) {
     const qty = Math.ceil(parapetBlockingLinealFt * 1.03);
     const rate = admin.autoRates?.parapetBlocking;
-    if (rate) addAutoItem(qty, rate, true, bAuto.blocking);
+    if (rate) addAutoItem(qty, rate, false, bAuto.blocking);
     else
       warnings.push(
         `Parapet wood blocking: ${qty} ft needed but no '2" x 4" W/ 8" ISO' rate row (Parapet Wall Blocking) — not auto-priced.`,
@@ -1898,16 +1955,27 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     accessoryLaborHours += accessoriesCalcResult.manHours;
   }
 
-  // M0 = membrane + accessories + parapet + curb + metals + ARP material (dMaterial[0..6] slots).
+  // M0 = Σ dMaterial[0..6] (ReviewCalc.Recalculate, docs §22.1/§22.2): each slot is GoodSingle'd
+  // as it is stored — [1] GoodSingle(MembraneCostBeforeDiscount), [2] Parapets.TotalCost,
+  // [3] Curbs.TotalCost, [4] Accessories.TotalCost (edge terms, flashing, fasteners, ADHESIVES
+  // and the MembraneAccs ARP row all live inside it), [5] Metals.MaterialCost, [6] the SLIP-SHEET
+  // underlayment tile (RoofSections.UnderlaymentCost(1)) — and dTotals[0] rounds the sum (money.ts).
+  const slipSheetMaterial = goodSingle(uMatBySub[1] ?? 0);
   const duroLastMaterial =
-    membraneMaterial +
-    accessoryMaterial +
-    parapetMaterial +
-    curbMaterial +
-    metalsMaterial +
-    adhesiveMaterial +
-    arpMaterial;
-  const materialUnderlayment = underlaymentMaterial + bid.materialUnderlayment;
+    goodSingle(membraneMaterial) +
+    goodSingle(parapetMaterial) +
+    goodSingle(curbMaterial) +
+    goodSingle(accessoryMaterial + adhesiveMaterial + arpMaterial) +
+    goodSingle(metalsMaterial) +
+    slipSheetMaterial;
+  // dTotals[6] = GoodSingle(MaterialTotalUnderlayment(False)) = Σ GoodSingle(dMaterial[7..13]) —
+  // tiles 2..8 only (tile 1 is Duro-Last material above). Unmapped boards (tile 0) and the manual
+  // seam stay in the underlayment bucket.
+  const materialUnderlayment =
+    Object.entries(uMatBySub).reduce(
+      (sum, [tile, v]) => (Number(tile) === 1 ? sum : sum + goodSingle(v)),
+      0,
+    ) + bid.materialUnderlayment;
 
   // Non-DL catalog lines, routed by curated category (docs/legacy-money-parity.md §6):
   //  - Subcontractors / 3rd Party Services: labor AND material → LaborSubtotal2 (legacy
@@ -1916,24 +1984,42 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   //    line's OWN rate → direct labor (dLabor[14..19] inside LaborSubtotal1), hours → man-days.
   //  - Uncategorized (older saved lines): previous web routing preserved (material →
   //    OtherMaterial, labor → services).
-  let nonDlMaterial = autoNdlMaterial;
+  // Legacy dMaterial[14..19] / dLabor[14..19] — one slot per ReviewCalc.NonDL group (docs §14.3):
+  // 1 = Wall + Edge Blocking, 2 = Deck Materials, 3 = Sheet Metal, 4 = Masonry, 5 = Custom Apps,
+  // 6 = Others. Each slot is GoodSingle'd where it is stored (docs §22.2/§22.3).
+  const ndlSlots: Array<{ material: number; laborCost: number; hours: number }> = Array.from(
+    { length: 7 },
+    () => ({ material: 0, laborCost: 0, hours: 0 }),
+  );
+  ndlSlots[1]!.material += bAuto.blocking.material;
+  ndlSlots[1]!.laborCost += bAuto.blocking.laborCost;
+  ndlSlots[1]!.hours += bAuto.blocking.hours;
+  ndlSlots[3]!.material += bAuto.counterflash.material;
+  ndlSlots[3]!.laborCost += bAuto.counterflash.laborCost;
+  ndlSlots[3]!.hours += bAuto.counterflash.hours;
+  ndlSlots[4]!.material += bAuto.masonry.material;
+  ndlSlots[4]!.laborCost += bAuto.masonry.laborCost;
+  ndlSlots[4]!.hours += bAuto.masonry.hours;
   let nonDlServices = 0;
   let nonDlSubs = 0;
-  let nonDlOwnRateCost = autoOwnRateCost;
-  let nonDlOwnRateHours = autoOwnRateHours;
   for (const l of bid.nonDlLines) {
     const material = l.price * l.quantity;
-    const labor = l.laborPerUnit * l.laborRate * l.quantity;
+    // Legacy NDLCollectionBase.ReadRefData: a ref Labor Rate of 0 means "use the estimate crew
+    // rate" (docs §14.1) — the flat catalog lines carry the seeded 0 verbatim.
+    const lineRate = l.laborRate !== 0 ? l.laborRate : bid.crewLaborRatePerHour;
+    const labor = l.laborPerUnit * lineRate * l.quantity;
     if (l.category !== undefined && NON_DL_LS2_CATEGORIES.has(l.category)) {
-      if (l.category === "Subcontractors") nonDlSubs += material + labor;
-      else nonDlServices += material + labor;
+      // dLabor[24+k] = GoodSingle(MaterialCost + LaborCost) per subs/services item.
+      if (l.category === "Subcontractors") nonDlSubs += goodSingle(material + labor);
+      else nonDlServices += goodSingle(material + labor);
     } else if (l.category !== undefined) {
-      nonDlMaterial += material;
-      nonDlOwnRateCost += labor;
-      nonDlOwnRateHours += l.laborPerUnit * l.quantity;
+      const slot = ndlSlots[NDL_SLOT_BY_CATEGORY[l.category] ?? 6]!;
+      slot.material += material;
+      slot.laborCost += labor;
+      slot.hours += l.laborPerUnit * l.quantity;
     } else {
-      nonDlMaterial += material;
-      nonDlServices += labor;
+      ndlSlots[6]!.material += material;
+      nonDlServices += goodSingle(labor);
     }
   }
 
@@ -1992,15 +2078,47 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       crewRate: bid.crewLaborRatePerHour,
     });
     warnings.push(...nonDlResult.warnings);
-    nonDlMaterial += nonDlResult.otherMaterial;
-    nonDlOwnRateCost += nonDlResult.ownRateLaborCost;
-    nonDlOwnRateHours += nonDlResult.ownRateLaborHours;
-    nonDlSubs += nonDlResult.subsCost;
-    nonDlServices += nonDlResult.servicesCost;
+    for (const [group, slotIx] of Object.entries(NDL_SLOT_BY_GROUP)) {
+      const t = nonDlResult.byGroup[group as NonDlGroup];
+      const slot = ndlSlots[slotIx]!;
+      slot.material += t.material;
+      slot.laborCost += t.laborCost;
+      slot.hours += t.hours;
+    }
+    for (const ln of nonDlResult.lines) {
+      if (ln.group === "subcontractors") nonDlSubs += goodSingle(ln.materialCost + ln.laborCost);
+      else if (ln.group === "services") nonDlServices += goodSingle(ln.materialCost + ln.laborCost);
+    }
   }
-  const otherMaterial = bid.otherMaterial + nonDlMaterial;
+  // The manual "other material" seam rides the Others slot (dMaterial[19]).
+  ndlSlots[6]!.material += bid.otherMaterial;
+  // dTotals[7] = GoodSingle(NonDL.MaterialCost) — the RAW six-group sum (rounded in money.ts);
+  // dMaterial[20] (tax / freight basis) sums the GoodSingle'd per-group slots instead.
+  const otherMaterial = ndlSlots.reduce((sum, g) => sum + g.material, 0);
+  const otherMaterialSlotsRounded = ndlSlots.reduce((sum, g) => sum + goodSingle(g.material), 0);
+  // dLabor[14..19]: each group's own-rate labor is GoodSingle'd per row. LEGACY QUIRK (docs
+  // §22.4): Recalculate then writes Setup labor into dLabor[19] — the Others group's row — so the
+  // Others group's labor $ AND hours never reach LaborSubtotal1 / man-days. Reproduced, flagged.
+  let nonDlOwnRateCost = 0;
+  let nonDlOwnRateHours = 0;
+  for (let g = 1; g <= 6; g++) {
+    const slot = ndlSlots[g]!;
+    if (g === 6 && LEGACY_NDL_OTHERS_LABOR_DROPPED) {
+      if (slot.laborCost > 0 || slot.hours > 0) {
+        warnings.push(
+          `Non-DL "Other" labor (${slot.hours.toFixed(2)} h, $${slot.laborCost.toFixed(2)}) is NOT in Labor Subtotal 1 — legacy ReviewCalc overwrites that group's labor slot with Setup labor (parity quirk, docs §22.4).`,
+        );
+      }
+      continue;
+    }
+    nonDlOwnRateCost += goodSingle(slot.laborCost);
+    nonDlOwnRateHours += slot.hours;
+  }
   const servicesCost = bid.servicesCost + nonDlServices;
-  const materialTotalBeforeTax = duroLastMaterial + materialUnderlayment + otherMaterial;
+  // dMaterial[20] = Σ dMaterial[0..19] — every stored (GoodSingle'd) slot; the manual seams
+  // (web-only hand-entered $) ride along raw.
+  const materialTotalBeforeTax =
+    duroLastMaterial + materialUnderlayment + otherMaterialSlotsRounded;
 
   // Freight (dMaterial[22]) — percent-of-material or the stepped "from" table, on
   // MATERIAL TOTAL BEFORE TAX (dMaterial[20] = ALL material: DL + underlayment + non-DL), per
@@ -2033,11 +2151,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adjustSetupLaborPct: bid.adjustSetupPct ?? 0,
     adjustInspectionPct: bid.adjustInspectionPct ?? 0,
     accessoryLaborHours,
-    ownRateDirectLaborCost: metalsLaborCost + nonDlOwnRateCost,
+    // dLabor[5,0] = GoodSingle(Metals.LaborCost); dLabor[14..18,0] GoodSingle'd per group above.
+    ownRateDirectLaborCost: goodSingle(metalsLaborCost) + nonDlOwnRateCost,
     ownRateDirectLaborHours: metalsLaborHours + nonDlOwnRateHours,
     parapetLaborHours,
     curbLaborHours,
     underlaymentLaborHours,
+    underlaymentLaborHoursByTile: uHrsBySub,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage,
@@ -2091,6 +2211,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     metalsMaterial,
     adhesiveMaterial,
     curbMaterial,
+    slipSheetMaterial,
     ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
     ...(metalsResult ? { metalsScreen: metalsResult } : {}),
     ...(nonDlResult ? { nonDl: nonDlResult } : {}),

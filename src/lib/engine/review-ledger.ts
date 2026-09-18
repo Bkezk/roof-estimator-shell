@@ -8,7 +8,7 @@
  */
 
 import type { BidInput, BuildResult, NonDlLine } from "./bid-builder";
-import { NON_DL_LS2_CATEGORIES } from "./bid-builder";
+import { LEGACY_NDL_OTHERS_LABOR_DROPPED, NON_DL_LS2_CATEGORIES } from "./bid-builder";
 import type { EstimateResult } from "./estimate";
 import { NON_DL_LS2_GROUPS, type NonDlGroup } from "./nondl";
 
@@ -101,6 +101,9 @@ export function buildReviewLedger(i: {
   const inp = result.inputs;
 
   // ── Purchases: Duro-Last ──────────────────────────────────────────────────
+  // NOTE (docs §22.1): the Slip Sheets insulation row below is legacy dMaterial[6] — it sits
+  // INSIDE Duro-Last Material (dTotals[0]) even though the Review screen lists it with the
+  // insulation tiles; Σ(this list) + Slip Sheets = inputs.duroLastMaterial.
   const purchasesDl: LedgerRow[] = [
     { label: "Roof Sections", cost: inp.membraneCostBeforeDiscount },
     { label: "Parapets", cost: result.parapetMaterial },
@@ -161,6 +164,7 @@ export function buildReviewLedger(i: {
   bump(ndlMat, "Sheet Metal", b.auto.counterflash.material);
   bump(ndlLaborCost, "Sheet Metal", b.auto.counterflash.laborCost);
   bump(ndlHours, "Sheet Metal", b.auto.counterflash.hours);
+  bump(ndlMat, "Wood Blocking", b.auto.blocking.material);
   bump(ndlLaborCost, "Wood Blocking", b.auto.blocking.laborCost);
   bump(ndlHours, "Wood Blocking", b.auto.blocking.hours);
   bump(ndlMat, "Masonry", b.auto.masonry.material);
@@ -172,11 +176,16 @@ export function buildReviewLedger(i: {
     label,
     cost: ndlMat[label] ?? 0,
   }));
-  const nonDlLabor: LedgerRow[] = NONDL_ROW_ORDER.map((label) => ({
-    label,
-    cost: ndlLaborCost[label] ?? 0,
-    hours: ndlHours[label] ?? 0,
-  }));
+  // Legacy quirk (docs §22.4): ReviewCalc overwrites the Others group's dLabor row with Setup
+  // labor, so its labor never reaches Total Labor — the row shows 0 here (the engine warns).
+  const nonDlLabor: LedgerRow[] = NONDL_ROW_ORDER.map((label) => {
+    const dropped = LEGACY_NDL_OTHERS_LABOR_DROPPED && label === "Other";
+    return {
+      label,
+      cost: dropped ? 0 : (ndlLaborCost[label] ?? 0),
+      hours: dropped ? 0 : (ndlHours[label] ?? 0),
+    };
+  });
 
   // ── Labor: Duro-Last (crew-rate hours; metals bill at their own rates) ─────
   const laborDl: LedgerRow[] = [

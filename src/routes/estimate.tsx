@@ -476,7 +476,8 @@ function EstimatePage() {
   const [uEnhField, setUEnhField] = useState(0.15625); // 5 per 4×8 board
   const [uEnhPerim, setUEnhPerim] = useState(0.15625);
   const [uEnhCorner, setUEnhCorner] = useState(0.15625);
-  const [uEnhSpacing, setUEnhSpacing] = useState(0); // 0 = default coverage
+  const [uEnhSpacing, setUEnhSpacing] = useState(0); // field ribbon spacing; 0 = default coverage
+  const [uEnhSpacingPerim, setUEnhSpacingPerim] = useState(0); // perimeter/corner; 0 = same as field
   // Custom-quote flow (legacy NeedQuote entries — Flute Filler / Tapered/Other / ISO-Rigid
   // Quote, docs §10.5): the dialog mirrors the captured HandleFluteFiller form.
   const [uQuoteBoard, setUQuoteBoard] = useState<string | null>(null);
@@ -782,8 +783,15 @@ function EstimatePage() {
   const result = useMemo(() => {
     if (!admin) return null;
     const build = buildEstimateInputs(bid, admin);
-    const { inputs, warnings, parapetMaterial, metalsMaterial, adhesiveMaterial, curbMaterial } =
-      build;
+    const {
+      inputs,
+      warnings,
+      parapetMaterial,
+      metalsMaterial,
+      adhesiveMaterial,
+      curbMaterial,
+      slipSheetMaterial,
+    } = build;
     const accessoriesResult = build.accessories;
     const adhesiveWholeUnits = build.adhesiveWholeUnits;
     const r = computeEstimate(inputs);
@@ -806,6 +814,7 @@ function EstimatePage() {
       metalsMaterial,
       adhesiveMaterial,
       curbMaterial,
+      slipSheetMaterial,
       // Own-rate direct-labor hours (metals + categorized non-DL); they join man-days but are
       // priced at each line's own rate, so they aren't in any crew-rate hour bucket.
       ownRateHours: inputs.ownRateDirectLaborHours ?? 0,
@@ -2552,12 +2561,22 @@ function EstimatePage() {
                             ))}
                           </div>
                         )}
-                        <Field label="Custom adhesive ribbon spacing (in; 0 = default)">
-                          <NumInput min={0} value={uEnhSpacing} onValue={setUEnhSpacing} />
-                        </Field>
+                        <div className="grid grid-cols-2 gap-2">
+                          <Field label="Adhesive ribbon spacing — field (in; 0 = default)">
+                            <NumInput min={0} value={uEnhSpacing} onValue={setUEnhSpacing} />
+                          </Field>
+                          <Field label="Perimeter / corner (in; 0 = same as field)">
+                            <NumInput
+                              min={0}
+                              value={uEnhSpacingPerim}
+                              onValue={setUEnhSpacingPerim}
+                            />
+                          </Field>
+                        </div>
                         <p className="text-[10px] text-muted-foreground">
-                          Adhesive units are multiplied by 12 ÷ spacing (legacy §10.3); fastener
-                          counts become Round(density × zone area) per zone.
+                          Adhesive units per zone are multiplied by the whole number 12 ÷ spacing
+                          (legacy rounds it to an integer: 8&quot; → ×2, 9&quot; → ×1, 24&quot; →
+                          ×0); fastener counts become Round(density × zone area) per zone.
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -2577,6 +2596,9 @@ function EstimatePage() {
                                   else delete nx.uCustomFastenerDensity;
                                   if (uEnhSpacing > 0) nx.uAdhesiveSpacingIn = uEnhSpacing;
                                   else delete nx.uAdhesiveSpacingIn;
+                                  if (uEnhSpacing > 0 && uEnhSpacingPerim > 0)
+                                    nx.uAdhesiveSpacingPerimIn = uEnhSpacingPerim;
+                                  else delete nx.uAdhesiveSpacingPerimIn;
                                   return nx;
                                 }),
                               )
@@ -2595,6 +2617,7 @@ function EstimatePage() {
                                   const nx = { ...s };
                                   delete nx.uCustomFastenerDensity;
                                   delete nx.uAdhesiveSpacingIn;
+                                  delete nx.uAdhesiveSpacingPerimIn;
                                   return nx;
                                 }),
                               )
@@ -4022,9 +4045,16 @@ function EstimatePage() {
                         result.parapetMaterial -
                         result.curbMaterial -
                         result.metalsMaterial -
-                        result.adhesiveMaterial,
+                        result.adhesiveMaterial -
+                        result.slipSheetMaterial,
                     )}
                   />
+                  {result.slipSheetMaterial > 0 && (
+                    <Row
+                      label="Slip sheets (Duro-Last material)"
+                      v={money(result.slipSheetMaterial)}
+                    />
+                  )}
                   {result.parapetMaterial > 0 && (
                     <Row label="Parapet material" v={money(result.parapetMaterial)} />
                   )}

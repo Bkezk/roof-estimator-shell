@@ -103,10 +103,8 @@ function ProposalPage() {
     // the estimator, so the proposal price cannot drift), else against live admin data.
     const cd = resolveBidComputeData(saved, admin, warrantyData);
     if (!cd.admin) return null;
-    const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial } = buildEstimateInputs(
-      buildBidInput(saved, cd.warranty),
-      cd.admin,
-    );
+    const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial, slipSheetMaterial } =
+      buildEstimateInputs(buildBidInput(saved, cd.warranty), cd.admin);
     const r = computeEstimate(inputs);
 
     const accessoryMaterial = saved.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
@@ -129,12 +127,15 @@ function ProposalPage() {
     );
     const groups = buildProposalPricing({
       grandTotal: r.money.grandTotal,
+      // Slip-sheet underlayment (tile 1) rides inside dTotals[0] (legacy dMaterial[6], docs
+      // §22.1); it belongs with the underlayment group on the proposal.
       membraneMaterial:
         (r.money.dTotals[0] ?? 0) -
         accessoryMaterial -
         parapetMaterial -
         metalsMaterial -
-        adhesiveMaterial,
+        adhesiveMaterial -
+        slipSheetMaterial,
       installLaborHours: r.installHours,
       setupHours: r.setupHours,
       inspectionHours: r.inspectionHours,
@@ -146,7 +147,7 @@ function ProposalPage() {
       curbLaborHours: r.curbLaborHours,
       metalsMaterial,
       metalsLabor,
-      underlaymentMaterial: r.money.dTotals[6] ?? 0,
+      underlaymentMaterial: (r.money.dTotals[6] ?? 0) + slipSheetMaterial,
       underlaymentLaborHours: r.underlaymentLaborHours,
       adhesiveMaterial,
       warrantyCost: r.money.dTotals[5] ?? 0,

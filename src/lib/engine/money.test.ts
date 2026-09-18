@@ -149,3 +149,48 @@ describe("taxCharged — the tax the bid actually charged, either mode", () => {
     expect(r.taxCharged).toBeCloseTo(625, 2);
   });
 });
+
+describe("§22.2/§22.3 legacy rounding & single-precision fields (ReviewCalc.Recalculate IL)", () => {
+  it("dTotals[0] / [6] / [7] are GoodSingle'd (the caller passes slot sums; the total rounds again)", () => {
+    const r = computeMoney(
+      base({ duroLastMaterial: 100.004, materialUnderlayment: 50.006, otherMaterial: 10.015 }),
+    );
+    // (float32 round-trip noise → compare at 4 dp)
+    expect(r.dTotals[0]).toBeCloseTo(100, 4);
+    expect(r.dTotals[6]).toBeCloseTo(50.01, 4);
+    expect(r.dTotals[7]).toBeCloseTo(10.02, 4); // banker's: 10.015 → 10.02
+  });
+
+  it("per-diem inside Subtotal 1 is the RAW PerDiem × ManDays; dTotals[17] is the GoodSingle'd one", () => {
+    // 10 h / 9 → 1.11 man-days; 33.33 × 1.11 = 36.9963 → d[17] 37.00, but d[13] carries 36.9963.
+    const r = computeMoney(
+      base({
+        laborSubtotal1: 1000,
+        laborSubtotal1Hours: 10,
+        perDiem: 33.33,
+        perDiemInMarkup: true,
+      }),
+    );
+    const md = r.totalManDays;
+    const raw = Math.fround(33.33) * md;
+    expect(r.perDiemValue).toBeCloseTo(37, 2);
+    expect(r.subtotal1).toBeCloseTo(1000 + raw, 8);
+    expect(r.subtotal1).not.toBeCloseTo(1000 + 37, 4);
+  });
+
+  it("markup / commission / tax percents divide by 100 in SINGLE precision (float32 fraction)", () => {
+    // 30% as a float32 fraction is 0.300000011920929, not 0.3 — the product lands where legacy does.
+    const S = 12345.67;
+    expect(calcMarkupValue(0, 30, S, 0)).toBeCloseTo(
+      Math.fround(Math.round(S * Math.fround(Math.fround(30) / 100) * 100) / 100),
+      6,
+    );
+    // Mode 2 anchor still holds (35% on $10,691.33 → $5,756.87).
+    expect(calcMarkupValue(2, 35, 10691.33, 0)).toBeCloseTo(5756.87, 2);
+    const r = computeMoney(
+      base({ laborSubtotal1: 10000, salesTax: 0.07, taxMaterialOnly: false, markupMode: 0 }),
+    );
+    // 0.07f × 10000 = 700.0000029802322 → GoodSingle 700.
+    expect(r.salesTaxValue).toBeCloseTo(700, 2);
+  });
+});

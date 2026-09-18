@@ -372,6 +372,45 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(r.laborSubtotal1Hours).toBeCloseTo(INSTALL + 1.0002, 3);
   });
 
+  it("§22.4 legacy quirk: the non-DL OTHERS group's labor is dropped from Labor Subtotal 1 (dLabor[19] ← Setup)", () => {
+    const line = (category: string) => ({
+      description: "thing",
+      category,
+      price: 0,
+      laborPerUnit: 1,
+      laborRate: 40,
+      quantity: 2,
+    });
+    const masonry = buildEstimateInputs(bid({ nonDlLines: [line("Masonry")] }), admin);
+    const other = buildEstimateInputs(bid({ nonDlLines: [line("Misc Other")] }), admin);
+    // Masonry (group 4) bills 2 h × $40 as own-rate direct labor…
+    expect(masonry.inputs.ownRateDirectLaborCost).toBeCloseTo(80, 2);
+    expect(masonry.inputs.ownRateDirectLaborHours).toBeCloseTo(2, 6);
+    // …the Others group (6) bills nothing and the estimator is told why.
+    expect(other.inputs.ownRateDirectLaborCost).toBe(0);
+    expect(other.inputs.ownRateDirectLaborHours).toBe(0);
+    expect(other.warnings.some((w) => w.includes('Non-DL "Other" labor'))).toBe(true);
+  });
+
+  it("§22.3 non-DL flat lines with a 0 Labor Rate bill at the estimate crew rate (legacy ReadRefData)", () => {
+    const r = buildEstimateInputs(
+      bid({
+        nonDlLines: [
+          {
+            description: "Ice & Water",
+            category: "Parapet Wall Blocking",
+            price: 0,
+            laborPerUnit: 1,
+            laborRate: 0,
+            quantity: 3,
+          },
+        ],
+      }),
+      admin,
+    );
+    expect(r.inputs.ownRateDirectLaborCost).toBeCloseTo(3 * bid().crewLaborRatePerHour, 2);
+  });
+
   it("non-DL lines: material → OtherMaterial (taxable basis), labor $ → services (LaborSubtotal2)", () => {
     const { inputs } = buildEstimateInputs(
       bid({
@@ -388,11 +427,11 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       admin,
     );
     expect(inputs.otherMaterial).toBeCloseTo(40, 2); // 10 × $4 material
-    expect(inputs.servicesCost).toBeCloseTo(7.515, 3); // 10 × 0.0167 h × $45/h
+    expect(inputs.servicesCost).toBeCloseTo(7.52, 3); // GoodSingle(10 × 0.0167 h × $45/h
     expect(inputs.materialTotalBeforeTax).toBeCloseTo(MWO * 1.23 + 40, 2); // OtherMaterial is taxable
     const r = computeEstimate(inputs);
     expect(r.money.dTotals[7]).toBeCloseTo(40, 2); // OtherMaterial row
-    expect(r.laborSubtotal2).toBeCloseTo(7.515, 3); // subs + services
+    expect(r.laborSubtotal2).toBeCloseTo(7.52, 3); // subs + services (GoodSingle per row)
   });
 
   it("non-DL routing by category: six categories → own-rate direct labor; subs/services (labor AND material) → LS2; uncategorized legacy lines keep the old services routing", () => {
@@ -1938,16 +1977,17 @@ describe("auto-priced NDL items (§8.3/§8.4/§8.6: counterflash / blocking / ca
     expect(inputs.otherMaterial).toBeCloseTo(0, 6);
   });
 
-  it("parapet wood blocking: Ceil(Σ length × 1.03) on the TopOfParapet row — LABOR-ONLY", () => {
+  it("parapet wood blocking: Ceil(Σ length × 1.03) on the TopOfParapet row — material AND labor (ReviewCalc.NonDL case 1)", () => {
     const { inputs, warnings } = buildEstimateInputs(
       bid({ parapets: [{ ...wall, hasBlocking: true }] }),
       withParapet,
     );
     expect(warnings).toEqual([]);
-    // 100 × 1.03 = 103 → Ceil 103 units × 0.04 h × $40 = $164.80; material price IGNORED
+    // 100 × 1.03 = 103 → Ceil 103 units × 0.04 h × $40 = $164.80 labor; 103 × $0.57 material
+    // (the legacy dialog footer is labor-only, but dMaterial[14] bills WallBlockings.MaterialCost).
     expect(inputs.ownRateDirectLaborHours).toBeCloseTo(103 * 0.04, 6);
     expect(inputs.ownRateDirectLaborCost).toBeCloseTo(103 * 0.04 * 40, 2);
-    expect(inputs.otherMaterial).toBeCloseTo(0, 6);
+    expect(inputs.otherMaterial).toBeCloseTo(103 * 0.57, 6);
   });
 
   it("capstones: option 1 → Remove Only Ceil(len/2); option 2 → Replace ONLY + sealant ordering note", () => {
@@ -2284,7 +2324,39 @@ describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUni
     );
   });
 
-  it("adhered layer over a tapered-group board bills quoteAdhesiveUnits verbatim (no coverage)", () => {
+  it("an ADHERED quote layer whose OWN board is a tapered group bills quoteAdhesiveUnits verbatim (§22.6)", () => {
+    // Legacy UnderlaymentAdhesive tests the LAYER'S OWN board (AdhesiveNeedsQuoteAdhesiveUnits)
+    // and has no NeedQuote guard: the Tapered ISO quote layer itself carries the containers.
+    const layers: UnderlaymentLayer[] = [
+      {
+        board: "Tapered ISO",
+        attachment: "adhesive",
+        fastenersPerBoard: 0,
+        adhesiveName: "Duro-Grip Adhesive(CR-20)",
+        substrate: "",
+        quote: { id: "q2", name: "Tapered quote", lumpSum: 900, laborAmount: 0 },
+        quoteAdhesiveUnits: 7,
+      },
+    ];
+    const { inputs, warnings, adhesiveMaterial } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers }] }),
+      withU,
+    );
+    // 7 containers verbatim × $899 (no coverage formula, no spacing multiplier)
+    expect(adhesiveMaterial).toBeCloseTo(7 * 899, 2);
+    expect(warnings).toEqual([]);
+    expect(inputs.materialUnderlayment).toBeCloseTo(900, 2);
+    // without the containers entered, it warns instead of billing $0 silently
+    const missing = buildEstimateInputs(
+      bid({
+        sections: [{ ...bid().sections[0]!, layers: [{ ...layers[0]!, quoteAdhesiveUnits: 0 }] }],
+      }),
+      withU,
+    );
+    expect(missing.warnings.some((w) => w.includes("quote adhesive containers"))).toBe(true);
+  });
+
+  it("an adhered board ABOVE a tapered board is unpriceable (legacy divides by coverage 0) — warns, bills 0", () => {
     const layers: UnderlaymentLayer[] = [
       {
         board: "Tapered ISO",
@@ -2300,30 +2372,68 @@ describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUni
         fastenersPerBoard: 0,
         adhesiveName: "Duro-Grip Adhesive(CR-20)",
         substrate: "",
-        quoteAdhesiveUnits: 7,
+        quoteAdhesiveUnits: 7, // ignored: this layer's own board is not a quote group
       },
     ];
-    const { inputs, warnings, adhesiveMaterial } = buildEstimateInputs(
-      bid({ sections: [{ ...bid().sections[0]!, layers }] }),
-      withU,
-    );
-    // 7 containers verbatim × $899 (whole units, no coverage formula, no spacing multiplier)
-    expect(adhesiveMaterial).toBeCloseTo(7 * 899, 2);
-    expect(warnings).toEqual([]);
-    expect(inputs.materialUnderlayment).toBeCloseTo(900 + 2500 * 0.85 * 1.06, 2);
-    // without the containers entered, it warns instead of billing $0 silently
-    const missing = buildEstimateInputs(
-      bid({
-        sections: [
-          {
-            ...bid().sections[0]!,
-            layers: [layers[0]!, { ...layers[1]!, quoteAdhesiveUnits: 0 }],
-          },
-        ],
-      }),
-      withU,
-    );
-    expect(missing.warnings.some((w) => w.includes("quote adhesive containers"))).toBe(true);
+    const r = buildEstimateInputs(bid({ sections: [{ ...bid().sections[0]!, layers }] }), withU);
+    expect(r.adhesiveMaterial).toBe(0);
+    expect(r.warnings.some((w) => w.includes("No adhesive coverage"))).toBe(true);
+  });
+});
+
+describe("§22.6 UnderlaymentAdhesive units — corner term and integer ribbon multipliers", () => {
+  const adhLayer: UnderlaymentLayer = {
+    board: '1/2" ISO',
+    attachment: "adhesive",
+    fastenersPerBoard: 0,
+    adhesiveName: "Duro-Grip Adhesive(CR-20)",
+    substrate: "ISO 4'x8'",
+  };
+  const withU: EngineAdminData = {
+    ...admin,
+    underlaymentPrices: { '1/2" ISO': 0.85 },
+    underlaymentLabor: {
+      layoutHoursByProduct: { '1/2" ISO': 7.775 },
+      fastenerCounts: [5],
+      fastenerMinutesByDeck: { Wood: 0.342 },
+    },
+    adhesiveTimes: {
+      adhesives: ["Duro-Grip Adhesive(CR-20)"],
+      bySubstrate: { "Duro-Grip Adhesive(CR-20)": { Wood: { coverageSqFt: 2000, labor: 2.5 } } },
+    },
+    adhesivePrices: { "Duro-Grip Adhesive(CR-20)": 899 },
+  };
+  // 50×50 with a 10 ft enhancement band and the two width-side corners marked:
+  // perimeter run = 2×(50−2×10) + 2×50 − … — use the engine's own areas via a zero-lap check.
+  const section = { ...bid().sections[0]!, layers: [adhLayer] };
+
+  it("units basis = AreaField/k×m0 + (AreaPerimeter + AreaCorner)/k×m1 — corners INCLUDED", () => {
+    const r = buildEstimateInputs(bid({ sections: [section] }), withU);
+    // No enhancement zone in the fixture ⇒ field = 2500 → 2500/2000 = 1.25 → Ceil 2 boxes.
+    expect(r.adhesiveWholeUnits?.["Duro-Grip Adhesive(CR-20)"]).toBe(2);
+    expect(r.adhesiveMaterial).toBeCloseTo(2 * 899, 2);
+  });
+
+  it('custom spacing multiplier is ToInteger(12/spacing) (banker\'s): 8" → ×2, 24" → ×0, 9" → ×1', () => {
+    const at = (fieldSp: number, perimSp?: number) =>
+      buildEstimateInputs(
+        bid({
+          sections: [
+            {
+              ...section,
+              uAdhesiveSpacingIn: fieldSp,
+              ...(perimSp !== undefined ? { uAdhesiveSpacingPerimIn: perimSp } : {}),
+            },
+          ],
+        }),
+        withU,
+      ).adhesiveWholeUnits?.["Duro-Grip Adhesive(CR-20)"];
+    expect(at(8)).toBe(3); // 1.25 × ToInteger(1.5 → 2) = 2.5 → 3 (web's old 12/8 = 1.5 gave 1.875 → 2)
+    expect(at(24)).toBe(0); // ToInteger(0.5) = 0 → no units
+    expect(at(9)).toBe(2); // ToInteger(1.33) = 1 → 1.25 → 2
+    // Field spacing 8" with a 12" perimeter spacing: the field zone doubles, perimeter ×1 —
+    // with no enhancement band the whole area is field, so same as at(8).
+    expect(at(8, 12)).toBe(3);
   });
 });
 
@@ -2878,6 +2988,29 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
     );
     // Round(2500/16) = 156 × 4 = 624 (banker's: 156.25 → 156)
     expect(four).toBeCloseTo(8 + (0.342 / 60) * 624, 6);
+  });
+
+  it("§22.1 Slip Sheets (tile 1) material is DURO-LAST material (dMaterial[6] inside M0), not Underlayment", () => {
+    const r = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer("Duro-Fold")] }] }),
+      uAdmin,
+    );
+    // 2500 × 1.06 × $0.30 = $795 slip sheet
+    expect(r.slipSheetMaterial).toBeCloseTo(795, 2);
+    expect(r.inputs.materialUnderlayment).toBe(0);
+    expect(r.inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 795, 1);
+    const est = computeEstimate(r.inputs);
+    expect(est.money.dTotals[6]).toBe(0);
+    // …and it is inside the 5% prepay base.
+    const prepay = computeEstimate({ ...r.inputs, prepayDiscount: true }).money.dTotals[1]!;
+    expect(prepay).toBeCloseTo(-Math.round((MWO * 1.23 + 795) * 0.05 * 100) / 100, 0);
+    // A tile-2 board stays in Underlayment (dTotals[6]).
+    const iso = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer('1/2" ISO')] }] }),
+      uAdmin,
+    );
+    expect(iso.slipSheetMaterial).toBe(0);
+    expect(iso.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
   });
 
   it("adhered layers: substrate derived from the deck / layer below; labor per 2500 on field+perim", () => {
