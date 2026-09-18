@@ -131,6 +131,15 @@ function refRow(r: RawMetalRow): MetalsRefRow | null {
  * Gutter seed rows are keyed `"DX-4 (A=6\" B=4\" C=4\") — «part»"`; styles are listed as
  * "DX-Style" and sizes as `"A = 6\" B = 4\" C = 4\""`. Match on the style prefix and the
  * whitespace-stripped dimension triple.
+ *
+ * ⚠ OPEN FLAG — docs/legacy-money-parity.md §22.10. Legacy binds an accessory to its gutter by a
+ * DATA COLUMN (`GutterAccs.readRefTable` 0xa2730: rows with `GutterID == gutter.GutterID`, then
+ * rows with `GutterID == -1` = shared on every gutter). The captured screen has no such column, so
+ * the relationship is recovered from the description here. Consequences to keep in mind before
+ * touching this: a row that does NOT match falls through to `ref.gutters.shared` and bills on
+ * EVERY gutter (silently), and a row whose style/size is not in the pickers is dropped. The em
+ * dash and the `STYLE-N` prefix are load-bearing. Today only "Gutter Sealant" and "Rivets (250
+ * count)" fall through, and both belong there — see §22.10 for the fix options.
  */
 const GUTTER_ROW_RE = /^([A-Z]+)-\d+\s*\(([^)]*)\)\s*—\s*(.+)$/;
 
@@ -161,7 +170,9 @@ export function buildMetalsRefData(data: MetalsScreenData | null): MetalsRefData
     if (!row) continue;
     const m = GUTTER_ROW_RE.exec(row.description);
     if (!m) {
-      // Style-independent rows (Gutter Sealant, Rivets).
+      // Style-independent rows (Gutter Sealant, Rivets) — legacy `GutterID == -1`. NOTE: this is
+      // also where a MIS-NAMED per-style row lands, and it would then bill on every gutter with
+      // no warning (open flag, docs §22.10).
       ref.gutters.shared.push(row);
       continue;
     }

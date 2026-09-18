@@ -2298,9 +2298,10 @@ below) → +Infinity — the web warns and bills 0 there.
   the Labor › Adhesive Times grid. Edits there change the PRICE only (the editor now says so).
   Wiring the grid to the engine, or replacing it with editors for those tables, is a follow-up.
 - No per-bid underlayment $/sqft override (legacy `frmULSqFtPopUp` → `DualValue.CustomValue`).
-- Metals: any gutter row whose description lacks the `STYLE-N (dims) — part` prefix is treated as
-  a shared accessory on every gutter (admin free-text risk); D/L/E/M-Style gutters have no priced
-  rows in the seed (vendor-DB only).
+- Metals gutter accessories: the web infers "shared across all gutters" from the row's
+  DESCRIPTION because the seeded screen has no `GutterID` column — an admin-entry hazard, not a
+  money bug today. Full note + fix options in **§22.10**. (Separately: D/L/E/M-Style gutters have
+  no priced rows in the seed — vendor-DB only, needs a capture.)
 - Uncaptured prices (bill $0, already flagged): Duro-Last stripping (lookup cat 5), pitch-pan
   Filler, drip-edge corners / clips, Rock Ply pipe stacks, no Rock Ply corner column,
   `non_dl:others` rows, Dark Gray / Terra Cotta term-bar "Additional" boxes (legacy prices them on
@@ -2339,3 +2340,49 @@ below) → +Infinity — the web warns and bills 0 there.
   `Estimate..ctor`), so the column follows the bid-level attachment — `cMechanicalSystem`
   (typedef 0x3d) → column 2, `AdheredSystem` (0x31) → column 3. The web already does this;
   verified, no change.
+
+### 22.10 FLAG (open, 2026-09-18) — gutter accessories are routed by description text, not a `GutterID`
+
+**Not a live money bug.** Every seeded row routes correctly today. This is recorded because the
+mechanism is fragile in a way that fails SILENTLY and only bites the next person who edits the
+Exceptional Metals screen.
+
+**Legacy.** `GutterAccs.readRefTable` (rva 0xa2730) fills a gutter's accessory list in two passes
+over `oRefGutterAccs`: first every row whose **`GutterAcc.GutterID` equals that gutter's own
+GutterID**, then every row whose **`GutterID` is `-1`** (`ldc.i4.m1`) — the explicit
+"style-independent, append to every gutter" marker. The relationship is a DATA COLUMN; the row's
+description is never parsed.
+
+**Web.** The captured `duro_last:exceptional_metals` screen carries no `GutterID`, so
+`buildMetalsRefData` (`src/lib/engine/metals.ts`) recovers the relationship from the description
+with `GUTTER_ROW_RE` = `^([A-Z]+)-\d+\s*\(([^)]*)\)\s*—\s*(.+)$`, i.e. rows shaped
+`DX-4 (A=6" B=4" C=4") — End Caps (Left)`. A match binds the row to that style + size; **anything
+that does not match falls through to `ref.gutters.shared` and is billed on EVERY gutter**
+(`computeMetals` bills `[...refEntry.accessories, ...ref.gutters.shared]` per gutter).
+
+**Current state (live DB, verified 2026-09-18).** Exactly two gutter rows fall through, and both
+are genuinely style-independent, so the fallback is doing the right thing:
+
+| Row | Unit cost |
+| --- | --- |
+| Gutter Sealant | 7.95 |
+| Rivets (250 count) | 50.00 |
+
+**The hazard.** The admin grid (`exceptional-metals-editor.tsx`) takes free text. An admin adding
+a per-style accessory without the exact prefix — `End Caps (Left)` instead of
+`DX-4 (A=6" B=4" C=4") — End Caps (Left)` — gets that cost added to every gutter on every bid,
+with no warning. The em dash (—, not a hyphen) and the `STYLE-N` prefix are both load-bearing.
+The inverse also fails quietly: a row whose style or size is not in the pickers is dropped
+(`if (!style || !size) continue;`).
+
+**Fix options, cheapest first.**
+1. Keep the parse; treat ONLY a known allow-list of style-independent part names (Gutter Sealant,
+   Rivets…) as shared, and surface anything else unmatched as an admin warning instead of
+   silently billing it everywhere.
+2. Add an explicit `shared: true` (or a `gutter_id` mirroring the legacy column) to the row shape,
+   default it from the current parse in a migration, and have the editor expose it as a checkbox.
+   This is the faithful restoration of the legacy `GutterID = -1`.
+3. Validate in the editor at save time: warn when a new gutter row matches neither the
+   `STYLE-N (dims) — part` shape nor the shared allow-list.
+
+Option 2 is the real fix; option 1 removes the silent-mispricing risk in a few lines.
