@@ -1824,8 +1824,10 @@ too (the web's bids page / proposal).
   applied deck/thickness/color/sheet). Legacy additionally skips sections whose deck is
   incompatible or whose fastener spacing lookup fails and shows a before/after comparison
   (`frmRSComparison`); the web applies unconditionally after the same confirmation text.
-- **Defaults persisted**: `sectionDefaults.designTable`, `parapetDefaults` (Type / Color / Wall
-  Type → new parapets; "Apply to Existing Parapets"), `underlaymentAttachmentDefault` (seeds the
+- **Defaults persisted**: `sectionDefaults.designTable`, `parapetDefaults` (Roof System /
+  Attached With / adhesive / Type / Color / Wall Type → new parapets; "Apply to Existing
+  Parapets" — parapets may run a DIFFERENT membrane than the roof sections, as the legacy "5.
+  Parapets Material" group allows; the Setup fields were read-only until 2026-09-18), `underlaymentAttachmentDefault` (seeds the
   Underlayment step's attachment picker), `buildingType`, `startDate`, `maxWindExpected`;
   client/job-site fields split into the legacy parts (`clientAddress2 / clientCity / clientState /
   clientZip / phoneExt / fax / projectAddress2 / jobCity / jobState / jobZip / shipTo`), with

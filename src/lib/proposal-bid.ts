@@ -141,6 +141,11 @@ export interface SavedBidState {
   };
   /** Legacy Home "5. Parapets Material" + "2. Wall Type" defaults for NEW parapets. */
   parapetDefaults?: {
+    /** Legacy Home "5. Parapets Material" Roof System / Attached With / adhesive for NEW walls
+     *  (absent = the bid's roof-section material). Parapets can run a different system. */
+    roofSystem?: string;
+    attachment?: "mechanical" | "adhered";
+    membraneAdhesiveName?: string;
     thicknessMil?: number;
     color?: string;
     /** 1 = Wood or Metal, 4 = Brick or Concrete (Parapet.WallType). */

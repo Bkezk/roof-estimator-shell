@@ -271,7 +271,9 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
   const { parapets, onChange, admin } = p;
   const i = Math.min(p.selected, parapets.length - 1);
   const w = parapets[i];
-  const [showMembrane, setShowMembrane] = useState(false);
+  // Open by default: walls often run a different membrane than the roof, and a collapsed
+  // expander read as "locked to the roof material".
+  const [showMembrane, setShowMembrane] = useState(true);
   const [showLabor, setShowLabor] = useState(false);
   const [laborPct, setLaborPct] = useState(0);
   const [copyFrom, setCopyFrom] = useState("");

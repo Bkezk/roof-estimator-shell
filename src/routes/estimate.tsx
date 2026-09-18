@@ -673,6 +673,17 @@ function EstimatePage() {
     return [...new Set(Object.keys(admin.labor).map((k) => k.split("|")[0]!))];
   }, [admin]);
 
+  /** Attachments the admin labor combos offer for a roof system (parapets may differ from the roof). */
+  const attachmentsForSystem = (rs: string): Array<"mechanical" | "adhered"> => {
+    const out: Array<"mechanical" | "adhered"> = [];
+    for (const k of Object.keys(admin?.labor ?? {})) {
+      const [sys, att] = k.split("|");
+      if (sys !== rs) continue;
+      if (att === "mechanical") out.push("mechanical");
+      else if (att === "adhesive" || att === "adhered") out.push("adhered");
+    }
+    return out.length ? out : ["mechanical"];
+  };
   const comboKey = `${roofSystem}|${attachment === "adhered" ? "adhesive" : "mechanical"}`;
   const laborTable = admin?.labor[comboKey];
   const colorOptions = useMemo(() => {
@@ -1700,24 +1711,72 @@ function EstimatePage() {
                 </div>
               </LegacyGroup>
               <LegacyGroup title="5. Parapets Material">
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Parapets may run a different membrane than the roof sections. These are the
+                  defaults for NEW walls (and &quot;Apply to Existing Parapets&quot;); each
+                  wall&apos;s own Membrane Options on the Parapets step can still differ.
+                </p>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Field label="Roof System">
-                    <Input
-                      value={roofSystem}
-                      disabled
-                      title="Parapets follow the bid roof system"
+                    <PickOne
+                      value={parapetDefaults.roofSystem ?? roofSystem}
+                      options={
+                        systemOptions.includes(parapetDefaults.roofSystem ?? roofSystem)
+                          ? systemOptions
+                          : [parapetDefaults.roofSystem ?? roofSystem, ...systemOptions]
+                      }
+                      onChange={(v) =>
+                        setParapetDefaults((p) => {
+                          const nx = { ...p };
+                          if (v === roofSystem) delete nx.roofSystem;
+                          else nx.roofSystem = v;
+                          const atts = attachmentsForSystem(v);
+                          const cur = nx.attachment ?? attachment;
+                          if (!atts.includes(cur)) nx.attachment = atts[0]!;
+                          return nx;
+                        })
+                      }
                     />
                   </Field>
                   <Field label="Attached With">
-                    <Input
+                    <PickOne
                       value={
-                        attachment === "adhered"
+                        (parapetDefaults.attachment ?? attachment) === "adhered"
                           ? "(No Tab) Fully Adhered"
                           : "Mechanically Fastened"
                       }
-                      disabled
+                      options={attachmentsForSystem(parapetDefaults.roofSystem ?? roofSystem).map(
+                        (a) =>
+                          a === "adhered" ? "(No Tab) Fully Adhered" : "Mechanically Fastened",
+                      )}
+                      onChange={(v) =>
+                        setParapetDefaults((p) => {
+                          const nx = { ...p };
+                          const att = v === "(No Tab) Fully Adhered" ? "adhered" : "mechanical";
+                          if (att === attachment && nx.roofSystem === undefined)
+                            delete nx.attachment;
+                          else nx.attachment = att;
+                          return nx;
+                        })
+                      }
                     />
                   </Field>
+                  {(parapetDefaults.attachment ?? attachment) === "adhered" && (
+                    <Field label="Attached To">
+                      <PickOne
+                        value={parapetDefaults.membraneAdhesiveName ?? membraneAdhesive}
+                        options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                        onChange={(v) =>
+                          setParapetDefaults((p) => {
+                            const nx = { ...p };
+                            if (v === membraneAdhesive) delete nx.membraneAdhesiveName;
+                            else nx.membraneAdhesiveName = v;
+                            return nx;
+                          })
+                        }
+                      />
+                    </Field>
+                  )}
                   <Field label="Type">
                     <PickOne
                       value={
@@ -1766,6 +1825,15 @@ function EstimatePage() {
                             ? { wallType: parapetDefaults.wallType }
                             : {}),
                         };
+                        // Roof System / Attached With / adhesive: the defaults when they differ
+                        // from the bid material, else back to "bid default".
+                        if (parapetDefaults.roofSystem) nx.roofSystem = parapetDefaults.roofSystem;
+                        else delete nx.roofSystem;
+                        if (parapetDefaults.attachment) nx.attachment = parapetDefaults.attachment;
+                        else delete nx.attachment;
+                        if (parapetDefaults.membraneAdhesiveName)
+                          nx.membraneAdhesiveName = parapetDefaults.membraneAdhesiveName;
+                        else delete nx.membraneAdhesiveName;
                         if (parapetDefaults.thicknessMil !== undefined)
                           nx.thicknessMil = parapetDefaults.thicknessMil;
                         else delete nx.thicknessMil;
@@ -2945,6 +3013,15 @@ function EstimatePage() {
                     // Legacy Parapet ctor: a new wall seeds AdjustLabor from Template.ParapetsLabor.
                     adjustLaborPct: seedParapetAdjust(templateDeltas),
                     wallType: parapetDefaults.wallType ?? 4,
+                    ...(parapetDefaults.roofSystem
+                      ? { roofSystem: parapetDefaults.roofSystem }
+                      : {}),
+                    ...(parapetDefaults.attachment
+                      ? { attachment: parapetDefaults.attachment }
+                      : {}),
+                    ...(parapetDefaults.membraneAdhesiveName
+                      ? { membraneAdhesiveName: parapetDefaults.membraneAdhesiveName }
+                      : {}),
                     ...(parapetDefaults.thicknessMil !== undefined
                       ? { thicknessMil: parapetDefaults.thicknessMil }
                       : {}),
