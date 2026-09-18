@@ -2302,10 +2302,10 @@ below) → +Infinity — the web warns and bills 0 there.
   DESCRIPTION because the seeded screen has no `GutterID` column — an admin-entry hazard, not a
   money bug today. Full note + fix options in **§22.10**. (Separately: D/L/E/M-Style gutters have
   no priced rows in the seed — vendor-DB only, needs a capture.)
-- Uncaptured prices (bill $0, already flagged): Duro-Last stripping (lookup cat 5), pitch-pan
-  Filler, drip-edge corners / clips, Rock Ply pipe stacks, no Rock Ply corner column,
-  `non_dl:others` rows, Dark Gray / Terra Cotta term-bar "Additional" boxes (legacy prices them on
-  the White bar).
+- Uncaptured prices (bill $0, already flagged): pitch-pan Filler, drip-edge corners / clips,
+  Rock Ply pipe stacks, no Rock Ply corner column, `non_dl:others` rows (see §22.11 — they are
+  not reachable from either legacy UI), Dark Gray / Terra Cotta term-bar "Additional" boxes
+  (legacy prices them on the White bar). (Duro-Last stripping is now priced — §22.9.)
 - Membrane high-wind upcharge column follows the DEFAULT section's attachment class (mechanical /
   adhered; any other class → 0) — the web keys the bid-level attachment.
 - Flute filler "Attached With": legacy keeps the combo on a quote layer but it never touches the
@@ -2386,3 +2386,31 @@ The inverse also fails quietly: a row whose style or size is not in the pickers 
    `STYLE-N (dims) — part` shape nor the shared allow-list.
 
 Option 2 is the real fix; option 1 removes the silent-mispricing risk in a few lines.
+
+### 22.11 Where the two `non_dl:others` rows live in the legacy app (answered 2026-09-18)
+
+Asked while hunting for their prices. Short answer: **neither legacy UI exposes them**, so the
+values are only recoverable by running a bid.
+
+- **Bid-Advantage Management (admin).** The "Non Duro-Last Pricing" branch has exactly eight
+  nodes — Roof Edge Blocking, Parapet Wall Blocking, Structural Deck Materials, Sheet Metal Work,
+  Masonry, Subcontractors, 3rd Party Services, Preset Custom Applications (admin capture
+  2026-08-31 114217, tree fully scrolled). There is **no Others node**; the eight match the eight
+  `non_dl:*` screens we seeded, which is why `non_dl:others` was never captured.
+- **Estimator.** `frmNonDL.RefreshSummary` (0x67f44) DOES write the Others collection into
+  `lvSummary` — one line per row with **Description, Qty and MaterialCost** (the two labor columns
+  are hard-coded 0). But `btnEditNDL_Click` (0x688d0) and `lvSummary_DoubleClick` (0x68768)
+  dispatch on the category text and handle only the eight named categories, so the Others line
+  cannot be opened. `frmNonDLReconcile`, the one form that renders these rows in an editable grid,
+  is **never instantiated anywhere in the shipped Estimator.exe** (full scan) — dead code, like
+  the `bOverride` material-total (§14.2) and Peel Stop.
+- **Installer.** `SqlScript.xml` only renames row 1 (`UPDATE ref_ndlOthers SET Description =
+  'DL Approved Slipsheet' WHERE ndlOtherID = 1`, line 3323). No INSERT, no price. The rows and
+  their unit costs are pre-existing vendor-database content.
+
+**Capture route (the only one).** In the legacy app build a bid whose geometry fires both
+auto-quantities — a parapet or curb with the polyethylene option on (row 1 =
+`Ceil(Parapets.PolyethyleneSqFt + Curbs.PolyethyleneSqFt)`) and a curb with insulation on
+(row 2 = `Ceil(Curbs.ISO_SqFt)`) — then read the two Others lines on the Non-Duro-Last screen's
+summary list. Unit cost = Material ÷ Qty. The same lines also reveal **row 2's real description**;
+ours ("ISO (Curb Insulation Sq Ft)") is a stand-in, since the installer names only row 1.
