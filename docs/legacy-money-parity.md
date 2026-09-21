@@ -2848,3 +2848,36 @@ A shared `NumberField` (`src/components/ui/number-field.tsx`) keeps its own text
 selects the current value on focus (typing replaces the 0), clamps to `min`, and hands the
 parent only finite numbers. Wired into the Sections / Curbs / Parapets / Metals / Non-DL screens
 and every numeric box on the estimate route (rates, markup, per diem, adjust %, quantities).
+
+### 22.23 Setup "Attached With" lists and the greyed underlayment default (2026-09-21)
+
+Owner: on Setup the material choices should change with the roof system, and Underlayment
+Attached With should grey out, as legacy does (Duro-Tuff lists Duro-Tuff Fasteners / Water Based
+/ Solvent Based; Duro-Bond lists Duro-Bond Plates/Fasteners only and greys the underlayment combo).
+
+- **Attached With = one combo, per system.** `frmHome.LoadAttachmentSystem` (0x57eec),
+  `frmRoofSection.LoadAttachmentSystem` (0x94348) and the parapet variant fill the combo with
+  the roof system's `MechanicalSystem` (LongName: 1 Duro-Last Fasteners, 2 Duro-Bond
+  Plates/Fasteners, 3 Duro-Tuff Fasteners, 4 Duro-Roof Fasteners; Duro-Fleece has none) and
+  then every `AdheredSystem` with an `RSAdhesiveCoverage` row for that system (wall coverage for
+  parapets). The captured coverage tables have rows for systems 1, 3 and 5 only, so Duro-Bond
+  and Duro-Roof show their fasteners alone. `attachedWithOptions(admin, system, scope)` builds
+  that list; the Setup roof and parapet defaults, the Sections screen and the Parapets screen
+  now use it in place of the old "Mechanically Fastened / (No Tab) Fully Adhered" pair plus a
+  separate adhesive pick (picking an adhesive sets attachment = adhered + that adhesive). The
+  legacy deck-compatibility filter (`CompatibleDeckTypes`, "Incompatible DeckType") is DB-resident
+  and uncaptured — not applied.
+- **Underlayment Attached With.** `frmHome.LoadDefaultUnderlaymentAttachment` (0x5bcd0): "None"
+  first; when the field attachment is `durobondmech` the combo is DISABLED; otherwise Duro-Last
+  Fasteners is added, and the insulation adhesives (the "insulations" group's
+  AdhesivesAllowedUnder) only when the membrane attachment is an `AdheredSystem`. The web Setup
+  combo now follows that: None / Mechanically Fastened / Adhesive (adhesive only on an adhered
+  membrane), disabled and showing None on Duro-Bond. The stored default is left untouched on
+  Duro-Bond so the Underlayment screen keeps "Section Fastened w/ Durobond" as its first / default
+  entry (§22.17), which is where legacy makes that choice.
+- **Curb ISO material (owner's second question).** Legacy prices curb insulation from
+  `ref_ndl` Others RefID 2 ("ISO (Curb Insulation Sq Ft)", $/sq ft × Ceil(Curbs.ISO_SqFt)), not
+  from the Underlayment board price. The web does the same (`nonDlCalcQuantities` → others
+  RefID 2 → unit cost × qty). The live `non_dl:others` row still carries Price 0 (seeded
+  `_uncaptured`; the engine only warns while price AND labor are 0) — enter the $/sq ft on
+  Admin › Non-DL › Others › "ISO (Curb Insulation Sq Ft)". No engine change.

@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
-import { adhesiveOptionsForSystem } from "@/lib/engine/adapters";
+import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { CHECK_PULL, legacyLapOptions } from "@/lib/engine/lap-options";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
@@ -725,33 +725,35 @@ export function SectionsScreen(p: SectionsScreenProps) {
               />
             </Field>
             <Field label="Attached With">
-              <Pick
-                className="w-[190px]"
-                value={ATTACHMENT_LABEL[sys.attachment]}
-                options={attachmentsFor(sys.roofSystem).map((a) => ATTACHMENT_LABEL[a])}
-                onChange={(v) => {
-                  const att = (Object.keys(ATTACHMENT_LABEL) as Attachment[]).find(
-                    (k) => ATTACHMENT_LABEL[k] === v,
-                  );
-                  if (att) updWithSpacing({ roofSystem: sys.roofSystem, attachment: att });
-                }}
-              />
+              {(() => {
+                // Legacy frmRoofSection.LoadAttachmentSystem (0x94348): the system's fasteners
+                // entry + the adhesives with coverage rows for it (Duro-Bond: fasteners only).
+                const opts = attachedWithOptions(admin, sys.roofSystem, "roof");
+                const cur = attachedWithLabel(opts, sys.attachment, sys.adhesiveName);
+                return (
+                  <Pick
+                    className="w-[220px]"
+                    value={cur}
+                    options={
+                      opts.some((o) => o.label === cur)
+                        ? opts.map((o) => o.label)
+                        : [cur, ...opts.map((o) => o.label)]
+                    }
+                    onChange={(v) => {
+                      const o = opts.find((x) => x.label === v);
+                      if (!o) return;
+                      updWithSpacing({
+                        roofSystem: sys.roofSystem,
+                        attachment: o.attachment,
+                        ...(o.attachment === "adhered"
+                          ? { membraneAdhesiveName: o.adhesiveName }
+                          : {}),
+                      });
+                    }}
+                  />
+                );
+              })()}
             </Field>
-            {sys.attachment === "adhered" && (
-              <Field label="Attached To (adhesive)">
-                <Pick
-                  className="w-[190px]"
-                  value={sys.adhesiveName}
-                  options={(() => {
-                    const o = adhesiveOptionsForSystem(admin, sys.roofSystem, "roof");
-                    return sys.adhesiveName && !o.includes(sys.adhesiveName)
-                      ? [sys.adhesiveName, ...o]
-                      : o;
-                  })()}
-                  onChange={(v) => upd({ membraneAdhesiveName: v })}
-                />
-              </Field>
-            )}
             <Field label="Type (mil)">
               <Pick
                 className="w-[90px]"

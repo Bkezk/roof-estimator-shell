@@ -12,7 +12,11 @@
 import { useState } from "react";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
-import { adhesiveOptionsForSystem, parapetBandForVertical } from "@/lib/engine/adapters";
+import {
+  attachedWithLabel,
+  attachedWithOptions,
+  parapetBandForVertical,
+} from "@/lib/engine/adapters";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
   parapetLaborBand,
@@ -713,35 +717,36 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     }}
                   />
                 </Field>
-                <Field label="Attachment">
-                  <Pick
-                    className="w-[180px]"
-                    value={ATTACHMENT_LABEL[ps.attachment]}
-                    options={attachmentsFor(ps.roofSystem).map((a) => ATTACHMENT_LABEL[a])}
-                    onChange={(v) => {
-                      const att = (Object.keys(ATTACHMENT_LABEL) as Attachment[]).find(
-                        (k) => ATTACHMENT_LABEL[k] === v,
-                      );
-                      if (att) upd({ roofSystem: ps.roofSystem, attachment: att });
-                    }}
-                  />
+                <Field label="Attached With">
+                  {(() => {
+                    // Legacy frmParapets: the wall system's fasteners entry + its WallAdhesives
+                    // (wall coverage > 0) in one combo.
+                    const opts = attachedWithOptions(admin, ps.roofSystem, "wall");
+                    const cur = attachedWithLabel(opts, ps.attachment, ps.adhesiveName);
+                    return (
+                      <Pick
+                        className="w-[220px]"
+                        value={cur}
+                        options={
+                          opts.some((o) => o.label === cur)
+                            ? opts.map((o) => o.label)
+                            : [cur, ...opts.map((o) => o.label)]
+                        }
+                        onChange={(v) => {
+                          const o = opts.find((x) => x.label === v);
+                          if (!o) return;
+                          upd({
+                            roofSystem: ps.roofSystem,
+                            attachment: o.attachment,
+                            ...(o.attachment === "adhered"
+                              ? { membraneAdhesiveName: o.adhesiveName }
+                              : {}),
+                          });
+                        }}
+                      />
+                    );
+                  })()}
                 </Field>
-                {ps.attachment === "adhered" && (
-                  <Field label="Adhesive">
-                    <Pick
-                      className="w-[180px]"
-                      value={ps.adhesiveName}
-                      options={(() => {
-                        // Legacy frmParapets lists RoofSystem.WallAdhesives (wall coverage > 0).
-                        const o = adhesiveOptionsForSystem(admin, ps.roofSystem, "wall");
-                        return ps.adhesiveName && !o.includes(ps.adhesiveName)
-                          ? [ps.adhesiveName, ...o]
-                          : o;
-                      })()}
-                      onChange={(v) => upd({ membraneAdhesiveName: v })}
-                    />
-                  </Field>
-                )}
                 <Field label="Mil">
                   <Pick
                     className="w-[120px]"

@@ -1880,7 +1880,15 @@ export function adhesiveOptionsForSystem(
   const rsId = LEGACY_RS_ID_BY_NAME[roofSystem];
   const byName = rsId !== undefined ? admin?.membraneAdhesives?.[rsId] : undefined;
   if (!byName) return [...DEFAULT_ADHESIVE_OPTIONS];
-  const names = Object.entries(byName)
+  const names = adhesiveNamesWithCoverage(byName, scope);
+  return names.length ? names : [...DEFAULT_ADHESIVE_OPTIONS];
+}
+
+function adhesiveNamesWithCoverage(
+  byName: Record<string, MembraneAdhesiveCoverage>,
+  scope: "roof" | "wall",
+): string[] {
+  return Object.entries(byName)
     .filter(([, cov]) =>
       scope === "wall"
         ? cov.wallCoverage !== null && cov.wallCoverage > 0
@@ -1891,7 +1899,68 @@ export function adhesiveOptionsForSystem(
           cov.wallCoverage !== null,
     )
     .map(([name]) => name);
-  return names.length ? names : [...DEFAULT_ADHESIVE_OPTIONS];
+}
+
+/**
+ * Legacy `MechanicalSystem.LongName` by RoofSystemID (installer seed): the one mechanical entry
+ * each system offers in its "Attached With" combo. Duro-Fleece (5) has no mechanical system.
+ */
+export const LEGACY_MECH_SYSTEM_LONG_NAME: Record<number, string> = {
+  1: "Duro-Last Fasteners",
+  2: "Duro-Bond Plates/Fasteners",
+  3: "Duro-Tuff Fasteners",
+  4: "Duro-Roof Fasteners",
+};
+
+export interface AttachedWithOption {
+  label: string;
+  attachment: "mechanical" | "adhered";
+  /** The adhesive LongName for an adhered entry; "" for the mechanical one. */
+  adhesiveName: string;
+}
+
+/**
+ * The legacy "Attached With" list (`frmHome.LoadAttachmentSystem` 0x57eec, `frmRoofSection.
+ * LoadAttachmentSystem` 0x94348, `frmHome.LoadParapetAttachmentSystem`): the roof system's ONE
+ * mechanical system (its LongName), then every `AdheredSystem` whose ShortName has an
+ * `RSAdhesiveCoverage` row for that system (wall coverage for parapets, §22.23). Duro-Bond and
+ * Duro-Roof have no coverage rows, so they list only their fasteners; Duro-Fleece lists
+ * adhesives only. With no adhesive tables in the snapshot at all, the legacy default pair is
+ * offered for the systems that carry it (1 / 3 / 5) so an old bid still has a choice.
+ */
+export function attachedWithOptions(
+  admin: Pick<EngineAdminData, "membraneAdhesives"> | null | undefined,
+  roofSystem: string,
+  scope: "roof" | "wall",
+): AttachedWithOption[] {
+  const rsId = LEGACY_RS_ID_BY_NAME[roofSystem];
+  const out: AttachedWithOption[] = [];
+  const mech = rsId !== undefined ? LEGACY_MECH_SYSTEM_LONG_NAME[rsId] : undefined;
+  if (mech) out.push({ label: mech, attachment: "mechanical", adhesiveName: "" });
+  const tables = admin?.membraneAdhesives;
+  const byName = rsId !== undefined ? tables?.[rsId] : undefined;
+  const names = byName
+    ? adhesiveNamesWithCoverage(byName, scope)
+    : tables === undefined && (rsId === 1 || rsId === 3 || rsId === 5)
+      ? [...DEFAULT_ADHESIVE_OPTIONS]
+      : [];
+  for (const name of names) out.push({ label: name, attachment: "adhered", adhesiveName: name });
+  if (out.length === 0) {
+    out.push({ label: "Mechanically Fastened", attachment: "mechanical", adhesiveName: "" });
+  }
+  return out;
+}
+
+/** The combo text for a (attachment, adhesive) pair — the saved adhesive even when unlisted. */
+export function attachedWithLabel(
+  options: AttachedWithOption[],
+  attachment: "mechanical" | "adhered",
+  adhesiveName: string,
+): string {
+  if (attachment === "mechanical") {
+    return options.find((o) => o.attachment === "mechanical")?.label ?? "Mechanically Fastened";
+  }
+  return adhesiveName || options.find((o) => o.attachment === "adhered")?.label || "Adhered";
 }
 
 export interface RawAdminData {

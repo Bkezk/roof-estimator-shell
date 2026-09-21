@@ -34,6 +34,8 @@ import {
   type LaborCombo,
   applyAdhesivesScreenCoverage,
   adhesiveOptionsForSystem,
+  attachedWithLabel,
+  attachedWithOptions,
 } from "./adapters";
 import { freightStepped } from "./pricing";
 import { setupTime, inspectionTime } from "./quantities";
@@ -1250,6 +1252,74 @@ describe("§22.9 applyAdhesivesScreenCoverage — the admin Adhesives grid feeds
     });
     expect(r.applied).toBe(0);
     expect(r.membraneAdhesives).toEqual(seedMembrane);
+  });
+});
+
+describe("attachedWithOptions (legacy Home / Section / Parapet 'Attached With' combos, §22.23)", () => {
+  const admin = {
+    membraneAdhesives: {
+      1: {
+        "Water Based Adhesive": {
+          byDeckName: { Wood: 700 },
+          underlaymentUniform: 700,
+          wallCoverage: 350,
+        },
+        "Solvent Based Adhesive": {
+          byDeckName: { Wood: 300 },
+          underlaymentUniform: 300,
+          wallCoverage: 300,
+        },
+      },
+      3: {
+        "Water Based Adhesive": {
+          byDeckName: { Wood: 700 },
+          underlaymentUniform: 700,
+          wallCoverage: 350,
+        },
+        "Solvent Based Adhesive": {
+          byDeckName: { Wood: 300 },
+          underlaymentUniform: 300,
+          wallCoverage: 300,
+        },
+      },
+      5: {
+        "Duro-Grip Adhesive(CR-20)": {
+          byDeckName: { Wood: 100 },
+          underlaymentUniform: null,
+          wallCoverage: null,
+        },
+      },
+    },
+  };
+  it("Duro-Tuff: its fasteners then the two adhesives; Duro-Bond: plates/fasteners only", () => {
+    expect(attachedWithOptions(admin, "Duro-Tuff", "roof").map((o) => o.label)).toEqual([
+      "Duro-Tuff Fasteners",
+      "Water Based Adhesive",
+      "Solvent Based Adhesive",
+    ]);
+    expect(attachedWithOptions(admin, "Duro-Bond", "roof").map((o) => o.label)).toEqual([
+      "Duro-Bond Plates/Fasteners",
+    ]);
+    // No mechanical system for Duro-Fleece: adhesives only.
+    expect(attachedWithOptions(admin, "Duro-Fleece", "roof")).toEqual([
+      {
+        label: "Duro-Grip Adhesive(CR-20)",
+        attachment: "adhered",
+        adhesiveName: "Duro-Grip Adhesive(CR-20)",
+      },
+    ]);
+    // Walls list WallAdhesives (wall coverage > 0) only.
+    expect(attachedWithOptions(admin, "Duro-Fleece", "wall")).toEqual([
+      { label: "Mechanically Fastened", attachment: "mechanical", adhesiveName: "" },
+    ]);
+  });
+  it("label resolves the saved pair and keeps an unlisted adhesive visible", () => {
+    const opts = attachedWithOptions(admin, "Duro-Last", "roof");
+    expect(attachedWithLabel(opts, "mechanical", "")).toBe("Duro-Last Fasteners");
+    expect(attachedWithLabel(opts, "adhered", "Solvent Based Adhesive")).toBe(
+      "Solvent Based Adhesive",
+    );
+    expect(attachedWithLabel(opts, "adhered", "OlyBond500 SpotShot")).toBe("OlyBond500 SpotShot");
   });
 });
 

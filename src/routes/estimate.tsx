@@ -104,6 +104,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { EngineAdminData } from "@/lib/engine/adapters";
+import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
 import { listEstimatorNames } from "@/lib/auth.functions";
@@ -1673,31 +1674,28 @@ function EstimatePage() {
                     </Select>
                   </Field>
                   <Field label="Attached With">
-                    <Select
-                      value={attachment}
-                      onValueChange={(v) => setAttachment(v as "mechanical" | "adhered")}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="mechanical">Mechanically Fastened</SelectItem>
-                        <SelectItem value="adhered">(No Tab) Fully Adhered</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {(() => {
+                      // Legacy frmHome.LoadAttachmentSystem: the system's fasteners entry plus
+                      // the adhesives it has coverage rows for (Duro-Bond: fasteners only).
+                      const opts = attachedWithOptions(admin, roofSystem, "roof");
+                      const cur = attachedWithLabel(opts, attachment, membraneAdhesive);
+                      return (
+                        <PickOne
+                          value={cur}
+                          options={withCurrent(
+                            opts.map((o) => o.label),
+                            cur,
+                          )}
+                          onChange={(v) => {
+                            const o = opts.find((x) => x.label === v);
+                            if (!o) return;
+                            setAttachment(o.attachment);
+                            if (o.attachment === "adhered") setMembraneAdhesive(o.adhesiveName);
+                          }}
+                        />
+                      );
+                    })()}
                   </Field>
-                  {attachment === "adhered" && (
-                    <Field label="Attached To">
-                      <PickOne
-                        value={membraneAdhesive}
-                        options={withCurrent(
-                          adhesiveOptionsForSystem(admin, roofSystem, "roof"),
-                          membraneAdhesive,
-                        )}
-                        onChange={setMembraneAdhesive}
-                      />
-                    </Field>
-                  )}
                   <Field label="Type">
                     <PickOne
                       value={String(sectionDefaults.thickness)}
@@ -1750,15 +1748,34 @@ function EstimatePage() {
               </LegacyGroup>
               <LegacyGroup title="4. Underlayment Attached With">
                 <div className="flex flex-wrap items-center gap-3">
-                  <PickOne
-                    value={U_ATTACH_LABEL[underlaymentAttachmentDefault]}
-                    options={uAttachOptions(roofSystem)}
-                    onChange={(v) => {
-                      const next = uAttachFromLabel(v);
-                      setUnderlaymentAttachmentDefault(next);
-                      setUAttach(next);
-                    }}
-                  />
+                  {(() => {
+                    // Legacy frmHome.LoadDefaultUnderlaymentAttachment (0x5bcd0): "None" first;
+                    // on a Duro-Bond membrane the combo is DISABLED (the board is held by the
+                    // induction plates — the Underlayment screen lists "Section Fastened w/
+                    // Durobond" there); otherwise Duro-Last Fasteners, plus the insulation
+                    // adhesives only when the MEMBRANE itself is adhered.
+                    const isBond = roofSystem === "Duro-Bond";
+                    const opts = isBond
+                      ? [U_ATTACH_LABEL.none]
+                      : [
+                          U_ATTACH_LABEL.none,
+                          U_ATTACH_LABEL.mechanical,
+                          ...(attachment === "adhered" ? [U_ATTACH_LABEL.adhesive] : []),
+                        ];
+                    const cur = U_ATTACH_LABEL[underlaymentAttachmentDefault];
+                    return (
+                      <PickOne
+                        value={isBond || !opts.includes(cur) ? U_ATTACH_LABEL.none : cur}
+                        options={opts}
+                        disabled={isBond}
+                        onChange={(v) => {
+                          const next = uAttachFromLabel(v);
+                          setUnderlaymentAttachmentDefault(next);
+                          setUAttach(next);
+                        }}
+                      />
+                    );
+                  })()}
                   <span className="text-xs text-muted-foreground">
                     (will not apply to existing underlayment)
                   </span>
@@ -1793,51 +1810,42 @@ function EstimatePage() {
                     />
                   </Field>
                   <Field label="Attached With">
-                    <PickOne
-                      value={
-                        (parapetDefaults.attachment ?? attachment) === "adhered"
-                          ? "(No Tab) Fully Adhered"
-                          : "Mechanically Fastened"
-                      }
-                      options={attachmentsForSystem(parapetDefaults.roofSystem ?? roofSystem).map(
-                        (a) =>
-                          a === "adhered" ? "(No Tab) Fully Adhered" : "Mechanically Fastened",
-                      )}
-                      onChange={(v) =>
-                        setParapetDefaults((p) => {
-                          const nx = { ...p };
-                          const att = v === "(No Tab) Fully Adhered" ? "adhered" : "mechanical";
-                          if (att === attachment && nx.roofSystem === undefined)
-                            delete nx.attachment;
-                          else nx.attachment = att;
-                          return nx;
-                        })
-                      }
-                    />
+                    {(() => {
+                      // Legacy frmHome.LoadParapetAttachmentSystem: fasteners + the wall
+                      // adhesives (RoofSystem.WallAdhesives) of the parapet system.
+                      const opts = attachedWithOptions(
+                        admin,
+                        parapetDefaults.roofSystem ?? roofSystem,
+                        "wall",
+                      );
+                      const curAtt = parapetDefaults.attachment ?? attachment;
+                      const curAdh = parapetDefaults.membraneAdhesiveName ?? membraneAdhesive;
+                      const cur = attachedWithLabel(opts, curAtt, curAdh);
+                      return (
+                        <PickOne
+                          value={cur}
+                          options={withCurrent(
+                            opts.map((o) => o.label),
+                            cur,
+                          )}
+                          onChange={(v) => {
+                            const o = opts.find((x) => x.label === v);
+                            if (!o) return;
+                            setParapetDefaults((p) => {
+                              const nx = { ...p };
+                              if (o.attachment === attachment && nx.roofSystem === undefined)
+                                delete nx.attachment;
+                              else nx.attachment = o.attachment;
+                              if (o.attachment !== "adhered" || o.adhesiveName === membraneAdhesive)
+                                delete nx.membraneAdhesiveName;
+                              else nx.membraneAdhesiveName = o.adhesiveName;
+                              return nx;
+                            });
+                          }}
+                        />
+                      );
+                    })()}
                   </Field>
-                  {(parapetDefaults.attachment ?? attachment) === "adhered" && (
-                    <Field label="Attached To">
-                      <PickOne
-                        value={parapetDefaults.membraneAdhesiveName ?? membraneAdhesive}
-                        options={withCurrent(
-                          adhesiveOptionsForSystem(
-                            admin,
-                            parapetDefaults.roofSystem ?? roofSystem,
-                            "wall",
-                          ),
-                          parapetDefaults.membraneAdhesiveName ?? membraneAdhesive,
-                        )}
-                        onChange={(v) =>
-                          setParapetDefaults((p) => {
-                            const nx = { ...p };
-                            if (v === membraneAdhesive) delete nx.membraneAdhesiveName;
-                            else nx.membraneAdhesiveName = v;
-                            return nx;
-                          })
-                        }
-                      />
-                    </Field>
-                  )}
                   <Field label="Type">
                     <PickOne
                       value={
