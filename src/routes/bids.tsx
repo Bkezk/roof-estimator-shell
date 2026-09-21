@@ -1,10 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { PlusCircle } from "lucide-react";
+import { PlusCircle, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
-import { listBids } from "@/lib/bids.functions";
+import { deleteBid, listBids } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-context";
 import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
@@ -56,6 +67,18 @@ function BidsPage() {
     enabled: !!session,
   });
   const [statusFilter, setStatusFilter] = useState("all");
+  const qc = useQueryClient();
+  const deleteBidFn = useServerFn(deleteBid);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const del = useMutation({
+    mutationFn: (id: string) => deleteBidFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Bid deleted");
+      void qc.invalidateQueries({ queryKey: ["bids"] });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
+    onSettled: () => setConfirmDelete(null),
+  });
 
   if (error) {
     return (
@@ -151,12 +174,53 @@ function BidsPage() {
                       Open
                     </Link>
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    title="Delete this bid"
+                    disabled={del.isPending}
+                    onClick={() => setConfirmDelete({ id: bid.id, name: bid.name })}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span className="sr-only">Delete</span>
+                  </Button>
                 </div>
               </div>
             );
           })}
         </div>
       )}
+
+      <AlertDialog
+        open={confirmDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !del.isPending) setConfirmDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this bid?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{confirmDelete?.name}” and everything saved in it will be permanently removed. This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={del.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={del.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmDelete) del.mutate(confirmDelete.id);
+              }}
+            >
+              {del.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

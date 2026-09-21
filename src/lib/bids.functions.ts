@@ -59,6 +59,20 @@ export const saveBid = createServerFn({ method: "POST" })
 
 const getBidSchema = z.object({ id: z.string().uuid() });
 
+/** Permanently delete one bid. RLS (`bids_authenticated_all`) is the final guard. */
+export const deleteBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => getBidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { error, count } = await context.supabase
+      .from("bids")
+      .delete({ count: "exact" })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+    if (!count) throw new Error("Bid not found (it may already have been deleted).");
+    return { id: data.id };
+  });
+
 /** Fetch one bid (with its stored estimator payload) by id. */
 export const getBid = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
