@@ -171,14 +171,21 @@ export interface UnderlaymentLayer {
 export const QUOTE_ADHESIVE_GROUPS: ReadonlySet<number> = new Set([16, 18, 19]);
 
 /**
- * The legacy "Calculate Pieces" flute-filler calculator (frmFluteFillerCalc, docs §10.7 —
- * rva 0x24a00), VERBATIM: per section (inches; secWid = Round(Width)×12; ff = length ft × 12;
- * r2r = ridge-to-ridge inches): across = Round(ff/r2r); x = secWid/ff;
- * rows = Round(x + (1 − frac(x))); trim = frac(x) ≥ 0.5 ? Round((1 − frac(x)) × across) : 0;
- * pieces += Round(across × rows − trim). With waste: Ceil(total × (1 + plus/100)).
+ * The legacy "Calculate Pieces" flute-filler calculator (frmFluteFillerCalc.calculateButton_Click,
+ * rva 0x24a00, re-read 2026-09-21 — docs §22.18). "Pieces are calculated assuming that the
+ * Width side runs from Ridge to Gutter": the flutes run along the width, so per section
+ * (inches; secLen = Round(Length) × 12, secWid = Round(Width) × 12, ff = piece length ft × 12,
+ * r2r = ridge-to-ridge inches):
+ *   across = Round(secLen / r2r)                      — flute rows across the LENGTH
+ *   x = secWid / ff; rows = Round(x + (1 − frac(x)))  — pieces per flute row, partial rounded up
+ *   trim = frac(x) < 0.5 ? Round((1 − frac(x)) × across) : 0   — short remainders dropped
+ *   pieces += Round(across × rows − trim)
+ * With waste: Ceil(total × (1 + plus/100)). Knox County: 188 × 182, 8 ft pieces, 12" ridges →
+ * 188 × 23 = 4,324 — the owner's legacy quote. (The first transcription keyed `across` on the
+ * piece length and inverted the trim test; it produced 182.)
  */
 export function fluteFillerPieces(i: {
-  sections: Array<{ widthFt: number }>;
+  sections: Array<{ lengthFt: number; widthFt: number }>;
   pieceLengthFt: number;
   ridgeToRidgeIn: number;
   wastePct?: number;
@@ -187,12 +194,13 @@ export function fluteFillerPieces(i: {
   if (ff <= 0 || i.ridgeToRidgeIn <= 0) return { pieces: 0, piecesWithWaste: 0 };
   let total = 0;
   for (const s of i.sections) {
+    const secLen = bankersRound(s.lengthFt, 0) * 12;
     const secWid = bankersRound(s.widthFt, 0) * 12;
-    const across = bankersRound(ff / i.ridgeToRidgeIn, 0);
+    const across = bankersRound(secLen / i.ridgeToRidgeIn, 0);
     const x = secWid / ff;
     const frac = x - Math.floor(x);
     const rows = bankersRound(x + (1 - frac), 0);
-    const trim = frac >= 0.5 ? bankersRound((1 - frac) * across, 0) : 0;
+    const trim = frac < 0.5 ? bankersRound((1 - frac) * across, 0) : 0;
     total += bankersRound(across * rows - trim, 0);
   }
   return {

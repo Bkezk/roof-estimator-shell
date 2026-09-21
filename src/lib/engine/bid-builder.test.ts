@@ -2340,18 +2340,36 @@ describe("§10.7 corrections: quote-id dedup, Calculate Pieces, QuoteAdhesiveUni
     expect(dup.inputs.materialUnderlayment).toBeCloseTo(3000, 2);
   });
 
-  it("fluteFillerPieces: verbatim frmFluteFillerCalc geometry", () => {
-    // 50 ft wide section, 4 ft pieces (48"), 24" ridge-to-ridge:
-    // secWid = 600; across = Round(48/24) = 2; x = 600/48 = 12.5 (frac .5);
-    // rows = Round(12.5 + .5) = 13; trim = Round(.5 × 2) = 1; pieces = Round(26 − 1) = 25.
+  it("fluteFillerPieces: verbatim frmFluteFillerCalc geometry (re-read 0x24a00)", () => {
+    // Knox County A: 188 × 182, 8 ft pieces (96"), 12" ridges: across = Round(2256/12) = 188;
+    // x = 2184/96 = 22.75 (frac .75 ≥ .5 → no trim); rows = Round(22.75 + .25) = 23 → 4,324,
+    // the owner's legacy quote. +10 % → Ceil(4756.4) = 4757.
+    const knox = fluteFillerPieces({
+      sections: [{ lengthFt: 188, widthFt: 182 }],
+      pieceLengthFt: 8,
+      ridgeToRidgeIn: 12,
+      wastePct: 10,
+    });
+    expect(knox.pieces).toBe(4324);
+    expect(knox.piecesWithWaste).toBe(4757);
+    // 50 × 50, 4 ft pieces (48"), 24" ridges: across = Round(600/24) = 25; x = 600/48 = 12.5
+    // (frac .5 → no trim); rows = Round(12.5 + .5) = 13 → 325.
     const r = fluteFillerPieces({
-      sections: [{ widthFt: 50 }],
+      sections: [{ lengthFt: 50, widthFt: 50 }],
       pieceLengthFt: 4,
       ridgeToRidgeIn: 24,
       wastePct: 10,
     });
-    expect(r.pieces).toBe(25);
-    expect(r.piecesWithWaste).toBe(Math.ceil(25 * 1.1)); // 28
+    expect(r.pieces).toBe(325);
+    // 50 × 45, 4 ft pieces, 24" ridges: x = 540/48 = 11.25 (frac .25 < .5 → trim
+    // Round(.75 × 25) = 19); rows = Round(11.25 + .75) = 12 → 300 − 19 = 281.
+    expect(
+      fluteFillerPieces({
+        sections: [{ lengthFt: 50, widthFt: 45 }],
+        pieceLengthFt: 4,
+        ridgeToRidgeIn: 24,
+      }).pieces,
+    ).toBe(281);
     expect(fluteFillerPieces({ sections: [], pieceLengthFt: 0, ridgeToRidgeIn: 24 }).pieces).toBe(
       0,
     );

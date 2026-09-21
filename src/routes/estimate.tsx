@@ -2896,7 +2896,7 @@ function EstimatePage() {
                                     const calc = fluteFillerPieces({
                                       sections: sections
                                         .filter((x) => uSel.includes(x.id))
-                                        .map((x) => ({ widthFt: x.width })),
+                                        .map((x) => ({ lengthFt: x.length, widthFt: x.width })),
                                       pieceLengthFt: qFfLen,
                                       ridgeToRidgeIn: qFfR2R,
                                       wastePct: qFfPlus,
@@ -2959,7 +2959,19 @@ function EstimatePage() {
                                   Lump Sum Quote
                                 </label>
                                 <Field label="Total amount ($)">
-                                  <NumInput min={0} value={qLump} onValue={setQLump} />
+                                  {/* Legacy frmULQuote keeps ONE LumpSum: typing a per-piece cost
+                                      writes pieces × cost into it (shown greyed in piece mode);
+                                      typing a lump sum writes Round(lump / pieces, 4) back. */}
+                                  <NumInput
+                                    min={0}
+                                    value={qPieceMode ? qPieces * qCpp : qLump}
+                                    disabled={qPieceMode}
+                                    onValue={(v) => {
+                                      setQLump(v);
+                                      if (qPieces > 0)
+                                        setQCpp(Math.round((v / qPieces) * 10000) / 10000);
+                                    }}
+                                  />
                                 </Field>
                               </div>
                               <div
@@ -2975,10 +2987,24 @@ function EstimatePage() {
                                 </label>
                                 <div className="grid grid-cols-2 gap-2">
                                   <Field label="Pieces">
-                                    <NumInput min={0} value={qPieces} onValue={setQPieces} />
+                                    <NumInput
+                                      min={0}
+                                      value={qPieces}
+                                      onValue={(v) => {
+                                        setQPieces(v);
+                                        setQLump(v * qCpp);
+                                      }}
+                                    />
                                   </Field>
                                   <Field label="Cost per piece ($)">
-                                    <NumInput min={0} value={qCpp} onValue={setQCpp} />
+                                    <NumInput
+                                      min={0}
+                                      value={qCpp}
+                                      onValue={(v) => {
+                                        setQCpp(v);
+                                        setQLump(qPieces * v);
+                                      }}
+                                    />
                                   </Field>
                                 </div>
                               </div>
@@ -4525,11 +4551,13 @@ function NumInput({
   onValue,
   min,
   className,
+  disabled,
 }: {
   value: number;
   onValue: (n: number) => void;
   min?: number;
   className?: string;
+  disabled?: boolean;
 }) {
   const [text, setText] = useState<string | null>(null);
   return (
@@ -4537,6 +4565,7 @@ function NumInput({
       type="number"
       min={min}
       className={className}
+      disabled={disabled}
       value={text ?? String(value)}
       onFocus={(e) => {
         setText(String(value));

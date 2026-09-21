@@ -2689,3 +2689,25 @@ by tests (117.05 h + 189.48 h). `RoofSection.UnderlaymentBaseHours` (0x4c284) al
 tile-6 block that adds `UnderlaymentFasteners(−1) × durobondmech.SingleFastenerTimeByDT` into
 `m_dUnder_labor[5]`; the Review's Tapered/Other 15 h (quote only) shows it did not contribute on
 this bid — not transcribed (see the block's own guards before relying on it).
+
+### 22.18 Flute Filler quote dialog — Calculate Pieces re-read + LumpSum sync (2026-09-21)
+
+Owner's follow-up on §22.17: the web's "Calculate pieces" showed 182 for section A and the
+Lump Sum box stayed at 0 in piece mode where the legacy shows the material amount.
+
+- **Calculate Pieces — the §10.7 transcription was wrong, fixed.** `frmFluteFillerCalc.
+  calculateButton_Click` (0x24a00) re-read with the locals: the eval stack keeps
+  `Round(Length) × 12` and `across = Round(secLen / r2r)` — flute rows across the LENGTH ("the
+  Width side runs from Ridge to Gutter") — not `Round(ff / r2r)`; and the trim branch is
+  `frac(secWid / ff) < 0.5 → Round((1 − frac) × across)` (bge.un 0.5 jumps to the zero case),
+  the reverse of the first reading. 188 × 182, 8 ft, 12" → 188 × 23 = 4,324 = the owner's legacy
+  quote (the FluteFillerCalc screenshot itself shows 0 because its ridge box was blank).
+  `fluteFillerPieces` now takes each section's length and width; tests pin 4,324 / 4,757 (+10 %)
+  and a trimmed case.
+- **LumpSum ⇄ per-piece — ported.** `frmULQuote` keeps ONE `QuoteUL.LumpSum`:
+  `txtPerPiece_KeyUp` writes `pieces × perPiece` (Single) into it and shows it in the Lump Sum
+  box (greyed while Piece Quote is selected — the radios only enable/disable the two groups);
+  `txtLump_KeyUp` writes the lump and shows `Round(lump / pieces, 4)` back in the per-piece box;
+  `UpdateCost` = LaborCost + LumpSum. The web dialog now mirrors that: the Lump Sum box displays
+  pieces × cost per piece (disabled) in piece mode, and a typed lump sum back-fills the cost per
+  piece to 4 dp.
