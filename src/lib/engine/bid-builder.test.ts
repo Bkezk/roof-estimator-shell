@@ -3741,7 +3741,7 @@ describe("Underlayment on a Duro-Bond bid — 'Section Fastened w/ Durobond' (do
     expect(inputs.underlaymentLaborHours).toBeCloseTo(117.05 + 189.48, 1);
     expect((34216 / 2500) * 7.775 * 1.1).toBeCloseTo(117.05, 2);
   });
-  it("the same layer marked Mechanically Fastened would add per-board fastening (the old web path)", () => {
+  it("a Duro-Bond layer stored as Mechanically Fastened is still priced layout-only — legacy LoadAttachment disables the combo (§22.28)", () => {
     const { inputs } = buildEstimateInputs(
       bid({
         roofSystem: "Duro-Bond",
@@ -3765,6 +3765,8 @@ describe("Underlayment on a Duro-Bond bid — 'Section Fastened w/ Durobond' (do
       }),
       uAdmin,
     );
-    expect(inputs.underlaymentLaborHours).toBeGreaterThan(117.06);
+    // Knox County CTC Test 2: the stored "mechanical" layers billed 5 screws per 4×8 board on Metal
+    // Retrofit (0.462 min each) — ≈69.5 h / $3.1K over the legacy Review's 4x8 ISO line.
+    expect(inputs.underlaymentLaborHours).toBeCloseTo(117.05, 1);
   });
 });

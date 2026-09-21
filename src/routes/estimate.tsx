@@ -37,6 +37,7 @@ import {
   type CurbInput,
   type MetalLine,
   sectionLayers,
+  effectiveLayerAttachment,
   fluteFillerPieces,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
@@ -178,15 +179,15 @@ const U_ATTACH_LABEL: Record<UAttach, string> = {
   none: "None",
   durobond: "Section Fastened w/ Durobond",
 };
-/** Legacy LoadAttachment (docs §10.4): the Duro-Bond option is listed first on a Duro-Bond system. */
-const uAttachOptions = (roofSystem: string): string[] =>
-  roofSystem === "Duro-Bond"
-    ? [
-        U_ATTACH_LABEL.durobond,
-        U_ATTACH_LABEL.mechanical,
-        U_ATTACH_LABEL.adhesive,
-        U_ATTACH_LABEL.none,
-      ]
+/**
+ * Legacy frmUnderlayment.LoadAttachment (0xadd24, docs §10.4 / §22.28): a Duro-Bond section gets
+ * ONLY "Section Fastened w/ Durobond" ("1+ Sections Use DuroBond" when several sections are
+ * selected), pre-selected and disabled; every other system lists None / Mechanically Fastened /
+ * the eligible adhesives.
+ */
+const uAttachOptions = (isDuroBond: boolean, multi = false): string[] =>
+  isDuroBond
+    ? [multi ? "1+ Sections Use DuroBond" : U_ATTACH_LABEL.durobond]
     : [U_ATTACH_LABEL.mechanical, U_ATTACH_LABEL.adhesive, U_ATTACH_LABEL.none];
 const uAttachFromLabel = (label: string): UAttach =>
   (Object.keys(U_ATTACH_LABEL) as UAttach[]).find((k) => U_ATTACH_LABEL[k] === label) ??
@@ -594,6 +595,16 @@ function EstimatePage() {
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive" | "none" | "durobond">(
     "mechanical",
   );
+  // Legacy frmUnderlayment.LoadAttachment (docs §22.28): a Duro-Bond selection forces "Section
+  // Fastened w/ Durobond" whatever the picker last held — the hints and the applied layer follow it.
+  const uAttachEffective: UAttach = (() => {
+    const picked = sections.filter((x) => uSel.includes(x.id));
+    const db =
+      picked.length > 0
+        ? picked.some((x) => (x.roofSystem ?? roofSystem) === "Duro-Bond")
+        : roofSystem === "Duro-Bond";
+    return db ? "durobond" : uAttach;
+  })();
   // Legacy Underlayment "Adjustable Labor for selected Roof Sections" link (AdjustUnderlaymentLabor).
   const [uLaborOpen, setULaborOpen] = useState(false);
   const [uLaborPct, setULaborPct] = useState(0);
@@ -998,11 +1009,14 @@ function EstimatePage() {
     );
     const fieldArea = Math.max(0, area - perimArea - cornerArea);
     const sLayers = sectionLayers(s);
+    const sIsDuroBond = (s.roofSystem ?? roofSystem) === "Duro-Bond";
     for (const [li, layer] of sLayers.entries()) {
       if (layer.quote) continue;
-      if (layer.attachment === "durobond" || layer.attachment === "none") {
+      // Duro-Bond sections force "Section Fastened w/ Durobond" (legacy, docs §22.28).
+      const att = effectiveLayerAttachment(layer, sIsDuroBond);
+      if (att === "durobond" || att === "none") {
         insulationBoards += Math.ceil(area / 32);
-      } else if (layer.attachment === "mechanical") {
+      } else if (att === "mechanical") {
         insulationBoards += Math.ceil(area / 32);
         // Legacy UnderlaymentFasteners rule (docs §18).
         insulationFasteners += underlaymentLayerFasteners({
@@ -1014,7 +1028,7 @@ function EstimatePage() {
           membraneMechanical: (s.attachment ?? attachment) === "mechanical",
           custom: s.uCustomFastenerDensity,
         }).total;
-      } else if (layer.attachment === "adhesive" && admin) {
+      } else if (att === "adhesive" && admin) {
         insulationBoards += Math.ceil(area / 32);
         const grid = admin.adhesiveTimes?.bySubstrate[layer.adhesiveName];
         const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
@@ -2327,15 +2341,19 @@ function EstimatePage() {
                                 {l
                                   ? l.quote
                                     ? `${l.board} : quote “${l.quote.name}”`
-                                    : `${l.board} : ${
-                                        l.attachment === "mechanical"
+                                    : `${l.board} : ${(() => {
+                                        const att = effectiveLayerAttachment(
+                                          l,
+                                          (s.roofSystem ?? roofSystem) === "Duro-Bond",
+                                        );
+                                        return att === "mechanical"
                                           ? "Mech"
-                                          : l.attachment === "durobond"
+                                          : att === "durobond"
                                             ? "Duro-Bond"
-                                            : l.attachment === "none"
+                                            : att === "none"
                                               ? "None"
-                                              : l.adhesiveName || "Adhesive"
-                                      }`
+                                              : l.adhesiveName || "Adhesive";
+                                      })()}`
                                   : "None : None"}
                               </TableCell>
                             );
@@ -2477,9 +2495,13 @@ function EstimatePage() {
                           {[3, 2, 1, 0].map((li) => {
                             const l = stackLayers[li];
                             return (
-                              <div
+                              <button
                                 key={li}
-                                className={`flex min-h-8 flex-col items-center justify-center rounded-sm border px-1 py-0.5 text-[11px] ${
+                                type="button"
+                                aria-pressed={li === uTab}
+                                title={`Select Layer ${li + 1}`}
+                                onClick={() => setUTab(li)}
+                                className={`flex min-h-8 w-full cursor-pointer flex-col items-center justify-center rounded-sm border px-1 py-0.5 text-[11px] transition hover:border-primary hover:shadow-sm ${
                                   li === uTab ? "ring-2 ring-primary" : ""
                                 } ${
                                   l
@@ -2502,7 +2524,7 @@ function EstimatePage() {
                                     {l.quote.laborInDays ? "d" : "h"} labor
                                   </span>
                                 )}
-                              </div>
+                              </button>
                             );
                           })}
                           <div className="flex h-8 items-center justify-center rounded-sm bg-blue-500/80 text-[11px] font-semibold text-white">
@@ -2639,36 +2661,45 @@ function EstimatePage() {
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <Field label="Select Attachment Method">
-                      <PickOne
-                        value={U_ATTACH_LABEL[uAttach]}
-                        options={uAttachOptions(
-                          // Legacy LoadAttachment: the Duro-Bond options appear when the
-                          // selected sections' system is Duro-Bond (the bid default otherwise).
-                          sections.find((x) => uSel.includes(x.id))?.roofSystem ?? roofSystem,
-                        )}
-                        onChange={(v) => setUAttach(uAttachFromLabel(v))}
-                      />
+                      {(() => {
+                        // Legacy LoadAttachment: a Duro-Bond section forces (and greys out) the
+                        // Duro-Bond option; other systems pick from the ordinary list.
+                        const picked = sections.filter((x) => uSel.includes(x.id));
+                        const dbSel =
+                          picked.length > 0
+                            ? picked.some((x) => (x.roofSystem ?? roofSystem) === "Duro-Bond")
+                            : roofSystem === "Duro-Bond";
+                        const opts = uAttachOptions(dbSel, picked.length > 1);
+                        return (
+                          <PickOne
+                            value={dbSel ? opts[0]! : U_ATTACH_LABEL[uAttach]}
+                            options={opts}
+                            disabled={dbSel}
+                            onChange={(v) => setUAttach(uAttachFromLabel(v))}
+                          />
+                        );
+                      })()}
                     </Field>
-                    {uAttach === "durobond" && (
+                    {uAttachEffective === "durobond" && (
                       <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
                         Layout labor only — the board is held by the membrane&apos;s induction
                         plates, which are counted in the Duro-Bond section labor and the Fasteners
                         screens.
                       </p>
                     )}
-                    {uAttach === "mechanical" && (
+                    {uAttachEffective === "mechanical" && (
                       <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
                         Fasteners follow the legacy rule: 5 per 4×8 board (4 per 4×4), 10 / 16 per
                         board field / perimeter when the membrane is adhered, 0.08 per sq ft for
                         slip sheets — override in Enhancement Options.
                       </p>
                     )}
-                    {uAttach === "none" && (
+                    {uAttachEffective === "none" && (
                       <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
                         Layout labor only — no fasteners or adhesive.
                       </p>
                     )}
-                    {uAttach === "adhesive" && (
+                    {uAttachEffective === "adhesive" && (
                       <>
                         <Field label="Adhesive">
                           <PickOne value={uAdh} options={adhesiveOptions} onChange={setUAdh} />
@@ -2709,16 +2740,19 @@ function EstimatePage() {
                             if (!uSel.includes(s.id)) return s;
                             const nextLayers = [...sectionLayers(s)];
                             const idx = Math.min(uTab, nextLayers.length);
+                            // Duro-Bond sections always store the forced legacy option (§22.28).
+                            const att: UAttach =
+                              (s.roofSystem ?? roofSystem) === "Duro-Bond" ? "durobond" : uAttach;
                             nextLayers[idx] = {
                               board: uBoard,
-                              attachment: uAttach,
+                              attachment: att,
                               fastenersPerBoard: 0,
-                              adhesiveName: uAttach === "adhesive" ? uAdh : "",
+                              adhesiveName: att === "adhesive" ? uAdh : "",
                               // The engine derives the substrate (deck / layer below, legacy).
                               substrate: "",
                               // §10.7: containers billed verbatim when this layer sits over a
                               // tapered/crickets-group board (engine checks the group).
-                              ...(uAttach === "adhesive" && uQAU > 0
+                              ...(att === "adhesive" && uQAU > 0
                                 ? { quoteAdhesiveUnits: uQAU }
                                 : {}),
                             };

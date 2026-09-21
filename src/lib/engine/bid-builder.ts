@@ -698,6 +698,21 @@ export function sectionLayers(s: BidSectionInput): UnderlaymentLayer[] {
   return [];
 }
 
+/**
+ * Legacy `frmUnderlayment.LoadAttachment` (0xadd24, docs §22.28): on a Duro-Bond section the
+ * "Attached With" combo holds ONLY "Section Fastened w/ Durobond" ("1+ Sections Use DuroBond" for a
+ * multi-section selection), pre-selected and DISABLED — a Duro-Bond board is always held by the
+ * membrane's induction plates (§22.17) and can never be mechanically fastened or adhered on its
+ * own. The web keeps whatever the layer stores but prices, consumes and displays every Duro-Bond
+ * layer as "durobond".
+ */
+export function effectiveLayerAttachment(
+  layer: UnderlaymentLayer,
+  isDuroBond: boolean,
+): UnderlaymentLayer["attachment"] {
+  return isDuroBond ? "durobond" : layer.attachment;
+}
+
 /** Legacy Complexities table (ComplexityID → Description). */
 export const COMPLEXITY_LABELS = [
   "Open",
@@ -1349,6 +1364,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     };
     for (const [li, layer] of sLayers.entries()) {
       const area = s.length * s.width;
+      // Duro-Bond sections force "Section Fastened w/ Durobond" (legacy disabled combo, §22.28).
+      const layerAttachment = effectiveLayerAttachment(layer, rsId === 2);
       // Custom-quote layer (docs §10.5/§10.7): quoted amounts verbatim; nothing else bills.
       // A quote ID applied to several sections bills ONCE (legacy CustomQuotes dedup set);
       // a quote without an id (older saved bids) bills per occurrence.
@@ -1369,7 +1386,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         addSub(uHrsBySub, uTile, qHours);
         // Legacy UnderlaymentAdhesive has no NeedQuote test: an ADHERED quote layer still bills
         // its adhesive units (quote containers for the tapered groups, else coverage).
-        if (layer.attachment === "adhesive") billLayerAdhesive(layer, li, false);
+        if (layerAttachment === "adhesive") billLayerAdhesive(layer, li, false);
         continue;
       }
       // SmartValue: the bid's custom $/sqft when > 0, else the admin default (docs §22.9).
@@ -1398,7 +1415,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       } else if (layout !== undefined) {
         layerHours += (area / 2500) * layout;
       }
-      if (layer.attachment === "mechanical") {
+      if (layerAttachment === "mechanical") {
         if (admin.underlaymentLabor) {
           const uDeck = UNDERLAYMENT_DECK_BY_LABOR_DECK[s.deckType] ?? s.deckType;
           const minPerFast = admin.underlaymentLabor.fastenerMinutesByDeck[uDeck];
@@ -1421,7 +1438,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             layerHours += (minPerFast / 60) * count;
           }
         }
-      } else if (layer.attachment === "adhesive" && admin.adhesiveTimes) {
+      } else if (layerAttachment === "adhesive" && admin.adhesiveTimes) {
         layerHours += billLayerAdhesive(layer, li, true);
       }
       const scaled = layerHours * uScale;

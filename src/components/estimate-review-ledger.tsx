@@ -30,6 +30,10 @@ const usd = (v: number) =>
   (v < 0 ? ")" : "");
 const hrs = (v: number) => (v === 0 ? "0" : v.toFixed(2).replace(/\.00$/, ""));
 const num2 = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+/** Editable cells share one look (the legacy green cells) so the changeable items stand out. */
+const EDIT_CELL = "bg-green-100 dark:bg-green-950/40";
+const EDIT_LINK =
+  "rounded px-1 text-primary underline decoration-dotted underline-offset-2 hover:bg-green-200/70 hover:decoration-solid dark:hover:bg-green-900/50";
 
 /** A value cell the user clicks to edit in place (the legacy blue-link cells). */
 function ClickEdit(props: {
@@ -45,12 +49,15 @@ function ClickEdit(props: {
       <button
         type="button"
         title={props.title ?? "Click to edit"}
-        className="w-full text-right text-primary underline decoration-dotted underline-offset-2 tabular-nums"
+        className={`w-full text-right tabular-nums ${EDIT_LINK}`}
         onClick={() => {
           setText(String(props.value));
           setEditing(true);
         }}
       >
+        <span aria-hidden className="mr-1 text-[10px] opacity-70">
+          ✎
+        </span>
         {props.display}
       </button>
     );
@@ -204,7 +211,7 @@ export function EstimateReviewLedger(props: {
   const discountRow = (label: string, idx: number, used: boolean, onUse: (b: boolean) => void) => (
     <tr className="border-t">
       <td className="px-2 py-0.5">{label}</td>
-      <td className="w-8 text-center">
+      <td className={`w-8 text-center ${EDIT_CELL}`} title="Click to apply / remove this discount">
         <input type="checkbox" checked={used} onChange={(e) => onUse(e.target.checked)} />
       </td>
       <td className="px-2 py-0.5 text-right tabular-nums">{usd(v(idx))}</td>
@@ -246,9 +253,9 @@ export function EstimateReviewLedger(props: {
                 {usd(ledger.purchases.shippingDl)}
               </td>
             </tr>
-            <tr className="border-t bg-green-100 dark:bg-green-950/40">
+            <tr className="border-t">
               <td className="py-0.5 pl-5 pr-2">Shipping (Other)</td>
-              <td className="px-2 py-0.5 text-right">
+              <td className={`px-2 py-0.5 text-right ${EDIT_CELL}`}>
                 <ClickEdit
                   display={usd(props.extraShipping.value)}
                   value={props.extraShipping.value}
@@ -326,13 +333,16 @@ export function EstimateReviewLedger(props: {
             )}
             <TotalRowU label="After Selected Discounts" value={usd(v(4))} bold />
             <tr className="border-t">
-              <td className="px-2 py-0.5">
+              <td className={`px-2 py-0.5 ${EDIT_CELL}`}>
                 <button
                   type="button"
-                  className="text-primary underline decoration-dotted underline-offset-2"
+                  className={EDIT_LINK}
                   onClick={props.onOpenSettings}
                   title="Pick the warranty in the settings panel"
                 >
+                  <span aria-hidden className="mr-1 text-[10px] opacity-70">
+                    ✎
+                  </span>
                   Warranty Cost
                 </button>
               </td>
@@ -349,7 +359,7 @@ export function EstimateReviewLedger(props: {
             <TotalRowU label="Subtotal 1" value={usd(est.money.subtotal1)} bold />
             <tr className="border-t">
               <td className="px-2 py-0.5">Dollar Markup</td>
-              <td className="text-center">
+              <td className={`text-center ${EDIT_CELL}`} title="Pick the markup method">
                 <input
                   type="radio"
                   title="$ per man-day markup"
@@ -357,7 +367,7 @@ export function EstimateReviewLedger(props: {
                   onChange={() => props.markup.onChange(1, props.markup.value)}
                 />
               </td>
-              <td className="px-2 py-0.5 text-right">
+              <td className={`px-2 py-0.5 text-right ${props.markup.mode === 1 ? EDIT_CELL : ""}`}>
                 {props.markup.mode === 1 ? (
                   <ClickEdit
                     display={`${usd(est.money.markupValue)} (@ ${usd(props.markup.value)}/day)`}
@@ -372,7 +382,7 @@ export function EstimateReviewLedger(props: {
             </tr>
             <tr className="border-t">
               <td className="px-2 py-0.5">Markup percentage</td>
-              <td className="text-center">
+              <td className={`text-center ${EDIT_CELL}`} title="Pick the markup method">
                 <input
                   type="radio"
                   title="Percentage markup (gross profit)"
@@ -380,7 +390,7 @@ export function EstimateReviewLedger(props: {
                   onChange={() => props.markup.onChange(2, props.markup.value)}
                 />
               </td>
-              <td className="px-2 py-0.5 text-right">
+              <td className={`px-2 py-0.5 text-right ${props.markup.mode !== 1 ? EDIT_CELL : ""}`}>
                 {props.markup.mode !== 1 ? (
                   <ClickEdit
                     display={`${num2(props.markup.value)}%`}
@@ -397,13 +407,16 @@ export function EstimateReviewLedger(props: {
             <tr className="border-t">
               <td className="px-2 py-0.5">Per-Diem Charge</td>
               <td />
-              <td className="px-2 py-0.5 text-right">
+              <td className={`px-2 py-0.5 text-right ${EDIT_CELL}`}>
                 <button
                   type="button"
-                  className="tabular-nums text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                  className={`w-full text-right tabular-nums ${EDIT_LINK}`}
                   title="Per Diem Charge calculator — enter a flat total or a $/man-day rate"
                   onClick={() => setPerDiemOpen(true)}
                 >
+                  <span aria-hidden className="mr-1 text-[10px] opacity-70">
+                    ✎
+                  </span>
                   {usd(est.money.perDiemValue)}
                 </button>
                 {perDiemOpen && (
@@ -420,7 +433,7 @@ export function EstimateReviewLedger(props: {
             <tr className="border-t">
               <td className="px-2 py-0.5">Sales Commission</td>
               <td />
-              <td className="px-2 py-0.5 text-right">
+              <td className={`px-2 py-0.5 text-right ${EDIT_CELL}`}>
                 <ClickEdit
                   display={usd(est.money.commissionValue)}
                   value={props.commission.pct}
@@ -467,6 +480,11 @@ export function EstimateReviewLedger(props: {
         </table>
       </div>
 
+      <p className="flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+        <span className={`inline-block h-3 w-5 rounded-sm border ${EDIT_CELL}`} aria-hidden />
+        Green cells can be changed here — click a value (✎) to edit it, tick a discount to apply it,
+        pick the markup method with the radios.
+      </p>
       {/* The legacy bottom radio: flips the Labor & Services column between $ and man-hours. */}
       <div className="flex justify-center gap-6 border-t pt-2 text-xs">
         <label className="flex items-center gap-1">

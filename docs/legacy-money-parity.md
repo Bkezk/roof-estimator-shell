@@ -2941,3 +2941,33 @@ units + extra × price per unit) inside its totals.
 Panduit row (Knox County: 63 × 3/8" × 14" straps → 2 boxes → $88, where legacy's bid carried one
 box, $44, while its own Accessories Summary showed $88 — §12.4 / §22.5). Deliberate departure
 from the legacy bid figure; the constant restores it. The one-box warning no longer fires.
+
+### 22.28 4x8 ISO labor ≈ $3.1K over legacy — Duro-Bond layers stored as "Mechanically Fastened" (2026-09-21)
+
+Owner: "the 4x8 iso is showing 3K more on labor on our app than legacy". Bid "Knox County BOE
+CTC Test 2" (Duro-Bond, Metal Retrofit): its ISO layers were saved with `attachment =
+"mechanical"` (the picker's default before §22.17 landed / the Setup default `mechanical`), so
+the engine added the per-board fastening term the legacy never bills on a Duro-Bond section:
+A ½" ISO 34,216 sqft → Round(34,216/32) × 5 = 5,345 screws × 0.462 min × 1.1 ≈ 45.3 h; B 2½" ISO
+18,286 sqft → 2,860 × 0.462/60 × 1.1 ≈ 24.2 h; ≈ 69.5 h × $45 ≈ **$3.1K**. Layout-only figures
+(117.05 h + 189.48 h) are the legacy 4x8 ISO 306.53 h (§22.17).
+
+`frmUnderlayment.LoadAttachment` (0xadd24) re-read: for a selection containing a section whose
+`RoofSystem.ShortName = "durobond"` the combo is cleared, ONE item is added — "Section Fastened
+w/ Durobond" when a single row is selected, "1+ Sections Use DuroBond" otherwise — `SelectedIndex
+= 0`, the combo is **disabled**, `llblAdvOptions` disabled, and the routine returns before the
+None / `durolastmech` / adhesive items are ever added. A Duro-Bond board can never be
+mechanically fastened or adhered on its own in legacy.
+
+Web: `effectiveLayerAttachment(layer, isDuroBond)` (bid-builder) returns `"durobond"` for every
+layer of a Duro-Bond section whatever the layer stores; the builder's labor/adhesive loop, the
+consumption pass (boards / screws / adhesive units) and the Underlayment grid's layer cells all
+go through it, so older bids re-price without a data migration. The "Select Attachment Method"
+pick shows only the forced item (multi-selection wording as legacy) and is greyed out on a
+Duro-Bond selection; the apply button stores `"durobond"` for Duro-Bond sections. Pinned by
+test: a Duro-Bond layer stored as `mechanical` bills 117.05 h (was "> 117.06").
+
+Also this round (UI only, no money): the Review ledger's editable cells (Shipping (Other),
+Warranty, markup radios and value, Per-Diem, Sales Commission, discount "Use" ticks) share one
+green cell style with a ✎ marker and a legend; the Underlayment layer stack graphic is clickable
+(click a drawn layer to select that layer, same as its "Add Layer n" tab).
