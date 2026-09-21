@@ -157,6 +157,17 @@ const num = (v: string) => Math.max(0, (v.trim() === "" || v === "-" ? 0 : Numbe
 const numAdj = (v: string) => Math.max(-100, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 /** A picker's option list with the stored value kept visible even when it is no longer offered. */
+/** JSON with object keys sorted at every level — equal data serialises equally whatever the key order. */
+const stableJson = (v: unknown): string =>
+  JSON.stringify(v, (_k, val) =>
+    val && typeof val === "object" && !Array.isArray(val)
+      ? Object.fromEntries(
+          Object.keys(val as Record<string, unknown>)
+            .sort()
+            .map((k) => [k, (val as Record<string, unknown>)[k]]),
+        )
+      : val,
+  );
 const withCurrent = (options: string[], current: string): string[] =>
   current && !options.includes(current) ? [current, ...options] : options;
 type UAttach = "mechanical" | "adhesive" | "none" | "durobond";
@@ -399,11 +410,13 @@ function EstimatePage() {
     if (!liveA) return false;
     const liveW = liveCheck ? liveCheck.warranty : (liveWarrantyData ?? null);
     // Both sides through the same normaliser so an older snapshot's missing defaults don't
-    // read as a pricing change.
+    // read as a pricing change, and a key-ORDER-insensitive serialisation: the saved snapshot
+    // comes back from Postgres jsonb with its object keys re-sorted, so a plain
+    // JSON.stringify compare flagged every reloaded bid as stale.
     return (
-      JSON.stringify(normalizeAdminSnapshot(snapshot.admin)) !==
-        JSON.stringify(normalizeAdminSnapshot(liveA)) ||
-      JSON.stringify(snapshot.warranty ?? null) !== JSON.stringify(liveW ?? null)
+      stableJson(normalizeAdminSnapshot(snapshot.admin)) !==
+        stableJson(normalizeAdminSnapshot(liveA)) ||
+      stableJson(snapshot.warranty ?? null) !== stableJson(liveW ?? null)
     );
   }, [snapshot, liveCheck, liveAdmin, liveWarrantyData]);
 
