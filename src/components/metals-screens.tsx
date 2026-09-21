@@ -13,13 +13,14 @@
 
 import { useMemo, useState } from "react";
 
-import type {
-  DownspoutEntryState,
-  GutterEntryState,
-  MetalsRefData,
-  MetalsRefRow,
-  MetalsResult,
-  MetalsState,
+import {
+  removeMetalsLine,
+  type DownspoutEntryState,
+  type GutterEntryState,
+  type MetalsRefData,
+  type MetalsRefRow,
+  type MetalsResult,
+  type MetalsState,
 } from "@/lib/engine/metals";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -157,7 +158,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
               <TableHead className="text-right">Hours PerUnit/LF</TableHead>
               <TableHead className="text-right">Hours</TableHead>
               <TableHead className="text-right">Labor Cost</TableHead>
-              <TableHead className="w-[56px]" />
+              <TableHead className="w-[130px]" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -183,14 +184,25 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
                   <TableCell className="text-right tabular-nums">{ln.hours.toFixed(2)}</TableCell>
                   <TableCell className="text-right tabular-nums">{usd(ln.laborCost)}</TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => tile && setOpenTile(tile)}
-                    >
-                      Edit
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => tile && setOpenTile(tile)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-destructive"
+                        title="Remove this item from the bid"
+                        onClick={() => onChange(removeMetalsLine(state, ln.source))}
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -435,6 +447,22 @@ function GuttersDialog(props: {
         </RefGrid>
       )}
 
+      {entry && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs text-destructive"
+          onClick={() =>
+            onChange({
+              ...state,
+              gutters: state.gutters.filter((x) => !(x.style === style && x.size === effSize)),
+            })
+          }
+        >
+          Remove this gutter ({style.replace(/-Style$/, "")} — {effSize})
+        </Button>
+      )}
+
       {/* Material for gutter runs bills increment10(LF) × $/LF: lengths round up to the next
           10 ft (legacy; a run under 10 ft bills 1 ft — legacy quirk kept for parity). */}
       <p className="text-xs text-muted-foreground">
@@ -583,6 +611,19 @@ function DownspoutsDialog(props: {
             />
           ))}
         </RefGrid>
+      )}
+
+      {entry && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs text-destructive"
+          onClick={() =>
+            onChange({ ...state, downspouts: state.downspouts.filter((x) => x.size !== size) })
+          }
+        >
+          Remove all {size} downspouts
+        </Button>
       )}
 
       <p className="text-xs text-muted-foreground">

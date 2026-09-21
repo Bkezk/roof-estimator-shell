@@ -323,10 +323,21 @@ export function normalizeMetalsState(raw: unknown): MetalsState {
 
 export type MetalsCategory = "Gutters" | "Downspouts" | "Pitch Pans" | "Collection Boxes";
 
+/** Where a summary line came from, so the screen can remove exactly that entry. */
+export type MetalsLineSource =
+  | { kind: "gutter"; style: string; size: string }
+  | { kind: "gutterAcc"; style: string; size: string; desc: string }
+  | { kind: "downspout"; size: string; desc: string }
+  | { kind: "downspoutAcc"; size: string; desc: string }
+  | { kind: "generalAcc"; desc: string }
+  | { kind: "pitchPan"; desc: string }
+  | { kind: "collectionBox"; option: string; desc: string };
+
 /** One frmMetals lvSummary row. */
 export interface MetalsLine {
   category: MetalsCategory;
   item: string;
+  source: MetalsLineSource;
   /** Qty/LF column: LF for length rows, qty for qty rows. */
   qtyOrLf: number;
   isLength: boolean;
@@ -377,11 +388,13 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
     isLength: boolean,
     row: MetalsRefRow,
     money: { materialCost: number; hours: number; laborCost: number },
+    source: MetalsLineSource,
   ) => {
     if (qtyOrLf <= 0) return;
     lines.push({
       category,
       item,
+      source,
       qtyOrLf,
       isLength,
       materialCost: money.materialCost,
@@ -407,6 +420,7 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
         true,
         refEntry.gutter,
         lengthRowMoney(entry.lengthFt, refEntry.gutter),
+        { kind: "gutter", style: entry.style, size: entry.size },
       );
     }
     const accRows = [...(refEntry?.accessories ?? []), ...ref.gutters.shared];
@@ -420,6 +434,7 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
           false,
           row,
           qtyRowMoney(qty, row),
+          { kind: "gutterAcc", style: entry.style, size: entry.size, desc: row.description },
         );
     }
   }
@@ -430,7 +445,12 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
     if (!sizeRef) continue;
     for (const row of sizeRef.spouts) {
       const len = entry.lengthByDesc[row.description] ?? 0;
-      if (len > 0) add("Downspouts", row.description, len, true, row, lengthRowMoney(len, row));
+      if (len > 0)
+        add("Downspouts", row.description, len, true, row, lengthRowMoney(len, row), {
+          kind: "downspout",
+          size: entry.size,
+          desc: row.description,
+        });
     }
     for (const row of sizeRef.accessories) {
       const qty = entry.accQty[row.description] ?? 0;
@@ -442,18 +462,27 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
           false,
           row,
           qtyRowMoney(qty, row),
+          { kind: "downspoutAcc", size: entry.size, desc: row.description },
         );
     }
   }
   for (const row of ref.downspouts.general) {
     const qty = state.generalAccQty[row.description] ?? 0;
-    if (qty > 0) add("Downspouts", row.description, qty, false, row, qtyRowMoney(qty, row));
+    if (qty > 0)
+      add("Downspouts", row.description, qty, false, row, qtyRowMoney(qty, row), {
+        kind: "generalAcc",
+        desc: row.description,
+      });
   }
 
   // Pitch pans
   for (const row of ref.pitchPans) {
     const qty = state.pitchPanQty[row.description] ?? 0;
-    if (qty > 0) add("Pitch Pans", row.description, qty, false, row, qtyRowMoney(qty, row));
+    if (qty > 0)
+      add("Pitch Pans", row.description, qty, false, row, qtyRowMoney(qty, row), {
+        kind: "pitchPan",
+        desc: row.description,
+      });
   }
 
   // Collection boxes
@@ -468,9 +497,86 @@ export function computeMetals(state: MetalsState, ref: MetalsRefData): MetalsRes
           false,
           row,
           qtyRowMoney(qty, row),
+          { kind: "collectionBox", option, desc: row.description },
         );
     }
   }
 
   return { lines, materialCost, laborCost, laborHours };
+}
+
+const without = (m: Record<string, number>, key: string): Record<string, number> => {
+  const out = { ...m };
+  delete out[key];
+  return out;
+};
+
+/**
+ * Remove one summary line (legacy frmMetals Remove on lvSummary): drops just that entry's
+ * quantity / length; a gutter or downspout size with nothing left on it is dropped entirely.
+ */
+export function removeMetalsLine(state: MetalsState, src: MetalsLineSource): MetalsState {
+  const next: MetalsState = {
+    ...state,
+    gutters: state.gutters.map((g) => ({ ...g, accQty: { ...g.accQty } })),
+    downspouts: state.downspouts.map((d) => ({
+      ...d,
+      lengthByDesc: { ...d.lengthByDesc },
+      accQty: { ...d.accQty },
+    })),
+    generalAccQty: { ...state.generalAccQty },
+    pitchPanQty: { ...state.pitchPanQty },
+    collectionBoxQty: Object.fromEntries(
+      Object.entries(state.collectionBoxQty).map(([k, v]) => [k, { ...v }]),
+    ),
+  };
+  const hasQty = (m: Record<string, number>) => Object.values(m).some((q) => q > 0);
+  switch (src.kind) {
+    case "gutter":
+    case "gutterAcc": {
+      const i = next.gutters.findIndex((g) => g.style === src.style && g.size === src.size);
+      if (i < 0) return state;
+      const g = next.gutters[i]!;
+      if (src.kind === "gutter") g.lengthFt = 0;
+      else g.accQty = without(g.accQty, src.desc);
+      if (g.lengthFt <= 0 && !hasQty(g.accQty)) next.gutters.splice(i, 1);
+      return next;
+    }
+    case "downspout":
+    case "downspoutAcc": {
+      const i = next.downspouts.findIndex((d) => d.size === src.size);
+      if (i < 0) return state;
+      const d = next.downspouts[i]!;
+      if (src.kind === "downspout") d.lengthByDesc = without(d.lengthByDesc, src.desc);
+      else d.accQty = without(d.accQty, src.desc);
+      if (!hasQty(d.lengthByDesc) && !hasQty(d.accQty)) next.downspouts.splice(i, 1);
+      return next;
+    }
+    case "generalAcc":
+      next.generalAccQty = without(next.generalAccQty, src.desc);
+      return next;
+    case "pitchPan":
+      next.pitchPanQty = without(next.pitchPanQty, src.desc);
+      return next;
+    case "collectionBox": {
+      const byDesc = without(next.collectionBoxQty[src.option] ?? {}, src.desc);
+      if (hasQty(byDesc)) next.collectionBoxQty[src.option] = byDesc;
+      else delete next.collectionBoxQty[src.option];
+      return next;
+    }
+  }
+}
+
+/** Remove every entry of one tile (gutters / downspouts / pitch pans / collection boxes). */
+export function clearMetalsCategory(state: MetalsState, category: MetalsCategory): MetalsState {
+  switch (category) {
+    case "Gutters":
+      return { ...state, gutters: [] };
+    case "Downspouts":
+      return { ...state, downspouts: [], generalAccQty: {} };
+    case "Pitch Pans":
+      return { ...state, pitchPanQty: {} };
+    case "Collection Boxes":
+      return { ...state, collectionBoxQty: {} };
+  }
 }

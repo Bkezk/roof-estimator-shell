@@ -13,6 +13,7 @@ import {
   increment10,
   lengthQty,
   normalizeMetalsState,
+  removeMetalsLine,
 } from "./metals";
 
 const f32 = Math.fround;
@@ -233,5 +234,44 @@ describe("normalizeMetalsState", () => {
     expect(
       normalizeMetalsState({ gutters: [{ style: 1 }], pitchPanQty: { a: -3, b: "x" } }),
     ).toEqual(emptyMetalsState());
+  });
+});
+
+describe("removeMetalsLine (frmMetals Remove on the summary)", () => {
+  const ref = buildMetalsRefData(SCREEN);
+  it("drops one accessory, then the whole gutter once nothing is left on it", () => {
+    const state = emptyMetalsState();
+    state.gutters.push({
+      style: "DX-Style",
+      size: 'A = 6" B = 4" C = 4"',
+      lengthFt: 25,
+      accQty: { "End Caps (Left)": 2, "Gutter Sealant": 1 },
+    });
+    const lines = computeMetals(state, ref).lines;
+    const endCaps = lines.find((l) => l.item.startsWith("End Caps (Left)"))!;
+    const s1 = removeMetalsLine(state, endCaps.source);
+    expect(computeMetals(s1, ref).lines.map((l) => l.item)).not.toContain(endCaps.item);
+    expect(s1.gutters).toHaveLength(1);
+    // Removing the gutter run keeps the entry while an accessory remains…
+    const run = computeMetals(s1, ref).lines.find((l) => l.source.kind === "gutter")!;
+    const s2 = removeMetalsLine(s1, run.source);
+    expect(s2.gutters[0]!.lengthFt).toBe(0);
+    expect(s2.gutters).toHaveLength(1);
+    // …and the last accessory removal drops the entry entirely.
+    const sealant = computeMetals(s2, ref).lines[0]!;
+    const s3 = removeMetalsLine(s2, sealant.source);
+    expect(s3.gutters).toHaveLength(0);
+    expect(computeMetals(s3, ref).lines).toHaveLength(0);
+    // The input state is never mutated.
+    expect(state.gutters[0]!.accQty["End Caps (Left)"]).toBe(2);
+  });
+  it("pitch pans and collection boxes remove by description / option", () => {
+    const state = emptyMetalsState();
+    state.pitchPanQty = { A: 2, B: 1 };
+    state.collectionBoxQty = { Opt: { X: 3 } };
+    const s1 = removeMetalsLine(state, { kind: "pitchPan", desc: "A" });
+    expect(s1.pitchPanQty).toEqual({ B: 1 });
+    const s2 = removeMetalsLine(s1, { kind: "collectionBox", option: "Opt", desc: "X" });
+    expect(s2.collectionBoxQty).toEqual({});
   });
 });
