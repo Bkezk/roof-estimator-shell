@@ -310,7 +310,27 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
       (x.wallTopInches ?? 0) +
       (x.dropInches ?? 0) || x.girthInches;
   const vertSqFt = parapets.reduce((s, x) => s + (x.lengthFt * (x.verticalInches ?? 0)) / 12, 0);
-  const totalSqFt = parapets.reduce((s, x) => s + (x.lengthFt * girthOf(x)) / 12, 0);
+  // Legacy Parapet.TotalWallSqFT (0x419f4) = Length × (Vertical + Drop + Cant + WallTop) / 12 —
+  // the SKIRT is not wall (docs §3); dim-less older walls fall back to their entered girth.
+  const hasDims = (x: ParapetInput) =>
+    x.skirtInches !== undefined ||
+    x.cantInches !== undefined ||
+    x.verticalInches !== undefined ||
+    x.wallTopInches !== undefined ||
+    x.dropInches !== undefined;
+  const totalSqFt = parapets.reduce(
+    (s, x) =>
+      s +
+      (x.lengthFt *
+        (hasDims(x)
+          ? (x.verticalInches ?? 0) +
+            (x.dropInches ?? 0) +
+            (x.cantInches ?? 0) +
+            (x.wallTopInches ?? 0)
+          : x.girthInches)) /
+        12,
+    0,
+  );
   const membraneSqFt = parapets.reduce((s, x) => {
     const pieces = x.pieces ?? 1;
     const adjLen = pieces >= 1 ? x.lengthFt + 1 + pieces : 0;

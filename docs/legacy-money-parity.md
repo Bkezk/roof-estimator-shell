@@ -2630,3 +2630,32 @@ routines they call (`RoofSystem.MechField/MechPerim/AdheredField/AdheredPerimLab
   the fixed widths and the custom field width, the labor tiers take the per-tier spacings, the
   field takes the custom field spacing. Older bids' Duro-Last-style `perimLap` on a Duro-Tuff
   section keeps its one-outer-row mapping.
+
+### 22.16 Parity Comparisons round 2 — Parapets pair (2026-09-21)
+
+Source: the owner's `parapets` folder — both apps' Parapets screens for the three Knox County
+walls (Duro-Last / Solvent Based Adhesive / 50 mil / White, Metal Retrofit, Brick or Concrete):
+P1 vertical 6/54, 750 ft; P2 vertical 6/18, 160 ft, T-Bar 160; P3 Up & Over 6/104/13/3, 35 ft.
+
+**Input drift, not a bug — pieces.** Legacy P1 = 10 pieces, P2 = 1; web P1 = 8, P2 = 2.
+`AdjustedLength = Length + 1 + Pieces` (§3) reproduces BOTH apps exactly: legacy membrane
+4,517.50 = 761 × 5 + 162 × 2 + 37 × 10.5; web 4,509.50 = 759 × 5 + 163 × 2 + 37 × 10.5. The
+labor gap is the same drift: P1 162.09 h / 761 ft = 0.2130 h/ft = web 161.67 h / 759 ft; P2
+11.57 h × 162/163 = 11.49 → the legacy's "11.5"; P3 10.51 h on both. Totals 184.10 vs 183.75 h
+and the $8 difference follow. With matching pieces the parapet lines are penny-exact; the
+"$11.76 / 8 sqft" item from §22.12 is closed.
+
+**Matched exactly**: Vertical Wall Sq Ft 3,918.33; per-wall labor at equal inputs; Height after
+tabs 44" on P3 (104 − one 60" adhered tab).
+
+**Fixed — Total Wall Sq Ft on the Parapets screen.** Legacy `Parapet.TotalWallSqFT` (0x419f4)
+= `Length × (Vertical + Drop + Cant + WallTop) / 12` — no skirt — = 3,965.00 on the screens.
+The web screen summed the full girth (skirt included) → 4,437.50; the Review stat already used
+the legacy formula. Display only: nothing prices off it (wall adhesive uses WallPlusTopSqFt).
+
+**Flagged — "Height after tabs" on tab-less walls.** Legacy shows 0" for P1 (54") and P2
+(18"); the web shows 54" / 18". `Parapet.RemainingHeight` (0x423c8) as read: start at slot 1
+(2 with a cant), subtract `m_dTabs[i]` up to `m_iCalcTabCount`, clamp at 0 — with no tab rows
+the loop does not run and the routine returns Vertical, which is what the web does. The
+screens disagree with that reading, so either the preview parapet's tab state differs at paint
+time or a step was missed; no money depends on the label. Left as-is pending a second look.
