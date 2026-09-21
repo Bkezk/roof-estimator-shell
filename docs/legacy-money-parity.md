@@ -2515,7 +2515,18 @@ counts. Not implemented as a ×2 — that would be fabrication against the IL.
   Duro-Tuff 30 / 60 / 120; Duro-Roof 64; Duro-Fleece 60 / 120); for sheets it is "Field Tab
   Spacing" over `SheetTabSpacings`. The web offered a free inches box for roll goods; it now
   picks from `rollGoodWidthMulti[rsId]` (the seeded table) and falls back to the box only when
-  a system has no rows.
+  a system has no rows. **Ported in full (same day, `src/lib/engine/lap-options.ts`)**: the
+  list follows `SheetSize.Layout` (roll-goods sheet → RollGoodWidths / "Field Roll Width";
+  sheet layout → SheetTabSpacings / "Field Tab Spacing", via the builder's isRollGoodSheet
+  test); under a MECHANICAL attachment each lap is offered only when
+  `UniversalFastenerSpacing(thickness, designTable, [lap], pullTest, 0)` finds a field
+  spacing; an empty list becomes the single **"Check Pull"** entry, whose selection stores
+  FieldLap = 0 (`cbLapWidth_SelectedIndexChanged` 0x950f4); the saved lap is preselected when
+  still listed, else the first entry (`SelectedIndex = 0`). `VerifyFields` flags "Lap Spacing"
+  only for an out-of-range selection — "Check Pull" itself is not flagged; the pull-test hints
+  (" - Pull Test" unparsable, "< 140") are separate. The mechanical filter is skipped when the
+  fastener lookup is not loaded (data gap). A zero lap keeps every estimate figure finite
+  (pinned by a test); the roll-goods calc returns the bare area when the lap is 0.
 - **Adhesive pickers are data-driven** (`adhesiveOptionsForSystem`): roof / section pickers list
   `RoofSystem.AcceptableAdhesives` = every adhesive with an AdhesiveCoverage row for the roof
   system (`frmHome.LoadAttachmentSystem`, 0x57eec); parapet pickers list
