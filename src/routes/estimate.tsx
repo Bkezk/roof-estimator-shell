@@ -810,6 +810,7 @@ function EstimatePage() {
       adhesiveMaterial,
       curbMaterial,
       slipSheetMaterial,
+      reviewMembraneSqFtExtras,
     } = build;
     const accessoriesResult = build.accessories;
     const adhesiveWholeUnits = build.adhesiveWholeUnits;
@@ -834,6 +835,7 @@ function EstimatePage() {
       adhesiveMaterial,
       curbMaterial,
       slipSheetMaterial,
+      reviewMembraneSqFtExtras,
       // Own-rate direct-labor hours (metals + categorized non-DL); they join man-days but are
       // priced at each line's own rate, so they aren't in any crew-rate hour bucket.
       ownRateHours: inputs.ownRateDirectLaborHours ?? 0,
@@ -3948,7 +3950,12 @@ function EstimatePage() {
                   est={result.r}
                   stats={{
                     roofSqFt: result.r.roofSqFootage,
-                    membraneSqFt: result.r.sqFtTotalMembrane,
+                    // Legacy dTotals[29]: membrane + parapet adjusted sqft + ARP (both sides).
+                    membraneSqFt:
+                      result.r.sqFtTotalMembrane +
+                      result.reviewMembraneSqFtExtras.parapetAdjustedSqFt +
+                      result.reviewMembraneSqFtExtras.parapetArpSqFt +
+                      result.reviewMembraneSqFtExtras.sectionArpSqFt,
                     parapetVertSqFt: parapetWallStats.vert,
                     parapetWallSqFt: parapetWallStats.total,
                   }}

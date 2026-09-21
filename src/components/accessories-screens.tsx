@@ -256,7 +256,8 @@ function PipeStacksScreen(
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {["White", "Tan", "Gray", "Dark Gray", "Terra Cotta", "Rock Ply"].map((c) => (
+              {/* No Rock Ply pipe stacks exist in the legacy catalog (confirmed 2026-09-21). */}
+              {["White", "Tan", "Gray", "Dark Gray", "Terra Cotta"].map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>

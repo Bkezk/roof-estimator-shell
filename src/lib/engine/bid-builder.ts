@@ -837,6 +837,15 @@ export interface BuildResult {
   /** Curb wrap membrane $ (inside duroLastMaterial/M0); split out for display/proposal. */
   curbMaterial: number;
   /**
+   * Legacy Review "Total Membrane sqft" (dTotals[29]) = SqFtTotalMembrane + Parapets.AdjustedSqFt
+   * + Parapets.ARPSqFt + RoofSections.ARPSqFt; the per-membrane-sqft rows divide by it (§22.12).
+   */
+  reviewMembraneSqFtExtras: {
+    parapetAdjustedSqFt: number;
+    parapetArpSqFt: number;
+    sectionArpSqFt: number;
+  };
+  /**
    * Slip-Sheet underlayment (insulation tile 1) material $ — legacy dMaterial[6], which sits INSIDE
    * Σ dMaterial[0..6] = Duro-Last Material (M0, prepay-discountable); the other seven tiles form
    * dTotals[6] Underlayment (docs §22.1). Split out for display/proposal.
@@ -1295,9 +1304,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       if (uPrice === undefined) {
         warnings.push(`No underlayment price for "${layer.board}" — section "${s.name}".`);
       } else {
-        // Legacy waste factor (RoofSection.UnderlaymentCost, parity doc §6): area × 1.06 (6%
-        // waste) on every board, × 1.03 for the board named "Geotextile".
-        const waste = layer.board.trim().toLowerCase() === "geotextile" ? 1.03 : 1.06;
+        // Legacy waste factor (RoofSection.UnderlaymentCost 0x4bcc4, docs §22.12 — CORRECTED
+        // 2026-09-21): `CompareString(Name, "Geotextile"); brtrue → 1.03 path`, i.e. the branch is
+        // taken when the name is NOT Geotextile. So every ordinary board bills area × 1.03 and
+        // ONLY Geotextile bills × 1.06 — the reverse of the first transcription. Confirmed on a
+        // legacy Review screen: 4x8 ISO $79,120.15 = the web's ×1.06 figure × 1.03 / 1.06 exactly.
+        const waste = layer.board.trim().toLowerCase() === "geotextile" ? 1.06 : 1.03;
         underlaymentMaterial += area * waste * uPrice;
         addSub(uMatBySub, uTile, area * waste * uPrice);
       }
@@ -1627,6 +1639,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let parapetMaterial = 0;
   /** Σ parapet ARP sq ft (§8.6) — joins the section ARP in the MembraneAccs CalcQty below. */
   let parapetArpSqFt = 0;
+  /** Σ Parapet.AdjustedSqFt (billed height × adjusted length) — legacy Parapets.AdjustedSqFt, the
+   *  Review's "Total Membrane sqft" adds it to SqFtTotalMembrane (dTotals[29], docs §22.12). */
+  let parapetAdjustedSqFt = 0;
   /** Σ parapet slipsheet polyethylene sq ft (§8.6) — the §14 Others "Slipsheet" CalcQty. */
   let parapetPolySqFt = 0;
   /** Per-parapet legacy ManHours / BaseManHours (the Parapets screen "N MHS (x%)" link). */
@@ -1729,6 +1744,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             )
           : defaultPrice;
       parapetMaterial += bankersRound(billedHeightFt * adjustedLengthFt * ownPrice, 2);
+      parapetAdjustedSqFt += billedHeightFt * adjustedLengthFt;
     }
   }
 
@@ -1748,11 +1764,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       curbLaborHours += manHours;
       curbHoursById[c.id] = manHours;
     };
-    // Legacy "Insulation on Curb(s)" (parity doc §2): ISO_Labor = Round((0.25 + LinealFt ×
-    // 0.0167) × qty, 2) hours, LinealFt = (A+B)/6 (the footprint perimeter in feet).
+    // Legacy "Insulation on Curb(s)" — Curb.ISO_Labor (rva 0x33718, re-read 2026-09-21, docs
+    // §22.12): Round(0.25 + LinealFt × 0.0167 × Qty, 2). The 0.25 h is added ONCE per curb entry;
+    // only the per-foot part scales with quantity (the earlier port multiplied both by qty).
     if (c.hasInsulation) {
       const linealFt = (c.widthIn + c.lengthIn) / 6;
-      itemHours += bankersRound((0.25 + linealFt * 0.0167) * c.quantity, 2);
+      itemHours += bankersRound(0.25 + linealFt * 0.0167 * c.quantity, 2);
     }
     // Legacy "Plastic on Curb(s)" labor (BaseHours: PolyethyleneSqF / 400 hours, docs §8.2),
     // PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8).
@@ -2267,6 +2284,11 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     adhesiveMaterial,
     curbMaterial,
     slipSheetMaterial,
+    reviewMembraneSqFtExtras: {
+      parapetAdjustedSqFt,
+      parapetArpSqFt,
+      sectionArpSqFt: bid.sections.reduce((sum, s) => sum + edgesArpSqFt(s.edges ?? []), 0),
+    },
     ...(accessoriesCalcResult ? { accessories: accessoriesCalcResult } : {}),
     ...(metalsResult ? { metalsScreen: metalsResult } : {}),
     ...(nonDlResult ? { nonDl: nonDlResult } : {}),

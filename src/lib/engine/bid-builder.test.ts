@@ -191,7 +191,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(inputs.membraneCostBeforeDiscount).toBeCloseTo(MWO * 1.23, 2);
   });
 
-  it("underlayment material = board $/sqft × area × 1.06 waste (1.03 for Geotextile)", () => {
+  it("underlayment material = board $/sqft × area × 1.03 waste (1.06 ONLY for Geotextile) — §22.12", () => {
     const withU: EngineAdminData = {
       ...admin,
       underlaymentPrices: { '1/2" ISO': 0.85, Geotextile: 0.85 },
@@ -201,17 +201,19 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withU,
     );
     expect(warnings).toEqual([]);
-    // 50×50 = 2500 sf × $0.85 × 1.06 waste = $2,252.50 (legacy UnderlaymentCost, parity doc §6)
-    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2);
+    // 50×50 = 2500 sf × $0.85 × 1.03 waste = $2,188.75 (legacy UnderlaymentCost 0x4bcc4: the
+    // CompareString/brtrue branch sends every NON-Geotextile board to the 1.03 multiply; confirmed
+    // on a legacy Review screen, docs §22.12)
+    expect(inputs.materialUnderlayment).toBeCloseTo(2188.75, 2);
     expect(inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23, 2); // membrane unchanged
     const r = computeEstimate(inputs);
-    expect(r.money.dTotals[6]).toBeCloseTo(2252.5, 2);
-    // Geotextile carries the reduced 1.03 factor: 2500 × 0.85 × 1.03 = 2188.75
+    expect(r.money.dTotals[6]).toBeCloseTo(2188.75, 2);
+    // Geotextile is the ONE board on the 1.06 path: 2500 × 0.85 × 1.06 = 2252.50
     const geo = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: "Geotextile" }] }),
       withU,
     );
-    expect(geo.inputs.materialUnderlayment).toBeCloseTo(2188.75, 2);
+    expect(geo.inputs.materialUnderlayment).toBeCloseTo(2252.5, 2);
     // warns on an unknown board
     const bad = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: "Unobtainium" }] }),
@@ -313,7 +315,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
         { fromThreshold: 5001, cost: 975 },
       ],
     };
-    // M0 stays MWO * 1.23, but board material 2500 × 0.85 × 1.06 = 2252.50 lifts material-before-tax
+    // M0 stays MWO * 1.23, but board material 2500 × 0.85 × 1.03 = 2188.75 lifts material-before-tax
     // to 5451.73 > 5001 → the 975 band. (On the old M0 basis this bid shipped at 800.)
     const { inputs } = buildEstimateInputs(
       bid({
@@ -349,13 +351,13 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       underlaymentPrices: { '1/2" ISO': 0.85 },
       settings: { ...admin.settings, shippingMode: "percent", shippingPercent: 5 },
     };
-    // Board material (2500 × 0.85 × 1.06 = 2252.50) separates the basis from M0: the percent
-    // applies to material-before-tax MWO * 1.23 + 2252.50 = 5451.73 → 5% = 272.5865 → GoodSingle.
+    // Board material (2500 × 0.85 × 1.03 = 2188.75) separates the basis from M0: the percent
+    // applies to material-before-tax MWO * 1.23 + 2188.75 = 5387.98 → 5% = 272.5865 → GoodSingle.
     const { inputs } = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, underlaymentBoard: '1/2" ISO' }] }),
       pct,
     );
-    expect(inputs.shipping).toBeCloseTo((MWO * 1.23 + 2252.5) * 0.05, 2);
+    expect(inputs.shipping).toBeCloseTo((MWO * 1.23 + 2188.75) * 0.05, 2);
   });
 
   it("accessory labor (per-unit hrs × qty) folds into direct labor (LaborSubtotal1)", () => {
@@ -848,14 +850,15 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withCurb,
     );
     expect(curbMaterial).toBeCloseTo(2 * 40.70483, 3);
-    // Insulation on curb(s): LinealFt = (24+24)/6 = 8 → Round((0.25 + 8×0.0167) × 2, 2) = 0.77 h
+    // Insulation on curb(s) — Curb.ISO_Labor 0x33718 (§22.12): Round(0.25 + LinealFt × 0.0167 ×
+    // qty, 2) = Round(0.25 + 8 × 0.0167 × 2, 2) = 0.52 h (the 0.25 is per ENTRY, not per unit)
     // on top of the type labor (perimeter 8 ft: (8 + 7.5×1×8)/60 × 2 = 2.2667 h).
     const { inputs } = buildEstimateInputs(
       bid({ curbs: [{ ...curb, hasInsulation: true }] }),
       withCurb,
     );
     const r = computeEstimate(inputs);
-    expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.77, 4);
+    expect(r.curbLaborHours).toBeCloseTo((2 * 68) / 60 + 0.52, 4);
   });
 
   it("parapets: the labor band derives from Vertical (LookupParapetTimes), not the saved band (§19)", () => {
@@ -1107,9 +1110,9 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       girthInches: 30.4,
       useSlipsheet: true,
     };
-    // curb base: type labor 2×(8+7.5×20)/60 + ISO Round((0.25+20×0.0167)×2,2)=1.17
-    //            + lift 1+20×0.020833 = 1.41666
-    const curbBase = (2 * (8 + 7.5 * 20)) / 60 + 1.17 + 1 + 20 * 0.020833;
+    // curb base: type labor 2×(8+7.5×20)/60 + ISO Round(0.25+20×0.0167×2,2)=0.92 (§22.12: the
+    //            0.25 is per entry) + lift 1+20×0.020833 = 1.41666
+    const curbBase = (2 * (8 + 7.5 * 20)) / 60 + 0.92 + 1 + 20 * 0.020833;
     // parapet base: 4.59 matrix (AdjustedLength 102) + 0.80625 slipsheet
     const parapetBase = 4.59 + 0.80625;
     const { inputs } = buildEstimateInputs(
@@ -1574,8 +1577,8 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withU,
     );
     expect(warnings).toEqual([]);
-    // board material: 2500 x (0.85 + 0.30) x 1.06 waste = 3047.50 -> underlayment purchase line
-    expect(inputs.materialUnderlayment).toBeCloseTo(3047.5, 2);
+    // board material: 2500 x (0.85 + 0.30) x 1.03 waste = 2961.25 -> underlayment purchase line
+    expect(inputs.materialUnderlayment).toBeCloseTo(2961.25, 2);
     // adhesive material (legacy AggregateCalcQtys): 2500/2000 = 1.25 units, ceilinged once per
     // adhesive across the estimate -> 2 whole units x $899 = $1798 -> M0
     expect(adhesiveMaterial).toBeCloseTo(1798, 2);
@@ -1641,7 +1644,7 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       withU,
     );
     const r = computeEstimate(inputs);
-    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5, 2); // unchanged material
+    expect(inputs.materialUnderlayment).toBeCloseTo(2188.75, 2); // unchanged material
     expect(r.underlaymentLaborHours).toBeCloseTo(9.998, 3); // legacy 5-per-board rule (§18)
   });
 
@@ -2274,8 +2277,8 @@ describe("custom-quote underlayment layers (§10.5: Flute Filler / Tapered / ISO
       withU,
     );
     expect(warnings).toEqual([]);
-    // priced: 2500 × 0.85 × 1.06 = 2252.50; quote adds 300 verbatim
-    expect(inputs.materialUnderlayment).toBeCloseTo(2252.5 + 300, 2);
+    // priced: 2500 × 0.85 × 1.03 = 2188.75; quote adds 300 verbatim
+    expect(inputs.materialUnderlayment).toBeCloseTo(2188.75 + 300, 2);
     // priced labor 9.998 + quote 1 h
     expect(computeEstimate(inputs).underlaymentLaborHours).toBeCloseTo(10.998, 3);
   });
@@ -3025,7 +3028,7 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       bid({ sections: [{ ...bid().sections[0]!, layers }] }),
       uAdmin,
     );
-    expect(base.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
+    expect(base.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.03 * 0.85, 2);
     const over = buildEstimateInputs(
       bid({
         sections: [{ ...bid().sections[0]!, layers }],
@@ -3033,7 +3036,7 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       }),
       uAdmin,
     );
-    expect(over.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 1.1, 2);
+    expect(over.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.03 * 1.1, 2);
     // A 0 override means "admin price" for that board.
     const zero = buildEstimateInputs(
       bid({
@@ -3042,7 +3045,7 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       }),
       uAdmin,
     );
-    expect(zero.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
+    expect(zero.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.03 * 0.85, 2);
   });
 
   it("§22.1 Slip Sheets (tile 1) material is DURO-LAST material (dMaterial[6] inside M0), not Underlayment", () => {
@@ -3050,22 +3053,22 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer("Duro-Fold")] }] }),
       uAdmin,
     );
-    // 2500 × 1.06 × $0.30 = $795 slip sheet
-    expect(r.slipSheetMaterial).toBeCloseTo(795, 2);
+    // 2500 × 1.03 × $0.30 = $772.50 slip sheet
+    expect(r.slipSheetMaterial).toBeCloseTo(772.5, 2);
     expect(r.inputs.materialUnderlayment).toBe(0);
-    expect(r.inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 795, 1);
+    expect(r.inputs.duroLastMaterial).toBeCloseTo(MWO * 1.23 + 772.5, 1);
     const est = computeEstimate(r.inputs);
     expect(est.money.dTotals[6]).toBe(0);
     // …and it is inside the 5% prepay base.
     const prepay = computeEstimate({ ...r.inputs, prepayDiscount: true }).money.dTotals[1]!;
-    expect(prepay).toBeCloseTo(-Math.round((MWO * 1.23 + 795) * 0.05 * 100) / 100, 0);
+    expect(prepay).toBeCloseTo(-Math.round((MWO * 1.23 + 772.5) * 0.05 * 100) / 100, 0);
     // A tile-2 board stays in Underlayment (dTotals[6]).
     const iso = buildEstimateInputs(
       bid({ sections: [{ ...bid().sections[0]!, layers: [mechLayer('1/2" ISO')] }] }),
       uAdmin,
     );
     expect(iso.slipSheetMaterial).toBe(0);
-    expect(iso.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.06 * 0.85, 2);
+    expect(iso.inputs.materialUnderlayment).toBeCloseTo(2500 * 1.03 * 0.85, 2);
   });
 
   it("adhered layers: substrate derived from the deck / layer below; labor per 2500 on field+perim", () => {

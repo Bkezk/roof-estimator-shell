@@ -75,7 +75,8 @@ Curbs bill membrane as a **self-contained prefab-wrap model hardcoded in code** 
 - Related quantities: `LinealFt = Round((dimA+dimB)/6, 8)` (= footprint perimeter, ft);
   `TotalFt = Round((ΣdimA..D)/12, 8)`; `PolyethyleneSqF = Round(LinealFt × (dimC+dimD) × 5/48 ×
   qty, 8)` when hasPlastic; `SF_ISO = LinealFt × qty` when hasInsulation;
-  `ISO_Labor = Round((0.25 + LinealFt × 0.0167) × qty, 2)`;
+  `ISO_Labor = Round(0.25 + LinealFt × 0.0167 × qty, 2)` (the 0.25 h is per ENTRY, only the
+  per-foot part scales with qty — corrected 2026-09-21 from the IL, §22.12);
   `ISO_Fasteners = Ceil(Ceil(LinealFt × qty)/3)`.
 
 The web app's "curb membrane not auto-computed" flag is settled: the legacy amount comes from
@@ -173,9 +174,12 @@ Settled premises for the web engine:
 - Per-diem: `dTotals[17] = PerDiem × TotalManDays` with the in/out-of-markup branches ✓ matches;
   the man-days BASIS gains metals + non-DL hours per the routing above.
 - Bonus finding — **underlayment board material carries a waste factor** (`RoofSection.
-  UnderlaymentCost`, rva 0x4bcc4): `length × width × 1.06 × $/sqft` (6% waste), or × **1.03** for
-  the board named "Geotextile". PORTED (2026-09-04): the web engine now bills area × waste ×
-  price (1.03 keyed on the exact board name "Geotextile", case-insensitive).
+  UnderlaymentCost`, rva 0x4bcc4): `length × width × 1.03 × $/sqft` for every board EXCEPT the one
+  named "Geotextile", which bills × **1.06**. CORRECTED 2026-09-21 (§22.12): the first reading had
+  the two factors swapped — the IL is `CompareString(Name, "Geotextile"); brtrue → 1.03 path`,
+  i.e. the branch is taken when the name is NOT Geotextile; a legacy Review screen confirms it
+  (4x8 ISO at ×1.03). The web engine bills area × waste × price with 1.06 keyed on the exact
+  board name "Geotextile" (case-insensitive).
 
 ## 7. Final round (2026-09-04): non-DL-family membrane pricing, BAColor, Duro-Tuff units
 
@@ -2303,9 +2307,11 @@ below) → +Infinity — the web warns and bills 0 there.
   money bug today. Full note + fix options in **§22.10**. (Separately: D/L/E/M-Style gutters have
   no priced rows in the seed — vendor-DB only, needs a capture.)
 - Uncaptured prices (bill $0, already flagged): pitch-pan Filler, drip-edge corners / clips,
-  Rock Ply pipe stacks, no Rock Ply corner column, `non_dl:others` rows (see §22.11 — they are
-  not reachable from either legacy UI), Dark Gray / Terra Cotta term-bar "Additional" boxes
-  (legacy prices them on the White bar). (Duro-Last stripping is now priced — §22.9.)
+  `non_dl:others` rows (see §22.11 — they are not reachable from either legacy UI). CLOSED
+  2026-09-21: Rock Ply pipe stacks and Rock Ply corners do not exist in the legacy catalog
+  (owner confirmation) — the code paths stay but the pipe-stack picker no longer offers the
+  colour; Dark Gray / Terra Cotta term-bar boxes were implemented in §22.9; Duro-Last stripping
+  is priced (§22.9); gutters / downspouts are captured (§22.12).
 - Membrane high-wind upcharge column follows the DEFAULT section's attachment class (mechanical /
   adhered; any other class → 0) — the web keys the bid-level attachment.
 - Flute filler "Attached With": legacy keeps the combo on a quote layer but it never touches the
@@ -2414,3 +2420,60 @@ auto-quantities — a parapet or curb with the polyethylene option on (row 1 =
 (row 2 = `Ceil(Curbs.ISO_SqFt)`) — then read the two Others lines on the Non-Duro-Last screen's
 summary list. Unit cost = Material ÷ Qty. The same lines also reveal **row 2's real description**;
 ours ("ISO (Curb Insulation Sq Ft)") is a stand-in, since the installer names only row 1.
+
+### 22.12 Parity Comparisons round 1 — Curbs screen + Estimate Review pair (2026-09-21)
+
+Source: the owner's "Parity Comparisons" Drive folder — the legacy and web Curbs screens for the
+same seven curbs, both apps' Estimate Review (Cost and Labor views) for that bid, and the
+legacy Gutters / Downspouts / Pitch Pans dialogs for every style and size. The web bid was
+re-keyed by hand, so some inputs drifted (noted per item); the roof sections were entered with
+different values on purpose, so their review lines are not comparable.
+
+**Confirmed penny-exact against the legacy screens** (same inputs): Roof Sections membrane
+material $60,908.34; Flute Filler $12,582.84 and Tapered/Other $2,500.00 quotes; warranty
+$7,264.40; standard-sheet discount ($2,436.33); prepay 5 %; setup 157.51 h / $7,087.77;
+inspection 16 h / $720; the whole totals chain (Total Purchases, Subtotal 1, gross-profit
+markup at 25 % and 35 %, commission 1.5 % on Subtotal 2 + per-diem, Bid Total, man-days, price
+per roof sqft); curb wrap material — the engine reproduces the legacy $1,008.30 (legacy
+dimensions, 40 mil) AND the web's $1,131.10 (the web bid had C = 12 on curbs 3 and 4 and 50 mil)
+to the cent, so that gap is input drift; parapet vertical / total wall sqft.
+
+**Bugs found and fixed**
+- **Underlayment waste factor was inverted** (§6 corrected): legacy bills ×1.03 on every board and
+  ×1.06 only on Geotextile. Proof on the screens: legacy 4x8 ISO $79,120.15 = web $81,424.62 ×
+  1.03 / 1.06 exactly. Every insulation board was over-billed 2.9 %.
+- **Curb insulation labor** (`Curb.ISO_Labor` 0x33718): `Round(0.25 + LinealFt × 0.0167 × Qty, 2)`
+  — the 0.25 h once per entry, not per unit. Curb F (30×72, qty 3): web 9.05 h → 8.55 h; legacy
+  shows 8.53 h. The remaining 0.02 h (≈ $1) does not come from any term in `BaseHours` (0x333a4,
+  re-read: `(perLF × (A+B)×2/12 × qty + base × qty) × typeMult + Poly/400 + ISO_Labor`, LinealFt
+  = (A+B)/6 exactly) and is left as a residual; the admin caption "Setup + (Deck × Multi)" is
+  looser than the IL, which multiplies the setup too.
+- **Review "Total Membrane sqft"** is legacy `dTotals[29]` = SqFtTotalMembrane + Parapets.
+  AdjustedSqFt + Parapets.ARPSqFt + RoofSections.ARPSqFt (legacy showed 60,397.50 vs the web's
+  bare 55,880); "Price per membrane sqft" and "Labor per membrane sqft" divide by it. Wired via
+  `BuildResult.reviewMembraneSqFtExtras`.
+
+**Open from this pair — needs the parapet screens**: parapet material legacy $6,640.73 vs web
+$6,628.97 with identical wall sqft. At the 50 mil parapet price ($1.47) that is 4,517.50 vs
+4,509.50 adjusted sqft — an 8 sqft gap on one wall's AdjustedLength / AdjustedHeight (pieces or
+height rounding), and parapet labor 184.10 h vs 181.16 h. Not resolvable from the review alone.
+
+**Display gaps noted (not money)**: the legacy Review carries a second Amount column (the
+CustomMarkup "what-if" at 35 %); the web shows one. The web lists Adhesives as its own purchase
+row; legacy folds adhesives into Accessories (same M0). Legacy "Other" $46.80 is the
+`non_dl:others` rows priced from the vendor DB — with the seven curbs' ISO sq ft (Σ (A+B)/6 × qty
+= 310.5 → 311) that is ≈ $0.15/sqft; read the Others lines on the legacy Non-DL screen to pin it
+(§22.11).
+
+**Captures applied** (migration `20260921100000`, live DB updated): four gutter styles DX / LX /
+EX / MX × three sizes (4: A6 B4 C4; 5: A7 B5 C5; 6: A7 B6 C5) — gutter $10.90–$12.50/LF, end caps
+$33.10–$33.85, splice plates $9.65–$10.00, miters $147.55–$155.95, all 0.15 / 0.15 / 0.1 / 1.0 h
+at $45; Gutter Sealant $7.95 and Rivets $50 shared, no labor. Downspouts in five sizes (3"X4",
+4"X4", 4"X5", 5"X7", 6"X6") — Open $18.90–$20.50, Closed $10.45–$13.00, Drop/Outlet $23.65–$24.90,
+elbows $63.05–$66.95, 0.15 h (drop 0.75) at $45. Two legacy data quirks kept verbatim: the 5"X7"
+Open row's labor rate is $0.00 and Snow Diverter is $0.00 (the installer's $34.55 was replaced).
+Pitch pans already matched ($96.58 / $102.31 / $108.02, 1 h); the Filler amount is still not on
+any screen. The 2026-09-09 installer reseed had priced the gutters at $4.69/LF with no labor —
+those were 2013 vendor defaults, not the owner's live values. Whether plain D / L / E / M styles
+exist in the legacy dropdown (the seed lists them, the captures show only the X variants) is an
+open question for the owner.
