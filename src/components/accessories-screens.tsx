@@ -615,11 +615,26 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     needed?: number;
   }) => (
     <div className="space-y-1">
-      {needed !== undefined && (
-        <p className={`text-xs font-medium ${needed > 0 ? "text-red-600" : ""}`}>
-          Fasteners Needed: {needed}
-        </p>
-      )}
+      {needed !== undefined &&
+        (() => {
+          // Legacy: Needed = calculated − Σ entered on this screen (steel plates excluded), red
+          // while > 0. Showing the entered count makes a netted 0 readable.
+          const entered = Object.entries(state.fastenerQty[slot] ?? {}).reduce(
+            (sum, [key, qty]) => (key === PLATE_ROWS.steel ? sum : sum + (qty || 0)),
+            0,
+          );
+          return (
+            <p className={`text-xs font-medium ${needed > 0 ? "text-red-600" : ""}`}>
+              Fasteners Needed: {needed}
+              {entered > 0 && (
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  ({needed + entered} calculated, {entered} entered)
+                </span>
+              )}
+            </p>
+          );
+        })()}
       {title && <p className="text-xs font-semibold">{title}</p>}
       <table className="text-xs">
         <tbody>
