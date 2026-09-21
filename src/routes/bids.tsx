@@ -2,10 +2,17 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { PlusCircle, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { deleteBid, listBids } from "@/lib/bids.functions";
+import {
+  DELETED_BID_RETENTION_DAYS,
+  deleteBid,
+  listBids,
+  listDeletedBids,
+  purgeBid,
+  restoreBid,
+} from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-context";
 import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
@@ -70,15 +77,53 @@ function BidsPage() {
   const qc = useQueryClient();
   const deleteBidFn = useServerFn(deleteBid);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["bids"] });
+    void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
+  };
   const del = useMutation({
     mutationFn: (id: string) => deleteBidFn({ data: { id } }),
     onSuccess: () => {
-      toast.success("Bid deleted");
-      void qc.invalidateQueries({ queryKey: ["bids"] });
+      toast.success(`Bid moved to Recently deleted (kept ${DELETED_BID_RETENTION_DAYS} days)`);
+      refresh();
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
     onSettled: () => setConfirmDelete(null),
   });
+  // Recently deleted bin: soft-deleted bids inside the retention window, with Restore / Purge.
+  const listDeletedFn = useServerFn(listDeletedBids);
+  const restoreFn = useServerFn(restoreBid);
+  const purgeFn = useServerFn(purgeBid);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const deletedQuery = useQuery({
+    queryKey: ["bids-deleted"],
+    queryFn: listDeletedFn,
+    enabled: !!session,
+  });
+  const restore = useMutation({
+    mutationFn: (id: string) => restoreFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Bid restored");
+      refresh();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Restore failed"),
+  });
+  const [confirmPurge, setConfirmPurge] = useState<{ id: string; name: string } | null>(null);
+  const purge = useMutation({
+    mutationFn: (id: string) => purgeFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Bid permanently deleted");
+      refresh();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
+    onSettled: () => setConfirmPurge(null),
+  });
+  const deletedBids = deletedQuery.data ?? [];
+  const daysLeft = (deletedAt: string | null) => {
+    const t = deletedAt ? new Date(deletedAt).getTime() : Date.now();
+    const end = t + DELETED_BID_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    return Math.max(0, Math.ceil((end - Date.now()) / (24 * 60 * 60 * 1000)));
+  };
 
   if (error) {
     return (
@@ -192,6 +237,99 @@ function BidsPage() {
         </div>
       )}
 
+      {/* Recently deleted (soft-deleted bids inside the retention window) */}
+      <div className="rounded-lg border">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-medium hover:bg-muted"
+          onClick={() => setShowDeleted((v) => !v)}
+          aria-expanded={showDeleted}
+        >
+          <span>
+            Recently deleted{deletedBids.length ? ` (${deletedBids.length})` : ""}
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              kept {DELETED_BID_RETENTION_DAYS} days, then removed for good
+            </span>
+          </span>
+          <span className="text-xs text-muted-foreground">{showDeleted ? "Hide" : "Show"}</span>
+        </button>
+        {showDeleted && (
+          <div className="space-y-2 border-t p-4">
+            {deletedQuery.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : deletedBids.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing in Recently deleted.</p>
+            ) : (
+              deletedBids.map((bid) => (
+                <div
+                  key={bid.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-dashed px-3 py-2"
+                >
+                  <div>
+                    <p className="font-medium">{bid.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Deleted {bid.deleted_at ? new Date(bid.deleted_at).toLocaleDateString() : "—"}{" "}
+                      · {daysLeft(bid.deleted_at)} day{daysLeft(bid.deleted_at) === 1 ? "" : "s"}{" "}
+                      left · {money(Number(bid.grand_total ?? 0))}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={restore.isPending || purge.isPending}
+                      onClick={() => restore.mutate(bid.id)}
+                    >
+                      <RotateCcw className="mr-1 h-4 w-4" />
+                      Restore
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      disabled={restore.isPending || purge.isPending}
+                      onClick={() => setConfirmPurge({ id: bid.id, name: bid.name })}
+                    >
+                      Delete permanently
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      <AlertDialog
+        open={confirmPurge !== null}
+        onOpenChange={(open) => {
+          if (!open && !purge.isPending) setConfirmPurge(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this bid permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{confirmPurge?.name}” and everything saved in it will be removed for good. This
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={purge.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={purge.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (confirmPurge) purge.mutate(confirmPurge.id);
+              }}
+            >
+              {purge.isPending ? "Deleting…" : "Delete permanently"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog
         open={confirmDelete !== null}
         onOpenChange={(open) => {
@@ -202,8 +340,8 @@ function BidsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this bid?</AlertDialogTitle>
             <AlertDialogDescription>
-              “{confirmDelete?.name}” and everything saved in it will be permanently removed. This
-              cannot be undone.
+              “{confirmDelete?.name}” will move to Recently deleted, where you can restore it for{" "}
+              {DELETED_BID_RETENTION_DAYS} days. After that it is removed for good.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

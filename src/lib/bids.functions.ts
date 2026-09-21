@@ -13,8 +13,35 @@ export const listBids = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase
       .from("bids")
       .select("*")
+      .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     if (error) throw error;
+    return data ?? [];
+  });
+
+/** Soft-deleted bids are kept this long, then purged (lazily, whenever the bin is listed). */
+export const DELETED_BID_RETENTION_DAYS = 30;
+
+/** The "Recently deleted" bin: soft-deleted bids still inside the retention window. */
+export const listDeletedBids = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const cutoff = new Date(
+      Date.now() - DELETED_BID_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    // Purge anything past the window before listing what is left.
+    const { error: purgeError } = await context.supabase
+      .from("bids")
+      .delete()
+      .not("deleted_at", "is", null)
+      .lt("deleted_at", cutoff);
+    if (purgeError) throw new Error(purgeError.message);
+    const { data, error } = await context.supabase
+      .from("bids")
+      .select("id, name, status, grand_total, updated_at, deleted_at")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    if (error) throw new Error(error.message);
     return data ?? [];
   });
 
@@ -59,17 +86,52 @@ export const saveBid = createServerFn({ method: "POST" })
 
 const getBidSchema = z.object({ id: z.string().uuid() });
 
-/** Permanently delete one bid. RLS (`bids_authenticated_all`) is the final guard. */
+/**
+ * Delete one bid — a SOFT delete: the row is stamped `deleted_at`, hidden from the list, and
+ * kept in "Recently deleted" for DELETED_BID_RETENTION_DAYS with Restore. RLS
+ * (`bids_authenticated_all`) is the final guard.
+ */
 export const deleteBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => getBidSchema.parse(d))
   .handler(async ({ data, context }) => {
     const { error, count } = await context.supabase
       .from("bids")
-      .delete({ count: "exact" })
-      .eq("id", data.id);
+      .update({ deleted_at: new Date().toISOString() }, { count: "exact" })
+      .eq("id", data.id)
+      .is("deleted_at", null);
     if (error) throw new Error(error.message);
     if (!count) throw new Error("Bid not found (it may already have been deleted).");
+    return { id: data.id };
+  });
+
+/** Bring a soft-deleted bid back to the list. */
+export const restoreBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => getBidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { error, count } = await context.supabase
+      .from("bids")
+      .update({ deleted_at: null }, { count: "exact" })
+      .eq("id", data.id)
+      .not("deleted_at", "is", null);
+    if (error) throw new Error(error.message);
+    if (!count) throw new Error("Bid not found in Recently deleted.");
+    return { id: data.id };
+  });
+
+/** Permanently remove a bid that is already in Recently deleted. Cannot be undone. */
+export const purgeBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => getBidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { error, count } = await context.supabase
+      .from("bids")
+      .delete({ count: "exact" })
+      .eq("id", data.id)
+      .not("deleted_at", "is", null);
+    if (error) throw new Error(error.message);
+    if (!count) throw new Error("Bid not found in Recently deleted.");
     return { id: data.id };
   });
 
