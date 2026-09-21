@@ -2994,3 +2994,24 @@ the engine multiplies the term bar by pieces, and the term bar contributes ONE s
 Parapet 2 …"): 160 / 170 / 5.95 / 357 fasteners / a single Term Bar line. No change to the money
 path; if the owner's "double" is a specific screen figure (e.g. the Review's per-item labor or
 the Accessories Summary), it needs that figure to chase further.
+
+### 22.30 Setup "2. Wall Type" now re-routes existing walls; header / footer tidy (2026-09-21)
+
+Owner: "if you were on brick or concrete then you went to metal or wood and click update it
+doesn't change from predrill to non pre drill". Legacy `frmHome.cbParapetWallType_
+SelectedIndexChanged` (0x5bb7c) writes the pick to `Estimate.defaultParapet.WallType` ONLY —
+new walls inherit it; `Button1_Click_1` ("apply to parapets") copies RoofSystem / Attachment /
+MembraneType / Color and never WallType; "Update Pricing & Labor" is admin data. So in legacy an
+existing wall keeps its own WallType (and its term-bar / fascia drill split) until it is changed
+on the Parapets screen — which is what the web did too.
+
+Departure (owner's expectation): changing "2. Wall Type" on Setup now also sets `wallType` on
+every existing parapet (toast names the count); the Parapets screen picker still overrides a
+single wall afterwards, and "Apply to Existing Parapets" keeps including the wall type. The
+drill routing itself is unchanged (`TermBar.GetParapetLength`: WallType 1 → no-drill, else
+pre-drill; the labor lookup's WallType-4-fixed rule for adhered walls, §8.5, is untouched).
+
+Layout (no money): the estimate header keeps only the title — the bid name is the Setup › Bid
+Info "Job Name"; the Proposal button is removed for now; Status and Export sit above the Bid
+total card on the right; the footer holds Save & Previous | Save | Save & Next (Save alone on
+the last step).

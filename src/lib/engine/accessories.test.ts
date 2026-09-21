@@ -521,7 +521,9 @@ describe("term bar (§12.2)", () => {
   it("Knox County Parapet 2 (160 ft T-Bar, Brick/Concrete, 2 pieces): 170 ft pre-drill, 5.95 h, one summary row", () => {
     const args = anchorArgs();
     args.sections = [section({})];
-    const wall = (over: Partial<ParapetInput>): ParapetInput => ({
+    const wall = (
+      over: Partial<import("./bid-builder").ParapetInput>,
+    ): import("./bid-builder").ParapetInput => ({
       id: "p",
       name: "wall",
       lengthFt: 750,

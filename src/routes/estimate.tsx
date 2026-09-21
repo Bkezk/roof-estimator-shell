@@ -8,7 +8,6 @@ import {
   Trash2,
   AlertTriangle,
   Save,
-  FileText,
   Copy,
   Download,
   RefreshCw,
@@ -1215,61 +1214,12 @@ function EstimatePage() {
             save. Saving will write the current inputs over the empty record.
           </div>
         )}
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
-            <p className="text-sm text-muted-foreground">
-              A live estimate — the bid total recomputes from the seeded pricing and labor data on
-              every change.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Bid name</Label>
-              <Input
-                className="w-[220px] max-w-full"
-                value={bidName}
-                onChange={(e) => setBidName(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Status</Label>
-              <Select value={bidStatus} onValueChange={(v) => setBidStatus(v as BidStatus)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {BID_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={handleSave} disabled={saving}>
-              <Save className="mr-2 h-4 w-4" />
-              {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!bidId}
-              title={bidId ? "Open the printable proposal" : "Save the bid first"}
-              onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
-            >
-              <FileText className="mr-2 h-4 w-4" />
-              Proposal
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!result}
-              title="Download the estimate review (cost, labor and unit metrics) as CSV"
-              onClick={exportReview}
-            >
-              <Download className="mr-2 h-4 w-4" />
-              Export
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
+          <p className="text-sm text-muted-foreground">
+            A live estimate — the bid total recomputes from the seeded pricing and labor data on
+            every change.
+          </p>
         </div>
 
         {frozenAsOf !== null && (
@@ -1731,12 +1681,20 @@ function EstimatePage() {
                   <PickOne
                     value={parapetDefaults.wallType === 4 ? "Brick or Concrete" : "Wood or Metal"}
                     options={["Wood or Metal", "Brick or Concrete"]}
-                    onChange={(v) =>
-                      setParapetDefaults((p) => ({
-                        ...p,
-                        wallType: v === "Brick or Concrete" ? 4 : 1,
-                      }))
-                    }
+                    onChange={(v) => {
+                      const wallType = v === "Brick or Concrete" ? 4 : 1;
+                      setParapetDefaults((p) => ({ ...p, wallType }));
+                      // Legacy only seeds NEW walls from this default (defaultParapet.WallType);
+                      // the owner expects the bid-level wall type to re-route the existing walls'
+                      // term-bar drill split too (docs §22.30), so it is applied to every wall.
+                      // A wall can still be overridden on the Parapets screen afterwards.
+                      if (parapets.length > 0) {
+                        setParapets((prev) => prev.map((pp) => ({ ...pp, wallType })));
+                        toast.info(
+                          `${v} applied to ${parapets.length} parapet${parapets.length === 1 ? "" : "s"} — term bar / fascia drill split follows it.`,
+                        );
+                      }
+                    }}
                   />
                 </LegacyGroup>
               </div>
@@ -4232,15 +4190,6 @@ function EstimatePage() {
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={!bidId}
-                  title={bidId ? "Open the printable proposal" : "Save the bid first"}
-                  onClick={() => bidId && navigate({ to: "/proposal", search: { bid: bidId } })}
-                >
-                  <FileText className="mr-2 h-4 w-4" />
-                  Proposal
-                </Button>
-                <Button
-                  variant="outline"
                   disabled={!result}
                   title="Download the estimate review as CSV"
                   onClick={exportReview}
@@ -4270,24 +4219,58 @@ function EstimatePage() {
               </span>
             )}
           </span>
-          {step < STEPS.length - 1 ? (
+          <div className="flex items-center gap-2">
             <Button
-              onClick={() => saveAndGo(step + 1)}
+              variant={step < STEPS.length - 1 ? "outline" : "default"}
+              onClick={handleSave}
               disabled={saving}
-              title="Saves the bid, then moves on"
+              title="Saves the bid and stays on this step"
             >
-              {saving ? "Saving…" : "Save & Next"} <ChevronRight className="ml-1 h-4 w-4" />
-            </Button>
-          ) : (
-            <Button onClick={handleSave} disabled={saving}>
               <Save className="mr-2 h-4 w-4" />
-              {saving ? "Saving…" : "Save bid"}
+              {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
             </Button>
-          )}
+            {step < STEPS.length - 1 && (
+              <Button
+                onClick={() => saveAndGo(step + 1)}
+                disabled={saving}
+                title="Saves the bid, then moves on"
+              >
+                {saving ? "Saving…" : "Save & Next"} <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
-      <div id="bid-total-panel" className="lg:sticky lg:top-4 lg:self-start">
+      <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-0 flex-1 space-y-1">
+            <Label className="text-xs">Status</Label>
+            <Select value={bidStatus} onValueChange={(v) => setBidStatus(v as BidStatus)}>
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BID_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9"
+            disabled={!result}
+            title="Download the estimate review (cost, labor and unit metrics) as CSV"
+            onClick={exportReview}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Export
+          </Button>
+        </div>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 py-3">
             <div className="min-w-0">
