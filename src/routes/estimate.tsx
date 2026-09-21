@@ -970,7 +970,8 @@ function EstimatePage() {
     }
   };
 
-  const handleSave = async () => {
+  /** Save the bid (create on first save). Resolves true on success, false when the save failed. */
+  const handleSave = async (): Promise<boolean> => {
     setSaving(true);
     try {
       const grandTotal = result?.r.money.grandTotal ?? 0;
@@ -1008,11 +1009,17 @@ function EstimatePage() {
         hydratedFor.current = row.id;
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
       }
+      return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+  // Next saves the bid before moving on (every step is a checkpoint); a failed save stays put.
+  const saveAndNext = async () => {
+    if (await handleSave()) goStep(step + 1);
   };
 
   // Estimate Review export (legacy "Export To Excel"): the same figures as the Bid-total panel,
@@ -4125,8 +4132,8 @@ function EstimatePage() {
             Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
           </span>
           {step < STEPS.length - 1 ? (
-            <Button onClick={() => goStep(step + 1)}>
-              Next <ChevronRight className="ml-1 h-4 w-4" />
+            <Button onClick={saveAndNext} disabled={saving} title="Saves the bid, then moves on">
+              {saving ? "Saving…" : "Save & Next"} <ChevronRight className="ml-1 h-4 w-4" />
             </Button>
           ) : (
             <Button onClick={handleSave} disabled={saving}>
