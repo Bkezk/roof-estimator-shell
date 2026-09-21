@@ -210,7 +210,17 @@ function BidsPage() {
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Updated {new Date(bid.updated_at).toLocaleDateString()}
+                    {(() => {
+                      // Estimator's Name is keyed on Setup › Bid Info (customer.estimatorName).
+                      const d = bid.data as { customer?: { estimatorName?: string } } | null;
+                      const est = d?.customer?.estimatorName?.trim();
+                      return est ? `Estimator: ${est} · ` : "Estimator: — · ";
+                    })()}
+                    Created {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+                    {new Date(bid.updated_at).toLocaleString(undefined, {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
