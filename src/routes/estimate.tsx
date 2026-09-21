@@ -123,7 +123,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 import {
   Select,
   SelectContent,
@@ -1446,7 +1446,7 @@ function EstimatePage() {
                     </div>
                   </LegacyGroup>
                   <LegacyGroup title="6. Notes">
-                    <Textarea
+                    <AutoTextarea
                       rows={3}
                       placeholder="Shown on the proposal…"
                       value={customer.notes}
