@@ -1252,13 +1252,15 @@ function EstimatePage() {
               {frozenAsOf ? new Date(frozenAsOf).toLocaleString() : "when this bid was saved"} —
               admin changes don't affect this bid until you update it.
             </span>
-            <Button variant="outline" size="sm" onClick={refreshPricing}>
-              <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
-            </Button>
+            {pricingStale && (
+              <Button variant="outline" size="sm" onClick={refreshPricing}>
+                <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
+              </Button>
+            )}
           </div>
         )}
 
-        <div className="flex flex-wrap gap-1 rounded-md border bg-muted/40 p-1">
+        <div className="flex flex-wrap gap-1.5 rounded-md border bg-muted/40 p-1.5">
           {STEPS.map((st, i) => {
             const n = stepCount(st.key);
             return (
@@ -1266,10 +1268,10 @@ function EstimatePage() {
                 key={st.key}
                 type="button"
                 onClick={() => goStep(i)}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                className={`rounded-md px-4 py-2 text-base font-bold tracking-tight transition-colors ${
                   step === i
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border"
+                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                 }`}
               >
                 {st.label}
