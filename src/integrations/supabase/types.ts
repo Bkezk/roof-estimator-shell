@@ -391,6 +391,39 @@ export type Database = {
         };
         Relationships: [];
       };
+      catalog_item_numbers: {
+        Row: {
+          created_at: string;
+          dl_description: string | null;
+          item_no: string;
+          last_import_at: string | null;
+          last_price: number | null;
+          price_col: string;
+          row_label: string;
+          screen_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          dl_description?: string | null;
+          item_no: string;
+          last_import_at?: string | null;
+          last_price?: number | null;
+          price_col: string;
+          row_label: string;
+          screen_id: string;
+        };
+        Update: {
+          created_at?: string;
+          dl_description?: string | null;
+          item_no?: string;
+          last_import_at?: string | null;
+          last_price?: number | null;
+          price_col?: string;
+          row_label?: string;
+          screen_id?: string;
+        };
+        Relationships: [];
+      };
       pricing_catalog: {
         Row: {
           branch: string;

@@ -13,11 +13,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -57,6 +53,7 @@ type AdminTab =
   | "roofdeck"
   | "parapet"
   | "accessory"
+  | "items"
   | "catalog"
   | "adhesives"
   | "metals";
@@ -129,6 +126,7 @@ const adminItems: {
       { title: "Walk Pads & Wall Vents", cat: "Walk Pads & Wall Vents" },
       { title: "Membrane Accs", cat: "Membrane Accs" },
       { title: "EXCEPTIONAL Metals", tab: "metals" },
+      { title: "Item Numbers / Price Import", tab: "items" },
     ],
   },
   {
@@ -213,8 +211,7 @@ export function AppSidebar() {
                       asChild
                       open={
                         openMenus[item.title] ??
-                        (isActive(item.url) ||
-                          item.sub.some((s) => s.url && isActive(s.url)))
+                        (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
                       }
                       onOpenChange={(open) =>
                         setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
@@ -274,11 +271,7 @@ export function AppSidebar() {
                     </Collapsible>
                   ) : (
                     <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={isActive(item.url)}
-                        tooltip={item.title}
-                      >
+                      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                         <Link to={item.url}>
                           <item.icon className="h-4 w-4" />
                           {!collapsed && <span>{item.title}</span>}

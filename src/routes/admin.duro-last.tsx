@@ -3,16 +3,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { CatalogEditor } from "@/components/catalog-editor";
 import { AdhesivesTab } from "@/components/adhesives-editor";
 import { ExceptionalMetalsTab } from "@/components/exceptional-metals-editor";
+import { ItemNumbersTab } from "@/components/item-numbers-tab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const DL_TABS = ["catalog", "adhesives", "metals"] as const;
+const DL_TABS = ["catalog", "adhesives", "metals", "items"] as const;
 type DlTab = (typeof DL_TABS)[number];
 
 export const Route = createFileRoute("/admin/duro-last")({
   // `cat` deep-links to a catalog category by name (from the sidebar submenu).
-  validateSearch: (
-    search: Record<string, unknown>,
-  ): { tab?: DlTab; cat?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { tab?: DlTab; cat?: string } => ({
     ...(DL_TABS.includes(search["tab"] as DlTab) ? { tab: search["tab"] as DlTab } : {}),
     ...(typeof search["cat"] === "string" && search["cat"] ? { cat: search["cat"] } : {}),
   }),
@@ -35,15 +34,14 @@ function DuroLastPage() {
       </div>
       <Tabs
         value={tab ?? "catalog"}
-        onValueChange={(v) =>
-          navigate({ search: { tab: v as DlTab }, replace: true })
-        }
+        onValueChange={(v) => navigate({ search: { tab: v as DlTab }, replace: true })}
         className="space-y-4"
       >
         <TabsList className="flex-wrap">
           <TabsTrigger value="catalog">Catalog</TabsTrigger>
           <TabsTrigger value="adhesives">Adhesives</TabsTrigger>
           <TabsTrigger value="metals">Exceptional Metals</TabsTrigger>
+          <TabsTrigger value="items">Item Numbers &amp; Price Import</TabsTrigger>
         </TabsList>
         <TabsContent value="catalog">
           <CatalogEditor
@@ -61,6 +59,9 @@ function DuroLastPage() {
         </TabsContent>
         <TabsContent value="metals">
           <ExceptionalMetalsTab />
+        </TabsContent>
+        <TabsContent value="items">
+          <ItemNumbersTab />
         </TabsContent>
       </Tabs>
     </div>

@@ -4,6 +4,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { Plus, Trash2, Save, Lock } from "lucide-react";
 
+import { listItemNumbers } from "@/lib/admin-item-numbers.functions";
 import {
   getPricingCatalog,
   savePricingScreen,
@@ -70,6 +71,12 @@ export function CatalogEditor({
     queryKey: ["pricing-catalog", branch],
     queryFn: () => getFn({ data: { branch } }),
   });
+  const itemNosFn = useServerFn(listItemNumbers);
+  const { data: itemNumbers } = useQuery({
+    queryKey: ["item-numbers"],
+    queryFn: () => itemNosFn(),
+    enabled: branch === "duro_last",
+  });
 
   const [selId, setSelId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CatalogScreenData | null>(null);
@@ -97,6 +104,12 @@ export function CatalogEditor({
   if (!selected || !draft) return null;
 
   const cols = draft.columns;
+  // Legacy part-number columns hold text ("1225B", "1312 BF"): never a number input.
+  const isPartCol = (c: string) => /part\s*#/i.test(c);
+  const itemNosFor = (row: Record<string, unknown>) =>
+    itemNumbers?.filter(
+      (m) => m.screen_id === selected.id && m.row_label === String(row[labelCol] ?? ""),
+    ) ?? [];
   // The label column is "Description" on every legacy screen except Underlayment, whose
   // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
   const labelCol = cols.includes("Description") ? "Description" : (cols[0] ?? "Description");
@@ -238,6 +251,14 @@ export function CatalogEditor({
                     {c}
                   </TableHead>
                 ))}
+                {branch === "duro_last" && (
+                  <TableHead
+                    className="whitespace-nowrap"
+                    title="Duro-Last item numbers mapped to this product (Item Numbers & Price Import tab)"
+                  >
+                    Item #
+                  </TableHead>
+                )}
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
@@ -260,15 +281,50 @@ export function CatalogEditor({
                   </TableCell>
                   {valueCols.map((c) => (
                     <TableCell key={c}>
-                      <Input
-                        type="number"
-                        step="0.0001"
-                        value={Number(row[c] ?? 0)}
-                        onChange={(e) => setCell(ri, c, num(e.target.value))}
-                        className="w-28"
-                      />
+                      {isPartCol(c) ? (
+                        <Input
+                          value={String(row[c] ?? "")}
+                          onChange={(e) => setCell(ri, c, e.target.value)}
+                          className="w-28 font-mono text-xs"
+                        />
+                      ) : (
+                        <Input
+                          type="number"
+                          step="0.0001"
+                          value={Number(row[c] ?? 0)}
+                          onChange={(e) => setCell(ri, c, num(e.target.value))}
+                          className="w-28"
+                        />
+                      )}
                     </TableCell>
                   ))}
+                  {branch === "duro_last" && (
+                    <TableCell className="whitespace-nowrap text-xs">
+                      {itemNosFor(row).length === 0 ? (
+                        <span
+                          className="text-muted-foreground"
+                          title="No Duro-Last item number mapped — add one on the Item Numbers tab"
+                        >
+                          —
+                        </span>
+                      ) : (
+                        itemNosFor(row).map((m) => (
+                          <span
+                            key={`${m.item_no}|${m.price_col}`}
+                            className="mr-1 inline-block rounded bg-muted px-1.5 py-0.5 font-mono"
+                            title={`→ ${m.price_col}`}
+                          >
+                            {m.item_no}
+                            {valueCols.filter((c) => !isPartCol(c)).length > 1 ? (
+                              <span className="ml-1 font-sans text-[10px] text-muted-foreground">
+                                {m.price_col}
+                              </span>
+                            ) : null}
+                          </span>
+                        ))
+                      )}
+                    </TableCell>
+                  )}
                   <TableCell>
                     {isLocked(row) ? (
                       <span

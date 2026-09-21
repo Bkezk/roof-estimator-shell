@@ -3026,3 +3026,29 @@ DeckType alone). The pull-test spacing autofill does not key on the deck (roof s
 thickness / design table / lap / pull test), so no o.c. re-derivation is needed; a deck change
 re-keys the fastening-time, tear-off and curb-setup lookups on recompute as it does from the
 Sections screen.
+
+### 22.31 Duro-Last item numbers and the Excel price-list import (2026-09-21)
+
+New, no legacy counterpart (the legacy app reads vendor prices from its Azure DB). Table
+`catalog_item_numbers` (item_no, screen_id, row_label, price_col, dl_description, last_price,
+last_import_at; PK on the four keys) maps a Duro-Last item number to ONE price cell of a
+Duro-Last pricing screen; an item number may feed several cells (legacy vents carry 1231 on
+every colour) and a colour variant with its own item number is its own row. Seeded (migration
+`20260921170000`, applied live: 319 rows) from the captured "Part #" columns → each screen's
+primary price column (Price / Price/Box / Price/Part / Price/Package / White Price / White),
+pipe stacks' Open + Closed Part # → Price, Adhesives products' part_no → price; "0" and blank
+part numbers skipped. Membrane, Underlayment, Exceptional Metals and Non-DL screens carry no
+Duro-Last item numbers yet — "Products without an item number" on the new tab lists the gaps.
+
+Admin › Duro-Last Pricing › **Item Numbers & Price Import**: upload the .xlsx/.xls/.csv price
+sheet (SheetJS, client-side); the header row and the Item # / Description / Price columns are
+guessed (overridable); rows match on the normalised item number (case-insensitive, inner
+spaces dropped: "1312 BF" = "1312bf"); the screen reports matched cells (with the last imported
+price), **no-match item numbers** (mappable inline), matched-but-no-price, duplicates in the
+sheet and catalog item numbers absent from the sheet. "Apply" writes the prices through
+`applyPriceImport` (flat rows by label, Adhesives by product name; cells that no longer exist
+come back as "could not be written") and stamps the mapping with price / date / Duro-Last
+description. Every catalog screen shows the mapped item numbers per row ("Item #" column), and
+the legacy "Part #" columns are text inputs (they were number inputs, which dropped "1225B").
+Pure matching lives in `src/lib/price-import.ts` (tests). Inventory management can hang off the
+same table later.
