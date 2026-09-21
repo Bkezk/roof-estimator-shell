@@ -1638,6 +1638,11 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     for (const layer of sectionLayers(s)) {
       if (layer.attachment !== "mechanical" || layer.quote) continue;
       mechLayers += 1;
+      // Legacy RoofSection.UnderlaymentFasteners(−1) (rva 0x4cf40): on a `durobondmech`
+      // field/perim attachment the count IS DuroBondFastenersField/Perim (above) and the
+      // layer loop is skipped entirely — a mechanical layer on a Duro-Bond section adds no
+      // fasteners of its own (docs §22.20; the web used to add both, 16,400 vs legacy 9,845).
+      if (isDuroBond && (s.attachment ?? "mechanical") === "mechanical") continue;
       // Legacy UnderlaymentFasteners (docs §10.3 / §18): SubType + membrane-attachment rule,
       // Enhancement Options densities overriding.
       uf += underlaymentLayerFasteners({

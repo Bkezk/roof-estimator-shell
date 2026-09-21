@@ -2742,3 +2742,42 @@ insulation on curbs 3 and 8 = A and F). Legacy 48.81 h / $2,196.39, material $1,
   brute force over every mil/colour rate reproduces $1,046.52 only for that combination given
   the stored data, and all-40-mil White gives the legacy $1,008.30 to the cent (test
   "legacy Knox County CTC screen" in `bid-builder.test.ts`).
+
+### 22.20 Parity Comparisons — Accessories (2026-09-21)
+
+Same Knox County CTC bid, the web side re-keyed from scratch after a reload (owner's caveat).
+Legacy footer: Material $16,406.70, 100.53 h, $4,523.98. Web: Accessories $12,747.80 +
+Adhesives $4,512.00 (the legacy footer folds adhesives in, §22.12) = $17,259.80, 105.28 h,
+$4,737.74. Both gaps reconcile to the cent / the hundredth of an hour from input differences;
+the accessories money path needed no change.
+
+**Labor +4.75 h — all input drift**
+- Drains: the web bid has the 6-drain row twice (2 × 4.50 h) and Existing Roof = Single Ply
+  (`ref_DrainRoofTypes` cleanup 0.25 h/drain); legacy has one row on None: 6 × 0.5 = 3.00 h. +6.00 h.
+- Pipe stacks: the web's second 4" row is Closed (×1.0); legacy Open (×1.25): 10 × 0.125 = −1.25 h.
+  Legacy displays 20.62 for the raw 20.625 sum (no per-row rounding, `PipeStack.ManHours`
+  0x20406 returns unrounded); the web bills the same raw sum.
+- Corners 6.67, walk pads 7.5, term bar 5.95 (Pre-Drill White 160 + 10 = 170 ft), vents 27 and
+  drip edge + snap cover 26.79 h are identical.
+
+**Material +$853.10 — all input drift** (catalog: XHD 12" $406/250, Metal Anchors $255/1000,
+1½" Spade $208/2000, 3½" boot $20.90 + ring $18.25, Duro-Caulk $10.20)
+- +$812.00: 500 × 12" XHD typed on the web Metal fastener tab (2 boxes); legacy has none.
+- +$296.10: the duplicated drain row — 6 × $39.15 boots+rings and its 6 Duro-Caulk tubes
+  (§12.9 one tube per drain, $61.20). With it removed the web's Duro-Caulk is 28 = legacy 28,
+  which also closes the "14 vs 28" question left open in §22.12/§22.13.
+- −$255.00: the web term-bar fasteners were typed as 1½" Spade (absorbed by the drip-edge +
+  snap-cover spade box count, 3,800 → 2 boxes, same as 3,400); legacy typed Metal Anchors,
+  one box.
+- Pipe stacks Open vs Closed price identically ($14.25 white).
+
+**Bug found and fixed — Items Required on a Duro-Bond section.** `RoofSection.
+UnderlaymentFasteners(−1)` (0x4cf40) branches on the field / perim attachment ShortName: on
+`durobondmech` it returns `DuroBondFastenersField` / `…Perim` (the membrane's induction plates)
+and never enters the per-layer loop. The web added the layers' mechanical counts on top, so the
+re-keyed bid (layers left on "Mechanically Fastened") showed Fasteners 16,845 / Insul. Plates
+16,400 / Induction 16,400 against legacy 10,805 / 0 / 9,845. The membrane part was already
+exact — Round(34,216/32 × 6) + Round(18,286/32 × 6) = 9,845. The layer loop is now skipped on
+Duro-Bond mechanical sections (test: 188 × 182 → 6,416); the §12.5 quirk `insulPlates += uf per
+mechanical layer` is kept, so those layers should be "Section Fastened w/ Durobond" (§22.17) to
+show the legacy 0. Poly plates 945 vs 960 is the parapet-length drift (750 + 160 + 35).

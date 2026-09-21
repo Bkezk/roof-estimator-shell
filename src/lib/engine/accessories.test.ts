@@ -361,6 +361,42 @@ describe("§12.0 anchors (captured legacy bid)", () => {
     expect(r.deckNeeds.wood.inductionPlates).toBe(0);
   });
 
+  it("Duro-Bond Items Required: induction plates = membrane plates only; a mechanical layer adds none (§22.20)", () => {
+    // Knox County CTC section 1: 188 × 182 Steel, 6 plates per 4×8, no perimeter zone, one
+    // mechanically-fastened ½" ISO layer. Legacy UnderlaymentFasteners(−1) on durobondmech =
+    // DuroBondFastenersField = Round(34,216 / 32 × 6) = 6,416 — the layer loop is skipped.
+    const args = anchorArgs();
+    const r = computeAccessories({
+      ...args,
+      roofSystem: "Duro-Bond",
+      sections: [
+        section({
+          length: 188,
+          width: 182,
+          deckType: "Steel",
+          fastenerOc: 6,
+          perimFastenerOc: 8,
+          cornerFastenerOc: 10,
+          enhancementWidthFt: 3,
+          layers: [
+            {
+              board: '1/2" ISO',
+              attachment: "mechanical",
+              fastenersPerBoard: 0,
+              adhesiveName: "",
+              substrate: "",
+            },
+          ],
+        }),
+      ],
+    });
+    expect(r.deckNeeds.metal.inductionPlates).toBe(6416);
+    expect(r.deckNeeds.metal.fasteners).toBe(6416);
+    expect(r.deckNeeds.metal.polyPlates).toBe(0);
+    // §12.5 quirk kept: insulPlates += uf per mechanical layer (1 here).
+    expect(r.deckNeeds.metal.insulPlates).toBe(6416);
+  });
+
   it("entered fasteners net the needs and bill by whole boxes (§12.5 shared box count)", () => {
     const st = emptyAccessoriesState();
     st.fastenerQty = {
