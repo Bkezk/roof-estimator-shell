@@ -2780,7 +2780,8 @@ re-keyed bid (layers left on "Mechanically Fastened") showed Fasteners 16,845 / 
 exact — Round(34,216/32 × 6) + Round(18,286/32 × 6) = 9,845. The layer loop is now skipped on
 Duro-Bond mechanical sections (test: 188 × 182 → 6,416); the §12.5 quirk `insulPlates += uf per
 mechanical layer` is kept, so those layers should be "Section Fastened w/ Durobond" (§22.17) to
-show the legacy 0. Poly plates 945 vs 960 is the parapet-length drift (750 + 160 + 35).
+show the legacy 0. Poly plates 945 vs 960 was NOT length drift — see §22.22 (deck fasteners
+count the AdjustedLength, not the bare length).
 
 ### 22.21 Duro-Bond "Field Roll Width" pick was empty (2026-09-21)
 
@@ -2805,3 +2806,45 @@ Owner: on a Duro-Bond section the Field Roll Width did not drop down with 30 / 6
   quantity, so the pick is money-relevant. `EditAdvRSOptions` (0x9561c) clears the combo on
   durolastmech / duroroofmech / durobondmech only while the Advanced dialog's custom settings
   are applied — not a hide.
+
+### 22.22 Complexity wiring, rounding audit, parapet deck fasteners, numeric inputs (2026-09-21)
+
+Owner's three questions.
+
+**Complexity factor — wired as legacy.** IL: `RoofSystem.MechFieldLaborRate` / `MechPerimLaborRate`
+(and the `DuroLastSystem` overrides), `AdheredFieldLaborRate` / `AdheredPerimLaborRate`,
+`RoofSection.UnderlaymentBaseHours` and `TearOffBaseLabor` each multiply
+`ComplexityFactor.SmartValue`; the Duro-Bond model (`RoofSectionLaborHours_4_0_237`) does not,
+and the Duro-Tuff / Fleece / Roof `_4_0_230` / `_229` models reach it through those rate
+methods. `RoofSystem.ComplexityFactors` comes from RSComplexityFactor, seeded only for Duro-Tuff
+(3) and Duro-Fleece (5): Open 0.9, Minor 0.98, Moderate 1 (default index 2), Medium 1.2, Heavy
+2.4, Extreme 4 — every other system lists the single "None" = 1.0. `RoofSection.set_SheetSize`
+resets the factor to None on durolast / durobond / duroroof whenever the picked sheet is not a
+roll (`Rolls ≠ 1`), and `UpdatePreview` enables the combo only on a roll layout whose
+SmartSheetMulti is exactly 1.0. Duro-Tuff and Duro-Fleece carry a single "Roll Good" sheet (×1),
+so the web's `sectionComplexityFactor(rsId, complexity, sheetMulti)` (factor rows for 3 / 5,
+1.0 unless the sheet multiplier is 1.0) is equivalent on every seeded configuration; the web
+picker shows the six labels for those two systems and "None" otherwise.
+
+**Rounding — same places, same mode.** Every ported rounding is `bankersRound` (.NET
+`Math.Round` = half-to-even) at the IL's own points: In2Ft 2 dp; money `GoodSingle` (2 dp then
+float32); labor cost 4 dp; per-item ManHours 8 dp (curbs, parapets); curb ISO labor 2 dp; curb
+wrap 8 dp; membrane counts `Round(…, 0)`; Duro-Caulk `ToInt32(Ceil(ft)/12)`. Two half-up
+leftovers found and corrected in this pass: `Ft2In` (`Round(ft × 12)`, Duro-Tuff membrane
+calc) and `Parapet.DeckFasteners` below. The remaining `Math.round` uses sit on values that are
+already integers (`Round(Ceil(x))`) or on display-only distribution (`proposal.ts`). Screens
+display 2 dp; the engine keeps full precision between steps exactly as the legacy doubles do.
+
+**Bug fixed — parapet deck fasteners.** `Parapet.DeckFasteners` (0x427b6) =
+`Convert.ToInt32(AdjustedLength)`, AdjustedLength = length + 1 + pieces (0 when pieces < 1,
+0x42140). The web counted `Round(length)`. Knox County: 750 / 160 / 35 ft walls → legacy 960
+poly plates on the Metal fastener tab, web 945 (the "length drift" guess in §22.20 was wrong;
+the 15 is the three walls' +1 +pieces). `parapetDeckFasteners(lengthFt, pieces)` now mirrors the
+IL, half-to-even.
+
+**UX — the sticky 0.** Every quantity box was a bare `<input type="number" value={n}>`: clearing
+it parsed "" → 0 and re-rendered the 0, so the user had to type a digit and then delete the 0.
+A shared `NumberField` (`src/components/ui/number-field.tsx`) keeps its own text while focused,
+selects the current value on focus (typing replaces the 0), clamps to `min`, and hands the
+parent only finite numbers. Wired into the Sections / Curbs / Parapets / Metals / Non-DL screens
+and every numeric box on the estimate route (rates, markup, per diem, adjust %, quantities).

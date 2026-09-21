@@ -101,7 +101,12 @@ describe("consumption rules (§2 port)", () => {
     expect(caulkTubes(13)).toBe(1); // 1.083 → 1
     expect(caulkTubes(18)).toBe(2); // 1.5 → 2
     expect(caulkTubes(30)).toBe(2); // 2.5 → 2
-    expect(parapetDeckFasteners(48.4)).toBe(48);
+    // Parapet.DeckFasteners = ToInt32(length + 1 + pieces), half to even (§22.22).
+    expect(parapetDeckFasteners(48.4)).toBe(50); // 50.4
+    expect(parapetDeckFasteners(47.5, 1)).toBe(50); // 49.5 → 50 (even)
+    expect(parapetDeckFasteners(46.5, 1)).toBe(48); // 48.5 → 48 (even)
+    expect(parapetDeckFasteners(750, 4)).toBe(755);
+    expect(parapetDeckFasteners(48, 0)).toBe(0); // pieces < 1 → AdjustedLength 0
   });
 
   it("membrane screws (DLRowStyle port): quick-bid field rows + perim rows on row-style systems", () => {
@@ -211,8 +216,9 @@ describe("consumption rules (§2 port)", () => {
     // Insulation (s1): perim 100ft(edge A only? perimeterFromEdges counts isPerimeter edges)=100*3=300 perim area.
     // field 10000-300=9700 → round(9700/32)*5=1515; perim round(300/32)*5... mechanical membrane → 5/32 both.
     expect(r.breakdown.insulationScrews).toBe(Math.round(9700 / 32) * 5 + Math.round(300 / 32) * 5);
-    expect(r.breakdown.parapetDeckScrews).toBe(40);
-    expect(r.polyPlates).toBe(40 + 3600); // parapet decks + 1 per membrane screw
+    // Parapet.DeckFasteners = ToInt32(AdjustedLength) = 40 + 1 + 1 piece = 42 (§22.22).
+    expect(r.breakdown.parapetDeckScrews).toBe(42);
+    expect(r.polyPlates).toBe(42 + 3600); // parapet decks + 1 per membrane screw
     expect(r.insulationPlates).toBe(r.breakdown.insulationScrews);
     // Adhesive: 10000/1700 + 2500/1700 = 7.35... → ceil once = 8 (NOT ceil(5.88)+ceil(1.47)=7+2=9).
     expect(r.adhesiveUnits["OlyBond500 Bag-in-Box"]).toBe(8);

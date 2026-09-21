@@ -24,6 +24,7 @@ import type {
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Select,
   SelectContent,
@@ -51,17 +52,10 @@ function Num(props: {
   step?: string;
 }) {
   return (
-    <Input
-      type="number"
-      min={0}
-      step={props.step ?? "1"}
+    <NumberField
+      {...props}
+      blankZero
       className={props.className ?? "h-7 w-[84px] bg-green-50 dark:bg-green-950"}
-      value={props.value === 0 ? "" : props.value}
-      placeholder="0"
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        props.onChange(Number.isFinite(n) ? Math.max(0, n) : 0);
-      }}
     />
   );
 }

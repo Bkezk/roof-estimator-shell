@@ -83,9 +83,16 @@ export function allowedScrewSubtypes(deckTypes: string[]): Set<string> {
 export const caulkTubes = (barLengthFt: number): number =>
   barLengthFt > 0 ? bankersRound(Math.ceil(barLengthFt) / 12, 0) : 0;
 
-/** §2.2 — parapet deck fasteners: 1 per foot of parapet length (also 1 poly plate each). */
-export const parapetDeckFasteners = (lengthFt: number): number =>
-  lengthFt > 0 ? Math.round(lengthFt) : 0;
+/**
+ * §2.2 / §12.5 — parapet deck fasteners (also 1 poly plate each): legacy `Parapet.DeckFasteners`
+ * (0x427b6) = `Convert.ToInt32(AdjustedLength)`, AdjustedLength = length + 1 + pieces (0 when
+ * pieces < 1; 0x42140). ToInt32 rounds half to even. Knox County: 750/160/35 ft walls at their
+ * pieces → legacy 960, not the bare Σ length 945 (docs §22.22).
+ */
+export const parapetDeckFasteners = (lengthFt: number, pieces = 1): number => {
+  if (lengthFt <= 0 || pieces < 1) return 0;
+  return bankersRound(lengthFt + 1 + pieces, 0);
+};
 
 export interface EdgeBarBreakdown {
   termBarLf: number;
@@ -146,7 +153,7 @@ export interface NeededQuantities {
  */
 export function computeNeededQuantities(args: {
   sections: BidSectionInput[];
-  parapets: { lengthFt: number }[];
+  parapets: { lengthFt: number; pieces?: number | undefined }[];
   attachment: "mechanical" | "adhered";
   roofSystem: string;
   adhesiveCoverage?: Record<string, Record<string, { coverageSqFt: number }>> | undefined;
@@ -227,7 +234,10 @@ export function computeNeededQuantities(args: {
     }
   }
 
-  const parapetScrews = args.parapets.reduce((sum, p) => sum + parapetDeckFasteners(p.lengthFt), 0);
+  const parapetScrews = args.parapets.reduce(
+    (sum, p) => sum + parapetDeckFasteners(p.lengthFt, p.pieces ?? 1),
+    0,
+  );
 
   // §2.4: sum fractional units per adhesive across the whole estimate, then Ceiling ONCE.
   const adhesiveUnits: Record<string, number> = {};

@@ -29,6 +29,7 @@ import { bankersRound } from "@/lib/engine/rounding";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Table,
   TableBody,
@@ -50,18 +51,10 @@ function Num(props: {
   title?: string;
 }) {
   return (
-    <Input
-      type="number"
-      min={0}
-      step={props.step ?? "1"}
-      title={props.title}
+    <NumberField
+      {...props}
+      blankZero
       className={props.className ?? "h-7 w-[76px] bg-green-50 px-1 text-right dark:bg-green-950"}
-      value={props.value === 0 ? "" : props.value}
-      placeholder="0"
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        props.onChange(Number.isFinite(n) ? Math.max(0, n) : 0);
-      }}
     />
   );
 }

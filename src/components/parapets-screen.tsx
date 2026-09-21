@@ -29,6 +29,7 @@ import {
 import { TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Dialog,
   DialogContent,
@@ -82,20 +83,7 @@ function Num(props: {
   invalid?: boolean;
   disabled?: boolean;
 }) {
-  return (
-    <Input
-      type="number"
-      min={props.min ?? 0}
-      step={props.step ?? "1"}
-      disabled={props.disabled}
-      className={`h-8 ${props.invalid ? "border-destructive" : ""} ${props.className ?? ""}`}
-      value={Number.isFinite(props.value) ? props.value : 0}
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        props.onChange(Number.isFinite(n) ? Math.max(props.min ?? 0, n) : 0);
-      }}
-    />
-  );
+  return <NumberField {...props} className={`h-8 ${props.className ?? ""}`} />;
 }
 
 function Check(props: {

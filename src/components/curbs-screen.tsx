@@ -14,6 +14,7 @@ import type { CurbInput } from "@/lib/engine/bid-builder";
 import { CURB_TYPE_BY_STYLE_ID } from "@/lib/engine/curb-wrap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Select,
   SelectContent,
@@ -64,16 +65,10 @@ function Num(props: {
   invalid?: boolean;
 }) {
   return (
-    <Input
-      type="number"
-      min={props.min ?? 0}
+    <NumberField
+      {...props}
       step={props.step ?? "0.25"}
-      className={`h-8 ${props.invalid ? "border-destructive" : ""} ${props.className ?? ""}`}
-      value={Number.isFinite(props.value) ? props.value : 0}
-      onChange={(e) => {
-        const n = Number(e.target.value);
-        props.onChange(Number.isFinite(n) ? Math.max(props.min ?? 0, n) : 0);
-      }}
+      className={`h-8 ${props.className ?? ""}`}
     />
   );
 }

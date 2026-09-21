@@ -109,6 +109,7 @@ import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1361,11 +1362,10 @@ function EstimatePage() {
                     </LegacyGroup>
                     <LegacyGroup title="4. Estimator Commission">
                       <Field label="Commission Rate (%)">
-                        <Input
-                          type="number"
+                        <NumberField
                           step="0.1"
                           value={commission}
-                          onChange={(e) => setCommission(num(e.target.value))}
+                          onChange={(v) => setCommission(v)}
                         />
                       </Field>
                     </LegacyGroup>
@@ -1391,15 +1391,12 @@ function EstimatePage() {
                         Tax Exempt
                       </label>
                       <Field label="Sales Tax (%)">
-                        <Input
-                          type="number"
+                        <NumberField
                           step="0.01"
                           className="w-[120px]"
                           disabled={taxExempt}
-                          value={
-                            taxExempt ? "0.0" : Math.round(effSalesTaxRate * 100 * 10000) / 10000
-                          }
-                          onChange={(e) => setSalesTaxRate(num(e.target.value) / 100)}
+                          value={taxExempt ? 0 : Math.round(effSalesTaxRate * 100 * 10000) / 10000}
+                          onChange={(v) => setSalesTaxRate(v / 100)}
                         />
                       </Field>
                       <label className="flex items-center gap-2 pb-2 text-xs">
@@ -1999,33 +1996,24 @@ function EstimatePage() {
                 )}
                 <div className="grid grid-cols-3 gap-3">
                   <Field label="Hourly Labor">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={laborRate}
-                      onChange={(e) => setLaborRate(num(e.target.value))}
-                    />
+                    <NumberField step="0.01" value={laborRate} onChange={(v) => setLaborRate(v)} />
                   </Field>
                   <Field label="Hours per Man Day">
-                    <Input
-                      type="number"
+                    <NumberField
                       step="0.5"
                       min={0}
                       value={hoursPerDay ?? admin.settings.hoursPerDay}
-                      onChange={(e) => {
-                        const v = num(e.target.value);
-                        setHoursPerDay(v > 0 && v !== admin.settings.hoursPerDay ? v : undefined);
-                      }}
+                      onChange={(v) =>
+                        setHoursPerDay(v > 0 && v !== admin.settings.hoursPerDay ? v : undefined)
+                      }
                     />
                   </Field>
                   <Field label="Man-Day Labor">
-                    <Input
-                      type="number"
+                    <NumberField
                       step="0.01"
                       value={Math.round(laborRate * effectiveHoursPerDay * 100) / 100}
-                      onChange={(e) =>
-                        effectiveHoursPerDay > 0 &&
-                        setLaborRate(num(e.target.value) / effectiveHoursPerDay)
+                      onChange={(v) =>
+                        effectiveHoursPerDay > 0 && setLaborRate(v / effectiveHoursPerDay)
                       }
                     />
                   </Field>
@@ -2053,11 +2041,10 @@ function EstimatePage() {
                   </div>
                   <div className="mt-2 flex items-end gap-3">
                     <Field label={markupMode === 1 ? "Markup ($ per man day)" : "Markup (%)"}>
-                      <Input
-                        type="number"
+                      <NumberField
                         className="w-[140px]"
                         value={markup}
-                        onChange={(e) => setMarkup(num(e.target.value))}
+                        onChange={(v) => setMarkup(v)}
                       />
                     </Field>
                     <p className="pb-2 text-xs text-muted-foreground">
@@ -2089,11 +2076,10 @@ function EstimatePage() {
                       Per Diem
                     </label>
                     <Field label="Per Diem ($/man-day)">
-                      <Input
-                        type="number"
+                      <NumberField
                         className="h-8 w-[120px]"
                         value={perDiem}
-                        onChange={(e) => setPerDiem(num(e.target.value))}
+                        onChange={(v) => setPerDiem(v)}
                       />
                     </Field>
                   </div>
@@ -2342,13 +2328,12 @@ function EstimatePage() {
                       applies.
                     </p>
                     <Field label="Adjust Labor (%)">
-                      <Input
-                        type="number"
+                      <NumberField
                         className="h-8 w-[120px]"
                         min={-100}
                         step="1"
                         value={uLaborPct}
-                        onChange={(e) => setULaborPct(numAdj(e.target.value))}
+                        onChange={(v) => setULaborPct(v)}
                       />
                     </Field>
                   </div>
@@ -3273,30 +3258,24 @@ function EstimatePage() {
                           <TableCell>{a.description}</TableCell>
                           <TableCell>{money(a.price)}</TableCell>
                           <TableCell>
-                            <Input
-                              type="number"
+                            <NumberField
                               step="0.0001"
                               className="h-8 w-[80px]"
                               value={a.laborHoursPerUnit ?? 0}
-                              onChange={(e) =>
+                              onChange={(v) =>
                                 setAccessories((p) =>
-                                  p.map((x, j) =>
-                                    j === i ? { ...x, laborHoursPerUnit: num(e.target.value) } : x,
-                                  ),
+                                  p.map((x, j) => (j === i ? { ...x, laborHoursPerUnit: v } : x)),
                                 )
                               }
                             />
                           </TableCell>
                           <TableCell>
-                            <Input
-                              type="number"
+                            <NumberField
                               className="h-8 w-[70px]"
                               value={a.quantity}
-                              onChange={(e) =>
+                              onChange={(v) =>
                                 setAccessories((p) =>
-                                  p.map((x, j) =>
-                                    j === i ? { ...x, quantity: num(e.target.value) } : x,
-                                  ),
+                                  p.map((x, j) => (j === i ? { ...x, quantity: v } : x)),
                                 )
                               }
                             />
@@ -3411,15 +3390,12 @@ function EstimatePage() {
                         <TableCell>{money(m.price)}</TableCell>
                         <TableCell>{money(m.laborPerUnit * m.laborRate)}</TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
+                          <NumberField
                             className="h-8 w-[70px]"
                             value={m.quantity}
-                            onChange={(e) =>
+                            onChange={(v) =>
                               setMetals((p) =>
-                                p.map((x, j) =>
-                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
-                                ),
+                                p.map((x, j) => (j === i ? { ...x, quantity: v } : x)),
                               )
                             }
                           />
@@ -3790,15 +3766,12 @@ function EstimatePage() {
                         <TableCell>{money(l.price)}</TableCell>
                         <TableCell>{money(l.laborPerUnit * l.laborRate)}</TableCell>
                         <TableCell>
-                          <Input
-                            type="number"
+                          <NumberField
                             className="h-8 w-[70px]"
                             value={l.quantity}
-                            onChange={(e) =>
+                            onChange={(v) =>
                               setNonDlLines((p) =>
-                                p.map((x, j) =>
-                                  j === i ? { ...x, quantity: num(e.target.value) } : x,
-                                ),
+                                p.map((x, j) => (j === i ? { ...x, quantity: v } : x)),
                               )
                             }
                           />
@@ -3868,45 +3841,33 @@ function EstimatePage() {
                 </Select>
               </Field>
               <Field label="Markup value">
-                <Input
-                  type="number"
-                  value={markup}
-                  onChange={(e) => setMarkup(num(e.target.value))}
-                />
+                <NumberField value={markup} onChange={(v) => setMarkup(v)} />
               </Field>
               <Field label="Labor $/hr">
-                <Input
-                  type="number"
-                  value={laborRate}
-                  onChange={(e) => setLaborRate(num(e.target.value))}
-                />
+                <NumberField value={laborRate} onChange={(v) => setLaborRate(v)} />
               </Field>
               <Field label="Commission %">
-                <Input
-                  type="number"
-                  value={commission}
-                  onChange={(e) => setCommission(num(e.target.value))}
-                />
+                <NumberField value={commission} onChange={(v) => setCommission(v)} />
               </Field>
               <Field label="Adjust labor %">
-                <Input
-                  type="number"
+                <NumberField
+                  min={-100}
                   value={adjustLaborPct}
-                  onChange={(e) => setAdjustLaborPct(numAdj(e.target.value))}
+                  onChange={(v) => setAdjustLaborPct(v)}
                 />
               </Field>
               <Field label="Adjust setup %">
-                <Input
-                  type="number"
+                <NumberField
+                  min={-100}
                   value={adjustSetupPct}
-                  onChange={(e) => setAdjustSetupPct(numAdj(e.target.value))}
+                  onChange={(v) => setAdjustSetupPct(v)}
                 />
               </Field>
               <Field label="Adjust inspection %">
-                <Input
-                  type="number"
+                <NumberField
+                  min={-100}
                   value={adjustInspectionPct}
-                  onChange={(e) => setAdjustInspectionPct(numAdj(e.target.value))}
+                  onChange={(v) => setAdjustInspectionPct(v)}
                 />
               </Field>
               <Field label="Labor template">
@@ -3927,11 +3888,7 @@ function EstimatePage() {
                 />
               </Field>
               <Field label="Per-diem $/man-day">
-                <Input
-                  type="number"
-                  value={perDiem}
-                  onChange={(e) => setPerDiem(num(e.target.value))}
-                />
+                <NumberField value={perDiem} onChange={(v) => setPerDiem(v)} />
               </Field>
               <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 pt-1">
                 <div className="flex items-center gap-2">
@@ -4559,23 +4516,14 @@ function NumInput({
   className?: string;
   disabled?: boolean;
 }) {
-  const [text, setText] = useState<string | null>(null);
   return (
-    <Input
-      type="number"
-      min={min}
+    <NumberField
+      value={value}
+      onChange={onValue}
+      min={min ?? 0}
+      step="any"
       className={className}
       disabled={disabled}
-      value={text ?? String(value)}
-      onFocus={(e) => {
-        setText(String(value));
-        e.currentTarget.select();
-      }}
-      onChange={(e) => {
-        setText(e.target.value);
-        onValue(Math.max(min ?? 0, num(e.target.value)));
-      }}
-      onBlur={() => setText(null)}
     />
   );
 }

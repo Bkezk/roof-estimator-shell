@@ -1667,7 +1667,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   for (const p of args.parapets) {
     const bucket = BUCKET_BY_DECK[p.deckType];
     if (!bucket) continue;
-    const deckF = parapetDeckFasteners(p.lengthFt);
+    const deckF = parapetDeckFasteners(p.lengthFt, p.pieces ?? 1);
     deckNeeds[bucket].fasteners += deckF;
     deckNeeds[bucket].polyPlates += deckF;
   }

@@ -128,8 +128,8 @@ export function sheetsMembraneCalc(s: LegacyMembraneSection, version: string): n
 // 2.2c Duro-Tuff — DuroTuffSystem.CalculateMembraneQty (IL-exact, docs §21.4)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** VB `DACommon.Ft2In(Double)` — Round(ft × 12) as an integer. */
-const ft2In = (ft: number): number => Math.round(ft * 12);
+/** VB `DACommon.Ft2In(Double)` — Round(ft × 12) as an integer (.NET Math.Round: half to even). */
+const ft2In = (ft: number): number => bankersRound(ft * 12, 0);
 
 export interface DuroTuffSection {
   length: number;
