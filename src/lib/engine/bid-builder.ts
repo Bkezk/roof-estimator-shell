@@ -61,6 +61,7 @@ import {
   parapetEdgeFastenersCount,
   type AccessoriesState,
   type AccessoriesResult,
+  type AccessoryReviewLine,
 } from "./accessories";
 import { computeMetals, normalizeMetalsState, type MetalsState, type MetalsResult } from "./metals";
 import {
@@ -869,6 +870,8 @@ export interface BuildResult {
   metalsMaterial: number;
   /** Adhesive material $ (inside duroLastMaterial/M0); split out for display/proposal. */
   adhesiveMaterial: number;
+  /** Legacy Accessories Summary "AdheredSystems" rows: whole units (+ extra) × price per unit. */
+  adhesiveLines: AccessoryReviewLine[];
   /** Curb wrap membrane $ (inside duroLastMaterial/M0); split out for display/proposal. */
   curbMaterial: number;
   /**
@@ -1777,20 +1780,38 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let adhesiveMaterial = 0;
   /** Whole units per adhesive (the Adhesives screen's Calc Qty column). */
   const adhesiveWholeUnits: Record<string, number> = {};
+  const adhesiveLines: AccessoryReviewLine[] = [];
   {
     const extraSeen = new Set<string>();
     for (const [name, units] of Object.entries(adhesiveUnitsByName)) {
       const extra = accState.adhesivesExtra[name] ?? 0;
       extraSeen.add(name);
       adhesiveWholeUnits[name] = Math.ceil(units);
-      adhesiveMaterial += bankersRound(
-        (Math.ceil(units) + extra) * (admin.adhesivePrices?.[name] ?? 0),
-        0,
-      );
+      const qty = Math.ceil(units) + extra;
+      const cost = bankersRound(qty * (admin.adhesivePrices?.[name] ?? 0), 0);
+      adhesiveMaterial += cost;
+      if (qty > 0)
+        adhesiveLines.push({
+          screen: "Adhesives",
+          qty,
+          name,
+          unitCost: admin.adhesivePrices?.[name] ?? 0,
+          totalCost: cost,
+          hours: 0,
+        });
     }
     for (const [name, extra] of Object.entries(accState.adhesivesExtra)) {
       if (extra > 0 && !extraSeen.has(name)) {
-        adhesiveMaterial += bankersRound(extra * (admin.adhesivePrices?.[name] ?? 0), 0);
+        const cost = bankersRound(extra * (admin.adhesivePrices?.[name] ?? 0), 0);
+        adhesiveMaterial += cost;
+        adhesiveLines.push({
+          screen: "Adhesives",
+          qty: extra,
+          name,
+          unitCost: admin.adhesivePrices?.[name] ?? 0,
+          totalCost: cost,
+          hours: 0,
+        });
       }
     }
   }
@@ -2464,6 +2485,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     parapetMaterial,
     metalsMaterial,
     adhesiveMaterial,
+    adhesiveLines,
     curbMaterial,
     slipSheetMaterial,
     reviewMembraneSqFtExtras: {

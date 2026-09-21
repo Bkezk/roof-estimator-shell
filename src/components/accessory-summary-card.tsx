@@ -46,9 +46,12 @@ function groupByScreen(lines: AccessoryReviewLine[]): ScreenGroup[] {
  */
 export function AccessorySummaryCard({
   result,
+  extraLines,
   laborRate,
 }: {
   result: AccessoriesResult | undefined;
+  /** Rows priced outside computeAccessories but listed under Accessories in legacy (adhesives). */
+  extraLines?: AccessoryReviewLine[] | undefined;
   laborRate: number;
 }) {
   const [open, setOpen] = useState<boolean>(() => {
@@ -69,9 +72,10 @@ export function AccessorySummaryCard({
       }
       return !o;
     });
-  const lines = result?.lines ?? [];
+  const extra = extraLines ?? [];
+  const lines = [...(result?.lines ?? []), ...extra];
   const groups = groupByScreen(lines);
-  const material = result?.totalCost ?? 0;
+  const material = (result?.totalCost ?? 0) + extra.reduce((s, l) => s + l.totalCost, 0);
   const hours = result?.manHours ?? 0;
   return (
     <Card className="mt-3">

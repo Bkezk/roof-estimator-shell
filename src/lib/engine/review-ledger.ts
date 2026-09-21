@@ -108,11 +108,13 @@ export function buildReviewLedger(i: {
     { label: "Roof Sections", cost: inp.membraneCostBeforeDiscount },
     { label: "Parapets", cost: result.parapetMaterial },
     { label: "Curbs", cost: result.curbMaterial },
-    // MembraneAccs ARP auto-material rides with the accessory lines, like legacy dMaterial[4].
-    { label: "Accessories", cost: b.accessoriesMaterial + b.arpMaterial },
+    // MembraneAccs ARP auto-material and the whole-unit adhesives ride with the accessory
+    // lines, like legacy dMaterial[4] (the Accessories Summary lists AdheredSystems, §22.26).
+    {
+      label: "Accessories",
+      cost: b.accessoriesMaterial + b.arpMaterial + result.adhesiveMaterial,
+    },
     { label: "Metals", cost: result.metalsMaterial },
-    // Whole-unit adhesives are estimate-level in the web model; own row for honesty.
-    { label: "Adhesives", cost: result.adhesiveMaterial },
   ];
 
   // ── Purchases + Labor: Insulation by tile ─────────────────────────────────

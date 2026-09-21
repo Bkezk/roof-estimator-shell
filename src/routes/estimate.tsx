@@ -917,6 +917,7 @@ function EstimatePage() {
       // §12 Accessories calculated-screen results + the adhesive whole-unit Calc Qtys.
       accessories: accessoriesResult,
       adhesiveWholeUnits,
+      adhesiveLines: build.adhesiveLines,
       // §13 EXCEPTIONAL Metals screen results (summary lines + dMaterial[5]/dLabor[5] totals).
       metalsScreen: build.metalsScreen,
       // §14 Non-Duro-Last Items results (six dialogs + auto rows; OtherMaterial / LS1 / LS2).
@@ -3202,7 +3203,9 @@ function EstimatePage() {
                   <span>
                     Material Cost:{" "}
                     <span className="font-semibold">
-                      {money(result.accessories.totalCost + accessoryTotal)}
+                      {money(
+                        result.accessories.totalCost + accessoryTotal + result.adhesiveMaterial,
+                      )}
                     </span>
                   </span>
                   <span>
@@ -4410,7 +4413,11 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
-        <AccessorySummaryCard result={result?.accessories} laborRate={laborRate} />
+        <AccessorySummaryCard
+          result={result?.accessories}
+          extraLines={result?.adhesiveLines}
+          laborRate={laborRate}
+        />
       </div>
 
       {/* Mobile: the live total stays in reach on every step (the panel itself sits at the

@@ -2922,3 +2922,15 @@ only place they surface is the Review's "Other" line. That line pins the price:
   it only while the bid's frozen admin / warranty snapshot differs from the current admin data
   (both normalised, JSON-compared) and hides it once applied — so it reappears exactly when an
   admin price, labor table or warranty table changes after the bid was priced.
+
+### 22.26 Adhesives fold into Accessories (2026-09-21)
+
+Owner: adhesives were their own Purchases row on the web Review; legacy folds them into
+Accessories. Legacy `Accessories.AccessoriesReviewTable` lists the `AdheredSystems` rows
+(TotalQuantity / Name / PricePerUnit / Cost) among the accessory items and `dMaterial[4]` carries
+their cost, so the Review's "Accessories" line, the Accessories screen footer "Material Cost" and
+the Accessories Summary all include them (the §22.20 reconciliation already added the two web
+rows to compare). Now: the ledger's Accessories row = accessory lines + ARP + whole-unit
+adhesives (the separate Adhesives row is gone; M0 unchanged), the Accessories footer adds
+`adhesiveMaterial`, and the sidebar summary shows an "Adhesives" group (`adhesiveLines`: whole
+units + extra × price per unit) inside its totals.
