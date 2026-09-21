@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -598,6 +598,9 @@ function EstimatePage() {
     enabled: authed && !!bidParam,
   });
   const hydratedFor = useRef<string | null>(null);
+  // Bumped when a saved bid finishes hydrating so the unsaved-changes baseline is captured
+  // from the hydrated state (not the empty pre-load render).
+  const [hydrationStamp, setHydrationStamp] = useState(0);
   useEffect(() => {
     if (!loadedBid || hydratedFor.current === loadedBid.id) return;
     const d = loadedBid.data as unknown as Partial<SavedBidState> | null;
@@ -672,6 +675,7 @@ function EstimatePage() {
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
     hydratedFor.current = loadedBid.id;
+    setHydrationStamp((n) => n + 1);
   }, [loadedBid]);
 
   // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
@@ -836,6 +840,24 @@ function EstimatePage() {
     highWindTermYears,
     highWindBand,
   };
+  // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
+  // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
+  // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
+  const savedJson = JSON.stringify(saved);
+  const lastSavedJson = useRef<string | null>(null);
+  useEffect(() => {
+    lastSavedJson.current = savedJson;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline only at mount / hydration
+  }, [hydrationStamp]);
+  const dirty = lastSavedJson.current !== null && savedJson !== lastSavedJson.current;
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  useBlocker({
+    shouldBlockFn: () =>
+      dirtyRef.current &&
+      !window.confirm("This bid has unsaved changes. Leave without saving them?"),
+    enableBeforeUnload: () => dirtyRef.current,
+  });
   const bid: BidInput = {
     ...buildBidInput(saved, warrantyData),
     // Legacy MechFastenerLookup rows: the Duro-Tuff mechanical perimeter tiers key their
@@ -1066,6 +1088,8 @@ function EstimatePage() {
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
       toast.success("Bid saved");
+      lastSavedJson.current = savedJson;
+      dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);
       if (row && !bidId) {
         setBidId(row.id);
@@ -4191,6 +4215,11 @@ function EstimatePage() {
           </Button>
           <span className="hidden text-xs text-muted-foreground sm:inline">
             Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
+            {dirty && (
+              <span className="ml-2 font-medium text-amber-600 dark:text-amber-400">
+                · Unsaved changes
+              </span>
+            )}
           </span>
           {step < STEPS.length - 1 ? (
             <Button
