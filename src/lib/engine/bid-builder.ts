@@ -53,6 +53,7 @@ import {
   tearOffVolume,
 } from "./quantities";
 import { in2Ft, bankersRound, goodSingle } from "./rounding";
+import { universalFastenerSpacing, type MechFastenerRow } from "./fastener-spacing";
 import { directLookup } from "./labor";
 import {
   computeAccessories,
@@ -579,6 +580,12 @@ export interface BidInput {
    */
   membraneAdhesiveName?: string;
   sections: BidSectionInput[];
+  /**
+   * Legacy MechFastenerLookup rows (mech_fastener_lookup). Optional: when present the Duro-Tuff
+   * mechanical perimeter tiers key their on-centre spacing by ROW WIDTH the way
+   * `RoofSystem.MechPerimLaborRate` does; absent → the section's stored spacings are used.
+   */
+  fastenerLookup?: MechFastenerRow[];
   accessories: AccessoryLine[];
   /** §12 Accessories calculated-screen state (absent on older saved bids → empty state). */
   accessoriesCalc?: Partial<AccessoriesState>;
@@ -1402,6 +1409,61 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
     }
 
+    // ── Duro-Tuff mechanical ("durotuffmech"): row-based perimeter / corner labor (docs §22.15) ──
+    // DuroTuffSystem.RoofSectionLaborHours_4_0_230 bills each written-back row tier
+    // (NumCustomRows(i) rows of CustomPerimeterLap(i) inches along PerimTotalLength /
+    // CornerTotalLength) at RoofSystem.MechPerimLaborRate's tier-i rate — tab key
+    // CustomPerimeterLap(i) / CustomCornerLap(i), on-centre from MechFastenerLookup keyed by that
+    // lap (Custom*FastenerSpacing(i) under custom settings; the corner shares the perimeter's
+    // looked-up spacing) — and the field on MembraneWithOverlap minus the row areas.
+    let duroTuffMech: RoofSection["duroTuffMech"];
+    if (rsId === 3 && sys.attachment === "mechanical" && tuff) {
+      const lookup = (bid.fastenerLookup ?? []).filter((r) => r.roofSystemId === 3);
+      let lookupMissing = false;
+      const tierPerimOc = (lapIn: number): number => {
+        if (tuffCustom) return s.perimFastenerOc; // legacy CustomPerimeterFastenerSpacing(i)
+        if (!lookup.length) {
+          lookupMissing = true;
+          return s.perimFastenerOc;
+        }
+        const r = universalFastenerSpacing(lookup, {
+          roofSystemId: 3,
+          thickness: s.thickness,
+          designTable: s.designTable ?? 60,
+          tabSpacings: [lapIn],
+          pullTest: s.pullTest ?? 0,
+          columnOffset: 1,
+        });
+        // A failed lookup leaves the legacy out-parameter at its error code (< 0): no on-centre
+        // band matches → multiplier 1.0, which onCenterLookup reproduces for a negative value.
+        return r.ok ? r.inches : -1;
+      };
+      const tiers = ([0, 1] as const).map((i) => {
+        const perimOc = tierPerimOc(tuff.perimLapIn[i]);
+        return {
+          rows: tuff.rows[i],
+          lapIn: tuff.perimLapIn[i],
+          cornerLapIn: tuff.cornerLapIn[i],
+          perimOc,
+          cornerOc: tuffCustom ? s.cornerFastenerOc : perimOc,
+        };
+      });
+      if (
+        lookupMissing &&
+        tiers.some((t) => t.rows > 0) &&
+        (zones.perimLengthFt > 0 || zones.cornerLengthFt > 0)
+      ) {
+        warnings.push(
+          `Duro-Tuff perimeter rows on "${s.name}" use the section's stored fastener spacing — the MechFastenerLookup rows were not supplied, so the legacy per-row-width spacing could not be keyed.`,
+        );
+      }
+      duroTuffMech = {
+        perimTotalLengthFt: zones.perimLengthFt,
+        cornerTotalLengthFt: zones.cornerLengthFt,
+        tiers,
+      };
+    }
+
     // ── Install-labor inputs (legacy RoofSystem.RoofSectionLaborHours_4_0_230, docs §20.1) ──
     // Labor areas are the zone SHARES of MembraneWithOverlap (MaterialTotalField/Perim/Corner =
     // AreaX / AreaTotal × MembraneWithOverlap), not the raw takeoff areas.
@@ -1506,6 +1568,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       // Per-section AdjustLabor (legacy RoofSection.AdjustLabor); absent = the bid-level value.
       ...(s.adjustLaborPct !== undefined ? { adjustLaborPct: s.adjustLaborPct } : {}),
       ...(duroBond ? { duroBond } : {}),
+      ...(duroTuffMech ? { duroTuffMech } : {}),
       adhesiveBaseHoursPer1000,
       rollGoods,
       rollGoodWidthMulti,

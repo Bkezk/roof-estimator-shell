@@ -2579,3 +2579,41 @@ screen's 120 %) — pinned by a test. The Sections screen now labels the Duro-Bo
 
 Not comparable in this pair: Accessories ($31,520.70 / 97.56 h legacy vs $6,556.70 / 53.79 h)
 and the insulation / non-DL lines — the legacy bid carries the full Knox County scope.
+
+### 22.15 Roof-system labor sweep after §22.14 (2026-09-21) — every system's RoofSectionLaborHours
+
+Re-read `*System.RoofSectionLaborHours_4_0_230/_237` for all five systems plus the rate
+routines they call (`RoofSystem.MechField/MechPerim/AdheredField/AdheredPerimLaborRate`
+0xa5d4 / 0xa810 / 0xa790 / 0xae7c, `DuroLastSystem.MechField/MechPerimLaborRate` 0xc4c4 /
+0xc714) against the web chain, looking for another model gap like Duro-Bond's.
+
+- **Duro-Last, Duro-Roof, Duro-Fleece**: `Labor × (field rate × MaterialTotalField + perim
+  rate × MaterialTotalPerim + corner rate × MaterialTotalCorner)`, clamped ≥ 0 — the web's
+  `roofSectionLaborHours` over the zone shares of MembraneWithOverlap (§20.1). Rates match:
+  mechanical `10 × deck × tab × oc / 2500 × sheet × complexity` (perimeter/corner on the
+  DEFAULT deck column, corner o.c. = the perimeter's unless custom); adhered
+  `GetAdhesiveBaseHours/1000 × (roll-goods sheet ? RollGoodWidthAdhesiveMulti(FieldLap) :
+  SmartSheetMulti) × complexity`, perimeter ×1.2 only for "durogrip" with a PerimeterSpacing.
+  Duro-Last's field override differs from the base only by the inactive `lookup_Decktimes`
+  factor (§20.2) and the 3"-snap of the o.c. it keys — no effect. **No change.**
+- **Duro-Bond**: the §22.14 model (fixed the same day).
+- **Duro-Tuff — second gap, fixed.** With a MECHANICAL perimeter ("durotuffmech")
+  `DuroTuffSystem.RoofSectionLaborHours_4_0_230` (0xf5bc) does NOT use the zone shares. It bills
+  the membrane rows the §21 routine wrote back: per tier i ∈ {0, 1}, `NumCustomRows(i) ×
+  In2Ft(CustomPerimeterLap(i)) × PerimTotalLength` (and `× CornerTotalLength`) at
+  `MechPerimLaborRate`'s tier-i rate — tab key CustomPerimeterLap(i) / CustomCornerLap(i)
+  (30" → ×2.8, 60" → ×1.4), on-centre from MechFastenerLookup keyed by THAT lap
+  (`UniversalFastenerSpacing(thickness, DT, [lap_i], pull, 1)`; the corner shares the
+  perimeter's spacing; Custom*FastenerSpacing(i) under custom settings; a failed lookup leaves
+  the error code → no band → ×1.0) — and the field at the field rate on `MembraneWithOverlap −
+  Σ row areas`. The tier-1 block of `RoofSystem.MechPerimLaborRate` (0x0369+) runs only for
+  "durotuffmech". Seeded Duro-Tuff lookup (DT 60, any mil): 30" rows perim 18" o.c. from 350 lb,
+  60" rows 9" o.c. from 425 lb, corners always −1. Web: `RoofSection.duroTuffMech` (tiers from
+  `duroTuffMembraneCalc`'s written-back rows / laps, `BidInput.fastenerLookup` = the
+  mech_fastener_lookup rows the estimator already loads, zone perimeter / corner lengths);
+  `computeSectionInstallHours` computes the branch; without the lookup rows the stored
+  spacings are used and a warning says so; adhered Duro-Tuff and sections without perimeter
+  footage are unchanged (the formula collapses to field × MembraneWithOverlap). Pinned by
+  tests with a hand-computed case. Not yet a web counterpart: the legacy Advanced form's
+  separate inner-row count / width under custom settings (the web's custom lap maps to one
+  outer row, §21 flag).

@@ -18,7 +18,7 @@
  * .NET rounding.
  */
 
-import { calcLaborCost, goodSingle } from "./rounding";
+import { calcLaborCost, goodSingle, in2Ft } from "./rounding";
 import {
   sqFtTotalMembrane,
   setupTime,
@@ -112,6 +112,24 @@ export interface RoofSection {
     mechSheetMulti: number;
     fastenerCount: number;
     singleFastenerTime: number;
+  };
+  /**
+   * Duro-Tuff on a mechanical perimeter ("durotuffmech", DuroTuffSystem.RoofSectionLaborHours
+   * _4_0_230 0xf5bc): perimeter / corner labor is billed on the membrane ROWS laid — per tier i,
+   * NumCustomRows(i) × In2Ft(CustomPerimeterLap(i)) × Perim/CornerTotalLength — each tier at its
+   * own tab (lap) and on-centre multipliers, and the field on MembraneWithOverlap minus those
+   * row areas. When set, replaces the zone-share chain for this section.
+   */
+  duroTuffMech?: {
+    perimTotalLengthFt: number;
+    cornerTotalLengthFt: number;
+    tiers: Array<{
+      rows: number;
+      lapIn: number; // CustomPerimeterLap(i): area width AND the perimeter tab key
+      cornerLapIn: number; // CustomCornerLap(i): the corner tab key
+      perimOc: number;
+      cornerOc: number;
+    }>;
   };
   // tear-off / disposal
   tearOff: boolean;
@@ -304,6 +322,37 @@ export function computeSectionInstallHours(
       singleFastenerTime: s.duroBond.singleFastenerTime,
       version,
     });
+    return base * (1 + (s.adjustLaborPct ?? adjustLaborPct) / 100);
+  }
+  if (s.duroTuffMech) {
+    const tables = s.laborTables ?? admin;
+    const { fieldRate } = resolveSectionRates(s, tables);
+    const deckDefault = directLookup(tables.deckTypeMulti, s.deckTypeId, true); // DEFAULT column
+    let rowArea = 0;
+    let rowHours = 0;
+    for (const t of s.duroTuffMech.tiers) {
+      if (t.rows <= 0) continue;
+      const perimArea = t.rows * in2Ft(t.lapIn) * s.duroTuffMech.perimTotalLengthFt;
+      const cornerArea = t.rows * in2Ft(t.lapIn) * s.duroTuffMech.cornerTotalLengthFt;
+      const perimRate = mechLaborRate({
+        deckMulti: deckDefault,
+        tabMulti: bandLookup(tables.tabBands, t.lapIn),
+        ocMulti: onCenterLookup(tables.onCenterBands, t.perimOc),
+        sheetSizeMulti: s.sheetSizeMulti,
+        complexity: s.complexity,
+      });
+      const cornerRate = mechLaborRate({
+        deckMulti: deckDefault,
+        tabMulti: bandLookup(tables.tabBands, t.cornerLapIn),
+        ocMulti: onCenterLookup(tables.onCenterBands, t.cornerOc),
+        sheetSizeMulti: s.sheetSizeMulti,
+        complexity: s.complexity,
+      });
+      rowArea += perimArea + cornerArea;
+      rowHours += perimRate * perimArea + cornerRate * cornerArea;
+    }
+    const raw = fieldRate * (s.membraneWithOverlap - rowArea) + rowHours;
+    const base = Math.max(0, raw * s.thicknessLabor);
     return base * (1 + (s.adjustLaborPct ?? adjustLaborPct) / 100);
   }
   const { fieldRate, perimRate, cornerRate } = resolveSectionRates(s, s.laborTables ?? admin);

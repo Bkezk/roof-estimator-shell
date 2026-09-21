@@ -781,7 +781,12 @@ function EstimatePage() {
     highWindTermYears,
     highWindBand,
   };
-  const bid: BidInput = buildBidInput(saved, warrantyData);
+  const bid: BidInput = {
+    ...buildBidInput(saved, warrantyData),
+    // Legacy MechFastenerLookup rows: the Duro-Tuff mechanical perimeter tiers key their
+    // spacing by row width (docs §22.15).
+    ...(fastenerLookup?.length ? { fastenerLookup } : {}),
+  };
   // Legacy high-wind semantics: the warranty carries IsHighWind + its term; the bid picks the
   // Max Expected Wind band (docs §17).
   const effHighWind = warrantyData ? effectiveHighWind(saved, warrantyData) : null;

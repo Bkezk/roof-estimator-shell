@@ -3281,3 +3281,166 @@ describe("Duro-Bond mechanical section labor — legacy DuroBondSystem model (do
     ).toBeCloseTo(149.87, 1);
   });
 });
+
+describe("Duro-Tuff mechanical perimeter — row-based labor tiers (docs §22.15)", () => {
+  // Duro-Tuff|mechanical combo: base tab 30" ×2.8 (mech_tab_multi 30 → 2.8, 60 → 1.4, 120 →
+  // 0.95), on-centre 18 → 1.0 / 9 → 1.21, wood ×1, one ×1.0 sheet.
+  const tuffCombo: LaborCombo = {
+    roof_system: "Duro-Tuff",
+    attachment: "mechanical",
+    base: { tab_value: 30, tab_multiplier: 2.8 },
+    deck_multipliers: { Wood: 1, Steel: 1.064 },
+    fastener_spacing_multipliers: [
+      { spacing_in: 18, multiplier: 1 },
+      { spacing_in: 12, multiplier: 1.1 },
+      { spacing_in: 9, multiplier: 1.21 },
+      { spacing_in: 6, multiplier: 1.41 },
+    ],
+    sheet_size_multipliers: [{ label: "1500 sf", roof_section: 1, underlayment: 1 }],
+    thickness_multipliers: [{ mil: 40, multiplier: 1 }],
+  };
+  const tuffTables = {
+    ...buildLaborTables(tuffCombo, deckOrder),
+    tabBands: [
+      { key: 30, value: 2.8 },
+      { key: 60, value: 1.4 },
+      { key: 120, value: 0.95 },
+    ],
+  };
+  const tAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Tuff|mechanical": tuffTables },
+    familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
+    rollGoodWidthMulti: { 3: { 30: 2.6, 60: 1.3, 120: 1 } },
+  };
+  // MechFastenerLookup rows for roof system 3 (DT 60, any thickness): 30" rows fasten the
+  // perimeter at 18" o.c. from a 350 lb pull; 60" rows at 9" o.c. from 425 lb; corners never.
+  const lookup = [
+    {
+      roofSystemId: 3,
+      membraneThickness: -1,
+      designTable: 60,
+      tabSpacing: 30,
+      pullTest: 350,
+      fieldSpacing: 18,
+      perimSpacing: 18,
+      cornerSpacing: -1,
+    },
+    {
+      roofSystemId: 3,
+      membraneThickness: -1,
+      designTable: 60,
+      tabSpacing: 60,
+      pullTest: 350,
+      fieldSpacing: 15,
+      perimSpacing: 9,
+      cornerSpacing: -1,
+    },
+    {
+      roofSystemId: 3,
+      membraneThickness: -1,
+      designTable: 60,
+      tabSpacing: 60,
+      pullTest: 425,
+      fieldSpacing: 18,
+      perimSpacing: 9,
+      cornerSpacing: -1,
+    },
+  ];
+  const section = (): BidSectionInput => ({
+    ...bid().sections[0]!,
+    roofSystem: "Duro-Tuff",
+    fieldLap: 60,
+    designTable: 60,
+    pullTest: 425,
+    fastenerOc: 18,
+    perimFastenerOc: 18,
+    cornerFastenerOc: 18,
+    enhancementWidthFt: 5,
+    edges: [
+      {
+        side: "A",
+        lengthFt: 50,
+        isPerimeter: true,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "B",
+        lengthFt: 50,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "C",
+        lengthFt: 50,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "D",
+        lengthFt: 50,
+        isPerimeter: false,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+    ],
+    isQuickBid: false,
+  });
+  it('bills 1 outer 30\\" row + 2 inner 60\\" rows along the 50 ft perimeter at their own tab / spacing rates', () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ roofSystem: "Duro-Tuff", sections: [section()], fastenerLookup: lookup }),
+      tAdmin,
+    );
+    expect(warnings.filter((w) => w.includes("Duro-Tuff perimeter rows"))).toEqual([]);
+    const s0 = inputs.sections[0]!;
+    expect(s0.duroTuffMech).toBeDefined();
+    const dt = s0.duroTuffMech!;
+    expect(dt.perimTotalLengthFt).toBe(50);
+    expect(dt.cornerTotalLengthFt).toBe(0);
+    // BA default rows (1, 2) at 30" / 60"; tier spacings keyed by row width from the lookup.
+    expect(dt.tiers.map((t) => [t.rows, t.lapIn, t.perimOc])).toEqual([
+      [1, 30, 18],
+      [2, 60, 9],
+    ]);
+    const M = s0.membraneWithOverlap;
+    const f = (10 * 1 * 1.4 * 1) / 2500; // field: tab 60 → 1.4, 18" o.c. → 1
+    const p0 = (10 * 1 * 2.8 * 1) / 2500; // tier 0: tab 30 → 2.8, 18" o.c.
+    const p1 = (10 * 1 * 1.4 * 1.21) / 2500; // tier 1: tab 60 → 1.4, 9" o.c. → 1.21
+    const a0 = 1 * 2.5 * 50; // 1 row × In2Ft(30) × 50 ft
+    const a1 = 2 * 5 * 50; // 2 rows × In2Ft(60) × 50 ft
+    const expected = f * (M - a0 - a1) + p0 * a0 + p1 * a1;
+    expect(computeSectionInstallHours(s0, inputs.admin, inputs.formulasVersion, 0)).toBeCloseTo(
+      expected,
+      6,
+    );
+    expect(expected).toBeGreaterThan(0);
+  });
+  it("without the lookup rows the stored spacing is used and a warning says so", () => {
+    const { inputs, warnings } = buildEstimateInputs(
+      bid({ roofSystem: "Duro-Tuff", sections: [section()] }),
+      tAdmin,
+    );
+    expect(warnings.some((w) => w.includes("Duro-Tuff perimeter rows"))).toBe(true);
+    expect(inputs.sections[0]!.duroTuffMech!.tiers.map((t) => t.perimOc)).toEqual([18, 18]);
+  });
+  it("a section without perimeter edges reduces to field rate × MembraneWithOverlap (unchanged)", () => {
+    const plain = { ...section(), edges: [], isQuickBid: true };
+    const { inputs } = buildEstimateInputs(
+      bid({ roofSystem: "Duro-Tuff", sections: [plain], fastenerLookup: lookup }),
+      tAdmin,
+    );
+    const s0 = inputs.sections[0]!;
+    const f = (10 * 1 * 1.4 * 1) / 2500;
+    expect(computeSectionInstallHours(s0, inputs.admin, inputs.formulasVersion, 0)).toBeCloseTo(
+      f * s0.membraneWithOverlap,
+      6,
+    );
+  });
+});
