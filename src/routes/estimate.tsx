@@ -2148,9 +2148,9 @@ function EstimatePage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>Apply To Existing Roof Sections</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Pressing OK will apply these Material Defaults to ALL existing Roof Sections: Roof
-                  System, Attached With, Design Table, Membrane Type, Color — and the &quot;2. Wall
-                  Type&quot; default to every existing parapet (term bar / fascia drill split).
+                  Pressing OK will apply these defaults to ALL existing Roof Sections: Deck Type,
+                  Roof System, Attached With, Design Table, Membrane Type, Color — and the &quot;2.
+                  Wall Type&quot; default to every existing parapet (term bar / fascia drill split).
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -2167,6 +2167,9 @@ function EstimatePage() {
                         delete nx.membraneAdhesiveName;
                         return {
                           ...nx,
+                          // "1. Deck Type" too (owner's request; legacy OverwriteWithDefault
+                          // leaves DeckType alone — docs §22.30).
+                          deckType: sectionDefaults.deckType,
                           designTable: sectionDefaults.designTable ?? 60,
                           thickness: sectionDefaults.thickness,
                           color: sectionDefaults.color,

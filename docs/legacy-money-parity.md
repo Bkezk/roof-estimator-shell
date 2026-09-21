@@ -3021,3 +3021,8 @@ onto every parapet. Legacy `RoofSections.OverwriteWithDefault` copies attachment
 AdheredTo, RoofSystem, DesignTable, MembraneType, Color, PerimEnhancementWidth and
 UseCustomSettings — never DeckType or WallType — so this, like the on-change propagation above,
 is the owner's departure; the dialog text says so.
+Same button also applies "1. Deck Type" to every section (owner's request; legacy leaves
+DeckType alone). The pull-test spacing autofill does not key on the deck (roof system /
+thickness / design table / lap / pull test), so no o.c. re-derivation is needed; a deck change
+re-keys the fastening-time, tear-off and curb-setup lookups on recompute as it does from the
+Sections screen.
