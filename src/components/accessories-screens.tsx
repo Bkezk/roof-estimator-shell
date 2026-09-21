@@ -593,6 +593,56 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
     return out;
   }, [result]);
 
+  /** Screens that already carry a value (footage, a cost, a quantity or a typed count) — green. */
+  const screenHasValues = useMemo(() => {
+    const out = new Set<ScreenId>();
+    const anyQty = (m: Record<string, number> | undefined) =>
+      Object.values(m ?? {}).some((v) => (v || 0) > 0);
+    const slotTyped = (slot: FastenerSlot) => anyQty(state.fastenerQty[slot]);
+    if (anyQty(Object.assign({}, ...Object.values(state.corners.qty))) || result?.corners.cost)
+      out.add("corners");
+    if (state.pipeStacks.length > 0) out.add("pipeStacks");
+    if (anyQty(state.washers.qty)) out.add("washers");
+    if (state.drains.length > 0) out.add("drains");
+    if (anyQty(state.walkPads.qty)) out.add("walkPads");
+    if (result) {
+      if (result.termBar.adjTotalLengthFt > 0 || result.termBar.cost > 0 || slotTyped("termBar"))
+        out.add("termBar");
+      for (const size of ["3", "4"] as const) {
+        const f = result.fascia[size];
+        const slot: FastenerSlot = size === "3" ? "fascia3" : "fascia4";
+        if (f.totalLengthFt > 0 || f.cost > 0 || slotTyped(slot)) out.add(slot);
+      }
+      for (const [id, g] of [
+        ["gravelStop", result.gravelStop],
+        ["dripEdge", result.dripEdge],
+      ] as const) {
+        if (
+          g.cost > 0 ||
+          Object.values(g.sizes).some((z) => z.adjTotalLengthFt > 0) ||
+          slotTyped(id)
+        )
+          out.add(id);
+      }
+      if (
+        result.snapCover.cost > 0 ||
+        Object.values(result.snapCover.sizes).some((z) => z.totalLengthFt > 0) ||
+        slotTyped("snapCover")
+      )
+        out.add("snapCover");
+      if (result.panduit.cost > 0 || anyQty(result.panduit.calcByLength)) out.add("panduit");
+      if (result.sealants.cost > 0 || anyQty(result.sealants.calcByPart)) out.add("sealants");
+      if (result.membraneAccs.cost > 0) out.add("membraneAccs");
+      if (result.vents.cost > 0 || anyQty(result.vents.calcByColor)) out.add("vents");
+      if (slotTyped("parapet")) out.add("parapetTabs");
+      for (const bucket of Object.keys(result.deckNeeds) as DeckBucket[]) {
+        if (slotTyped(bucket)) out.add(bucket);
+      }
+    }
+    if (anyQty(props.adhesiveCalc) || anyQty(state.adhesivesExtra)) out.add("adhesives");
+    return out;
+  }, [state, result, props.adhesiveCalc]);
+
   if (!refData) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -1756,14 +1806,19 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                     title={
                       screenNeedsAttention.has(it.id)
                         ? "This screen still has needed quantities — open it to cover them."
-                        : undefined
+                        : screenHasValues.has(it.id)
+                          ? "This screen carries values on this bid."
+                          : undefined
                     }
+                    // Red = an unmet need (wins); green = the screen already carries values.
                     className={`w-full rounded px-1 py-0.5 text-left ${
                       screenId === it.id
                         ? "bg-primary text-primary-foreground"
                         : screenNeedsAttention.has(it.id)
                           ? "font-medium text-red-600 hover:bg-muted dark:text-red-400"
-                          : "hover:bg-muted"
+                          : screenHasValues.has(it.id)
+                            ? "font-medium text-green-700 hover:bg-muted dark:text-green-400"
+                            : "hover:bg-muted"
                     }`}
                     onClick={() => setScreenId(it.id)}
                   >
