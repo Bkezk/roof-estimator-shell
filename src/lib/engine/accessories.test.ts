@@ -518,6 +518,52 @@ describe("term bar (§12.2)", () => {
     expect(r.termBar.billedHours).toBeCloseTo(1.58, 4);
   });
 
+  it("Knox County Parapet 2 (160 ft T-Bar, Brick/Concrete, 2 pieces): 170 ft pre-drill, 5.95 h, one summary row", () => {
+    const args = anchorArgs();
+    args.sections = [section({})];
+    const wall = (over: Partial<ParapetInput>): ParapetInput => ({
+      id: "p",
+      name: "wall",
+      lengthFt: 750,
+      heightBand: "",
+      deckType: "Retrofit",
+      predrill: false,
+      canted: false,
+      girthInches: 60,
+      wallType: 4,
+      color: "White",
+      pieces: 1,
+      ...over,
+    });
+    args.parapets = [
+      wall({ id: "p1" }),
+      wall({
+        id: "p2",
+        lengthFt: 160,
+        girthInches: 24,
+        pieces: 2,
+        termOptionId: 2,
+        termLengthFt: 160,
+      }),
+      wall({ id: "p3", lengthFt: 35, girthInches: 126 }),
+    ];
+    const r = computeAccessories(args);
+    // Legacy TermBar.GetParapetLength (0x253fc): TermLength of the id-2 wall, WallType ≠ 1 → pre-drill;
+    // pieces never enter. Both apps' Term Bar screens: Parapets 160, Sub-Total 170, 5.95 h (100%).
+    expect(r.termBar.counts.parapetsFt).toBe(160);
+    expect(r.termBar.preDrillByColor.White).toBe(160);
+    expect(r.termBar.noDrillByColor.White).toBe(0);
+    expect(r.termBar.subTotalPreDrill).toBe(170);
+    expect(r.termBar.billedHours).toBeCloseTo(5.95, 4);
+    expect(r.termBar.linkBaseHours.preDrill).toBeCloseTo(5.95, 4);
+    expect(r.termBar.fastenersNeeded).toBe(357);
+    const tbLines = r.lines.filter((l) => l.screen === "Term Bar");
+    expect(tbLines).toHaveLength(1);
+    expect(tbLines[0]!.hours).toBeCloseTo(5.95, 4);
+    // Only the auto vents (3 h) sit beside it in this fixture: no second term bar contribution.
+    expect(r.manHours - r.termBar.billedHours).toBeCloseTo(3, 4);
+  });
+
   it("base term bar (UseTermBarOnBase) joins Cost but not Fasteners nor billed hours (quirk)", () => {
     const args = anchorArgs();
     args.sections = [section({})];

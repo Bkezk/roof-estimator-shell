@@ -2971,3 +2971,26 @@ Also this round (UI only, no money): the Review ledger's editable cells (Shippin
 Warranty, markup radios and value, Per-Diem, Sales Commission, discount "Use" ticks) share one
 green cell style with a ✎ marker and a legend; the Underlayment layer stack graphic is clickable
 (click a drawn layer to select that layer, same as its "Add Layer n" tab).
+
+### 22.29 "T-bar labor seemed double" — Parapet 2, re-verified (2026-09-21)
+
+Owner: the term bar on Parapet 2 of the Knox County CTC bid. Bid state: P2 160 ft, Brick or
+Concrete (WallType 4), 2 pieces, T-Bar 160 ft (`termOptionId 2`, `termLengthFt 160`); no
+Additional feet, no base term bar, no roof-edge or curb T-bar.
+
+`TermBar.GetParapetLength` (0x253fc) re-read: for each present parapet with a termination, add
+`TermLength` to the bar of its colour when `TermOption.ID = 2`; `WallType = 1` → no-drill length,
+anything else → pre-drill length. `Pieces` never enters (it only feeds `AdjustedLength` = Length +
+1 + Pieces for the wall's own labor / membrane). `cboTermType_SelectionChangeCommitted` seeds
+`TermLength = Length` (not × pieces); `txtTermLength` edits store it verbatim.
+`get_ManHoursPreDrill` (0x24ca0): `Round(R10(f32 1.03 × (preDrill + otherPreDrill)) ×
+SmartPreDrillLabor × (1 + adj/100), 4)` — 170 × 0.035 = **5.95 h**, no-drill 0.
+
+The two apps' Term Bar screens captured for §22.20 already agree line for line: Parapets 160,
+Pre-Drill White 160, Sub-Total 170, Labor 5.95 h (100%), Adj. Total Length 170 ft, Metal
+Anchors 400 typed (legacy) vs 1½" Spade 400 (web) — the fastener drift noted there. Nothing in
+the engine multiplies the term bar by pieces, and the term bar contributes ONE summary row
+("Termination Bars White", 5.95 h) and one term into `manHours`. Pinned by test ("Knox County
+Parapet 2 …"): 160 / 170 / 5.95 / 357 fasteners / a single Term Bar line. No change to the money
+path; if the owner's "double" is a specific screen figure (e.g. the Review's per-item labor or
+the Accessories Summary), it needs that figure to chase further.
