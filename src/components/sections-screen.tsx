@@ -7,10 +7,11 @@
  * to BidSectionInput[] and shows the engine's per-section Man Hours / Labor Cost.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { adhesiveOptionsForSystem } from "@/lib/engine/adapters";
+import { CHECK_PULL, legacyLapOptions } from "@/lib/engine/lap-options";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
   COMPLEXITY_LABELS,
@@ -229,6 +230,22 @@ export function SectionsScreen(p: SectionsScreenProps) {
   const upd = (patch: Partial<BidSectionInput>) =>
     onChange(sections.map((x, j) => (j === i ? { ...x, ...patch } : x)));
 
+  // Legacy LoadLapSpacings selection: the saved FieldLap when it is still listed, else the first
+  // entry; "Check Pull" stores 0. Re-run whenever a lookup key or the list changes.
+  const lapSync = s ? legacyLapOptions(s, p) : null;
+  const lapSyncKey = s
+    ? `${s.id}|${s.fieldLap}|${lapSync!.checkPull ? "cp" : lapSync!.options.join(",")}`
+    : "";
+  useEffect(() => {
+    if (!s || !lapSync || lapSync.raw.length === 0) return;
+    if (lapSync.checkPull) {
+      if (s.fieldLap !== 0) upd({ fieldLap: 0 });
+      return;
+    }
+    if (!lapSync.options.includes(s.fieldLap)) upd({ fieldLap: lapSync.options[0]! });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lapSyncKey]);
+
   // Legacy pull-test autofill (§1): with a pull test entered, re-derive the field/perim/corner
   // o.c. from MechFastenerLookup whenever a lookup key changes. Manual OC edits still stick.
   const updWithSpacing = (patch: Partial<BidSectionInput>) => {
@@ -305,12 +322,9 @@ export function SectionsScreen(p: SectionsScreenProps) {
   const hours = p.totals?.sectionHours[i] ?? 0;
   const baseHours = p.totals?.sectionBaseHours?.[i] ?? 0;
   const tabOptions = TAB_OPTIONS_BY_SYSTEM[sys.roofSystem];
-  // Legacy frmRoofSection.LoadLapSpacings: for roll goods the "Field Roll Width" combo lists the
-  // roof system's RSRollGoodWidth rows (inches) — a pick, not a free number.
-  const rollWidthOptions = Object.keys(admin.rollGoodWidthMulti?.[sys.rsId] ?? {})
-    .map(Number)
-    .filter((w) => w > 0)
-    .sort((a, b) => a - b);
+  // Legacy frmRoofSection.LoadLapSpacings (see legacyLapOptions): tab spacings for sheets, roll
+  // widths for rolls, filtered by the pull test under a mechanical attachment.
+  const lap = legacyLapOptions(s, p);
 
   const setEdges = (next: EdgeInput[], extra: Partial<BidSectionInput> = {}) =>
     upd({ edges: next, ...extra });
@@ -405,7 +419,7 @@ export function SectionsScreen(p: SectionsScreenProps) {
       "Perim Enhancement is greater than Roof Dimension — increase the size of the Roof Section, or decrease the Enhancement Width",
     );
   }
-  if (tabOptions && !tabOptions.includes(s.fieldLap))
+  if (lap.raw.length > 0 && !lap.checkPull && !lap.options.includes(s.fieldLap))
     problems.push("Lap Spacing — select a Tab Spacing");
   if (
     sys.rsId === 1 &&
@@ -778,26 +792,20 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 onChange={(v) => updWithSpacing({ designTable: Number(v) })}
               />
             </Field>
-            <Field label={tabOptions ? "Field Tab Spacing (in)" : "Field Roll Width (in)"}>
-              {tabOptions ? (
+            <Field label={lap.isRollWidth ? "Field Roll Width (in)" : "Field Tab Spacing (in)"}>
+              {lap.raw.length ? (
                 <Pick
                   className="w-[100px]"
-                  value={String(s.fieldLap)}
-                  options={[
-                    ...(tabOptions.includes(s.fieldLap) ? [] : [String(s.fieldLap)]),
-                    ...tabOptions.map(String),
-                  ]}
-                  onChange={(v) => updWithSpacing({ fieldLap: Number(v) })}
-                />
-              ) : rollWidthOptions.length ? (
-                <Pick
-                  className="w-[100px]"
-                  value={String(s.fieldLap)}
-                  options={[
-                    ...(rollWidthOptions.includes(s.fieldLap) ? [] : [String(s.fieldLap)]),
-                    ...rollWidthOptions.map(String),
-                  ]}
-                  onChange={(v) => updWithSpacing({ fieldLap: Number(v) })}
+                  value={lap.checkPull ? CHECK_PULL : String(s.fieldLap)}
+                  options={
+                    lap.checkPull
+                      ? [CHECK_PULL]
+                      : [
+                          ...(lap.options.includes(s.fieldLap) ? [] : [String(s.fieldLap)]),
+                          ...lap.options.map(String),
+                        ]
+                  }
+                  onChange={(v) => updWithSpacing({ fieldLap: v === CHECK_PULL ? 0 : Number(v) })}
                 />
               ) : (
                 <Num

@@ -3189,3 +3189,17 @@ describe("§22.9 strippingBySection — roll-goods $/sqft per foot, Duro-Tuff fa
     expect(r["s1"]!.deckMulti).toBeGreaterThan(0);
   });
 });
+
+describe("Check Pull (FieldLap = 0 — no lap qualifies for the pull test)", () => {
+  it("keeps every estimate figure finite while the lap is unset", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({ sections: [{ ...bid().sections[0]!, fieldLap: 0 }] }),
+      admin,
+    );
+    const r = computeEstimate(inputs);
+    const numbers = Object.entries(r).filter(([, v]) => typeof v === "number");
+    expect(numbers.length).toBeGreaterThan(10);
+    for (const [k, v] of numbers) expect(Number.isFinite(v), k).toBe(true);
+    expect(inputs.sections[0]!.membraneWithOverlap).toBeGreaterThan(0);
+  });
+});
