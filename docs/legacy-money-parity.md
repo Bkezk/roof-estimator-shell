@@ -2881,3 +2881,21 @@ Attached With should grey out, as legacy does (Duro-Tuff lists Duro-Tuff Fastene
   RefID 2 → unit cost × qty). The live `non_dl:others` row still carries Price 0 (seeded
   `_uncaptured`; the engine only warns while price AND labor are 0) — enter the $/sq ft on
   Admin › Non-DL › Others › "ISO (Curb Insulation Sq Ft)". No engine change.
+
+### 22.24 Curb ISO material — the hidden "Others" price, pinned (2026-09-21)
+
+Correction to §22.23's last bullet. The owner is right that legacy has no admin screen for the
+Non-DL "Others" group and no item by that name in BAManager: `ref_ndl` Others rows (RefID 1 DL
+Approved Slipsheet, RefID 2 curb ISO) are vendor-DB data the legacy app reads silently — the
+only place they surface is the Review's "Other" line. That line pins the price:
+
+- Knox County CTC, insulated curbs A (98 × 110, qty 3) and F (30 × 72, qty 3). `Curb.LinealFt`
+  (0x3334a) = Round((A + B) / 6, 8) → 34.66666667 and 17; `Curbs.ISO_SqFt` = Σ LinealFt × Qty =
+  104.00000001 + 51 = 155.00000001; Others RefID 2 CalcQty = Ceil(…) = **156** (the 8-dp
+  rounding is what tips 155 to 156). Legacy "Other" $46.80 = 156 × **$0.30 / sq ft**.
+- Web: `curbLinealFt` / `curbIsoSqFt` now round exactly as the IL (the builder used the raw
+  (A + B) / 6, which ceils to 155 here); the same rounded LinealFt feeds the ISO labor and the
+  polyethylene sq ft. The live `non_dl:others` ISO row is set to 0.30 and its `_uncaptured`
+  marker cleared (migration `20260921160000`); the slipsheet row stays 0 / uncaptured (no
+  legacy readout for it yet). The web keeps the group editable under Admin › Non-DL › Others —
+  something legacy never exposed.

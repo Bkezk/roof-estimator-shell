@@ -13,6 +13,8 @@ import {
   type BidSectionInput,
   type UnderlaymentLayer,
   strippingBySection,
+  curbIsoSqFt,
+  curbLinealFt,
 } from "./bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
@@ -1248,6 +1250,17 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
       curbLabor: { ...withCurb.curbLabor!, setupMinutesByDeck: {} },
     });
     expect(computeEstimate(global8.inputs).curbLaborHours).toBeCloseTo(49.01, 2);
+  });
+
+  it("curb ISO sq ft: legacy LinealFt rounds to 8 dp before × qty, so Knox A + F ceil to 156 (§22.24)", () => {
+    const iso = curbIsoSqFt([
+      { widthIn: 98, lengthIn: 110, quantity: 3, hasInsulation: true },
+      { widthIn: 30, lengthIn: 72, quantity: 3, hasInsulation: true },
+      { widthIn: 20, lengthIn: 20, quantity: 9, hasInsulation: false },
+    ]);
+    expect(iso).toBeGreaterThan(155);
+    expect(Math.ceil(iso)).toBe(156); // 156 × $0.30 = the legacy review's Other $46.80
+    expect(curbLinealFt({ widthIn: 98, lengthIn: 110 })).toBe(34.66666667);
   });
 
   it("curbs: a legacy styleId auto-prices the wrap membrane into M0; styles 3/4 warn quote-required", () => {

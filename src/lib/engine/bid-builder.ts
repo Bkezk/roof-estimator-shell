@@ -989,6 +989,27 @@ export function strippingBySection(
 }
 
 /** Build the engine EstimateInputs from a bid + assembled admin data. */
+/**
+ * Legacy `Curb.LinealFt` (0x3334a) = Round((A + B) / 6, 8). The 8-dp rounding is load-bearing:
+ * Knox County curb A (98 × 110, qty 3) gives 34.66666667 × 3 = 104.00000001, so the ISO square
+ * footage Ceil() lands on 156, not 155 — the legacy review's "Other" $46.80 = 156 × $0.30
+ * (docs §22.24).
+ */
+export const curbLinealFt = (c: Pick<CurbInput, "widthIn" | "lengthIn">): number =>
+  bankersRound((c.widthIn + c.lengthIn) / 6, 8);
+
+/** Legacy `Curbs.ISO_SqFt` = Σ Curb.SF_ISO = Σ LinealFt × Qty over insulated curbs (raw sum). */
+export function curbIsoSqFt(
+  curbs: Array<Pick<CurbInput, "widthIn" | "lengthIn" | "quantity" | "hasInsulation">>,
+): number {
+  let total = 0;
+  for (const c of curbs) {
+    if (c.quantity <= 0 || !c.hasInsulation) continue;
+    total += curbLinealFt(c) * c.quantity;
+  }
+  return total;
+}
+
 export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): BuildResult {
   const warnings: string[] = [];
   const version = CURRENT_FORMULAS_VERSION;
@@ -1924,13 +1945,13 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // §22.12): Round(0.25 + LinealFt × 0.0167 × Qty, 2). The 0.25 h is added ONCE per curb entry;
     // only the per-foot part scales with quantity (the earlier port multiplied both by qty).
     if (c.hasInsulation) {
-      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      const linealFt = curbLinealFt(c);
       itemHours += bankersRound(0.25 + linealFt * 0.0167 * c.quantity, 2);
     }
     // Legacy "Plastic on Curb(s)" labor (BaseHours: PolyethyleneSqF / 400 hours, docs §8.2),
     // PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8).
     if (c.hasPlastic) {
-      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      const linealFt = curbLinealFt(c);
       const polySqFt = bankersRound(
         ((linealFt * ((c.dimCIn ?? 0) + (c.dimDIn ?? 0)) * 5) / 48) * c.quantity,
         8,
@@ -2267,7 +2288,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     let curbIsoSqFt = 0;
     for (const c of bid.curbs) {
       if (c.quantity <= 0) continue;
-      const linealFt = (c.widthIn + c.lengthIn) / 6;
+      const linealFt = curbLinealFt(c);
       // Curb.PolyethyleneSqF = Round(LinealFt × (C + D) × 5 / 48 × qty, 8); Curb.SF_ISO =
       // LinealFt × qty (IL-exact).
       if (c.hasPlastic)
