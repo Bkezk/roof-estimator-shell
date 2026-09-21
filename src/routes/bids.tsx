@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -60,6 +60,7 @@ export const Route = createFileRoute("/bids")({
 });
 
 function BidsPage() {
+  const navigate = useNavigate();
   const listBidsFn = useServerFn(listBids);
   const { session } = useAuth();
   // Only fetch with a live session — otherwise the server fn 401s (e.g. a mobile browser whose
@@ -187,7 +188,17 @@ function BidsPage() {
             return (
               <div
                 key={bid.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-4"
+                role="link"
+                tabIndex={0}
+                title="Open this bid"
+                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void navigate({ to: "/estimate", search: { bid: bid.id } });
+                  }
+                }}
               >
                 <div>
                   <div className="flex items-center gap-2">
@@ -215,7 +226,11 @@ function BidsPage() {
                     </span>
                   </span>
                   <Button asChild variant="ghost" size="sm">
-                    <Link to="/estimate" search={{ bid: bid.id }}>
+                    <Link
+                      to="/estimate"
+                      search={{ bid: bid.id }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       Open
                     </Link>
                   </Button>
@@ -225,7 +240,10 @@ function BidsPage() {
                     className="text-destructive hover:text-destructive"
                     title="Delete this bid"
                     disabled={del.isPending}
-                    onClick={() => setConfirmDelete({ id: bid.id, name: bid.name })}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDelete({ id: bid.id, name: bid.name });
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                     <span className="sr-only">Delete</span>
