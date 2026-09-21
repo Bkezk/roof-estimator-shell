@@ -293,7 +293,9 @@ export function computeSectionInstallHours(
   adjustLaborPct: number,
 ): number {
   if (s.duroBond) {
-    return duroBondLaborHours({
+    // Legacy RoofSection.AdjustedBaseHours = BaseHours × (1 + AdjustLabor/100) wraps every
+    // system's RoofSectionLaborHours, the Duro-Bond model included (docs §16.2).
+    const base = duroBondLaborHours({
       membraneWithOverlap: s.membraneWithOverlap,
       layoutTime: s.duroBond.layoutTime,
       thicknessLabor: s.thicknessLabor,
@@ -302,6 +304,7 @@ export function computeSectionInstallHours(
       singleFastenerTime: s.duroBond.singleFastenerTime,
       version,
     });
+    return base * (1 + (s.adjustLaborPct ?? adjustLaborPct) / 100);
   }
   const { fieldRate, perimRate, cornerRate } = resolveSectionRates(s, s.laborTables ?? admin);
   return roofSectionLaborHours({

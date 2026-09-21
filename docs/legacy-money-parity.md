@@ -2541,3 +2541,41 @@ counts. Not implemented as a ×2 — that would be fabrication against the IL.
   `RoundToNextTen(1.03f × (calculated + additional))` (`TermBar.GetTotalLength` 0x24e1c), and
   R10(10.3) = 20 — the same 20 the legacy Term Bar screen shows for a lone 10 ft Additional.
 - **Admin Save buttons** moved to the top of every admin screen.
+
+### 22.14 Parity Comparisons round 2 — Roof Sections pair (2026-09-21): Duro-Bond labor model
+
+Source: the owner's `sections` folder — both apps' Roof Section screens and Estimate Review for
+a two-section Duro-Bond 50 mil bid (A 188 × 182 Metal Retrofit, B 164 × 111.5 Structural
+Metal, 1000 sf sheet, pull test 425 / DT 60, quick bid, no perimeter edges).
+
+**Matched exactly**: membrane material $60,908.34, Total Membrane sqft 55,880, Roof sqft 52,502,
+setup 157.51 h, inspection 16 h, crew rate ($45: 383.46 h ↔ $17,255.92).
+
+**Bug — Duro-Bond sections were priced on the Duro-Last labor chain.** Legacy 383.46 h vs web
+282.75 h; with B's on-screen 120 % removed both sections were short by the SAME ×1.268, i.e. one
+missing term. `DuroBondSystem.RoofSectionLaborHours_4_0_237` (0xba1c; `_230` identical minus
+the sheet multiplier) is a different model:
+```
+hours = MembraneType.Labor × MembraneWithOverlap × LayoutTime/2500 × SheetSize.MechSheetMulti
+      + UnderlaymentFasteners(−1,0,0) × SingleFastenerTimeByDT(deck)
+```
+`UnderlaymentFasteners(−1)` on `durobondmech` (RoofSection 0x4d…: layer −1 branch) =
+`DuroLastFunctions.DuroBondFastenersField + DuroBondFastenersPerim` (0xa58b4 / 0xa5934):
+`Round(AreaField/32 × field) + Round(AreaPerimeter/32 × perim + AreaCorner/32 × corner)` where
+field/perim/corner are the MechFastenerLookup columns for roof system 2 — induction plates PER
+4 × 8 BOARD ("6 per 4x8" on the legacy screen: 50 mil / DT 60 / pull 425 → row 350 → 6 / 8 / 10),
+or the Custom*FastenerSpacing values under custom settings. Raw takeoff areas, .NET banker's
+rounding. The web's generic chain (10 × deck × tab × oc / 2500 × sheet × thickness) happened
+to equal the layout term (all multipliers 1 except sheet 1.1 and 50 mil 1.15), so the plate
+fastening time was the whole gap: A 6,416 plates × 0.462 min = 49.4 h; B 3,429 × 0.462 = 26.4 h.
+
+Data: the Duro-Bond combo's `duro_bond_base_labor` (sheet_layout_hr 10; minutes per plate Wood
+0.342, Steel / Retrofit / Purlin 0.462, LWC/Steel 0.858, Concrete / LWC-Concrete 2.185) was
+captured and editable on the admin screen but never read by the engine. Now `LaborTables.
+duroBondBase` → `RoofSection.duroBond` for rsId 2 mechanical sections; AdjustLabor wraps the
+model like every other system (§16.2). Reproduced: A 233.59 h, B 124.89 h (149.87 h at the
+screen's 120 %) — pinned by a test. The Sections screen now labels the Duro-Bond lookup value
+"Plates per 4×8" / "6 per 4x8" instead of inches on centre.
+
+Not comparable in this pair: Accessories ($31,520.70 / 97.56 h legacy vs $6,556.70 / 53.79 h)
+and the insulation / non-DL lines — the legacy bid carries the full Knox County scope.

@@ -873,6 +873,15 @@ export interface LaborCombo {
   }> | null;
   thickness_multipliers?: Array<{ mil: number; multiplier: number }> | null;
   /**
+   * Duro-Bond mechanical combo (legacy `DuroBondSystem.RoofSectionLaborHours_4_0_237`):
+   * `RoofSystem.LayoutTime` (hours per 2,500 sq ft) and `cMechanicalSystem.
+   * SingleFastenerTimeByDT` (minutes per induction-welded plate, by deck name).
+   */
+  duro_bond_base_labor?: {
+    sheet_layout_hr: number | string;
+    single_fastener_time_min_per_fastener_by_deck: Record<string, number | string>;
+  } | null;
+  /**
    * Adhered combos: legacy AdhesiveCoverage.DefaultLabor / `RSAdhesiveCoverage.HoursPerKSqFt` —
    * install labor HOURS PER 1,000 SQ FT keyed by the adhesive's long name (the "substrate" key
    * is the captured screen's column caption).
@@ -910,6 +919,11 @@ export interface LaborTables {
    * adhesive long name (legacy AdhesiveCoverage.DefaultLabor). Empty on mechanical combos.
    */
   adhesiveBaseHoursByName: Record<string, number>;
+  /**
+   * Duro-Bond mechanical: the "genuinely different" section labor model (docs §22.14) —
+   * layout hours per 2,500 sq ft and the per-plate fastening MINUTES by deck name.
+   */
+  duroBondBase?: { layoutHoursPer2500: number; fastenerMinutesByDeck: Record<string, number> };
 }
 
 /**
@@ -954,6 +968,21 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     if (a.substrate && Number.isFinite(v) && v > 0) adhesiveBaseHoursByName[a.substrate] = v;
   }
 
+  let duroBondBase: LaborTables["duroBondBase"];
+  if (combo.duro_bond_base_labor) {
+    const fastenerMinutesByDeck: Record<string, number> = {};
+    for (const [deck, v] of Object.entries(
+      combo.duro_bond_base_labor.single_fastener_time_min_per_fastener_by_deck ?? {},
+    )) {
+      const n = Number(v);
+      if (Number.isFinite(n)) fastenerMinutesByDeck[deck] = n;
+    }
+    duroBondBase = {
+      layoutHoursPer2500: Number(combo.duro_bond_base_labor.sheet_layout_hr) || 0,
+      fastenerMinutesByDeck,
+    };
+  }
+
   return {
     deckTypeMulti,
     deckTypeIds,
@@ -963,6 +992,7 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     thicknessLaborByMil,
     rollGoodsSheetLabel,
     adhesiveBaseHoursByName,
+    ...(duroBondBase ? { duroBondBase } : {}),
   };
 }
 

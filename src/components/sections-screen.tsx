@@ -482,8 +482,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
         pullTest: s.pullTest!,
         columnOffset: 0,
       });
+      // Duro-Bond's lookup columns are induction plates PER 4×8 BOARD (legacy "6 per 4x8"), not
+      // inches on centre.
       calcedSpacing = res.ok
-        ? `${res.inches}" oc`
+        ? sys.rsId === 2
+          ? `${res.inches} per 4x8`
+          : `${res.inches}" oc`
         : `No Fastener Spacing available for this Pull Test (${SPACING_ERROR_TEXT[res.error]})`;
     }
   }
@@ -815,7 +819,7 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 />
               )}
             </Field>
-            <Field label="Fastener OC (in)">
+            <Field label={sys.rsId === 2 ? "Plates per 4×8" : "Fastener OC (in)"}>
               <Num
                 className="w-[100px]"
                 value={s.fastenerOc}

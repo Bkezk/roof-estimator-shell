@@ -1363,6 +1363,45 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       }
     }
 
+    // ── Duro-Bond mechanical ("durobondmech"): a DIFFERENT labor model (docs §22.14) ──
+    // DuroBondSystem.RoofSectionLaborHours_4_0_237 (0xba1c):
+    //   hours = MembraneType.Labor × MembraneWithOverlap × LayoutTime/2500 × SheetSize.MechSheetMulti
+    //         + UnderlaymentFasteners(−1) × SingleFastenerTimeByDT(deck)
+    // where UnderlaymentFasteners(−1) on durobondmech = DuroLastFunctions.DuroBondFastenersField
+    // + DuroBondFastenersPerim (0xa58b4 / 0xa5934): Round(AreaField/32 × fieldPerBoard) +
+    // Round(AreaPerimeter/32 × perimPerBoard + AreaCorner/32 × cornerPerBoard) — the per-4×8-board
+    // plate counts from MechFastenerLookup (the section's stored OC values carry them, exactly as
+    // the legacy custom-settings path reads CustomField/Perimeter/CornerFastenerSpacing). Raw
+    // takeoff areas (RoofSection.AreaField/AreaPerimeter/AreaCorner), .NET banker's rounding.
+    let duroBond: RoofSection["duroBond"];
+    if (rsId === 2 && sys.attachment === "mechanical") {
+      const dbBase = sLt?.duroBondBase;
+      if (!dbBase) {
+        warnings.push(
+          `Duro-Bond labor table has no layout / fastening times — section "${s.name}" falls back to the Duro-Last rate chain (docs §22.14).`,
+        );
+      } else {
+        const per = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+        const fieldPlates = bankersRound((fieldArea / 32) * per(s.fastenerOc), 0);
+        const perimPlates = bankersRound(
+          (perimArea / 32) * per(s.perimFastenerOc) + (cornerArea / 32) * per(s.cornerFastenerOc),
+          0,
+        );
+        const minutes = dbBase.fastenerMinutesByDeck[s.deckType];
+        if (minutes === undefined) {
+          warnings.push(
+            `No Duro-Bond fastening time for deck "${s.deckType}" — section "${s.name}" bills layout labor only.`,
+          );
+        }
+        duroBond = {
+          layoutTime: dbBase.layoutHoursPer2500,
+          mechSheetMulti: sheetSizeMulti,
+          fastenerCount: fieldPlates + perimPlates,
+          singleFastenerTime: (minutes ?? 0) / 60,
+        };
+      }
+    }
+
     // ── Install-labor inputs (legacy RoofSystem.RoofSectionLaborHours_4_0_230, docs §20.1) ──
     // Labor areas are the zone SHARES of MembraneWithOverlap (MaterialTotalField/Perim/Corner =
     // AreaX / AreaTotal × MembraneWithOverlap), not the raw takeoff areas.
@@ -1466,6 +1505,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         : {}),
       // Per-section AdjustLabor (legacy RoofSection.AdjustLabor); absent = the bid-level value.
       ...(s.adjustLaborPct !== undefined ? { adjustLaborPct: s.adjustLaborPct } : {}),
+      ...(duroBond ? { duroBond } : {}),
       adhesiveBaseHoursPer1000,
       rollGoods,
       rollGoodWidthMulti,

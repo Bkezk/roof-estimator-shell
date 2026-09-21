@@ -10,10 +10,11 @@ import {
   sectionComplexityFactor,
   sectionMembraneDisplayPricing,
   type BidInput,
+  type BidSectionInput,
   type UnderlaymentLayer,
   strippingBySection,
 } from "./bid-builder";
-import { computeEstimate } from "./estimate";
+import { computeEstimate, computeSectionInstallHours } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
 
 const deckOrder = [
@@ -3201,5 +3202,82 @@ describe("Check Pull (FieldLap = 0 — no lap qualifies for the pull test)", () 
     expect(numbers.length).toBeGreaterThan(10);
     for (const [k, v] of numbers) expect(Number.isFinite(v), k).toBe(true);
     expect(inputs.sections[0]!.membraneWithOverlap).toBeGreaterThan(0);
+  });
+});
+
+describe("Duro-Bond mechanical section labor — legacy DuroBondSystem model (docs §22.14)", () => {
+  // Owner's sections comparison (2026-09-21): Duro-Bond 50 mil White, 1000 sf sheet, pull test
+  // 425 / DT 60 → 6 / 8 / 10 plates per 4×8 board, quick bid, no perimeter edges.
+  const dbCombo: LaborCombo = {
+    roof_system: "Duro-Bond",
+    attachment: "mechanical",
+    sheet_size_multipliers: [
+      { label: "500 sf", roof_section: 2, underlayment: 2.4 },
+      { label: "1000 sf", roof_section: 1.1, underlayment: 1.2 },
+      { label: "1500 sf", roof_section: 1, underlayment: 1 },
+      { label: "2000 sf", roof_section: 1.1, underlayment: 0.98 },
+      { label: "2500 sf", roof_section: 1.2, underlayment: 0.9 },
+    ],
+    thickness_multipliers: [
+      { mil: 40, multiplier: 1 },
+      { mil: 50, multiplier: 1.15 },
+      { mil: 60, multiplier: 1.25 },
+    ],
+    duro_bond_base_labor: {
+      sheet_layout_hr: 10,
+      single_fastener_time_min_per_fastener_by_deck: {
+        Wood: 0.342,
+        Steel: 0.462,
+        Retrofit: 0.462,
+        Concrete: 2.185,
+        "LWC/Steel": 0.858,
+        "LWC/Concrete": 2.185,
+        Purlin: 0.462,
+      },
+    },
+  };
+  const dbAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Bond|mechanical": buildLaborTables(dbCombo, deckOrder) },
+  };
+  const dbSection = (over: Partial<BidSectionInput>): BidSectionInput => ({
+    ...bid().sections[0]!,
+    thickness: 50,
+    sheetSizeLabel: "1000 sf",
+    fieldLap: 60,
+    designTable: 60,
+    pullTest: 425,
+    fastenerOc: 6,
+    perimFastenerOc: 8,
+    cornerFastenerOc: 10,
+    ...over,
+  });
+  it("Section A 188×182 Metal Retrofit → 233.59 h; Section B 164×111.5 Structural Metal → 124.89 h (100 %)", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Bond",
+        sections: [
+          dbSection({ id: "A", name: "A", length: 188, width: 182, deckType: "Retrofit" }),
+          dbSection({ id: "B", name: "B", length: 164, width: 111.5, deckType: "Steel" }),
+        ],
+      }),
+      dbAdmin,
+    );
+    const [a, b] = inputs.sections;
+    expect(a!.duroBond?.fastenerCount).toBe(6416); // Round(34216/32 × 6)
+    const hA = computeSectionInstallHours(a!, inputs.admin, inputs.formulasVersion, 0);
+    const hB = computeSectionInstallHours(b!, inputs.admin, inputs.formulasVersion, 0);
+    // Legacy screens: A 233.59 h (Man Hours 383.46 − B 149.87), B 149.87 h at 120 % = 124.89 h.
+    expect(hA).toBeCloseTo(233.59, 1);
+    expect(hB).toBeCloseTo(124.89, 1);
+    // The per-section AdjustLabor wraps the model (B was at 120 % on the legacy screen).
+    expect(
+      computeSectionInstallHours(
+        { ...b!, adjustLaborPct: 20 },
+        inputs.admin,
+        inputs.formulasVersion,
+        0,
+      ),
+    ).toBeCloseTo(149.87, 1);
   });
 });
