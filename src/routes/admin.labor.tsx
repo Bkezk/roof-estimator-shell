@@ -148,6 +148,8 @@ function SetupTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void }
   };
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Setup times</CardTitle>
@@ -230,7 +232,6 @@ function SetupTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void }
           </Button>
         </CardContent>
       </Card>
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -255,6 +256,8 @@ function InspectionTab({ data, onSaved }: { data: LaborEngines; onSaved: () => v
   };
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Inspection times</CardTitle>
@@ -325,7 +328,6 @@ function InspectionTab({ data, onSaved }: { data: LaborEngines; onSaved: () => v
           </Button>
         </CardContent>
       </Card>
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -361,6 +363,8 @@ function TemplatesTab({ data, onSaved }: { data: LaborEngines; onSaved: () => vo
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <p className="text-sm text-muted-foreground">
         A template is a set of percent adjustments, one per labor area, written into every item of a
         bid when the template is selected (and seeded into new items): 0 = no change, 10 = 10% more
@@ -434,7 +438,6 @@ function TemplatesTab({ data, onSaved }: { data: LaborEngines; onSaved: () => vo
           </CardContent>
         </Card>
       ))}
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -466,6 +469,8 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
   };
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Curb labor</CardTitle>
@@ -555,7 +560,6 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
           </div>
         </CardContent>
       </Card>
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -589,6 +593,8 @@ function ParapetTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void
   };
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Parapet labor</CardTitle>
@@ -643,7 +649,6 @@ function ParapetTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void
           </Table>
         </CardContent>
       </Card>
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }

@@ -33,6 +33,7 @@ import {
   TEAROFF_DECK_BY_LABOR_DECK,
   type LaborCombo,
   applyAdhesivesScreenCoverage,
+  adhesiveOptionsForSystem,
 } from "./adapters";
 import { freightStepped } from "./pricing";
 import { setupTime, inspectionTime } from "./quantities";
@@ -1235,5 +1236,63 @@ describe("§22.9 applyAdhesivesScreenCoverage — the admin Adhesives grid feeds
     });
     expect(r.applied).toBe(0);
     expect(r.membraneAdhesives).toEqual(seedMembrane);
+  });
+});
+
+describe("adhesiveOptionsForSystem (legacy AcceptableAdhesives / WallAdhesives)", () => {
+  const admin = {
+    membraneAdhesives: {
+      1: {
+        "Water Based Adhesive": {
+          byDeckName: { Wood: 700 },
+          underlaymentUniform: 700,
+          wallCoverage: 350,
+        },
+        "Solvent Based Adhesive": {
+          byDeckName: { Wood: 300 },
+          underlaymentUniform: 300,
+          wallCoverage: 300,
+        },
+      },
+      5: {
+        "Water Based Adhesive": {
+          byDeckName: { Wood: 500 },
+          underlaymentUniform: null,
+          wallCoverage: null,
+        },
+        "Duro-Grip Adhesive(CR-20)": {
+          byDeckName: { Wood: 2000 },
+          underlaymentUniform: null,
+          wallCoverage: null,
+        },
+        "OlyBond500 SpotShot": { byDeckName: {}, underlaymentUniform: null, wallCoverage: null },
+      },
+    },
+  };
+  it("lists every adhesive with a coverage row for the roof", () => {
+    expect(adhesiveOptionsForSystem(admin, "Duro-Last", "roof")).toEqual([
+      "Water Based Adhesive",
+      "Solvent Based Adhesive",
+    ]);
+    // A wall-only or deck-less entry with no usable coverage is not offered for the roof.
+    expect(adhesiveOptionsForSystem(admin, "Duro-Fleece", "roof")).toEqual([
+      "Water Based Adhesive",
+      "Duro-Grip Adhesive(CR-20)",
+    ]);
+  });
+  it("lists only positive wall coverage for parapets, falling back to the seeded pair", () => {
+    expect(adhesiveOptionsForSystem(admin, "Duro-Last", "wall")).toEqual([
+      "Water Based Adhesive",
+      "Solvent Based Adhesive",
+    ]);
+    // Duro-Fleece wall rows are all −1 in the vendor seed → legacy offers none → seeded pair.
+    expect(adhesiveOptionsForSystem(admin, "Duro-Fleece", "wall")).toEqual([
+      "Water Based Adhesive",
+      "Solvent Based Adhesive",
+    ]);
+    expect(adhesiveOptionsForSystem(null, "Duro-Last", "wall")).toEqual([
+      "Water Based Adhesive",
+      "Solvent Based Adhesive",
+    ]);
   });
 });

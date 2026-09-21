@@ -118,6 +118,8 @@ export function UnderlaymentEditor() {
 
   return (
     <div className="space-y-6">
+      <SaveButton saving={saving} onSave={save} />
+
       <Tabs defaultValue="layout" className="space-y-4">
         <TabsList>
           <TabsTrigger value="layout">Layout &amp; Mechanical</TabsTrigger>
@@ -129,8 +131,8 @@ export function UnderlaymentEditor() {
             <CardHeader>
               <CardTitle>Layout &amp; mechanical labor</CardTitle>
               <CardDescription>
-                Labor = layout time + (time for one fastener by deck type) × # fasteners in 2,500
-                sq ft. Gray per-deck hours are the calculated preview; layout hours and the
+                Labor = layout time + (time for one fastener by deck type) × # fasteners in 2,500 sq
+                ft. Gray per-deck hours are the calculated preview; layout hours and the
                 minutes-per-fastener row are the editable inputs.
               </CardDescription>
             </CardHeader>
@@ -190,9 +192,7 @@ export function UnderlaymentEditor() {
                             onChange={(e) =>
                               setLayout((p) => {
                                 const n = clone(p!);
-                                n.fastening_times_min_per_fastener_by_deck[d] = num(
-                                  e.target.value,
-                                );
+                                n.fastening_times_min_per_fastener_by_deck[d] = num(e.target.value);
                                 return n;
                               })
                             }
@@ -284,56 +284,54 @@ export function UnderlaymentEditor() {
                 )}
               </div>
               <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Substrate</TableHead>
-                <TableHead>Coverage (sq ft)</TableHead>
-                <TableHead>Labor</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {adhesive.rows.map((r, i) => (
-                <TableRow key={i}>
-                  <TableCell className="font-medium">{r.substrate}</TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      value={r.coverage_sqft}
-                      onChange={(e) =>
-                        setAdh((p) => {
-                          const n = clone(p!);
-                          n.adhesives[selAdh]!.rows[i]!.coverage_sqft = num(e.target.value);
-                          return n;
-                        })
-                      }
-                      className="max-w-[140px]"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={r.labor}
-                      onChange={(e) =>
-                        setAdh((p) => {
-                          const n = clone(p!);
-                          n.adhesives[selAdh]!.rows[i]!.labor = num(e.target.value);
-                          return n;
-                        })
-                      }
-                      className="max-w-[120px]"
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Substrate</TableHead>
+                    <TableHead>Coverage (sq ft)</TableHead>
+                    <TableHead>Labor</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {adhesive.rows.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{r.substrate}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          value={r.coverage_sqft}
+                          onChange={(e) =>
+                            setAdh((p) => {
+                              const n = clone(p!);
+                              n.adhesives[selAdh]!.rows[i]!.coverage_sqft = num(e.target.value);
+                              return n;
+                            })
+                          }
+                          className="max-w-[140px]"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          value={r.labor}
+                          onChange={(e) =>
+                            setAdh((p) => {
+                              const n = clone(p!);
+                              n.adhesives[selAdh]!.rows[i]!.labor = num(e.target.value);
+                              return n;
+                            })
+                          }
+                          className="max-w-[120px]"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
-
-      <SaveButton saving={saving} onSave={save} />
     </div>
   );
 }
@@ -372,6 +370,8 @@ export function TearoffEditor() {
 
   return (
     <div className="space-y-6">
+      <SaveButton saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Tearoff times</CardTitle>
@@ -421,7 +421,6 @@ export function TearoffEditor() {
           </Table>
         </CardContent>
       </Card>
-      <SaveButton saving={saving} onSave={save} />
     </div>
   );
 }

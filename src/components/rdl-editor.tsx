@@ -118,6 +118,13 @@ function MembraneEditor() {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving}>
+          <Save className="mr-2 h-4 w-4" />
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-2">
           <Label className="text-sm">Roof system &amp; attachment</Label>
@@ -251,11 +258,11 @@ function MembraneEditor() {
               </Table>
             </div>
             <p className="text-xs text-muted-foreground">
-              Gray hours are calculated live: {baseHrs} hrs × deck multiplier ×
-              fastener-spacing multiplier
+              Gray hours are calculated live: {baseHrs} hrs × deck multiplier × fastener-spacing
+              multiplier
               {d.base?.tab_multiplier ? <> × {tabLabel.toLowerCase()} multiplier</> : null}. Edit
-              any multiplier and the hours update; sheet-size and thickness multipliers below
-              apply on top, per the formula.
+              any multiplier and the hours update; sheet-size and thickness multipliers below apply
+              on top, per the formula.
             </p>
           </CardContent>
         </Card>
@@ -379,8 +386,7 @@ function MembraneEditor() {
                               {(
                                 db.sheet_layout_hr +
                                 ((2500 * density) / 32) *
-                                  ((db.single_fastener_time_min_per_fastener_by_deck[k] ?? 0) /
-                                    60)
+                                  ((db.single_fastener_time_min_per_fastener_by_deck[k] ?? 0) / 60)
                               ).toFixed(2)}
                             </TableCell>
                           ))}
@@ -460,179 +466,172 @@ function MembraneEditor() {
 
       {/* Side-by-side panels (legacy shows these next to each other with × between) */}
       <div className="grid items-start gap-6 lg:grid-cols-2">
-      {/* Adhesive base labor — panel 1 on adhesive combos */}
-      {d.adhesive && (
-        <Card>
-          <CardHeader>
-            <CardTitle>1. Base labor</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Substrate / adhesive</TableHead>
-                  <TableHead>Labor / 1,000 sq ft</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {d.adhesive.base_hours_per_1000_sqft_by_substrate.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{r.substrate}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="0.0001"
-                        value={r.labor_per_1000_sqft}
-                        onChange={(e) =>
-                          update((x) => {
-                            x.adhesive!.base_hours_per_1000_sqft_by_substrate[
-                              i
-                            ]!.labor_per_1000_sqft = num(e.target.value);
-                          })
-                        }
-                        className="max-w-[140px]"
-                      />
-                    </TableCell>
+        {/* Adhesive base labor — panel 1 on adhesive combos */}
+        {d.adhesive && (
+          <Card>
+            <CardHeader>
+              <CardTitle>1. Base labor</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Substrate / adhesive</TableHead>
+                    <TableHead>Labor / 1,000 sq ft</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-      {/* Complexity factors */}
-      {d.complexity_factors && (
-        <Card>
-          <CardHeader>
-            <CardTitle>2. Complexity factors</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Complexity</TableHead>
-                  <TableHead>Value</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {d.complexity_factors.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{r.label}</TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={r.value}
-                        onChange={(e) =>
-                          update((x) => {
-                            x.complexity_factors![i]!.value = num(e.target.value);
-                          })
-                        }
-                        className="max-w-[120px]"
-                      />
-                    </TableCell>
+                </TableHeader>
+                <TableBody>
+                  {d.adhesive.base_hours_per_1000_sqft_by_substrate.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{r.substrate}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.0001"
+                          value={r.labor_per_1000_sqft}
+                          onChange={(e) =>
+                            update((x) => {
+                              x.adhesive!.base_hours_per_1000_sqft_by_substrate[
+                                i
+                              ]!.labor_per_1000_sqft = num(e.target.value);
+                            })
+                          }
+                          className="max-w-[140px]"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+        {/* Complexity factors */}
+        {d.complexity_factors && (
+          <Card>
+            <CardHeader>
+              <CardTitle>2. Complexity factors</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Complexity</TableHead>
+                    <TableHead>Value</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {d.complexity_factors.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={r.value}
+                          onChange={(e) =>
+                            update((x) => {
+                              x.complexity_factors![i]!.value = num(e.target.value);
+                            })
+                          }
+                          className="max-w-[120px]"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Sheet size multipliers */}
-      {d.sheet_size_multipliers && (
-        <Card>
-          <CardHeader>
-            <CardTitle>2. {d.sheet_size_label ?? "Sheet-size labor multipliers"}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Sheet size</TableHead>
-                  <TableHead>Roof section</TableHead>
-                  <TableHead>Underlayment</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {d.sheet_size_multipliers.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">{r.label}</TableCell>
-                    <TableCell>
-                      <NullableNumber
-                        value={r.roof_section}
-                        onChange={(v) =>
-                          update((x) => {
-                            x.sheet_size_multipliers![i]!.roof_section = v;
-                          })
-                        }
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <NullableNumber
-                        value={r.underlayment}
-                        onChange={(v) =>
-                          update((x) => {
-                            x.sheet_size_multipliers![i]!.underlayment = v;
-                          })
-                        }
-                      />
-                    </TableCell>
+        {/* Sheet size multipliers */}
+        {d.sheet_size_multipliers && (
+          <Card>
+            <CardHeader>
+              <CardTitle>2. {d.sheet_size_label ?? "Sheet-size labor multipliers"}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Sheet size</TableHead>
+                    <TableHead>Roof section</TableHead>
+                    <TableHead>Underlayment</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {d.sheet_size_multipliers.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">{r.label}</TableCell>
+                      <TableCell>
+                        <NullableNumber
+                          value={r.roof_section}
+                          onChange={(v) =>
+                            update((x) => {
+                              x.sheet_size_multipliers![i]!.roof_section = v;
+                            })
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <NullableNumber
+                          value={r.underlayment}
+                          onChange={(v) =>
+                            update((x) => {
+                              x.sheet_size_multipliers![i]!.underlayment = v;
+                            })
+                          }
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Thickness multipliers */}
-      {d.thickness_multipliers && (
-        <Card>
-          <CardHeader>
-            <CardTitle>3. Membrane thickness multipliers</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Thickness</TableHead>
-                  <TableHead>Multiplier</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {d.thickness_multipliers.map((r, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="font-medium">
-                      {typeof r.mil === "number" ? `${r.mil}mil` : r.mil}
-                    </TableCell>
-                    <TableCell>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        value={r.multiplier}
-                        onChange={(e) =>
-                          update((x) => {
-                            x.thickness_multipliers![i]!.multiplier = num(e.target.value);
-                          })
-                        }
-                        className="max-w-[120px]"
-                      />
-                    </TableCell>
+        {/* Thickness multipliers */}
+        {d.thickness_multipliers && (
+          <Card>
+            <CardHeader>
+              <CardTitle>3. Membrane thickness multipliers</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Thickness</TableHead>
+                    <TableHead>Multiplier</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
+                </TableHeader>
+                <TableBody>
+                  {d.thickness_multipliers.map((r, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-medium">
+                        {typeof r.mil === "number" ? `${r.mil}mil` : r.mil}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          value={r.multiplier}
+                          onChange={(e) =>
+                            update((x) => {
+                              x.thickness_multipliers![i]!.multiplier = num(e.target.value);
+                            })
+                          }
+                          className="max-w-[120px]"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

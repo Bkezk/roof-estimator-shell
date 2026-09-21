@@ -215,10 +215,16 @@ function useCompanyDraft(initial: CompanySettings | null, onSaved: () => void, s
 type CompanyTabProps = { initial: CompanySettings | null; onSaved: () => void };
 
 function ContractorTab({ initial, onSaved }: CompanyTabProps) {
-  const { c, set, save, saving } = useCompanyDraft(initial, onSaved, "Contractor information saved");
+  const { c, set, save, saving } = useCompanyDraft(
+    initial,
+    onSaved,
+    "Contractor information saved",
+  );
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Contractor information</CardTitle>
@@ -261,8 +267,6 @@ function ContractorTab({ initial, onSaved }: CompanyTabProps) {
           </div>
         </CardContent>
       </Card>
-
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -272,6 +276,8 @@ function SalesTaxTab({ initial, onSaved }: CompanyTabProps) {
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Sales tax</CardTitle>
@@ -301,8 +307,6 @@ function SalesTaxTab({ initial, onSaved }: CompanyTabProps) {
           </div>
         </CardContent>
       </Card>
-
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -312,6 +316,8 @@ function BasicLaborTab({ initial, onSaved }: CompanyTabProps) {
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Basic labor settings</CardTitle>
@@ -345,8 +351,6 @@ function BasicLaborTab({ initial, onSaved }: CompanyTabProps) {
           </Field>
         </CardContent>
       </Card>
-
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -406,6 +410,8 @@ function ShippingTab({
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Shipping method</CardTitle>
@@ -513,8 +519,6 @@ function ShippingTab({
           </Button>
         </CardContent>
       </Card>
-
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -554,6 +558,8 @@ function MarkupTab({ initial, onSaved }: { initial: MarkupOption[]; onSaved: () 
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <p className="text-sm text-muted-foreground">
         Named labor-rate and markup presets. One is the default applied to new bids.
       </p>
@@ -657,7 +663,6 @@ function MarkupTab({ initial, onSaved }: { initial: MarkupOption[]; onSaved: () 
           <Plus className="mr-1 h-4 w-4" /> Add preset
         </Button>
       </div>
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }
@@ -710,6 +715,8 @@ function WarrantiesTab({
 
   return (
     <div className="space-y-6">
+      <SaveBar saving={saving} onSave={save} />
+
       <Card>
         <CardHeader>
           <CardTitle>Warranties</CardTitle>
@@ -830,8 +837,6 @@ function WarrantiesTab({
           </Table>
         </CardContent>
       </Card>
-
-      <SaveBar saving={saving} onSave={save} />
     </div>
   );
 }

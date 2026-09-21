@@ -41,7 +41,11 @@ import {
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
-import { deriveAdhesiveSubstrate, normalizeAdminSnapshot } from "@/lib/engine/adapters";
+import {
+  adhesiveOptionsForSystem,
+  deriveAdhesiveSubstrate,
+  normalizeAdminSnapshot,
+} from "@/lib/engine/adapters";
 import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
 import type { MarkupMode } from "@/lib/engine/money";
@@ -149,13 +153,18 @@ const money = (n: number) => n.toLocaleString("en-US", { style: "currency", curr
 const num = (v: string) => Math.max(0, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const numAdj = (v: string) => Math.max(-100, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
+/** A picker's option list with the stored value kept visible even when it is no longer offered. */
+const withCurrent = (options: string[], current: string): string[] =>
+  current && !options.includes(current) ? [current, ...options] : options;
 
 let seq = 1;
 const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput => ({
   id: `s${seq++}`,
   name: `Section ${seq - 1}`,
-  length: 100,
-  width: 100,
+  // Blank dimensions: the estimator must key both (a 100×100 prefill was silently priced when
+  // a section was forgotten).
+  length: 0,
+  width: 0,
   deckType: "Wood",
   thickness: 40,
   color: "White",
@@ -178,7 +187,7 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   designTable: 60,
   // Legacy Edge Options: four sides (A/C = Length, B/D = Width), no corners, Quick Bid,
   // Complexity "Moderate" (index 2 — only priced on systems with RSComplexityFactor rows).
-  edges: defaultEdges(100, 100),
+  edges: defaultEdges(0, 0),
   perimCorners: [false, false, false, false],
   isQuickBid: true,
   complexity: 2,
@@ -495,7 +504,7 @@ function EstimatePage() {
   // frmQuoteDecision (§10.7): merge into an existing quote on the selection, or start new.
   const [qMerge, setQMerge] = useState(true);
   // frmFluteFillerCalc inputs (§10.7): piece length (ft), ridge-to-ridge (in), waste %.
-  const [qFfLen, setQFfLen] = useState(4);
+  const [qFfLen, setQFfLen] = useState(8);
   const [qFfR2R, setQFfR2R] = useState(24);
   const [qFfPlus, setQFfPlus] = useState(0);
   // Adhered-layer quote containers over tapered surfaces (§10.7 QuoteAdhesiveUnits).
@@ -829,6 +838,12 @@ function EstimatePage() {
       sectionHours: inputs.sections.map((rs) =>
         computeSectionInstallHours(rs, inputs.admin, inputs.formulasVersion, inputs.adjustLaborPct),
       ),
+      // The same hours before any AdjustLabor (legacy RoofSection.BaseHours) — the Labor link's
+      // 100 % reference.
+      sectionBaseHours: inputs.sections.map((rs) => {
+        const { adjustLaborPct: _sectionAdjust, ...base } = rs;
+        return computeSectionInstallHours(base, inputs.admin, inputs.formulasVersion, 0);
+      }),
       warnings,
       parapetMaterial,
       metalsMaterial,
@@ -1634,7 +1649,10 @@ function EstimatePage() {
                     <Field label="Attached To">
                       <PickOne
                         value={membraneAdhesive}
-                        options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                        options={withCurrent(
+                          adhesiveOptionsForSystem(admin, roofSystem, "roof"),
+                          membraneAdhesive,
+                        )}
                         onChange={setMembraneAdhesive}
                       />
                     </Field>
@@ -1767,7 +1785,14 @@ function EstimatePage() {
                     <Field label="Attached To">
                       <PickOne
                         value={parapetDefaults.membraneAdhesiveName ?? membraneAdhesive}
-                        options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                        options={withCurrent(
+                          adhesiveOptionsForSystem(
+                            admin,
+                            parapetDefaults.roofSystem ?? roofSystem,
+                            "wall",
+                          ),
+                          parapetDefaults.membraneAdhesiveName ?? membraneAdhesive,
+                        )}
                         onChange={(v) =>
                           setParapetDefaults((p) => {
                             const nx = { ...p };
@@ -2112,6 +2137,7 @@ function EstimatePage() {
                   result
                     ? {
                         sectionHours: result.sectionHours,
+                        sectionBaseHours: result.sectionBaseHours,
                         setupHours: result.r.setupHours,
                         inspectionHours: result.r.inspectionHours,
                         roofSqFt: result.r.roofSqFootage,
@@ -2155,6 +2181,7 @@ function EstimatePage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-8" title="Tick to select several sections" />
                       <TableHead>ID</TableHead>
                       <TableHead>W × L</TableHead>
                       {[1, 2, 3, 4].map((n) => (
@@ -2169,15 +2196,26 @@ function EstimatePage() {
                       return (
                         <TableRow
                           key={s.id}
-                          onClick={() =>
-                            setUSel((prev) =>
-                              prev.includes(s.id)
-                                ? prev.filter((x) => x !== s.id)
-                                : [...prev, s.id],
-                            )
-                          }
+                          // One click moves the selection to this section (legacy grid click);
+                          // the checkbox adds/removes it for a multi-section apply.
+                          onClick={() => setUSel([s.id])}
                           className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
                         >
+                          <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 align-middle"
+                              checked={sel}
+                              aria-label={`Select ${s.name}`}
+                              onChange={() =>
+                                setUSel((prev) =>
+                                  prev.includes(s.id)
+                                    ? prev.filter((x) => x !== s.id)
+                                    : [...prev, s.id],
+                                )
+                              }
+                            />
+                          </TableCell>
                           <TableCell className="font-medium">{s.name}</TableCell>
                           <TableCell className="tabular-nums">
                             {s.width}x{s.length}

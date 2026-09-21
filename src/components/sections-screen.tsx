@@ -10,6 +10,7 @@
 import { useState } from "react";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
+import { adhesiveOptionsForSystem } from "@/lib/engine/adapters";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
   COMPLEXITY_LABELS,
@@ -191,6 +192,8 @@ export interface SectionsScreenProps {
   /** Engine readouts: per-section Man Hours (1:1 with sections) and the bottom-bar totals. */
   totals: {
     sectionHours: number[];
+    /** The same hours at 100 % (before AdjustLabor) — the Labor popup's reference. */
+    sectionBaseHours?: number[];
     setupHours: number;
     inspectionHours: number;
     roofSqFt: number;
@@ -300,7 +303,14 @@ export function SectionsScreen(p: SectionsScreenProps) {
   const area = s.length * s.width;
   const adjust = s.adjustLaborPct ?? p.bidAdjustLaborPct;
   const hours = p.totals?.sectionHours[i] ?? 0;
+  const baseHours = p.totals?.sectionBaseHours?.[i] ?? 0;
   const tabOptions = TAB_OPTIONS_BY_SYSTEM[sys.roofSystem];
+  // Legacy frmRoofSection.LoadLapSpacings: for roll goods the "Field Roll Width" combo lists the
+  // roof system's RSRollGoodWidth rows (inches) — a pick, not a free number.
+  const rollWidthOptions = Object.keys(admin.rollGoodWidthMulti?.[sys.rsId] ?? {})
+    .map(Number)
+    .filter((w) => w > 0)
+    .sort((a, b) => a - b);
 
   const setEdges = (next: EdgeInput[], extra: Partial<BidSectionInput> = {}) =>
     upd({ edges: next, ...extra });
@@ -721,7 +731,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 <Pick
                   className="w-[190px]"
                   value={sys.adhesiveName}
-                  options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                  options={(() => {
+                    const o = adhesiveOptionsForSystem(admin, sys.roofSystem, "roof");
+                    return sys.adhesiveName && !o.includes(sys.adhesiveName)
+                      ? [sys.adhesiveName, ...o]
+                      : o;
+                  })()}
                   onChange={(v) => upd({ membraneAdhesiveName: v })}
                 />
               </Field>
@@ -771,6 +786,16 @@ export function SectionsScreen(p: SectionsScreenProps) {
                   options={[
                     ...(tabOptions.includes(s.fieldLap) ? [] : [String(s.fieldLap)]),
                     ...tabOptions.map(String),
+                  ]}
+                  onChange={(v) => updWithSpacing({ fieldLap: Number(v) })}
+                />
+              ) : rollWidthOptions.length ? (
+                <Pick
+                  className="w-[100px]"
+                  value={String(s.fieldLap)}
+                  options={[
+                    ...(rollWidthOptions.includes(s.fieldLap) ? [] : [String(s.fieldLap)]),
+                    ...rollWidthOptions.map(String),
                   ]}
                   onChange={(v) => updWithSpacing({ fieldLap: Number(v) })}
                 />
@@ -876,8 +901,8 @@ export function SectionsScreen(p: SectionsScreenProps) {
               className="font-medium text-primary underline"
               onClick={() => setShowLabor(true)}
             >
-              Labor: {n2(hours)} hours ({adjust >= 0 ? "+" : ""}
-              {adjust}%{s.adjustLaborPct !== undefined ? ", section override" : ""})
+              Labor: {n2(hours)} hours ({100 + adjust}%
+              {s.adjustLaborPct !== undefined ? ", section override" : ""})
             </button>
             <span>Setup: {n2(p.totals?.setupHours ?? 0)} h</span>
             <span>Inspection: {n2(p.totals?.inspectionHours ?? 0)} h</span>
@@ -1172,27 +1197,51 @@ export function SectionsScreen(p: SectionsScreenProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Labor link: per-section AdjustLabor */}
+      {/* Labor link: per-section AdjustLabor — legacy frmLaborPopUp (docs §8.7): 100 % = the
+          section's base hours; the user edits either the percent or the target hours and the
+          stored value is Round(pct) − 100. */}
       <Dialog open={showLabor} onOpenChange={setShowLabor}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Roof Section Labor — {s.name}</DialogTitle>
             <DialogDescription>
-              Adjust this section&apos;s install labor. The bid-level adjust ({p.bidAdjustLaborPct}
-              %) applies unless a section override is set.
+              Base install labor is {n2(baseHours)} h = 100%. Enter a percent or the hours you want;
+              the bid-level adjust ({100 + p.bidAdjustLaborPct}%) applies unless a section override
+              is set.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-end gap-3 text-xs">
-            <Field label="Adjust labor (%)">
+            <Field label="Percent (%)">
               <Input
                 type="number"
                 className="h-8 w-[110px]"
                 step="1"
-                min={-100}
-                value={s.adjustLaborPct ?? p.bidAdjustLaborPct}
+                min={0}
+                value={100 + adjust}
                 onChange={(e) => {
                   const v = Number(e.target.value);
-                  upd({ adjustLaborPct: Number.isFinite(v) ? Math.max(-100, v) : 0 });
+                  upd({
+                    adjustLaborPct: Number.isFinite(v) ? Math.max(0, Math.round(v)) - 100 : 0,
+                  });
+                }}
+              />
+            </Field>
+            <Field label="Hours">
+              <Input
+                type="number"
+                className="h-8 w-[110px]"
+                step="0.01"
+                min={0}
+                disabled={baseHours <= 0}
+                value={n2(hours)}
+                onChange={(e) => {
+                  const h = Number(e.target.value);
+                  if (!Number.isFinite(h) || baseHours <= 0) return;
+                  // hours = base × pct / 100 ⇒ pct = hours / base × 100 (rounded like the popup).
+                  upd({
+                    adjustLaborPct:
+                      Math.max(0, Math.round((Math.max(0, h) / baseHours) * 100)) - 100,
+                  });
                 }}
               />
             </Field>
@@ -1209,7 +1258,7 @@ export function SectionsScreen(p: SectionsScreenProps) {
               Use bid default
             </Button>
             <p className="w-full text-muted-foreground">
-              Base hours × (1 + adjust / 100). Current: {n2(hours)} h = {usd(hours * p.crewRate)}.
+              Hours = base × percent / 100. Current: {n2(hours)} h = {usd(hours * p.crewRate)}.
             </p>
           </div>
         </DialogContent>

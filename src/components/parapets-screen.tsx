@@ -12,7 +12,7 @@
 import { useState } from "react";
 
 import type { EngineAdminData } from "@/lib/engine/adapters";
-import { parapetBandForVertical } from "@/lib/engine/adapters";
+import { adhesiveOptionsForSystem, parapetBandForVertical } from "@/lib/engine/adapters";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
   parapetLaborBand,
@@ -723,7 +723,13 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     <Pick
                       className="w-[180px]"
                       value={ps.adhesiveName}
-                      options={["Water Based Adhesive", "Solvent Based Adhesive"]}
+                      options={(() => {
+                        // Legacy frmParapets lists RoofSystem.WallAdhesives (wall coverage > 0).
+                        const o = adhesiveOptionsForSystem(admin, ps.roofSystem, "wall");
+                        return ps.adhesiveName && !o.includes(ps.adhesiveName)
+                          ? [ps.adhesiveName, ...o]
+                          : o;
+                      })()}
                       onChange={(v) => upd({ membraneAdhesiveName: v })}
                     />
                   </Field>

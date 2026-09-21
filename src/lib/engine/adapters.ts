@@ -1809,6 +1809,40 @@ export const LEGACY_RS_ID_BY_NAME: Record<string, number> = {
   "Duro-Fleece": 5,
 };
 
+/** The two vendor-seeded Duro-Last adhesives — the picker fallback when no coverage data is loaded. */
+const DEFAULT_ADHESIVE_OPTIONS = ["Water Based Adhesive", "Solvent Based Adhesive"];
+
+/**
+ * The adhesives a roof system may be attached with — legacy `frmHome.LoadAttachmentSystem` /
+ * `frmRoofSection` list every adhered system that has an AdhesiveCoverage row for the roof
+ * system (`RoofSystem.AcceptableAdhesives` = all coverage rows' AdhesiveIDs); the parapet combo
+ * (`frmHome.LoadParapetAttachmentSystem`, `frmParapets`) lists `RoofSystem.WallAdhesives` = the
+ * rows whose WallCoverage is neither −1 nor 0. Both read the same table the admin Adhesives grid
+ * edits, so adding a wall coverage for an adhesive there adds it to the parapet pickers.
+ * Falls back to the two seeded Duro-Last adhesives when no coverage data is loaded.
+ */
+export function adhesiveOptionsForSystem(
+  admin: Pick<EngineAdminData, "membraneAdhesives"> | null | undefined,
+  roofSystem: string,
+  scope: "roof" | "wall",
+): string[] {
+  const rsId = LEGACY_RS_ID_BY_NAME[roofSystem];
+  const byName = rsId !== undefined ? admin?.membraneAdhesives?.[rsId] : undefined;
+  if (!byName) return [...DEFAULT_ADHESIVE_OPTIONS];
+  const names = Object.entries(byName)
+    .filter(([, cov]) =>
+      scope === "wall"
+        ? cov.wallCoverage !== null && cov.wallCoverage > 0
+        : Object.keys(cov.byDeckName).length > 0 ||
+          cov.underlaymentUniform !== null ||
+          (cov.byUnderlaymentGroup !== undefined &&
+            Object.keys(cov.byUnderlaymentGroup).length > 0) ||
+          cov.wallCoverage !== null,
+    )
+    .map(([name]) => name);
+  return names.length ? names : [...DEFAULT_ADHESIVE_OPTIONS];
+}
+
 export interface RawAdminData {
   membraneScreen: MembraneScreen | null;
   combos: Array<{ roof_system: string; attachment: string; data: LaborCombo }>;

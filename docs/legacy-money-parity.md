@@ -2494,3 +2494,39 @@ length on the same colour, or extra White tubes from drains (+1 each), washers (
 or pipe stacks (1–4 per stack, +1 if open, in the stack's colour). Resolve from the Term Bar
 screen of both apps (roof / curb / parapet / additional feet, total, tubes) plus drain and stack
 counts. Not implemented as a ×2 — that would be fabrication against the IL.
+
+### 22.13 Owner walkthrough fixes (2026-09-21) — screens, not money
+
+- **New section prefills 0 × 0** (was 100 × 100); the VerifyFields "Width" / "Length" problems
+  flag it until keyed. Legacy `frmRoofSection.ResetFields` default is not the point — a silent
+  100 × 100 was being priced when a section was forgotten.
+- **Underlayment screen selection**: one click moves the selection to that section (legacy grid
+  click); a native checkbox per row adds/removes it for a multi-section apply; "Select all" stays.
+- **Flute Filler "Calculate pieces" piece length** prefills 8 ft (owner's stock length; the
+  legacy `tbFFLength` default was never captured).
+- **Section Labor link = legacy `frmLaborPopUp`** (§8.7): the link reads `Labor: X hours (Y%)`
+  with `Y = 100 + AdjustLabor`, and the popup edits either the percent or the target hours
+  (`hours = base × pct / 100`, stored `Round(pct) − 100`). The web had been showing the stored
+  delta (0 / −20) where the legacy shows 100 / 80. `sectionBaseHours` (the same
+  `computeSectionInstallHours` at AdjustLabor 0) is the 100 % reference.
+- **Field Roll Width is a pick** — `frmRoofSection.LoadLapSpacings` (0x94de0): for roll goods
+  (`SheetSize.Layout ≠ 1`) the label is "Field Roll Width" and the combo lists
+  `RoofSystem.RollGoodWidths` (the `RSRollGoodWidth.Width` rows, inches: Duro-Last 64;
+  Duro-Tuff 30 / 60 / 120; Duro-Roof 64; Duro-Fleece 60 / 120); for sheets it is "Field Tab
+  Spacing" over `SheetTabSpacings`. The web offered a free inches box for roll goods; it now
+  picks from `rollGoodWidthMulti[rsId]` (the seeded table) and falls back to the box only when
+  a system has no rows.
+- **Adhesive pickers are data-driven** (`adhesiveOptionsForSystem`): roof / section pickers list
+  `RoofSystem.AcceptableAdhesives` = every adhesive with an AdhesiveCoverage row for the roof
+  system (`frmHome.LoadAttachmentSystem`, 0x57eec); parapet pickers list
+  `RoofSystem.WallAdhesives` = rows whose WallCoverage is neither −1 nor 0
+  (`frmHome.LoadParapetAttachmentSystem` 0x58f30, lambda 55-0). With the vendor seed that is
+  Water / Solvent for Duro-Last and Duro-Tuff roofs and walls, and Water Based + Duro-Fleece
+  2-part / cartridge + Duro-Grip + OlyBond BiB / SpotShot for Duro-Fleece roofs (no Duro-Fleece
+  wall rows — all −1). The owner reported MORE parapet adhesives in the legacy — their live
+  Manager data must carry wall coverage rows the 2013 bootstrap lacks; adding a "Walls"
+  coverage for an adhesive on the admin Adhesives grid now adds it to the parapet pickers.
+- **Additional term bar 10 ft showing 20 ft is legacy-exact**: the bar's total is
+  `RoundToNextTen(1.03f × (calculated + additional))` (`TermBar.GetTotalLength` 0x24e1c), and
+  R10(10.3) = 20 — the same 20 the legacy Term Bar screen shows for a lone 10 ft Additional.
+- **Admin Save buttons** moved to the top of every admin screen.

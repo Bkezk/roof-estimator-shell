@@ -77,6 +77,13 @@ export function AccessoryLaborTab() {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving}>
+          <Save className="mr-2 h-4 w-4" />
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+
       <div className="space-y-2">
         <Label className="text-sm">Accessory category</Label>
         <Select value={selected.id} onValueChange={(v) => setSelId(v)}>
@@ -136,13 +143,6 @@ export function AccessoryLaborTab() {
           </Table>
         </CardContent>
       </Card>
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
     </div>
   );
 }

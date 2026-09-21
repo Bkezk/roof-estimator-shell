@@ -155,6 +155,13 @@ export function CatalogEditor({
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Button onClick={save} disabled={saving}>
+          <Save className="mr-2 h-4 w-4" />
+          {saving ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+
       {!hideHeader && (
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
@@ -302,13 +309,6 @@ export function CatalogEditor({
       {draft.help && (
         <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{draft.help}</p>
       )}
-
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          <Save className="mr-2 h-4 w-4" />
-          {saving ? "Saving…" : "Save changes"}
-        </Button>
-      </div>
 
       <AlertDialog
         open={confirmDelete !== null}
