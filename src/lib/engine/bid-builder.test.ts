@@ -3559,3 +3559,119 @@ describe("Duro-Tuff custom settings — the Advanced form's DT group (docs §22.
     );
   });
 });
+
+describe("Underlayment on a Duro-Bond bid — 'Section Fastened w/ Durobond' (docs §22.17)", () => {
+  const dbCombo: LaborCombo = {
+    roof_system: "Duro-Bond",
+    attachment: "mechanical",
+    sheet_size_multipliers: [
+      { label: "1000 sf", roof_section: 1.1, underlayment: 1.2 },
+      { label: "1500 sf", roof_section: 1, underlayment: 1 },
+    ],
+    thickness_multipliers: [{ mil: 50, multiplier: 1.15 }],
+    duro_bond_base_labor: {
+      sheet_layout_hr: 10,
+      single_fastener_time_min_per_fastener_by_deck: { Retrofit: 0.462, Steel: 0.462 },
+    },
+  };
+  const uAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Bond|mechanical": buildLaborTables(dbCombo, deckOrder) },
+    underlaymentPrices: { '1/2" ISO': 0.85, '2 1/2" ISO': 1.6 },
+    underlaymentLabor: {
+      layoutHoursByProduct: { '1/2" ISO': 7.775, '2 1/2" ISO': 11.775 },
+      fastenerCounts: [5],
+      fastenerMinutesByDeck: { "Metal Retrofit": 0.462, Steel: 0.462 },
+    },
+  };
+  const section = (over: Partial<BidSectionInput>): BidSectionInput => ({
+    ...bid().sections[0]!,
+    thickness: 50,
+    sheetSizeLabel: "1000 sf",
+    fieldLap: 60,
+    designTable: 60,
+    pullTest: 425,
+    fastenerOc: 6,
+    perimFastenerOc: 8,
+    cornerFastenerOc: 10,
+    ...over,
+  });
+  it('Knox County: A ½\\" ISO 117.05 h, B 2 × 2½\\" ISO 189.48 h — layout × 1.1, no fastening term', () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Bond",
+        sections: [
+          section({
+            id: "A",
+            name: "A",
+            length: 188,
+            width: 182,
+            deckType: "Retrofit",
+            layers: [
+              {
+                board: '1/2" ISO',
+                attachment: "durobond",
+                adhesiveName: "",
+                fastenersPerBoard: 0,
+                substrate: "",
+              },
+            ],
+          }),
+          section({
+            id: "B",
+            name: "B",
+            length: 164,
+            width: 111.5,
+            deckType: "Steel",
+            layers: [
+              {
+                board: '2 1/2" ISO',
+                attachment: "durobond",
+                adhesiveName: "",
+                fastenersPerBoard: 0,
+                substrate: "",
+              },
+              {
+                board: '2 1/2" ISO',
+                attachment: "durobond",
+                adhesiveName: "",
+                fastenersPerBoard: 0,
+                substrate: "",
+              },
+            ],
+          }),
+        ],
+      }),
+      uAdmin,
+    );
+    // Legacy Underlayment screen: A "Adjustable Labor 117.05 h", 4x8 ISO review line 306.53 h.
+    expect(inputs.underlaymentLaborHours).toBeCloseTo(117.05 + 189.48, 1);
+    expect((34216 / 2500) * 7.775 * 1.1).toBeCloseTo(117.05, 2);
+  });
+  it("the same layer marked Mechanically Fastened would add per-board fastening (the old web path)", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Bond",
+        sections: [
+          section({
+            id: "A",
+            length: 188,
+            width: 182,
+            deckType: "Retrofit",
+            layers: [
+              {
+                board: '1/2" ISO',
+                attachment: "mechanical",
+                adhesiveName: "",
+                fastenersPerBoard: 0,
+                substrate: "",
+              },
+            ],
+          }),
+        ],
+      }),
+      uAdmin,
+    );
+    expect(inputs.underlaymentLaborHours).toBeGreaterThan(117.06);
+  });
+});

@@ -156,6 +156,27 @@ const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
 /** A picker's option list with the stored value kept visible even when it is no longer offered. */
 const withCurrent = (options: string[], current: string): string[] =>
   current && !options.includes(current) ? [current, ...options] : options;
+type UAttach = "mechanical" | "adhesive" | "none" | "durobond";
+/** Underlayment "Attached With" labels (legacy frmUnderlayment.cbAttachedWith wording). */
+const U_ATTACH_LABEL: Record<UAttach, string> = {
+  mechanical: "Mechanically Fastened",
+  adhesive: "Adhesive",
+  none: "None",
+  durobond: "Section Fastened w/ Durobond",
+};
+/** Legacy LoadAttachment (docs §10.4): the Duro-Bond option is listed first on a Duro-Bond system. */
+const uAttachOptions = (roofSystem: string): string[] =>
+  roofSystem === "Duro-Bond"
+    ? [
+        U_ATTACH_LABEL.durobond,
+        U_ATTACH_LABEL.mechanical,
+        U_ATTACH_LABEL.adhesive,
+        U_ATTACH_LABEL.none,
+      ]
+    : [U_ATTACH_LABEL.mechanical, U_ATTACH_LABEL.adhesive, U_ATTACH_LABEL.none];
+const uAttachFromLabel = (label: string): UAttach =>
+  (Object.keys(U_ATTACH_LABEL) as UAttach[]).find((k) => U_ATTACH_LABEL[k] === label) ??
+  "mechanical";
 
 let seq = 1;
 const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput => ({
@@ -416,7 +437,7 @@ function EstimatePage() {
     NonNullable<SavedBidState["parapetDefaults"]>
   >({ wallType: 4 });
   const [underlaymentAttachmentDefault, setUnderlaymentAttachmentDefault] = useState<
-    "mechanical" | "adhesive" | "none"
+    "mechanical" | "adhesive" | "none" | "durobond"
   >("mechanical");
   // Legacy Home General Info: Building Type + Date Created (Estimate.StartDate, editable).
   const [buildingType, setBuildingType] = useState<string>("Commercial");
@@ -530,7 +551,9 @@ function EstimatePage() {
     }
     return undefined;
   };
-  const [uAttach, setUAttach] = useState<"mechanical" | "adhesive" | "none">("mechanical");
+  const [uAttach, setUAttach] = useState<"mechanical" | "adhesive" | "none" | "durobond">(
+    "mechanical",
+  );
   // Legacy Underlayment "Adjustable Labor for selected Roof Sections" link (AdjustUnderlaymentLabor).
   const [uLaborOpen, setULaborOpen] = useState(false);
   const [uLaborPct, setULaborPct] = useState(0);
@@ -586,8 +609,13 @@ function EstimatePage() {
       setWarrantyName(d.warrantyName ?? "");
       if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
       setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 4 });
-      setUnderlaymentAttachmentDefault(d.underlaymentAttachmentDefault ?? "mechanical");
-      if (d.underlaymentAttachmentDefault) setUAttach(d.underlaymentAttachmentDefault);
+      // Legacy frmUnderlayment.LoadAttachment lists the Duro-Bond options first on a Duro-Bond
+      // bid, so "Section Fastened w/ Durobond" is the default there.
+      const uDefault =
+        d.underlaymentAttachmentDefault ??
+        (d.roofSystem === "Duro-Bond" ? "durobond" : "mechanical");
+      setUnderlaymentAttachmentDefault(uDefault);
+      setUAttach(uDefault);
       setBuildingType(d.buildingType ?? "Commercial");
       setStartDate(
         d.startDate ??
@@ -909,7 +937,9 @@ function EstimatePage() {
     const sLayers = sectionLayers(s);
     for (const [li, layer] of sLayers.entries()) {
       if (layer.quote) continue;
-      if (layer.attachment === "mechanical") {
+      if (layer.attachment === "durobond" || layer.attachment === "none") {
+        insulationBoards += Math.ceil(area / 32);
+      } else if (layer.attachment === "mechanical") {
         insulationBoards += Math.ceil(area / 32);
         // Legacy UnderlaymentFasteners rule (docs §18).
         insulationFasteners += underlaymentLayerFasteners({
@@ -1723,17 +1753,10 @@ function EstimatePage() {
               <LegacyGroup title="4. Underlayment Attached With">
                 <div className="flex flex-wrap items-center gap-3">
                   <PickOne
-                    value={
-                      underlaymentAttachmentDefault === "none"
-                        ? "None"
-                        : underlaymentAttachmentDefault === "adhesive"
-                          ? "Adhesive"
-                          : "Mechanically Fastened"
-                    }
-                    options={["None", "Mechanically Fastened", "Adhesive"]}
+                    value={U_ATTACH_LABEL[underlaymentAttachmentDefault]}
+                    options={uAttachOptions(roofSystem)}
                     onChange={(v) => {
-                      const next =
-                        v === "None" ? "none" : v === "Adhesive" ? "adhesive" : "mechanical";
+                      const next = uAttachFromLabel(v);
                       setUnderlaymentAttachmentDefault(next);
                       setUAttach(next);
                     }}
@@ -2243,9 +2266,11 @@ function EstimatePage() {
                                     : `${l.board} : ${
                                         l.attachment === "mechanical"
                                           ? "Mech"
-                                          : l.attachment === "none"
-                                            ? "None"
-                                            : l.adhesiveName || "Adhesive"
+                                          : l.attachment === "durobond"
+                                            ? "Duro-Bond"
+                                            : l.attachment === "none"
+                                              ? "None"
+                                              : l.adhesiveName || "Adhesive"
                                       }`
                                   : "None : None"}
                               </TableCell>
@@ -2552,21 +2577,22 @@ function EstimatePage() {
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <Field label="Select Attachment Method">
                       <PickOne
-                        value={
-                          uAttach === "none"
-                            ? "None"
-                            : uAttach === "adhesive"
-                              ? "Adhesive"
-                              : "Mechanically Fastened"
-                        }
-                        options={["Mechanically Fastened", "Adhesive", "None"]}
-                        onChange={(v) =>
-                          setUAttach(
-                            v === "None" ? "none" : v === "Adhesive" ? "adhesive" : "mechanical",
-                          )
-                        }
+                        value={U_ATTACH_LABEL[uAttach]}
+                        options={uAttachOptions(
+                          // Legacy LoadAttachment: the Duro-Bond options appear when the
+                          // selected sections' system is Duro-Bond (the bid default otherwise).
+                          sections.find((x) => uSel.includes(x.id))?.roofSystem ?? roofSystem,
+                        )}
+                        onChange={(v) => setUAttach(uAttachFromLabel(v))}
                       />
                     </Field>
+                    {uAttach === "durobond" && (
+                      <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
+                        Layout labor only — the board is held by the membrane&apos;s induction
+                        plates, which are counted in the Duro-Bond section labor and the Fasteners
+                        screens.
+                      </p>
+                    )}
                     {uAttach === "mechanical" && (
                       <p className="col-span-2 self-end pb-2 text-[11px] text-muted-foreground">
                         Fasteners follow the legacy rule: 5 per 4×8 board (4 per 4×4), 10 / 16 per

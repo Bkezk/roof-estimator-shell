@@ -85,7 +85,11 @@ export function SectionCalcDialog({
     if (layer.quote) return row;
     if (uPrice !== undefined) row.material = roofArea * uPrice;
     const layout = admin.underlaymentLabor?.layoutHoursByProduct[layer.board];
-    if (layer.attachment === "mechanical") {
+    if (layer.attachment === "durobond" || layer.attachment === "none") {
+      // Legacy: layout labor only (Duro-Bond induction plates bill in the section labor).
+      if (layout !== undefined) row.hours = (roofArea / 2500) * layout;
+      row.extra = `${Math.ceil(roofArea / 32).toLocaleString()} boards · layout only`;
+    } else if (layer.attachment === "mechanical") {
       const minPerFast = admin.underlaymentLabor?.fastenerMinutesByDeck[uDeck];
       if (layout !== undefined && minPerFast !== undefined) {
         const count = underlaymentLayerFasteners({

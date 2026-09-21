@@ -118,7 +118,12 @@ import {
 export interface UnderlaymentLayer {
   board: string; // from the Underlayment prices screen (or a NeedQuote entry when quoted)
   /** Legacy Attached With: mechanical, an adhesive, or "none" (layout labor only, no fasteners). */
-  attachment: "mechanical" | "adhesive" | "none";
+  /**
+   * "durobond" = the legacy "Section Fastened w/ Durobond" option (docs §22.17): the board is
+   * held by the membrane's induction plates, so the layer bills LAYOUT LABOR ONLY — no
+   * per-board fastening, no adhesive; the plate fastening is in the Duro-Bond section labor.
+   */
+  attachment: "mechanical" | "adhesive" | "none" | "durobond";
   /**
    * LEGACY-WEB FIELD, no longer priced: the legacy fastener count is a rule of the board's
    * SubType and the membrane attachment (docs §18; override via Enhancement Options). Kept so

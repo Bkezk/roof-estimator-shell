@@ -1622,6 +1622,19 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const fieldArea = Math.max(0, roofArea - perimArea - cornerArea);
     let uf = 0;
     let mechLayers = 0;
+    // Legacy `uf = UnderlaymentFasteners(−1)`: on a durobondmech field attachment that is
+    // DuroLastFunctions.DuroBondFastenersField + Perim — the MEMBRANE's induction plates
+    // (Round(AreaField/32 × plates-per-4×8) + Round(AreaPerim/32 × perim + AreaCorner/32 ×
+    // corner), docs §22.14) — not the layers' counts.
+    if (isDuroBond && (s.attachment ?? "mechanical") === "mechanical") {
+      const per = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+      uf +=
+        bankersRound((fieldArea / 32) * per(s.fastenerOc), 0) +
+        bankersRound(
+          (perimArea / 32) * per(s.perimFastenerOc) + (cornerArea / 32) * per(s.cornerFastenerOc),
+          0,
+        );
+    }
     for (const layer of sectionLayers(s)) {
       if (layer.attachment !== "mechanical" || layer.quote) continue;
       mechLayers += 1;

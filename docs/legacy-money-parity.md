@@ -2659,3 +2659,33 @@ the legacy formula. Display only: nothing prices off it (wall adhesive uses Wall
 the loop does not run and the routine returns Vertical, which is what the web does. The
 screens disagree with that reading, so either the preview parapet's tab state differs at paint
 time or a step was missed; no money depends on the label. Left as-is pending a second look.
+
+### 22.17 Parity Comparisons round 2 — Underlayment pair (2026-09-21): "Section Fastened w/ Durobond"
+
+Source: the owner's `Underlayment` folder — the legacy Underlayment screen with the Flute Filler
+quote dialog and FluteFillerCalc open, and the web's Flute Filler dialog.
+
+**Matched exactly**: the Flute Filler quote — 4,324 pieces × $2.91 + 60 h → Material & Labor
+Cost $15,282.84 on both. Not comparable: the legacy FluteFillerCalc had no ridge width entered
+(0 pieces); the web's "Use 182" is the §10.7 formula at 12" ridge centres. The legacy dialog's
+"S.F of Sections 0.00 / Flute Filler Name 12528" is its own binding quirk (the quote id lands
+in the name box) — not money.
+
+**Bug — no Duro-Bond layer attachment.** The legacy screen's figures reproduce only with NO
+fastening term: A (½" ISO, 34,216 sqft) 117.05 h = 34,216 / 2500 × 7.775 × 1.1; B (2 × 2½" ISO,
+18,286 sqft) 189.48 h = 2 × 18,286 / 2500 × 11.775 × 1.1; together the Review's 4x8 ISO 306.53 h
+(the 1.1 is `SheetSize.SmartSheetMulti` = the ROOF-SECTION column of the 1000 sf row, not the
+Underlayment column's 1.2). Legacy `frmUnderlayment.LoadAttachment` (§10.4) offers "Section
+Fastened w/ Durobond" / "1+ Sections Use DuroBond" first on a Duro-Bond system; a layer so
+attached bills layout only — the board is held by the membrane's induction plates, whose
+fastening time is the Duro-Bond SECTION labor (§22.14). The web offered only Mechanically
+Fastened / Adhesive / None, and "Mechanically Fastened" adds the 5-per-4×8 fastening term (A
+would bill 162.3 h). Web: `UnderlaymentLayer.attachment = "durobond"` ("Section Fastened w/
+Durobond", listed first and defaulted on Duro-Bond bids, §10.4 order): layout labor only;
+boards count for material; no screws in consumption; the Fasteners-screen `uf` on a Duro-Bond
+field attachment is now the membrane's plate count (`UnderlaymentFasteners(−1)` on durobondmech
+= DuroBondFastenersField + Perim, §22.14) — previously the layers' 5-per-board counts. Pinned
+by tests (117.05 h + 189.48 h). `RoofSection.UnderlaymentBaseHours` (0x4c284) also carries a
+tile-6 block that adds `UnderlaymentFasteners(−1) × durobondmech.SingleFastenerTimeByDT` into
+`m_dUnder_labor[5]`; the Review's Tapered/Other 15 h (quote only) shows it did not contribute on
+this bid — not transcribed (see the block's own guards before relying on it).

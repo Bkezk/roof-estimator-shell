@@ -152,7 +152,7 @@ export interface SavedBidState {
     wallType?: number;
   };
   /** Legacy Home "4. Underlayment Attached With" default (new layers only). */
-  underlaymentAttachmentDefault?: "mechanical" | "adhesive" | "none";
+  underlaymentAttachmentDefault?: "mechanical" | "adhesive" | "none" | "durobond";
   /** Legacy Home General Info: Building Type (Commercial / Residential), start date (ISO date). */
   buildingType?: string;
   startDate?: string;
