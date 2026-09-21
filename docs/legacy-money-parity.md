@@ -2711,3 +2711,34 @@ Lump Sum box stayed at 0 in piece mode where the legacy shows the material amoun
   `UpdateCost` = LaborCost + LumpSum. The web dialog now mirrors that: the Lump Sum box displays
   pieces × cost per piece (disabled) in piece mode, and a typed lump sum back-fills the cost per
   piece to 4 dp.
+
+### 22.19 Parity Comparisons round 2 — Curbs (2026-09-21)
+
+Same seven curbs re-run by the owner after §22.12 (legacy: Structural Metal, 40 mil White,
+insulation on A and F; web: deck Retrofit, mil/colour "Bid default" except curb 4 = 50 mil White,
+insulation on curbs 3 and 8 = A and F). Legacy 48.81 h / $2,196.39, material $1,008.30; web
+49.04 h / $2,206.58, material $1,046.52.
+
+- **Labor — setup is per deck, not global (fixed).** `lookup_CurbTimes` is one row per
+  `DeckTypeID` with `(HrsPerLinealFt, MinutesToInstall, Base, CustomHrsPerLinealFt, CustomBase)`,
+  and `Curb.BaseHours` (0x333a4) reads col 3 (`Base`) for the curb's OWN deck. The web carried a
+  single `labor_curb.setup_minutes` = 8. Solving the three legacy readouts on this bid — Curb A
+  "16.7 h", Curb F 8.53 h (§22.12) and the 48.81 h total — with the seeded 7.5 min/LF and Open
+  ×1.1 admits exactly one base: **0.125 h = 7.5 min for Structural Metal** (A = (0.125×104 +
+  0.125×3)×1.1 + 1.99 = 16.7025; F = 8.525; Σ = 48.80875). With 8 min the same bid is 49.01. A
+  per-lineal-foot rate change cannot fit A, F and the total together. `labor_curb_deck` gained a
+  nullable `setup_minutes` override (migration `20260921140000`, applied live): Structural Metal
+  = 7.5, every other deck null → the global 8 (their legacy `Base` values are still uncaptured —
+  read them off the BAManager Curb Times screen before trusting a non-steel curb bid to the
+  minute). Admin › Curb Labor shows the new column beside Min / LF.
+- **Labor — perimeter rounding (fixed).** `BaseHours` uses `(A + B) × 2 / 12` raw; the web used
+  `2 × (In2Ft(A) + In2Ft(B))`, which rounds each side to 2 dp first (98×110 → 34.68 vs 34.6667
+  ft, +0.0055 h on curb A; the remaining 0.03 h of the 49.04 vs 49.01 gap).
+- **Labor — input drift.** The web bid's curbs are on Retrofit (legacy Structural Metal); with no
+  Metal Retrofit override that deck still bills the 8 min default, so the web will read 48.81 only
+  once the curbs are switched to Steel (or Metal Retrofit is given its own capture).
+- **Material $1,046.52 vs $1,008.30 — input drift, engine exact.** Curb 4 (20×20×16, qty 9) is
+  stored at an explicit 50 mil ($376.89) while the other six ride the bid default 40 mil; the
+  brute force over every mil/colour rate reproduces $1,046.52 only for that combination given
+  the stored data, and all-40-mil White gives the legacy $1,008.30 to the cent (test
+  "legacy Knox County CTC screen" in `bid-builder.test.ts`).

@@ -1338,6 +1338,8 @@ export function buildMetalsCatalog(data: MetalsScreenData | null): MetalsCatalog
 export interface RawCurbDeckRow {
   deck_type: string;
   minutes: number | string;
+  /** Per-deck setup override (legacy lookup_CurbTimes.Base is keyed by deck); null = global. */
+  setup_minutes?: number | string | null;
 }
 export interface RawCurbTypeRow {
   curb_type: string;
@@ -1345,10 +1347,16 @@ export interface RawCurbTypeRow {
 }
 
 export interface CurbLaborTables {
-  /** Setup minutes per curb (labor_curb.setup_minutes). */
+  /** Default setup minutes per curb (labor_curb.setup_minutes) — used when the deck has no override. */
   setupMinutes: number;
   /** Minutes per lineal foot by tear-off-taxonomy deck name. */
   minutesByDeck: Record<string, number>;
+  /**
+   * Setup minutes by deck (labor_curb_deck.setup_minutes). Legacy `lookup_CurbTimes` carries the
+   * base/setup time PER DECK ROW (col 3, read by Curb.BaseHours for the curb's own deck), so a
+   * single global value cannot reproduce it — docs §22.19 (Structural Metal 7.5 vs default 8).
+   */
+  setupMinutesByDeck?: Record<string, number>;
   /** Curb-type multiplier (Open 1.1, Closed 1, Scupper 4, …). */
   multiplierByType: Record<string, number>;
   /** Curb type names in sort order, for the picker. */
@@ -1362,14 +1370,27 @@ export function buildCurbLabor(
   typeRows: RawCurbTypeRow[],
 ): CurbLaborTables {
   const minutesByDeck: Record<string, number> = {};
-  for (const d of deckRows) minutesByDeck[d.deck_type] = Number(d.minutes);
+  const setupMinutesByDeck: Record<string, number> = {};
+  for (const d of deckRows) {
+    minutesByDeck[d.deck_type] = Number(d.minutes);
+    if (d.setup_minutes !== undefined && d.setup_minutes !== null && d.setup_minutes !== "") {
+      const v = Number(d.setup_minutes);
+      if (Number.isFinite(v)) setupMinutesByDeck[d.deck_type] = v;
+    }
+  }
   const multiplierByType: Record<string, number> = {};
   const curbTypes: string[] = [];
   for (const t of typeRows) {
     multiplierByType[t.curb_type] = Number(t.multiplier);
     curbTypes.push(t.curb_type);
   }
-  return { setupMinutes: Number(setupMinutes ?? 0), minutesByDeck, multiplierByType, curbTypes };
+  return {
+    setupMinutes: Number(setupMinutes ?? 0),
+    minutesByDeck,
+    setupMinutesByDeck,
+    multiplierByType,
+    curbTypes,
+  };
 }
 
 /**

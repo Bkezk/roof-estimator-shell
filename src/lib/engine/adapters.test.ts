@@ -644,6 +644,20 @@ describe("buildCurbLabor / curbLaborHours (§5.3)", () => {
     expect(t.curbTypes).toEqual(["Open", "Closed", "Scupper"]);
   });
 
+  it("per-deck setup override (legacy lookup_CurbTimes.Base is keyed by deck, §22.19)", () => {
+    const t2 = buildCurbLabor(
+      8,
+      [
+        { deck_type: "Wood", minutes: 7.5, setup_minutes: null },
+        { deck_type: "Structural Metal", minutes: "7.5", setup_minutes: "7.5" },
+      ],
+      [],
+    );
+    expect(t2.setupMinutes).toBe(8);
+    expect(t2.setupMinutesByDeck).toEqual({ "Structural Metal": 7.5 });
+    expect(t.setupMinutesByDeck).toEqual({});
+  });
+
   it("curb hours = qty × (setup + min/LF × type multi × perimeter) / 60", () => {
     // 24"×36" curb → perimeter 2×(2+3)=10 ft; Wood 7.5 min/LF, Closed ×1:
     // (8 + 7.5×1×10)/60 = 83/60 h per curb; ×2 curbs = 2.7667 h

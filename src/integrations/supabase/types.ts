@@ -169,18 +169,21 @@ export type Database = {
           deck_type: string;
           id: string;
           minutes: number;
+          setup_minutes: number | null;
           sort: number;
         };
         Insert: {
           deck_type: string;
           id?: string;
           minutes?: number;
+          setup_minutes?: number | null;
           sort?: number;
         };
         Update: {
           deck_type?: string;
           id?: string;
           minutes?: number;
+          setup_minutes?: number | null;
           sort?: number;
         };
         Relationships: [];

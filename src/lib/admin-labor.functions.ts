@@ -145,7 +145,13 @@ export const saveTemplates = createServerFn({ method: "POST" })
 
 const curbSchema = z.object({
   setup_minutes: z.number(),
-  deck: z.array(z.object({ deck_type: z.string().min(1), minutes: z.number() })),
+  deck: z.array(
+    z.object({
+      deck_type: z.string().min(1),
+      minutes: z.number(),
+      setup_minutes: z.number().nullable().optional(),
+    }),
+  ),
   types: z.array(z.object({ curb_type: z.string().min(1), multiplier: z.number() })),
 });
 export const saveCurb = createServerFn({ method: "POST" })
@@ -157,7 +163,11 @@ export const saveCurb = createServerFn({ method: "POST" })
     await sb.from("labor_curb").upsert({ id: 1, setup_minutes: data.setup_minutes });
     await sb.from("labor_curb_deck").delete().neq("id", NIL);
     if (data.deck.length)
-      await sb.from("labor_curb_deck").insert(data.deck.map((d, i) => ({ ...d, sort: i })));
+      await sb
+        .from("labor_curb_deck")
+        .insert(
+          data.deck.map((d, i) => ({ ...d, setup_minutes: d.setup_minutes ?? null, sort: i })),
+        );
     await sb.from("labor_curb_type").delete().neq("id", NIL);
     if (data.types.length)
       await sb.from("labor_curb_type").insert(data.types.map((t, i) => ({ ...t, sort: i })));

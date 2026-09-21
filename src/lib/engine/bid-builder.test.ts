@@ -1188,6 +1188,68 @@ describe("buildEstimateInputs → computeEstimate (end-to-end through the builde
     expect(computeEstimate(small).curbLaborHours).toBeCloseTo((2 * (8 + 7.5 * 12)) / 60, 4);
   });
 
+  it("curbs: legacy Knox County CTC screen — per-deck setup (Structural Metal 7.5 min) reproduces 48.81 h / $1,008.30 (§22.19)", () => {
+    const withCurb: EngineAdminData = {
+      ...admin,
+      curbLabor: {
+        setupMinutes: 8,
+        minutesByDeck: { "Structural Metal": 7.5 },
+        setupMinutesByDeck: { "Structural Metal": 7.5 },
+        multiplierByType: { Open: 1.1 },
+        curbTypes: ["Open"],
+      },
+    };
+    const mk = (
+      id: string,
+      quantity: number,
+      widthIn: number,
+      lengthIn: number,
+      dimCIn: number,
+      hasInsulation = false,
+    ) => ({
+      id,
+      name: `Curb ${id}`,
+      quantity,
+      widthIn,
+      lengthIn,
+      dimCIn,
+      dimDIn: 6,
+      curbType: "Open",
+      deckType: "Steel",
+      styleId: 1,
+      thicknessMil: 40,
+      color: "White",
+      hasInsulation,
+    });
+    const curbs = [
+      mk("A", 3, 98, 110, 12, true),
+      mk("B", 9, 20, 20, 16),
+      mk("C", 1, 32, 32, 16),
+      mk("D", 2, 42, 42, 16),
+      mk("E", 3, 52, 29, 12),
+      mk("F", 3, 30, 72, 12, true),
+      mk("G", 1, 44, 54, 12),
+    ];
+    const { inputs, curbMaterial, warnings, breakdown } = buildEstimateInputs(
+      bid({ curbs }),
+      withCurb,
+    );
+    const curbHoursById = breakdown.curbHoursById;
+    expect(warnings).toEqual([]);
+    // Curb A: (0.125 × 104 + 0.125 × 3) × 1.1 + Round(0.25 + 34.6667 × 0.0167 × 3, 2) = 16.7025
+    // (legacy label "16.7 h. (100%)"); Curb F 8.525 (legacy 8.53); total 48.80875 → 48.81.
+    expect(curbHoursById["A"]).toBeCloseTo(16.7025, 4);
+    expect(curbHoursById["F"]).toBeCloseTo(8.525, 4);
+    expect(computeEstimate(inputs).curbLaborHours).toBeCloseTo(48.80875, 4);
+    expect(curbMaterial).toBeCloseTo(1008.3, 2);
+    // With the old single 8-minute setup the same bid over-bills 0.20 h (49.01), the round-2 gap.
+    const global8 = buildEstimateInputs(bid({ curbs }), {
+      ...withCurb,
+      curbLabor: { ...withCurb.curbLabor!, setupMinutesByDeck: {} },
+    });
+    expect(computeEstimate(global8.inputs).curbLaborHours).toBeCloseTo(49.01, 2);
+  });
+
   it("curbs: a legacy styleId auto-prices the wrap membrane into M0; styles 3/4 warn quote-required", () => {
     const withCurb: EngineAdminData = {
       ...admin,

@@ -1904,8 +1904,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     }
   }
 
-  // Curbs (§5.3): qty × (setup min + min/LF[deck] × type multiplier × perimeter LF) / 60 → direct
-  // labor. Perimeter = 2 × (In2Ft(A) + In2Ft(B)); insulation-on-curb ISO labor adds per §2.
+  // Curbs (§5.3 / §8.2): (min/LF[deck] × perimeter LF × qty + setup[deck] × qty) / 60 × type
+  // multiplier → direct labor. Perimeter = (A + B) × 2 / 12; insulation-on-curb ISO labor adds per §2.
   // Membrane material auto-computes below via the legacy wrap model.
   let curbLaborHours = 0;
   /** Per-curb Curb.ManHours (the legacy "Labor: X hours" link on the Curbs screen). */
@@ -1955,12 +1955,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       addItem();
       continue;
     }
+    // Legacy lookup_CurbTimes.Base is per deck (col 3 for the curb's deck); the global value is
+    // the fallback for decks without an override (docs §22.19).
     itemHours += curbHoursCalc({
       quantity: c.quantity,
-      setupMinutes: admin.curbLabor?.setupMinutes ?? 0,
+      setupMinutes:
+        admin.curbLabor?.setupMinutesByDeck?.[tDeck] ?? admin.curbLabor?.setupMinutes ?? 0,
       minutesPerLF,
       typeMultiplier,
-      perimeterFt: 2 * (in2Ft(c.widthIn) + in2Ft(c.lengthIn)),
+      // Legacy BaseHours: (A + B) × 2 / 12 raw — NOT per-dimension In2Ft (which rounds each to
+      // 2 dp: 98×110 gave 34.68 vs 34.6667 ft, +0.0055 h on the Knox curb A; docs §22.19).
+      perimeterFt: ((c.widthIn + c.lengthIn) * 2) / 12,
     });
     addItem();
   }

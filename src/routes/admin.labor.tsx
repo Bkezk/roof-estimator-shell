@@ -446,7 +446,11 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
   const saveFn = useServerFn(saveCurb);
   const [setup, setSetup] = useState(data.curbSetupMinutes);
   const [deck, setDeck] = useState(
-    data.curbDeck.map((d) => ({ deck_type: d.deck_type, minutes: d.minutes })),
+    data.curbDeck.map((d) => ({
+      deck_type: d.deck_type,
+      minutes: d.minutes,
+      setup_minutes: d.setup_minutes ?? null,
+    })),
   );
   const [types, setTypes] = useState(
     data.curbType.map((t) => ({
@@ -475,12 +479,13 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
         <CardHeader>
           <CardTitle>Curb labor</CardTitle>
           <CardDescription>
-            Time = setup time + (deck-type time × curb-type multiplier), per curb.
+            Per curb: (min/LF × footprint perimeter + setup) × curb-type multiplier. Setup is per
+            deck (legacy lookup_CurbTimes base); a blank deck setup uses the default below.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="max-w-[260px] space-y-2">
-            <Label>Setup time per curb (minutes)</Label>
+            <Label>Default setup time per curb (minutes)</Label>
             <Input
               type="number"
               step="0.5"
@@ -497,7 +502,8 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
                 <TableHeader>
                   <TableRow>
                     <TableHead>Deck type</TableHead>
-                    <TableHead>Minutes</TableHead>
+                    <TableHead>Min / LF</TableHead>
+                    <TableHead>Setup (min)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -513,6 +519,28 @@ function CurbTab({ data, onSaved }: { data: LaborEngines; onSaved: () => void })
                             setDeck((p) =>
                               p.map((r, j) =>
                                 j === i ? { ...r, minutes: num(e.target.value) } : r,
+                              ),
+                            )
+                          }
+                          className="max-w-[120px]"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.5"
+                          placeholder={`default ${setup}`}
+                          value={d.setup_minutes ?? ""}
+                          onChange={(e) =>
+                            setDeck((p) =>
+                              p.map((r, j) =>
+                                j === i
+                                  ? {
+                                      ...r,
+                                      setup_minutes:
+                                        e.target.value === "" ? null : num(e.target.value),
+                                    }
+                                  : r,
                               ),
                             )
                           }

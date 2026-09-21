@@ -125,7 +125,7 @@ export const getEngineAdminData = createServerFn({ method: "GET" })
         )
         .order("sort"),
       sb.from("labor_curb").select("setup_minutes").eq("id", 1).maybeSingle(),
-      sb.from("labor_curb_deck").select("deck_type, minutes").order("sort"),
+      sb.from("labor_curb_deck").select("deck_type, minutes, setup_minutes").order("sort"),
       sb.from("labor_curb_type").select("curb_type, multiplier").order("sort"),
       sb
         .from("rdl_labor_tables")
