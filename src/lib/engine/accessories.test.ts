@@ -393,8 +393,8 @@ describe("§12.0 anchors (captured legacy bid)", () => {
     expect(r.deckNeeds.metal.inductionPlates).toBe(6416);
     expect(r.deckNeeds.metal.fasteners).toBe(6416);
     expect(r.deckNeeds.metal.polyPlates).toBe(0);
-    // §12.5 quirk kept: insulPlates += uf per mechanical layer (1 here).
-    expect(r.deckNeeds.metal.insulPlates).toBe(6416);
+    // Duro-Bond: the induction plates hold the boards — no insulation plates (§22.25).
+    expect(r.deckNeeds.metal.insulPlates).toBe(0);
   });
 
   it("entered fasteners net the needs and bill by whole boxes (§12.5 shared box count)", () => {
@@ -410,6 +410,15 @@ describe("§12.0 anchors (captured legacy bid)", () => {
     expect(r.deckNeeds.wood.fasteners).toBe(25); // 925 − 900
     expect(r.deckNeeds.wood.polyPlates).toBe(0);
     expect(r.dripEdge.fastenersNeeded).toBe(0); // 21 − 21
+    // Over-ordering shows the excess as a negative need (§22.25): 1000 spades vs 925.
+    const over = emptyAccessoriesState();
+    over.fastenerQty = {
+      wood: { [fastenerKey('1 1/2"', "Spade")]: 1000 },
+      dripEdge: { [fastenerKey('1 1/2"', "Spade")]: 30 },
+    };
+    const o = computeAccessories(anchorArgs(over));
+    expect(o.deckNeeds.wood.fasteners).toBe(-75);
+    expect(o.dripEdge.fastenersNeeded).toBe(-9);
     // 921 spades across both slots → ONE box count: Ceil(921/2000) = 1 box at $208.
     const spade = r.fasteners.rows.find((x) => x.key === fastenerKey('1 1/2"', "Spade"))!;
     expect(spade.totalQty).toBe(921);

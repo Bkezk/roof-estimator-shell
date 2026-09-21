@@ -373,15 +373,39 @@ function EstimatePage() {
     liveWarrantyData,
   );
 
+  // What the "Update Pricing & Labor" button compares the frozen snapshot against: the admin
+  // data as last fetched (refreshed by the button itself so it disappears once applied).
+  const [liveCheck, setLiveCheck] = useState<{
+    admin: EngineAdminData;
+    warranty: WarrantyData | null;
+  } | null>(null);
   const refreshPricing = async () => {
     try {
       const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
       setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
+      setLiveCheck({ admin: a, warranty: w ?? null });
       toast.success("Updated to current pricing & labor — totals recomputed. Save to keep it.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not fetch current pricing");
     }
   };
+
+  // Legacy Home shows "Update Pricing & Labor" as a standing button; here it appears only while
+  // the bid's frozen snapshot differs from the current admin pricing / labor / warranty data,
+  // and goes away once applied (owner's request, §22.25).
+  const pricingStale = useMemo(() => {
+    if (!snapshot) return false;
+    const liveA = liveCheck?.admin ?? liveAdmin;
+    if (!liveA) return false;
+    const liveW = liveCheck ? liveCheck.warranty : (liveWarrantyData ?? null);
+    // Both sides through the same normaliser so an older snapshot's missing defaults don't
+    // read as a pricing change.
+    return (
+      JSON.stringify(normalizeAdminSnapshot(snapshot.admin)) !==
+        JSON.stringify(normalizeAdminSnapshot(liveA)) ||
+      JSON.stringify(snapshot.warranty ?? null) !== JSON.stringify(liveW ?? null)
+    );
+  }, [snapshot, liveCheck, liveAdmin, liveWarrantyData]);
 
   const [roofSystem, setRoofSystem] = useState("Duro-Last");
   const [attachment, setAttachment] = useState<"mechanical" | "adhered">("mechanical");
@@ -1629,8 +1653,13 @@ function EstimatePage() {
                   underlayment; existing items keep their values unless you apply.
                 </CardDescription>
               </div>
-              {frozenAsOf !== null && (
-                <Button variant="outline" size="sm" onClick={refreshPricing}>
+              {frozenAsOf !== null && pricingStale && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={refreshPricing}
+                  title="Admin pricing / labor has changed since this bid was priced"
+                >
                   <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update Pricing &amp; Labor
                 </Button>
               )}

@@ -674,7 +674,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             0,
           );
           return (
-            <p className={`text-xs font-medium ${needed > 0 ? "text-red-600" : ""}`}>
+            <p className={`text-xs font-medium ${needed > 0 ? "text-red-600" : "text-green-700"}`}>
               Fasteners Needed: {needed}
               {entered > 0 && (
                 <span className="font-normal text-muted-foreground">
@@ -1680,7 +1680,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
         return (
           <div className="space-y-3">
             <p
-              className={`text-xs font-medium ${(result?.parapetTabs.fastenersNeeded ?? 0) > 0 ? "text-red-600" : ""}`}
+              className={`text-xs font-medium ${(result?.parapetTabs.fastenersNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700"}`}
             >
               Fasteners Needed: {result?.parapetTabs.fastenersNeeded ?? 0}
             </p>
@@ -1697,7 +1697,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               />
               <div className="space-y-2">
                 <p
-                  className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : ""}`}
+                  className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700"}`}
                 >
                   Steel Plates Needed: {result?.parapetTabs.steelPlatesNeeded ?? 0}
                 </p>

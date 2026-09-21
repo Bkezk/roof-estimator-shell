@@ -11,10 +11,11 @@
  * display rounding only).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   removeMetalsLine,
+  type MetalsLineSource,
   type DownspoutEntryState,
   type GutterEntryState,
   type MetalsRefData,
@@ -107,6 +108,14 @@ interface MetalsScreensProps {
 
 export function MetalsScreens({ refData, state, onChange, result }: MetalsScreensProps) {
   const [openTile, setOpenTile] = useState<TileId | null>(null);
+  // The summary row being edited: its dialog opens on that gutter style/size, downspout size
+  // or scupper option instead of the first one.
+  const [focus, setFocus] = useState<MetalsLineSource | null>(null);
+  const openFor = (tile: TileId | undefined, src: MetalsLineSource | null) => {
+    if (!tile) return;
+    setFocus(src);
+    setOpenTile(tile);
+  };
 
   if (!refData) {
     return (
@@ -131,7 +140,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
           <button
             key={t.id}
             type="button"
-            onClick={() => setOpenTile(t.id)}
+            onClick={() => openFor(t.id, null)}
             className={`flex flex-col items-center gap-2 rounded-md border-2 p-4 text-sm font-medium transition-colors ${t.classes}`}
           >
             <img src={t.icon} alt="" className="h-16 w-16 object-contain dark:invert" />
@@ -170,7 +179,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
                 <TableRow
                   key={i}
                   className="cursor-pointer"
-                  onDoubleClick={() => tile && setOpenTile(tile)}
+                  onDoubleClick={() => openFor(tile, ln.source)}
                 >
                   <TableCell className="text-muted-foreground">
                     {i === 0 || lines[i - 1]!.category !== ln.category ? ln.category : ""}
@@ -189,7 +198,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        onClick={() => tile && setOpenTile(tile)}
+                        onClick={() => openFor(tile, ln.source)}
                       >
                         Edit
                       </Button>
@@ -225,6 +234,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
         refData={refData}
         state={state}
         onChange={onChange}
+        focus={focus}
       />
       <DownspoutsDialog
         open={openTile === "downspouts"}
@@ -232,6 +242,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
         refData={refData}
         state={state}
         onChange={onChange}
+        focus={focus}
       />
       <PitchPansDialog
         open={openTile === "pitchPans"}
@@ -246,6 +257,7 @@ export function MetalsScreens({ refData, state, onChange, result }: MetalsScreen
         refData={refData}
         state={state}
         onChange={onChange}
+        focus={focus}
       />
     </div>
   );
@@ -338,12 +350,20 @@ function GuttersDialog(props: {
   refData: MetalsRefData;
   state: MetalsState;
   onChange: (next: MetalsState) => void;
+  focus?: MetalsLineSource | null;
 }) {
-  const { refData, state, onChange } = props;
+  const { refData, state, onChange, focus } = props;
   const g = refData.gutters;
   const [style, setStyle] = useState<string>(() => g.styles[0] ?? "");
   const sizes = g.sizesByStyle[style] ?? [];
   const [size, setSize] = useState<string>(() => sizes[0] ?? "");
+  useEffect(() => {
+    if (!props.open || !focus) return;
+    if (focus.kind === "gutter" || focus.kind === "gutterAcc") {
+      setStyle(focus.style);
+      setSize(focus.size);
+    }
+  }, [props.open, focus]);
   const effSize = sizes.includes(size) ? size : (sizes[0] ?? "");
 
   const key = `${style}|${effSize}`;
@@ -521,11 +541,16 @@ function DownspoutsDialog(props: {
   refData: MetalsRefData;
   state: MetalsState;
   onChange: (next: MetalsState) => void;
+  focus?: MetalsLineSource | null;
 }) {
-  const { refData, state, onChange } = props;
+  const { refData, state, onChange, focus } = props;
   const d = refData.downspouts;
   const sizesWithRows = d.sizes.filter((s) => d.bySize[s]);
   const [size, setSize] = useState<string>(() => sizesWithRows[0] ?? d.sizes[0] ?? "");
+  useEffect(() => {
+    if (!props.open || !focus) return;
+    if (focus.kind === "downspout" || focus.kind === "downspoutAcc") setSize(focus.size);
+  }, [props.open, focus]);
   const sizeRef = d.bySize[size];
   const entry = state.downspouts.find((e) => e.size === size);
 
@@ -698,10 +723,15 @@ function CollectionBoxesDialog(props: {
   refData: MetalsRefData;
   state: MetalsState;
   onChange: (next: MetalsState) => void;
+  focus?: MetalsLineSource | null;
 }) {
-  const { refData, state, onChange } = props;
+  const { refData, state, onChange, focus } = props;
   const cb = refData.collectionBoxes;
   const [option, setOption] = useState<string>(() => cb.options[0] ?? "");
+  useEffect(() => {
+    if (!props.open || !focus) return;
+    if (focus.kind === "collectionBox") setOption(focus.option);
+  }, [props.open, focus]);
   const rows = cb.byOption[option] ?? [];
 
   const total = Object.entries(state.collectionBoxQty).reduce(

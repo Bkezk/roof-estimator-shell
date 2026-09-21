@@ -2899,3 +2899,26 @@ only place they surface is the Review's "Other" line. That line pins the price:
   marker cleared (migration `20260921160000`); the slipsheet row stays 0 / uncaptured (no
   legacy readout for it yet). The web keeps the group editable under Admin › Non-DL › Others —
   something legacy never exposed.
+
+### 22.25 Owner round: Duro-Bond insulation plates, negative needs, metals focus, Update Pricing (2026-09-21)
+
+- **Duro-Bond shows no insulation plates.** The §12.5 quirk (`insulPlates += uf` per
+  mechanical layer) is skipped on a Duro-Bond mechanical section: there `uf` is the membrane's
+  induction plate count, which already holds the boards; legacy bids carry those layers as
+  "Section Fastened w/ Durobond" and show 0. Deliberate deviation from the transcribed quirk
+  for the case legacy never reaches by default (mechanical layers on Duro-Bond).
+- **Needs go negative.** Every netted "Fasteners Needed" / "Items Required" figure (edge
+  screens, parapet wall-tabs + steel plates, the deck buckets) is now calculated − entered
+  without the legacy `max(0, …)` clamp: order 500 against 450 and the screen reads −50, green.
+  Red only while > 0; the tree colouring is unchanged (needs > 0). The Gypsum bucket still
+  forces Poly / Insul. plates to 0.
+- **Metals: editing a summary row opens its own entry.** Edit / double-click on a summary line
+  now opens the tile on that line's gutter style + size, downspout size or scupper option (the
+  dialogs used to open on their first entry, so the row you clicked was hidden behind the
+  style/size pickers). Switching style resets the size to the first size of that style; an
+  entry appears on the first typed value and lists under "Other gutters on this bid" once you
+  move to another style/size.
+- **"Update Pricing & Labor" only while stale.** Legacy shows the button always; the web shows
+  it only while the bid's frozen admin / warranty snapshot differs from the current admin data
+  (both normalised, JSON-compared) and hides it once applied — so it reappears exactly when an
+  admin price, labor table or warranty table changes after the bid was priced.

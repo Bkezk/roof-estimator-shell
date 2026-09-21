@@ -1945,8 +1945,12 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     if (isDuroBond) need.inductionPlates += uf;
     else need.polyPlates += mf;
     // §12.5 LEGACY QUIRK (transcribed): insulPlates += uf once PER MECHANICAL LAYER, where uf
-    // already sums every layer — two mechanical layers double the plate count.
-    need.insulPlates += uf * mechLayers;
+    // already sums every layer — two mechanical layers double the plate count. NOT on a
+    // Duro-Bond section: there uf is the membrane's induction plates, which hold the boards too
+    // (legacy bids carry Duro-Bond layers as "Section Fastened w/ Durobond" → 0 insulation
+    // plates); counting them again as insulation plates is the quirk's blind spot (§22.25).
+    if (!(isDuroBond && (s.attachment ?? "mechanical") === "mechanical"))
+      need.insulPlates += uf * mechLayers;
   }
   // Parapet deck screws: 1/ft + 1 poly plate each into the PARAPET's deck bucket (§12.5).
   for (const p of args.parapets) {
@@ -1966,11 +1970,13 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       if (!row || !qty) continue;
       if (SCREW_SUBTYPES_BY_BUCKET[b].includes(row.subtype.toLowerCase())) screwSum += qty;
     }
+    // Netted needs may go NEGATIVE: the screens show the excess ordered as "−50" (owner's
+    // request, §22.25; legacy clamped at 0). Red only while > 0.
     const need = deckNeeds[b];
-    need.fasteners = Math.max(0, need.fasteners - screwSum);
-    need.polyPlates = Math.max(0, need.polyPlates - (entered[PLATE_ROWS.poly] ?? 0));
-    need.insulPlates = Math.max(0, need.insulPlates - (entered[PLATE_ROWS.insulation] ?? 0));
-    need.inductionPlates = Math.max(0, need.inductionPlates - (entered[PLATE_ROWS.induction] ?? 0));
+    need.fasteners = need.fasteners - screwSum;
+    need.polyPlates = need.polyPlates - (entered[PLATE_ROWS.poly] ?? 0);
+    need.insulPlates = need.insulPlates - (entered[PLATE_ROWS.insulation] ?? 0);
+    need.inductionPlates = need.inductionPlates - (entered[PLATE_ROWS.induction] ?? 0);
     if (b === "gypsum") {
       // §12.5: the Gypsum bucket forces Poly and Insul. plates to 0 (auger/NTB carry their own).
       need.polyPlates = 0;
@@ -1987,12 +1993,10 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     if (EDGE_FASTENER_GROUPS.parapet.includes(key) && key !== PLATE_ROWS.steel)
       parapetEnteredFasteners += qty;
   }
-  const parapetTabsNeeded = Math.max(0, args.parapetEdgeFasteners - parapetEnteredFasteners);
-  const steelPlatesNeeded = Math.max(
-    0,
+  const parapetTabsNeeded = args.parapetEdgeFasteners - parapetEnteredFasteners;
+  const steelPlatesNeeded =
     Math.max(args.parapetEdgeFasteners, parapetEnteredFasteners) -
-      (parapetEntered[PLATE_ROWS.steel] ?? 0),
-  );
+    (parapetEntered[PLATE_ROWS.steel] ?? 0);
 
   /* ---------------- Edge-screen Fasteners Needed (netted, §12.2) ---------------- */
   const nettedEdgeNeed = (slot: FastenerSlot, gross: number): number => {
@@ -2002,7 +2006,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       if (key === PLATE_ROWS.steel) continue;
       sum += qty || 0;
     }
-    return Math.max(0, gross - sum);
+    return gross - sum;
   };
   termBar.fastenersNeeded = nettedEdgeNeed("termBar", termBar.fastenersNeeded);
   fasciaResult["3"].fastenersNeeded = nettedEdgeNeed("fascia3", fasciaResult["3"].fastenersNeeded);
