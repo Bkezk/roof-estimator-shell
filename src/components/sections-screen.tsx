@@ -325,6 +325,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
   // Legacy frmRoofSection.LoadLapSpacings (see legacyLapOptions): tab spacings for sheets, roll
   // widths for rolls, filtered by the pull test under a mechanical attachment.
   const lap = legacyLapOptions(s, p);
+  // Duro-Tuff on a mechanical perimeter: the legacy Advanced form's DT custom group applies.
+  const isTuffMech = sys.rsId === 3 && sys.attachment === "mechanical";
+  const tuffRollWidths = Object.keys(admin.rollGoodWidthMulti?.[3] ?? {})
+    .map(Number)
+    .filter((w) => w > 0)
+    .sort((a, b) => a - b);
 
   const setEdges = (next: EdgeInput[], extra: Partial<BidSectionInput> = {}) =>
     upd({ edges: next, ...extra });
@@ -1129,25 +1135,135 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 />
               </Field>
             </div>
+            {isTuffMech && (
+              /* Legacy frmRoofSectionAdv "Duro-Tuff Options" (grpDTCustomSettings): Use Custom
+                 Spacings → NumCustomRows(0/1) of the FIXED 30" outer / 60" inner rows, per-tier
+                 perimeter / corner fastener spacing, field roll width and field spacing. */
+              <div className="rounded-md border p-2">
+                <label className="mb-2 flex items-center gap-2 font-medium">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={!!s.tuffCustom}
+                    onChange={(e) => {
+                      if (!e.target.checked) {
+                        const nx = { ...s };
+                        delete nx.tuffCustom;
+                        onChange(sections.map((x, j) => (j === i ? nx : x)));
+                        return;
+                      }
+                      // Seeded the way the legacy form loads: the BA-default rows (1 outer, 2
+                      // inner) and the section's current spacings.
+                      upd({
+                        tuffCustom: {
+                          rows: [1, 2],
+                          perimOc: [s.perimFastenerOc, s.perimFastenerOc],
+                          cornerOc: [s.cornerFastenerOc, s.cornerFastenerOc],
+                        },
+                      });
+                    }}
+                  />
+                  Duro-Tuff Options — Use Custom Spacings
+                </label>
+                {s.tuffCustom && (
+                  <div className="space-y-2">
+                    {([0, 1] as const).map((t) => (
+                      <div key={t} className="flex flex-wrap items-end gap-3">
+                        <Field label={t === 0 ? 'Outer rows @ 30"' : 'Inner rows @ 60"'}>
+                          <Num
+                            className="w-[80px]"
+                            value={s.tuffCustom!.rows[t]}
+                            onChange={(v) => {
+                              const rows = [...s.tuffCustom!.rows] as [number, number];
+                              rows[t] = Math.max(0, Math.round(v));
+                              upd({ tuffCustom: { ...s.tuffCustom!, rows } });
+                            }}
+                          />
+                        </Field>
+                        <Field label="Perim fastener OC (in)">
+                          <Num
+                            className="w-[90px]"
+                            value={s.tuffCustom!.perimOc[t]}
+                            onChange={(v) => {
+                              const perimOc = [...s.tuffCustom!.perimOc] as [number, number];
+                              perimOc[t] = v;
+                              upd({ tuffCustom: { ...s.tuffCustom!, perimOc } });
+                            }}
+                          />
+                        </Field>
+                        <Field label="Corner fastener OC (in)">
+                          <Num
+                            className="w-[90px]"
+                            value={s.tuffCustom!.cornerOc[t]}
+                            onChange={(v) => {
+                              const cornerOc = [...s.tuffCustom!.cornerOc] as [number, number];
+                              cornerOc[t] = v;
+                              upd({ tuffCustom: { ...s.tuffCustom!, cornerOc } });
+                            }}
+                          />
+                        </Field>
+                      </div>
+                    ))}
+                    <div className="flex flex-wrap items-end gap-3">
+                      <Field label="Field roll width (in)">
+                        <Pick
+                          className="w-[100px]"
+                          value={
+                            s.tuffCustom.fieldLapIn !== undefined
+                              ? String(s.tuffCustom.fieldLapIn)
+                              : "—"
+                          }
+                          options={["—", ...tuffRollWidths.map(String)]}
+                          onChange={(v) => {
+                            const nx = { ...s.tuffCustom! };
+                            if (v === "—") delete nx.fieldLapIn;
+                            else nx.fieldLapIn = Number(v);
+                            upd({ tuffCustom: nx });
+                          }}
+                        />
+                      </Field>
+                      <Field label="Field fastener OC (in)">
+                        <Num
+                          className="w-[90px]"
+                          value={s.tuffCustom.fieldOc ?? s.fastenerOc}
+                          onChange={(v) => upd({ tuffCustom: { ...s.tuffCustom!, fieldOc: v } })}
+                        />
+                      </Field>
+                    </div>
+                    <p className="text-muted-foreground">
+                      Row widths are fixed at 30&quot; outer / 60&quot; inner as in the legacy form.
+                      Each tier bills its rows along the perimeter at its own tab and spacing rates;
+                      the field bills what is left of the membrane.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Perim lap (in)">
-                <Pick
-                  className="w-[100px]"
-                  value={s.perimLap !== undefined && s.perimLap !== -1 ? String(s.perimLap) : "—"}
-                  options={["—", ...(tabOptions ?? []).map(String)]}
-                  onChange={(v) => upd({ perimLap: v === "—" ? -1 : Number(v) })}
-                />
-              </Field>
-              <Field label="Corner lap (in)">
-                <Pick
-                  className="w-[100px]"
-                  value={
-                    s.cornerLap !== undefined && s.cornerLap !== -1 ? String(s.cornerLap) : "—"
-                  }
-                  options={["—", ...(tabOptions ?? []).map(String)]}
-                  onChange={(v) => upd({ cornerLap: v === "—" ? -1 : Number(v) })}
-                />
-              </Field>
+              {!isTuffMech && (
+                <>
+                  <Field label="Perim lap (in)">
+                    <Pick
+                      className="w-[100px]"
+                      value={
+                        s.perimLap !== undefined && s.perimLap !== -1 ? String(s.perimLap) : "—"
+                      }
+                      options={["—", ...(tabOptions ?? []).map(String)]}
+                      onChange={(v) => upd({ perimLap: v === "—" ? -1 : Number(v) })}
+                    />
+                  </Field>
+                  <Field label="Corner lap (in)">
+                    <Pick
+                      className="w-[100px]"
+                      value={
+                        s.cornerLap !== undefined && s.cornerLap !== -1 ? String(s.cornerLap) : "—"
+                      }
+                      options={["—", ...(tabOptions ?? []).map(String)]}
+                      onChange={(v) => upd({ cornerLap: v === "—" ? -1 : Number(v) })}
+                    />
+                  </Field>
+                </>
+              )}
               {!s.edges?.length && (
                 <>
                   <Field label="Perim len (ft, manual)">

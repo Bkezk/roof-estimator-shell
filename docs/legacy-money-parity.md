@@ -2614,6 +2614,19 @@ routines they call (`RoofSystem.MechField/MechPerim/AdheredField/AdheredPerimLab
   `computeSectionInstallHours` computes the branch; without the lookup rows the stored
   spacings are used and a warning says so; adhered Duro-Tuff and sections without perimeter
   footage are unchanged (the formula collapses to field × MembraneWithOverlap). Pinned by
-  tests with a hand-computed case. Not yet a web counterpart: the legacy Advanced form's
-  separate inner-row count / width under custom settings (the web's custom lap maps to one
-  outer row, §21 flag).
+  tests with a hand-computed case.
+- **Duro-Tuff custom settings — ported (same day).** `frmRoofSectionAdv` "Duro-Tuff Options"
+  (`grpDTCustomSettings`, `LoadForRoofSection` 0x9d6e4 durotuffmech branch): `cbUseDTCustom` =
+  UseCustomSettings; the outer / inner width boxes (`tbDTOuterPerim` "30", `tbDTInnerPerim`
+  "60") are DISABLED — on load the form re-asserts `CustomPerimeterLap(0) = 30, (1) = 60`;
+  editable are `tbDTCustomRows0/1` → NumCustomRows(i) (`_LostFocus` → `set_NumCustomRows`),
+  `tbDTCustomPerimFast0/1` / `tbDTCustomCornerFast0/1` → Custom{Perimeter,Corner}
+  FastenerSpacing(i), `cbDTCustomFieldWidth` (RollGoodWidths) → CustomFieldLap, `tbDTCustomField`
+  → CustomFieldFastenerSpacing. Nothing on the form writes CustomCornerLap — in custom mode the
+  corner tab keys are whatever the last NON-custom recalc wrote back ((30, 60) for a section that
+  started on BA-default rows, the normal path); the web uses (30, 60). Web:
+  `BidSectionInput.tuffCustom { rows, perimOc, cornerOc, fieldLapIn?, fieldOc? }` on the
+  Sections screen's Enhancement dialog (Duro-Tuff mechanical only); the calc takes the rows at
+  the fixed widths and the custom field width, the labor tiers take the per-tier spacings, the
+  field takes the custom field spacing. Older bids' Duro-Last-style `perimLap` on a Duro-Tuff
+  section keeps its one-outer-row mapping.

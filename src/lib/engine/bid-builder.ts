@@ -222,6 +222,21 @@ export interface BidSectionInput {
   perimLap?: number;
   /** Custom corner-zone lap (in). Absent/-1 = legacy default: the corner share is unpriced. */
   cornerLap?: number;
+  /**
+   * Duro-Tuff mechanical "Use Custom Spacings" (legacy frmRoofSectionAdv `grpDTCustomSettings`,
+   * docs §22.15): present = RoofSection.UseCustomSettings. `rows` = NumCustomRows(0 / 1) of the
+   * FIXED 30" outer / 60" inner rows (the form's width boxes are disabled at "30" / "60"),
+   * `perimOc` / `cornerOc` = Custom{Perimeter,Corner}FastenerSpacing(0 / 1), `fieldLapIn` =
+   * CustomFieldLap (a RollGoodWidths pick; absent = −1), `fieldOc` = CustomFieldFastenerSpacing
+   * (absent = the section's Fastener OC).
+   */
+  tuffCustom?: {
+    rows: [number, number];
+    perimOc: [number, number];
+    cornerOc: [number, number];
+    fieldLapIn?: number;
+    fieldOc?: number;
+  };
   underlaymentBoard: string; // LEGACY single board ("" = none); superseded by `layers`
   /** Insulation layers (up to 4). When absent, a legacy underlaymentBoard converts to one layer. */
   layers?: UnderlaymentLayer[];
@@ -1023,7 +1038,25 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // Duro-Tuff: DuroTuffSystem.CalculateMembraneQty lays 30"/60" perimeter rows + field strips
     // and WRITES the custom laps it used back onto the section (docs §21.4) — those feed the
     // labor tab lookups below. Custom settings (a user perimeter lap) map to one outer row.
-    const tuffCustom = s.perimLap !== undefined && s.perimLap !== -1;
+    // Duro-Tuff custom settings: the legacy Advanced form's DT group (`s.tuffCustom`: row counts
+    // of the fixed 30" / 60" rows, per-tier spacings, field width / spacing). Older saved bids
+    // may instead carry a Duro-Last-style `perimLap`: kept as one outer row at that lap.
+    const tuffCustom =
+      s.tuffCustom !== undefined || (s.perimLap !== undefined && s.perimLap !== -1);
+    // In custom mode the legacy form re-asserts CustomPerimeterLap = (30, 60) on load and never
+    // writes CustomCornerLap; the corner laps are whatever the last NON-custom recalc wrote back —
+    // (30, 60) for a section that started life on BA-default rows (the normal path).
+    const tuffCustomRows: [number, number] = s.tuffCustom
+      ? s.tuffCustom.rows
+      : tuffCustom
+        ? [1, 0]
+        : [0, 0];
+    const tuffCustomPerimLap: [number, number] = s.tuffCustom
+      ? [30, 60]
+      : [s.perimLap ?? -1, s.perimLap ?? -1];
+    const tuffCustomCornerLap: [number, number] = s.tuffCustom
+      ? [30, 60]
+      : [s.cornerLap ?? -1, s.cornerLap ?? -1];
     const tuff =
       rsId === 3
         ? duroTuffMembraneCalc({
@@ -1031,12 +1064,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             width: s.width,
             overlapWidthIn: LEGACY_OVERLAP_WIDTH_IN[3] ?? 6,
             fieldLapIn: s.fieldLap,
-            customFieldLapIn: -1,
+            customFieldLapIn: s.tuffCustom?.fieldLapIn ?? -1,
             mechanical: sys.attachment === "mechanical",
             useCustomSettings: tuffCustom,
-            customRows: tuffCustom ? [1, 0] : [0, 0],
-            customPerimLapIn: [s.perimLap ?? -1, s.perimLap ?? -1],
-            customCornerLapIn: [s.cornerLap ?? -1, s.cornerLap ?? -1],
+            customRows: tuffCustomRows,
+            customPerimLapIn: tuffCustomPerimLap,
+            customCornerLapIn: tuffCustomCornerLap,
             sides: [0, 1, 2, 3].map((i) => {
               const e = edgeList?.[i];
               return {
@@ -1420,8 +1453,10 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     if (rsId === 3 && sys.attachment === "mechanical" && tuff) {
       const lookup = (bid.fastenerLookup ?? []).filter((r) => r.roofSystemId === 3);
       let lookupMissing = false;
-      const tierPerimOc = (lapIn: number): number => {
-        if (tuffCustom) return s.perimFastenerOc; // legacy CustomPerimeterFastenerSpacing(i)
+      const tierPerimOc = (lapIn: number, i: 0 | 1): number => {
+        // Legacy UseCustomSettings → CustomPerimeterFastenerSpacing(i) (the DT form's boxes).
+        if (s.tuffCustom) return s.tuffCustom.perimOc[i];
+        if (tuffCustom) return s.perimFastenerOc;
         if (!lookup.length) {
           lookupMissing = true;
           return s.perimFastenerOc;
@@ -1439,13 +1474,17 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         return r.ok ? r.inches : -1;
       };
       const tiers = ([0, 1] as const).map((i) => {
-        const perimOc = tierPerimOc(tuff.perimLapIn[i]);
+        const perimOc = tierPerimOc(tuff.perimLapIn[i], i);
         return {
           rows: tuff.rows[i],
           lapIn: tuff.perimLapIn[i],
           cornerLapIn: tuff.cornerLapIn[i],
           perimOc,
-          cornerOc: tuffCustom ? s.cornerFastenerOc : perimOc,
+          cornerOc: s.tuffCustom
+            ? s.tuffCustom.cornerOc[i]
+            : tuffCustom
+              ? s.cornerFastenerOc
+              : perimOc,
         };
       });
       if (
@@ -1547,7 +1586,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       fieldLap: laborFieldLap,
       perimLap: laborPerimLap,
       cornerLap: laborCornerLap,
-      customFieldFastenerSpacing: s.fastenerOc,
+      // Duro-Tuff custom settings carry their own field spacing (CustomFieldFastenerSpacing).
+      customFieldFastenerSpacing: s.tuffCustom?.fieldOc ?? s.fastenerOc,
       customPerimFastenerSpacing: s.perimFastenerOc,
       customCornerFastenerSpacing: s.cornerFastenerOc,
       deckTypeId: sLt?.deckTypeIds[s.deckType] ?? 0,

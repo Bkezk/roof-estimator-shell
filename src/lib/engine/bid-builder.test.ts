@@ -3444,3 +3444,118 @@ describe("Duro-Tuff mechanical perimeter — row-based labor tiers (docs §22.15
     );
   });
 });
+
+describe("Duro-Tuff custom settings — the Advanced form's DT group (docs §22.15)", () => {
+  const tuffCombo: LaborCombo = {
+    roof_system: "Duro-Tuff",
+    attachment: "mechanical",
+    base: { tab_value: 30, tab_multiplier: 2.8 },
+    deck_multipliers: { Wood: 1 },
+    fastener_spacing_multipliers: [
+      { spacing_in: 18, multiplier: 1 },
+      { spacing_in: 12, multiplier: 1.1 },
+      { spacing_in: 6, multiplier: 1.41 },
+    ],
+    sheet_size_multipliers: [{ label: "1500 sf", roof_section: 1, underlayment: 1 }],
+    thickness_multipliers: [{ mil: 40, multiplier: 1 }],
+  };
+  const tAdmin: EngineAdminData = {
+    ...admin,
+    labor: {
+      ...admin.labor,
+      "Duro-Tuff|mechanical": {
+        ...buildLaborTables(tuffCombo, deckOrder),
+        tabBands: [
+          { key: 30, value: 2.8 },
+          { key: 60, value: 1.4 },
+          { key: 120, value: 0.95 },
+        ],
+      },
+    },
+    familyMembranePrices: { "Duro-Tuff": { "40": 1.23 } },
+    rollGoodWidthMulti: { 3: { 30: 2.6, 60: 1.3, 120: 1 } },
+  };
+  const edgesA = [
+    {
+      side: "A",
+      lengthFt: 50,
+      isPerimeter: true,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    },
+    {
+      side: "B",
+      lengthFt: 50,
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    },
+    {
+      side: "C",
+      lengthFt: 50,
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    },
+    {
+      side: "D",
+      lengthFt: 50,
+      isPerimeter: false,
+      termination: "No Termination",
+      blockingFt: 0,
+      arpSizeIn: 0,
+    },
+  ];
+  it("rows / per-tier spacings / field width & spacing flow into the calc and the labor tiers", () => {
+    const { inputs } = buildEstimateInputs(
+      bid({
+        roofSystem: "Duro-Tuff",
+        sections: [
+          {
+            ...bid().sections[0]!,
+            roofSystem: "Duro-Tuff",
+            fieldLap: 60,
+            fastenerOc: 18,
+            perimFastenerOc: 18,
+            cornerFastenerOc: 18,
+            enhancementWidthFt: 5,
+            edges: edgesA,
+            isQuickBid: false,
+            tuffCustom: {
+              rows: [2, 1],
+              perimOc: [12, 6],
+              cornerOc: [6, 12],
+              fieldLapIn: 120,
+              fieldOc: 12,
+            },
+          },
+        ],
+      }),
+      tAdmin,
+    );
+    const s0 = inputs.sections[0]!;
+    // Rows and the fixed 30" / 60" widths reach the calc; the custom field width re-keys the field.
+    expect(
+      s0.duroTuffMech!.tiers.map((t) => [t.rows, t.lapIn, t.cornerLapIn, t.perimOc, t.cornerOc]),
+    ).toEqual([
+      [2, 30, 30, 12, 6],
+      [1, 60, 60, 6, 12],
+    ]);
+    expect(s0.fieldLap).toBe(120);
+    expect(s0.customFieldFastenerSpacing).toBe(12);
+    const M = s0.membraneWithOverlap;
+    const f = (10 * 1 * 0.95 * 1.1) / 2500; // field: tab 120 → 0.95, 12" → 1.1
+    const a0 = 2 * 2.5 * 50;
+    const a1 = 1 * 5 * 50;
+    const p0 = (10 * 1 * 2.8 * 1.1) / 2500; // tier 0 perim: tab 30, 12"
+    const p1 = (10 * 1 * 1.4 * 1.41) / 2500; // tier 1 perim: tab 60, 6"
+    const expected = f * (M - a0 - a1) + p0 * a0 + p1 * a1; // no corner footage
+    expect(computeSectionInstallHours(s0, inputs.admin, inputs.formulasVersion, 0)).toBeCloseTo(
+      expected,
+      6,
+    );
+  });
+});
