@@ -808,6 +808,20 @@ export interface FastenerRowTotal {
   cost: number;
 }
 
+/**
+ * One legacy Accessories Summary row (`frmAccReview.UpdateList` over
+ * `Accessories.AccessoriesReviewTable`: Qty / Name / UnitCost / TotalCost / Labor), tagged with
+ * the screen it came from so the sidebar can group it.
+ */
+export interface AccessoryReviewLine {
+  screen: string;
+  qty: number;
+  name: string;
+  unitCost: number;
+  totalCost: number;
+  hours: number;
+}
+
 export interface AccessoriesResult {
   totalCost: number;
   manHours: number; // billed, unrounded (LEGACY: footer bills unrounded hours)
@@ -851,6 +865,8 @@ export interface AccessoriesResult {
   fasteners: { cost: number; rows: FastenerRowTotal[] };
   parapetTabs: { fastenersNeeded: number; steelPlatesNeeded: number };
   deckNeeds: Record<DeckBucket, DeckBucketNeeds>;
+  /** The legacy Accessories Summary rows (every priced / laboured item, in screen order). */
+  lines: AccessoryReviewLine[];
   warnings: string[];
 }
 
@@ -888,6 +904,18 @@ const adj = (pct: number): number => 1 + (pct || 0) / 100;
 export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesResult {
   const { state: st, ref } = args;
   const warnings: string[] = [];
+  const lines: AccessoryReviewLine[] = [];
+  const line = (
+    screen: string,
+    qty: number,
+    name: string,
+    unitCost: number,
+    totalCost: number,
+    hours = 0,
+  ) => {
+    if (qty <= 0 && totalCost <= 0 && hours <= 0) return;
+    lines.push({ screen, qty, name, unitCost, totalCost, hours });
+  };
   const defaultColor = args.sections[0]?.color ?? "White";
   const geo: GeoInputs = {
     sections: args.sections,
@@ -951,17 +979,29 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     // Billed hours EXCLUDE base footage; the labor-link seed INCLUDES it (LEGACY QUIRK §12.2).
     const baseNDc = c === "White" ? baseND : 0;
     const basePDc = c === "White" ? basePD : 0;
-    tbBilledNoDrill += round(
+    const tbNdHours = round(
       roundToNextTen(F32_SCRAP * (noDrill + addlND)) *
         tbRates.noDrillPerFt *
         adj(st.termBar.adjustNoDrillPct),
       4,
     );
-    tbBilledPreDrill += round(
+    const tbPdHours = round(
       roundToNextTen(F32_SCRAP * (preDrill + addlPD)) *
         tbRates.preDrillPerFt *
         adj(st.termBar.adjustPreDrillPct),
       4,
+    );
+    tbBilledNoDrill += tbNdHours;
+    tbBilledPreDrill += tbPdHours;
+    // Summary row: legacy "Termination Bars <Color>" — Qty = scrapped length, Labor = the bar's
+    // no-drill + pre-drill hours.
+    line(
+      "Term Bar",
+      lenWith,
+      `Termination Bars ${c}`,
+      ref.termBars[c]?.pricePerFt ?? 0,
+      lenWith * (ref.termBars[c]?.pricePerFt ?? 0),
+      tbNdHours + tbPdHours,
     );
     tbLinkNoDrill += round(
       roundToNextTen(F32_SCRAP * (noDrill + baseNDc + addlND)) * tbRates.noDrillPerFt,
@@ -1077,6 +1117,50 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const stripFt = fst.stripMastic
       ? roundToNextTen(F32_SCRAP * (fst.stripMasticLengthFt ?? totalLength))
       : 0;
+    {
+      const screen = size === "3" ? '1-3/4" Fascia' : '4" Fascia';
+      const desc = size === "3" ? '1-3/4" Fascia Bar' : '4" Fascia Bar';
+      line(
+        screen,
+        totalLength,
+        desc,
+        fref.barPricePerFt,
+        totalLength * fref.barPricePerFt,
+        hoursND + hoursPD,
+      );
+      for (const c of TERM_COLORS) {
+        const q = roundToNextTen(vinylQty[c]);
+        if (q > 0)
+          line(
+            screen,
+            q,
+            `${desc} ${c} Vinyl Covers`,
+            fref.vinylCoverPrice[c],
+            q * fref.vinylCoverPrice[c],
+          );
+      }
+      const mq = roundToNextTen(metalQty.White + metalQty.Tan + metalQty.Gray);
+      if (mq > 0)
+        line(screen, mq, `${desc} Metal Covers`, fref.metalCoverPrice, mq * fref.metalCoverPrice);
+      if (fst.metalCovers.on) {
+        if (fst.metalCovers.inside > 0)
+          line(
+            screen,
+            fst.metalCovers.inside,
+            `${desc} Inside Corners`,
+            fref.insideCornerPrice,
+            fst.metalCovers.inside * fref.insideCornerPrice,
+          );
+        if (fst.metalCovers.outside > 0)
+          line(
+            screen,
+            fst.metalCovers.outside,
+            `${desc} Outside Corners`,
+            fref.outsideCornerPrice,
+            fst.metalCovers.outside * fref.outsideCornerPrice,
+          );
+      }
+    }
     fasciaResult[size] = {
       counts: {
         roofEdgesFt: sumColors(roofBy),
@@ -1174,6 +1258,58 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
             sizeHours += round(sref.outsideCorner.laborFactor * (sst.outsideCorners ?? 0) * a, 4);
         }
       }
+      {
+        const desc = group === "dripEdge" ? `${size}" Drip Edge` : `${size}" Gravel Stop`;
+        // Legacy: a "<desc> Labor" row (Qty = calc length) then per-colour material rows.
+        if (sizeScrapLen > 0) {
+          const totalExtra = TERM_COLORS.reduce((acc, c) => acc + colorVal(sst.extraFt, c), 0);
+          line(desc, sumColors(calcBy) + totalExtra, `${desc} Labor`, 0, 0, sizeHours);
+        }
+        for (const c of TERM_COLORS) {
+          if (scrapBy[c] > 0)
+            line(
+              desc,
+              scrapBy[c],
+              `${desc} ${c}`,
+              sref.bar.priceByColor[c] ?? 0,
+              scrapBy[c] * (sref.bar.priceByColor[c] ?? 0),
+            );
+          const cq = colorVal(sst.corners, c);
+          if (cq > 0)
+            line(
+              desc,
+              cq,
+              `${desc} Corners ${c}`,
+              sref.corner?.priceByColor[c] ?? 0,
+              cq * (sref.corner?.priceByColor[c] ?? 0),
+            );
+          const vq = colorVal(sst.coverQty, c);
+          if (vq > 0)
+            line(
+              desc,
+              vq,
+              `${desc} Metal Cover ${c}`,
+              sref.cover?.priceByColor[c] ?? 0,
+              vq * (sref.cover?.priceByColor[c] ?? 0),
+            );
+        }
+        if ((sst.insideCorners ?? 0) > 0)
+          line(
+            desc,
+            sst.insideCorners ?? 0,
+            `${desc} Inside Corner Metal Cover`,
+            sref.insideCorner?.priceByColor.White ?? 0,
+            (sst.insideCorners ?? 0) * (sref.insideCorner?.priceByColor.White ?? 0),
+          );
+        if ((sst.outsideCorners ?? 0) > 0)
+          line(
+            desc,
+            sst.outsideCorners ?? 0,
+            `${desc} Outside Corner Metal Cover`,
+            sref.outsideCorner?.priceByColor.White ?? 0,
+            (sst.outsideCorners ?? 0) * (sref.outsideCorner?.priceByColor.White ?? 0),
+          );
+      }
       cost += sizeCost;
       billedHours += sizeHours;
       sizes[size] = {
@@ -1229,6 +1365,36 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       ) * adj(sst.adjustPct),
       4,
     );
+    {
+      const screen = "Base & Snap Cover";
+      const desc = `${size}" Piece`;
+      line(
+        screen,
+        totalLength,
+        `${desc} Base`,
+        sref.pricePerFt,
+        totalLength * sref.pricePerFt,
+        hours,
+      );
+      if (coversQty > 0)
+        line(screen, coversQty, `${desc} Covers`, sref.coverPrice, coversQty * sref.coverPrice);
+      if (sst.insideCorners > 0)
+        line(
+          screen,
+          sst.insideCorners,
+          `${desc} Inside Corners`,
+          sref.insideCornerPrice,
+          sst.insideCorners * sref.insideCornerPrice,
+        );
+      if (sst.outsideCorners > 0)
+        line(
+          screen,
+          sst.outsideCorners,
+          `${desc} Outside Corners`,
+          sref.outsideCornerPrice,
+          sst.outsideCorners * sref.outsideCornerPrice,
+        );
+    }
     snapFasteners += fasteners;
     snapCost += cost;
     snapHours += hours;
@@ -1257,6 +1423,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       if (!qty) continue;
       cornersCost += qty * (row.priceByColor[color] ?? 0);
       cornersHours += row.hours * qty;
+      line(
+        "Corners",
+        qty,
+        `${row.description} corner - ${color}`,
+        row.priceByColor[color] ?? 0,
+        qty * (row.priceByColor[color] ?? 0),
+        row.hours * qty * adj(st.corners.adjustPct),
+      );
     }
   }
   cornersHours = cornersHours * adj(st.corners.adjustPct);
@@ -1282,6 +1456,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     h = h * adj(ps.adjustPct);
     perStackHours[ps.id] = h;
     stacksHours += h;
+    line(
+      "Pipe Stacks",
+      ps.quantity,
+      `${sizeRef?.label ?? `${ps.size}"`} ${ps.open ? "Open" : "Closed"} ${ps.color} (${ps.usage})`,
+      price,
+      price * ps.quantity,
+      h,
+    );
     // Consumption (§12.3): circumference c = Ceil((size + ¼)π) in; sealant ft = c/12 × qty
     // (per the stack's OWN colour — the 6 eDLColorsIndex buckets, not the bar fold);
     // panduit 20" straps = ⌊c/17⌋, then 14" straps = Ceil(remainder/11), each × qty.
@@ -1314,6 +1496,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     washersCost += row.price * qty;
     washersHours += round(row.hours * qty, 4);
     washersQtyTotal += qty;
+    line(
+      "Conduit Washers",
+      qty,
+      row.description,
+      row.price,
+      row.price * qty,
+      round(row.hours * qty, 4) * adj(st.washers.adjustPct),
+    );
   }
   washersHours = washersHours * adj(st.washers.adjustPct);
 
@@ -1336,6 +1526,24 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       ) * adj(d.adjustPct);
     perDrainHours[d.id] = h;
     drainsHours += h;
+    if (d.reuseRings) line("Roof Drains & Boots", d.quantity, "Reuse Ring", 0, 0, h);
+    else {
+      line(
+        "Roof Drains & Boots",
+        d.quantity,
+        boot?.description ?? d.bootSize,
+        boot?.price ?? 0,
+        d.quantity * (boot?.price ?? 0),
+        h,
+      );
+      line(
+        "Roof Drains & Boots",
+        d.quantity,
+        ring?.description ?? d.ringSize,
+        ring?.price ?? 0,
+        d.quantity * (ring?.price ?? 0),
+      );
+    }
   }
   let strainersCost = 0;
   let strainersHours = 0;
@@ -1344,6 +1552,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     if (!qty) continue;
     strainersCost += row.price * qty;
     strainersHours += qty * row.hours;
+    line(
+      "Roof Drains & Boots",
+      qty,
+      row.description,
+      row.price,
+      row.price * qty,
+      qty * row.hours * adj(st.strainers.adjustPct),
+    );
   }
   strainersHours = strainersHours * adj(st.strainers.adjustPct);
 
@@ -1355,6 +1571,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     if (!qty) continue;
     walkCost += row.price * qty;
     walkHours += qty * row.hours;
+    line(
+      "Walk Pads",
+      qty,
+      row.description,
+      row.price,
+      row.price * qty,
+      qty * row.hours * adj(st.walkPads.adjustPct),
+    );
   }
   walkHours = walkHours * adj(st.walkPads.adjustPct);
 
@@ -1369,6 +1593,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const boxes = total > 0 && row.partsPerBag > 0 ? Math.ceil(total / row.partsPerBag) : 0;
     panduitBoxes[row.description] = boxes;
     const boxCost = row.partsPerBag * row.pricePerPart;
+    if (boxes > 0)
+      line(
+        "Panduit Straps",
+        boxes,
+        `${row.description} Panduit`,
+        boxCost,
+        LEGACY_PANDUIT_ONE_BOX_PER_ROW ? boxCost : boxes * boxCost,
+      );
     if (LEGACY_PANDUIT_ONE_BOX_PER_ROW) {
       // Legacy TotalBoxCost: one box per present row (see the constant's note).
       if (boxes > 0) panduitCost += boxCost;
@@ -1462,6 +1694,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const calcQty = sealantCalcByPart[row.part] ?? 0;
     const total = calcQty + (st.sealants.extra[row.part] ?? 0);
     sealantsCost += row.price * total;
+    if (total > 0) line("Sealants", total, row.description, row.price, row.price * total);
   }
 
   /* ---------------- Membrane Accs (§12.4) ---------------- */
@@ -1476,6 +1709,15 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     maCost += arpCost;
     // ARP labor: extra qty only, rate 0, adjust −2 (no %) — stays 0 (§12.4).
     maHours += st.membraneAccs.arpExtra * ma.arpHours;
+    if (total > 0)
+      line(
+        "Membrane Acc.",
+        Math.ceil(total / ma.arp.partsPerPack),
+        "ARP",
+        ma.arp.pricePerPack,
+        arpCost,
+        st.membraneAccs.arpExtra * ma.arpHours,
+      );
   }
   // §12.9 item 1: T-Patch counts DURO-TUFF sections only — Round(Length × Width / 250)
   // (banker's, raw area). The §12.8 "contradiction" was an inverted filter in the first §12.4
@@ -1487,9 +1729,21 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   }
   if (ma.tPatch) {
     const total = tPatchCalc + st.membraneAccs.tPatchExtra;
+    const tPatchCost =
+      total > 0 ? round(ma.tPatch.pricePerPack * Math.ceil(total / ma.tPatch.partsPerPack), 2) : 0;
+    maCost += tPatchCost;
+    const tPatchHours =
+      st.membraneAccs.tPatchExtra * ma.tPatchHours * adj(st.membraneAccs.tPatchAdjustPct);
+    maHours += tPatchHours;
     if (total > 0)
-      maCost += round(ma.tPatch.pricePerPack * Math.ceil(total / ma.tPatch.partsPerPack), 2);
-    maHours += st.membraneAccs.tPatchExtra * ma.tPatchHours * adj(st.membraneAccs.tPatchAdjustPct);
+      line(
+        "Membrane Acc.",
+        Math.ceil(total / ma.tPatch.partsPerPack),
+        "T-Patch",
+        ma.tPatch.pricePerPack,
+        tPatchCost,
+        tPatchHours,
+      );
   }
   // Stripping rows (docs §22.9): user-entered feet per section; one legacy row per
   // (system, colour, mil) part number → GenericMaterial.Cost = Round(price × Ceil(Σ ft / 1), 2);
@@ -1499,16 +1753,19 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   {
     const feetByPart: Record<string, { price: number; feet: number }> = {};
     let unpricedFt = 0;
+    let strippingHours = 0;
     for (const s of args.sections) {
       const ft = st.membraneAccs.strippingFtBySection[s.id] ?? 0;
       const info = args.strippingBySection?.[s.id];
       strippingPriceBySection[s.id] = info?.pricePerFt ?? 0;
       if (ft <= 0) continue;
-      maHours +=
+      const h =
         ft *
         ma.strippingHoursPerFt *
         (info?.deckMulti ?? 1) *
         adj(st.membraneAccs.strippingAdjustPct);
+      maHours += h;
+      strippingHours += h;
       if (!info || info.pricePerFt <= 0) {
         unpricedFt += ft;
         continue;
@@ -1516,9 +1773,22 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
       const part = (feetByPart[info.partKey] ??= { price: info.pricePerFt, feet: 0 });
       part.feet += ft;
     }
-    for (const part of Object.values(feetByPart)) {
-      strippingCost += round(part.price * Math.ceil(part.feet), 2);
+    let first = true;
+    for (const [partKey, part] of Object.entries(feetByPart)) {
+      const c = round(part.price * Math.ceil(part.feet), 2);
+      strippingCost += c;
+      line(
+        "Membrane Acc.",
+        Math.ceil(part.feet),
+        `Stripping ${partKey}`,
+        part.price,
+        c,
+        first ? strippingHours : 0,
+      );
+      first = false;
     }
+    if (first && strippingHours > 0)
+      line("Membrane Acc.", unpricedFt, "Stripping (labor only)", 0, 0, strippingHours);
     if (unpricedFt > 0) {
       warnings.push(
         `Stripping: ${unpricedFt} ft entered on a section with no roll-goods price for its mil/colour — bills labor only.`,
@@ -1546,6 +1816,14 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     if (total <= 0) continue;
     ventsCost += v.price * total;
     ventsHours += round(total * ref.ventLaborHours, 4);
+    line(
+      "Vents",
+      total,
+      v.color,
+      v.price,
+      v.price * total,
+      round(total * ref.ventLaborHours, 4) * adj(st.vents.adjustPct),
+    );
   }
   ventsHours = ventsHours * adj(st.vents.adjustPct);
 
@@ -1562,6 +1840,13 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     const cost = round(boxes * row.boxPrice, 2);
     fastenersCost += cost;
     fastenerRows.push({ key: row.key, totalQty: total, boxes, cost });
+    line(
+      "Fasteners",
+      boxes,
+      `${row.description} ${row.subtype}`.trim() + ` (${total} pcs, boxes of ${row.perBox})`,
+      row.boxPrice,
+      cost,
+    );
   }
 
   /* ---------------- Items Required per deck bucket (§12.5) ---------------- */
@@ -1803,6 +2088,7 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     fasteners: { cost: fastenersCost, rows: fastenerRows },
     parapetTabs: { fastenersNeeded: parapetTabsNeeded, steelPlatesNeeded },
     deckNeeds,
+    lines,
     warnings,
   };
 }

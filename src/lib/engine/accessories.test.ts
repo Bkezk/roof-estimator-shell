@@ -423,6 +423,21 @@ describe("§12.0 anchors (captured legacy bid)", () => {
   });
 });
 
+describe("Accessories Summary lines (frmAccReview)", () => {
+  it("every priced / laboured item is listed and the rows reconcile to the footer totals", () => {
+    const st = emptyAccessoriesState();
+    st.fastenerQty = { dripEdge: { [fastenerKey('1 1/2"', "Spade")]: 21 } };
+    const r = computeAccessories(anchorArgs(st));
+    expect(r.lines.length).toBeGreaterThan(0);
+    const cost = r.lines.reduce((s, l) => s + l.totalCost, 0);
+    const hours = r.lines.reduce((s, l) => s + l.hours, 0);
+    expect(cost).toBeCloseTo(r.totalCost, 2);
+    expect(hours).toBeCloseTo(r.manHours, 2);
+    expect(r.lines.map((l) => l.screen)).toContain("Vents");
+    expect(r.lines.find((l) => l.screen === "Fasteners")?.qty).toBe(1); // one box of spades
+  });
+});
+
 describe("term bar (§12.2)", () => {
   it("prices per ten-rounded scrap foot per colour; fasteners at 21/10 ft; labor split by drill", () => {
     const blankEdge = {

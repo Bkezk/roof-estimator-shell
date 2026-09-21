@@ -58,6 +58,7 @@ import {
 import { underlaymentLayerFasteners } from "@/lib/engine/underlayment-fasteners";
 import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
+import { AccessorySummaryCard } from "@/components/accessory-summary-card";
 import { MetalsScreens } from "@/components/metals-screens";
 import { CurbsScreen } from "@/components/curbs-screen";
 import { ParapetsScreen } from "@/components/parapets-screen";
@@ -4372,6 +4373,7 @@ function EstimatePage() {
             )}
           </CardContent>
         </Card>
+        <AccessorySummaryCard result={result?.accessories} laborRate={laborRate} />
       </div>
 
       {/* Mobile: the live total stays in reach on every step (the panel itself sits at the
