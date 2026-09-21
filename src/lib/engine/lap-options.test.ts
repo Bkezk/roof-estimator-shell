@@ -99,6 +99,37 @@ describe("legacyLapOptions (frmRoofSection.LoadLapSpacings)", () => {
     expect(r.raw).toEqual([64]);
     expect(r.isRollWidth).toBe(true);
   });
+  it("Duro-Bond: lists the system's roll widths (30/60/120) as Field Roll Width; its lookup rows (tab −1) pass any width for a qualifying pull test (§22.21)", () => {
+    // Legacy mech_fastener_lookup for RoofSystem 2 carries tab_spacing −1 on every row, so
+    // UniversalFastenerSpacing(…, [lap], pullTest) qualifies each width by pull test alone.
+    const bondLookup: MechFastenerRow[] = [
+      { ...row(-1, 210, 6), roofSystemId: 2, membraneThickness: 50 },
+      { ...row(-1, 300, 8), roofSystemId: 2, membraneThickness: 50 },
+    ];
+    const bondAdmin = {
+      ...admin,
+      rollGoodWidthMulti: { ...admin.rollGoodWidthMulti, 2: { 30: 1, 60: 1, 120: 1 } },
+    };
+    const bond = {
+      ...section,
+      roofSystem: "Duro-Bond",
+      thickness: 50,
+      pullTest: 425,
+      fieldLap: 60,
+    };
+    const r = legacyLapOptions(bond, { bidDefaults, fastenerLookup: bondLookup, admin: bondAdmin });
+    expect(r.isRollWidth).toBe(true);
+    expect(r.raw).toEqual([30, 60, 120]);
+    expect(r.options).toEqual([30, 60, 120]);
+    expect(r.checkPull).toBe(false);
+    // No pull test entered → nothing qualifies → the single "Check Pull" entry, as in legacy.
+    const cp = legacyLapOptions(
+      { ...bond, pullTest: 0 },
+      { bidDefaults, fastenerLookup: bondLookup, admin: bondAdmin },
+    );
+    expect(cp.checkPull).toBe(true);
+  });
+
   it("without the lookup table loaded the raw list is offered (data gap, not a rule)", () => {
     const r = legacyLapOptions(section, { bidDefaults, fastenerLookup: undefined, admin });
     expect(r.options).toEqual([28, 60, 120]);

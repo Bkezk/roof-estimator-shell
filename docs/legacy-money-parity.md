@@ -2781,3 +2781,27 @@ exact — Round(34,216/32 × 6) + Round(18,286/32 × 6) = 9,845. The layer loop 
 Duro-Bond mechanical sections (test: 188 × 182 → 6,416); the §12.5 quirk `insulPlates += uf per
 mechanical layer` is kept, so those layers should be "Section Fastened w/ Durobond" (§22.17) to
 show the legacy 0. Poly plates 945 vs 960 is the parapet-length drift (750 + 160 + 35).
+
+### 22.21 Duro-Bond "Field Roll Width" pick was empty (2026-09-21)
+
+Owner: on a Duro-Bond section the Field Roll Width did not drop down with 30 / 60 / 120.
+
+- **Cause — data, not code.** `LoadLapSpacings` (0x94de0) lists `RoofSystem.RollGoodWidths`
+  (RSRollGoodWidth by RoofSystemID) on a roll-goods sheet layout. The shipped installer script
+  seeds RSRollGoodWidth for systems 1 / 3 / 4 / 5 only (Duro-Last 64; Duro-Tuff 30/60/120;
+  Duro-Roof 64; Duro-Fleece 60/120) — no RoofSystem 2 row — and `rdl_roll_good_width` was
+  seeded verbatim from it (§21 migration `20260914100000`), so `legacyLapOptions` had an empty
+  raw list for Duro-Bond and the screen fell back to the bare number box. The live vendor DB
+  evidently carries 30 / 60 / 120 for Duro-Bond (the owner's legacy screen); seeded as
+  migration `20260921150000` (applied live) with the adhered multiplier = 1, which nothing reads
+  because Duro-Bond has no adhered attachment. Not a table capture — if the legacy combo shows
+  other widths, edit the rows.
+- **Filter is unchanged and legacy-exact.** `LoadFlowPanel` always shows `pnlLaps` in the
+  advanced view and nothing hides it per system; the pull-test filter applies (the Duro-Bond
+  field attachment is a `cMechanicalSystem`, ShortName `durobondmech`) and its
+  `mech_fastener_lookup` rows all carry tab_spacing −1, so every width qualifies once the pull
+  test finds a row (≥ 210 lb at 60 psf); no pull test → the single "Check Pull" entry, as in
+  legacy. The chosen width feeds `RollGoodsMembraneCalc` (FieldLap) for the Duro-Bond membrane
+  quantity, so the pick is money-relevant. `EditAdvRSOptions` (0x9561c) clears the combo on
+  durolastmech / duroroofmech / durobondmech only while the Advanced dialog's custom settings
+  are applied — not a hide.
