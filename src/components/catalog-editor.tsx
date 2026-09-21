@@ -97,7 +97,10 @@ export function CatalogEditor({
   if (!selected || !draft) return null;
 
   const cols = draft.columns;
-  const valueCols = cols.filter((c) => c !== "Description");
+  // The label column is "Description" on every legacy screen except Underlayment, whose
+  // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
+  const labelCol = cols.includes("Description") ? "Description" : (cols[0] ?? "Description");
+  const valueCols = cols.filter((c) => c !== labelCol);
 
   const setCell = (ri: number, col: string, v: string | number) =>
     setDraft((p) => {
@@ -121,7 +124,7 @@ export function CatalogEditor({
       return n;
     });
     toast("Row deleted", {
-      description: String(removed["Description"] ?? "") || undefined,
+      description: String(removed[labelCol] ?? "") || undefined,
       duration: 8000,
       action: {
         label: "Undo",
@@ -245,12 +248,12 @@ export function CatalogEditor({
                     {isLocked(row) ? (
                       <div className="flex min-w-[220px] items-center gap-1.5 text-sm">
                         <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span>{String(row["Description"] ?? "")}</span>
+                        <span>{String(row[labelCol] ?? "")}</span>
                       </div>
                     ) : (
                       <Input
-                        value={String(row["Description"] ?? "")}
-                        onChange={(e) => setCell(ri, "Description", e.target.value)}
+                        value={String(row[labelCol] ?? "")}
+                        onChange={(e) => setCell(ri, labelCol, e.target.value)}
                         className="min-w-[220px]"
                       />
                     )}
@@ -291,7 +294,7 @@ export function CatalogEditor({
               setDraft((p) => {
                 const n = clone(p!);
                 const blank: Record<string, string | number> = {};
-                for (const c of n.columns) blank[c] = c === "Description" ? "" : 0;
+                for (const c of n.columns) blank[c] = c === labelCol ? "" : 0;
                 n.rows.push(blank);
                 return n;
               })
@@ -320,9 +323,8 @@ export function CatalogEditor({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this row?</AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmDelete !== null &&
-              String(draft.rows[confirmDelete]?.["Description"] ?? "").trim()
-                ? `"${String(draft.rows[confirmDelete]!["Description"])}" will be removed from ${selected.category}.`
+              {confirmDelete !== null && String(draft.rows[confirmDelete]?.[labelCol] ?? "").trim()
+                ? `"${String(draft.rows[confirmDelete]![labelCol])}" will be removed from ${selected.category}.`
                 : `This row will be removed from ${selected.category}.`}{" "}
               You can undo right after, and nothing is permanent until you save changes.
             </AlertDialogDescription>
