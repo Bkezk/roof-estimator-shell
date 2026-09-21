@@ -8,6 +8,17 @@
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { NumberField } from "@/components/ui/number-field";
 import type { EstimateResult } from "@/lib/engine/estimate";
 import type { MarkupMode } from "@/lib/engine/money";
 import type { LedgerRow, ReviewLedger } from "@/lib/engine/review-ledger";
@@ -66,6 +77,74 @@ function ClickEdit(props: {
   );
 }
 
+/**
+ * Legacy `frmPerDiem` ("Per Diem Charge calculator", opened from the Review's Per-Diem link):
+ * Est. Man-Days (read-only), Man Days (prefilled with the estimate), Per-Diem Charge ($/man-day)
+ * and Total. Days or rate edits recompute Total = Days × rate; a typed Total back-solves the
+ * rate = Total / Days. OK stores the RATE (Estimate.PerDiem, Single); the review then bills
+ * GoodSingle(rate × TotalManDays), so a typed flat total comes back as that total.
+ */
+function PerDiemCalcDialog(props: {
+  open: boolean;
+  onClose: () => void;
+  estManDays: number;
+  rate: number;
+  onCommit: (rate: number) => void;
+}) {
+  const [days, setDays] = useState(props.estManDays);
+  const [rate, setRate] = useState(props.rate);
+  const [total, setTotal] = useState(Math.fround(props.rate) * Math.fround(props.estManDays));
+  const f32 = Math.fround;
+  const fromDays = (d: number) => {
+    setDays(d);
+    setTotal(f32(f32(d) * f32(rate)));
+  };
+  const fromRate = (r: number) => {
+    setRate(r);
+    setTotal(f32(f32(days) * f32(r)));
+  };
+  const fromTotal = (t: number) => {
+    setTotal(t);
+    if (days > 0) setRate(f32(f32(t) / f32(days)));
+  };
+  return (
+    <Dialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Per Diem Charge calculator</DialogTitle>
+          <DialogDescription>
+            Type the flat Total and the per-man-day rate is solved from your Man Days; or type the
+            rate. The bid bills rate × the estimate&apos;s man-days.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-sm">
+          <Label className="text-xs">Est. Man-Days :</Label>
+          <span className="tabular-nums">{num2(props.estManDays)}</span>
+          <Label className="text-xs">Man Days :</Label>
+          <NumberField value={days} step="0.01" className="h-8" onChange={fromDays} />
+          <Label className="text-xs">Per-Diem Charge :</Label>
+          <NumberField value={rate} step="0.01" className="h-8" onChange={fromRate} />
+          <Label className="text-xs">Total :</Label>
+          <NumberField value={total} step="0.01" className="h-8" onChange={fromTotal} />
+        </div>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={props.onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              props.onCommit(rate);
+              props.onClose();
+            }}
+          >
+            Ok
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function GroupHeader({ label }: { label: string }) {
   return (
     <tr className="bg-muted/60">
@@ -117,6 +196,7 @@ export function EstimateReviewLedger(props: {
 }) {
   const { ledger, est } = props;
   const [laborView, setLaborView] = useState(false);
+  const [perDiemOpen, setPerDiemOpen] = useState(false);
   const d = est.money.dTotals;
   const v = (i: number) => d[i] ?? 0;
   const g = est.money.grandTotal;
@@ -318,12 +398,23 @@ export function EstimateReviewLedger(props: {
               <td className="px-2 py-0.5">Per-Diem Charge</td>
               <td />
               <td className="px-2 py-0.5 text-right">
-                <ClickEdit
-                  display={usd(est.money.perDiemValue)}
-                  value={props.perDiem.rate}
-                  onCommit={props.perDiem.onChange}
-                  title="Per-diem $/man-day — click to edit the rate"
-                />
+                <button
+                  type="button"
+                  className="tabular-nums text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                  title="Per Diem Charge calculator — enter a flat total or a $/man-day rate"
+                  onClick={() => setPerDiemOpen(true)}
+                >
+                  {usd(est.money.perDiemValue)}
+                </button>
+                {perDiemOpen && (
+                  <PerDiemCalcDialog
+                    open
+                    onClose={() => setPerDiemOpen(false)}
+                    estManDays={est.money.totalManDays}
+                    rate={props.perDiem.rate}
+                    onCommit={props.perDiem.onChange}
+                  />
+                )}
               </td>
             </tr>
             <tr className="border-t">

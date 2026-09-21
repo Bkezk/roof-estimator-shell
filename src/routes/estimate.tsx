@@ -2076,7 +2076,7 @@ function EstimatePage() {
                       />
                       Per Diem
                     </label>
-                    <Field label="Per Diem ($/man-day)">
+                    <Field label="Per Diem ($/man-day — the Review's calculator takes a flat total)">
                       <NumberField
                         className="h-8 w-[120px]"
                         value={perDiem}
