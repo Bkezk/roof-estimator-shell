@@ -52,10 +52,11 @@ export const roundToNextTen = (x: number): number => {
  * LEGACY QUIRK (`Accessories.get_TotalCost` rva 0x10a8c adds `Panduits.get_TotalBoxCost`, not
  * `TotalCost`; `Panduits.OnRecalculate` 0x1fa88 sums `Panduit.BoxCost` = ONE box per present
  * row — docs §22.5): the shipped Bid-Advantage bills a single box of each Panduit row whatever
- * the box count (its own Accessories Summary shows boxes × box cost). Reproduced; flip to
- * `false` to bill boxes × box cost (a deliberate departure from legacy).
+ * the box count (its own Accessories Summary shows boxes × box cost). `false` (owner's
+ * decision 2026-09-21, §22.27) bills boxes × box cost — what the legacy summary screen shows
+ * and what the job actually needs; `true` restores the legacy bid figure.
  */
-export const LEGACY_PANDUIT_ONE_BOX_PER_ROW = true;
+export const LEGACY_PANDUIT_ONE_BOX_PER_ROW = false;
 
 /** The legacy `ldc.r4 1.03` single-precision scrap factor (1.0299999713897705). */
 export const F32_SCRAP = Math.fround(1.03);

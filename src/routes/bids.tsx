@@ -191,7 +191,7 @@ function BidsPage() {
                 role="link"
                 tabIndex={0}
                 title="Open this bid"
-                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -225,15 +225,6 @@ function BidsPage() {
                       (last saved)
                     </span>
                   </span>
-                  <Button asChild variant="ghost" size="sm">
-                    <Link
-                      to="/estimate"
-                      search={{ bid: bid.id }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Open
-                    </Link>
-                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"

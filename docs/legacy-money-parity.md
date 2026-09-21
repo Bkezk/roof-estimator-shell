@@ -2934,3 +2934,10 @@ rows to compare). Now: the ledger's Accessories row = accessory lines + ARP + wh
 adhesives (the separate Adhesives row is gone; M0 unchanged), the Accessories footer adds
 `adhesiveMaterial`, and the sidebar summary shows an "Adhesives" group (`adhesiveLines`: whole
 units + extra × price per unit) inside its totals.
+
+### 22.27 Panduit boxes billed in full (owner's decision, 2026-09-21)
+
+`LEGACY_PANDUIT_ONE_BOX_PER_ROW` flipped to `false`: the bid now carries boxes × box cost per
+Panduit row (Knox County: 63 × 3/8" × 14" straps → 2 boxes → $88, where legacy's bid carried one
+box, $44, while its own Accessories Summary showed $88 — §12.4 / §22.5). Deliberate departure
+from the legacy bid figure; the constant restores it. The one-box warning no longer fires.

@@ -911,11 +911,12 @@ describe("§22.5 IL-exact corrections (2026-09-18)", () => {
     ];
     args.state = st;
     const r = computeAccessories(args);
-    // 14" straps = Ceil(14/11) = 2 × 30 = 60 → 2 bags of 50, but the legacy bill is one bag.
+    // 14" straps = Ceil(14/11) = 2 × 30 = 60 → 2 bags of 50. Legacy bills one bag (quirk);
+    // the web bills both (§22.27), with no warning.
     expect(r.pipeStacks.panduit14).toBe(60);
     expect(r.panduit.boxesByRow['3/8" x 14"']).toBe(2);
-    expect(r.panduit.cost).toBeCloseTo(50 * 0.88, 2);
-    expect(r.warnings.some((w) => w.includes("legacy bills ONE box"))).toBe(true);
+    expect(r.panduit.cost).toBeCloseTo(2 * 50 * 0.88, 2);
+    expect(r.warnings.some((w) => w.includes("legacy bills ONE box"))).toBe(false);
   });
 });
 
