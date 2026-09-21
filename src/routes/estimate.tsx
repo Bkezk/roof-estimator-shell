@@ -2149,13 +2149,14 @@ function EstimatePage() {
                 <AlertDialogTitle>Apply To Existing Roof Sections</AlertDialogTitle>
                 <AlertDialogDescription>
                   Pressing OK will apply these Material Defaults to ALL existing Roof Sections: Roof
-                  System, Attached With, Design Table, Membrane Type, Color.
+                  System, Attached With, Design Table, Membrane Type, Color — and the &quot;2. Wall
+                  Type&quot; default to every existing parapet (term bar / fascia drill split).
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction
-                  onClick={() =>
+                  onClick={() => {
                     setSections((prev) =>
                       prev.map((sec) => {
                         // Roof System / Attached With / adhesive: clear the per-section
@@ -2171,8 +2172,13 @@ function EstimatePage() {
                           color: sectionDefaults.color,
                         };
                       }),
-                    )
-                  }
+                    );
+                    // Owner's expectation (docs §22.30): the "2. Wall Type" default beside these
+                    // material defaults re-routes the existing walls' drill split as well.
+                    const wallType = parapetDefaults.wallType;
+                    if (wallType !== undefined && parapets.length > 0)
+                      setParapets((prev) => prev.map((pp) => ({ ...pp, wallType })));
+                  }}
                 >
                   OK
                 </AlertDialogAction>
