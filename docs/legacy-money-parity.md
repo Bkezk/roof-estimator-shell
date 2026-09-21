@@ -2474,6 +2474,23 @@ elbows $63.05–$66.95, 0.15 h (drop 0.75) at $45. Two legacy data quirks kept v
 Open row's labor rate is $0.00 and Snow Diverter is $0.00 (the installer's $34.55 was replaced).
 Pitch pans already matched ($96.58 / $102.31 / $108.02, 1 h); the Filler amount is still not on
 any screen. The 2026-09-09 installer reseed had priced the gutters at $4.69/LF with no labor —
-those were 2013 vendor defaults, not the owner's live values. Whether plain D / L / E / M styles
-exist in the legacy dropdown (the seed lists them, the captures show only the X variants) is an
-open question for the owner.
+those were 2013 vendor defaults, not the owner's live values. The plain D / L / E / M styles are
+NOT used (owner, 2026-09-21); they stay listed in the seed with no priced rows and nothing
+should be captured for them.
+
+**Open — Duro-Caulk on the term bar: legacy 28 tubes vs web 14 (owner note, 2026-09-21).** The
+owner's field reason is that a T-bar is caulked behind it AND along its top edge (two beads). The
+legacy code does NOT do that: `Sealants.RecalcParents` (0x22208, re-read) computes ONE bead per
+colour index — `ToInt32(Ceil(TermBars.GetTotalLengthByColor(i,0,0) + FaciaBars.
+TotalCoverLengthByColor(i)) / 12)` — where `GetTotalLengthByColor` returns the first present
+bar of that colour's `TermBar.GetTotalLength` = `R10(1.03f × (GetCalculatedLength(0,0) +
+OtherPreDrill + OtherNoDrill))` and `GetCalculatedLength(0,0)` = roof edges + curbs + parapet
+walls (no base row). No ×2, no second pass, and the White row (SealantID 13, position 12) IS
+zeroed before the add, so the accumulation quirk that affects Bronze cannot double it either.
+The web (`accessories.ts` Sealants block) computes the identical expression, so the 2× has to be
+an INPUT difference: the legacy bar carried twice the footage (parapet walls terminated with
+T-Bar on both apps?, a base term bar, Additional pre-drill / no-drill feet), a fascia cover
+length on the same colour, or extra White tubes from drains (+1 each), washers (Ceil(0.25 × qty))
+or pipe stacks (1–4 per stack, +1 if open, in the stack's colour). Resolve from the Term Bar
+screen of both apps (roof / curb / parapet / additional feet, total, tubes) plus drain and stack
+counts. Not implemented as a ×2 — that would be fabrication against the IL.
