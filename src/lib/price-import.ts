@@ -452,7 +452,6 @@ const NOISE = new Set([
 export function nameTokens(name: string): Set<string> {
   let s = name.toUpperCase().replace(/DARK\s+GRAY|DARK\s+GREY|D\/GRY|DK\s*GRY/g, " DARKGRAY ");
   s = s.replace(/TERRA\s*-?\s*COTTA/g, " TERRACOTTA ").replace(/DURO\s*-\s*LAST/g, " DUROLAST ");
-  s = s;
   // "40MIL" → "40 MIL" so the number and the word compare separately; sizes keep their digits;
   // "6X6" → "6 6" so a dimension pair compares as two sizes.
   s = s.replace(/(\d)\s*MIL\b/g, "$1 MIL ").replace(/(\d)X(\d)/g, "$1 $2");
