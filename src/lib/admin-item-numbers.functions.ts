@@ -51,7 +51,13 @@ const numOrNull = (v: unknown): number | null => {
   return null;
 };
 
-import { findRowByKey, labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import {
+  applyUpdatesToScreen,
+  revertChangesOnScreen,
+  type AppliedUpdate,
+  type ScreenData,
+} from "@/lib/price-import-apply";
 const NON_PRICE_COLS = new Set([
   "Part #",
   "Open Part #",
@@ -251,6 +257,7 @@ export const addCatalogProduct = createServerFn({ method: "POST" })
   });
 
 const importSchema = z.object({
+  file_name: z.string().max(300).optional(),
   updates: z
     .array(
       mappingKey.extend({
@@ -261,14 +268,7 @@ const importSchema = z.object({
     .min(1),
 });
 
-export interface AppliedUpdate {
-  item_no: string;
-  screen_id: string;
-  row_label: string;
-  price_col: string;
-  old: number | null;
-  new: number;
-}
+export type { AppliedUpdate } from "@/lib/price-import-apply";
 
 /**
  * Write the matched prices into the catalog screens (flat rows by label, Adhesives products by
@@ -282,7 +282,11 @@ export const applyPriceImport = createServerFn({ method: "POST" })
     async ({
       data,
       context,
-    }): Promise<{ applied: AppliedUpdate[]; missing: { item_no: string; reason: string }[] }> => {
+    }): Promise<{
+      applied: AppliedUpdate[];
+      missing: { item_no: string; reason: string }[];
+      run_id: string | null;
+    }> => {
       await assertAdmin(context.supabase, context.userId);
       const sb = context.supabase;
       const byScreen = new Map<string, typeof data.updates>();
@@ -306,49 +310,11 @@ export const applyPriceImport = createServerFn({ method: "POST" })
             missing.push({ item_no: u.item_no, reason: `screen ${screenId} not found` });
           continue;
         }
-        const d = row.data as {
-          kind?: string;
-          columns?: string[];
-          rows?: Record<string, unknown>[];
-          products?: { name: string; price?: number }[];
-        };
-        let changed = false;
-        for (const u of ups) {
-          if (d.kind === "adhesives") {
-            const p = (d.products ?? []).find((x) => x.name === u.row_label);
-            if (!p) {
-              missing.push({ item_no: u.item_no, reason: `adhesive "${u.row_label}" not found` });
-              continue;
-            }
-            const old = typeof p.price === "number" ? p.price : null;
-            p.price = u.price;
-            changed = true;
-            applied.push({ ...u, old, new: u.price });
-            continue;
-          }
-          const cols = d.columns ?? [];
-          if (!cols.includes(u.price_col)) {
-            missing.push({
-              item_no: u.item_no,
-              reason: `column "${u.price_col}" not on ${screenId}`,
-            });
-            continue;
-          }
-          const target = findRowByKey(cols, d.rows ?? [], u.row_label);
-          if (!target) {
-            missing.push({ item_no: u.item_no, reason: `row "${u.row_label}" not on ${screenId}` });
-            continue;
-          }
-          const oldRaw = target[u.price_col];
-          const old = typeof oldRaw === "number" ? oldRaw : oldRaw == null ? null : Number(oldRaw);
-          target[u.price_col] = u.price;
-          changed = true;
-          applied.push({
-            ...u,
-            old: Number.isFinite(old as number) ? (old as number) : null,
-            new: u.price,
-          });
-        }
+        const d = row.data as ScreenData;
+        const r = applyUpdatesToScreen(screenId, d, ups);
+        applied.push(...r.applied);
+        missing.push(...r.missing);
+        const changed = r.changed;
         if (changed) {
           const { error: saveErr } = await sb
             .from("pricing_catalog")
@@ -379,6 +345,198 @@ export const applyPriceImport = createServerFn({ method: "POST" })
           .eq("price_col", a.price_col);
         if (stampErr) throw new Error(stampErr.message);
       }
-      return { applied, missing };
+      // Audit log: the run and every cell it wrote (old → new), so it can be reverted.
+      let runId: string | null = null;
+      if (applied.length) {
+        const { data: me } = await sb
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", context.userId)
+          .maybeSingle();
+        const { data: run, error: runErr } = await sb
+          .from("price_import_runs")
+          .insert({
+            created_by: context.userId,
+            created_by_name: me?.full_name?.trim() || me?.email || null,
+            file_name: data.file_name ?? "(price sheet)",
+            cells_written: applied.length,
+            cells_changed: applied.filter((a) => a.old !== a.new).length,
+          })
+          .select("id")
+          .single();
+        if (runErr) throw new Error(runErr.message);
+        runId = run.id;
+        const { error: chErr } = await sb.from("price_import_changes").insert(
+          applied.map((a) => ({
+            run_id: run.id,
+            screen_id: a.screen_id,
+            row_label: a.row_label,
+            price_col: a.price_col,
+            item_no: a.item_no,
+            sheet_description:
+              data.updates.find(
+                (u) =>
+                  u.item_no === a.item_no &&
+                  u.screen_id === a.screen_id &&
+                  u.row_label === a.row_label &&
+                  u.price_col === a.price_col,
+              )?.dl_description ?? null,
+            old_price: a.old,
+            new_price: a.new,
+          })),
+        );
+        if (chErr) throw new Error(chErr.message);
+      }
+      return { applied, missing, run_id: runId };
+    },
+  );
+
+export interface PriceImportRun {
+  id: string;
+  created_at: string;
+  created_by_name: string | null;
+  file_name: string;
+  cells_written: number;
+  cells_changed: number;
+  reverted_at: string | null;
+  revert_note: string | null;
+}
+export interface PriceImportChange {
+  id: number;
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+  item_no: string;
+  sheet_description: string | null;
+  old_price: number | null;
+  new_price: number;
+  reverted_at: string | null;
+}
+
+/** Import history, newest first. */
+export const listPriceImportRuns = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<PriceImportRun[]> => {
+    const { data, error } = await context.supabase
+      .from("price_import_runs")
+      .select(
+        "id, created_at, created_by_name, file_name, cells_written, cells_changed, reverted_at, revert_note",
+      )
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return data ?? [];
+  });
+
+/** The cells one run wrote. */
+export const listPriceImportChanges = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ run_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<PriceImportChange[]> => {
+    const { data: rows, error } = await context.supabase
+      .from("price_import_changes")
+      .select(
+        "id, screen_id, row_label, price_col, item_no, sheet_description, old_price, new_price, reverted_at",
+      )
+      .eq("run_id", data.run_id)
+      .order("id");
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r) => ({
+      ...r,
+      old_price: r.old_price === null ? null : Number(r.old_price),
+      new_price: Number(r.new_price),
+    }));
+  });
+
+/**
+ * Put back every cell a run wrote — only where the cell STILL holds the run's new price (a
+ * cell edited since is left alone and reported) — and mark the run reverted.
+ */
+export const revertPriceImport = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ run_id: z.string().uuid() }).parse(d))
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ reverted: number; skipped: { cell: string; reason: string }[] }> => {
+      await assertAdmin(context.supabase, context.userId);
+      const sb = context.supabase;
+      const { data: run, error: runErr } = await sb
+        .from("price_import_runs")
+        .select("id, reverted_at")
+        .eq("id", data.run_id)
+        .maybeSingle();
+      if (runErr) throw new Error(runErr.message);
+      if (!run) throw new Error("Import run not found");
+      if (run.reverted_at) throw new Error("This import was already reverted");
+      const { data: changes, error: chErr } = await sb
+        .from("price_import_changes")
+        .select("id, screen_id, row_label, price_col, old_price, new_price, reverted_at")
+        .eq("run_id", data.run_id)
+        .is("reverted_at", null);
+      if (chErr) throw new Error(chErr.message);
+      const byScreen = new Map<string, typeof changes>();
+      for (const c of changes ?? []) {
+        const arr = byScreen.get(c.screen_id);
+        if (arr) arr.push(c);
+        else byScreen.set(c.screen_id, [c]);
+      }
+      const skipped: { cell: string; reason: string }[] = [];
+      const revertedIds: number[] = [];
+      const now = new Date().toISOString();
+      for (const [screenId, list] of byScreen) {
+        const { data: row, error } = await sb
+          .from("pricing_catalog")
+          .select("data")
+          .eq("id", screenId)
+          .maybeSingle();
+        if (error) throw new Error(error.message);
+        if (!row) {
+          for (const c of list ?? [])
+            skipped.push({ cell: `${c.row_label} · ${c.price_col}`, reason: "screen gone" });
+          continue;
+        }
+        const d = row.data as ScreenData;
+        const r = revertChangesOnScreen(
+          screenId,
+          d,
+          (list ?? []).map((c) => ({
+            id: c.id,
+            screen_id: c.screen_id,
+            row_label: c.row_label,
+            price_col: c.price_col,
+            old_price: c.old_price === null ? null : Number(c.old_price),
+            new_price: Number(c.new_price),
+          })),
+        );
+        skipped.push(...r.skipped);
+        revertedIds.push(...r.revertedIds);
+        const changed = r.changed;
+        if (changed) {
+          const { error: saveErr } = await sb
+            .from("pricing_catalog")
+            .update({ data: d as unknown as Json })
+            .eq("id", screenId);
+          if (saveErr) throw new Error(saveErr.message);
+        }
+      }
+      if (revertedIds.length) {
+        const { error } = await sb
+          .from("price_import_changes")
+          .update({ reverted_at: now })
+          .in("id", revertedIds);
+        if (error) throw new Error(error.message);
+      }
+      const { error: markErr } = await sb
+        .from("price_import_runs")
+        .update({
+          reverted_at: now,
+          reverted_by: context.userId,
+          revert_note: skipped.length ? `${skipped.length} cell(s) left as edited since` : null,
+        })
+        .eq("id", data.run_id);
+      if (markErr) throw new Error(markErr.message);
+      return { reverted: revertedIds.length, skipped };
     },
   );

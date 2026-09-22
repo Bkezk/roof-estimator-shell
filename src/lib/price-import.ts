@@ -663,3 +663,37 @@ export function convertSheetPrice(args: {
     note: `${args.sheetPrice} per ${args.sheetUnit.toUpperCase()} ÷ ${qty} ${args.packCol ?? "per pack"}`,
   };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Cross-check — an item number matched, but does the sheet line NAME the product it points at?
+ * Duro-Last reuses numbers (legacy 1767 was a bit; today it is an auger screw), so a matched
+ * number with a disagreeing description is the renumbering signal the price delta cannot give.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type NameCheck = "ok" | "differs" | "unscorable";
+
+/**
+ * "differs" when the catalog product name and the sheet description share too little (or
+ * conflict on colour / size / variant); "unscorable" when the catalog name is only a size or a
+ * colour and so cannot vouch for anything. The "[Subtype]" row-key suffix counts as a word.
+ */
+export function nameCheck(catalogRowKey: string, sheetDescription: string): NameCheck {
+  const a = nameTokens(catalogRowKey.replace(/\s*\[([^\]]+)\]\s*$/, " $1"));
+  if (a.size === 0) return "unscorable";
+  const meaningful = [...a].filter((t) => !isSizeToken(t) && !COLOURS.has(t));
+  if (meaningful.length === 0) return "unscorable";
+  const b = nameTokens(sheetDescription);
+  if (b.size === 0) return "unscorable";
+  return scoreTokenSets(a, b) === null ? "differs" : "ok";
+}
+
+/** True when a previously stamped Duro-Last description and the sheet's now disagree. */
+export function descriptionChanged(previous: string | null | undefined, current: string): boolean {
+  if (!previous) return false;
+  const a = nameTokens(previous);
+  const b = nameTokens(current);
+  if (a.size === 0 || b.size === 0) return false;
+  let shared = 0;
+  for (const t of a) if (b.has(t)) shared++;
+  return shared / Math.max(a.size, b.size) < 0.5;
+}

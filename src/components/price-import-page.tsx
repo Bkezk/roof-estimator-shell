@@ -39,9 +39,14 @@ import {
   applyPriceImport,
   deleteItemNumber,
   listItemNumbers,
+  listPriceImportChanges,
+  listPriceImportRuns,
   listPriceTargets,
+  revertPriceImport,
   upsertItemNumber,
   type ItemNumberRow,
+  type PriceImportChange,
+  type PriceImportRun,
 } from "@/lib/admin-item-numbers.functions";
 import {
   guessHeader,
@@ -56,6 +61,8 @@ import {
   readSheetItems,
   buildNameIndex,
   convertSheetPrice,
+  descriptionChanged,
+  nameCheck,
   suggestCatalogRow,
   suggestSheetLine,
   type CatalogRowRef,
@@ -119,6 +126,12 @@ interface PlannedUpdate {
   next: number;
   /** How `next` was derived when it is not the sheet price as written (membrane rolls → $/sq ft). */
   note?: string;
+  /** Cross-check: the sheet line does not name the catalog product it is mapped to. */
+  nameDiffers?: boolean;
+  /** Cross-check: the description stamped by the last import no longer matches this line. */
+  descChanged?: boolean;
+  /** The description stamped by the last import (shown when it changed). */
+  previousDescription?: string | null;
 }
 
 /**
@@ -390,6 +403,8 @@ export function PriceImportPage() {
         unitSkipped.push({ item, mapping, reason: conv.error });
         continue;
       }
+      const nameDiffers = nameCheck(mapping.row_label, item.description) === "differs";
+      const descChanged = descriptionChanged(mapping.dl_description, item.description);
       out.push({
         item_no: mapping.item_no,
         screen_id: mapping.screen_id,
@@ -401,6 +416,8 @@ export function PriceImportPage() {
         current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
         next: conv.price,
         ...(conv.note ? { note: conv.note } : {}),
+        ...(nameDiffers ? { nameDiffers } : {}),
+        ...(descChanged ? { descChanged, previousDescription: mapping.dl_description } : {}),
       });
     }
     return { plan: out, membraneSkipped: skipped, unitSkipped };
@@ -411,6 +428,10 @@ export function PriceImportPage() {
   const decreases = changed.filter((p) => p.current !== null && p.next < p.current).length;
   const newlyPriced = changed.filter((p) => p.current === null).length;
   const swings = changed.filter((p) => bigSwing(p.current, p.next)).length;
+  /** Matched by number but the sheet line does not name the product — likely renumbered. */
+  const suspect = plan.filter((p) => p.nameDiffers || p.descChanged);
+  const isSuspect = (p: PlannedUpdate) =>
+    !!p.nameDiffers || !!p.descChanged || bigSwing(p.current, p.next);
 
   /* ---------------- Review & confirm ---------------- */
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -419,7 +440,7 @@ export function PriceImportPage() {
   const planKey = (p: PlannedUpdate) => `${p.item_no}|${p.screen_id}|${p.row_label}|${p.price_col}`;
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
   const openReview = () => {
-    setExcluded(new Set(changed.filter((p) => bigSwing(p.current, p.next)).map(planKey)));
+    setExcluded(new Set(changed.filter(isSuspect).map(planKey)));
     setReviewOpen(true);
   };
   const toWrite = plan.filter((p) => !excluded.has(planKey(p)));
@@ -440,6 +461,7 @@ export function PriceImportPage() {
     try {
       const res = await applyFn({
         data: {
+          file_name: fileName,
           updates: toWrite.map((p) => ({
             item_no: p.item_no,
             screen_id: p.screen_id,
@@ -451,10 +473,14 @@ export function PriceImportPage() {
         },
       });
       const nChanged = res.applied.filter((a) => a.old !== a.new).length;
+      void qc.invalidateQueries({ queryKey: ["price-import-runs"] });
       setLastReport(
         `${res.applied.length} price cell${res.applied.length === 1 ? "" : "s"} written from ${fileName} (${nChanged} changed)` +
           (res.missing.length ? `; ${res.missing.length} could not be written` : "") +
-          (match?.unmatched.length ? `; ${match.unmatched.length} sheet item(s) had no match` : ""),
+          (match?.unmatched.length
+            ? `; ${match.unmatched.length} sheet item(s) had no match`
+            : "") +
+          (res.run_id ? ". Logged under Import history below — it can be reverted." : ""),
       );
       if (res.missing.length)
         toast.warning(
@@ -1022,6 +1048,81 @@ export function PriceImportPage() {
                 </ul>
               </details>
             )}
+            {suspect.length > 0 && (
+              <details className="rounded-md border border-destructive/60 p-3" open>
+                <summary className="cursor-pointer text-sm font-semibold text-destructive">
+                  Number matched but the description disagrees ({suspect.length}) — likely
+                  renumbered
+                </summary>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Duro-Last reuses item numbers. These lines carry a mapped number, but their
+                  wording does not name the product the number points at (or differs from the
+                  description stamped by the last import). They start unticked on the review. Remove
+                  the mapping if the number now belongs to something else, then map the
+                  product&apos;s real number from the unmatched list.
+                </p>
+                <div className="mt-2 overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item #</TableHead>
+                        <TableHead>Mapped to</TableHead>
+                        <TableHead>Sheet description now</TableHead>
+                        <TableHead>Why</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {suspect.map((p) => (
+                        <TableRow key={planKey(p)}>
+                          <TableCell className="font-mono text-xs">{p.item_no}</TableCell>
+                          <TableCell className="text-xs">
+                            <span className="text-muted-foreground">{p.category} › </span>
+                            {p.row_label} · {p.price_col}
+                          </TableCell>
+                          <TableCell className="text-xs">{p.description}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {p.nameDiffers ? "does not name the product" : ""}
+                            {p.nameDiffers && p.descChanged ? "; " : ""}
+                            {p.descChanged
+                              ? `was "${p.previousDescription ?? ""}" at the last import`
+                              : ""}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7"
+                              onClick={() =>
+                                void deleteFn({
+                                  data: {
+                                    item_no: p.item_no,
+                                    screen_id: p.screen_id,
+                                    row_label: p.row_label,
+                                    price_col: p.price_col,
+                                  },
+                                })
+                                  .then(() => {
+                                    toast.success(`Removed ${p.item_no} from ${p.row_label}`);
+                                    refresh();
+                                  })
+                                  .catch((e: unknown) =>
+                                    toast.error(
+                                      e instanceof Error ? e.message : "Could not remove mapping",
+                                    ),
+                                  )
+                              }
+                            >
+                              Remove mapping
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </details>
+            )}
             {unitSkipped.length > 0 && (
               <details className="rounded-md border border-amber-300 p-3" open>
                 <summary className="cursor-pointer text-sm font-semibold">
@@ -1180,6 +1281,8 @@ export function PriceImportPage() {
         </DialogContent>
       </Dialog>
 
+      <ImportHistory />
+
       {/* ── Review & confirm ──────────────────────────────────────────── */}
       <Dialog open={reviewOpen} onOpenChange={(o) => !applying && setReviewOpen(o)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -1189,8 +1292,11 @@ export function PriceImportPage() {
               From {fileName}. {plan.length} price cell{plan.length === 1 ? "" : "s"} will be
               written: {changed.length} change ({increases} up, {decreases} down, {newlyPriced}{" "}
               newly priced
-              {swings > 0 ? `; ${swings} flagged ⚠ as a likely unit problem` : ""}),{" "}
-              {plan.length - changed.length} already at the sheet price.
+              {swings > 0 ? `; ${swings} flagged ⚠ as a likely unit problem` : ""}
+              {suspect.filter((p) => p.current !== p.next).length > 0
+                ? `; ${suspect.filter((p) => p.current !== p.next).length} flagged ⚠ as a likely renumbered item`
+                : ""}
+              ), {plan.length - changed.length} already at the sheet price.
               {match && match.unmatched.length > 0
                 ? ` ${match.unmatched.length.toLocaleString()} sheet item(s) with no mapping are skipped.`
                 : ""}{" "}
@@ -1253,6 +1359,20 @@ export function PriceImportPage() {
                         <TableCell className="text-xs text-muted-foreground">
                           {p.description}
                           {p.note && <div className="text-[10px] italic">{p.note}</div>}
+                          {(p.nameDiffers || p.descChanged) && (
+                            <div
+                              className="text-[10px] font-semibold text-destructive"
+                              title={
+                                p.descChanged
+                                  ? `Last import stamped "${p.previousDescription ?? ""}"`
+                                  : "The sheet wording does not name this catalog product"
+                              }
+                            >
+                              ⚠ {p.nameDiffers ? "description does not name this product" : ""}
+                              {p.nameDiffers && p.descChanged ? "; " : ""}
+                              {p.descChanged ? "description changed since last import" : ""}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{p.unit}</TableCell>
                         <TableCell className="text-right text-xs tabular-nums">
@@ -1304,9 +1424,10 @@ export function PriceImportPage() {
             )}
             <p className="text-xs text-muted-foreground">
               Untick any change you do not want written; the rest still apply. Rows flagged ⚠ (more
-              than double or under half the current price) start unticked — tick one only once you
-              have checked its unit and pack quantity. Unticked rows keep their current price and
-              come back on the next import.
+              than double or under half the current price, or a description that does not name the
+              product) start unticked — tick one only once you have checked it. Unticked rows keep
+              their current price and come back on the next import. Every confirmed import is logged
+              below and can be reverted.
             </p>
           </div>
           <DialogFooter>
@@ -1460,5 +1581,179 @@ function UnmatchedList(props: {
         </Button>
       )}
     </div>
+  );
+}
+
+/** Every confirmed import: who, when, what, and a one-click revert. */
+function ImportHistory() {
+  const qc = useQueryClient();
+  const listRuns = useServerFn(listPriceImportRuns);
+  const listChanges = useServerFn(listPriceImportChanges);
+  const revertFn = useServerFn(revertPriceImport);
+  const runsQ = useQuery({ queryKey: ["price-import-runs"], queryFn: () => listRuns() });
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const changesQ = useQuery({
+    queryKey: ["price-import-changes", openRun],
+    queryFn: () => listChanges({ data: { run_id: openRun! } }),
+    enabled: !!openRun,
+  });
+  const [confirmRevert, setConfirmRevert] = useState<PriceImportRun | null>(null);
+  const [reverting, setReverting] = useState(false);
+  const runs = runsQ.data ?? [];
+  const revert = async (run: PriceImportRun) => {
+    setReverting(true);
+    try {
+      const r = await revertFn({ data: { run_id: run.id } });
+      toast.success(
+        `Reverted ${r.reverted} cell${r.reverted === 1 ? "" : "s"} from ${run.file_name}` +
+          (r.skipped.length ? ` — ${r.skipped.length} left as edited since` : ""),
+      );
+      setConfirmRevert(null);
+      void qc.invalidateQueries({ queryKey: ["price-import-runs"] });
+      void qc.invalidateQueries({ queryKey: ["price-import-changes"] });
+      void qc.invalidateQueries({ queryKey: ["price-targets"] });
+      void qc.invalidateQueries({ queryKey: ["pricing-catalog"] });
+      void qc.invalidateQueries({ queryKey: ["pricing-screen"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Revert failed");
+    } finally {
+      setReverting(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Import history</CardTitle>
+        <CardDescription>
+          Every confirmed import, with each cell&apos;s price before and after. Revert puts the old
+          prices back on every cell that still holds the imported figure; a cell edited by hand
+          since is left alone and reported.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {runsQ.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : runs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No imports applied yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {runs.map((run) => (
+              <div key={run.id} className="rounded-md border">
+                <div className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
+                  <span className="font-medium">
+                    {new Date(run.created_at).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </span>
+                  <span className="text-muted-foreground">{run.file_name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {run.cells_written} cell{run.cells_written === 1 ? "" : "s"} written ·{" "}
+                    {run.cells_changed} changed
+                    {run.created_by_name ? ` · by ${run.created_by_name}` : ""}
+                  </span>
+                  {run.reverted_at ? (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                      Reverted {new Date(run.reverted_at).toLocaleDateString()}
+                      {run.revert_note ? ` (${run.revert_note})` : ""}
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto h-7"
+                      onClick={() => setConfirmRevert(run)}
+                    >
+                      Revert this import
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7"
+                    onClick={() => setOpenRun(openRun === run.id ? null : run.id)}
+                  >
+                    {openRun === run.id ? "Hide cells" : "Show cells"}
+                  </Button>
+                </div>
+                {openRun === run.id && (
+                  <div className="overflow-x-auto border-t p-2">
+                    {changesQ.isLoading ? (
+                      <p className="text-xs text-muted-foreground">Loading…</p>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Item #</TableHead>
+                            <TableHead>Screen</TableHead>
+                            <TableHead>Product · column</TableHead>
+                            <TableHead>Sheet description</TableHead>
+                            <TableHead className="text-right">Before</TableHead>
+                            <TableHead className="text-right">After</TableHead>
+                            <TableHead />
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {(changesQ.data ?? []).map((c: PriceImportChange) => (
+                            <TableRow key={c.id}>
+                              <TableCell className="font-mono text-xs">{c.item_no}</TableCell>
+                              <TableCell className="text-xs">
+                                {c.screen_id.replace(/^duro_last:/, "")}
+                              </TableCell>
+                              <TableCell className="text-xs">
+                                {c.row_label} · {c.price_col}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {c.sheet_description ?? ""}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {money(c.old_price)}
+                              </TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">
+                                {money(c.new_price)}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {c.reverted_at ? "reverted" : ""}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <Dialog
+        open={!!confirmRevert}
+        onOpenChange={(o) => !reverting && !o && setConfirmRevert(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Revert this import?</DialogTitle>
+            <DialogDescription>
+              {confirmRevert
+                ? `${confirmRevert.cells_written} cell(s) from ${confirmRevert.file_name} go back to the price they held before it. Cells edited by hand since then are left as they are. Saved bids are not touched.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRevert(null)} disabled={reverting}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={reverting}
+              onClick={() => confirmRevert && void revert(confirmRevert)}
+            >
+              {reverting ? "Reverting…" : "Revert"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   convertSheetPrice,
+  descriptionChanged,
   headerSignature,
+  nameCheck,
   membranePerSqFt,
   nameMatchScore,
   nameTokens,
@@ -330,5 +332,24 @@ describe("price import — unit conversion to the catalog basis", () => {
       packCol: "Fasteners/Box",
     });
     expect("error" in r && r.error).toMatch(/no Fasteners\/Box/);
+  });
+});
+
+describe("price import — matched-number cross-check", () => {
+  it("flags a matched item number whose sheet line does not name the catalog product", () => {
+    expect(nameCheck('1/2" Bit -', "AUGER 11")).toBe("differs");
+    expect(nameCheck('2" [Auger]', "AUGER 2")).toBe("ok");
+    expect(nameCheck("Term Bar White", "TERM BAR WHT 10'")).toBe("ok");
+    expect(nameCheck("Duro-Last - 40mil Roll Goods", "DL 40MIL WHT 5'4\"X100'")).toBe("ok");
+    expect(nameCheck("Duro-Bond - 50", "DURO-TUFF 120X1200 WHT 50MIL")).toBe("ok");
+    expect(nameCheck("Drain Guard White", "DRAIN GUARD TAN")).toBe("differs");
+    // A size-only or colour-only catalog name cannot vouch either way.
+    expect(nameCheck('1 5/8" #12', "SCREW 1-5/8 SS DRL PT #14")).toBe("unscorable");
+    expect(nameCheck("White", "TERM BAR WHT 10'")).toBe("unscorable");
+  });
+  it("notices when the description stamped by the last import no longer matches", () => {
+    expect(descriptionChanged("DRL BIT SDS 1/2X6 MSNRY", "AUGER 11")).toBe(true);
+    expect(descriptionChanged("TERM BAR WHT 10'", "TERM BAR WHITE 10 FT")).toBe(false);
+    expect(descriptionChanged(null, "AUGER 11")).toBe(false);
   });
 });

@@ -451,6 +451,84 @@ export type Database = {
         };
         Relationships: [];
       };
+      price_import_changes: {
+        Row: {
+          id: number;
+          item_no: string;
+          new_price: number;
+          old_price: number | null;
+          price_col: string;
+          reverted_at: string | null;
+          row_label: string;
+          run_id: string;
+          screen_id: string;
+          sheet_description: string | null;
+        };
+        Insert: {
+          id?: number;
+          item_no: string;
+          new_price: number;
+          old_price?: number | null;
+          price_col: string;
+          reverted_at?: string | null;
+          row_label: string;
+          run_id: string;
+          screen_id: string;
+          sheet_description?: string | null;
+        };
+        Update: {
+          id?: number;
+          item_no?: string;
+          new_price?: number;
+          old_price?: number | null;
+          price_col?: string;
+          reverted_at?: string | null;
+          row_label?: string;
+          run_id?: string;
+          screen_id?: string;
+          sheet_description?: string | null;
+        };
+        Relationships: [];
+      };
+      price_import_runs: {
+        Row: {
+          cells_changed: number;
+          cells_written: number;
+          created_at: string;
+          created_by: string | null;
+          created_by_name: string | null;
+          file_name: string;
+          id: string;
+          revert_note: string | null;
+          reverted_at: string | null;
+          reverted_by: string | null;
+        };
+        Insert: {
+          cells_changed?: number;
+          cells_written?: number;
+          created_at?: string;
+          created_by?: string | null;
+          created_by_name?: string | null;
+          file_name: string;
+          id?: string;
+          revert_note?: string | null;
+          reverted_at?: string | null;
+          reverted_by?: string | null;
+        };
+        Update: {
+          cells_changed?: number;
+          cells_written?: number;
+          created_at?: string;
+          created_by?: string | null;
+          created_by_name?: string | null;
+          file_name?: string;
+          id?: string;
+          revert_note?: string | null;
+          reverted_at?: string | null;
+          reverted_by?: string | null;
+        };
+        Relationships: [];
+      };
       pricing_catalog: {
         Row: {
           branch: string;
