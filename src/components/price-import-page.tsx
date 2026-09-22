@@ -54,6 +54,7 @@ import {
   matchSheet,
   readMembraneSheet,
   readSheetItems,
+  buildNameIndex,
   suggestCatalogRow,
   suggestSheetLine,
   type CatalogRowRef,
@@ -535,6 +536,7 @@ export function PriceImportPage() {
   // Catalog products with no item number at all, each with the sheet line that best names it
   // (idea: fill the gaps from the sheet as a checklist rather than by hand).
   const [dismissedGaps, setDismissedGaps] = useState<Set<string>>(() => new Set());
+  const sheetIndex = useMemo(() => buildNameIndex(items, (it) => it.description), [items]);
   const gapSuggestions = useMemo(() => {
     if (!items.length) return [];
     const has = new Set(mappings.map((m) => `${m.screen_id}\u0000${m.row_label}`));
@@ -554,12 +556,12 @@ export function PriceImportPage() {
           key,
           category: t.category,
           target: { screen_id: t.screen_id, row_label: r, price_col: priceCol },
-          suggestion: suggestSheetLine(r, items),
+          suggestion: suggestSheetLine(r, sheetIndex),
         });
       }
     }
     return out;
-  }, [items, mappings, targets]);
+  }, [items, sheetIndex, mappings, targets]);
   const gapsWithSuggestion = gapSuggestions.filter(
     (g) => g.suggestion && !dismissedGaps.has(g.key),
   );
@@ -577,6 +579,10 @@ export function PriceImportPage() {
           : [],
       ),
     [targets],
+  );
+  const catalogIndex = useMemo(
+    () => buildNameIndex(catalogRowRefs, (r) => r.row_label),
+    [catalogRowRefs],
   );
 
   const notInSheetByItem = useMemo(() => {
@@ -957,7 +963,7 @@ export function PriceImportPage() {
                   setDrafts={setMapDrafts}
                   onMap={(it, t) => void saveMapping(it.itemNo, t, it.description)}
                   onAdd={openNewProduct}
-                  suggest={(it) => suggestCatalogRow(it.description, catalogRowRefs)}
+                  suggest={(it) => suggestCatalogRow(it.description, catalogIndex)}
                 />
               </details>
             )}

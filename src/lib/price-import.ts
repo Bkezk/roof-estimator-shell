@@ -483,18 +483,13 @@ export interface NameMatch {
   score: number;
 }
 
-/**
- * How well a sheet description names a catalog product. Every word of the catalog name must be
- * covered for a perfect 1; a colour on both sides that differs, or a size number in the catalog
- * name the sheet lacks, is a hard reject. At least two shared words (or one when the catalog
- * name is a single word) and 60% coverage.
- */
-export function nameMatchScore(catalogName: string, sheetDescription: string): number | null {
-  const a = nameTokens(catalogName);
-  const b = nameTokens(sheetDescription);
+const isSizeToken = (t: string) => /^[\d/.'x-]+$/i.test(t);
+
+/** `nameMatchScore` on already-tokenised names (the indexed path). */
+export function scoreTokenSets(a: Set<string>, b: Set<string>): number | null {
   if (a.size === 0 || b.size === 0) return null;
   // A catalog name that is only a size ("3 1/2\"") names nothing on its own — never suggest.
-  if ([...a].every((t) => /^[\d/.'x-]+$/i.test(t))) return null;
+  if ([...a].every(isSizeToken)) return null;
   const aColour = [...a].find((t) => COLOURS.has(t));
   const bColour = [...b].find((t) => COLOURS.has(t));
   if (aColour && bColour && aColour !== bColour) return null;
@@ -511,6 +506,49 @@ export function nameMatchScore(catalogName: string, sheetDescription: string): n
   return score >= 0.6 ? score : null;
 }
 
+/**
+ * How well a sheet description names a catalog product. Every word of the catalog name must be
+ * covered for a perfect 1; a colour on both sides that differs, or a size number in the catalog
+ * name the sheet lacks, is a hard reject. At least two shared words (or one when the catalog
+ * name is a single word) and 60% coverage.
+ */
+export function nameMatchScore(catalogName: string, sheetDescription: string): number | null {
+  return scoreTokenSets(nameTokens(catalogName), nameTokens(sheetDescription));
+}
+
+/**
+ * Names tokenised once, with a word → entries index so a lookup only scores the entries that
+ * share a real word with the query (a 13,000-line sheet × 100 products stays instant).
+ */
+export interface NameIndex<T> {
+  entries: { value: T; tokens: Set<string> }[];
+  postings: Map<string, number[]>;
+}
+export function buildNameIndex<T>(values: readonly T[], nameOf: (v: T) => string): NameIndex<T> {
+  const entries = values.map((value) => ({ value, tokens: nameTokens(nameOf(value)) }));
+  const postings = new Map<string, number[]>();
+  entries.forEach((e, i) => {
+    for (const t of e.tokens) {
+      if (isSizeToken(t)) continue;
+      const arr = postings.get(t);
+      if (arr) arr.push(i);
+      else postings.set(t, [i]);
+    }
+  });
+  return { entries, postings };
+}
+const isIndex = <T>(v: readonly T[] | NameIndex<T>): v is NameIndex<T> =>
+  !Array.isArray(v) && "postings" in v;
+/** Entries sharing at least one non-size word with `tokens`. */
+function candidates<T>(index: NameIndex<T>, tokens: Set<string>): Set<number> {
+  const out = new Set<number>();
+  for (const t of tokens) {
+    if (isSizeToken(t)) continue;
+    for (const i of index.postings.get(t) ?? []) out.add(i);
+  }
+  return out;
+}
+
 export interface CatalogRowRef {
   screen_id: string;
   category: string;
@@ -521,18 +559,21 @@ export interface CatalogRowRef {
 /** The best catalog product for a sheet line, or null when nothing is close. */
 export function suggestCatalogRow(
   description: string,
-  rows: CatalogRowRef[],
+  rows: readonly CatalogRowRef[] | NameIndex<CatalogRowRef>,
 ): { row: CatalogRowRef; score: number } | null {
+  const index = isIndex(rows) ? rows : buildNameIndex(rows, (r) => r.row_label);
+  const b = nameTokens(description);
   let best: { row: CatalogRowRef; score: number } | null = null;
-  for (const row of rows) {
-    const score = nameMatchScore(row.row_label, description);
+  for (const i of candidates(index, b)) {
+    const e = index.entries[i]!;
+    const score = scoreTokenSets(e.tokens, b);
     if (score === null) continue;
     if (
       !best ||
       score > best.score ||
-      (score === best.score && row.row_label.length > best.row.row_label.length)
+      (score === best.score && e.value.row_label.length > best.row.row_label.length)
     )
-      best = { row, score };
+      best = { row: e.value, score };
   }
   return best;
 }
@@ -540,18 +581,21 @@ export function suggestCatalogRow(
 /** The best sheet line for a catalog product, or null. Prefers the shortest exact-coverage line. */
 export function suggestSheetLine(
   rowLabel: string,
-  items: SheetItem[],
+  items: readonly SheetItem[] | NameIndex<SheetItem>,
 ): { item: SheetItem; score: number } | null {
+  const index = isIndex(items) ? items : buildNameIndex(items, (it) => it.description);
+  const a = nameTokens(rowLabel);
   let best: { item: SheetItem; score: number } | null = null;
-  for (const item of items) {
-    const score = nameMatchScore(rowLabel, item.description);
+  for (const i of candidates(index, a)) {
+    const e = index.entries[i]!;
+    const score = scoreTokenSets(a, e.tokens);
     if (score === null) continue;
     if (
       !best ||
       score > best.score ||
-      (score === best.score && item.description.length < best.item.description.length)
+      (score === best.score && e.value.description.length < best.item.description.length)
     )
-      best = { item, score };
+      best = { item: e.value, score };
   }
   return best;
 }
