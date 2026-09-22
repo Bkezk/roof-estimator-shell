@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   buildPriceMatrix,
+  buildFamilyMembranePricesByColor,
   buildLaborTables,
   parseMembraneRow,
   assembleEngineAdminData,
@@ -1399,5 +1400,19 @@ describe("adhesiveOptionsForSystem (legacy AcceptableAdhesives / WallAdhesives)"
       "Water Based Adhesive",
       "Solvent Based Adhesive",
     ]);
+  });
+});
+
+describe("buildFamilyMembranePricesByColor (Duro-Tech TPO prices per colour, docs §22.34)", () => {
+  it("keys each flat-family row by its numeric colour cells; the single-figure families keep White", () => {
+    const by = buildFamilyMembranePricesByColor({
+      columns: ["Description", "White", "Tan", "Gray"],
+      rows: [
+        { Description: "Duro-Tech TPO - 60", White: 0.84, Tan: 0.86, Gray: null },
+        { Description: "Duro-Tuff - 50", White: 1.23, Tan: null, Gray: null },
+      ],
+    });
+    expect(by["Duro-Tech TPO"]!["60"]).toEqual({ White: 0.84, Tan: 0.86 });
+    expect(by["Duro-Tuff"]!["50"]).toEqual({ White: 1.23 });
   });
 });

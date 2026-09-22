@@ -758,6 +758,23 @@ export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
  */
 export const FLAT_PRICE_FAMILY_IDS: ReadonlySet<number> = new Set([2, 3, 5, 6]);
 
+/**
+ * A flat family's $/sq ft for a thickness variant: the section's colour column when that row
+ * prices it (Duro-Tech TPO white / tan / gray), else the family's single figure (first numeric
+ * colour cell — the legacy Duro-Bond / Tuff / Fleece rows). undefined when the variant is absent.
+ */
+export function familyMembranePrice(
+  admin: Pick<EngineAdminData, "familyMembranePrices" | "familyMembranePricesByColor">,
+  family: string,
+  variant: string,
+  color: string,
+): number | undefined {
+  return (
+    admin.familyMembranePricesByColor?.[family]?.[variant]?.[color] ??
+    admin.familyMembranePrices?.[family]?.[variant]
+  );
+}
+
 /** Whether a roof system offers the legacy Complexity list (RSComplexityFactor rows). */
 export function roofSystemHasComplexity(roofSystem: string): boolean {
   return RS_COMPLEXITY_FACTORS[LEGACY_RS_ID_BY_NAME[roofSystem] ?? -1] !== undefined;
@@ -952,7 +969,7 @@ export function sectionMembraneDisplayPricing(
   if (FLAT_PRICE_FAMILY_IDS.has(rsId)) {
     const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
     return {
-      pricePerSqFt: admin.familyMembranePrices?.[roofSystem]?.[variantKey] ?? 0,
+      pricePerSqFt: familyMembranePrice(admin, roofSystem, variantKey, s.color) ?? 0,
       tierLabel: `${roofSystem} flat price`,
     };
   }
@@ -1009,7 +1026,7 @@ export function strippingBySection(
     const sys = resolveSectionSystem(bid, s);
     let pricePerFt: number;
     if (sys.rsId === 3 || sys.rsId === 6) {
-      pricePerFt = admin.familyMembranePrices?.[sys.roofSystem]?.[String(s.thickness)] ?? 0;
+      pricePerFt = familyMembranePrice(admin, sys.roofSystem, String(s.thickness), s.color) ?? 0;
     } else {
       pricePerFt = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color) ?? 0;
     }
@@ -1194,7 +1211,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // thickness-only bid reaches the non-Plus rows ("50mil"/"60mil"; Plus variants flagged).
     if (FLAT_PRICE_FAMILY_IDS.has(rsId)) {
       const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
-      const fPrice = admin.familyMembranePrices?.[sys.roofSystem]?.[variantKey];
+      const fPrice = familyMembranePrice(admin, sys.roofSystem, variantKey, s.color);
       if (fPrice === undefined) {
         warnings.push(
           `No ${sys.roofSystem} membrane price for "${variantKey}" — section "${s.name}".`,

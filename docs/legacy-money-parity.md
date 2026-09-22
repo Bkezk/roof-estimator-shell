@@ -3164,3 +3164,17 @@ Migration `20260922100000_duro_tech_tpo.sql`, applied live. Tests: flat pricing 
 roll-goods quantity (2,731.5 sq ft × 0.75 / 1.30), 27 h base × 1.25 Moderate (36.875 h), Open
 complexity, 80 mil handling, legacy anchor unchanged; `buildLaborTables` base-hours default /
 override.
+
+Addendum (guide page 1, same day): (a) **default thickness 60 mil** — the Setup and Sections
+thickness picks list the combo's thickness table and snap to 60 (else the first entry) when the
+roof system changes and the current value is not offered; (b) **three named adhesives** —
+adhesive 11 renamed "TECH-Bond TPO Bonding Adhesive", 12 "TECH-Bond TPO LVOC Bonding Adhesive"
+(300 sq ft), 13 "TECH-Bond TPO Spray Adhesive" (guide ≈ 1,000 sq ft per cylinder), all three
+with deck / board-group / wall coverage on rs 6, ×1 Roll Good sheet multiplier and 13.2 h /
+1,000 sq ft in the adhered combo (migration `20260922110000`, applied live; prices 0 until
+entered); (c) **colour as its own price field** — `familyMembranePricesByColor` (family →
+variant → colour) feeds `familyMembranePrice(admin, family, variant, colour)`: a TPO section
+bills its own colour's cell when the matrix row prices it and the family figure otherwise
+(legacy families unchanged: one figure in White); (d) the guide's naming note — Duro-Tuff is
+PVC; only its LABOR multipliers and pull-test rows were cloned as starting values, never its
+product or price. Induction welding as a TPO attachment (guide §4) is not offered yet.

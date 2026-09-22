@@ -3824,6 +3824,27 @@ describe("Duro-Tech TPO — the web's sixth roof system (docs §22.34)", () => {
     });
   });
 
+  it("prices the section's colour when the row carries it, else the family figure", () => {
+    const byColor: EngineAdminData = {
+      ...tpoAdmin,
+      familyMembranePricesByColor: { "Duro-Tech TPO": { "60": { White: 0.84, Tan: 0.9 } } },
+    };
+    const tan = bid({
+      roofSystem: "Duro-Tech TPO",
+      sections: [{ ...bid().sections[0]!, thickness: 60, fieldLap: 120, color: "Tan" }],
+    });
+    expect(buildEstimateInputs(tan, byColor).inputs.duroLastMaterial).toBeCloseTo(TPO_MWO * 0.9, 2);
+    // Gray has no cell on that row → the family figure (0.84).
+    const gray = bid({
+      roofSystem: "Duro-Tech TPO",
+      sections: [{ ...bid().sections[0]!, thickness: 60, fieldLap: 120, color: "Gray" }],
+    });
+    expect(buildEstimateInputs(gray, byColor).inputs.duroLastMaterial).toBeCloseTo(
+      TPO_MWO * 0.84,
+      2,
+    );
+  });
+
   it("bills 27 h / 2,500 sq ft × deck × roll width × spacing × complexity (Moderate 1.25) × thickness", () => {
     const { inputs } = buildEstimateInputs(tpoBid(45), tpoAdmin);
     // 2731.5 × 27 / 2500 × 1 × 1 × 1 × 1.25 × 1.0 = 36.875 h

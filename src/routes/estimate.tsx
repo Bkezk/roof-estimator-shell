@@ -1701,7 +1701,28 @@ function EstimatePage() {
               <LegacyGroup title="3. Roof Sections Material">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Field label="Roof System">
-                    <Select value={roofSystem} onValueChange={setRoofSystem}>
+                    <Select
+                      value={roofSystem}
+                      onValueChange={(v) => {
+                        setRoofSystem(v);
+                        // The new system's thickness list (Duro-Tech TPO 45/60/80, default 60
+                        // per the owner's guide; legacy 40/50/60). Snap an invalid default.
+                        const lt =
+                          admin.labor[
+                            `${v}|${attachment === "adhered" ? "adhesive" : "mechanical"}`
+                          ] ??
+                          admin.labor[`${v}|mechanical`] ??
+                          admin.labor[`${v}|adhesive`];
+                        const mils = Object.keys(lt?.thicknessLaborByMil ?? {})
+                          .map(Number)
+                          .filter((n) => n > 0);
+                        if (mils.length && !mils.includes(sectionDefaults.thickness))
+                          setSectionDefaults((p) => ({
+                            ...p,
+                            thickness: mils.includes(60) ? 60 : mils[0]!,
+                          }));
+                      }}
+                    >
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
@@ -1740,7 +1761,15 @@ function EstimatePage() {
                   <Field label="Type">
                     <PickOne
                       value={String(sectionDefaults.thickness)}
-                      options={["40", "50", "60"]}
+                      options={(() => {
+                        const mils = Object.keys(admin.labor[comboKey]?.thicknessLaborByMil ?? {})
+                          .map(Number)
+                          .filter((n) => n > 0)
+                          .sort((a, b) => a - b)
+                          .map(String);
+                        const base = mils.length ? mils : ["40", "50", "60"];
+                        return withCurrent(base, String(sectionDefaults.thickness));
+                      })()}
                       onChange={(v) => setSectionDefaults((p) => ({ ...p, thickness: Number(v) }))}
                     />
                   </Field>

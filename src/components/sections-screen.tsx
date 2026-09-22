@@ -725,6 +725,13 @@ export function SectionsScreen(p: SectionsScreenProps) {
                   const patch: Partial<BidSectionInput> = { roofSystem: v, attachment: att };
                   const tabs = TAB_OPTIONS_BY_SYSTEM[v];
                   if (tabs && !tabs.includes(s.fieldLap)) patch.fieldLap = tabs[1] ?? tabs[0]!;
+                  // Thickness must exist on the new system (TPO 45/60/80 — default 60).
+                  const nlt = admin.labor[`${v}|${att === "adhered" ? "adhesive" : "mechanical"}`];
+                  const mils = Object.keys(nlt?.thicknessLaborByMil ?? {})
+                    .map(Number)
+                    .filter((n) => n > 0);
+                  if (mils.length && !mils.includes(s.thickness))
+                    patch.thickness = mils.includes(60) ? 60 : mils[0]!;
                   updWithSpacing(patch);
                 }}
               />

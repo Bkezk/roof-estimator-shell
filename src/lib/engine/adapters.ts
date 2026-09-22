@@ -78,6 +78,24 @@ export function buildFamilyMembranePrices(
   screen: MembraneScreen,
 ): Record<string, Record<string, number>> {
   const out: Record<string, Record<string, number>> = {};
+  for (const [family, variants] of Object.entries(buildFamilyMembranePricesByColor(screen))) {
+    for (const [variant, byColor] of Object.entries(variants)) {
+      const first = Object.values(byColor)[0];
+      if (first !== undefined) (out[family] ??= {})[variant] = first;
+    }
+  }
+  return out;
+}
+
+/**
+ * The same flat-family rows keyed by colour column too (family → variant → colour → $/sqft),
+ * in column order. Duro-Tech TPO prices per colour (owner's guide: "keep color as a separate
+ * selectable price field"); the legacy families carry one figure, seeded in White.
+ */
+export function buildFamilyMembranePricesByColor(
+  screen: MembraneScreen,
+): Record<string, Record<string, Record<string, number>>> {
+  const out: Record<string, Record<string, Record<string, number>>> = {};
   const colorCols = screen.columns.filter((c) => c !== "Description");
   for (const row of screen.rows) {
     const m = /^(Duro-Bond|Duro-Tuff|Duro-Fleece|Duro-Tech TPO) - (.+)$/.exec(
@@ -86,10 +104,7 @@ export function buildFamilyMembranePrices(
     if (!m) continue;
     for (const col of colorCols) {
       const v = row[col];
-      if (typeof v === "number") {
-        (out[m[1]!] ??= {})[m[2]!.trim()] = v;
-        break;
-      }
+      if (typeof v === "number") ((out[m[1]!] ??= {})[m[2]!.trim()] ??= {})[col] = v;
     }
   }
   return out;
@@ -2077,6 +2092,8 @@ export interface EngineAdminData {
   sheetTabSpacings?: Record<number, number[]>;
   /** Duro-Bond / Duro-Tuff / Duro-Fleece flat membrane prices (family → variant → $/sqft). */
   familyMembranePrices?: Record<string, Record<string, number>>;
+  /** Flat families by colour column (family → variant → colour → $/sqft); TPO prices per colour. */
+  familyMembranePricesByColor?: Record<string, Record<string, Record<string, number>>>;
   /** Auto-priced NDL rate rows (counterflash / parapet blocking / masonry / ARP — §8.3/§8.4). */
   autoRates?: NdlAutoRates;
   /** Legacy Underlayment parent-type structure (Select Insulation Type tiles → options). */
@@ -2110,6 +2127,9 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
   const priceMatrix = raw.membraneScreen ? buildPriceMatrix(raw.membraneScreen) : {};
   const familyMembranePrices = raw.membraneScreen
     ? buildFamilyMembranePrices(raw.membraneScreen)
+    : {};
+  const familyMembranePricesByColor = raw.membraneScreen
+    ? buildFamilyMembranePricesByColor(raw.membraneScreen)
     : {};
 
   // Full tab-band sets per legacy roof-system id (mech_tab_multi). The screenshot-captured combos
@@ -2259,6 +2279,7 @@ export function assembleEngineAdminData(raw: RawAdminData): EngineAdminData {
     ...(laborTemplates ? { laborTemplates } : {}),
     ...(raw.sheetTabRows?.length ? { sheetTabSpacings } : {}),
     ...(Object.keys(familyMembranePrices).length ? { familyMembranePrices } : {}),
+    ...(Object.keys(familyMembranePricesByColor).length ? { familyMembranePricesByColor } : {}),
     ...(Object.keys(autoRates).length ? { autoRates } : {}),
     ...(underlaymentGroups ? { underlaymentGroups } : {}),
     ...(accessories ? { accessories } : {}),
