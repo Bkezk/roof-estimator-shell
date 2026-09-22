@@ -367,8 +367,10 @@ export function legacyMembraneWithOverlap(
   s: LegacyMembraneSection,
   version: string,
 ): number {
-  // Duro-Fleece (5) and Duro-Tech TPO (6, web-only roll goods — docs §22.34): always roll goods.
-  if (rsId === 5 || rsId === 6) return rollGoodsMembraneCalc(s, version);
+  // Duro-Fleece (5) and the web-only roll-goods systems — Duro-Tech TPO (6), Non-DL TPO (7),
+  // EPDM Rubber (8), docs §22.34 / §22.35: always roll goods.
+  if (rsId === 5 || rsId === 6 || rsId === 7 || rsId === 8)
+    return rollGoodsMembraneCalc(s, version);
   if (rsId === 2)
     return s.rolls > 1
       ? sheetsMembraneCalc(s, version)

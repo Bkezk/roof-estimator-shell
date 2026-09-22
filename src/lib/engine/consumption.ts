@@ -20,7 +20,14 @@ import { resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 
 /** Row-style tab systems whose membrane screws come from the DLRowStyle port (§2.2). */
-const ROW_STYLE_SYSTEMS = new Set(["Duro-Last", "Duro-Roof", "Duro-Tuff", "Duro-Tech TPO"]);
+const ROW_STYLE_SYSTEMS = new Set([
+  "Duro-Last",
+  "Duro-Roof",
+  "Duro-Tuff",
+  "Duro-Tech TPO",
+  "Non-DL TPO",
+  "EPDM Rubber",
+]);
 /** RoofSystem.OverlapWidth — 6" for the DL families (legacy_roof_system.lap_over). */
 const OVERLAP_WIDTH_IN = 6;
 

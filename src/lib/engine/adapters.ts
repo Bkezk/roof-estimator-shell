@@ -98,9 +98,10 @@ export function buildFamilyMembranePricesByColor(
   const out: Record<string, Record<string, Record<string, number>>> = {};
   const colorCols = screen.columns.filter((c) => c !== "Description");
   for (const row of screen.rows) {
-    const m = /^(Duro-Bond|Duro-Tuff|Duro-Fleece|Duro-Tech TPO) - (.+)$/.exec(
-      String(row["Description"] ?? "").trim(),
-    );
+    const m =
+      /^(Duro-Bond|Duro-Tuff|Duro-Fleece|Duro-Tech TPO|Non-DL TPO|EPDM Rubber) - (.+)$/.exec(
+        String(row["Description"] ?? "").trim(),
+      );
     if (!m) continue;
     for (const col of colorCols) {
       const v = row[col];
@@ -1894,8 +1895,10 @@ export const LEGACY_RS_ID_BY_NAME: Record<string, number> = {
   "Duro-Tuff": 3,
   "Duro-Roof": 4,
   "Duro-Fleece": 5,
-  // No legacy id — the web's own sixth system (Duro-Last's TPO membrane, docs §22.34).
+  // No legacy ids — the web's own systems (docs §22.34 / §22.35).
   "Duro-Tech TPO": 6,
+  "Non-DL TPO": 7,
+  "EPDM Rubber": 8,
 };
 
 /** The two vendor-seeded Duro-Last adhesives — the picker fallback when no coverage data is loaded. */
@@ -1949,6 +1952,8 @@ export const LEGACY_MECH_SYSTEM_LONG_NAME: Record<number, string> = {
   3: "Duro-Tuff Fasteners",
   4: "Duro-Roof Fasteners",
   6: "Duro-Tech TPO Fasteners",
+  7: "Non-DL TPO Fasteners/Plates",
+  8: "EPDM Fasteners/Plates",
 };
 
 export interface AttachedWithOption {

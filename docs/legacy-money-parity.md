@@ -3178,3 +3178,48 @@ bills its own colour's cell when the matrix row prices it and the family figure 
 (legacy families unchanged: one figure in White); (d) the guide's naming note — Duro-Tuff is
 PVC; only its LABOR multipliers and pull-test rows were cloned as starting values, never its
 product or price. Induction welding as a TPO attachment (guide §4) is not offered yet.
+
+### 22.35 Non-DL TPO and EPDM Rubber — non-Duro-Last membranes (2026-09-22, NO legacy source)
+
+Owner: "can you add the non DL TPO and EPDM?". Roof systems **7 "Non-DL TPO"** (`ndltpo`, LapOver
+6) and **8 "EPDM Rubber"** (`epdm`, LapOver 3) join the six of §22.34, built the same way — the
+owner's "Roof Membrane Bid Calculator Reference" for labor, Duro-Tuff for the roll-goods
+mechanics the guide does not give — with one money difference: **they are not Duro-Last
+purchases.** Their membrane and wall material bills to the Non-DL **Other** purchases slot
+(`NON_DL_MEMBRANE_IDS` = 7/8 → `nonDlMembraneMaterial` → `ndlSlots[6]`, the same slot as the
+manual "other material" seam), so no Duro-Last discount / prepay / volume math touches them and
+the review ledger shows the figure on its own "Non-DL Membrane" row under Non-Duro-Last
+purchases. `duroLastMaterial` (M0) stays at whatever Duro-Last product the bid still buys
+(accessories, adhesives, boards).
+
+**Labor (guide midpoints, every value a START).** Non-DL TPO mechanical 25–30 h / 2,500 → base
+27.5; adhered 32–38 → 35 h = 14 h / 1,000 sq ft. EPDM mechanical 28–34 → 31; adhered 30–38 → 34 h
+= 13.6 h / 1,000 sq ft. Deck multipliers and complexity (1.0 / 1.1 / 1.25 / 1.4 / 1.6 / 2.0) as
+Duro-Tech TPO. Thickness: TPO 45 / 60 = 1, 80 = 1.075; EPDM 45 / 60 = 1, 75 = 1.05, 90 = 1.1
+(guide: thicker rubber, more handling). Roll widths: TPO 30 / 60 / 120 with Duro-Tuff's 2.6 /
+1.3 / 1.0 and its pull-test rows cloned; EPDM 120 / 240 with 240" at 0.85 (wider sheets, fewer
+seams) and the Duro-Tuff 120" pull-test rows serving both widths (flagged — EPDM fastening
+patterns are the manufacturer's). Default thickness 60 mil.
+
+**Quantity.** `RollGoodsMembraneCalc` at the system's lap — 6" for TPO (welded seam), 3" for EPDM
+(seam tape) — so the 51'×51' test roof bills 2,731.5 sq ft of TPO and 2,666.25 sq ft of EPDM on a
+10' roll. Stripping (1' of 10" "TPO" / "EPDM" per §12.x) and the parapet wall-tab rule follow the
+Duro-Tuff paths (`WEB_ROLL_GOODS_IDS` = 6/7/8). A wall on a Non-DL system has no Parapets tier:
+it bills billed height × adjusted length × the flat family $/sq ft for the wall's mil / colour,
+into the same Non-DL bucket.
+
+**Prices.** Neither product is on the Duro-Last price list, so the membrane matrix gets seven
+locked rows — `Non-DL TPO - 45 / 60 / 80`, `EPDM Rubber - 45 / 60 / 75 / 90` — **all blank**, plus
+a new **"Black"** colour column (EPDM). Enter $/sq ft per row (per colour when it matters) on
+Admin › Duro-Last › Membrane; until then the section bills 0 and warns "No EPDM Rubber membrane
+price for "60"". Adhesives 14 "Non-DL TPO Bonding Adhesive", 15 "Non-DL TPO Spray Adhesive", 16
+"EPDM Bonding Adhesive", 17 "EPDM Spray Adhesive" (300 / 1,000 sq ft coverage on decks, board
+groups and walls; price 0 until entered on Admin › Adhesives). "Attached With" reads "Non-DL TPO
+Fasteners/Plates" / "EPDM Fasteners/Plates".
+
+**Not done / flagged.** Same phase-2 list as §22.34 (TPO/EPDM-specific accessory variants; the
+warranty table is Duro-Last's and does not apply to a non-DL system; induction welding). The
+Non-DL Membrane figure rides the Other slot's tax / freight basis like any other purchase.
+Migration `20260922120000_non_dl_tpo_epdm.sql`, applied live. Tests: TPO roll-goods × flat price
+into `otherMaterial` with `duroLastMaterial` 0 and 27.5 h × 1.25; EPDM 3" lap quantity and 31 h
+base; a Non-DL wall (2 ft × 102 ft × $/sq ft) into the same bucket; blank matrix → 0 + warning.

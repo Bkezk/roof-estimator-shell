@@ -629,8 +629,13 @@ export function parapetEdgeFasteners(
         const tabs = Math.max(1, c + (v6 > 59 ? 1 : 0));
         total += bankersRound((adjLen / in2Ft(15)) * tabs, 0);
       }
-    } else if (roofSystem === "Duro-Tuff" || roofSystem === "Duro-Tech TPO") {
-      // Duro-Tech TPO (web-only, §22.34) borrows the Duro-Tuff wall-tab rule — flagged.
+    } else if (
+      roofSystem === "Duro-Tuff" ||
+      roofSystem === "Duro-Tech TPO" ||
+      roofSystem === "Non-DL TPO" ||
+      roofSystem === "EPDM Rubber"
+    ) {
+      // The web-only systems (§22.34 / §22.35) borrow the Duro-Tuff wall-tab rule — flagged.
       total +=
         attachment === "mechanical"
           ? bankersRound((Math.ceil(adjHeight / 24) * adjLen) / in2Ft(15), 0)
@@ -1862,7 +1867,9 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
   const membraneAdheredOrBond = args.attachment === "adhered" || isDuroBond;
   const rowStyle =
     args.attachment === "mechanical" &&
-    ["Duro-Last", "Duro-Roof", "Duro-Tuff", "Duro-Tech TPO"].includes(args.roofSystem);
+    ["Duro-Last", "Duro-Roof", "Duro-Tuff", "Duro-Tech TPO", "Non-DL TPO", "EPDM Rubber"].includes(
+      args.roofSystem,
+    );
   for (const s of args.sections) {
     const bucket = BUCKET_BY_DECK[s.deckType];
     if (!bucket) continue;

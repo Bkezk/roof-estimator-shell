@@ -740,6 +740,9 @@ export const LEGACY_OVERLAP_WIDTH_IN: Record<number, number> = {
   4: 6,
   5: 3,
   6: 6,
+  // Web-only systems (docs §22.35): TPO seams weld on a 6" lap; EPDM seam tape runs 3".
+  7: 6,
+  8: 3,
 };
 /** Legacy MembraneType.DefaultRollLength (ft) — RSMembraneType.RollLength, 100 for every seeded type. */
 export const LEGACY_ROLL_LENGTH_FT = 100;
@@ -750,13 +753,27 @@ export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
   // Duro-Tech TPO (web-only, docs §22.34): the owner's guide — Open 1.00, Moderate 1.20–1.30,
   // very cut-up 1.40–1.60+ — spread over the six legacy labels.
   6: [1, 1.1, 1.25, 1.4, 1.6, 2],
+  // Non-DL TPO / EPDM Rubber (web-only, docs §22.35): the same guide table.
+  7: [1, 1.1, 1.25, 1.4, 1.6, 2],
+  8: [1, 1.1, 1.25, 1.4, 1.6, 2],
 };
 
 /**
  * Systems priced from the flat family table (`familyMembranePrices`: one $/sq ft per thickness
- * variant, no tab tiers): Duro-Bond, Duro-Tuff, Duro-Fleece and the web's Duro-Tech TPO.
+ * variant, no tab tiers): Duro-Bond, Duro-Tuff, Duro-Fleece and the web's Duro-Tech TPO,
+ * Non-DL TPO and EPDM Rubber.
  */
-export const FLAT_PRICE_FAMILY_IDS: ReadonlySet<number> = new Set([2, 3, 5, 6]);
+export const FLAT_PRICE_FAMILY_IDS: ReadonlySet<number> = new Set([2, 3, 5, 6, 7, 8]);
+/**
+ * Web-only roll-goods membranes (no legacy row): Duro-Tech TPO (6), Non-DL TPO (7), EPDM Rubber
+ * (8). They share Duro-Tuff's roll-goods quantity, stripping and wall-tab paths (docs §22.34/§22.35).
+ */
+export const WEB_ROLL_GOODS_IDS: ReadonlySet<number> = new Set([6, 7, 8]);
+/**
+ * Membranes that are NOT Duro-Last purchases (docs §22.35): their membrane and parapet material
+ * bills to the Non-DL "Other" purchases slot (no Duro-Last discount / markup) instead of M0.
+ */
+export const NON_DL_MEMBRANE_IDS: ReadonlySet<number> = new Set([7, 8]);
 
 /**
  * A flat family's $/sq ft for a thickness variant: the section's colour column when that row
@@ -832,6 +849,8 @@ export const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
   "Duro-Roof": [57, 87, 120],
   "Duro-Tuff": [30, 60, 120],
   "Duro-Tech TPO": [30, 60, 120],
+  "Non-DL TPO": [30, 60, 120],
+  "EPDM Rubber": [120, 240],
 };
 
 /**
@@ -888,6 +907,11 @@ const comboKey = (system: string, attachment: Attachment): string =>
 export interface ReviewBreakdown {
   /** Accessory lines material (dMaterial[4] share of M0). */
   accessoriesMaterial: number;
+  /**
+   * Non-DL TPO / EPDM Rubber membrane + parapet material $ (docs §22.35) — billed to the Non-DL
+   * "Other" purchases slot, never inside duroLastMaterial.
+   */
+  nonDlMembraneMaterial: number;
   /** Auto-priced ARP material (§8.6, MembraneAccs → shown with Accessories). */
   arpMaterial: number;
   /** Exceptional Metals own-rate labor (dLabor[5] share). */
@@ -1025,7 +1049,7 @@ export function strippingBySection(
   for (const s of bid.sections) {
     const sys = resolveSectionSystem(bid, s);
     let pricePerFt: number;
-    if (sys.rsId === 3 || sys.rsId === 6) {
+    if (sys.rsId === 3 || WEB_ROLL_GOODS_IDS.has(sys.rsId)) {
       pricePerFt = familyMembranePrice(admin, sys.roofSystem, String(s.thickness), s.color) ?? 0;
     } else {
       pricePerFt = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color) ?? 0;
@@ -1085,6 +1109,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       : admin.settings.hoursPerDay;
 
   let membraneMaterial = 0;
+  // Non-DL TPO / EPDM Rubber membrane (and, below, wall) $ — a non-Duro-Last purchase (§22.35).
+  let nonDlMembraneMaterial = 0;
   let underlaymentMaterial = 0;
   let underlaymentLaborHours = 0;
   /** §10.7: a quote ID shared across sections/layers bills ONCE (legacy CustomQuotes dedup). */
@@ -1217,7 +1243,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           `No ${sys.roofSystem} membrane price for "${variantKey}" — section "${s.name}".`,
         );
       }
-      membraneMaterial += membraneWithOverlap * (fPrice ?? 0);
+      if (NON_DL_MEMBRANE_IDS.has(rsId))
+        nonDlMembraneMaterial += membraneWithOverlap * (fPrice ?? 0);
+      else membraneMaterial += membraneWithOverlap * (fPrice ?? 0);
     }
     // Duro-Roof (rs 4) shares the Duro-Last zone logic with NO roll-good sheet branch and a
     // 57" middle threshold (its 57" tab maps to the 60"-Tabs price row); ×1.05 rides on
@@ -1994,15 +2022,35 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
           (((p.arpSizeIn ?? 0) + 6) / 12) * (arpLen === p.lengthFt ? adjustedLengthFt : arpLen);
       }
       // Legacy prices at the PARAPET's own mil/color (docs §8.5); bid default when unset.
-      const ownPrice =
-        p.thicknessMil !== undefined || p.color !== undefined
-          ? parapetTierPrice(
-              p.thicknessMil ?? first?.thickness ?? 0,
-              p.color ?? first?.color ?? "",
-              `parapet "${p.name}" thickness/color`,
-            )
-          : defaultPrice;
-      parapetMaterial += bankersRound(billedHeightFt * adjustedLengthFt * ownPrice, 2);
+      // Web-only systems (docs §22.34/§22.35) have no Parapets tier: the wall bills the flat
+      // family $/sq ft for the wall's mil/colour (the section membrane figure).
+      let ownPrice: number;
+      if (WEB_ROLL_GOODS_IDS.has(ps.rsId)) {
+        const mil = p.thicknessMil ?? first?.thickness ?? 0;
+        const color = p.color ?? first?.color ?? "";
+        const fp = familyMembranePrice(admin, ps.roofSystem, String(mil), color);
+        if (
+          fp === undefined &&
+          anyWall &&
+          !tierWarned.has(`web|${ps.roofSystem}|${mil}|${color}`)
+        ) {
+          tierWarned.add(`web|${ps.roofSystem}|${mil}|${color}`);
+          warnings.push(`No ${ps.roofSystem} membrane price for "${mil}" — parapet "${p.name}".`);
+        }
+        ownPrice = fp ?? 0;
+      } else {
+        ownPrice =
+          p.thicknessMil !== undefined || p.color !== undefined
+            ? parapetTierPrice(
+                p.thicknessMil ?? first?.thickness ?? 0,
+                p.color ?? first?.color ?? "",
+                `parapet "${p.name}" thickness/color`,
+              )
+            : defaultPrice;
+      }
+      const wallMaterial = bankersRound(billedHeightFt * adjustedLengthFt * ownPrice, 2);
+      if (NON_DL_MEMBRANE_IDS.has(ps.rsId)) nonDlMembraneMaterial += wallMaterial;
+      else parapetMaterial += wallMaterial;
       parapetAdjustedSqFt += billedHeightFt * adjustedLengthFt;
     }
   }
@@ -2426,8 +2474,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       else if (ln.group === "services") nonDlServices += goodSingle(ln.materialCost + ln.laborCost);
     }
   }
-  // The manual "other material" seam rides the Others slot (dMaterial[19]).
-  ndlSlots[6]!.material += bid.otherMaterial;
+  // The manual "other material" seam rides the Others slot (dMaterial[19]) — as does the Non-DL
+  // TPO / EPDM membrane (docs §22.35).
+  ndlSlots[6]!.material += bid.otherMaterial + nonDlMembraneMaterial;
   // dTotals[7] = GoodSingle(NonDL.MaterialCost) — the RAW six-group sum (rounded in money.ts);
   // dMaterial[20] (tax / freight basis) sums the GoodSingle'd per-group slots instead.
   const otherMaterial = ndlSlots.reduce((sum, g) => sum + g.material, 0);
@@ -2530,6 +2579,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
 
   const breakdown: ReviewBreakdown = {
     accessoriesMaterial: accessoryMaterial,
+    nonDlMembraneMaterial,
     arpMaterial,
     metalsLaborCost,
     metalsLaborHours,

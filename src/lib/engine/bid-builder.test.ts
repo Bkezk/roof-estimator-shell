@@ -3870,3 +3870,96 @@ describe("Duro-Tech TPO — the web's sixth roof system (docs §22.34)", () => {
     expect(r.installHours).toBeCloseTo(INSTALL, 6);
   });
 });
+
+describe("Non-DL TPO / EPDM Rubber — non-Duro-Last membranes (docs §22.35)", () => {
+  const combo = (roofSystem: string, baseHours: number): LaborCombo => ({
+    roof_system: roofSystem,
+    attachment: "mechanical",
+    base: { tab_value: 120, tab_multiplier: 1 },
+    base_hours_per_2500: baseHours,
+    deck_multipliers: { Wood: 1, Steel: 1.05, Concrete: 1.325 },
+    fastener_spacing_multipliers: [
+      { spacing_in: 18, multiplier: 1 },
+      { spacing_in: 12, multiplier: 1.1 },
+    ],
+    thickness_multipliers: [
+      { mil: 45, multiplier: 1 },
+      { mil: 60, multiplier: 1 },
+      { mil: 75, multiplier: 1.05 },
+      { mil: 80, multiplier: 1.075 },
+      { mil: 90, multiplier: 1.1 },
+    ],
+  });
+  const ndlAdmin: EngineAdminData = {
+    ...admin,
+    labor: {
+      ...admin.labor,
+      "Non-DL TPO|mechanical": buildLaborTables(combo("Non-DL TPO", 27.5), deckOrder),
+      "EPDM Rubber|mechanical": buildLaborTables(combo("EPDM Rubber", 31), deckOrder),
+    },
+    familyMembranePrices: {
+      "Non-DL TPO": { "60": 0.7 },
+      "EPDM Rubber": { "60": 0.65 },
+    },
+    rollGoodWidthMulti: { 7: { 30: 2.6, 60: 1.3, 120: 1 }, 8: { 120: 1, 240: 0.85 } },
+  };
+  const ndlBid = (roofSystem: string, fieldLap: number, over: Partial<BidInput> = {}) =>
+    bid({
+      roofSystem,
+      sections: [{ ...bid().sections[0]!, thickness: 60, fieldLap, fastenerOc: 18 }],
+      ...over,
+    });
+  // 10 ft roll: TPO's 6" side lap → 2731.5 sq ft; EPDM's 3" seam tape → rollQty(10, 0.25).
+  const TPO_MWO = rollQty(10, 0.5);
+  const EPDM_MWO = rollQty(10, 0.25);
+
+  it("Non-DL TPO: roll-goods quantity × flat $/sq ft bills to Non-DL Other purchases, not Duro-Last material", () => {
+    const { inputs, breakdown } = buildEstimateInputs(ndlBid("Non-DL TPO", 120), ndlAdmin);
+    expect(inputs.sections[0]!.membraneWithOverlap).toBeCloseTo(TPO_MWO, 6);
+    expect(inputs.duroLastMaterial).toBe(0);
+    expect(inputs.otherMaterial).toBeCloseTo(TPO_MWO * 0.7, 2);
+    expect(breakdown.nonDlMembraneMaterial).toBeCloseTo(TPO_MWO * 0.7, 2);
+    // 27.5 h / 2,500 × Moderate 1.25 on a wood deck, 10 ft roll, 18" spacing, 60 mil ×1.
+    expect(computeEstimate(inputs).installHours).toBeCloseTo((TPO_MWO * 27.5 * 1.25) / 2500, 6);
+  });
+
+  it('EPDM Rubber: 3" seam lap on the roll-goods quantity, 31 h / 2,500 base', () => {
+    const { inputs, breakdown } = buildEstimateInputs(ndlBid("EPDM Rubber", 120), ndlAdmin);
+    expect(inputs.sections[0]!.membraneWithOverlap).toBeCloseTo(EPDM_MWO, 6);
+    expect(inputs.duroLastMaterial).toBe(0);
+    expect(breakdown.nonDlMembraneMaterial).toBeCloseTo(EPDM_MWO * 0.65, 2);
+    expect(computeEstimate(inputs).installHours).toBeCloseTo((EPDM_MWO * 31 * 1.25) / 2500, 6);
+  });
+
+  it("a wall on a Non-DL system bills its membrane at the flat family price into the same Non-DL bucket", () => {
+    const withWall = ndlBid("Non-DL TPO", 120, {
+      parapets: [
+        {
+          id: "p1",
+          name: "North",
+          lengthFt: 100,
+          heightBand: "",
+          deckType: "Wood",
+          predrill: false,
+          canted: false,
+          girthInches: 24,
+          pieces: 1,
+          wallType: 1,
+        },
+      ],
+    });
+    const { inputs, breakdown } = buildEstimateInputs(withWall, ndlAdmin);
+    // Girth 24" → 2 ft billed height × adjusted length (100 + 1 + 1) × $0.70.
+    const wall = 2 * 102 * 0.7;
+    expect(inputs.duroLastMaterial).toBe(0);
+    expect(breakdown.nonDlMembraneMaterial).toBeCloseTo(TPO_MWO * 0.7 + wall, 2);
+    expect(inputs.otherMaterial).toBeCloseTo(TPO_MWO * 0.7 + wall, 2);
+  });
+
+  it("warns (and prices 0) when the membrane matrix row is still blank", () => {
+    const blank: EngineAdminData = { ...ndlAdmin, familyMembranePrices: {} };
+    const { inputs, warnings } = buildEstimateInputs(ndlBid("EPDM Rubber", 120), blank);
+    expect(inputs.otherMaterial).toBe(0);
+    expect(warnings.some((w) => w.includes("No EPDM Rubber membrane price"))).toBe(true);
+  });
+});

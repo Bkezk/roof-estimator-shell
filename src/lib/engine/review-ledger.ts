@@ -178,6 +178,10 @@ export function buildReviewLedger(i: {
     label,
     cost: ndlMat[label] ?? 0,
   }));
+  // Non-DL TPO / EPDM Rubber membrane + walls (docs §22.35): inside the engine's Others slot,
+  // shown on its own row so the purchase is visible.
+  if ((b.nonDlMembraneMaterial ?? 0) > 0)
+    nonDlPurchases.push({ label: "Non-DL Membrane", cost: b.nonDlMembraneMaterial });
   // Legacy quirk (docs §22.4): ReviewCalc overwrites the Others group's dLabor row with Setup
   // labor, so its labor never reaches Total Labor — the row shows 0 here (the engine warns).
   const nonDlLabor: LedgerRow[] = NONDL_ROW_ORDER.map((label) => {

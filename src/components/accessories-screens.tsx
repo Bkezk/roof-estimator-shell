@@ -1598,9 +1598,11 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                       1' of 10"{" "}
                       {s.roofSystem === "Duro-Tuff"
                         ? "DT"
-                        : s.roofSystem === "Duro-Tech TPO"
+                        : s.roofSystem === "Duro-Tech TPO" || s.roofSystem === "Non-DL TPO"
                           ? "TPO"
-                          : "DL"}{" "}
+                          : s.roofSystem === "EPDM Rubber"
+                            ? "EPDM"
+                            : "DL"}{" "}
                       {s.color} Stripping — {s.name}
                       {(result?.membraneAccs.strippingPriceBySection[s.id] ?? 0) <= 0 && (
                         <span className="ml-1 text-[10px] text-amber-600">
