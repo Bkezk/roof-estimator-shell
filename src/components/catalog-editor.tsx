@@ -312,7 +312,11 @@ export function CatalogEditor({
                           <span
                             key={`${m.item_no}|${m.price_col}`}
                             className="mb-0.5 mr-1 inline-block whitespace-nowrap rounded bg-muted px-1.5 py-0.5 font-mono"
-                            title={`→ ${m.price_col}`}
+                            title={
+                              m.dl_description
+                                ? `${m.dl_description} → ${m.price_col}`
+                                : `→ ${m.price_col}`
+                            }
                           >
                             {m.item_no}
                             {valueCols.filter((c) => !isPartCol(c)).length > 1 ? (
