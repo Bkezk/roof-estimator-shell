@@ -29,6 +29,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      bid_locks: {
+        Row: {
+          acquired_at: string;
+          bid_id: string;
+          heartbeat_at: string;
+          holder_name: string;
+          session_key: string;
+          user_id: string;
+        };
+        Insert: {
+          acquired_at?: string;
+          bid_id: string;
+          heartbeat_at?: string;
+          holder_name: string;
+          session_key: string;
+          user_id: string;
+        };
+        Update: {
+          acquired_at?: string;
+          bid_id?: string;
+          heartbeat_at?: string;
+          holder_name?: string;
+          session_key?: string;
+          user_id?: string;
+        };
+        Relationships: [];
+      };
       bids: {
         Row: {
           created_at: string;
@@ -585,8 +612,19 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      acquire_bid_lock: {
+        Args: { p_bid: string; p_session: string; p_name: string; p_ttl_seconds?: number };
+        Returns: {
+          acquired: boolean;
+          holder_name: string;
+          holder_user: string;
+          holder_session: string;
+          heartbeat_at: string;
+        }[];
+      };
       current_user_role: { Args: never; Returns: string };
       is_admin: { Args: never; Returns: boolean };
+      release_bid_lock: { Args: { p_bid: string; p_session: string }; Returns: undefined };
     };
     Enums: {
       [_ in never]: never;

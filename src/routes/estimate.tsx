@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  Lock,
 } from "lucide-react";
 
 import {
@@ -108,6 +109,7 @@ import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
+import { useBidLock } from "@/lib/use-bid-lock";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
@@ -450,6 +452,22 @@ function EstimatePage() {
   // A saved bid whose row has no usable data ({} / null): surface it loudly instead of quietly
   // showing a fresh default estimate under the saved name (the "smith elemetry" bug).
   const [loadedBidEmpty, setLoadedBidEmpty] = useState(false);
+  // Per-tab edit lock (docs: bid_locks). Another tab — any user, or this account in a second
+  // window — makes this view read-only; when the holder leaves, this tab takes over and
+  // re-hydrates from the saved row so it never edits a stale copy.
+  const lockHolderName = profile?.full_name?.trim() || session?.user.email || "Another user";
+  const bidLock = useBidLock({
+    bidId: bidParam,
+    enabled: authed,
+    holderName: lockHolderName,
+    onAcquired: (firstTime) => {
+      if (firstTime) return;
+      hydratedFor.current = null;
+      void qc.invalidateQueries({ queryKey: ["bid", bidParam] });
+    },
+  });
+  const readOnly = bidLock.readOnly;
+  const ro = readOnly ? { inert: true } : {};
   const [commission, setCommission] = useState(3);
   const [taxExempt, setTaxExempt] = useState(false);
   const [prepayDiscount, setPrepayDiscount] = useState(false);
@@ -1088,6 +1106,10 @@ function EstimatePage() {
 
   /** Save the bid (create on first save). Resolves true on success, false when the save failed. */
   const handleSave = async (): Promise<boolean> => {
+    if (readOnly) {
+      toast.error(`Read only: ${bidLock.holder?.name ?? "another user"} is editing this bid.`);
+      return false;
+    }
     setSaving(true);
     try {
       const grandTotal = result?.r.money.grandTotal ?? 0;
@@ -1111,6 +1133,7 @@ function EstimatePage() {
       const row = await saveBidFn({
         data: {
           ...(bidId ? { id: bidId } : {}),
+          sessionKey: bidLock.sessionKey,
           name: bidName.trim() || "Untitled bid",
           data: payload as unknown as Record<string, unknown>,
           grandTotal,
@@ -1212,6 +1235,22 @@ function EstimatePage() {
       }`}
     >
       <div className="space-y-6">
+        {readOnly && bidLock.holder && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center gap-2 rounded-md border border-orange-600 bg-orange-500 px-4 py-3 text-sm font-semibold text-white shadow-sm"
+          >
+            <Lock className="h-4 w-4 shrink-0" />
+            <span>
+              Read only mode: {bidLock.holder.name} is currently editing this bid
+              {bidLock.holder.userId === session?.user.id ? " in another window" : ""}.
+            </span>
+            <span className="font-normal text-orange-50">
+              You can look but not change anything — editing unlocks here automatically once they
+              leave.
+            </span>
+          </div>
+        )}
         {loadedBidEmpty && (
           <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
             <span className="font-semibold">This saved bid has no stored data.</span> What you see
@@ -1235,7 +1274,7 @@ function EstimatePage() {
               admin changes don't affect this bid until you update it.
             </span>
             {pricingStale && (
-              <Button variant="outline" size="sm" onClick={refreshPricing}>
+              <Button variant="outline" size="sm" onClick={refreshPricing} disabled={readOnly}>
                 <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
               </Button>
             )}
@@ -1263,7 +1302,7 @@ function EstimatePage() {
           })}
         </div>
 
-        <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"}>
+        <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"} {...ro}>
           {/* Legacy frmHome: "Setup" panel (Bid Info | Client | Job Site) on the left, the
               "Defaults" panel on the right (docs §17). */}
           <Card>
@@ -2224,7 +2263,7 @@ function EstimatePage() {
           </AlertDialog>
         </div>
 
-        <div className={step === 1 ? "space-y-6" : "hidden"}>
+        <div className={step === 1 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Roof Sections</CardTitle>
@@ -2276,7 +2315,7 @@ function EstimatePage() {
         </div>
 
         {/* Legacy Underlayment / Insulation screen: select sections, configure a layer, apply. */}
-        <div className={step === 2 ? "space-y-6" : "hidden"}>
+        <div className={step === 2 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Underlayment / Insulation</CardTitle>
@@ -3189,7 +3228,7 @@ function EstimatePage() {
             Skirt-Cant-Vertical-Top-Drop profile, termination / capstone / ARP tabs, Membrane
             Options (per-wall Roof System / Attachment / adhesive / mil / color), the frmLaborPopUp
             labor link, Fasteners Needed and lvSummary — docs §19. */}
-        <div className={step === 3 ? "space-y-6" : "hidden"}>
+        <div className={step === 3 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Parapets</CardTitle>
@@ -3239,7 +3278,7 @@ function EstimatePage() {
         {/* Legacy Curbs screen (frmCurbs): style toolstrip, dims, termination, insulation /
             plastic, the picCurb drawing with the A/B/C/D readout and the lvSummary — docs
             §8.1–§8.3. Wrap material via curb-wrap.ts (§2); labor per §8.2 BaseHours. */}
-        <div className={step === 4 ? "space-y-6" : "hidden"}>
+        <div className={step === 4 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Curbs</CardTitle>
@@ -3268,7 +3307,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 5 ? "space-y-6" : "hidden"}>
+        <div className={step === 5 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Accessories</CardTitle>
@@ -3425,7 +3464,7 @@ function EstimatePage() {
         {/* Legacy EXCEPTIONAL Metals screen (frmMetals): four entry tiles + the lvSummary grid.
             Money per docs §13 (extracted IL): material → dMaterial[5] inside M0, labor at each
             row's own rate → dLabor[5] direct labor. */}
-        <div className={step === 6 ? "space-y-6" : "hidden"}>
+        <div className={step === 6 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">EXCEPTIONAL Metals</CardTitle>
@@ -3540,7 +3579,7 @@ function EstimatePage() {
         {/* Legacy Tear-Off screen (mirrors the 2026-08-31 12:44 capture): section select grid,
             type tiles grouped Single Ply / Built Up / Urethane, thickness + disposal capacity,
             the red labor-variables note, and the Existing Roof / Deck info panel. */}
-        <div className={step === 7 ? "space-y-6" : "hidden"}>
+        <div className={step === 7 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Tear-Off</CardTitle>
@@ -3793,7 +3832,7 @@ function EstimatePage() {
         {/* Legacy Non-Duro-Last Items screen (frmNonDL): six entry tiles + the lvSummary grid.
             Money per docs §14 (extracted IL): six material groups → OtherMaterial (taxable) with
             direct labor at each row's own rate; subs & services → LaborSubtotal2. */}
-        <div className={step === 8 ? "space-y-6" : "hidden"}>
+        <div className={step === 8 ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Non-Duro-Last Items</CardTitle>
@@ -3913,7 +3952,7 @@ function EstimatePage() {
           )}
         </div>
 
-        <div className={step === 9 && showPricingSettings ? "space-y-6" : "hidden"}>
+        <div className={step === 9 && showPricingSettings ? "space-y-6" : "hidden"} {...ro}>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <CardTitle className="text-base">Pricing controls</CardTitle>
@@ -4101,7 +4140,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 9 ? "space-y-6" : "hidden"}>
+        <div className={step === 9 ? "space-y-6" : "hidden"} {...ro}>
           {result && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -4227,7 +4266,7 @@ function EstimatePage() {
                   : "No input warnings."}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button onClick={handleSave} disabled={saving}>
+                <Button onClick={handleSave} disabled={saving || readOnly}>
                   <Save className="mr-2 h-4 w-4" />
                   {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
                 </Button>
@@ -4249,10 +4288,11 @@ function EstimatePage() {
           <Button
             variant="outline"
             disabled={step === 0 || saving}
-            title="Saves the bid, then goes back"
-            onClick={() => saveAndGo(step - 1)}
+            title={readOnly ? "Goes back (read only)" : "Saves the bid, then goes back"}
+            onClick={() => (readOnly ? goStep(step - 1) : saveAndGo(step - 1))}
           >
-            <ChevronLeft className="mr-1 h-4 w-4" /> {saving ? "Saving…" : "Save & Previous"}
+            <ChevronLeft className="mr-1 h-4 w-4" />{" "}
+            {saving ? "Saving…" : readOnly ? "Previous" : "Save & Previous"}
           </Button>
           <span className="hidden text-xs text-muted-foreground sm:inline">
             Step {step + 1} of {STEPS.length} — {STEPS[step]!.label}
@@ -4266,19 +4306,20 @@ function EstimatePage() {
             <Button
               variant={step < STEPS.length - 1 ? "outline" : "default"}
               onClick={handleSave}
-              disabled={saving}
-              title="Saves the bid and stays on this step"
+              disabled={saving || readOnly}
+              title={readOnly ? "Read only" : "Saves the bid and stays on this step"}
             >
               <Save className="mr-2 h-4 w-4" />
               {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
             </Button>
             {step < STEPS.length - 1 && (
               <Button
-                onClick={() => saveAndGo(step + 1)}
+                onClick={() => (readOnly ? goStep(step + 1) : saveAndGo(step + 1))}
                 disabled={saving}
-                title="Saves the bid, then moves on"
+                title={readOnly ? "Moves on (read only)" : "Saves the bid, then moves on"}
               >
-                {saving ? "Saving…" : "Save & Next"} <ChevronRight className="ml-1 h-4 w-4" />
+                {saving ? "Saving…" : readOnly ? "Next" : "Save & Next"}{" "}
+                <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             )}
           </div>
@@ -4289,7 +4330,11 @@ function EstimatePage() {
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1">
             <Label className="text-xs">Status</Label>
-            <Select value={bidStatus} onValueChange={(v) => setBidStatus(v as BidStatus)}>
+            <Select
+              value={bidStatus}
+              onValueChange={(v) => setBidStatus(v as BidStatus)}
+              disabled={readOnly}
+            >
               <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>

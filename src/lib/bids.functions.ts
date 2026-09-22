@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
 import { BID_STATUSES } from "@/lib/bid-status";
+import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -51,6 +52,8 @@ const saveBidSchema = z.object({
   data: z.record(z.string(), z.unknown()),
   grandTotal: z.number(),
   status: z.enum(BID_STATUSES).optional(),
+  /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
+  sessionKey: z.string().min(8).max(80).optional(),
 });
 
 /** Create a new bid or update an existing one (by id) with the full estimator payload. */
@@ -66,6 +69,11 @@ export const saveBid = createServerFn({ method: "POST" })
       ...(data.status ? { status: data.status } : {}),
     };
     if (data.id) {
+      const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);
+      if (other)
+        throw new Error(
+          `Read only: ${other.holderName} is currently editing this bid — your changes were not saved.`,
+        );
       const { data: bid, error } = await context.supabase
         .from("bids")
         .update(payload)
