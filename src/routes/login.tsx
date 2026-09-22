@@ -38,7 +38,14 @@ function LoginPage() {
     });
     setSubmitting(false);
     if (signInError) {
-      setError("Incorrect email or password.");
+      // A rejected password comes back as HTTP 400; anything else (no network, a blocked host,
+      // a 5xx) is not the user's fault and must not read as a wrong password.
+      const status = (signInError as { status?: number }).status;
+      setError(
+        status === 400
+          ? "Incorrect email or password."
+          : "Could not reach the sign-in service — check your connection and try again.",
+      );
       return;
     }
     navigate({ to: "/bids" });
