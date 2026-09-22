@@ -4407,6 +4407,18 @@ function EstimatePage() {
             </Button>
           </CardHeader>
           <CardContent id="bid-total-body" className={bidTotalOpen ? "space-y-3" : "hidden"}>
+            {frozenAsOf !== null && pricingStale && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
+                <span>
+                  Priced with admin data frozen{" "}
+                  {frozenAsOf ? `on ${new Date(frozenAsOf).toLocaleDateString()}` : "at save"} —
+                  pricing or labor has changed since.
+                </span>
+                <Button variant="outline" size="sm" className="h-7" onClick={refreshPricing}>
+                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
+                </Button>
+              </div>
+            )}
             {result?.warnings.length ? (
               <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
                 <div className="mb-1 flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
