@@ -3229,3 +3229,28 @@ Addendum (same day) — **"Enhancement Necessary" on EPDM.** The Setup flag is t
 (120" / 240" only), so the 60" probe found no `mech_fastener_lookup` row (error −2) and flagged
 every EPDM bid. Departure: a system whose `TAB_OPTIONS_BY_SYSTEM` list does not offer 60" probes
 its narrowest offered width (EPDM → 120"); legacy systems and both TPOs still probe 60".
+
+### 22.36 Membrane item numbers from the roll-goods list (2026-09-22)
+
+Owner: "don't some of these have item numbers in the price sheet? look at the second tab". The
+workbook's "Duro-Last Membrane" tab carries **no item numbers** — Description / Mil / Color /
+Price per SqFt only — which is why the import matches it by product. The main "Price List" tab
+does list the rolls: category "Duro-Last Roll Goods" (40 / 50 / 60 mil × White / Tan / Gray /
+Dark Gray, 50 mil also Terra Cotta, each at 5'4" × 100' and 2'8" × 100') and "Duro-Tech (TPO)"
+(45 / 60 / 80 mil rolls at 30" / 60" / 120" × 100'). Migration `20260922130000` maps 41 roll
+item numbers onto the matrix's Roll Goods and Duro-Tech TPO rows **per colour column** (both
+roll widths on the same cell); the Duro-Last Membrane admin screen's Item # column now shows
+them (chips wrap; the colour rides each chip). Tabs / Parapets rows are prefabricated sheets
+with no list item; Duro-Bond / Duro-Tuff / Duro-Fleece (PVC) are not on this list (the sheet's
+"D-FLEECE EV" rows are Elvaloy fleece — a different product — and were NOT mapped).
+
+**Import conversion.** The matrix is $/sq ft and the list prices per roll, so a roll item
+mapped onto a membrane cell writes `Round(roll $ ÷ roll area, 2)` — the area from the sheet's
+Size cell (`rollAreaSqFt`: `5'4 X 100'` = 533.3, `2'8" X 100'` = 266.7, `10' X 100'` = 1,000;
+`guessHeader` now picks the Size column, with a manual pick beside Unit). Verified on the real
+workbook: every mapped roll lands on the membrane tab's own figure (40 mil White 1.23 / Tan
+1.25; 50 mil 1.36 / 1.37; 60 mil 1.48 / 1.50; TPO 0.75 / 0.84 / 1.30), both widths of a product
+agree, and the cell is planned once — the membrane tab's per-sq-ft line wins when the workbook
+carries it. A roll line whose Size cell cannot be read is listed under "Membrane roll lines not
+converted" and never written as a per-roll price. No prices changed on this import path yet
+(mappings only).

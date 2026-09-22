@@ -46,6 +46,9 @@ import {
 import {
   guessHeader,
   guessMembraneHeader,
+  MEMBRANE_SCREEN_ID,
+  membranePerSqFt,
+  rollAreaSqFt,
   matchMembrane,
   matchSheet,
   readMembraneSheet,
@@ -53,11 +56,10 @@ import {
   type HeaderGuess,
   type MatchResult,
   type MembraneMatchResult,
+  type ItemNumberMapping,
   type SheetItem,
   type SheetRow,
 } from "@/lib/price-import";
-
-const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
 
 const money = (v: number | null | undefined) =>
   v === null || v === undefined
@@ -77,6 +79,8 @@ interface PlannedUpdate {
   unit: string;
   current: number | null;
   next: number;
+  /** How `next` was derived when it is not the sheet price as written (membrane rolls → $/sq ft). */
+  note?: string;
 }
 
 /**
@@ -205,6 +209,7 @@ export function PriceImportPage() {
           descCol: 1,
           priceCol: 2,
           unitCol: null,
+          sizeCol: null,
         },
       );
       setLastReport(null);
@@ -249,22 +254,17 @@ export function PriceImportPage() {
   }, [membraneSheet, useMembrane, targetById]);
 
   /* ---------------- Plan (what "Apply" will write) ---------------- */
-  const plan: PlannedUpdate[] = useMemo(() => {
+  const { plan, membraneSkipped } = useMemo(() => {
     const out: PlannedUpdate[] = [];
-    for (const { item, mapping } of match?.matched ?? []) {
-      out.push({
-        item_no: mapping.item_no,
-        screen_id: mapping.screen_id,
-        category: categoryOf(mapping.screen_id),
-        row_label: mapping.row_label,
-        price_col: mapping.price_col,
-        description: item.description,
-        unit: item.unit,
-        current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
-        next: item.price!,
-      });
-    }
+    // Membrane matrix cells are $/sq ft. The membrane tab prices them directly and wins; a
+    // roll-goods item number mapped onto a cell converts roll $ ÷ roll area (both roll widths of
+    // one product land on the same figure, so the cell is planned once). A roll line whose Size
+    // cell cannot be read is reported, never written as a per-roll price.
+    const membraneCells = new Set<string>();
+    const cellKey = (row: string, col: string) => `${row}\u0000${col}`;
+    const skipped: { item: SheetItem; mapping: ItemNumberMapping; reason: string }[] = [];
     for (const m of membraneMatch?.matched ?? []) {
+      membraneCells.add(cellKey(m.row_label, m.price_col));
       out.push({
         item_no: "MEMBRANE",
         screen_id: MEMBRANE_SCREEN_ID,
@@ -277,7 +277,49 @@ export function PriceImportPage() {
         next: m.item.price!,
       });
     }
-    return out;
+    for (const { item, mapping } of match?.matched ?? []) {
+      if (mapping.screen_id === MEMBRANE_SCREEN_ID) {
+        const k = cellKey(mapping.row_label, mapping.price_col);
+        if (membraneCells.has(k)) continue; // the membrane tab already prices this cell
+        const perSqFt = membranePerSqFt(item);
+        if (perSqFt === null) {
+          skipped.push({
+            item,
+            mapping,
+            reason: item.size
+              ? `size "${item.size}" is not a roll dimension`
+              : "no Size column / cell — pick the Size column above",
+          });
+          continue;
+        }
+        membraneCells.add(k);
+        out.push({
+          item_no: mapping.item_no,
+          screen_id: mapping.screen_id,
+          category: categoryOf(mapping.screen_id),
+          row_label: mapping.row_label,
+          price_col: mapping.price_col,
+          description: item.description,
+          unit: "SQFT",
+          current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
+          next: perSqFt,
+          note: `${money(item.price)} per roll ÷ ${(rollAreaSqFt(item.size) ?? 0).toFixed(1)} sq ft`,
+        });
+        continue;
+      }
+      out.push({
+        item_no: mapping.item_no,
+        screen_id: mapping.screen_id,
+        category: categoryOf(mapping.screen_id),
+        row_label: mapping.row_label,
+        price_col: mapping.price_col,
+        description: item.description,
+        unit: item.unit,
+        current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
+        next: item.price!,
+      });
+    }
+    return { plan: out, membraneSkipped: skipped };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match, membraneMatch, targetById]);
   const changed = plan.filter((p) => p.current !== p.next);
@@ -501,6 +543,7 @@ export function PriceImportPage() {
                           descCol: 1,
                           priceCol: 2,
                           unitCol: null,
+                          sizeCol: null,
                         },
                       );
                     }}
@@ -536,6 +579,7 @@ export function PriceImportPage() {
                   ["descCol", "Description column"],
                   ["priceCol", "Price column"],
                   ["unitCol", "Unit column"],
+                  ["sizeCol", "Size column"],
                 ] as const
               ).map(([k, label]) => (
                 <div key={k} className="space-y-1">
@@ -686,6 +730,26 @@ export function PriceImportPage() {
                     <li key={u.item.rowIndex}>
                       row {u.item.rowIndex + 1}: {u.item.description} {u.item.mil} mil{" "}
                       {u.item.color} — {u.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+            {membraneSkipped.length > 0 && (
+              <details className="rounded-md border border-amber-300 p-3">
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Membrane roll lines not converted to $/sq ft ({membraneSkipped.length})
+                </summary>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The membrane matrix is priced per sq ft; a roll price is only written once it can
+                  be divided by the roll&apos;s area from the sheet&apos;s Size column. These lines
+                  are left as they are.
+                </p>
+                <ul className="mt-1 text-xs text-muted-foreground">
+                  {membraneSkipped.map((u) => (
+                    <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
+                      {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
+                      {u.mapping.price_col}: {u.reason}
                     </li>
                   ))}
                 </ul>
@@ -850,6 +914,7 @@ export function PriceImportPage() {
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {p.description}
+                          {p.note && <div className="text-[10px] italic">{p.note}</div>}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{p.unit}</TableCell>
                         <TableCell className="text-right text-xs tabular-nums">

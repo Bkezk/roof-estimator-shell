@@ -299,7 +299,7 @@ export function CatalogEditor({
                     </TableCell>
                   ))}
                   {branch === "duro_last" && (
-                    <TableCell className="whitespace-nowrap text-xs">
+                    <TableCell className="max-w-[320px] text-xs">
                       {itemNosFor(row).length === 0 ? (
                         <span
                           className="text-muted-foreground"
@@ -311,7 +311,7 @@ export function CatalogEditor({
                         itemNosFor(row).map((m) => (
                           <span
                             key={`${m.item_no}|${m.price_col}`}
-                            className="mr-1 inline-block rounded bg-muted px-1.5 py-0.5 font-mono"
+                            className="mb-0.5 mr-1 inline-block whitespace-nowrap rounded bg-muted px-1.5 py-0.5 font-mono"
                             title={`→ ${m.price_col}`}
                           >
                             {m.item_no}

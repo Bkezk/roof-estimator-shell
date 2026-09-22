@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  membranePerSqFt,
+  rollAreaSqFt,
   guessHeader,
   guessMembraneHeader,
   matchMembrane,
@@ -60,6 +62,7 @@ describe("price import — parsing", () => {
       descCol: 1,
       priceCol: 3,
       unitCol: 2,
+      sizeCol: null,
     });
     // The real Duro-Last sheet: Item / Description / Category / … / Price / Unit of Measure.
     const dl = [
@@ -92,10 +95,31 @@ describe("price import — parsing", () => {
       descCol: 1,
       priceCol: 7,
       unitCol: 8,
+      sizeCol: 4,
     });
     const it0 = readSheetItems(dl, guessHeader(dl)!)[0]!;
-    expect([it0.itemNo, it0.price, it0.unit]).toEqual(["1222", 44, "BG"]);
+    expect([it0.itemNo, it0.price, it0.unit, it0.size]).toEqual(["1222", 44, "BG", ""]);
     expect(guessHeader([["a", "b"]])).toBeNull();
+  });
+
+  it("turns a roll-goods line (per roll) into the membrane matrix's $/sq ft via its Size cell", () => {
+    // The real sheet's Duro-Last Roll Goods: 5'4 × 100' = 533.33 sq ft; 2'8" × 100' = 266.67.
+    expect(rollAreaSqFt("5'4 X 100'")).toBeCloseTo(533.333, 3);
+    expect(rollAreaSqFt("2'8\" X 100'")).toBeCloseTo(266.667, 3);
+    expect(rollAreaSqFt("10' X 100'")).toBe(1000);
+    expect(rollAreaSqFt("2'6\" x 100'")).toBe(250);
+    expect(rollAreaSqFt("10\" X 100'- STRIPPING")).toBeCloseTo(83.333, 3);
+    expect(rollAreaSqFt("")).toBeNull();
+    expect(rollAreaSqFt("BAG")).toBeNull();
+    // 55701 DL 40MIL WHT 5'4"X100' $656.72 → 1.23 (= the membrane tab's 40 mil White Roll Goods).
+    expect(membranePerSqFt({ price: 656.72, size: "5'4 X 100'" })).toBe(1.23);
+    expect(membranePerSqFt({ price: 328.41, size: "2'8\" X 100'" })).toBe(1.23);
+    expect(membranePerSqFt({ price: 667.32, size: "5'4 X 100'" })).toBe(1.25);
+    // 44103 D-TECH TPO WHT 45 MIL 120x1200 $750 → 0.75; 44127 80 mil $1300 → 1.30.
+    expect(membranePerSqFt({ price: 750, size: "10' X 100'" })).toBe(0.75);
+    expect(membranePerSqFt({ price: 1300, size: "10' X 100'" })).toBe(1.3);
+    expect(membranePerSqFt({ price: 44, size: "" })).toBeNull();
+    expect(membranePerSqFt({ price: null, size: "10' X 100'" })).toBeNull();
   });
 
   it("reads data rows under the header and skips blank item numbers", () => {

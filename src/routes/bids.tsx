@@ -61,6 +61,17 @@ export const Route = createFileRoute("/bids")({
 });
 
 const NO_ESTIMATOR = "__none__";
+/** Roof systems a bid uses: the Setup default plus any per-section override. */
+const roofSystemsOf = (bid: { data: unknown }): string[] => {
+  const d = bid.data as {
+    roofSystem?: string;
+    sections?: { roofSystem?: string }[];
+  } | null;
+  const out = new Set<string>();
+  if (d?.roofSystem) out.add(d.roofSystem);
+  for (const s of d?.sections ?? []) if (s.roofSystem) out.add(s.roofSystem);
+  return [...out];
+};
 /** Estimator's Name as keyed on Setup › Bid Info (customer.estimatorName); "" when blank. */
 const estimatorOf = (bid: { data: unknown }): string => {
   const d = bid.data as { customer?: { estimatorName?: string } } | null;
@@ -85,6 +96,7 @@ function BidsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [estimatorFilter, setEstimatorFilter] = useState("all");
+  const [systemFilter, setSystemFilter] = useState("all");
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
   const [priceMin, setPriceMin] = useState("");
@@ -156,6 +168,9 @@ function BidsPage() {
   const estimators = Array.from(new Set(bids.map(estimatorOf)))
     .filter((e) => e !== "")
     .sort((a, b) => a.localeCompare(b));
+  const roofSystems = Array.from(new Set(bids.flatMap(roofSystemsOf))).sort((a, b) =>
+    a.localeCompare(b),
+  );
   const q = search.trim().toLowerCase();
   const fromMs = createdFrom ? new Date(`${createdFrom}T00:00:00`).getTime() : null;
   const toMs = createdTo ? new Date(`${createdTo}T23:59:59.999`).getTime() : null;
@@ -168,6 +183,7 @@ function BidsPage() {
       const est = estimatorOf(b);
       if (estimatorFilter === NO_ESTIMATOR ? est !== "" : est !== estimatorFilter) return false;
     }
+    if (systemFilter !== "all" && !roofSystemsOf(b).includes(systemFilter)) return false;
     const created = new Date(b.created_at).getTime();
     if (fromMs !== null && created < fromMs) return false;
     if (toMs !== null && created > toMs) return false;
@@ -180,6 +196,7 @@ function BidsPage() {
     statusFilter !== "all" ||
     q !== "" ||
     estimatorFilter !== "all" ||
+    systemFilter !== "all" ||
     createdFrom !== "" ||
     createdTo !== "" ||
     priceMin !== "" ||
@@ -188,6 +205,7 @@ function BidsPage() {
     setStatusFilter("all");
     setSearch("");
     setEstimatorFilter("all");
+    setSystemFilter("all");
     setCreatedFrom("");
     setCreatedTo("");
     setPriceMin("");
@@ -250,6 +268,22 @@ function BidsPage() {
                 {bids.some((b) => estimatorOf(b) === "") && (
                   <SelectItem value={NO_ESTIMATOR}>(no estimator)</SelectItem>
                 )}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Roof system
+            <Select value={systemFilter} onValueChange={setSystemFilter}>
+              <SelectTrigger className="w-[160px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All systems</SelectItem>
+                {roofSystems.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </label>

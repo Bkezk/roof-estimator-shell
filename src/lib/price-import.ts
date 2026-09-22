@@ -39,6 +39,7 @@ const ITEM_HEADER =
 const DESC_HEADER = /descr|product name|^name$|^item$/i;
 const PRICE_HEADER = /price|cost|\$|amount/i;
 const UNIT_HEADER = /unit of measure|^uom$|^unit$|^u\/m$/i;
+const SIZE_HEADER = /^size$|^dimensions?$|^roll size$/i;
 
 export interface HeaderGuess {
   headerRow: number;
@@ -47,6 +48,8 @@ export interface HeaderGuess {
   priceCol: number | null;
   /** "Unit of Measure" column (EA / FT / BX …) when the sheet has one — shown in the review. */
   unitCol: number | null;
+  /** "Size" column (5'4 X 100' …) — turns a roll price into the membrane matrix's $/sq ft. */
+  sizeCol: number | null;
 }
 
 /**
@@ -62,15 +65,17 @@ export function guessHeader(rows: SheetRow[], scan = 40): HeaderGuess | null {
     let descCol: number | null = null;
     let priceCol: number | null = null;
     let unitCol: number | null = null;
+    let sizeCol: number | null = null;
     row.forEach((cell, c) => {
       const h = String(cell ?? "").trim();
       if (!h) return;
       if (itemCol < 0 && ITEM_HEADER.test(h)) itemCol = c;
       else if (descCol === null && DESC_HEADER.test(h)) descCol = c;
       else if (unitCol === null && UNIT_HEADER.test(h)) unitCol = c;
+      else if (sizeCol === null && SIZE_HEADER.test(h)) sizeCol = c;
       else if (priceCol === null && PRICE_HEADER.test(h)) priceCol = c;
     });
-    if (itemCol >= 0) return { headerRow: r, itemCol, descCol, priceCol, unitCol };
+    if (itemCol >= 0) return { headerRow: r, itemCol, descCol, priceCol, unitCol, sizeCol };
   }
   return null;
 }
@@ -82,6 +87,8 @@ export interface SheetItem {
   description: string;
   price: number | null;
   unit: string;
+  /** The sheet's Size cell as written ("5'4 X 100'"); "" when the sheet has no size column. */
+  size: string;
 }
 
 /** Read the data rows under the header with the picked columns; rows with no item number are skipped. */
@@ -93,6 +100,7 @@ export function readSheetItems(
     descCol: number | null;
     priceCol: number | null;
     unitCol?: number | null;
+    sizeCol?: number | null;
   },
 ): SheetItem[] {
   const out: SheetItem[] = [];
@@ -108,9 +116,47 @@ export function readSheetItems(
       description: pick.descCol === null ? "" : String(row[pick.descCol] ?? "").trim(),
       price: pick.priceCol === null ? null : parsePrice(row[pick.priceCol]),
       unit: pick.unitCol == null ? "" : String(row[pick.unitCol] ?? "").trim(),
+      size: pick.sizeCol == null ? "" : String(row[pick.sizeCol] ?? "").trim(),
     });
   }
   return out;
+}
+
+/** The Duro-Last Membrane price matrix (priced in $/sq ft; the roll-goods list prices per roll). */
+export const MEMBRANE_SCREEN_ID = "duro_last:duro_last_membrane";
+
+/** One dimension of a size cell — feet with optional inches (5'4, 2'8", 10'), or inches alone (10"). */
+const DIM = /(\d+(?:\.\d+)?)\s*'\s*(?:(\d+(?:\.\d+)?)\s*"?)?|(\d+(?:\.\d+)?)\s*"/;
+const dimFeet = (t: string): number | null => {
+  const m = DIM.exec(t.trim());
+  if (!m) return null;
+  if (m[1] !== undefined) return Number(m[1]) + (m[2] !== undefined ? Number(m[2]) / 12 : 0);
+  return Number(m[3]) / 12;
+};
+
+/**
+ * Roll area (sq ft) from a Duro-Last "Size" cell — `5'4 X 100'`, `2'8" X 100'`, `10' X 100'`,
+ * `10" X 100'- STRIPPING`. Null when the cell is not two dimensions.
+ */
+export function rollAreaSqFt(size: string): number | null {
+  const parts = size.split(/\s*[x×]\s*/i);
+  if (parts.length < 2) return null;
+  const a = dimFeet(parts[0]!);
+  const b = dimFeet(parts[1]!);
+  if (a === null || b === null || a <= 0 || b <= 0) return null;
+  return a * b;
+}
+
+/**
+ * A roll-goods line's $/sq ft for the membrane matrix: roll price ÷ roll area, rounded to the
+ * cent as Duro-Last's own per-sq-ft membrane sheet is. Null when the line has no price or no
+ * readable size (the review then reports it instead of writing a per-roll figure into the cell).
+ */
+export function membranePerSqFt(item: Pick<SheetItem, "price" | "size">): number | null {
+  if (item.price === null) return null;
+  const area = rollAreaSqFt(item.size);
+  if (area === null) return null;
+  return Math.round((item.price / area) * 100) / 100;
 }
 
 export interface MatchedUpdate {
