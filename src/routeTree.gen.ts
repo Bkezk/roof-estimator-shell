@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
 import { Route as EstimateRouteImport } from './routes/estimate'
+import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
@@ -40,6 +41,11 @@ const BidsRoute = BidsRouteImport.update({
 const EstimateRoute = EstimateRouteImport.update({
   id: '/estimate',
   path: '/estimate',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InventoryRoute = InventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
+  '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
+  '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -117,6 +125,7 @@ export interface FileRoutesById {
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
   '/estimate': typeof EstimateRoute
+  '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -133,6 +142,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/estimate'
+    | '/inventory'
     | '/login'
     | '/proposal'
     | '/admin/duro-last'
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/estimate'
+    | '/inventory'
     | '/login'
     | '/proposal'
     | '/admin/duro-last'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/account'
     | '/bids'
     | '/estimate'
+    | '/inventory'
     | '/login'
     | '/proposal'
     | '/admin/duro-last'
@@ -176,6 +188,7 @@ export interface RootRouteChildren {
   AccountRoute: typeof AccountRoute
   BidsRoute: typeof BidsRoute
   EstimateRoute: typeof EstimateRoute
+  InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
   ProposalRoute: typeof ProposalRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
@@ -214,6 +227,13 @@ declare module '@tanstack/react-router' {
       path: '/estimate'
       fullPath: '/estimate'
       preLoaderRoute: typeof EstimateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inventory': {
+      id: '/inventory'
+      path: '/inventory'
+      fullPath: '/inventory'
+      preLoaderRoute: typeof InventoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -280,6 +300,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountRoute: AccountRoute,
   BidsRoute: BidsRoute,
   EstimateRoute: EstimateRoute,
+  InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
   ProposalRoute: ProposalRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,

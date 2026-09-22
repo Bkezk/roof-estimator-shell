@@ -33,6 +33,7 @@ import {
 
 // New bids start from the Bids page's "New Bid" button (owner: one entry point, not two).
 const estimatorItems = [{ title: "Bids", url: "/bids", icon: FileText }];
+const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
 // tab via ?tab= (the first sub is the page's default tab). Tab keys must match
@@ -184,11 +185,31 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
+        {role !== "field" && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Estimate</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {estimatorItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         <SidebarGroup>
-          <SidebarGroupLabel>Estimate</SidebarGroupLabel>
+          <SidebarGroupLabel>Inventory</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {estimatorItems.map((item) => (
+              {inventoryItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <Link to={item.url}>

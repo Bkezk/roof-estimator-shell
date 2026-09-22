@@ -7,7 +7,7 @@ import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 interface AuthState {
   session: Session | null;
   profile: UserProfile | null;
-  role: "admin" | "estimator" | null;
+  role: "admin" | "estimator" | "field" | null;
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;

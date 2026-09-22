@@ -38,17 +38,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   const isLogin = pathname === "/login";
   const isAdminRoute = pathname.startsWith("/admin");
+  // A field login lives on Inventory (and its own password page); everything else is off-limits.
+  const fieldAllowed = pathname.startsWith("/inventory") || pathname === "/account";
+  const fieldBlocked = role === "field" && !fieldAllowed;
 
   useEffect(() => {
     if (loading) return;
     if (!session && !isLogin) {
       navigate({ to: "/login" });
     } else if (session && isLogin) {
-      navigate({ to: "/bids" });
+      navigate({ to: role === "field" ? "/inventory" : "/bids" });
+    } else if (session && fieldBlocked) {
+      navigate({ to: "/inventory" });
     } else if (session && isAdminRoute && role && role !== "admin") {
       navigate({ to: "/bids" });
     }
-  }, [loading, session, role, pathname, isLogin, isAdminRoute, navigate]);
+  }, [loading, session, role, pathname, isLogin, isAdminRoute, fieldBlocked, navigate]);
 
   // The login screen renders full-bleed, with no app chrome.
   if (isLogin) return <>{children}</>;
@@ -61,8 +66,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
 
-  // An estimator mid-redirect away from an admin route: don't flash admin UI.
-  if (isAdminRoute && role !== "admin") {
+  // An estimator mid-redirect away from an admin route (or a field login off Inventory): don't
+  // flash the other UI.
+  if ((isAdminRoute && role !== "admin") || fieldBlocked) {
     return (
       <FullScreen>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

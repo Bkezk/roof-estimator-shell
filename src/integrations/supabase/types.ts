@@ -176,6 +176,66 @@ export type Database = {
         };
         Relationships: [];
       };
+      inventory_movements: {
+        Row: {
+          bid_id: string | null;
+          bid_name: string | null;
+          counted_note: string | null;
+          created_at: string;
+          created_by: string | null;
+          created_by_name: string | null;
+          id: number;
+          item_no: string | null;
+          note: string | null;
+          price_col: string;
+          qty: number;
+          reason: string;
+          row_label: string;
+          screen_id: string;
+          unit: string;
+        };
+        Insert: {
+          bid_id?: string | null;
+          bid_name?: string | null;
+          counted_note?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          created_by_name?: string | null;
+          id?: number;
+          item_no?: string | null;
+          note?: string | null;
+          price_col: string;
+          qty: number;
+          reason: string;
+          row_label: string;
+          screen_id: string;
+          unit: string;
+        };
+        Update: {
+          bid_id?: string | null;
+          bid_name?: string | null;
+          counted_note?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          created_by_name?: string | null;
+          id?: number;
+          item_no?: string | null;
+          note?: string | null;
+          price_col?: string;
+          qty?: number;
+          reason?: string;
+          row_label?: string;
+          screen_id?: string;
+          unit?: string;
+        };
+        Relationships: [];
+      };
+      inventory_settings: {
+        Row: { id: number; opened_box_rule: string; updated_at: string };
+        Insert: { id?: number; opened_box_rule?: string; updated_at?: string };
+        Update: { id?: number; opened_box_rule?: string; updated_at?: string };
+        Relationships: [];
+      };
       labor_curb: {
         Row: {
           id: number;
@@ -707,6 +767,10 @@ export type Database = {
         }[];
       };
       current_user_role: { Args: never; Returns: string };
+      inventory_bid_options: {
+        Args: never;
+        Returns: { id: string; name: string; status: string; updated_at: string }[];
+      };
       is_admin: { Args: never; Returns: boolean };
       release_bid_lock: { Args: { p_bid: string; p_session: string }; Returns: undefined };
     };

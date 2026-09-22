@@ -166,6 +166,7 @@ function UsersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="estimator">Estimator</SelectItem>
+                  <SelectItem value="field">Field (Inventory only)</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
                 </SelectContent>
               </Select>
@@ -220,6 +221,7 @@ function UsersPage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="estimator">Estimator</SelectItem>
+                            <SelectItem value="field">Field (Inventory only)</SelectItem>
                             <SelectItem value="admin">Admin</SelectItem>
                           </SelectContent>
                         </Select>

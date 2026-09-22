@@ -5,7 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 
-export type Role = "admin" | "estimator";
+/** admin: everything; estimator: bids + inventory; field: Inventory only (records leftovers). */
+export type Role = "admin" | "estimator" | "field";
 export interface UserProfile {
   id: string;
   email: string;
@@ -87,7 +88,7 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   full_name: z.string().trim().max(200).optional(),
-  role: z.enum(["admin", "estimator"]),
+  role: z.enum(["admin", "estimator", "field"]),
 });
 
 // Admin-only account creation. There is no public sign-up anywhere in the app;
@@ -130,7 +131,7 @@ export const createUser = createServerFn({ method: "POST" })
 
 const updateRoleSchema = z.object({
   id: z.string().uuid(),
-  role: z.enum(["admin", "estimator"]),
+  role: z.enum(["admin", "estimator", "field"]),
 });
 
 export const updateUserRole = createServerFn({ method: "POST" })
