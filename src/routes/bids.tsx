@@ -16,6 +16,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -59,6 +60,13 @@ export const Route = createFileRoute("/bids")({
   component: BidsPage,
 });
 
+const NO_ESTIMATOR = "__none__";
+/** Estimator's Name as keyed on Setup › Bid Info (customer.estimatorName); "" when blank. */
+const estimatorOf = (bid: { data: unknown }): string => {
+  const d = bid.data as { customer?: { estimatorName?: string } } | null;
+  return d?.customer?.estimatorName?.trim() ?? "";
+};
+
 function BidsPage() {
   const navigate = useNavigate();
   const listBidsFn = useServerFn(listBids);
@@ -75,6 +83,12 @@ function BidsPage() {
     enabled: !!session,
   });
   const [statusFilter, setStatusFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [estimatorFilter, setEstimatorFilter] = useState("all");
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
   const qc = useQueryClient();
   const deleteBidFn = useServerFn(deleteBid);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
@@ -138,35 +152,163 @@ function BidsPage() {
     return <p className="text-sm text-muted-foreground">Loading bids…</p>;
   }
 
-  const filtered =
-    statusFilter === "all" ? bids : bids.filter((b) => asBidStatus(b.status) === statusFilter);
+  // Estimator names as saved on Setup › Bid Info; "" = not entered.
+  const estimators = Array.from(new Set(bids.map(estimatorOf)))
+    .filter((e) => e !== "")
+    .sort((a, b) => a.localeCompare(b));
+  const q = search.trim().toLowerCase();
+  const fromMs = createdFrom ? new Date(`${createdFrom}T00:00:00`).getTime() : null;
+  const toMs = createdTo ? new Date(`${createdTo}T23:59:59.999`).getTime() : null;
+  const minPrice = priceMin.trim() === "" ? null : Number(priceMin);
+  const maxPrice = priceMax.trim() === "" ? null : Number(priceMax);
+  const filtered = bids.filter((b) => {
+    if (statusFilter !== "all" && asBidStatus(b.status) !== statusFilter) return false;
+    if (q && !b.name.toLowerCase().includes(q)) return false;
+    if (estimatorFilter !== "all") {
+      const est = estimatorOf(b);
+      if (estimatorFilter === NO_ESTIMATOR ? est !== "" : est !== estimatorFilter) return false;
+    }
+    const created = new Date(b.created_at).getTime();
+    if (fromMs !== null && created < fromMs) return false;
+    if (toMs !== null && created > toMs) return false;
+    const total = Number(b.grand_total ?? 0);
+    if (minPrice !== null && Number.isFinite(minPrice) && total < minPrice) return false;
+    if (maxPrice !== null && Number.isFinite(maxPrice) && total > maxPrice) return false;
+    return true;
+  });
+  const anyFilter =
+    statusFilter !== "all" ||
+    q !== "" ||
+    estimatorFilter !== "all" ||
+    createdFrom !== "" ||
+    createdTo !== "" ||
+    priceMin !== "" ||
+    priceMax !== "";
+  const clearFilters = () => {
+    setStatusFilter("all");
+    setSearch("");
+    setEstimatorFilter("all");
+    setCreatedFrom("");
+    setCreatedTo("");
+    setPriceMin("");
+    setPriceMax("");
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Saved Bids</h1>
-        <div className="flex items-center gap-2">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {BID_STATUSES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button asChild>
-            <Link to="/estimate">
-              <PlusCircle className="mr-2 h-4 w-4" />
-              New Bid
-            </Link>
-          </Button>
-        </div>
+        <Button asChild size="lg" className="text-base font-semibold">
+          <Link to="/estimate">
+            <PlusCircle className="mr-2 h-5 w-5" />
+            New Bid
+          </Link>
+        </Button>
       </div>
+
+      {bids.length > 0 && (
+        <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
+          <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground">
+            Bid name
+            <Input
+              type="search"
+              placeholder="Search by bid name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="bg-background"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Status
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[150px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {BID_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Estimator
+            <Select value={estimatorFilter} onValueChange={setEstimatorFilter}>
+              <SelectTrigger className="w-[170px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All estimators</SelectItem>
+                {estimators.map((e) => (
+                  <SelectItem key={e} value={e}>
+                    {e}
+                  </SelectItem>
+                ))}
+                {bids.some((b) => estimatorOf(b) === "") && (
+                  <SelectItem value={NO_ESTIMATOR}>(no estimator)</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Created from
+            <Input
+              type="date"
+              value={createdFrom}
+              max={createdTo || undefined}
+              onChange={(e) => setCreatedFrom(e.target.value)}
+              className="w-[150px] bg-background"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Created to
+            <Input
+              type="date"
+              value={createdTo}
+              min={createdFrom || undefined}
+              onChange={(e) => setCreatedTo(e.target.value)}
+              className="w-[150px] bg-background"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Price from ($)
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="any"
+              placeholder="0"
+              value={priceMin}
+              onChange={(e) => setPriceMin(e.target.value)}
+              className="w-[120px] bg-background"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Price to ($)
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="any"
+              placeholder="Any"
+              value={priceMax}
+              onChange={(e) => setPriceMax(e.target.value)}
+              className="w-[120px] bg-background"
+            />
+          </label>
+          {anyFilter && (
+            <Button variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
+              Clear filters
+            </Button>
+          )}
+          <span className="mb-2 ml-auto text-xs text-muted-foreground">
+            {filtered.length} of {bids.length} bid{bids.length === 1 ? "" : "s"}
+          </span>
+        </div>
+      )}
 
       {bids.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
@@ -177,9 +319,10 @@ function BidsPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-muted-foreground">
-            No bids with status “{STATUS_LABELS[asBidStatus(statusFilter)]}”.
-          </p>
+          <p className="text-muted-foreground">No bids match these filters.</p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
+            Clear filters
+          </Button>
         </div>
       ) : (
         <div className="grid gap-4">
@@ -210,13 +353,8 @@ function BidsPage() {
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {(() => {
-                      // Estimator's Name is keyed on Setup › Bid Info (customer.estimatorName).
-                      const d = bid.data as { customer?: { estimatorName?: string } } | null;
-                      const est = d?.customer?.estimatorName?.trim();
-                      return est ? `Estimator: ${est} · ` : "Estimator: — · ";
-                    })()}
-                    Created {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+                    Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+                    {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
                     {new Date(bid.updated_at).toLocaleString(undefined, {
                       dateStyle: "short",
                       timeStyle: "short",

@@ -9,7 +9,6 @@ import {
   Package,
   FileSpreadsheet,
   Layers,
-  Calculator,
   ChevronRight,
 } from "lucide-react";
 
@@ -32,10 +31,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const estimatorItems = [
-  { title: "New Estimate", url: "/estimate", icon: Calculator },
-  { title: "Bids", url: "/bids", icon: FileText },
-];
+// New bids start from the Bids page's "New Bid" button (owner: one entry point, not two).
+const estimatorItems = [{ title: "Bids", url: "/bids", icon: FileText }];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
 // tab via ?tab= (the first sub is the page's default tab). Tab keys must match
