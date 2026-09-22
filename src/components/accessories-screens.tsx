@@ -1595,8 +1595,13 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
                 {props.sections.map((s) => (
                   <tr key={s.id}>
                     <td className="border px-2 py-0.5">
-                      1' of 10" {s.roofSystem === "Duro-Tuff" ? "DT" : "DL"} {s.color} Stripping —{" "}
-                      {s.name}
+                      1' of 10"{" "}
+                      {s.roofSystem === "Duro-Tuff"
+                        ? "DT"
+                        : s.roofSystem === "Duro-Tech TPO"
+                          ? "TPO"
+                          : "DL"}{" "}
+                      {s.color} Stripping — {s.name}
                       {(result?.membraneAccs.strippingPriceBySection[s.id] ?? 0) <= 0 && (
                         <span className="ml-1 text-[10px] text-amber-600">
                           (no roll-goods price for this mil/colour — labor only)

@@ -181,6 +181,27 @@ describe("buildLaborTables (from a Roof Deck Labor combo)", () => {
     expect(directLookup(t.deckTypeMulti, t.deckTypeIds["Concrete"]!)).toBe(2);
   });
 
+  it("mechanical base hours default to the legacy 10 and follow base_hours_per_2500 (Duro-Tech TPO 27)", () => {
+    expect(t.baseHoursPer2500).toBe(10);
+    const tpo = buildLaborTables({ ...duroLastMechCombo, base_hours_per_2500: 27 }, deckOrder);
+    expect(tpo.baseHoursPer2500).toBe(27);
+    expect(
+      mechLaborRate({
+        deckMulti: 1,
+        tabMulti: 1,
+        ocMulti: 1,
+        sheetSizeMulti: 1,
+        complexity: 1,
+        baseHours: tpo.baseHoursPer2500,
+      }),
+    ).toBeCloseTo(27 / 2500, 12);
+    // Blank / junk values keep the legacy base.
+    expect(
+      buildLaborTables({ ...duroLastMechCombo, base_hours_per_2500: "" }, deckOrder)
+        .baseHoursPer2500,
+    ).toBe(10);
+  });
+
   it("on-center bands, single tab band, sheet-size and thickness maps", () => {
     expect(bandLookup(t.onCenterBands, 18)).toBe(1);
     expect(bandLookup(t.onCenterBands, 6)).toBe(1.41);

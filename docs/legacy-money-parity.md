@@ -3103,3 +3103,64 @@ or delete them.
 First product imported this way (owner's request), applied with the same logic by SQL: Drain
 Boot Accessories › **Drain Guard White**, item 18301, $72.00 EA (sheet "DRAIN GUARD WHITE",
 Drains / Drain Accessories) — the only catalog change so far; no existing price was touched.
+
+### 22.34 Duro-Tech TPO — the web's sixth roof system (2026-09-22, NO legacy source)
+
+Owner: "there's a new material D-Tech TPO that's a Duro-Last TPO". The legacy estimator knew
+five systems (Duro-Last 1, Duro-Bond 2, Duro-Tuff 3, Duro-Roof 4, Duro-Fleece 5); nothing in
+the IL or the vendor tables covers TPO. Duro-Tech TPO is added as **roof system 6** (`durotech`,
+LapOver 6, needs vents) built from three sources, every figure an estimating START to calibrate
+on the admin screens:
+
+- **Duro-Last price list** (`pricelist_dl_excel_2.xlsx`, "Duro-Tech (TPO)" category): rolls in
+  45 mil white, 60 mil white / tan / gray, 80 mil white at 30" / 60" / 120" × 100' and 10"
+  stripping rolls; roll price ÷ roll area is identical across widths → membrane matrix rows
+  `Duro-Tech TPO - 45` (White 0.75), `- 60` (White / Tan / Gray 0.84), `- 80` (White 1.30), priced
+  as a flat family (`FLAT_PRICE_FAMILY_IDS` = 2/3/5/6: one $/sq ft per thickness variant, first
+  numeric colour cell — a 45 mil Tan section bills the white figure; flagged).
+- **Owner's "Roof Membrane Bid Calculator Reference"** (Duro-TECH TPO section): mechanically
+  fastened 24–30 h / 2,500 sq ft on a wood deck, adhered 30–36 h; deck multipliers Wood 1.00,
+  Structural steel 1.00–1.10, Concrete 1.25–1.40, Gypsum/Tectum/CWF 1.15–1.30, Retrofit/recover
+  1.15–1.30; 80 mil "5–10% extra handling"; complexity Open 1.00 / Moderate 1.20–1.30 / very
+  cut-up 1.40–1.60+; 6" side lap on bareback Duro-Tech TPO; TPO bonding adhesive ≈ 60 sq ft/gal
+  ⇒ ≈ 300 sq ft per 5-gal pail; warranties 15 / 20 / up to 25 yr NDL.
+- **Duro-Tuff** (the nearest welded roll-goods system) for everything the guide does not give:
+  roll widths 30/60/120 with labor multipliers 2.6 / 1.3 / 1.0, the mechanical width bands
+  2.8 / 1.4 / 0.95, the seven fastener-spacing multipliers, the 14-row pull-test → spacing
+  table (`mech_fastener_lookup` rs 6 = rs 3 cloned), the adhered "Roll Good" ×1 sheet multiplier,
+  the parapet wall-tab rule and the row-style membrane screw count.
+
+**Model.** Mechanical: `base × deck × roll-width × fastener-spacing × complexity × thickness /
+2,500` — the legacy formula's fixed "10 Hrs" is now a per-combo `base_hours_per_2500`
+(`LaborCombo` → `LaborTables.baseHoursPer2500` → `mechLaborRate({baseHours})`, legacy combos
+unchanged at 10; the anchor test still bills 15.125 h); TPO seeds 27 (midpoint of 24–30, Open
+complexity, 10' roll, wood). Deck multipliers = the guide midpoints (Steel / Purlin 1.05,
+Concrete / LWC-Concrete 1.325, Gypsum / Tectum / Retrofit / LWC-Steel / LWC-Other 1.225).
+Thickness 45 / 60 = 1.0, 80 = 1.075. Complexity 1.0 / 1.1 / 1.25 / 1.4 / 1.6 / 2.0 over the six
+legacy labels, default Moderate (1.25) as legacy — so the seeded typical roof bills 33.75 h /
+2,500 sq ft. The combo's `complexity_factors` list now feeds the engine when present (Duro-Tuff /
+Fleece lists equal the hard-coded legacy table, so nothing else moves). Adhered: 13.2 h / 1,000
+sq ft (33 h / 2,500) for "TPO Bonding Adhesive" × complexity × thickness × roll-width multiplier
+(Duro-Tuff model). Membrane quantity: `RollGoodsMembraneCalc` at the 6" lap (as Duro-Fleece).
+
+**Adhesive.** `legacy_adhesive` 11 "TPO Bonding Adhesive" (5-gal pail, price 0 — the sheet lists
+only TPO spray guns, hoses, tips and primer; enter the pail price on Admin › Adhesives); coverage
+300 sq ft on every deck, over ISO 4'×8' / 4'×4', EPO/XPS, DensDeck / Prime groups and on walls;
+tapered / crickets groups 0 (quote).
+
+**UI.** "Duro-Tech TPO" appears wherever the labor combos drive a system list (Setup, Sections,
+Parapets); "Attached With" = "Duro-Tech TPO Fasteners" + "TPO Bonding Adhesive"; the Sections
+thickness pick now follows the combo's thickness table (45 / 60 / 80 here; 40 / 50 / 60 for the
+legacy systems); Field Roll Width 30 / 60 / 120 filtered by the cloned pull-test table; the
+Complexity pick is live; the stripping row reads "1' of 10" TPO". Admin › Labor › Roof Deck
+Labor lists both TPO combos with a new "Base hours per 2,500 sq ft" field (blank = 10).
+
+**Not done / flagged.** TPO-specific accessories (the sheet's TPO stacks, boots, corners,
+TPO-coated drip edge, T-joint covers, walkway, unsupported flashing) still price from the PVC
+catalog rows — they need TPO variants on the accessory screens (phase 2). Warranty eligibility
+uses the shared table (45 mil clears the 40-mil rows). T-Patch stays Duro-Tuff-only. No waste
+percentage (the guide's 5 / 7 / 10%) is applied — the roll-goods calc's own lap allowance stands.
+Migration `20260922100000_duro_tech_tpo.sql`, applied live. Tests: flat pricing on the
+roll-goods quantity (2,731.5 sq ft × 0.75 / 1.30), 27 h base × 1.25 Moderate (36.875 h), Open
+complexity, 80 mil handling, legacy anchor unchanged; `buildLaborTables` base-hours default /
+override.

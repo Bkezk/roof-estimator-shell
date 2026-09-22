@@ -125,11 +125,16 @@ export interface MechRateInputs {
   complexity: number; // ComplexityFactor.SmartValue
   /** Duro-Last only: oLookupDecktimes factor (when its Version ≥ 4 and factor ≠ -1); multiplies. */
   deckTimeFactor?: number;
+  /**
+   * Base hours per 2,500 sq ft. Every legacy system hard-codes 10; a combo may override it
+   * (Duro-Tech TPO carries the owner's 27 h starting value — docs §22.34).
+   */
+  baseHours?: number;
 }
 
-/** The shared per-sq-ft mechanical rate: 10 × deck × tab × oc / 2500 × sheet × complexity. */
+/** The shared per-sq-ft mechanical rate: base(10) × deck × tab × oc / 2500 × sheet × complexity. */
 export function mechLaborRate(i: MechRateInputs): number {
-  let rate = (10 * i.deckMulti * i.tabMulti * i.ocMulti) / 2500;
+  let rate = ((i.baseHours ?? 10) * i.deckMulti * i.tabMulti * i.ocMulti) / 2500;
   rate *= i.sheetSizeMulti;
   rate *= i.complexity;
   if (i.deckTimeFactor !== undefined && i.deckTimeFactor !== -1) rate *= i.deckTimeFactor;

@@ -3770,3 +3770,82 @@ describe("Underlayment on a Duro-Bond bid — 'Section Fastened w/ Durobond' (do
     expect(inputs.underlaymentLaborHours).toBeCloseTo(117.05, 1);
   });
 });
+
+describe("Duro-Tech TPO — the web's sixth roof system (docs §22.34)", () => {
+  // Owner's guide values: 27 h / 2,500 sq ft base, Wood ×1, complexity Moderate 1.25, 45 mil ×1.
+  const tpoCombo: LaborCombo = {
+    roof_system: "Duro-Tech TPO",
+    attachment: "mechanical",
+    base: { tab_value: 120, tab_multiplier: 1 },
+    base_hours_per_2500: 27,
+    deck_multipliers: { Wood: 1, Steel: 1.05, Concrete: 1.325 },
+    fastener_spacing_multipliers: [
+      { spacing_in: 18, multiplier: 1 },
+      { spacing_in: 12, multiplier: 1.1 },
+    ],
+    thickness_multipliers: [
+      { mil: 45, multiplier: 1 },
+      { mil: 60, multiplier: 1 },
+      { mil: 80, multiplier: 1.075 },
+    ],
+  };
+  const tpoAdmin: EngineAdminData = {
+    ...admin,
+    labor: { ...admin.labor, "Duro-Tech TPO|mechanical": buildLaborTables(tpoCombo, deckOrder) },
+    familyMembranePrices: { "Duro-Tech TPO": { "45": 0.75, "60": 0.84, "80": 1.3 } },
+    rollGoodWidthMulti: { 6: { 30: 2.6, 60: 1.3, 120: 1 } },
+  };
+  const tpoBid = (thickness: number) =>
+    bid({
+      roofSystem: "Duro-Tech TPO",
+      sections: [{ ...bid().sections[0]!, thickness, fieldLap: 120, fastenerOc: 18 }],
+    });
+  // Roll goods at a 10 ft roll with the 6" side lap: 2601 + Ceil(51/10 × 51) × 0.5 = 2731.5 sq ft.
+  const TPO_MWO = rollQty(10, 0.5);
+
+  it("prices the membrane from the flat family table ($/sq ft by mil) on the roll-goods quantity", () => {
+    const { inputs } = buildEstimateInputs(tpoBid(45), tpoAdmin);
+    expect(inputs.sections[0]!.membraneWithOverlap).toBeCloseTo(TPO_MWO, 6);
+    expect(inputs.duroLastMaterial).toBeCloseTo(TPO_MWO * 0.75, 2);
+    expect(buildEstimateInputs(tpoBid(80), tpoAdmin).inputs.duroLastMaterial).toBeCloseTo(
+      TPO_MWO * 1.3,
+      2,
+    );
+    expect(
+      sectionMembraneDisplayPricing(
+        tpoAdmin,
+        "Duro-Tech TPO",
+        "mechanical",
+        tpoBid(60).sections[0]!,
+      ),
+    ).toEqual({
+      pricePerSqFt: 0.84,
+      tierLabel: "Duro-Tech TPO flat price",
+    });
+  });
+
+  it("bills 27 h / 2,500 sq ft × deck × roll width × spacing × complexity (Moderate 1.25) × thickness", () => {
+    const { inputs } = buildEstimateInputs(tpoBid(45), tpoAdmin);
+    // 2731.5 × 27 / 2500 × 1 × 1 × 1 × 1.25 × 1.0 = 36.875 h
+    expect(computeEstimate(inputs).installHours).toBeCloseTo((TPO_MWO * 27 * 1.25) / 2500, 6);
+    // 80 mil adds the 7.5% handling; Open complexity (index 0) drops the 1.25.
+    expect(
+      computeEstimate(buildEstimateInputs(tpoBid(80), tpoAdmin).inputs).installHours,
+    ).toBeCloseTo((TPO_MWO * 27 * 1.25 * 1.075) / 2500, 6);
+    const open = bid({
+      roofSystem: "Duro-Tech TPO",
+      sections: [
+        { ...bid().sections[0]!, thickness: 45, fieldLap: 120, fastenerOc: 18, complexity: 0 },
+      ],
+    });
+    expect(computeEstimate(buildEstimateInputs(open, tpoAdmin).inputs).installHours).toBeCloseTo(
+      (TPO_MWO * 27) / 2500,
+      6,
+    );
+  });
+
+  it("legacy systems are untouched: the Duro-Last anchor still bills at the 10 h base", () => {
+    const r = computeEstimate(buildEstimateInputs(bid(), admin).inputs);
+    expect(r.installHours).toBeCloseTo(INSTALL, 6);
+  });
+});

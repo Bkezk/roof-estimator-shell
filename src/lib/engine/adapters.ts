@@ -80,7 +80,7 @@ export function buildFamilyMembranePrices(
   const out: Record<string, Record<string, number>> = {};
   const colorCols = screen.columns.filter((c) => c !== "Description");
   for (const row of screen.rows) {
-    const m = /^(Duro-Bond|Duro-Tuff|Duro-Fleece) - (.+)$/.exec(
+    const m = /^(Duro-Bond|Duro-Tuff|Duro-Fleece|Duro-Tech TPO) - (.+)$/.exec(
       String(row["Description"] ?? "").trim(),
     );
     if (!m) continue;
@@ -864,6 +864,10 @@ export interface LaborCombo {
   roof_system: string;
   attachment: string;
   base?: { tab_value: number; tab_multiplier: number } | null;
+  /** Mechanical base hours per 2,500 sq ft when the combo departs from the legacy 10 (TPO: 27). */
+  base_hours_per_2500?: number | string | null;
+  /** The combo's Complexity list (legacy RSComplexityFactor rows; Duro-Tuff / Fleece / TPO). */
+  complexity_factors?: Array<{ label: string; value: number | string }> | null;
   deck_multipliers?: Record<string, number> | null;
   fastener_spacing_multipliers?: Array<{ spacing_in: number; multiplier: number }> | null;
   sheet_size_multipliers?: Array<{
@@ -908,6 +912,13 @@ export interface LaborTables {
   tabBands: Band[];
   sheetSizeMultiByLabel: Record<string, number>;
   thicknessLaborByMil: Record<number, number>;
+  /** Mechanical base hours per 2,500 sq ft (legacy 10; a combo may override — docs §22.34). */
+  baseHoursPer2500: number;
+  /**
+   * The combo's six Complexity values (Open … Extreme) when the admin screen carries them; the
+   * engine falls back to the hard-coded legacy RSComplexityFactor table per system id.
+   */
+  complexityFactors?: number[];
   /**
    * The combo's FIRST sheet-size label (legacy RoofSystem.SheetSizeList[0] — "Roll Good" in the
    * seeded data): sections on this sheet price membrane at the roll-goods tier; other sheets
@@ -983,6 +994,14 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     };
   }
 
+  const baseRaw = Number(combo.base_hours_per_2500);
+  const baseHoursPer2500 =
+    combo.base_hours_per_2500 != null && Number.isFinite(baseRaw) && baseRaw > 0 ? baseRaw : 10;
+
+  const complexityFactors = (combo.complexity_factors ?? [])
+    .map((c) => Number(c.value))
+    .filter((v) => Number.isFinite(v) && v > 0);
+
   return {
     deckTypeMulti,
     deckTypeIds,
@@ -990,6 +1009,8 @@ export function buildLaborTables(combo: LaborCombo, deckOrder: string[]): LaborT
     tabBands,
     sheetSizeMultiByLabel,
     thicknessLaborByMil,
+    baseHoursPer2500,
+    ...(complexityFactors.length === 6 ? { complexityFactors } : {}),
     rollGoodsSheetLabel,
     adhesiveBaseHoursByName,
     ...(duroBondBase ? { duroBondBase } : {}),
@@ -1858,6 +1879,8 @@ export const LEGACY_RS_ID_BY_NAME: Record<string, number> = {
   "Duro-Tuff": 3,
   "Duro-Roof": 4,
   "Duro-Fleece": 5,
+  // No legacy id — the web's own sixth system (Duro-Last's TPO membrane, docs §22.34).
+  "Duro-Tech TPO": 6,
 };
 
 /** The two vendor-seeded Duro-Last adhesives — the picker fallback when no coverage data is loaded. */
@@ -1910,6 +1933,7 @@ export const LEGACY_MECH_SYSTEM_LONG_NAME: Record<number, string> = {
   2: "Duro-Bond Plates/Fasteners",
   3: "Duro-Tuff Fasteners",
   4: "Duro-Roof Fasteners",
+  6: "Duro-Tech TPO Fasteners",
 };
 
 export interface AttachedWithOption {

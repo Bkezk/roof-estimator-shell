@@ -55,6 +55,8 @@ export interface AdminLaborTables {
   deckTypeMulti: Record<number, DualValue>;
   tabBands: Band[];
   onCenterBands: Band[];
+  /** Mechanical base hours per 2,500 sq ft (legacy 10; Duro-Tech TPO 27 — docs §22.34). */
+  baseHoursPer2500?: number;
   fastenerSpacing: FastenerSpacingRow[];
   setupTable?: SetupBandTable;
   inspectionTable?: InspectionBandTable;
@@ -246,6 +248,7 @@ export function resolveSectionRates(
       ocMulti: onCenterLookup(admin.onCenterBands, oc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
+      ...(admin.baseHoursPer2500 !== undefined ? { baseHours: admin.baseHoursPer2500 } : {}),
     });
   } else {
     fieldRate = adheredFieldLaborRate({
@@ -273,12 +276,15 @@ export function resolveSectionRates(
             which: 1,
           }).onCenter;
     const cornerOc = s.customCornerFastenerSpacing !== -1 ? s.customCornerFastenerSpacing : perimOc;
+    const baseHours =
+      admin.baseHoursPer2500 !== undefined ? { baseHours: admin.baseHoursPer2500 } : {};
     perimRate = mechLaborRate({
       deckMulti: deckDefault,
       tabMulti: bandLookup(admin.tabBands, s.perimLap),
       ocMulti: onCenterLookup(admin.onCenterBands, perimOc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
+      ...baseHours,
     });
     cornerRate = mechLaborRate({
       deckMulti: deckDefault,
@@ -286,6 +292,7 @@ export function resolveSectionRates(
       ocMulti: onCenterLookup(admin.onCenterBands, cornerOc),
       sheetSizeMulti: s.sheetSizeMulti,
       complexity: s.complexity,
+      ...baseHours,
     });
   } else {
     const r = adheredPerimCornerLaborRate({

@@ -733,14 +733,30 @@ export const COMPLEXITY_LABELS = [
  * installer's RoofSystem rows: 6" for every membrane system except Duro-Fleece (3"). Not an
  * admin-editable value in BAManager.
  */
-export const LEGACY_OVERLAP_WIDTH_IN: Record<number, number> = { 1: 6, 2: 6, 3: 6, 4: 6, 5: 3 };
+export const LEGACY_OVERLAP_WIDTH_IN: Record<number, number> = {
+  1: 6,
+  2: 6,
+  3: 6,
+  4: 6,
+  5: 3,
+  6: 6,
+};
 /** Legacy MembraneType.DefaultRollLength (ft) — RSMembraneType.RollLength, 100 for every seeded type. */
 export const LEGACY_ROLL_LENGTH_FT = 100;
 
 export const RS_COMPLEXITY_FACTORS: Record<number, readonly number[]> = {
   3: [0.9, 0.98, 1, 1.2, 2.4, 4],
   5: [0.9, 0.98, 1, 1.2, 2.4, 4],
+  // Duro-Tech TPO (web-only, docs §22.34): the owner's guide — Open 1.00, Moderate 1.20–1.30,
+  // very cut-up 1.40–1.60+ — spread over the six legacy labels.
+  6: [1, 1.1, 1.25, 1.4, 1.6, 2],
 };
+
+/**
+ * Systems priced from the flat family table (`familyMembranePrices`: one $/sq ft per thickness
+ * variant, no tab tiers): Duro-Bond, Duro-Tuff, Duro-Fleece and the web's Duro-Tech TPO.
+ */
+export const FLAT_PRICE_FAMILY_IDS: ReadonlySet<number> = new Set([2, 3, 5, 6]);
 
 /** Whether a roof system offers the legacy Complexity list (RSComplexityFactor rows). */
 export function roofSystemHasComplexity(roofSystem: string): boolean {
@@ -758,8 +774,10 @@ export function sectionComplexityFactor(
   rsId: number,
   complexity: number | undefined,
   sheetSizeMulti: number,
+  /** The combo's own Complexity list (admin-editable) — preferred over the legacy table. */
+  override?: readonly number[],
 ): number {
-  const table = RS_COMPLEXITY_FACTORS[rsId];
+  const table = override && override.length === 6 ? override : RS_COMPLEXITY_FACTORS[rsId];
   if (!table || sheetSizeMulti !== 1) return 1;
   return table[complexity ?? 2] ?? 1;
 }
@@ -796,6 +814,7 @@ export const TAB_OPTIONS_BY_SYSTEM: Record<string, number[]> = {
   "Duro-Last": [28, 60, 120],
   "Duro-Roof": [57, 87, 120],
   "Duro-Tuff": [30, 60, 120],
+  "Duro-Tech TPO": [30, 60, 120],
 };
 
 /**
@@ -930,7 +949,7 @@ export function sectionMembraneDisplayPricing(
   const sys = resolveSectionSystem({ roofSystem, attachment }, s);
   roofSystem = sys.roofSystem;
   const rsId = sys.rsId;
-  if (rsId === 2 || rsId === 3 || rsId === 5) {
+  if (FLAT_PRICE_FAMILY_IDS.has(rsId)) {
     const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
     return {
       pricePerSqFt: admin.familyMembranePrices?.[roofSystem]?.[variantKey] ?? 0,
@@ -989,8 +1008,8 @@ export function strippingBySection(
   for (const s of bid.sections) {
     const sys = resolveSectionSystem(bid, s);
     let pricePerFt: number;
-    if (sys.rsId === 3) {
-      pricePerFt = admin.familyMembranePrices?.["Duro-Tuff"]?.[String(s.thickness)] ?? 0;
+    if (sys.rsId === 3 || sys.rsId === 6) {
+      pricePerFt = admin.familyMembranePrices?.[sys.roofSystem]?.[String(s.thickness)] ?? 0;
     } else {
       pricePerFt = priceMatrixLookup(admin.priceMatrix, s.thickness, "rollGoods", s.color) ?? 0;
     }
@@ -1173,7 +1192,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // Duro-Bond (rs 2) / Duro-Tuff (rs 3) / Duro-Fleece (rs 5): flat single-price membranes
     // (parity doc §7.1) — no color, no tiers, no zones. Fleece keys by membrane TYPE; a
     // thickness-only bid reaches the non-Plus rows ("50mil"/"60mil"; Plus variants flagged).
-    if (rsId === 2 || rsId === 3 || rsId === 5) {
+    if (FLAT_PRICE_FAMILY_IDS.has(rsId)) {
       const variantKey = rsId === 5 ? `${s.thickness}mil` : String(s.thickness);
       const fPrice = admin.familyMembranePrices?.[sys.roofSystem]?.[variantKey];
       if (fPrice === undefined) {
@@ -1186,7 +1205,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // Duro-Roof (rs 4) shares the Duro-Last zone logic with NO roll-good sheet branch and a
     // 57" middle threshold (its 57" tab maps to the 60"-Tabs price row); ×1.05 rides on
     // membraneMaterialCost's isDuroRoof surcharge.
-    const isFlatFamily = rsId === 2 || rsId === 3 || rsId === 5;
+    const isFlatFamily = FLAT_PRICE_FAMILY_IDS.has(rsId);
     const midThresholdIn = rsId === 4 ? 57 : 60;
     // A pre-series adminSnapshot has no sheetTabSpacings at all — zoned pricing must not engage
     // there (it would warn and misprice); those frozen bids keep roll goods, warning-free.
@@ -1284,7 +1303,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     // ComplexityFactor.SmartValue (RSComplexityFactor rows only for Duro-Tuff / Duro-Fleece);
     // UnderlaymentBaseHours multiplies both into the section's underlayment hours as well.
     const sheetSizeMulti = sLt?.sheetSizeMultiByLabel[sheetLabel] ?? 1;
-    const complexity = sectionComplexityFactor(rsId, s.complexity, sheetSizeMulti);
+    const complexity = sectionComplexityFactor(
+      rsId,
+      s.complexity,
+      sheetSizeMulti,
+      sLt?.complexityFactors,
+    );
 
     // Insulation layers (§4.3, up to 4): board material → dTotals[6]; layout + fastener labor
     // and adhesive labor → direct labor; adhesive units × price → M0. Labor follows legacy
@@ -1656,6 +1680,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
               tabBands: sLt?.tabBands ?? [],
               onCenterBands: sLt?.onCenterBands ?? [],
               fastenerSpacing: [],
+              ...(sLt?.baseHoursPer2500 !== undefined
+                ? { baseHoursPer2500: sLt.baseHoursPer2500 }
+                : {}),
             },
           }
         : {}),
@@ -2434,6 +2461,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       tabBands: lt?.tabBands ?? [],
       onCenterBands: lt?.onCenterBands ?? [],
       fastenerSpacing: [], // gap — sections supply customFieldFastenerSpacing
+      ...(lt?.baseHoursPer2500 !== undefined ? { baseHoursPer2500: lt.baseHoursPer2500 } : {}),
       ...(admin.setupTable ? { setupTable: admin.setupTable } : {}),
       ...(admin.inspectionTable ? { inspectionTable: admin.inspectionTable } : {}),
     },

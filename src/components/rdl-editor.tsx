@@ -268,6 +268,41 @@ function MembraneEditor() {
         </Card>
       )}
 
+      {/* Mechanical base hours per 2,500 sq ft — the legacy formula's fixed "10 Hrs"; a combo
+          may carry its own figure (Duro-Tech TPO starts at the owner's 27 h, docs §22.34). */}
+      {d.base && d.base.tab_or_width_label && !d.duro_bond_base_labor && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Base hours per 2,500 sq ft</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-end gap-6">
+            <div className="space-y-2">
+              <Label>Hours (blank = legacy 10)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={d.base_hours_per_2500 ?? ""}
+                placeholder="10"
+                onChange={(e) =>
+                  update((x) => {
+                    const v = e.target.value.trim();
+                    if (v === "") delete x.base_hours_per_2500;
+                    else x.base_hours_per_2500 = num(v);
+                  })
+                }
+                className="max-w-[140px]"
+              />
+            </div>
+            <p className="max-w-md text-xs text-muted-foreground">
+              Mechanical labor = base hours × deck × {tabLabel.toLowerCase()} × fastener spacing ×
+              sheet size / complexity × thickness, per 2,500 sq ft of membrane. Every legacy system
+              uses 10; Duro-Tech TPO is seeded at 27 from the bid-calculator guide (24–30 h) —
+              calibrate to your crews.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Fallback for combos without both matrix axes (e.g. Duro-Bond) */}
       {!hasMatrix && d.base && d.base.tab_or_width_label && (
         <Card>

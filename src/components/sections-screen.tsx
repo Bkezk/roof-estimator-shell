@@ -296,7 +296,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
   // Legacy UpdatePreview: the Complexity combo is enabled (and the sheet combo disabled) only
   // while the sheet multiplier is exactly 1.0; otherwise the sheet size is what varies labor.
   const complexityEnabled = hasComplexity && sheetMulti === 1;
-  const complexityFactor = sectionComplexityFactor(sys.rsId, s.complexity, sheetMulti);
+  const complexityFactor = sectionComplexityFactor(
+    sys.rsId,
+    s.complexity,
+    sheetMulti,
+    laborTable?.complexityFactors,
+  );
   const isQuickBid = s.isQuickBid !== false;
   const edges = s.edges?.length ? s.edges : defaultEdges(s.length, s.width);
   const bySide = (side: string) => edges.find((e) => e.side === side);
@@ -758,7 +763,17 @@ export function SectionsScreen(p: SectionsScreenProps) {
               <Pick
                 className="w-[90px]"
                 value={String(s.thickness)}
-                options={["40", "50", "60"]}
+                // The combo's thickness table (Duro-Last 40/50/60, Duro-Tech TPO 45/60/80 …); the
+                // legacy trio when the combo carries none. A saved thickness stays listed.
+                options={(() => {
+                  const fromCombo = Object.keys(laborTable?.thicknessLaborByMil ?? {})
+                    .map(Number)
+                    .filter((n) => n > 0)
+                    .sort((a, b) => a - b)
+                    .map(String);
+                  const base = fromCombo.length ? fromCombo : ["40", "50", "60"];
+                  return base.includes(String(s.thickness)) ? base : [String(s.thickness), ...base];
+                })()}
                 onChange={(v) => updWithSpacing({ thickness: Number(v) })}
               />
             </Field>

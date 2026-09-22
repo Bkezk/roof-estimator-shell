@@ -30,6 +30,7 @@ export const LEGACY_ROOF_SYSTEM_IDS: Record<string, number> = {
   "Duro-Tuff": 3,
   "Duro-Roof": 4,
   "Duro-Fleece": 5,
+  "Duro-Tech TPO": 6, // web-only sixth system (docs §22.34); its rows are cloned from Duro-Tuff
 };
 
 /** Design-table (wind uplift, psf) choices seen in the lookup: 60–210. */

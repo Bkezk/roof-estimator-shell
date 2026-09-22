@@ -12,6 +12,8 @@ export interface RdlData {
     tab_multiplier?: number;
     sheet_layout_hours?: number;
   } | null;
+  /** Mechanical base hours per 2,500 sq ft (absent = the legacy 10; Duro-Tech TPO 27, docs §22.34). */
+  base_hours_per_2500?: number;
   deck_multipliers?: Record<string, number> | null;
   fastener_spacing_multipliers?: { spacing_in: number; multiplier: number }[] | null;
   complexity_factors?: { label: string; value: number }[] | null;
