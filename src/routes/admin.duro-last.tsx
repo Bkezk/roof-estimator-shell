@@ -41,7 +41,7 @@ function DuroLastPage() {
           <TabsTrigger value="catalog">Catalog</TabsTrigger>
           <TabsTrigger value="adhesives">Adhesives</TabsTrigger>
           <TabsTrigger value="metals">Exceptional Metals</TabsTrigger>
-          <TabsTrigger value="items">Item Numbers &amp; Price Import</TabsTrigger>
+          <TabsTrigger value="items">Item Numbers</TabsTrigger>
         </TabsList>
         <TabsContent value="catalog">
           <CatalogEditor

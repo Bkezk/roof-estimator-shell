@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   guessHeader,
+  guessMembraneHeader,
+  matchMembrane,
   matchSheet,
+  readMembraneSheet,
   normalizeItemNo,
   parsePrice,
   readSheetItems,
@@ -51,7 +54,47 @@ describe("price import — parsing", () => {
       ["Item #", "Description", "Unit", "Price"],
       ["1225", "Term Bar White", "ft", "$0.75"],
     ];
-    expect(guessHeader(rows)).toEqual({ headerRow: 2, itemCol: 0, descCol: 1, priceCol: 3 });
+    expect(guessHeader(rows)).toEqual({
+      headerRow: 2,
+      itemCol: 0,
+      descCol: 1,
+      priceCol: 3,
+      unitCol: 2,
+    });
+    // The real Duro-Last sheet: Item / Description / Category / … / Price / Unit of Measure.
+    const dl = [
+      [
+        "Item",
+        "Description",
+        "Category",
+        "Category Type",
+        "Size",
+        "Item Color",
+        "Metal Gauge",
+        "Price",
+        "Unit of Measure",
+      ],
+      [
+        1222,
+        "PANDUIT SS BAND 14 (BAG)",
+        "Stack Flashings",
+        "Panduit Bands",
+        null,
+        null,
+        null,
+        44,
+        "BG",
+      ],
+    ];
+    expect(guessHeader(dl)).toEqual({
+      headerRow: 0,
+      itemCol: 0,
+      descCol: 1,
+      priceCol: 7,
+      unitCol: 8,
+    });
+    const it0 = readSheetItems(dl, guessHeader(dl)!)[0]!;
+    expect([it0.itemNo, it0.price, it0.unit]).toEqual(["1222", 44, "BG"]);
     expect(guessHeader([["a", "b"]])).toBeNull();
   });
 
@@ -107,5 +150,50 @@ describe("price import — matching", () => {
     expect(r.matched).toHaveLength(1);
     expect(r.matched[0]!.item.price).toBe(2);
     expect(r.notInSheet.map((m) => m.item_no).sort()).toEqual(["1225B", "1231", "1231", "1312 BF"]);
+  });
+});
+
+describe("price import — Duro-Last Membrane sheet", () => {
+  const sheet = [
+    ["Description", "Mil", "Color", "Price per SqFt"],
+    ["Roll Goods", 40, "White", 1.23],
+    ["Roll Goods", 40, "Tan", 1.25],
+    ['60" Tabs', 50, "Terra Cotta", 1.42],
+    ["Parapets", 60, "Dark Gray", 1.63],
+    ["Roll Goods", 70, "White", 2],
+    ["Roll Goods", 40, "Blue", 1.3],
+    ["Roll Goods", 50, "White", ""],
+  ];
+  const target = {
+    rows: [
+      "Duro-Last - 40mil Roll Goods",
+      'Duro-Last - 50mil 60" Tabs',
+      "Duro-Last - 60mil Parapets",
+      "Duro-Last - 50mil Roll Goods",
+      "Duro-Bond - 40",
+    ],
+    price_cols: ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta", "Rock-Ply"],
+  };
+  it("finds the header and maps Description + Mil onto the matrix row, Color onto the column", () => {
+    expect(guessMembraneHeader(sheet)).toEqual({
+      headerRow: 0,
+      descCol: 0,
+      milCol: 1,
+      colorCol: 2,
+      priceCol: 3,
+    });
+    expect(guessMembraneHeader([["Item", "Description", "Price"]])).toBeNull();
+    const r = matchMembrane(readMembraneSheet(sheet), target);
+    expect(r.matched.map((m) => `${m.row_label} · ${m.price_col} = ${m.item.price}`)).toEqual([
+      "Duro-Last - 40mil Roll Goods · White = 1.23",
+      "Duro-Last - 40mil Roll Goods · Tan = 1.25",
+      'Duro-Last - 50mil 60" Tabs · Terra Cotta = 1.42',
+      "Duro-Last - 60mil Parapets · Dark Gray = 1.63",
+    ]);
+    expect(r.unmatched.map((u) => u.reason)).toEqual([
+      'no matrix row "Duro-Last - 70mil Roll Goods"',
+      'no "Blue" colour column',
+    ]);
+    expect(r.noPrice.map((u) => `${u.mil} ${u.description}`)).toEqual(["50 Roll Goods"]);
   });
 });

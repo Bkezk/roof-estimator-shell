@@ -3052,3 +3052,38 @@ description. Every catalog screen shows the mapped item numbers per row ("Item #
 the legacy "Part #" columns are text inputs (they were number inputs, which dropped "1225B").
 Pure matching lives in `src/lib/price-import.ts` (tests). Inventory management can hang off the
 same table later.
+
+### 22.32 Price List Import — real Duro-Last workbook, review & confirm, menu placement (2026-09-22)
+
+Owner supplied a real Duro-Last price list (`pricelist_dl_excel_2.xlsx`): sheet "Price List"
+(13,506 rows; Item / Description / Category / Category Type / Size / Item Color / Metal Gauge /
+Price / Unit of Measure — Item is numeric for 12,441 rows and text such as "1312 BF",
+"1628-009", "NTB01" for 1,065) and sheet "Duro-Last Membrane" (Description / Mil / Color /
+Price per SqFt, 65 lines).
+
+- **Header guess** on the real file: row 1, Item col 1, Description col 2, Price col 8, Unit
+  col 9 (the price regex no longer matches "Unit"; a Unit-of-Measure column is captured
+  separately and shown in the review so a per-box vs per-each basis can be eyeballed).
+- **Item numbers**: 115 of the 312 seeded legacy part numbers appear in the sheet as-is (e.g.
+  1222/1222P panduit, 1231 vent, 1309 corner, 1315 stack, 1568/1571 fascia bars, 1916 drain
+  boot, the drill bits). The rest were renumbered by Duro-Last (CDR 1536 → 15361 "CDR 2 FAB",
+  drip edge / gravel stop now 11-digit metal codes, walk pads under "Walkway Pads" …). The
+  import page lists every "catalog item number not in this sheet" with a search box over the
+  sheet (description / item number) and a **Use** button that re-points the mapping (delete old
+  key, insert new, Duro-Last description stamped) — the owner's job, one product at a time; it
+  sticks for every later import.
+- **Membrane tab**: matched by `Duro-Last - {mil}mil {Description}` × colour column (case /
+  whitespace-insensitive): 60 of 65 lines land; the five 50 mil 120" Tabs lines have no matrix
+  row (the legacy screen never carried one) and are reported, not written. The tab is loaded
+  alongside the item sheet (checkbox) and its cells carry item number "MEMBRANE" (no mapping
+  row to stamp).
+- **Review & confirm** (owner's request): "Review & confirm N updates…" opens a dialog with the
+  count of cells to write, how many change (up / down / newly priced), a table of every changed
+  cell (item #, screen, product · column, sheet description, unit, current → new, Δ%), the
+  unchanged cells folded away, the skipped no-match count, and the reminder that saved bids keep
+  their frozen prices until "Update Pricing & Labor". Nothing is written before "Confirm and
+  apply". Current values come from `listPriceTargets` (now returns each row's price cells).
+- **Menu**: "Price List Import" is its own admin page (`/admin/price-import`), the LAST item
+  in the admin menu after Non Duro-Last Pricing; the Duro-Last "Item Numbers" tab keeps the map.
+- Unmatched sheet items (13,391 on this file — gutters, downspouts, copings, TPO … that the
+  estimator never prices) are filtered / paged in the UI; only the ones you bid need mapping.

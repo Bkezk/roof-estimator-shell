@@ -38,12 +38,15 @@ const ITEM_HEADER =
   /\b(item|part|product|stock|sku)\b.*\b(no|num|number|#|code|id)\b|^(item|part|sku|item ?#|part ?#)$/i;
 const DESC_HEADER = /descr|product name|^name$|^item$/i;
 const PRICE_HEADER = /price|cost|\$|amount/i;
+const UNIT_HEADER = /unit of measure|^uom$|^unit$|^u\/m$/i;
 
 export interface HeaderGuess {
   headerRow: number;
   itemCol: number;
   descCol: number | null;
   priceCol: number | null;
+  /** "Unit of Measure" column (EA / FT / BX …) when the sheet has one — shown in the review. */
+  unitCol: number | null;
 }
 
 /**
@@ -58,14 +61,16 @@ export function guessHeader(rows: SheetRow[], scan = 40): HeaderGuess | null {
     let itemCol = -1;
     let descCol: number | null = null;
     let priceCol: number | null = null;
+    let unitCol: number | null = null;
     row.forEach((cell, c) => {
       const h = String(cell ?? "").trim();
       if (!h) return;
       if (itemCol < 0 && ITEM_HEADER.test(h)) itemCol = c;
       else if (descCol === null && DESC_HEADER.test(h)) descCol = c;
+      else if (unitCol === null && UNIT_HEADER.test(h)) unitCol = c;
       else if (priceCol === null && PRICE_HEADER.test(h)) priceCol = c;
     });
-    if (itemCol >= 0) return { headerRow: r, itemCol, descCol, priceCol };
+    if (itemCol >= 0) return { headerRow: r, itemCol, descCol, priceCol, unitCol };
   }
   return null;
 }
@@ -76,12 +81,19 @@ export interface SheetItem {
   key: string; // normalised
   description: string;
   price: number | null;
+  unit: string;
 }
 
 /** Read the data rows under the header with the picked columns; rows with no item number are skipped. */
 export function readSheetItems(
   rows: SheetRow[],
-  pick: { headerRow: number; itemCol: number; descCol: number | null; priceCol: number | null },
+  pick: {
+    headerRow: number;
+    itemCol: number;
+    descCol: number | null;
+    priceCol: number | null;
+    unitCol?: number | null;
+  },
 ): SheetItem[] {
   const out: SheetItem[] = [];
   for (let r = pick.headerRow + 1; r < rows.length; r++) {
@@ -95,6 +107,7 @@ export function readSheetItems(
       key: normalizeItemNo(itemNo),
       description: pick.descCol === null ? "" : String(row[pick.descCol] ?? "").trim(),
       price: pick.priceCol === null ? null : parsePrice(row[pick.priceCol]),
+      unit: pick.unitCol == null ? "" : String(row[pick.unitCol] ?? "").trim(),
     });
   }
   return out;
@@ -154,4 +167,117 @@ export function matchSheet(items: SheetItem[], mappings: ItemNumberMapping[]): M
   unmatched.sort((a, b) => a.rowIndex - b.rowIndex);
   matched.sort((a, b) => a.item.rowIndex - b.item.rowIndex);
   return { matched, noPrice, unmatched, notInSheet, duplicatesInSheet: [...duplicates] };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * "Duro-Last Membrane" sheet — no item numbers: Description / Mil / Color / Price per SqFt rows
+ * that map straight onto the Duro-Last Membrane price matrix (row "Duro-Last - {mil}mil
+ * {Description}", column = colour).
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface MembraneItem {
+  rowIndex: number;
+  description: string;
+  mil: number;
+  color: string;
+  price: number | null;
+}
+
+const MEMBRANE_DESC = /^descr/i;
+const MEMBRANE_MIL = /^mil$|thickness/i;
+const MEMBRANE_COLOR = /^colou?r$/i;
+
+/** Header row + columns of a membrane sheet, or null when the sheet is not one. */
+export function guessMembraneHeader(
+  rows: SheetRow[],
+  scan = 20,
+): {
+  headerRow: number;
+  descCol: number;
+  milCol: number;
+  colorCol: number;
+  priceCol: number;
+} | null {
+  for (let r = 0; r < Math.min(rows.length, scan); r++) {
+    const row = rows[r] ?? [];
+    let descCol = -1;
+    let milCol = -1;
+    let colorCol = -1;
+    let priceCol = -1;
+    row.forEach((cell, c) => {
+      const h = String(cell ?? "").trim();
+      if (!h) return;
+      if (descCol < 0 && MEMBRANE_DESC.test(h)) descCol = c;
+      else if (milCol < 0 && MEMBRANE_MIL.test(h)) milCol = c;
+      else if (colorCol < 0 && MEMBRANE_COLOR.test(h)) colorCol = c;
+      else if (priceCol < 0 && PRICE_HEADER.test(h)) priceCol = c;
+    });
+    if (descCol >= 0 && milCol >= 0 && colorCol >= 0 && priceCol >= 0)
+      return { headerRow: r, descCol, milCol, colorCol, priceCol };
+  }
+  return null;
+}
+
+export function readMembraneSheet(rows: SheetRow[]): MembraneItem[] {
+  const h = guessMembraneHeader(rows);
+  if (!h) return [];
+  const out: MembraneItem[] = [];
+  for (let r = h.headerRow + 1; r < rows.length; r++) {
+    const row = rows[r] ?? [];
+    const description = String(row[h.descCol] ?? "").trim();
+    const mil = Number(String(row[h.milCol] ?? "").replace(/[^\d.]/g, ""));
+    const color = String(row[h.colorCol] ?? "").trim();
+    if (!description || !Number.isFinite(mil) || mil <= 0 || !color) continue;
+    out.push({ rowIndex: r, description, mil, color, price: parsePrice(row[h.priceCol]) });
+  }
+  return out;
+}
+
+/** The catalog row label the legacy matrix uses for a membrane sheet line. */
+export const membraneRowLabel = (mil: number, description: string): string =>
+  `Duro-Last - ${mil}mil ${description}`;
+
+export interface MembraneUpdate {
+  item: MembraneItem;
+  row_label: string;
+  price_col: string;
+}
+
+export interface MembraneMatchResult {
+  matched: MembraneUpdate[];
+  noPrice: MembraneItem[];
+  unmatched: { item: MembraneItem; reason: string }[];
+}
+
+const foldKey = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Match membrane sheet lines onto the matrix's rows (by label) and colour columns. */
+export function matchMembrane(
+  items: MembraneItem[],
+  target: { rows: string[]; price_cols: string[] },
+): MembraneMatchResult {
+  const rowByKey = new Map(target.rows.map((r) => [foldKey(r), r]));
+  const colByKey = new Map(target.price_cols.map((c) => [foldKey(c), c]));
+  const matched: MembraneUpdate[] = [];
+  const noPrice: MembraneItem[] = [];
+  const unmatched: { item: MembraneItem; reason: string }[] = [];
+  for (const item of items) {
+    const label = membraneRowLabel(item.mil, item.description);
+    const row = rowByKey.get(foldKey(label));
+    if (!row) {
+      unmatched.push({ item, reason: `no matrix row "${label}"` });
+      continue;
+    }
+    const col = colByKey.get(foldKey(item.color));
+    if (!col) {
+      unmatched.push({ item, reason: `no "${item.color}" colour column` });
+      continue;
+    }
+    if (item.price === null) {
+      noPrice.push(item);
+      continue;
+    }
+    matched.push({ item, row_label: row, price_col: col });
+  }
+  return { matched, noPrice, unmatched };
 }

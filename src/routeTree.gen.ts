@@ -18,6 +18,7 @@ import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
+import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 
@@ -66,6 +67,11 @@ const AdminNonDlRoute = AdminNonDlRouteImport.update({
   path: '/admin/non-dl',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminPriceImportRoute = AdminPriceImportRouteImport.update({
+  id: '/admin/price-import',
+  path: '/admin/price-import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/admin/settings',
   path: '/admin/settings',
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -114,6 +122,7 @@ export interface FileRoutesById {
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
+  '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
 }
@@ -129,6 +138,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesByTo: FileRoutesByTo
@@ -142,6 +152,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
   id:
@@ -155,6 +166,7 @@ export interface FileRouteTypes {
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
+    | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
   fileRoutesById: FileRoutesById
@@ -169,6 +181,7 @@ export interface RootRouteChildren {
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
+  AdminPriceImportRoute: typeof AdminPriceImportRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
 }
@@ -238,6 +251,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminNonDlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/price-import': {
+      id: '/admin/price-import'
+      path: '/admin/price-import'
+      fullPath: '/admin/price-import'
+      preLoaderRoute: typeof AdminPriceImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/settings': {
       id: '/admin/settings'
       path: '/admin/settings'
@@ -265,6 +285,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
+  AdminPriceImportRoute: AdminPriceImportRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
 }

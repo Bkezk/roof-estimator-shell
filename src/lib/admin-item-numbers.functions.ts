@@ -32,7 +32,18 @@ export interface PriceTarget {
   category: string;
   rows: string[];
   price_cols: string[];
+  /** Current catalog value per row label → price column (null when blank / non-numeric). */
+  values: Record<string, Record<string, number | null>>;
 }
+
+const numOrNull = (v: unknown): number | null => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
 
 const LABEL_COLS = new Set(["Description", "Name"]);
 const NON_PRICE_COLS = new Set([
@@ -62,27 +73,36 @@ export const listPriceTargets = createServerFn({ method: "GET" })
         kind?: string;
         columns?: string[];
         rows?: Record<string, unknown>[];
-        products?: { name: string }[];
+        products?: { name: string; price?: unknown }[];
       } | null;
       if (!d) continue;
       if (d.kind === "adhesives") {
+        const values: PriceTarget["values"] = {};
+        for (const p of d.products ?? []) values[p.name] = { price: numOrNull(p.price) };
         out.push({
           screen_id: s.id,
           category: s.category,
           rows: (d.products ?? []).map((p) => p.name),
           price_cols: ["price"],
+          values,
         });
         continue;
       }
       if (d.kind) continue; // Exceptional Metals: no Duro-Last item numbers.
       const cols = d.columns ?? [];
       const labelCol = cols.find((c) => LABEL_COLS.has(c)) ?? cols[0] ?? "Description";
-      out.push({
-        screen_id: s.id,
-        category: s.category,
-        rows: (d.rows ?? []).map((r) => String(r[labelCol] ?? "")).filter((x) => x !== ""),
-        price_cols: cols.filter((c) => c !== labelCol && !NON_PRICE_COLS.has(c)),
-      });
+      const priceCols = cols.filter((c) => c !== labelCol && !NON_PRICE_COLS.has(c));
+      const values: PriceTarget["values"] = {};
+      const rows: string[] = [];
+      for (const r of d.rows ?? []) {
+        const label = String(r[labelCol] ?? "");
+        if (label === "") continue;
+        rows.push(label);
+        const v: Record<string, number | null> = {};
+        for (const c of priceCols) v[c] = numOrNull(r[c]);
+        values[label] = v;
+      }
+      out.push({ screen_id: s.id, category: s.category, rows, price_cols: priceCols, values });
     }
     return out;
   });

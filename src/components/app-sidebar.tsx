@@ -7,6 +7,7 @@ import {
   KeyRound,
   SlidersHorizontal,
   Package,
+  FileSpreadsheet,
   Layers,
   Calculator,
   ChevronRight,
@@ -126,7 +127,7 @@ const adminItems: {
       { title: "Walk Pads & Wall Vents", cat: "Walk Pads & Wall Vents" },
       { title: "Membrane Accs", cat: "Membrane Accs" },
       { title: "EXCEPTIONAL Metals", tab: "metals" },
-      { title: "Item Numbers / Price Import", tab: "items" },
+      { title: "Item Numbers", tab: "items" },
     ],
   },
   {
@@ -143,6 +144,11 @@ const adminItems: {
       { title: "3rd Party Services", cat: "3rd Party Services" },
       { title: "Preset Custom Applications", cat: "Preset Custom Applications" },
     ],
+  },
+  {
+    title: "Price List Import",
+    url: "/admin/price-import",
+    icon: FileSpreadsheet,
   },
 ];
 
