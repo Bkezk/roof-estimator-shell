@@ -1052,6 +1052,8 @@ function EstimatePage() {
       // Per-wall legacy ManHours / BaseManHours for the Parapets screen labor link (§19).
       parapetHoursById: build.breakdown.parapetHoursById,
       parapetBaseHoursById: build.breakdown.parapetBaseHoursById,
+      // Auto-priced ARP membrane (§8.6) — Duro-Last material shown with Accessories.
+      arpMaterial: build.breakdown.arpMaterial,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
@@ -4496,11 +4498,16 @@ function EstimatePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {/* Duro-Last material (dTotals[0]) less every other Duro-Last bucket shown on
+                      its own row below — the calculated accessory screens' material (edge terms,
+                      flashing, fasteners, ARP) is Accessories, not membrane. */}
                   <Row
                     label="Membrane material"
                     v={money(
                       (result.r.money.dTotals[0] ?? 0) -
                         accessoryTotal -
+                        (result.accessories?.totalCost ?? 0) -
+                        result.arpMaterial -
                         result.parapetMaterial -
                         result.curbMaterial -
                         result.metalsMaterial -
@@ -4526,7 +4533,15 @@ function EstimatePage() {
                   {result.adhesiveMaterial > 0 && (
                     <Row label="Adhesive material" v={money(result.adhesiveMaterial)} />
                   )}
-                  {accessoryTotal > 0 && <Row label="Accessories" v={money(accessoryTotal)} />}
+                  {accessoryTotal + (result.accessories?.totalCost ?? 0) + result.arpMaterial >
+                    0 && (
+                    <Row
+                      label="Accessories"
+                      v={money(
+                        accessoryTotal + (result.accessories?.totalCost ?? 0) + result.arpMaterial,
+                      )}
+                    />
+                  )}
                   {(result.r.money.dTotals[6] ?? 0) > 0 && (
                     <Row label="Underlayment" v={money(result.r.money.dTotals[6] ?? 0)} />
                   )}
