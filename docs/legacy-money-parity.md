@@ -3240,9 +3240,20 @@ Dark Gray, 50 mil also Terra Cotta, each at 5'4" × 100' and 2'8" × 100') and "
 (45 / 60 / 80 mil rolls at 30" / 60" / 120" × 100'). Migration `20260922130000` maps 41 roll
 item numbers onto the matrix's Roll Goods and Duro-Tech TPO rows **per colour column** (both
 roll widths on the same cell); the Duro-Last Membrane admin screen's Item # column now shows
-them (chips wrap; the colour rides each chip). Tabs / Parapets rows are prefabricated sheets
-with no list item; Duro-Bond / Duro-Tuff / Duro-Fleece (PVC) are not on this list (the sheet's
-"D-FLEECE EV" rows are Elvaloy fleece — a different product — and were NOT mapped).
+them (chips wrap; the colour rides each chip, the roll's list description on hover). Tabs /
+Parapets rows are prefabricated sheets with no list item. The sheet's "D-FLEECE EV" rows are
+Elvaloy fleece — a different product — and were NOT mapped.
+
+Addendum (same day, owner: "are all these Duro-Fleece products lacking a number?"): no — the
+first pass missed them. Migration `20260922140000` maps 68 more: Duro-Fleece 50 / 60 mil and
+Plus (White, plus Gray / Tan / Dark Gray on the non-Plus rows) and Duro-Tuff 50 / 60 mil in
+White / Light Gray → Gray / Light Tan → Tan / Charcoal → Dark Gray, at 30" / 60" / 120" × 100'.
+The legacy **Duro-Bond** rows price exactly the Duro-Tuff rolls (White 1.09 / 1.19, colours
+1.23 / 1.33 = Duro-Tuff roll $ ÷ area), so the Duro-Tuff item numbers also sit on Duro-Bond 50 /
+60 (Duro-Bond 40 has no roll on the list). Unmapped: Patina / Green / Copper / Blue / Red rolls
+(no matrix column), 80 mil rolls (no row), 10" stripping rolls. Every mapped roll ÷ area equals
+its live cell where one is priced (20 cells checked, 0 mismatches); the Gray / Tan / Dark Gray
+Duro-Fleece and Duro-Tuff cells are still 0 until an import (or the admin) fills them.
 
 **Import conversion.** The matrix is $/sq ft and the list prices per roll, so a roll item
 mapped onto a membrane cell writes `Round(roll $ ÷ roll area, 2)` — the area from the sheet's
