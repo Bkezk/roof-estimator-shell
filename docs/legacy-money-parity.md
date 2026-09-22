@@ -3312,3 +3312,96 @@ bid's manual %s (sections, parapets, curbs, accessories, setup, inspection). **L
 under `bid.formulasVersion ?? current`, so older saves without a stamp keep computing as before)
 re-stamped to the current version; the box is disabled when already current. Nothing is written
 until the bid is saved. The pricing box pre-ticks when the snapshot is stale (legacy opens blank).
+
+### 22.40 Fifth underlayment layer (2026-09-22, owner departure)
+
+Legacy `RoofSection._uLayer` holds FOUR layers: `frmUnderlayment` has four "Add Layer" tabs and
+`UnderlaymentBaseHours` (0x4c284) loops the layer index `0..3` (`ldc.i4.3 ble`). Owner: "some jobs
+need 5 and legacy didn't have that option". The web now allows five (`MAX_UNDERLAYMENT_LAYERS = 5`
+in `bid-builder.ts`; `sectionLayers` slices to it, the Underlayment step's table / tabs / stack
+visual are generated from it). Nothing else changes: every layer is priced by the same per-layer
+rules (§18 — layout time, fastener count, adhesive labor and units, material × 1.03 / 1.06,
+substrate derived from the layer below), so a fifth layer bills exactly what legacy would have
+billed had its form carried a fifth tab. Test: five "None" layers of 1/2" ISO on 2,500 sq ft =
+5 × 7.775 h; a sixth is ignored.
+
+### 22.41 Bid Combiner — legacy `BidAdvantage.BidCombiner` (2026-09-22)
+
+Legacy (Estimator.exe, IL read 2026-09-22): `combineBidsButton_Click` loads each listed .bid file
+("Please select two or more bids to combine"), `CombineBids` creates a NEW estimate
+(`MainStore.CreateNew` → every estimate-level value from management defaults; the generated
+Description says "Base Labor and Item Costs have been set according to management defaults"),
+then: `CombineQuotes` re-numbers every source's custom quotes into one pool; `CombineRoofSections`
+appends every section (ParentEstimate re-pointed); `ReduceQuotes` re-points the layers at the
+re-numbered quotes; `CombineCurbs` / `CombineParapets` append; `CombineAccessories` SUMS the
+user-entered quantities by item identity — AccOthers by Description, Corners by RefID per colour
+(`QuantityByColor`), Washers / Strainers / Panduit / Vents by part, PipeStacks by Size + Usage +
+IsOpen (else added), Drains by boot size + ring size + existing roof type + ReuseRing (else added),
+Term Bar `AdditionalNoDrill/PreDrillLength` per colour, Fascia (Item1 = 3", Item2 = 4")
+`OtherNoDrill/PreDrillLength`, `StripMasticLength`, vinyl-cover colour quantities,
+`MetalCoverLength`, inside / outside corner quantities, Generic edges' `ExtraByColor` / corners /
+covers, Two-piece metal `OtherLength` / covers / corners, Sealants by Description;
+`UseStripMastic` flags are OR-ed; `CombineMetals` sums Gutters and DownSpouts by PartNumber
+(Length + accessory Qty), Pitch Pans and Collection Boxes by RefID; Non-DL goes through
+`frmNonDLReconcile` — same Description → `CompareNDLItems` combines the quantities and, when
+Labor/Unit or Material Cost differ, asks "Press OK to combine the item quantities or press Cancel
+to add the item as a separate entity"; fasteners are NOT carried ("Fasteners have been
+recalculated. You will need to enter new quantities for the items highlighted in red on the
+Accessories page"); Title "Combined Bid", Description = the warning + one line per source bid
+(`"<title>" for <client>, bid by <estimator>`). Everything the estimate DERIVES per job (setup and
+inspection hours, shipping, per diem, warranty, markup, commission, calculated fastener / plate /
+adhesive quantities, membrane) is therefore computed once from the merged inputs.
+
+Web (`src/lib/combine-bids.ts`, pure; Bids page tick-boxes → **Combine n bids** → `/estimate?combine=
+id,id`): the estimator starts as a NEW bid (its fresh defaults = legacy management defaults), loads
+the sources and hydrates the merged `SavedBidState`: sections / parapets / curbs appended with ids
+`<n>.<old id>`; quote ids re-keyed per source (a quote shared by two sections of one bid still bills
+once, two bids' quotes never collapse); `accessoriesCalc`, `metalsCalc`, `nonDlCalc` and the plain
+line lists summed exactly as above (`fastenerQty` dropped; every adjust % at the fresh 0);
+`membraneAccs.strippingFtBySection` follows the new section ids. Departures: (a) the combined bid's
+roof system / attachment / membrane adhesive are the FIRST source's (web sections and parapets
+inherit them from the bid; any section or parapet whose source used a different system is stamped
+with its own, which is what legacy's per-section RoofSystem already did — money identical); (b)
+Non-DL price conflicts are not a modal: the quantities combine (the dialog's OK path), the first
+bid's figures are kept and every conflict is listed in the notice; a custom row with a different
+price stays a separate line (the Cancel path); (c) pipe stacks also key by colour (the web entry
+carries one); (d) the legacy Description text is carried as `SavedBidState.combineInfo` and shown
+as a dismissible notice on the estimate (Dismiss removes it from the bid). The combined bid is
+unsaved until saved (legacy `NewBid = true`); it has no frozen snapshot, so it prices from live
+admin data like any new bid, freezing at first save. Also fixed alongside: hydrating any bid now
+moves the new-section / parapet / curb id counters past the ids in use (previously a section added
+to a loaded bid could reuse `s1`).
+
+### 22.42 Fire-rated (DensDeck Prime) adhered-layer labor — parity check (2026-09-22)
+
+Owner report: "the fire rated adhesive labor cost seems to be way overcounting", seen on the
+Summit Project (Section 10, 80 × 100 Steel deck, Duro-Fleece adhered, complexity Medium, layers
+L1 2" ISO None, L2 2" ISO mechanical, L3 1/4" DensDeck Prime adhered with Duro-Grip CR-20; no
+perimeter enhancement). No legacy Summit screenshot exists in the Drive "parity comparisons"
+folders (searched: summit / fire / adhesive / dens — Knox County only), so the check is IL vs
+engine, both re-read today:
+
+- Legacy `UnderlaymentBaseHours` (0x4c284): per layer `AreaTotal × LayoutTime / 2500`
+  (`AreaTotal = Length × Width`, 0x4b5a4); adhered → `AreaField × L / 2500 + AreaPerimeter × L /
+  2500` where `L = RoofSystem("insulations").AdhesiveLaborRate(1, AdhesiveSubgroup of the nearest
+  non-empty layer below, adhesive)` = `RSAdhesiveCoverage.UnderlaymentAdhesiveLabor[subgroup]`
+  (bottom layer: `AdhesiveLaborRate(0, DeckType.ID)` = `DeckTypesAdhesiveLabor[deck]`), 0xa274;
+  `AreaField = AreaTotal − AreaPerimeter − AreaCorner` (0x4ba54, formulas ≥ 4.0.230); the layer
+  total × `ComplexityFactor.SmartValue × SheetSize.SmartSheetMulti`; `UnderlaymentAdjustedBaseHours`
+  (0x4cd48) × `(1 + AdjustUnderlaymentLabor / 100)`. The web loop (`bid-builder.ts`, §18) is the
+  same expression term for term (`underlaymentAdhesive` = `(field + perim) × labor / 2500`, layout
+  on every priced layer, `uScale`).
+- Engine run on the saved Summit payload (vite-node, frozen snapshot): 199.932 h underlayment
+  labor, no warnings — by hand: L1 8,000/2,500 × 10.775 = 34.48 h; L2 34.48 + 2,500 fasteners
+  (Round(8,000/32) × 10, membrane adhered) × 0.462/60 = 53.73 h; L3 8,000/2,500 × 18 = 57.60 h
+  layout + 8,000 × 6.5/2,500 = 20.80 h adhesive = 78.40 h; (34.48 + 53.73 + 78.40) × 1.2
+  (Duro-Fleece "Medium") = 199.93 h × $45 = $8,996.94. The fire-rated layer is 94.08 h ($4,233.60):
+  the adhesive term is 24.96 h of it; the LAYOUT term (69.12 h) dominates because the captured
+  legacy layout time for 1/4" DensDeck Prime is 18 h / 2,500 sq ft (Layout & Mechanical grid,
+  pale-yellow cell; 2" ISO is 10.775) and the CR-20 labor is 6.5 h / 2,500 sq ft on every substrate
+  (Adhesive Times grid).
+
+Conclusion: the web bills the legacy formula on the legacy figures; no over-count is provable from
+the app data. Whether legacy's Summit bid showed a different number depends on that install's
+own DensDeck Prime layout time / CR-20 labor values (both DualValue custom cells) — the owner's
+legacy Summit review screen is needed to go further.

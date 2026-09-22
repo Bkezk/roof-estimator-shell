@@ -5,6 +5,7 @@
  * live estimate (the two are pinned to one code path — they cannot drift).
  */
 
+import type { CombineInfo } from "@/lib/combine-bids";
 import type {
   BidInput,
   BidSectionInput,
@@ -179,6 +180,8 @@ export interface SavedBidState {
   warrantySnapshot?: WarrantyData;
   /** ISO timestamp of when the snapshot was captured. */
   pricingAsOf?: string;
+  /** Set on a bid produced by the Bid Combiner (legacy Description text's data, docs §22.41). */
+  combineInfo?: CombineInfo;
 }
 
 /**

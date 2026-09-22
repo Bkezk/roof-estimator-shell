@@ -15,6 +15,7 @@ import {
   strippingBySection,
   curbIsoSqFt,
   curbLinealFt,
+  MAX_UNDERLAYMENT_LAYERS,
 } from "./bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
@@ -3260,6 +3261,29 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       }),
     );
     expect(h).toBeCloseTo(7.775, 6);
+  });
+
+  it("§22.40: a FIFTH layer bills like the others; anything past MAX_UNDERLAYMENT_LAYERS is ignored", () => {
+    const none = (): UnderlaymentLayer => ({
+      board: '1/2" ISO',
+      attachment: "none",
+      fastenersPerBoard: 0,
+      adhesiveName: "",
+      substrate: "",
+    });
+    const five = uHours(
+      bid({ sections: [{ ...bid().sections[0]!, layers: [none(), none(), none(), none(), none()] }] }),
+    );
+    expect(MAX_UNDERLAYMENT_LAYERS).toBe(5);
+    expect(five).toBeCloseTo(5 * 7.775, 6);
+    const six = uHours(
+      bid({
+        sections: [
+          { ...bid().sections[0]!, layers: [none(), none(), none(), none(), none(), none()] },
+        ],
+      }),
+    );
+    expect(six).toBeCloseTo(5 * 7.775, 6);
   });
 });
 

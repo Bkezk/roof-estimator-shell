@@ -19,7 +19,7 @@
  *    total before tax (dMaterial[20]). Membrane tier per legacy: roll-good sheet → roll goods;
  *    tab sheets → field share at the fieldLap tab tier (zones unpriced at default -1 laps).
  *  - Tear-off labor wired from the seeded Tearoff Times table (per deck × tear-off type).
- *  - Insulation layers wired (§4.3, up to 4 per section): board material → dTotals[6]; mechanical
+ *  - Insulation layers wired (§4.3, up to MAX_UNDERLAYMENT_LAYERS per section): board material → dTotals[6]; mechanical
  *    labor per the app's header formula (layout hrs/2500 + fastener min × count/board); adhesive
  *    units = area ÷ coverage, summed per adhesive across the estimate and Ceilinged ONCE per
  *    adhesive (legacy AggregateCalcQtys) → whole units × price into M0; labor at hrs/1000 sqft
@@ -111,7 +111,7 @@ import {
 } from "./adapters";
 
 /**
- * One insulation/underlayment layer on a section (§4.3, up to 4). Mechanical bills the app's own
+ * One insulation/underlayment layer on a section (§4.3, up to MAX_UNDERLAYMENT_LAYERS). Mechanical bills the app's own
  * header formula (layout hrs/2500 + fastener minutes × count); adhesive bills area ÷ coverage units
  * of adhesive (whole-unit rounding happens per adhesive at the estimate level) + labor at
  * hrs/1000 sqft (confirmed scale).
@@ -252,7 +252,7 @@ export interface BidSectionInput {
     fieldOc?: number;
   };
   underlaymentBoard: string; // LEGACY single board ("" = none); superseded by `layers`
-  /** Insulation layers (up to 4). When absent, a legacy underlaymentBoard converts to one layer. */
+  /** Insulation layers (up to MAX_UNDERLAYMENT_LAYERS). When absent, a legacy underlaymentBoard converts to one layer. */
   layers?: UnderlaymentLayer[];
   /**
    * Per-side edge definitions (A–D). When present: perimeter-marked edges drive the perimeter
@@ -688,8 +688,16 @@ export interface BidInput {
  * mechanical layer at the app's default 5 fasteners/board. Used by the compute path AND the UI
  * hydration so old saved bids read identically everywhere.
  */
+/**
+ * Layers a section may carry. Legacy `RoofSection._uLayer` held FOUR (frmUnderlayment's four
+ * "Add Layer" tabs; `UnderlaymentBaseHours` loops `0..3`). The web allows a FIFTH (owner request,
+ * docs §22.40): every layer bills by the same per-layer rules, so a fifth layer is priced exactly
+ * as legacy would have priced it had the form had a fifth tab.
+ */
+export const MAX_UNDERLAYMENT_LAYERS = 5;
+
 export function sectionLayers(s: BidSectionInput): UnderlaymentLayer[] {
-  if (s.layers && s.layers.length > 0) return s.layers.slice(0, 4);
+  if (s.layers && s.layers.length > 0) return s.layers.slice(0, MAX_UNDERLAYMENT_LAYERS);
   if (s.underlaymentBoard)
     return [
       {
@@ -1360,7 +1368,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
       sLt?.complexityFactors,
     );
 
-    // Insulation layers (§4.3, up to 4): board material → dTotals[6]; layout + fastener labor
+    // Insulation layers (§4.3, up to MAX_UNDERLAYMENT_LAYERS): board material → dTotals[6]; layout + fastener labor
     // and adhesive labor → direct labor; adhesive units × price → M0. Labor follows legacy
     // RoofSection.UnderlaymentBaseHours (docs §18): per priced layer AreaTotal/2500 × LayoutTime,
     // + fastener time × the legacy count rule (mechanical) or (AreaField + AreaPerimeter) ×

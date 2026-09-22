@@ -40,9 +40,11 @@ import {
   effectiveLayerAttachment,
   fluteFillerPieces,
   TAB_OPTIONS_BY_SYSTEM,
+  MAX_UNDERLAYMENT_LAYERS,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
+import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import {
   adhesiveOptionsForSystem,
   deriveAdhesiveSubstrate,
@@ -149,9 +151,14 @@ import {
 
 export const Route = createFileRoute("/estimate")({
   head: () => ({ meta: [{ title: "Estimator — Bid-O-Matic" }] }),
-  validateSearch: (s: Record<string, unknown>): { bid?: string } => {
+  validateSearch: (s: Record<string, unknown>): { bid?: string; combine?: string } => {
     const b = s["bid"];
-    return typeof b === "string" ? { bid: b } : {};
+    const c = s["combine"];
+    return {
+      ...(typeof b === "string" ? { bid: b } : {}),
+      // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
+      ...(typeof c === "string" && c ? { combine: c } : {}),
+    };
   },
   component: EstimatePage,
 });
@@ -163,6 +170,10 @@ const money = (n: number) => n.toLocaleString("en-US", { style: "currency", curr
 const num = (v: string) => Math.max(0, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const numAdj = (v: string) => Math.max(-100, (v.trim() === "" || v === "-" ? 0 : Number(v)) || 0);
 const clone = <T,>(o: T): T => JSON.parse(JSON.stringify(o));
+/** Underlayment layer slots 0..4 (legacy's four "Add Layer" tabs plus the web's fifth, §22.40). */
+const LAYER_SLOTS = Array.from({ length: MAX_UNDERLAYMENT_LAYERS }, (_, i) => i);
+/** The stack visual draws the top layer first. */
+const LAYER_SLOTS_TOP_DOWN = [...LAYER_SLOTS].reverse();
 /** A picker's option list with the stored value kept visible even when it is no longer offered. */
 /** JSON with object keys sorted at every level — equal data serialises equally whatever the key order. */
 const stableJson = (v: unknown): string =>
@@ -314,7 +325,7 @@ function EstimatePage() {
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { bid: bidParam } = Route.useSearch();
+  const { bid: bidParam, combine: combineParam } = Route.useSearch();
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
   const { session, profile } = useAuth();
@@ -533,6 +544,8 @@ function EstimatePage() {
 
   const [bidId, setBidId] = useState<string | undefined>(bidParam);
   const [bidName, setBidName] = useState("Untitled bid");
+  // Set on a bid the Bid Combiner produced (legacy Description text); persisted until dismissed.
+  const [combineInfo, setCombineInfo] = useState<CombineInfo | undefined>(undefined);
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
@@ -557,7 +570,7 @@ function EstimatePage() {
   // Underlayment step (legacy Underlayment/Insulation screen): section multi-select + the
   // pending layer being configured (board / attachment) before it's applied to the selection.
   const [uSel, setUSel] = useState<string[]>([]);
-  const [uTab, setUTab] = useState(0); // 0..3 → Layer 1..4
+  const [uTab, setUTab] = useState(0); // 0..MAX_UNDERLAYMENT_LAYERS-1 → Layer 1..5
   const [uBoard, setUBoard] = useState("");
   // Selected insulation-type parent tile (legacy Select Insulation Type); null = follow uBoard.
   const [uGroup, setUGroup] = useState<number | null>(null);
@@ -642,76 +655,107 @@ function EstimatePage() {
   // Bumped when a saved bid finishes hydrating so the unsaved-changes baseline is captured
   // from the hydrated state (not the empty pre-load render).
   const [hydrationStamp, setHydrationStamp] = useState(0);
+  /**
+   * Hydrate the form from a saved payload (a loaded bid, or the Bid Combiner's merged result).
+   * `d.sections` must be an array. Also moves the new-section / parapet / curb id counters past
+   * the ids already in use so an added item never collides with a loaded one.
+   */
+  const hydrateSaved = (
+    d: Partial<SavedBidState> & { sections: BidSectionInput[] },
+    meta: { createdAt?: string | undefined; updatedAt?: string | undefined },
+  ) => {
+    setRoofSystem(d.roofSystem ?? "Duro-Last");
+    setAttachment(d.attachment ?? "mechanical");
+    setMembraneAdhesive(d.membraneAdhesiveName ?? "Water Based Adhesive");
+    setSections(d.sections.map((s) => ({ ...s, layers: sectionLayers(s) })));
+    setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
+    setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
+    setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
+    setMetals(Array.isArray(d.metals) ? d.metals : []);
+    setMetalsCalc(normalizeMetalsState(d.metalsCalc));
+    setNonDlCalc(normalizeNonDlState(d.nonDlCalc));
+    setParapets(Array.isArray(d.parapets) ? d.parapets : []);
+    setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
+    setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
+    setMarkupMode((d.markupMode ?? 2) as MarkupMode);
+    setMarkup(d.markup ?? 35);
+    setLaborRate(d.laborRate ?? 50);
+    setHoursPerDay(d.hoursPerDay !== undefined && d.hoursPerDay > 0 ? d.hoursPerDay : undefined);
+    setCommission(d.commission ?? 3);
+    setTaxExempt(d.taxExempt ?? false);
+    setPrepayDiscount(d.prepayDiscount ?? false);
+    setStdSizeDiscount(d.stdSizeDiscount ?? false);
+    setVolumeDiscount(d.volumeDiscount ?? false);
+    setPerDiem(d.perDiem ?? 0);
+    setExtraShipping(d.extraShipping ?? 0);
+    setPerDiemInMarkup(d.perDiemInMarkup ?? true);
+    setCommissionInMarkup(d.commissionInMarkup ?? false);
+    setAdjustLaborPct(d.adjustLaborPct ?? 0);
+    setAdjustSetupPct(d.adjustSetupPct ?? 0);
+    setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
+    setLaborTemplateName(d.laborTemplateName ?? "");
+    setFormulasVersion(d.formulasVersion ?? CURRENT_FORMULAS_VERSION);
+    setWarrantyName(d.warrantyName ?? "");
+    if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
+    setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 4 });
+    // Legacy frmUnderlayment.LoadAttachment lists the Duro-Bond options first on a Duro-Bond
+    // bid, so "Section Fastened w/ Durobond" is the default there.
+    const uDefault =
+      d.underlaymentAttachmentDefault ?? (d.roofSystem === "Duro-Bond" ? "durobond" : "mechanical");
+    setUnderlaymentAttachmentDefault(uDefault);
+    setUAttach(uDefault);
+    setBuildingType(d.buildingType ?? "Commercial");
+    setStartDate(d.startDate ?? (meta.createdAt ?? new Date().toISOString()).slice(0, 10));
+    setSalesTaxRate(d.salesTaxRate ?? null);
+    setUnderlaymentPriceOverrides(d.underlaymentPriceOverrides ?? {});
+    setTaxMaterialOnly(d.taxMaterialOnly ?? null);
+    setMaxWindExpected(d.maxWindExpected);
+    setHighWind(d.highWind ?? false);
+    setHighWindTermYears(d.highWindTermYears ?? 0);
+    setHighWindBand(d.highWindBand ?? "");
+    setSnapshot(
+      d.adminSnapshot
+        ? {
+            admin: normalizeAdminSnapshot(d.adminSnapshot),
+            warranty: d.warrantySnapshot ?? null,
+            asOf: d.pricingAsOf ?? meta.updatedAt ?? new Date().toISOString(),
+          }
+        : null,
+    );
+    setCombineInfo(d.combineInfo);
+    const bump = (ids: string[], prefix: string, cur: number) =>
+      Math.max(
+        cur,
+        ...ids.map((id) => {
+          const m = new RegExp(`^${prefix}(\\d+)$`).exec(id);
+          return m ? Number(m[1]) + 1 : 0;
+        }),
+      );
+    seq = bump(
+      d.sections.map((x) => x.id),
+      "s",
+      seq,
+    );
+    pseq = bump(
+      (d.parapets ?? []).map((x) => x.id),
+      "p",
+      pseq,
+    );
+    cseq = bump(
+      (d.curbs ?? []).map((x) => x.id),
+      "c",
+      cseq,
+    );
+  };
   useEffect(() => {
     if (!loadedBid || hydratedFor.current === loadedBid.id) return;
     const d = loadedBid.data as unknown as Partial<SavedBidState> | null;
     setLoadedBidEmpty(!(d && Array.isArray(d.sections)));
     if (d && Array.isArray(d.sections)) {
-      setRoofSystem(d.roofSystem ?? "Duro-Last");
-      setAttachment(d.attachment ?? "mechanical");
-      setMembraneAdhesive(d.membraneAdhesiveName ?? "Water Based Adhesive");
-      setSections(d.sections.map((s) => ({ ...s, layers: sectionLayers(s) })));
-      setAccessories(Array.isArray(d.accessories) ? d.accessories : []);
-      setAccessoriesCalc(normalizeAccessoriesState(d.accessoriesCalc));
-      setNonDlLines(Array.isArray(d.nonDlLines) ? d.nonDlLines : []);
-      setMetals(Array.isArray(d.metals) ? d.metals : []);
-      setMetalsCalc(normalizeMetalsState(d.metalsCalc));
-      setNonDlCalc(normalizeNonDlState(d.nonDlCalc));
-      setParapets(Array.isArray(d.parapets) ? d.parapets : []);
-      setCurbs(Array.isArray(d.curbs) ? d.curbs : []);
-      setCustomer({ ...emptyCustomer(), ...(d.customer ?? {}) });
-      setMarkupMode((d.markupMode ?? 2) as MarkupMode);
-      setMarkup(d.markup ?? 35);
-      setLaborRate(d.laborRate ?? 50);
-      setHoursPerDay(d.hoursPerDay !== undefined && d.hoursPerDay > 0 ? d.hoursPerDay : undefined);
-      setCommission(d.commission ?? 3);
-      setTaxExempt(d.taxExempt ?? false);
-      setPrepayDiscount(d.prepayDiscount ?? false);
-      setStdSizeDiscount(d.stdSizeDiscount ?? false);
-      setVolumeDiscount(d.volumeDiscount ?? false);
-      setPerDiem(d.perDiem ?? 0);
-      setExtraShipping(d.extraShipping ?? 0);
-      setPerDiemInMarkup(d.perDiemInMarkup ?? true);
-      setCommissionInMarkup(d.commissionInMarkup ?? false);
-      setAdjustLaborPct(d.adjustLaborPct ?? 0);
-      setAdjustSetupPct(d.adjustSetupPct ?? 0);
-      setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
-      setLaborTemplateName(d.laborTemplateName ?? "");
-      setFormulasVersion(d.formulasVersion ?? CURRENT_FORMULAS_VERSION);
-      setWarrantyName(d.warrantyName ?? "");
-      if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
-      setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 4 });
-      // Legacy frmUnderlayment.LoadAttachment lists the Duro-Bond options first on a Duro-Bond
-      // bid, so "Section Fastened w/ Durobond" is the default there.
-      const uDefault =
-        d.underlaymentAttachmentDefault ??
-        (d.roofSystem === "Duro-Bond" ? "durobond" : "mechanical");
-      setUnderlaymentAttachmentDefault(uDefault);
-      setUAttach(uDefault);
-      setBuildingType(d.buildingType ?? "Commercial");
-      setStartDate(
-        d.startDate ??
-          ((loadedBid as { created_at?: string }).created_at ?? new Date().toISOString()).slice(
-            0,
-            10,
-          ),
-      );
-      setSalesTaxRate(d.salesTaxRate ?? null);
-      setUnderlaymentPriceOverrides(d.underlaymentPriceOverrides ?? {});
-      setTaxMaterialOnly(d.taxMaterialOnly ?? null);
-      setMaxWindExpected(d.maxWindExpected);
-      setHighWind(d.highWind ?? false);
-      setHighWindTermYears(d.highWindTermYears ?? 0);
-      setHighWindBand(d.highWindBand ?? "");
-      setSnapshot(
-        d.adminSnapshot
-          ? {
-              admin: normalizeAdminSnapshot(d.adminSnapshot),
-              warranty: d.warrantySnapshot ?? null,
-              asOf: d.pricingAsOf ?? loadedBid.updated_at,
-            }
-          : null,
-      );
+      hydrateSaved(d as Partial<SavedBidState> & { sections: BidSectionInput[] }, {
+        createdAt: (loadedBid as { created_at?: string }).created_at,
+        updatedAt: loadedBid.updated_at,
+      });
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
@@ -719,6 +763,56 @@ function EstimatePage() {
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
   }, [loadedBid]);
+
+  // Bid Combiner (legacy BidAdvantage.BidCombiner, docs §22.41): ?combine=<id>,<id>,… loads the
+  // source bids and merges them into THIS (new, unsaved) bid on top of the fresh defaults.
+  const combineIds = useMemo(
+    () =>
+      (combineParam ?? "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+    [combineParam],
+  );
+  const { data: combineSources, error: combineError } = useQuery({
+    queryKey: ["combine", combineParam],
+    queryFn: () => Promise.all(combineIds.map((id) => getBidFn({ data: { id } }))),
+    enabled: authed && !bidParam && combineIds.length >= 2,
+  });
+  const combinedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!combineSources || !combineParam || combinedFor.current === combineParam) return;
+    combinedFor.current = combineParam;
+    const sources = combineSources
+      .filter((b): b is NonNullable<typeof b> => !!b)
+      .map((b) => ({
+        id: b.id,
+        name: b.name,
+        saved: (b.data ?? {}) as Partial<SavedBidState>,
+      }));
+    if (sources.length < 2) {
+      toast.error("Could not load two or more bids to combine.");
+      return;
+    }
+    try {
+      const { saved: merged } = combineSavedBids(sources, saved);
+      hydrateSaved(merged, {});
+      setBidId(undefined);
+      setBidName("Combined Bid");
+      setBidStatus("draft");
+      // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.
+      toast.success(`Combined ${sources.length} bids — review the steps in the notice, then save.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not combine these bids.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- combine once per ?combine value
+  }, [combineSources, combineParam]);
+  useEffect(() => {
+    if (combineError)
+      toast.error(
+        combineError instanceof Error ? combineError.message : "Could not load the bids.",
+      );
+  }, [combineError]);
 
   // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
   // $45/hr, 35% gross profit) instead of hardcoded fallbacks; saved bids keep their own values.
@@ -938,6 +1032,7 @@ function EstimatePage() {
     highWind,
     highWindTermYears,
     highWindBand,
+    ...(combineInfo ? { combineInfo } : {}),
   };
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
@@ -1308,6 +1403,34 @@ function EstimatePage() {
               You can look but not change anything — editing unlocks here automatically once they
               leave.
             </span>
+          </div>
+        )}
+        {combineInfo && (
+          <div
+            role="status"
+            className="space-y-1 rounded-md border border-amber-500 bg-amber-50 p-3 text-sm dark:bg-amber-300/10"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold">Bid Combiner</p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setCombineInfo(undefined)}
+                title="Remove this notice from the bid"
+              >
+                Dismiss
+              </Button>
+            </div>
+            {combineWarningLines(combineInfo).map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+            {combineInfo.conflicts.length > 0 && (
+              <ul className="list-disc pl-5 text-xs">
+                {combineInfo.conflicts.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
         {loadedBidEmpty && (
@@ -2388,8 +2511,8 @@ function EstimatePage() {
                       <TableHead className="w-8" title="Tick to select several sections" />
                       <TableHead>ID</TableHead>
                       <TableHead>W × L</TableHead>
-                      {[1, 2, 3, 4].map((n) => (
-                        <TableHead key={n}>Layer {n} : Attachment</TableHead>
+                      {LAYER_SLOTS.map((li) => (
+                        <TableHead key={li}>Layer {li + 1} : Attachment</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -2424,7 +2547,7 @@ function EstimatePage() {
                           <TableCell className="tabular-nums">
                             {s.width}x{s.length}
                           </TableCell>
-                          {[0, 1, 2, 3].map((li) => {
+                          {LAYER_SLOTS.map((li) => {
                             const l = sLayers[li];
                             return (
                               <TableCell key={li} className="whitespace-nowrap text-xs">
@@ -2561,7 +2684,7 @@ function EstimatePage() {
                 {/* Layer tabs + stack visual (legacy bottom-left) */}
                 <div className="rounded-md border">
                   <div className="flex border-b">
-                    {[0, 1, 2, 3].map((n) => (
+                    {LAYER_SLOTS.map((n) => (
                       <button
                         key={n}
                         type="button"
@@ -2582,7 +2705,7 @@ function EstimatePage() {
                       const stackLayers = stackSec ? sectionLayers(stackSec) : [];
                       return (
                         <div className="mx-auto w-64 space-y-1">
-                          {[3, 2, 1, 0].map((li) => {
+                          {LAYER_SLOTS_TOP_DOWN.map((li) => {
                             const l = stackLayers[li];
                             return (
                               <button

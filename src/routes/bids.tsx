@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { PlusCircle, RotateCcw, Trash2 } from "lucide-react";
+import { Layers, PlusCircle, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -101,6 +101,11 @@ function BidsPage() {
   const [createdTo, setCreatedTo] = useState("");
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
+  // Bid Combiner (legacy BidAdvantage.BidCombiner, docs §22.41): tick two or more bids, then
+  // "Combine" opens a NEW estimate merged from them.
+  const [combineSel, setCombineSel] = useState<string[]>([]);
+  const toggleCombine = (id: string) =>
+    setCombineSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const qc = useQueryClient();
   const deleteBidFn = useServerFn(deleteBid);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
@@ -216,12 +221,37 @@ function BidsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold tracking-tight">Saved Bids</h1>
-        <Button asChild size="lg" className="text-base font-semibold">
-          <Link to="/estimate">
-            <PlusCircle className="mr-2 h-5 w-5" />
-            New Bid
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {combineSel.length > 0 && (
+            <>
+              <Button
+                variant="outline"
+                size="lg"
+                disabled={combineSel.length < 2}
+                title={
+                  combineSel.length < 2
+                    ? "Tick two or more bids to combine them"
+                    : "Open a new bid merged from the ticked bids (sections, parapets, curbs, accessories, metals and Non-DL items; per-job items are recalculated once)"
+                }
+                onClick={() =>
+                  navigate({ to: "/estimate", search: { combine: combineSel.join(",") } })
+                }
+              >
+                <Layers className="mr-2 h-5 w-5" />
+                Combine {combineSel.length} bid{combineSel.length === 1 ? "" : "s"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setCombineSel([])}>
+                Clear selection
+              </Button>
+            </>
+          )}
+          <Button asChild size="lg" className="text-base font-semibold">
+            <Link to="/estimate">
+              <PlusCircle className="mr-2 h-5 w-5" />
+              New Bid
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {bids.length > 0 && (
@@ -383,23 +413,35 @@ function BidsPage() {
                   }
                 }}
               >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{bid.name}</p>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[st]}`}
-                    >
-                      {STATUS_LABELS[st]}
-                    </span>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 shrink-0 cursor-pointer"
+                    aria-label={`Select ${bid.name} to combine`}
+                    title="Tick to combine with other bids"
+                    checked={combineSel.includes(bid.id)}
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onChange={() => toggleCombine(bid.id)}
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{bid.name}</p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[st]}`}
+                      >
+                        {STATUS_LABELS[st]}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+                      {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+                      {new Date(bid.updated_at).toLocaleString(undefined, {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </p>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Estimator: {estimatorOf(bid) || "—"} · Created{" "}
-                    {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
-                    {new Date(bid.updated_at).toLocaleString(undefined, {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
-                  </p>
                 </div>
                 <div className="flex items-center gap-4">
                   {/* Stored at save time — the estimator recomputes live, so an engine change
