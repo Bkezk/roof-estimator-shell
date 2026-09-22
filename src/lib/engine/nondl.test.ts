@@ -316,3 +316,64 @@ describe("Update Bid Options — Non-DL overrides back to management defaults", 
     expect(countNonDlOverrides(all)).toEqual({ unitPrice: 0, unitLabor: 0, laborRate: 0 });
   });
 });
+
+describe("Update Bid Options — legacy NDLCollectionBase.UpdateManagement semantics", () => {
+  it("un-ticked fields keep the OLD management copies; ticked fields follow the new ref", async () => {
+    const { pinNonDlToRef } = await import("./nondl");
+    const oldRef = {
+      rows: {
+        roofEdgeBlocking: [
+          {
+            description: "2x4 Wood Nailer",
+            unitCost: 1.5,
+            laborPerUnit: 0.2,
+            laborRate: 0,
+            refId: 1,
+          },
+          {
+            description: "2x6 Wood Nailer",
+            unitCost: 2.5,
+            laborPerUnit: 0.25,
+            laborRate: 65,
+            refId: 2,
+          },
+        ],
+      },
+    } as unknown as import("./nondl").NonDlRefData;
+    const state = {
+      rows: {
+        roofEdgeBlocking: { "2x4 Wood Nailer": { extra: 3, unitCost: 1.75, laborHours: 2 } },
+      },
+      custom: {},
+    } as unknown as import("./nondl").NonDlState;
+    // Only "price/unit" ticked: unit cost overrides drop (row reads the NEW ref), labor per unit
+    // and rate are pinned from the OLD ref (or the bid's own value when it had one).
+    const r = pinNonDlToRef(state, oldRef, { unitPrice: true, unitLabor: false, laborRate: false });
+    expect(r.rows.roofEdgeBlocking!["2x4 Wood Nailer"]).toEqual({
+      extra: 3,
+      laborHours: 2,
+      laborPerUnit: 0.2,
+    });
+    expect(r.rows.roofEdgeBlocking!["2x6 Wood Nailer"]).toEqual({
+      extra: 0,
+      laborPerUnit: 0.25,
+      laborRate: 65,
+    });
+    // Nothing ticked: every field pinned to its old copy, the bid's own unit cost kept.
+    const none = pinNonDlToRef(state, oldRef, {
+      unitPrice: false,
+      unitLabor: false,
+      laborRate: false,
+    });
+    expect(none.rows.roofEdgeBlocking!["2x4 Wood Nailer"]).toEqual({
+      extra: 3,
+      unitCost: 1.75,
+      laborHours: 2,
+      laborPerUnit: 0.2,
+    });
+    // Everything ticked: all overrides gone, rows read the new management figures.
+    const all = pinNonDlToRef(state, oldRef, { unitPrice: true, unitLabor: true, laborRate: true });
+    expect(all.rows.roofEdgeBlocking!["2x4 Wood Nailer"]).toEqual({ extra: 3 });
+    expect(all.rows.roofEdgeBlocking!["2x6 Wood Nailer"]).toEqual({ extra: 0 });
+  });
+});

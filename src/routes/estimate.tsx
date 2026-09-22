@@ -113,7 +113,7 @@ import { useBidLock } from "@/lib/use-bid-lock";
 import { AttachmentIcon } from "@/components/attachment-icon";
 import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-dialog";
 import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
-import { countNonDlOverrides, resetNonDlOverrides } from "@/lib/engine/nondl";
+import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
@@ -845,6 +845,17 @@ function EstimatePage() {
     const done: string[] = [];
     if (o.materialPricing) {
       const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
+      // Legacy NDLCollectionBase.UpdateManagement: Non-DL rows are stored copies — an un-ticked
+      // field keeps the figure the bid already had (pinned from the OLD snapshot before it is
+      // replaced); a ticked field reads the CURRENT management value.
+      const oldRef = admin?.nonDl;
+      setNonDlCalc((prev) =>
+        pinNonDlToRef(prev, oldRef, {
+          unitPrice: o.ndlUnitPrice,
+          unitLabor: o.ndlUnitLabor,
+          laborRate: o.ndlLaborRate,
+        }),
+      );
       setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
       setLiveCheck({ admin: a, warranty: w ?? null });
       done.push("pricing & labor");
@@ -852,20 +863,26 @@ function EstimatePage() {
         setUnderlaymentPriceOverrides({});
         done.push("underlayment quotes reset");
       }
-      if (o.ndlUnitLabor || o.ndlLaborRate || o.ndlUnitPrice) {
-        setNonDlCalc((prev) =>
-          resetNonDlOverrides(prev, {
-            unitLabor: o.ndlUnitLabor,
-            laborRate: o.ndlLaborRate,
-            unitPrice: o.ndlUnitPrice,
-          }),
-        );
-        done.push("Non-DL defaults");
-      }
+      const ndl = [
+        o.ndlUnitLabor ? "labor/unit" : "",
+        o.ndlLaborRate ? "labor rate" : "",
+        o.ndlUnitPrice ? "price/unit" : "",
+      ].filter(Boolean);
+      if (ndl.length) done.push(`Non-DL ${ndl.join(", ")} to management defaults`);
     }
     if (o.laborTemplate) {
-      applyTemplate(laborTemplateName);
-      done.push(`labor template "${laborTemplateName || "None"}"`);
+      // Legacy PreserveLaborTemplate(True): the management template is looked up by name; when
+      // it no longer exists the estimate keeps its own settings.
+      if (laborTemplateName && admin?.laborTemplates?.byName[laborTemplateName]) {
+        applyTemplate(laborTemplateName);
+        done.push(`labor template "${laborTemplateName}"`);
+      } else {
+        toast.warning(
+          laborTemplateName
+            ? `Template "${laborTemplateName}" is no longer in management — labor settings kept.`
+            : "No labor template is selected on this bid — labor settings kept.",
+        );
+      }
     }
     if (o.latestFormulas && formulasVersion !== CURRENT_FORMULAS_VERSION) {
       setFormulasVersion(CURRENT_FORMULAS_VERSION);

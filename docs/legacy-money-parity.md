@@ -3300,9 +3300,13 @@ Web (same button, now a standing black button at the right of the step row; the 
 management data newer than the bid's frozen copy): **Material pricing** = replace the bid's
 `adminSnapshot` + `warrantySnapshot` with the live admin / warranty data (`underlaymentPriceOverrides`
 — the web's SqFtCost custom values — live on the bid, so they survive unless **Reset Underlayment
-Price Quotes** clears them; Non-DL rows keep their per-row `unitCost` / `laborPerUnit` +
-`laborHours` / `laborRate` overrides unless the matching sub-option clears them —
-`resetNonDlOverrides`, custom rows untouched). **Labor template** = `applyTemplate(name)` over the
+Price Quotes** clears them; Non-DL rows follow legacy `NDLCollectionBase.UpdateManagement` (DataAccess 0xa8334): a
+bid's rows are stored COPIES, so an un-ticked field keeps the figure the bid already had and a
+ticked one is copied from the current ref row by Description — the web pins each ref row's
+un-ticked fields from the OLD snapshot as explicit values before the swap and drops the ticked
+fields' overrides (`pinNonDlToRef`; ref labor rate 0 = crew rate is not pinned; custom rows
+untouched). Ticked template with a name no longer in management keeps the bid's settings, as
+legacy `PreserveLaborTemplate` does. **Labor template** = `applyTemplate(name)` over the
 bid's manual %s (sections, parapets, curbs, accessories, setup, inspection). **Latest formulas** =
 `SavedBidState.formulasVersion` (new: stamped `CURRENT_FORMULAS_VERSION`; the engine now computes
 under `bid.formulasVersion ?? current`, so older saves without a stamp keep computing as before)

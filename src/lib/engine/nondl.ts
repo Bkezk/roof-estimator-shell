@@ -605,3 +605,44 @@ export function countNonDlOverrides(state: NonDlState): {
   }
   return out;
 }
+
+/**
+ * Legacy `NDLCollectionBase.UpdateManagement(ref, laborRate, unitPrice, unitLabor)` (DataAccess
+ * 0xa8334): a bid's Non-DL rows are stored COPIES of the management figures, so replacing the
+ * management data leaves every row's price / unit labor / labor rate as it was unless that field's
+ * box is ticked, in which case it is copied from the current ref row (matched by Description).
+ * The web reads un-overridden rows straight from the (about to be replaced) snapshot, so before
+ * the swap each ref row's UN-ticked fields are pinned as explicit values from the OLD ref data,
+ * and each ticked field's override is dropped so the row reads the NEW ref figure. Rows the bid
+ * never touched get a state entry (extra 0) so they keep their old copies too, as legacy's do.
+ * A ref rate of 0 means "crew rate" and is not pinned (legacy stores 0 there as well).
+ */
+export function pinNonDlToRef(
+  state: NonDlState,
+  oldRef: NonDlRefData | undefined,
+  update: { unitPrice: boolean; unitLabor: boolean; laborRate: boolean },
+): NonDlState {
+  const rows: NonDlState["rows"] = {};
+  for (const [g, byDesc] of Object.entries(state.rows) as [
+    NonDlGroup,
+    Record<string, NonDlRowState>,
+  ][])
+    rows[g] = { ...byDesc };
+  for (const [g, refRows] of Object.entries(oldRef?.rows ?? {}) as [NonDlGroup, NonDlRefRow[]][]) {
+    const byDesc = { ...(rows[g] ?? {}) };
+    for (const r of refRows) {
+      const st: NonDlRowState = { ...(byDesc[r.description] ?? { extra: 0 }) };
+      if (update.unitPrice) delete st.unitCost;
+      else if (st.unitCost === undefined) st.unitCost = r.unitCost;
+      if (update.unitLabor) {
+        delete st.laborPerUnit;
+        delete st.laborHours;
+      } else if (st.laborPerUnit === undefined) st.laborPerUnit = r.laborPerUnit;
+      if (update.laborRate) delete st.laborRate;
+      else if (st.laborRate === undefined && r.laborRate !== 0) st.laborRate = r.laborRate;
+      byDesc[r.description] = st;
+    }
+    rows[g] = byDesc;
+  }
+  return { rows, custom: state.custom };
+}

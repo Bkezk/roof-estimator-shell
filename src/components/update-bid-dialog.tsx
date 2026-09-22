@@ -126,6 +126,11 @@ export function UpdateBidDialog(props: {
               <p className="text-xs font-medium text-destructive">
                 These sub-options may reset quoted and/or custom values
               </p>
+              <p className="text-xs text-muted-foreground">
+                Non-DL rows keep the price, labor per unit and labor rate this bid already carries
+                unless the matching box is ticked, which copies the current management value onto
+                every row.
+              </p>
               {sub(
                 "resetUnderlaymentQuotes",
                 "Reset Underlayment Price Quotes",
