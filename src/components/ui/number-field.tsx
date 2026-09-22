@@ -20,15 +20,19 @@ export function NumberField(props: {
   disabled?: boolean | undefined;
   placeholder?: string | undefined;
   title?: string | undefined;
-  /** Show an empty box (with the placeholder) instead of "0" while not editing. */
+  /**
+   * Show an empty box (with the placeholder) instead of "0" while not editing. On by default
+   * (owner: number boxes start empty, not 0); pass false where a visible 0 matters.
+   */
   blankZero?: boolean | undefined;
   inputMode?: "numeric" | "decimal" | undefined;
   onBlur?: (() => void) | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
   const min = props.min ?? 0;
+  const blankZero = props.blankZero ?? true;
   const shown = Number.isFinite(props.value) ? props.value : 0;
-  const display = text ?? (props.blankZero && shown === 0 ? "" : String(shown));
+  const display = text ?? (blankZero && shown === 0 ? "" : String(shown));
   return (
     <Input
       type="number"
@@ -37,12 +41,12 @@ export function NumberField(props: {
       step={props.step ?? "1"}
       inputMode={props.inputMode}
       disabled={props.disabled ?? false}
-      placeholder={props.placeholder ?? (props.blankZero ? "0" : undefined)}
+      placeholder={props.placeholder ?? (blankZero ? "0" : undefined)}
       title={props.title}
       className={`${props.invalid ? "border-destructive " : ""}${props.className ?? ""}`}
       value={display}
       onFocus={(e) => {
-        setText(shown === 0 && props.blankZero ? "" : String(shown));
+        setText(shown === 0 && blankZero ? "" : String(shown));
         e.currentTarget.select();
       }}
       onChange={(e) => {

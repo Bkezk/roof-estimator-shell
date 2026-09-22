@@ -110,6 +110,7 @@ import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
 import { useBidLock } from "@/lib/use-bid-lock";
+import { AttachmentIcon } from "@/components/attachment-icon";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
@@ -223,12 +224,13 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   // Legacy XML section defaults: Pull Test 350 lbs, Design Table 60 psf.
   pullTest: 350,
   designTable: 60,
-  // Legacy Edge Options: four sides (A/C = Length, B/D = Width), no corners, Quick Bid,
-  // Complexity "Moderate" (index 2 — only priced on systems with RSComplexityFactor rows).
+  // Legacy Edge Options: four sides (A/C = Length, B/D = Width), no corners, Quick Bid.
+  // Complexity "Medium" (index 3; legacy started at "Moderate" 2 — owner's departure, docs
+  // §22.38; only priced on systems with complexity factors).
   edges: defaultEdges(0, 0),
   perimCorners: [false, false, false, false],
   isQuickBid: true,
-  complexity: 2,
+  complexity: 3,
   ...defaults,
 });
 
@@ -2549,8 +2551,18 @@ function EstimatePage() {
                                     : "border-dashed text-muted-foreground"
                                 }`}
                               >
-                                <span className="truncate">
-                                  {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
+                                <span className="flex max-w-full items-center gap-1">
+                                  {l && !l.quote && (
+                                    <AttachmentIcon
+                                      attachment={effectiveLayerAttachment(
+                                        l,
+                                        (stackSec?.roofSystem ?? roofSystem) === "Duro-Bond",
+                                      )}
+                                    />
+                                  )}
+                                  <span className="truncate">
+                                    {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
+                                  </span>
                                 </span>
                                 {l?.quote && (
                                   <span className="max-w-full truncate text-[10px] font-normal text-muted-foreground">

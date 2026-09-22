@@ -3275,3 +3275,11 @@ Prime 1/4 / 1/2 / 5/8, Securock GFRB 1/4 / 3/8 / 1/2 / 5/8, 5/8 F/C Sheet Rock) 
 lookup never hit and those layers billed 0 layout hours. Migration `20260922140000` renames them
 to the catalog names; the captured hours (18 / 20 / 25 / 31.82 h per 2,500 sq ft) are unchanged.
 Applied live. Not a money-model change: the legacy app matched by product id, not by label.
+
+### 22.38 New-section complexity starts at "Medium" (2026-09-22, owner departure)
+
+Legacy `frmRoofSection` starts a new section at complexity index 2 ("Moderate"). Owner: "complexity
+should be defaulted to medium when that box is not greyed out" → a NEW section now starts at
+index 3 ("Medium"). Only systems with complexity factors price it (Duro-Tuff 1.2, Duro-Fleece
+1.2, the web TPO / EPDM systems 1.4); Duro-Last / Duro-Bond / Duro-Roof ignore it. Saved
+sections keep their stored index; a section with NO stored index still bills the legacy 2.
