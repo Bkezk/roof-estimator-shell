@@ -151,6 +151,86 @@ export const deleteItemNumber = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+const addProductSchema = z.object({
+  screen_id: z.string().min(1),
+  /** The new product's name (label column). */
+  row_label: z.string().trim().min(1),
+  price_col: z.string().min(1),
+  price: z.number().finite(),
+  item_no: z.string().trim().min(1),
+  dl_description: z.string().optional(),
+});
+
+/**
+ * Add a product the catalog never had (from a price-sheet line): appends a row to a flat
+ * Duro-Last screen — name in the label column, the price in the chosen column, every other
+ * price/count column 0, the legacy "Part #" column(s) set to the item number — and maps the item
+ * number to that cell so later imports keep it current. Master-detail screens (Adhesives,
+ * Exceptional Metals) keep their own editors.
+ */
+export const addCatalogProduct = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => addProductSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertAdmin(context.supabase, context.userId);
+    const sb = context.supabase;
+    const { data: row, error } = await sb
+      .from("pricing_catalog")
+      .select("data, branch")
+      .eq("id", data.screen_id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(`Screen ${data.screen_id} not found`);
+    if (row.branch !== "duro_last")
+      throw new Error("Only Duro-Last screens take imported products");
+    const d = row.data as {
+      kind?: string;
+      columns?: string[];
+      rows?: Record<string, unknown>[];
+    };
+    if (d.kind) throw new Error("This screen has its own editor — add the product there");
+    const cols = d.columns ?? [];
+    const labelCol = cols.find((c) => LABEL_COLS.has(c)) ?? cols[0] ?? "Description";
+    if (!cols.includes(data.price_col) || data.price_col === labelCol)
+      throw new Error(`"${data.price_col}" is not a price column on this screen`);
+    const rows = d.rows ?? [];
+    const dup = rows.find(
+      (r) =>
+        String(r[labelCol] ?? "")
+          .trim()
+          .toLowerCase() === data.row_label.toLowerCase(),
+    );
+    if (dup) throw new Error(`"${data.row_label}" is already on this screen — map it instead`);
+    const next: Record<string, unknown> = {};
+    for (const c of cols) {
+      if (c === labelCol) next[c] = data.row_label;
+      else if (/part\s*#/i.test(c)) next[c] = data.item_no;
+      else if (NON_PRICE_COLS.has(c)) next[c] = 0;
+      else next[c] = c === data.price_col ? data.price : 0;
+    }
+    rows.push(next);
+    d.rows = rows;
+    const { error: saveErr } = await sb
+      .from("pricing_catalog")
+      .update({ data: d as unknown as Json })
+      .eq("id", data.screen_id);
+    if (saveErr) throw new Error(saveErr.message);
+    const { error: mapErr } = await sb.from("catalog_item_numbers").upsert(
+      {
+        item_no: data.item_no,
+        screen_id: data.screen_id,
+        row_label: data.row_label,
+        price_col: data.price_col,
+        dl_description: data.dl_description ?? null,
+        last_price: data.price,
+        last_import_at: new Date().toISOString(),
+      },
+      { onConflict: "item_no,screen_id,row_label,price_col" },
+    );
+    if (mapErr) throw new Error(mapErr.message);
+    return { ok: true };
+  });
+
 const importSchema = z.object({
   updates: z
     .array(

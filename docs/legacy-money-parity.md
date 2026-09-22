@@ -3087,3 +3087,19 @@ Price per SqFt, 65 lines).
   in the admin menu after Non Duro-Last Pricing; the Duro-Last "Item Numbers" tab keeps the map.
 - Unmatched sheet items (13,391 on this file — gutters, downspouts, copings, TPO … that the
   estimator never prices) are filtered / paged in the UI; only the ones you bid need mapping.
+
+### 22.33 Price List Import — "Add as new product" (2026-09-22)
+
+A sheet line the catalog never had can now become a catalog row from the no-match list: **Add
+as new product** opens a dialog (screen, product name defaulting to the Duro-Last description,
+price column, price with the sheet's unit shown) and `addCatalogProduct` appends the row to the
+chosen flat Duro-Last screen — name in the label column, the price in the chosen column, other
+price/count columns 0, the legacy "Part #" column(s) set to the item number — and writes the
+item-number mapping (stamped with the price / date / description) so later imports keep it
+current. Duplicate names are refused (map instead); Adhesives / Exceptional Metals keep their
+own editors. Rows added this way are user rows (no `_locked`), so the catalog editor can rename
+or delete them.
+
+First product imported this way (owner's request), applied with the same logic by SQL: Drain
+Boot Accessories › **Drain Guard White**, item 18301, $72.00 EA (sheet "DRAIN GUARD WHITE",
+Drains / Drain Accessories) — the only catalog change so far; no existing price was touched.

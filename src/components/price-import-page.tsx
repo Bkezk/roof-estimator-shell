@@ -35,6 +35,7 @@ import {
 import { TargetPicker } from "@/components/item-number-target-picker";
 import { firstTarget, type TargetRef } from "@/lib/item-number-targets";
 import {
+  addCatalogProduct,
   applyPriceImport,
   deleteItemNumber,
   listItemNumbers,
@@ -369,6 +370,57 @@ export function PriceImportPage() {
     }
   };
 
+  /** "Add as new product": a sheet line the catalog never had becomes a new row + mapping. */
+  const addFn = useServerFn(addCatalogProduct);
+  const [newProduct, setNewProduct] = useState<{
+    item: SheetItem;
+    screen_id: string;
+    name: string;
+    price_col: string;
+    price: number;
+  } | null>(null);
+  const [addingProduct, setAddingProduct] = useState(false);
+  const flatTargets = useMemo(
+    () => targets.filter((t) => t.screen_id !== "duro_last:adhesives"),
+    [targets],
+  );
+  const openNewProduct = (it: SheetItem) => {
+    const t = flatTargets[0];
+    if (!t) return;
+    setNewProduct({
+      item: it,
+      screen_id: t.screen_id,
+      name: it.description,
+      price_col: t.price_cols[0] ?? "",
+      price: it.price ?? 0,
+    });
+  };
+  const submitNewProduct = async () => {
+    if (!newProduct) return;
+    setAddingProduct(true);
+    try {
+      await addFn({
+        data: {
+          screen_id: newProduct.screen_id,
+          row_label: newProduct.name.trim(),
+          price_col: newProduct.price_col,
+          price: newProduct.price,
+          item_no: newProduct.item.itemNo,
+          dl_description: newProduct.item.description,
+        },
+      });
+      toast.success(
+        `Added "${newProduct.name.trim()}" to ${categoryOf(newProduct.screen_id)} at ${money(newProduct.price)} (${newProduct.price_col}) — item # ${newProduct.item.itemNo} mapped.`,
+      );
+      setNewProduct(null);
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not add the product");
+    } finally {
+      setAddingProduct(false);
+    }
+  };
+
   const notInSheetByItem = useMemo(() => {
     const g = new Map<string, ItemNumberRow[]>();
     for (const m of match?.notInSheet ?? []) {
@@ -619,6 +671,7 @@ export function PriceImportPage() {
                   drafts={mapDrafts}
                   setDrafts={setMapDrafts}
                   onMap={(it, t) => void saveMapping(it.itemNo, t, it.description)}
+                  onAdd={openNewProduct}
                 />
               </details>
             )}
@@ -651,6 +704,109 @@ export function PriceImportPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Add as new product ────────────────────────────────────────── */}
+      <Dialog
+        open={newProduct !== null}
+        onOpenChange={(o) => !o && !addingProduct && setNewProduct(null)}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add a new catalog product</DialogTitle>
+            <DialogDescription>
+              From sheet item <span className="font-mono">{newProduct?.item.itemNo}</span> —{" "}
+              {newProduct?.item.description}
+              {newProduct?.item.unit ? ` (${newProduct.item.unit})` : ""}. The row is added to the
+              chosen screen with this price; other columns start at 0 and are editable there.
+            </DialogDescription>
+          </DialogHeader>
+          {newProduct && (
+            <div className="grid gap-3 text-sm">
+              <div className="space-y-1">
+                <Label className="text-xs">Screen</Label>
+                <Select
+                  value={newProduct.screen_id}
+                  onValueChange={(v) => {
+                    const t = flatTargets.find((x) => x.screen_id === v);
+                    setNewProduct({
+                      ...newProduct,
+                      screen_id: v,
+                      price_col: t?.price_cols[0] ?? "",
+                    });
+                  }}
+                >
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {flatTargets.map((t) => (
+                      <SelectItem key={t.screen_id} value={t.screen_id}>
+                        {t.category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Product name (as it will read in the estimator)</Label>
+                <Input
+                  value={newProduct.name}
+                  onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Price column</Label>
+                  <Select
+                    value={newProduct.price_col}
+                    onValueChange={(v) => setNewProduct({ ...newProduct, price_col: v })}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(
+                        flatTargets.find((t) => t.screen_id === newProduct.screen_id)?.price_cols ??
+                        []
+                      ).map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Price</Label>
+                  <Input
+                    type="number"
+                    step="0.0001"
+                    value={newProduct.price}
+                    onChange={(e) =>
+                      setNewProduct({ ...newProduct, price: Number(e.target.value) || 0 })
+                    }
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Check the unit: the sheet price is per {newProduct.item.unit || "unit"}; the catalog
+                column&apos;s basis is what the estimator multiplies (per box, per foot, per each).
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNewProduct(null)} disabled={addingProduct}>
+              Cancel
+            </Button>
+            <Button
+              onClick={submitNewProduct}
+              disabled={addingProduct || !newProduct?.name.trim() || !newProduct?.price_col}
+            >
+              {addingProduct ? "Adding…" : "Add product"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Review & confirm ──────────────────────────────────────────── */}
       <Dialog open={reviewOpen} onOpenChange={(o) => !applying && setReviewOpen(o)}>
@@ -766,6 +922,7 @@ function UnmatchedList(props: {
   drafts: Record<string, TargetRef>;
   setDrafts: (f: (d: Record<string, TargetRef>) => Record<string, TargetRef>) => void;
   onMap: (it: SheetItem, t: TargetRef) => void;
+  onAdd: (it: SheetItem) => void;
 }) {
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
@@ -827,14 +984,25 @@ function UnmatchedList(props: {
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!draft}
-                      onClick={() => draft && props.onMap(u, draft)}
-                    >
-                      Map
-                    </Button>
+                    <div className="flex flex-col gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!draft}
+                        title="Point this item number at an existing catalog product"
+                        onClick={() => draft && props.onMap(u, draft)}
+                      >
+                        Map
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Create a new catalog product from this sheet line"
+                        onClick={() => props.onAdd(u)}
+                      >
+                        Add as new product
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
