@@ -414,16 +414,33 @@ export function PriceImportPage() {
 
   /* ---------------- Review & confirm ---------------- */
   const [reviewOpen, setReviewOpen] = useState(false);
+  // Per-row opt-out on the review. Flagged (⚠) rows start unticked: a likely unit problem needs
+  // an explicit tick before it is written.
+  const planKey = (p: PlannedUpdate) => `${p.item_no}|${p.screen_id}|${p.row_label}|${p.price_col}`;
+  const [excluded, setExcluded] = useState<Set<string>>(() => new Set());
+  const openReview = () => {
+    setExcluded(new Set(changed.filter((p) => bigSwing(p.current, p.next)).map(planKey)));
+    setReviewOpen(true);
+  };
+  const toWrite = plan.filter((p) => !excluded.has(planKey(p)));
+  const selectedChanges = changed.filter((p) => !excluded.has(planKey(p))).length;
+  const toggleRow = (key: string, on: boolean) =>
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (on) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   const [applying, setApplying] = useState(false);
   const [lastReport, setLastReport] = useState<string | null>(null);
 
   const apply = async () => {
-    if (plan.length === 0) return;
+    if (toWrite.length === 0) return;
     setApplying(true);
     try {
       const res = await applyFn({
         data: {
-          updates: plan.map((p) => ({
+          updates: toWrite.map((p) => ({
             item_no: p.item_no,
             screen_id: p.screen_id,
             row_label: p.row_label,
@@ -809,7 +826,7 @@ export function PriceImportPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={() => setReviewOpen(true)} disabled={plan.length === 0}>
+              <Button onClick={openReview} disabled={plan.length === 0}>
                 Review &amp; confirm {plan.length} update{plan.length === 1 ? "" : "s"}…
               </Button>
               {lastReport && (
@@ -1187,6 +1204,23 @@ export function PriceImportPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-8">
+                        <input
+                          type="checkbox"
+                          aria-label="Apply all changes"
+                          checked={selectedChanges === changed.length}
+                          ref={(el) => {
+                            if (el)
+                              el.indeterminate =
+                                selectedChanges > 0 && selectedChanges < changed.length;
+                          }}
+                          onChange={(e) =>
+                            setExcluded(
+                              e.target.checked ? new Set() : new Set(changed.map(planKey)),
+                            )
+                          }
+                        />
+                      </TableHead>
                       <TableHead>Item #</TableHead>
                       <TableHead>Screen</TableHead>
                       <TableHead>Product · column</TableHead>
@@ -1199,7 +1233,18 @@ export function PriceImportPage() {
                   </TableHeader>
                   <TableBody>
                     {changed.map((p) => (
-                      <TableRow key={`${p.item_no}|${p.screen_id}|${p.row_label}|${p.price_col}`}>
+                      <TableRow
+                        key={planKey(p)}
+                        className={excluded.has(planKey(p)) ? "opacity-50" : undefined}
+                      >
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            aria-label={`Apply ${p.row_label} · ${p.price_col}`}
+                            checked={!excluded.has(planKey(p))}
+                            onChange={(e) => toggleRow(planKey(p), e.target.checked)}
+                          />
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{p.item_no}</TableCell>
                         <TableCell className="text-xs">{p.category}</TableCell>
                         <TableCell className="text-xs">
@@ -1258,18 +1303,20 @@ export function PriceImportPage() {
               </details>
             )}
             <p className="text-xs text-muted-foreground">
-              Check the Unit column against the catalog&apos;s price basis (per box, per foot, per
-              each) before confirming — the import writes the sheet figure as-is.
+              Untick any change you do not want written; the rest still apply. Rows flagged ⚠ (more
+              than double or under half the current price) start unticked — tick one only once you
+              have checked its unit and pack quantity. Unticked rows keep their current price and
+              come back on the next import.
             </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReviewOpen(false)} disabled={applying}>
               Cancel
             </Button>
-            <Button onClick={apply} disabled={applying || plan.length === 0}>
+            <Button onClick={apply} disabled={applying || toWrite.length === 0}>
               {applying
                 ? "Applying…"
-                : `Confirm and apply ${plan.length} update${plan.length === 1 ? "" : "s"}`}
+                : `Confirm and apply ${selectedChanges} of ${changed.length} change${changed.length === 1 ? "" : "s"}`}
             </Button>
           </DialogFooter>
         </DialogContent>
