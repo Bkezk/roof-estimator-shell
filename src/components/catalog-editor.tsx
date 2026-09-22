@@ -154,8 +154,9 @@ export function CatalogEditor({
   // Mappings address a row by its key (label, or "label [Subtype|Part #]" where the label
   // repeats on the screen — catalog-row-key.ts), the same key the server resolves on apply.
   const keyByIndex = rowKeys(cols, draft.rows);
-  const rowKeyOf = (row: Record<string, unknown>) => keyByIndex[draft.rows.indexOf(row)] ?? "";
-  const itemNosFor = (row: Record<string, unknown>) =>
+  type Row = (typeof draft.rows)[number];
+  const rowKeyOf = (row: Row) => keyByIndex[draft.rows.indexOf(row)] ?? "";
+  const itemNosFor = (row: Row) =>
     itemNumbers?.filter((m) => m.screen_id === selected.id && m.row_label === rowKeyOf(row)) ?? [];
   // The label column is "Description" on every legacy screen except Underlayment, whose
   // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
