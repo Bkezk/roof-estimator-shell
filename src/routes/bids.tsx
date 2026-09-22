@@ -253,52 +253,58 @@ function BidsPage() {
               </SelectContent>
             </Select>
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Created from
-            <Input
-              type="date"
-              value={createdFrom}
-              max={createdTo || undefined}
-              onChange={(e) => setCreatedFrom(e.target.value)}
-              className="w-[150px] bg-background"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Created to
-            <Input
-              type="date"
-              value={createdTo}
-              min={createdFrom || undefined}
-              onChange={(e) => setCreatedTo(e.target.value)}
-              className="w-[150px] bg-background"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Price from ($)
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              step="any"
-              placeholder="0"
-              value={priceMin}
-              onChange={(e) => setPriceMin(e.target.value)}
-              className="w-[120px] bg-background"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Price to ($)
-            <Input
-              type="number"
-              inputMode="decimal"
-              min={0}
-              step="any"
-              placeholder="Any"
-              value={priceMax}
-              onChange={(e) => setPriceMax(e.target.value)}
-              className="w-[120px] bg-background"
-            />
-          </label>
+          <fieldset className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <legend className="mb-1">Created between</legend>
+            <div className="flex items-center rounded-md border bg-background shadow-sm">
+              <Input
+                type="date"
+                aria-label="Created on or after"
+                value={createdFrom}
+                max={createdTo || undefined}
+                onChange={(e) => setCreatedFrom(e.target.value)}
+                className="w-[148px] border-0 shadow-none focus-visible:ring-0"
+              />
+              <span className="px-1.5 text-muted-foreground">–</span>
+              <Input
+                type="date"
+                aria-label="Created on or before"
+                value={createdTo}
+                min={createdFrom || undefined}
+                onChange={(e) => setCreatedTo(e.target.value)}
+                className="w-[148px] border-0 shadow-none focus-visible:ring-0"
+              />
+            </div>
+          </fieldset>
+          <fieldset className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <legend className="mb-1">Price between</legend>
+            <div className="flex items-center rounded-md border bg-background shadow-sm">
+              <span className="pl-2.5 text-muted-foreground">$</span>
+              <Input
+                type="number"
+                inputMode="decimal"
+                aria-label="Minimum price"
+                min={0}
+                step="any"
+                placeholder="Min"
+                value={priceMin}
+                onChange={(e) => setPriceMin(e.target.value)}
+                className="w-[100px] border-0 pl-1 shadow-none focus-visible:ring-0"
+              />
+              <span className="px-1.5 text-muted-foreground">–</span>
+              <span className="text-muted-foreground">$</span>
+              <Input
+                type="number"
+                inputMode="decimal"
+                aria-label="Maximum price"
+                min={priceMin || 0}
+                step="any"
+                placeholder="Max"
+                value={priceMax}
+                onChange={(e) => setPriceMax(e.target.value)}
+                className="w-[100px] border-0 pl-1 shadow-none focus-visible:ring-0"
+              />
+            </div>
+          </fieldset>
           {anyFilter && (
             <Button variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
               Clear filters
