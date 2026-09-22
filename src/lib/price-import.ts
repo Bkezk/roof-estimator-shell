@@ -327,3 +327,232 @@ export function matchMembrane(
   }
   return { matched, noPrice, unmatched };
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Layout memory — a header row's cells, joined, identify a sheet layout so the next file with
+ * the same headings skips the column picks.
+ * ---------------------------------------------------------------------------------------------- */
+
+export const headerSignature = (row: SheetRow | undefined): string =>
+  (row ?? [])
+    .map((c) =>
+      String(c ?? "")
+        .trim()
+        .toLowerCase(),
+    )
+    .join("|")
+    .replace(/\|+$/, "");
+
+/* ------------------------------------------------------------------------------------------------
+ * Name matching — suggest a catalog product for a sheet line (and vice versa) from the words
+ * they share. Deliberately conservative: a suggestion is a checklist item, never auto-applied.
+ * ---------------------------------------------------------------------------------------------- */
+
+const ABBREVIATIONS: Record<string, string> = {
+  WHT: "WHITE",
+  WH: "WHITE",
+  GRY: "GRAY",
+  GREY: "GRAY",
+  DKGRY: "DARKGRAY",
+  "D/GRY": "DARKGRAY",
+  DGRY: "DARKGRAY",
+  BLK: "BLACK",
+  BRNZ: "BRONZE",
+  BRZ: "BRONZE",
+  BRN: "BROWN",
+  TC: "TERRACOTTA",
+  "TERRA COTTA": "TERRACOTTA",
+  SS: "STAINLESS",
+  GALV: "GALVANIZED",
+  ALUM: "ALUMINUM",
+  AL: "ALUMINUM",
+  ADH: "ADHESIVE",
+  FASTNR: "FASTENER",
+  FAST: "FASTENER",
+  SCR: "SCREW",
+  INSUL: "INSULATION",
+  INSULAT: "INSULATION",
+  MEMB: "MEMBRANE",
+  FLASH: "FLASHING",
+  FLSH: "FLASHING",
+  PLT: "PLATE",
+  BT: "BOOT",
+  "I/C": "INSIDE",
+  "O/C": "OUTSIDE",
+  BF: "BUTTERFLY",
+  SQ: "SQUARE",
+  DL: "DUROLAST",
+  "DURO-LAST": "DUROLAST",
+  DUROLAST: "DUROLAST",
+};
+/**
+ * Words that mark a product VARIANT: present on one side only, the two names are different
+ * products (Duro-Caulk vs Duro-Caulk Plus, DensDeck vs DensDeck Prime).
+ */
+const VARIANT_MARKERS = new Set([
+  "PLUS",
+  "PLS",
+  "ADVANCED",
+  "LVOC",
+  "HD",
+  "XHD",
+  "EV",
+  "ELVALOY",
+  "PRIME",
+  "MINI",
+  "JUMBO",
+  "LONG",
+  "SHORT",
+  "FLEECE",
+  "TPO",
+  "PVC",
+]);
+const COLOURS = new Set([
+  "WHITE",
+  "TAN",
+  "GRAY",
+  "DARKGRAY",
+  "BLACK",
+  "BRONZE",
+  "BROWN",
+  "TERRACOTTA",
+  "GREEN",
+  "BLUE",
+  "COPPER",
+  "PATINA",
+  "CHARCOAL",
+  "RED",
+  "YELLOW",
+  "CLEAR",
+]);
+/** Unit / packaging words that carry no product meaning. */
+const NOISE = new Set([
+  "EA",
+  "BX",
+  "BG",
+  "RL",
+  "PK",
+  "CS",
+  "CTN",
+  "BOX",
+  "BAG",
+  "CASE",
+  "ROLL",
+  "EACH",
+  "PER",
+  "OF",
+  "THE",
+  "AND",
+  "W",
+  "WITH",
+  "X",
+]);
+
+/** Comparable word set of a product / sheet name (abbreviations expanded, noise dropped). */
+export function nameTokens(name: string): Set<string> {
+  let s = name.toUpperCase().replace(/DARK\s+GRAY|DARK\s+GREY|D\/GRY|DK\s*GRY/g, " DARKGRAY ");
+  s = s.replace(/TERRA\s*-?\s*COTTA/g, " TERRACOTTA ").replace(/DURO\s*-\s*LAST/g, " DUROLAST ");
+  s = s;
+  // "40MIL" → "40 MIL" so the number and the word compare separately; sizes keep their digits;
+  // "6X6" → "6 6" so a dimension pair compares as two sizes.
+  s = s.replace(/(\d)\s*MIL\b/g, "$1 MIL ").replace(/(\d)X(\d)/g, "$1 $2");
+  const out = new Set<string>();
+  for (const raw of s.split(/[^A-Z0-9/.']+/)) {
+    if (!raw) continue;
+    let t = raw.replace(/^\/+|\/+$/g, "");
+    if (!t) continue;
+    t = ABBREVIATIONS[t] ?? t;
+    if (NOISE.has(t)) continue;
+    // Feet/inch marks: 10' → 10, 5'4" → 5'4 (kept whole so it stays one size token).
+    t = t.replace(/["']+$/, "");
+    if (!t) continue;
+    // Plurals: PLATES → PLATE, GRATES → GRATE (not GLASS, PLUS, RADIUS or a known word).
+    if (
+      /[A-Z]{3,}S$/.test(t) &&
+      !/(SS|US|IS)$/.test(t) &&
+      !VARIANT_MARKERS.has(t) &&
+      !COLOURS.has(t)
+    )
+      t = t.slice(0, -1);
+    out.add(t);
+  }
+  return out;
+}
+
+export interface NameMatch {
+  /** 0..1 — the share of the catalog name's words the sheet line carries. */
+  score: number;
+}
+
+/**
+ * How well a sheet description names a catalog product. Every word of the catalog name must be
+ * covered for a perfect 1; a colour on both sides that differs, or a size number in the catalog
+ * name the sheet lacks, is a hard reject. At least two shared words (or one when the catalog
+ * name is a single word) and 60% coverage.
+ */
+export function nameMatchScore(catalogName: string, sheetDescription: string): number | null {
+  const a = nameTokens(catalogName);
+  const b = nameTokens(sheetDescription);
+  if (a.size === 0 || b.size === 0) return null;
+  // A catalog name that is only a size ("3 1/2\"") names nothing on its own — never suggest.
+  if ([...a].every((t) => /^[\d/.'x-]+$/i.test(t))) return null;
+  const aColour = [...a].find((t) => COLOURS.has(t));
+  const bColour = [...b].find((t) => COLOURS.has(t));
+  if (aColour && bColour && aColour !== bColour) return null;
+  for (const t of VARIANT_MARKERS) if (a.has(t) !== b.has(t)) return null;
+  // Inside vs outside (corners) are opposites, like two colours.
+  if ((a.has("INSIDE") && b.has("OUTSIDE")) || (a.has("OUTSIDE") && b.has("INSIDE"))) return null;
+  let matched = 0;
+  for (const t of a) {
+    if (b.has(t)) matched++;
+    else if (/\d/.test(t)) return null; // a size in the catalog name the sheet does not carry
+  }
+  if (matched < Math.min(2, a.size)) return null;
+  const score = matched / a.size;
+  return score >= 0.6 ? score : null;
+}
+
+export interface CatalogRowRef {
+  screen_id: string;
+  category: string;
+  row_label: string;
+  price_col: string;
+}
+
+/** The best catalog product for a sheet line, or null when nothing is close. */
+export function suggestCatalogRow(
+  description: string,
+  rows: CatalogRowRef[],
+): { row: CatalogRowRef; score: number } | null {
+  let best: { row: CatalogRowRef; score: number } | null = null;
+  for (const row of rows) {
+    const score = nameMatchScore(row.row_label, description);
+    if (score === null) continue;
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && row.row_label.length > best.row.row_label.length)
+    )
+      best = { row, score };
+  }
+  return best;
+}
+
+/** The best sheet line for a catalog product, or null. Prefers the shortest exact-coverage line. */
+export function suggestSheetLine(
+  rowLabel: string,
+  items: SheetItem[],
+): { item: SheetItem; score: number } | null {
+  let best: { item: SheetItem; score: number } | null = null;
+  for (const item of items) {
+    const score = nameMatchScore(rowLabel, item.description);
+    if (score === null) continue;
+    if (
+      !best ||
+      score > best.score ||
+      (score === best.score && item.description.length < best.item.description.length)
+    )
+      best = { item, score };
+  }
+  return best;
+}

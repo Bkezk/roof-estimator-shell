@@ -2,9 +2,13 @@ import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Plus, Trash2, Save, Lock } from "lucide-react";
+import { Plus, Trash2, Save, Lock, X } from "lucide-react";
 
-import { listItemNumbers } from "@/lib/admin-item-numbers.functions";
+import {
+  deleteItemNumber,
+  listItemNumbers,
+  upsertItemNumber,
+} from "@/lib/admin-item-numbers.functions";
 import {
   getPricingCatalog,
   savePricingScreen,
@@ -77,6 +81,46 @@ export function CatalogEditor({
     queryFn: () => itemNosFn(),
     enabled: branch === "duro_last",
   });
+  // Inline item-number entry on the row (the Item Numbers tab does the same with more room).
+  const upsertItemFn = useServerFn(upsertItemNumber);
+  const deleteItemFn = useServerFn(deleteItemNumber);
+  const [itemEntry, setItemEntry] = useState<{ row: string; item: string; col: string } | null>(
+    null,
+  );
+  const addItemNumber = async (screenId: string, rowLabel: string, item: string, col: string) => {
+    const item_no = item.trim();
+    if (!item_no) return;
+    try {
+      await upsertItemFn({
+        data: { item_no, screen_id: screenId, row_label: rowLabel, price_col: col },
+      });
+      toast.success(`${item_no} → ${rowLabel} · ${col}`);
+      setItemEntry(null);
+      void qc.invalidateQueries({ queryKey: ["item-numbers"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the item number");
+    }
+  };
+  const removeItemNumber = async (m: {
+    item_no: string;
+    screen_id: string;
+    row_label: string;
+    price_col: string;
+  }) => {
+    try {
+      await deleteItemFn({
+        data: {
+          item_no: m.item_no,
+          screen_id: m.screen_id,
+          row_label: m.row_label,
+          price_col: m.price_col,
+        },
+      });
+      void qc.invalidateQueries({ queryKey: ["item-numbers"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not remove the item number");
+    }
+  };
 
   const [selId, setSelId] = useState<string | null>(null);
   const [draft, setDraft] = useState<CatalogScreenData | null>(null);
@@ -298,37 +342,110 @@ export function CatalogEditor({
                       )}
                     </TableCell>
                   ))}
-                  {branch === "duro_last" && (
-                    <TableCell className="max-w-[320px] text-xs">
-                      {itemNosFor(row).length === 0 ? (
-                        <span
-                          className="text-muted-foreground"
-                          title="No Duro-Last item number mapped — add one on the Item Numbers tab"
-                        >
-                          —
-                        </span>
-                      ) : (
-                        itemNosFor(row).map((m) => (
-                          <span
-                            key={`${m.item_no}|${m.price_col}`}
-                            className="mb-0.5 mr-1 inline-block whitespace-nowrap rounded bg-muted px-1.5 py-0.5 font-mono"
-                            title={
-                              m.dl_description
-                                ? `${m.dl_description} → ${m.price_col}`
-                                : `→ ${m.price_col}`
-                            }
-                          >
-                            {m.item_no}
-                            {valueCols.filter((c) => !isPartCol(c)).length > 1 ? (
-                              <span className="ml-1 font-sans text-[10px] text-muted-foreground">
-                                {m.price_col}
-                              </span>
-                            ) : null}
-                          </span>
-                        ))
-                      )}
-                    </TableCell>
-                  )}
+                  {branch === "duro_last" &&
+                    (() => {
+                      const rowLabel = String(row[labelCol] ?? "");
+                      const priceCols = valueCols.filter((c) => !isPartCol(c));
+                      const entry = itemEntry?.row === rowLabel ? itemEntry : null;
+                      return (
+                        <TableCell className="max-w-[340px] text-xs">
+                          {itemNosFor(row).map((m) => (
+                            <span
+                              key={`${m.item_no}|${m.price_col}`}
+                              className="mb-0.5 mr-1 inline-flex items-center whitespace-nowrap rounded bg-muted px-1.5 py-0.5 font-mono"
+                              title={
+                                m.dl_description
+                                  ? `${m.dl_description} → ${m.price_col}`
+                                  : `→ ${m.price_col}`
+                              }
+                            >
+                              {m.item_no}
+                              {priceCols.length > 1 ? (
+                                <span className="ml-1 font-sans text-[10px] text-muted-foreground">
+                                  {m.price_col}
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="ml-1 text-muted-foreground hover:text-destructive"
+                                title="Remove this item number from the product"
+                                onClick={() => void removeItemNumber(m)}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                          {entry ? (
+                            <span className="inline-flex items-center gap-1">
+                              <Input
+                                autoFocus
+                                className="h-7 w-24 text-xs"
+                                placeholder="Item #"
+                                value={entry.item}
+                                onChange={(e) => setItemEntry({ ...entry, item: e.target.value })}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter")
+                                    void addItemNumber(
+                                      selected.id,
+                                      rowLabel,
+                                      entry.item,
+                                      entry.col,
+                                    );
+                                  if (e.key === "Escape") setItemEntry(null);
+                                }}
+                              />
+                              {priceCols.length > 1 && (
+                                <select
+                                  className="h-7 rounded-md border bg-background px-1 text-xs"
+                                  value={entry.col}
+                                  onChange={(e) => setItemEntry({ ...entry, col: e.target.value })}
+                                  title="Price column (colour) this item number prices"
+                                >
+                                  {priceCols.map((c) => (
+                                    <option key={c} value={c}>
+                                      {c}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                              <Button
+                                size="sm"
+                                className="h-7"
+                                disabled={!entry.item.trim()}
+                                onClick={() =>
+                                  void addItemNumber(selected.id, rowLabel, entry.item, entry.col)
+                                }
+                              >
+                                Add
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7"
+                                onClick={() => setItemEntry(null)}
+                              >
+                                Cancel
+                              </Button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded border border-dashed px-1.5 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-foreground"
+                              title="Add a Duro-Last item number to this product"
+                              onClick={() =>
+                                setItemEntry({
+                                  row: rowLabel,
+                                  item: "",
+                                  col: priceCols[0] ?? valueCols[0] ?? "",
+                                })
+                              }
+                            >
+                              <Plus className="mr-0.5 h-3 w-3" /> item #
+                            </button>
+                          )}
+                        </TableCell>
+                      );
+                    })()}
                   <TableCell>
                     {isLocked(row) ? (
                       <span

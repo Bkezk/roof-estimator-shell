@@ -46,6 +46,7 @@ import {
 import {
   guessHeader,
   guessMembraneHeader,
+  headerSignature,
   MEMBRANE_SCREEN_ID,
   membranePerSqFt,
   rollAreaSqFt,
@@ -53,6 +54,9 @@ import {
   matchSheet,
   readMembraneSheet,
   readSheetItems,
+  suggestCatalogRow,
+  suggestSheetLine,
+  type CatalogRowRef,
   type HeaderGuess,
   type MatchResult,
   type MembraneMatchResult,
@@ -60,6 +64,34 @@ import {
   type SheetItem,
   type SheetRow,
 } from "@/lib/price-import";
+
+const LAYOUT_KEY = "priceImport.layout.v1";
+interface SavedLayout {
+  sheetName: string;
+  signature: string;
+  pick: HeaderGuess;
+  useMembrane: boolean;
+}
+/** The column picks confirmed by the last applied import (per browser). */
+function readSavedLayout(): SavedLayout | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<SavedLayout>;
+    if (!v || typeof v.signature !== "string" || !v.pick || typeof v.pick.itemCol !== "number")
+      return null;
+    return v as SavedLayout;
+  } catch {
+    return null;
+  }
+}
+function writeSavedLayout(v: SavedLayout) {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(v));
+  } catch {
+    // Private mode / blocked storage: the picks simply are not remembered.
+  }
+}
 
 const money = (v: number | null | undefined) =>
   v === null || v === undefined
@@ -176,6 +208,10 @@ export function PriceImportPage() {
   const [sheetIdx, setSheetIdx] = useState(0);
   const [pick, setPick] = useState<HeaderGuess | null>(null);
   const [useMembrane, setUseMembrane] = useState(true);
+  // The column picks are shown only when the file's layout is new; a layout confirmed by an
+  // earlier import (same header cells) is recognised and the picks collapse to a summary.
+  const [setupOpen, setSetupOpen] = useState(true);
+  const [recognised, setRecognised] = useState(false);
 
   const loadFile = async (file: File) => {
     try {
@@ -198,20 +234,46 @@ export function PriceImportPage() {
       }
       setFileName(file.name);
       setSheets(parsed);
-      // Prefer the first sheet with an item-number header (the membrane tab has none).
-      const firstWithHeader = parsed.findIndex((s) => guessHeader(s.rows) !== null);
-      const idx = firstWithHeader >= 0 ? firstWithHeader : 0;
-      setSheetIdx(idx);
-      setPick(
-        guessHeader(parsed[idx]!.rows) ?? {
-          headerRow: 0,
-          itemCol: 0,
-          descCol: 1,
-          priceCol: 2,
-          unitCol: null,
-          sizeCol: null,
-        },
-      );
+      // A layout confirmed by an earlier import: same sheet name (or any sheet) whose header
+      // row reads exactly as before → reuse those picks and skip the setup.
+      const saved = readSavedLayout();
+      const savedIdx = saved
+        ? (() => {
+            const byName = parsed.findIndex(
+              (sh) =>
+                sh.name === saved.sheetName &&
+                headerSignature(sh.rows[saved.pick.headerRow]) === saved.signature,
+            );
+            if (byName >= 0) return byName;
+            return parsed.findIndex(
+              (sh) => headerSignature(sh.rows[saved.pick.headerRow]) === saved.signature,
+            );
+          })()
+        : -1;
+      if (saved && savedIdx >= 0) {
+        setSheetIdx(savedIdx);
+        setPick(saved.pick);
+        setUseMembrane(saved.useMembrane);
+        setRecognised(true);
+        setSetupOpen(false);
+      } else {
+        // Prefer the first sheet with an item-number header (the membrane tab has none).
+        const firstWithHeader = parsed.findIndex((s) => guessHeader(s.rows) !== null);
+        const idx = firstWithHeader >= 0 ? firstWithHeader : 0;
+        setSheetIdx(idx);
+        setPick(
+          guessHeader(parsed[idx]!.rows) ?? {
+            headerRow: 0,
+            itemCol: 0,
+            descCol: 1,
+            priceCol: 2,
+            unitCol: null,
+            sizeCol: null,
+          },
+        );
+        setRecognised(false);
+        setSetupOpen(true);
+      }
       setLastReport(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not read that file");
@@ -364,6 +426,13 @@ export function PriceImportPage() {
       toast.success(`Prices updated — ${nChanged} changed. Bids show "Update Pricing & Labor".`);
       setReviewOpen(false);
       refresh();
+      if (sheet && pick)
+        writeSavedLayout({
+          sheetName: sheet.name,
+          signature: headerSignature(sheet.rows[pick.headerRow]),
+          pick,
+          useMembrane,
+        });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -463,6 +532,53 @@ export function PriceImportPage() {
     }
   };
 
+  // Catalog products with no item number at all, each with the sheet line that best names it
+  // (idea: fill the gaps from the sheet as a checklist rather than by hand).
+  const [dismissedGaps, setDismissedGaps] = useState<Set<string>>(() => new Set());
+  const gapSuggestions = useMemo(() => {
+    if (!items.length) return [];
+    const has = new Set(mappings.map((m) => `${m.screen_id}\u0000${m.row_label}`));
+    const out: {
+      key: string;
+      target: TargetRef;
+      category: string;
+      suggestion: ReturnType<typeof suggestSheetLine>;
+    }[] = [];
+    for (const t of targets) {
+      const priceCol = t.price_cols[0];
+      if (!priceCol) continue;
+      for (const r of t.rows) {
+        const key = `${t.screen_id}\u0000${r}`;
+        if (has.has(key)) continue;
+        out.push({
+          key,
+          category: t.category,
+          target: { screen_id: t.screen_id, row_label: r, price_col: priceCol },
+          suggestion: suggestSheetLine(r, items),
+        });
+      }
+    }
+    return out;
+  }, [items, mappings, targets]);
+  const gapsWithSuggestion = gapSuggestions.filter(
+    (g) => g.suggestion && !dismissedGaps.has(g.key),
+  );
+  const [showAllGaps, setShowAllGaps] = useState(false);
+  const catalogRowRefs: CatalogRowRef[] = useMemo(
+    () =>
+      targets.flatMap((t) =>
+        t.price_cols[0]
+          ? t.rows.map((r) => ({
+              screen_id: t.screen_id,
+              category: t.category,
+              row_label: r,
+              price_col: t.price_cols[0]!,
+            }))
+          : [],
+      ),
+    [targets],
+  );
+
   const notInSheetByItem = useMemo(() => {
     const g = new Map<string, ItemNumberRow[]>();
     for (const m of match?.notInSheet ?? []) {
@@ -526,7 +642,24 @@ export function PriceImportPage() {
             )}
           </div>
 
-          {sheet && pick && (
+          {sheet && pick && !setupOpen && (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+              <span>
+                {recognised ? "Layout recognised from your last import" : "Layout"}: sheet{" "}
+                <span className="font-medium">{sheet.name}</span> · header row {pick.headerRow + 1}{" "}
+                · item # col {pick.itemCol + 1}
+                {pick.descCol !== null ? ` · description col ${pick.descCol + 1}` : ""}
+                {pick.priceCol !== null ? ` · price col ${pick.priceCol + 1}` : ""}
+                {pick.unitCol != null ? ` · unit col ${pick.unitCol + 1}` : ""}
+                {pick.sizeCol != null ? ` · size col ${pick.sizeCol + 1}` : ""}
+                {membraneSheet ? ` · membrane tab ${useMembrane ? "on" : "off"}` : ""}
+              </span>
+              <Button variant="ghost" size="sm" className="h-7" onClick={() => setSetupOpen(true)}>
+                Change columns
+              </Button>
+            </div>
+          )}
+          {sheet && pick && setupOpen && (
             <div className="flex flex-wrap items-end gap-3 text-xs">
               {sheets.length > 1 && (
                 <div className="space-y-1">
@@ -614,6 +747,16 @@ export function PriceImportPage() {
                   Also load the membrane tab
                 </label>
               )}
+              {recognised && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setSetupOpen(false)}
+                >
+                  Done
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -697,6 +840,104 @@ export function PriceImportPage() {
               </details>
             )}
 
+            {gapSuggestions.length > 0 && (
+              <details
+                className="rounded-md border border-primary/40 p-3"
+                open={gapsWithSuggestion.length > 0}
+              >
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Catalog products with no item number ({gapSuggestions.length}) —{" "}
+                  {gapsWithSuggestion.length} suggestion
+                  {gapsWithSuggestion.length === 1 ? "" : "s"} from this sheet
+                </summary>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Each suggestion is the sheet line whose wording best matches the product name.
+                  Accept maps that item number (saved immediately; the price shows on the next
+                  pass); Not this hides the suggestion for now.
+                </p>
+                <label className="mt-1 flex items-center gap-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={showAllGaps}
+                    onChange={(e) => setShowAllGaps(e.target.checked)}
+                  />
+                  Also list products with no suggestion
+                </label>
+                <div className="mt-2 overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Catalog product</TableHead>
+                        <TableHead>Suggested sheet line</TableHead>
+                        <TableHead>Price</TableHead>
+                        <TableHead />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(showAllGaps
+                        ? gapSuggestions.filter((g) => !dismissedGaps.has(g.key))
+                        : gapsWithSuggestion
+                      ).map((g) => (
+                        <TableRow key={g.key}>
+                          <TableCell className="text-xs">
+                            <span className="text-muted-foreground">{g.category} › </span>
+                            {g.target.row_label}
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              {g.target.price_col}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {g.suggestion ? (
+                              <>
+                                <span className="font-mono">{g.suggestion.item.itemNo}</span>{" "}
+                                {g.suggestion.item.description}
+                                <span className="ml-1 text-[10px] text-muted-foreground">
+                                  {Math.round(g.suggestion.score * 100)}% of the name
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-muted-foreground">— nothing close</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs tabular-nums">
+                            {g.suggestion ? money(g.suggestion.item.price) : ""}
+                          </TableCell>
+                          <TableCell>
+                            {g.suggestion && (
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7"
+                                  onClick={() =>
+                                    void saveMapping(
+                                      g.suggestion!.item.itemNo,
+                                      g.target,
+                                      g.suggestion!.item.description,
+                                    )
+                                  }
+                                >
+                                  Accept
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7"
+                                  onClick={() => setDismissedGaps((d) => new Set(d).add(g.key))}
+                                >
+                                  Not this
+                                </Button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </details>
+            )}
+
             {match.unmatched.length > 0 && (
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm font-semibold text-destructive">
@@ -716,6 +957,7 @@ export function PriceImportPage() {
                   setDrafts={setMapDrafts}
                   onMap={(it, t) => void saveMapping(it.itemNo, t, it.description)}
                   onAdd={openNewProduct}
+                  suggest={(it) => suggestCatalogRow(it.description, catalogRowRefs)}
                 />
               </details>
             )}
@@ -988,6 +1230,8 @@ function UnmatchedList(props: {
   setDrafts: (f: (d: Record<string, TargetRef>) => Record<string, TargetRef>) => void;
   onMap: (it: SheetItem, t: TargetRef) => void;
   onAdd: (it: SheetItem) => void;
+  /** Closest catalog product by name for a sheet line (computed for the rows on screen only). */
+  suggest: (it: SheetItem) => { row: CatalogRowRef; score: number } | null;
 }) {
   const [q, setQ] = useState("");
   const [limit, setLimit] = useState(50);
@@ -1047,6 +1291,37 @@ function UnmatchedList(props: {
                         onChange={(v) => props.setDrafts((d) => ({ ...d, [u.key]: v }))}
                       />
                     )}
+                    {(() => {
+                      const sug = props.suggest(u);
+                      if (!sug) return null;
+                      const isDraft =
+                        draft?.screen_id === sug.row.screen_id &&
+                        draft?.row_label === sug.row.row_label;
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                          Suggested: {sug.row.category} › {sug.row.row_label}
+                          {!isDraft && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-2 text-[11px]"
+                              onClick={() =>
+                                props.setDrafts((d) => ({
+                                  ...d,
+                                  [u.key]: {
+                                    screen_id: sug.row.screen_id,
+                                    row_label: sug.row.row_label,
+                                    price_col: sug.row.price_col,
+                                  },
+                                }))
+                              }
+                            >
+                              Use
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col gap-1">

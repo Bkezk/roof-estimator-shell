@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  headerSignature,
   membranePerSqFt,
+  nameMatchScore,
+  nameTokens,
   rollAreaSqFt,
+  suggestCatalogRow,
+  suggestSheetLine,
   guessHeader,
   guessMembraneHeader,
   matchMembrane,
@@ -219,5 +224,61 @@ describe("price import — Duro-Last Membrane sheet", () => {
       'no "Blue" colour column',
     ]);
     expect(r.noPrice.map((u) => `${u.mil} ${u.description}`)).toEqual(["50 Roll Goods"]);
+  });
+});
+
+describe("price import — layout memory and name suggestions", () => {
+  it("signs a header row by its cells so a re-issued sheet with the same headings is recognised", () => {
+    expect(headerSignature(["Item", "Description", null, "Price", "Unit of Measure"])).toBe(
+      "item|description||price|unit of measure",
+    );
+    expect(headerSignature(undefined)).toBe("");
+  });
+
+  it("tokenises names with Duro-Last's abbreviations expanded and units dropped", () => {
+    expect([...nameTokens("TERM BAR WHT 10'")]).toEqual(["TERM", "BAR", "WHITE", "10"]);
+    expect([...nameTokens("Term Bar White")]).toEqual(["TERM", "BAR", "WHITE"]);
+    expect(nameTokens("MATL 40MIL D/GRY 64X100' DL").has("DARKGRAY")).toBe(true);
+    expect(nameTokens("DRAIN GUARD WHITE EA").has("EA")).toBe(false);
+  });
+
+  it("scores a sheet line against a catalog name, rejecting colour and size conflicts", () => {
+    expect(nameMatchScore("Term Bar White", "TERM BAR WHT 10'")).toBe(1);
+    expect(nameMatchScore("Term Bar White", "TERM BAR TAN 10'")).toBeNull();
+    expect(nameMatchScore('3" Square Steel Plate', "PLATE SQ STEEL 3")).toBe(1);
+    expect(nameMatchScore('3" Square Steel Plate', "PLATE SQ STEEL 2")).toBeNull();
+    expect(nameMatchScore("Drain Guard White", "DRAIN GUARD WHITE")).toBe(1);
+    expect(nameMatchScore("Drain Guard White", "GUARD RAIL")).toBeNull();
+    expect(nameMatchScore("Sealant", "CAULK")).toBeNull();
+    // Variant words on one side only are different products; plurals and I/C fold together.
+    expect(nameMatchScore("Duro-Caulk - White", "CAULK DURO PLUS WHT")).toBeNull();
+    expect(nameMatchScore("Duro-Caulk Plus - White", "CAULK DURO PLUS WHT")).toBe(1);
+    expect(nameMatchScore("Metal Cleat Plates", "PLATE METAL CLEAT")).toBe(1);
+    expect(nameMatchScore('Inside 6" x 6"', "I/C 6X6 WHT")).toBe(1);
+    expect(nameMatchScore('3 1/2"', "AUGER 3-1/2")).toBeNull();
+  });
+
+  it("suggests the closest catalog row for a sheet line and the closest sheet line for a product", () => {
+    const rows = [
+      { screen_id: "s", category: "Edge", row_label: "Term Bar White", price_col: "Price" },
+      { screen_id: "s", category: "Edge", row_label: "Term Bar Tan", price_col: "Price" },
+      { screen_id: "s", category: "Edge", row_label: "Term Bar White 2-Piece", price_col: "Price" },
+    ];
+    expect(suggestCatalogRow("TERM BAR TAN 10'", rows)?.row.row_label).toBe("Term Bar Tan");
+    // Full coverage beats partial: the plain white bar, not the 2-piece it only half names.
+    expect(suggestCatalogRow("TERM BAR WHT 10'", rows)?.row.row_label).toBe("Term Bar White");
+    expect(suggestCatalogRow("PANDUIT SS BAND", rows)).toBeNull();
+    const items = readSheetItems(
+      [
+        ["Item", "Description", "Price"],
+        ["1225", "TERM BAR WHT 10'", 7.5],
+        ["1225L", "TERM BAR WHT 10' LONG PACK", 70],
+        ["1226", "TERM BAR TAN 10'", 7.6],
+      ],
+      { headerRow: 0, itemCol: 0, descCol: 1, priceCol: 2 },
+    );
+    expect(suggestSheetLine("Term Bar White", items)?.item.itemNo).toBe("1225");
+    expect(suggestSheetLine("Term Bar Tan", items)?.item.itemNo).toBe("1226");
+    expect(suggestSheetLine("Walkway Pad", items)).toBeNull();
   });
 });

@@ -3265,3 +3265,13 @@ agree, and the cell is planned once — the membrane tab's per-sq-ft line wins w
 carries it. A roll line whose Size cell cannot be read is listed under "Membrane roll lines not
 converted" and never written as a per-roll price. No prices changed on this import path yet
 (mappings only).
+
+### 22.37 Underlayment layout hours — eight truncated product names (2026-09-22)
+
+Owner's Bid total warned "No underlayment layout time for "1/4" DensDeck Prime"". The
+`underlayment_layout_mechanical` table was captured from the legacy grid with its truncated
+labels — `1/4" DensDeck P...`, `1/2" Securock G...`, `5/8" F/C Sheet R...` (eight rows: DensDeck
+Prime 1/4 / 1/2 / 5/8, Securock GFRB 1/4 / 3/8 / 1/2 / 5/8, 5/8 F/C Sheet Rock) — so the exact-name
+lookup never hit and those layers billed 0 layout hours. Migration `20260922140000` renames them
+to the catalog names; the captured hours (18 / 20 / 25 / 31.82 h per 2,500 sq ft) are unchanged.
+Applied live. Not a money-model change: the legacy app matched by product id, not by label.
