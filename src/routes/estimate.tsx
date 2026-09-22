@@ -112,7 +112,7 @@ import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { useAuth } from "@/lib/auth-context";
 import { useBidLock } from "@/lib/use-bid-lock";
-import { AttachmentIcon } from "@/components/attachment-icon";
+import { LayerStack, TileGlyph } from "@/components/layer-stack";
 import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-dialog";
 import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
 import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
@@ -2684,75 +2684,61 @@ function EstimatePage() {
                 {/* Layer tabs + stack visual (legacy bottom-left) */}
                 <div className="rounded-md border">
                   <div className="flex border-b">
-                    {LAYER_SLOTS.map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setUTab(n)}
-                        className={`px-3 py-1.5 text-xs font-medium ${
-                          uTab === n
-                            ? "border-b-2 border-primary text-primary"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        Add Layer {n + 1}
-                      </button>
-                    ))}
+                    {LAYER_SLOTS.map((n) => {
+                      // Legacy tab: the layer's board glyph + "Layer n"; "Add Layer n" when empty.
+                      const tabSec = sections.find((s) => uSel.includes(s.id)) ?? sections[0];
+                      const tl = tabSec ? sectionLayers(tabSec)[n] : undefined;
+                      return (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => setUTab(n)}
+                          className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium ${
+                            uTab === n
+                              ? "border-b-2 border-primary text-primary"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {tl && (
+                            <TileGlyph
+                              tile={admin.underlaymentGroups?.groupIdByBoard?.[tl.board]}
+                              className="h-4 w-8 shrink-0"
+                            />
+                          )}
+                          {tl ? `Layer ${n + 1}` : `Add Layer ${n + 1}`}
+                        </button>
+                      );
+                    })}
                   </div>
                   <div className="p-4">
                     {(() => {
                       const stackSec = sections.find((s) => uSel.includes(s.id)) ?? sections[0];
                       const stackLayers = stackSec ? sectionLayers(stackSec) : [];
                       return (
-                        <div className="mx-auto w-64 space-y-1">
-                          {LAYER_SLOTS_TOP_DOWN.map((li) => {
-                            const l = stackLayers[li];
-                            return (
-                              <button
-                                key={li}
-                                type="button"
-                                aria-pressed={li === uTab}
-                                title={`Select Layer ${li + 1}`}
-                                onClick={() => setUTab(li)}
-                                className={`flex min-h-8 w-full cursor-pointer flex-col items-center justify-center rounded-sm border px-1 py-0.5 text-[11px] transition hover:border-primary hover:shadow-sm ${
-                                  li === uTab ? "ring-2 ring-primary" : ""
-                                } ${
-                                  l
-                                    ? "bg-amber-100 font-medium dark:bg-amber-300/20"
-                                    : "border-dashed text-muted-foreground"
-                                }`}
-                              >
-                                <span className="flex max-w-full items-center gap-1">
-                                  {l && !l.quote && (
-                                    <AttachmentIcon
-                                      attachment={effectiveLayerAttachment(
-                                        l,
-                                        (stackSec?.roofSystem ?? roofSystem) === "Duro-Bond",
-                                      )}
-                                    />
-                                  )}
-                                  <span className="truncate">
-                                    {l ? `Layer ${li + 1}: ${l.board}` : `Layer ${li + 1}`}
-                                  </span>
-                                </span>
-                                {l?.quote && (
-                                  <span className="max-w-full truncate text-[10px] font-normal text-muted-foreground">
-                                    “{l.quote.name}” —{" "}
-                                    {money(
-                                      l.quote.pieceMode
-                                        ? (l.quote.pieces ?? 0) * (l.quote.costPerPiece ?? 0)
-                                        : (l.quote.lumpSum ?? 0),
-                                    )}{" "}
-                                    + {l.quote.laborAmount ?? 0}
-                                    {l.quote.laborInDays ? "d" : "h"} labor
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                          <div className="flex h-8 items-center justify-center rounded-sm bg-blue-500/80 text-[11px] font-semibold text-white">
-                            Deck{stackSec ? ` (${stackSec.deckType})` : ""}
-                          </div>
+                        <div className="space-y-2">
+                          <LayerStack
+                            slotsTopDown={LAYER_SLOTS_TOP_DOWN}
+                            layers={stackLayers}
+                            selected={uTab}
+                            onSelect={setUTab}
+                            deckLabel={stackSec ? `Deck (${stackSec.deckType})` : "Deck"}
+                            attachmentOf={(l) =>
+                              effectiveLayerAttachment(
+                                l,
+                                (stackSec?.roofSystem ?? roofSystem) === "Duro-Bond",
+                              )
+                            }
+                            tileOf={(board) => admin.underlaymentGroups?.groupIdByBoard?.[board]}
+                            quoteText={(l) =>
+                              l.quote
+                                ? `“${l.quote.name}” — ${money(
+                                    l.quote.pieceMode
+                                      ? (l.quote.pieces ?? 0) * (l.quote.costPerPiece ?? 0)
+                                      : (l.quote.lumpSum ?? 0),
+                                  )} + ${l.quote.laborAmount ?? 0}${l.quote.laborInDays ? "d" : "h"} labor`
+                                : null
+                            }
+                          />
                           <p className="pt-1 text-center text-[11px] text-muted-foreground">
                             {stackSec ? `Showing ${stackSec.name}` : "Add a section first"}
                           </p>
