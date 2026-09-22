@@ -16,6 +16,27 @@ export interface ItemNumberMapping {
   dl_description?: string | null;
   last_price?: number | null;
   last_import_at?: string | null;
+  /** Set by "Confirm mapping": the sheet wording the admin vouched for. */
+  confirmed_description?: string | null;
+}
+
+/**
+ * The cross-check for one matched line: quiet when the admin confirmed the pairing under wording
+ * the sheet still uses; otherwise the name check plus the last-import stamp comparison.
+ */
+export function crossCheck(
+  mapping: Pick<ItemNumberMapping, "row_label" | "dl_description" | "confirmed_description">,
+  sheetDescription: string,
+): { nameDiffers: boolean; descChanged: boolean } {
+  if (
+    mapping.confirmed_description &&
+    !descriptionChanged(mapping.confirmed_description, sheetDescription)
+  )
+    return { nameDiffers: false, descChanged: false };
+  return {
+    nameDiffers: nameCheck(mapping.row_label, sheetDescription) === "differs",
+    descChanged: descriptionChanged(mapping.dl_description, sheetDescription),
+  };
 }
 
 /** Item numbers compare case-insensitively with internal whitespace removed ("1312 BF" = "1312bf"). */

@@ -142,7 +142,13 @@ const mappingKey = z.object({
 export const upsertItemNumber = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) =>
-    mappingKey.extend({ dl_description: z.string().nullable().optional() }).parse(d),
+    mappingKey
+      .extend({
+        dl_description: z.string().nullable().optional(),
+        /** The admin vouches for this number → product pairing under this sheet wording. */
+        confirmed_description: z.string().nullable().optional(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
@@ -153,6 +159,12 @@ export const upsertItemNumber = createServerFn({ method: "POST" })
         row_label: data.row_label,
         price_col: data.price_col,
         ...(data.dl_description !== undefined ? { dl_description: data.dl_description } : {}),
+        ...(data.confirmed_description !== undefined
+          ? {
+              confirmed_description: data.confirmed_description,
+              confirmed_at: data.confirmed_description ? new Date().toISOString() : null,
+            }
+          : {}),
       },
       { onConflict: "item_no,screen_id,row_label,price_col" },
     );

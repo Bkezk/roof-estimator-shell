@@ -420,6 +420,8 @@ export type Database = {
       };
       catalog_item_numbers: {
         Row: {
+          confirmed_at: string | null;
+          confirmed_description: string | null;
           created_at: string;
           dl_description: string | null;
           item_no: string;
@@ -430,6 +432,8 @@ export type Database = {
           screen_id: string;
         };
         Insert: {
+          confirmed_at?: string | null;
+          confirmed_description?: string | null;
           created_at?: string;
           dl_description?: string | null;
           item_no: string;
@@ -440,6 +444,8 @@ export type Database = {
           screen_id: string;
         };
         Update: {
+          confirmed_at?: string | null;
+          confirmed_description?: string | null;
           created_at?: string;
           dl_description?: string | null;
           item_no?: string;

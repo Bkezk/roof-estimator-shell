@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   convertSheetPrice,
+  crossCheck,
   descriptionChanged,
   headerSignature,
   nameCheck,
@@ -346,6 +347,15 @@ describe("price import — matched-number cross-check", () => {
     // A size-only or colour-only catalog name cannot vouch either way.
     expect(nameCheck('1 5/8" #12', "SCREW 1-5/8 SS DRL PT #14")).toBe("unscorable");
     expect(nameCheck("White", "TERM BAR WHT 10'")).toBe("unscorable");
+  });
+  it("a confirmed pairing stays quiet under the confirmed wording and re-flags when it changes", () => {
+    const m = { row_label: '1/2" Bit -', dl_description: null, confirmed_description: null };
+    expect(crossCheck(m, "AUGER 11")).toEqual({ nameDiffers: true, descChanged: false });
+    const ok = { ...m, confirmed_description: "AUGER 11" };
+    expect(crossCheck(ok, "AUGER 11")).toEqual({ nameDiffers: false, descChanged: false });
+    expect(crossCheck(ok, "AUGER 11 SS")).toEqual({ nameDiffers: false, descChanged: false });
+    // Duro-Last moves the number to yet another product: the confirmation no longer covers it.
+    expect(crossCheck(ok, "DRAIN BOOT 4 WHT")).toEqual({ nameDiffers: true, descChanged: false });
   });
   it("notices when the description stamped by the last import no longer matches", () => {
     expect(descriptionChanged("DRL BIT SDS 1/2X6 MSNRY", "AUGER 11")).toBe(true);

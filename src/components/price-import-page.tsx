@@ -61,8 +61,7 @@ import {
   readSheetItems,
   buildNameIndex,
   convertSheetPrice,
-  descriptionChanged,
-  nameCheck,
+  crossCheck,
   suggestCatalogRow,
   suggestSheetLine,
   type CatalogRowRef,
@@ -403,8 +402,7 @@ export function PriceImportPage() {
         unitSkipped.push({ item, mapping, reason: conv.error });
         continue;
       }
-      const nameDiffers = nameCheck(mapping.row_label, item.description) === "differs";
-      const descChanged = descriptionChanged(mapping.dl_description, item.description);
+      const { nameDiffers, descChanged } = crossCheck(mapping, item.description);
       out.push({
         item_no: mapping.item_no,
         screen_id: mapping.screen_id,
@@ -1057,9 +1055,10 @@ export function PriceImportPage() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   Duro-Last reuses item numbers. These lines carry a mapped number, but their
                   wording does not name the product the number points at (or differs from the
-                  description stamped by the last import). They start unticked on the review. Remove
-                  the mapping if the number now belongs to something else, then map the
-                  product&apos;s real number from the unmatched list.
+                  description stamped by the last import). They start unticked on the review.
+                  Confirm the mapping if the number really is this product — it stays quiet under
+                  that wording from then on. Remove it if the number now belongs to something else,
+                  then map the product&apos;s real number from the unmatched list.
                 </p>
                 <div className="mt-2 overflow-x-auto">
                   <Table>
@@ -1089,32 +1088,64 @@ export function PriceImportPage() {
                               : ""}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7"
-                              onClick={() =>
-                                void deleteFn({
-                                  data: {
-                                    item_no: p.item_no,
-                                    screen_id: p.screen_id,
-                                    row_label: p.row_label,
-                                    price_col: p.price_col,
-                                  },
-                                })
-                                  .then(() => {
-                                    toast.success(`Removed ${p.item_no} from ${p.row_label}`);
-                                    refresh();
+                            <div className="flex gap-1">
+                              <Button
+                                size="sm"
+                                className="h-7"
+                                title="This number really is this product — remember the sheet wording and stop flagging it (it flags again if the wording changes)"
+                                onClick={() =>
+                                  void upsertFn({
+                                    data: {
+                                      item_no: p.item_no,
+                                      screen_id: p.screen_id,
+                                      row_label: p.row_label,
+                                      price_col: p.price_col,
+                                      dl_description: p.description,
+                                      confirmed_description: p.description,
+                                    },
                                   })
-                                  .catch((e: unknown) =>
-                                    toast.error(
-                                      e instanceof Error ? e.message : "Could not remove mapping",
-                                    ),
-                                  )
-                              }
-                            >
-                              Remove mapping
-                            </Button>
+                                    .then(() => {
+                                      toast.success(
+                                        `Confirmed ${p.item_no} → ${p.row_label} as "${p.description}"`,
+                                      );
+                                      refresh();
+                                    })
+                                    .catch((e: unknown) =>
+                                      toast.error(
+                                        e instanceof Error ? e.message : "Could not confirm",
+                                      ),
+                                    )
+                                }
+                              >
+                                Confirm mapping
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7"
+                                onClick={() =>
+                                  void deleteFn({
+                                    data: {
+                                      item_no: p.item_no,
+                                      screen_id: p.screen_id,
+                                      row_label: p.row_label,
+                                      price_col: p.price_col,
+                                    },
+                                  })
+                                    .then(() => {
+                                      toast.success(`Removed ${p.item_no} from ${p.row_label}`);
+                                      refresh();
+                                    })
+                                    .catch((e: unknown) =>
+                                      toast.error(
+                                        e instanceof Error ? e.message : "Could not remove mapping",
+                                      ),
+                                    )
+                                }
+                              >
+                                Remove mapping
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
