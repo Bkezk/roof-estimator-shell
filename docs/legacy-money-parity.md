@@ -3223,3 +3223,9 @@ Non-DL Membrane figure rides the Other slot's tax / freight basis like any other
 Migration `20260922120000_non_dl_tpo_epdm.sql`, applied live. Tests: TPO roll-goods × flat price
 into `otherMaterial` with `duroLastMaterial` 0 and 27.5 h × 1.25; EPDM 3" lap quantity and 31 h
 base; a Non-DL wall (2 ft × 102 ft × $/sq ft) into the same bucket; blank matrix → 0 + warning.
+
+Addendum (same day) — **"Enhancement Necessary" on EPDM.** The Setup flag is the legacy
+`frmHome.TestForEnhancement` probe (pull test 350 at a fixed 60" lap). EPDM ships no 60" roll
+(120" / 240" only), so the 60" probe found no `mech_fastener_lookup` row (error −2) and flagged
+every EPDM bid. Departure: a system whose `TAB_OPTIONS_BY_SYSTEM` list does not offer 60" probes
+its narrowest offered width (EPDM → 120"); legacy systems and both TPOs still probe 60".

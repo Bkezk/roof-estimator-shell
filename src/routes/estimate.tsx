@@ -38,6 +38,7 @@ import {
   sectionLayers,
   effectiveLayerAttachment,
   fluteFillerPieces,
+  TAB_OPTIONS_BY_SYSTEM,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
@@ -895,16 +896,20 @@ function EstimatePage() {
   const thinSections = selectedWarranty?.reqThickness
     ? sections.filter((sec) => sec.thickness < selectedWarranty.reqThickness!)
     : [];
-  // Legacy frmHome.TestForEnhancement on the default section (pull test 350, lap 60).
+  // Legacy frmHome.TestForEnhancement on the default section (pull test 350, lap 60). Web-only
+  // systems that do not ship a 60" roll (EPDM: 120" / 240") probe their narrowest offered width
+  // instead — a 60" probe would find no row and flag every EPDM bid (docs §22.35 addendum).
   const defaultsEnhancement = (() => {
     if (!fastenerLookup?.length || attachment !== "mechanical") return null;
     const rsId = LEGACY_ROOF_SYSTEM_IDS[roofSystem];
     if (!rsId) return null;
+    const offered = TAB_OPTIONS_BY_SYSTEM[roofSystem];
+    const probeLap = !offered || offered.includes(60) ? 60 : Math.min(...offered);
     const r = universalFastenerSpacing(fastenerLookup, {
       roofSystemId: rsId,
       thickness: sectionDefaults.thickness,
       designTable: sectionDefaults.designTable ?? 60,
-      tabSpacings: [60],
+      tabSpacings: [probeLap],
       pullTest: 350,
       columnOffset: 0,
     });
