@@ -129,6 +129,8 @@ export interface SavedBidState {
   adjustInspectionPct?: number;
   /** Per-category labor template name ("" / unset = none). */
   laborTemplateName?: string;
+  /** Legacy Estimate.FormulasVersion (engine version.ts); absent on older saves = current. */
+  formulasVersion?: string;
   // Warranty selection (resolved to $/sqft via the warranties + high-wind admin tables).
   /** Legacy Home > Defaults panel: material defaults applied to new roof sections. */
   sectionDefaults?: {
@@ -348,6 +350,7 @@ export function savedToBidInput(s: SavedBidState): BidInput {
     adjustSetupPct: s.adjustSetupPct ?? 0,
     adjustInspectionPct: s.adjustInspectionPct ?? 0,
     ...(s.laborTemplateName ? { laborTemplateName: s.laborTemplateName } : {}),
+    ...(s.formulasVersion ? { formulasVersion: s.formulasVersion } : {}),
     ...(s.salesTaxRate !== undefined ? { salesTaxRate: s.salesTaxRate } : {}),
     ...(s.taxMaterialOnly !== undefined ? { taxMaterialOnly: s.taxMaterialOnly } : {}),
     extraShipping: s.extraShipping ?? 0,

@@ -283,3 +283,36 @@ describe("normalizeNonDlState", () => {
     ).toEqual(emptyNonDlState());
   });
 });
+
+describe("Update Bid Options — Non-DL overrides back to management defaults", () => {
+  it("clears only the chosen overrides, keeps Extra, leaves custom rows alone", async () => {
+    const { resetNonDlOverrides, countNonDlOverrides } = await import("./nondl");
+    const state = {
+      rows: {
+        roofEdgeBlocking: {
+          "2x4 Wood Nailer": {
+            extra: 3,
+            unitCost: 1.5,
+            laborPerUnit: 0.2,
+            laborRate: 60,
+            laborHours: 4,
+          },
+          "2x6 Wood Nailer": { extra: 0, unitCost: 2.5 },
+        },
+      },
+      custom: {
+        roofEdgeBlocking: [
+          { description: "Odd bit", qty: 1, unitCost: 9, laborPerUnit: 1, laborRate: 50 },
+        ],
+      },
+    } as unknown as import("./nondl").NonDlState;
+    expect(countNonDlOverrides(state)).toEqual({ unitPrice: 2, unitLabor: 1, laborRate: 1 });
+    const r = resetNonDlOverrides(state, { unitLabor: true, laborRate: true });
+    expect(r.rows.roofEdgeBlocking!["2x4 Wood Nailer"]).toEqual({ extra: 3, unitCost: 1.5 });
+    expect(r.rows.roofEdgeBlocking!["2x6 Wood Nailer"]).toEqual({ extra: 0, unitCost: 2.5 });
+    expect(r.custom).toBe(state.custom);
+    const all = resetNonDlOverrides(state, { unitPrice: true, unitLabor: true, laborRate: true });
+    expect(all.rows.roofEdgeBlocking!["2x4 Wood Nailer"]).toEqual({ extra: 3 });
+    expect(countNonDlOverrides(all)).toEqual({ unitPrice: 0, unitLabor: 0, laborRate: 0 });
+  });
+});

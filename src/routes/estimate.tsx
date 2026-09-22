@@ -111,6 +111,9 @@ import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/
 import { useAuth } from "@/lib/auth-context";
 import { useBidLock } from "@/lib/use-bid-lock";
 import { AttachmentIcon } from "@/components/attachment-icon";
+import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-dialog";
+import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
+import { countNonDlOverrides, resetNonDlOverrides } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
@@ -395,16 +398,6 @@ function EstimatePage() {
     admin: EngineAdminData;
     warranty: WarrantyData | null;
   } | null>(null);
-  const refreshPricing = async () => {
-    try {
-      const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
-      setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
-      setLiveCheck({ admin: a, warranty: w ?? null });
-      toast.success("Updated to current pricing & labor — totals recomputed. Save to keep it.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not fetch current pricing");
-    }
-  };
 
   // Legacy Home shows "Update Pricing & Labor" as a standing button; here it appears only while
   // the bid's frozen snapshot differs from the current admin pricing / labor / warranty data,
@@ -482,6 +475,10 @@ function EstimatePage() {
   const [adjustSetupPct, setAdjustSetupPct] = useState(0);
   const [adjustInspectionPct, setAdjustInspectionPct] = useState(0);
   const [laborTemplateName, setLaborTemplateName] = useState("");
+  // Legacy Estimate.FormulasVersion: new bids take the current version; a loaded bid keeps its
+  // stamp until "Upgrade to Latest Formulas" (Update Bid Options).
+  const [formulasVersion, setFormulasVersion] = useState<string>(CURRENT_FORMULAS_VERSION);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [warrantyName, setWarrantyName] = useState("");
   // Legacy Home > Defaults panel: material defaults for NEW roof sections.
   const [sectionDefaults, setSectionDefaults] = useState<
@@ -680,6 +677,7 @@ function EstimatePage() {
       setAdjustSetupPct(d.adjustSetupPct ?? 0);
       setAdjustInspectionPct(d.adjustInspectionPct ?? 0);
       setLaborTemplateName(d.laborTemplateName ?? "");
+      setFormulasVersion(d.formulasVersion ?? CURRENT_FORMULAS_VERSION);
       setWarrantyName(d.warrantyName ?? "");
       if (d.sectionDefaults) setSectionDefaults({ designTable: 60, ...d.sectionDefaults });
       setParapetDefaults(d.parapetDefaults ? { ...d.parapetDefaults } : { wallType: 4 });
@@ -837,6 +835,45 @@ function EstimatePage() {
     setAccessoriesCalc(w.accessoriesCalc);
   };
 
+  /**
+   * Legacy frmHome.btnUpdate_Click (docs §22.39): the Update Bid Options dialog's OK. Material
+   * pricing = replace the frozen snapshot with live admin data (custom underlayment quotes survive
+   * unless reset; Non-DL overrides survive unless their box is ticked); labor template = re-apply
+   * the template deltas over manual %s; latest formulas = re-stamp FormulasVersion.
+   */
+  const applyUpdateOptions = async (o: UpdateBidOptions) => {
+    const done: string[] = [];
+    if (o.materialPricing) {
+      const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
+      setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
+      setLiveCheck({ admin: a, warranty: w ?? null });
+      done.push("pricing & labor");
+      if (o.resetUnderlaymentQuotes) {
+        setUnderlaymentPriceOverrides({});
+        done.push("underlayment quotes reset");
+      }
+      if (o.ndlUnitLabor || o.ndlLaborRate || o.ndlUnitPrice) {
+        setNonDlCalc((prev) =>
+          resetNonDlOverrides(prev, {
+            unitLabor: o.ndlUnitLabor,
+            laborRate: o.ndlLaborRate,
+            unitPrice: o.ndlUnitPrice,
+          }),
+        );
+        done.push("Non-DL defaults");
+      }
+    }
+    if (o.laborTemplate) {
+      applyTemplate(laborTemplateName);
+      done.push(`labor template "${laborTemplateName || "None"}"`);
+    }
+    if (o.latestFormulas && formulasVersion !== CURRENT_FORMULAS_VERSION) {
+      setFormulasVersion(CURRENT_FORMULAS_VERSION);
+      done.push(`formulas ${CURRENT_FORMULAS_VERSION}`);
+    }
+    toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);
+  };
+
   const saved: SavedBidState = {
     roofSystem,
     attachment,
@@ -868,6 +905,7 @@ function EstimatePage() {
     adjustSetupPct,
     adjustInspectionPct,
     laborTemplateName,
+    formulasVersion,
     sectionDefaults,
     parapetDefaults,
     underlaymentAttachmentDefault,
@@ -1260,30 +1298,9 @@ function EstimatePage() {
             save. Saving will write the current inputs over the empty record.
           </div>
         )}
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
-          <p className="text-sm text-muted-foreground">
-            A live estimate — the bid total recomputes from the seeded pricing and labor data on
-            every change.
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold tracking-tight">Estimator</h1>
 
-        {frozenAsOf !== null && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <span>
-              Pricing &amp; labor frozen as of{" "}
-              {frozenAsOf ? new Date(frozenAsOf).toLocaleString() : "when this bid was saved"} —
-              admin changes don't affect this bid until you update it.
-            </span>
-            {pricingStale && (
-              <Button variant="outline" size="sm" onClick={refreshPricing} disabled={readOnly}>
-                <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
-              </Button>
-            )}
-          </div>
-        )}
-
-        <div className="flex flex-wrap gap-1.5 rounded-md border bg-muted/40 p-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 p-1.5">
           {STEPS.map((st, i) => {
             const n = stepCount(st.key);
             return (
@@ -1302,6 +1319,28 @@ function EstimatePage() {
               </button>
             );
           })}
+          {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
+              on the right in black; the dot marks management data newer than the bid's copy. */}
+          <button
+            type="button"
+            onClick={() => setUpdateOpen(true)}
+            disabled={readOnly}
+            title={
+              pricingStale
+                ? `Management pricing / labor has changed since this bid was priced${frozenAsOf ? ` (${new Date(frozenAsOf).toLocaleDateString()})` : ""}`
+                : "Update this bid from the current management data, template or formulas"
+            }
+            className="ml-auto flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/85 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Update pricing &amp; labor
+            {pricingStale && (
+              <span
+                className="h-2 w-2 rounded-full bg-amber-400"
+                aria-label="Management data has changed since this bid was priced"
+              />
+            )}
+          </button>
         </div>
 
         <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"} {...ro}>
@@ -1703,16 +1742,6 @@ function EstimatePage() {
                   underlayment; existing items keep their values unless you apply.
                 </CardDescription>
               </div>
-              {frozenAsOf !== null && pricingStale && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={refreshPricing}
-                  title="Admin pricing / labor has changed since this bid was priced"
-                >
-                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update Pricing &amp; Labor
-                </Button>
-              )}
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -4338,6 +4367,20 @@ function EstimatePage() {
         </div>
       </div>
 
+      <UpdateBidDialog
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+        pricingStale={pricingStale}
+        frozenAsOf={frozenAsOf}
+        underlaymentQuoteCount={
+          Object.values(underlaymentPriceOverrides).filter((v) => v > 0).length
+        }
+        ndlOverrides={countNonDlOverrides(nonDlCalc)}
+        laborTemplateName={laborTemplateName}
+        formulasVersion={formulasVersion}
+        latestFormulasVersion={CURRENT_FORMULAS_VERSION}
+        onApply={applyUpdateOptions}
+      />
       <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1">
@@ -4408,15 +4451,11 @@ function EstimatePage() {
           </CardHeader>
           <CardContent id="bid-total-body" className={bidTotalOpen ? "space-y-3" : "hidden"}>
             {frozenAsOf !== null && pricingStale && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
-                <span>
-                  Priced with admin data frozen{" "}
-                  {frozenAsOf ? `on ${new Date(frozenAsOf).toLocaleDateString()}` : "at save"} —
-                  pricing or labor has changed since.
-                </span>
-                <Button variant="outline" size="sm" className="h-7" onClick={refreshPricing}>
-                  <RefreshCw className="mr-1 h-3.5 w-3.5" /> Update pricing &amp; labor
-                </Button>
+              <div className="rounded-md border border-sky-500/40 bg-sky-500/10 p-2 text-xs">
+                Priced with management data frozen{" "}
+                {frozenAsOf ? `on ${new Date(frozenAsOf).toLocaleDateString()}` : "at save"} —
+                pricing or labor has changed since. Use &quot;Update pricing &amp; labor&quot;
+                above.
               </div>
             )}
             {result?.warnings.length ? (

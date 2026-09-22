@@ -3283,3 +3283,28 @@ should be defaulted to medium when that box is not greyed out" → a NEW section
 index 3 ("Medium"). Only systems with complexity factors price it (Duro-Tuff 1.2, Duro-Fleece
 1.2, the web TPO / EPDM systems 1.4); Duro-Last / Duro-Bond / Duro-Roof ignore it. Saved
 sections keep their stored index; a section with NO stored index still bills the legacy 2.
+
+### 22.39 Update Bid Options — legacy `frmHome.btnUpdate_Click` (2026-09-22)
+
+Legacy: the Home ribbon's standing **Update Pricing & Labor** button opens `frmUpdateBidOptions`;
+OK runs `btnUpdate_Click` (0x5ad38): (1) `cbMaterialPricing` — save every underlayment's
+`SqFtCost.CustomValue`, replace `Estimate.oMgmt` with a fresh copy of `defaultManagement`, restore
+the custom values unless `cbUnderQuoteReset`, then `Estimate.UpdateEstimateManagement(underQuoteReset,
+ndlLaborRate, ndlUnitPrice, ndlUnitLabor)`; (2) `PreserveLaborTemplate(cbLaborTemplate)` — unticked
+keeps the estimate's own template object (manual labor settings untouched), ticked re-selects the
+management template by name / id so `LoadEstimate` re-applies its modifiers; (3) hidden
+`cbUpgradeMechLabor` (deck-times column 4 → −1; not offered); (4) `cbLatestFormulas` —
+`Estimate.FormulasVersion` = the running assembly version.
+
+Web (same button, now a standing black button at the right of the step row; the amber dot marks
+management data newer than the bid's frozen copy): **Material pricing** = replace the bid's
+`adminSnapshot` + `warrantySnapshot` with the live admin / warranty data (`underlaymentPriceOverrides`
+— the web's SqFtCost custom values — live on the bid, so they survive unless **Reset Underlayment
+Price Quotes** clears them; Non-DL rows keep their per-row `unitCost` / `laborPerUnit` +
+`laborHours` / `laborRate` overrides unless the matching sub-option clears them —
+`resetNonDlOverrides`, custom rows untouched). **Labor template** = `applyTemplate(name)` over the
+bid's manual %s (sections, parapets, curbs, accessories, setup, inspection). **Latest formulas** =
+`SavedBidState.formulasVersion` (new: stamped `CURRENT_FORMULAS_VERSION`; the engine now computes
+under `bid.formulasVersion ?? current`, so older saves without a stamp keep computing as before)
+re-stamped to the current version; the box is disabled when already current. Nothing is written
+until the bid is saved. The pricing box pre-ticks when the snapshot is stale (legacy opens blank).

@@ -556,3 +556,52 @@ export function computeNonDl(args: ComputeNonDlArgs): NonDlResult {
     warnings,
   };
 }
+
+/**
+ * Legacy frmUpdateBidOptions sub-options (frmHome.btnUpdate_Click → Estimate.UpdateEstimateManagement
+ * flags): put the chosen per-row overrides back to the management (ref) defaults. Clearing an
+ * override makes the row read the ref value again — which, after the pricing refresh, is the
+ * CURRENT management figure. Custom (user-added) rows have no ref default and are left alone.
+ * Clearing "unit labor" also drops any typed hours, since legacy recomputes them from the unit.
+ */
+export function resetNonDlOverrides(
+  state: NonDlState,
+  opts: { unitPrice?: boolean; unitLabor?: boolean; laborRate?: boolean },
+): NonDlState {
+  const rows: NonDlState["rows"] = {};
+  for (const [g, byDesc] of Object.entries(state.rows) as [
+    NonDlGroup,
+    Record<string, NonDlRowState>,
+  ][]) {
+    const next: Record<string, NonDlRowState> = {};
+    for (const [desc, st] of Object.entries(byDesc)) {
+      const n: NonDlRowState = { ...st };
+      if (opts.unitPrice) delete n.unitCost;
+      if (opts.unitLabor) {
+        delete n.laborPerUnit;
+        delete n.laborHours;
+      }
+      if (opts.laborRate) delete n.laborRate;
+      next[desc] = n;
+    }
+    rows[g] = next;
+  }
+  return { rows, custom: state.custom };
+}
+
+/** How many ref rows carry each kind of override (for the update dialog's counts). */
+export function countNonDlOverrides(state: NonDlState): {
+  unitPrice: number;
+  unitLabor: number;
+  laborRate: number;
+} {
+  const out = { unitPrice: 0, unitLabor: 0, laborRate: 0 };
+  for (const byDesc of Object.values(state.rows)) {
+    for (const st of Object.values(byDesc ?? {})) {
+      if (st.unitCost !== undefined) out.unitPrice++;
+      if (st.laborPerUnit !== undefined || st.laborHours !== undefined) out.unitLabor++;
+      if (st.laborRate !== undefined) out.laborRate++;
+    }
+  }
+  return out;
+}

@@ -604,6 +604,11 @@ export interface BidInput {
   roofSystem: string; // "Duro-Last" | "Duro-Roof" | ...
   attachment: Attachment;
   /**
+   * Legacy Estimate.FormulasVersion: the formulas the bid was created under (version.ts). Absent
+   * = the current version. "Upgrade to Latest Formulas" (Update Bid Options) re-stamps it.
+   */
+  formulasVersion?: string;
+  /**
    * Membrane adhesive for fully-adhered systems ("Water Based Adhesive" / "Solvent Based
    * Adhesive"); defaults to Water Based. Drives the §2.4 membrane/wall adhesive units.
    */
@@ -1090,7 +1095,7 @@ export function curbIsoSqFt(
 
 export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): BuildResult {
   const warnings: string[] = [];
-  const version = CURRENT_FORMULAS_VERSION;
+  const version = bid.formulasVersion ?? CURRENT_FORMULAS_VERSION;
   const lt = admin.labor[comboKey(bid.roofSystem, bid.attachment)];
   if (!lt) {
     warnings.push(`No labor table for ${bid.roofSystem} / ${bid.attachment}; labor will be 0.`);
