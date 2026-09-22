@@ -9,6 +9,7 @@ import {
   listItemNumbers,
   upsertItemNumber,
 } from "@/lib/admin-item-numbers.functions";
+import { rowKeys } from "@/lib/catalog-row-key";
 import {
   getPricingCatalog,
   savePricingScreen,
@@ -150,10 +151,12 @@ export function CatalogEditor({
   const cols = draft.columns;
   // Legacy part-number columns hold text ("1225B", "1312 BF"): never a number input.
   const isPartCol = (c: string) => /part\s*#/i.test(c);
+  // Mappings address a row by its key (label, or "label [Subtype|Part #]" where the label
+  // repeats on the screen — catalog-row-key.ts), the same key the server resolves on apply.
+  const keyByIndex = rowKeys(cols, draft.rows);
+  const rowKeyOf = (row: Record<string, unknown>) => keyByIndex[draft.rows.indexOf(row)] ?? "";
   const itemNosFor = (row: Record<string, unknown>) =>
-    itemNumbers?.filter(
-      (m) => m.screen_id === selected.id && m.row_label === String(row[labelCol] ?? ""),
-    ) ?? [];
+    itemNumbers?.filter((m) => m.screen_id === selected.id && m.row_label === rowKeyOf(row)) ?? [];
   // The label column is "Description" on every legacy screen except Underlayment, whose
   // captured column list is ["Name", "Cost/Sq. Ft."]; fall back to the first column.
   const labelCol = cols.includes("Description") ? "Description" : (cols[0] ?? "Description");
@@ -344,7 +347,7 @@ export function CatalogEditor({
                   ))}
                   {branch === "duro_last" &&
                     (() => {
-                      const rowLabel = String(row[labelCol] ?? "");
+                      const rowLabel = rowKeyOf(row);
                       const priceCols = valueCols.filter((c) => !isPartCol(c));
                       const entry = itemEntry?.row === rowLabel ? itemEntry : null;
                       return (

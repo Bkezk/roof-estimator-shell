@@ -599,3 +599,67 @@ export function suggestSheetLine(
   }
   return best;
 }
+
+/* ------------------------------------------------------------------------------------------------
+ * Unit conversion — the catalog prices some screens per BOX / BAG / PACKAGE ("Price/Box" with a
+ * "Fasteners/Box" quantity) or per PART ("Price/Part" with "Parts/Bag"), while the Duro-Last
+ * list prices the same product per EA or per BG. A sheet price is converted to the catalog's
+ * basis before it is written, never copied across.
+ * ---------------------------------------------------------------------------------------------- */
+
+export type PriceBasis = "pack" | "each" | "other";
+
+/** What a catalog price column is per: "Price/Box" → pack, "Price/Part" → each, "Price" → other. */
+export function catalogPriceBasis(priceCol: string): PriceBasis {
+  const m = /\/\s*([a-z]+)\s*$/i.exec(priceCol);
+  const unit = (m?.[1] ?? "").toUpperCase();
+  if (["BOX", "BAG", "PACKAGE", "PKG", "PACK", "CASE", "CTN", "CARTON"].includes(unit))
+    return "pack";
+  if (["PART", "EACH", "EA", "PIECE", "PC"].includes(unit)) return "each";
+  return "other";
+}
+
+/** What a sheet "Unit of Measure" is per: EA → each, BX / BG / PK / CS → pack, FT / RL / GL → other. */
+export function sheetUnitBasis(unit: string): PriceBasis {
+  const u = unit.trim().toUpperCase();
+  if (["EA", "EACH", "PC", "PCS", "PIECE"].includes(u)) return "each";
+  if (["BX", "BOX", "BG", "BAG", "PK", "PKG", "PACK", "CS", "CASE", "CTN", "CARTON"].includes(u))
+    return "pack";
+  return "other";
+}
+
+export interface ConvertedPrice {
+  price: number;
+  /** Shown on the review when the figure is not the sheet price as written. */
+  note?: string;
+}
+
+/**
+ * Convert a sheet price to the catalog column's basis. Returns `{ error }` when the two bases
+ * differ and the row has no usable pack quantity — the review reports it and writes nothing.
+ */
+export function convertSheetPrice(args: {
+  priceCol: string;
+  sheetUnit: string;
+  sheetPrice: number;
+  packQty: number | null | undefined;
+  packCol?: string | undefined;
+}): ConvertedPrice | { error: string } {
+  const cat = catalogPriceBasis(args.priceCol);
+  const sh = sheetUnitBasis(args.sheetUnit);
+  if (cat === "other" || sh === "other" || cat === sh) return { price: args.sheetPrice };
+  const qty = args.packQty ?? null;
+  if (qty === null || !(qty > 0))
+    return {
+      error: `sheet prices per ${args.sheetUnit.toUpperCase()} but the catalog column is ${args.priceCol} and the row has no ${args.packCol ?? "pack quantity"}`,
+    };
+  if (cat === "pack" && sh === "each")
+    return {
+      price: Math.round(args.sheetPrice * qty * 1000) / 1000,
+      note: `${args.sheetPrice} per ${args.sheetUnit.toUpperCase()} × ${qty} ${args.packCol ?? "per pack"}`,
+    };
+  return {
+    price: Math.round((args.sheetPrice / qty) * 1000) / 1000,
+    note: `${args.sheetPrice} per ${args.sheetUnit.toUpperCase()} ÷ ${qty} ${args.packCol ?? "per pack"}`,
+  };
+}

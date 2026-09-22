@@ -55,6 +55,7 @@ import {
   readMembraneSheet,
   readSheetItems,
   buildNameIndex,
+  convertSheetPrice,
   suggestCatalogRow,
   suggestSheetLine,
   type CatalogRowRef,
@@ -93,6 +94,10 @@ function writeSavedLayout(v: SavedLayout) {
     // Private mode / blocked storage: the picks simply are not remembered.
   }
 }
+
+/** A change past ×2 or below ÷2 usually means a unit or pack-quantity problem, not a price move. */
+const bigSwing = (cur: number | null, next: number) =>
+  cur !== null && cur > 0 && (next > cur * 2 || next < cur / 2);
 
 const money = (v: number | null | undefined) =>
   v === null || v === undefined
@@ -317,7 +322,7 @@ export function PriceImportPage() {
   }, [membraneSheet, useMembrane, targetById]);
 
   /* ---------------- Plan (what "Apply" will write) ---------------- */
-  const { plan, membraneSkipped } = useMemo(() => {
+  const { plan, membraneSkipped, unitSkipped } = useMemo(() => {
     const out: PlannedUpdate[] = [];
     // Membrane matrix cells are $/sq ft. The membrane tab prices them directly and wins; a
     // roll-goods item number mapped onto a cell converts roll $ ÷ roll area (both roll widths of
@@ -326,6 +331,7 @@ export function PriceImportPage() {
     const membraneCells = new Set<string>();
     const cellKey = (row: string, col: string) => `${row}\u0000${col}`;
     const skipped: { item: SheetItem; mapping: ItemNumberMapping; reason: string }[] = [];
+    const unitSkipped: { item: SheetItem; mapping: ItemNumberMapping; reason: string }[] = [];
     for (const m of membraneMatch?.matched ?? []) {
       membraneCells.add(cellKey(m.row_label, m.price_col));
       out.push({
@@ -370,6 +376,20 @@ export function PriceImportPage() {
         });
         continue;
       }
+      // Box / bag / package columns vs the sheet's per-EA (or per-bag) price: convert on the
+      // row's pack quantity, or report — a per-each figure never lands in a per-box cell.
+      const target = targetById.get(mapping.screen_id);
+      const conv = convertSheetPrice({
+        priceCol: mapping.price_col,
+        sheetUnit: item.unit,
+        sheetPrice: item.price!,
+        packQty: target?.packs?.[mapping.row_label],
+        packCol: target?.pack_col,
+      });
+      if ("error" in conv) {
+        unitSkipped.push({ item, mapping, reason: conv.error });
+        continue;
+      }
       out.push({
         item_no: mapping.item_no,
         screen_id: mapping.screen_id,
@@ -379,16 +399,18 @@ export function PriceImportPage() {
         description: item.description,
         unit: item.unit,
         current: currentOf(mapping.screen_id, mapping.row_label, mapping.price_col),
-        next: item.price!,
+        next: conv.price,
+        ...(conv.note ? { note: conv.note } : {}),
       });
     }
-    return { plan: out, membraneSkipped: skipped };
+    return { plan: out, membraneSkipped: skipped, unitSkipped };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [match, membraneMatch, targetById]);
   const changed = plan.filter((p) => p.current !== p.next);
   const increases = changed.filter((p) => p.current !== null && p.next > p.current).length;
   const decreases = changed.filter((p) => p.current !== null && p.next < p.current).length;
   const newlyPriced = changed.filter((p) => p.current === null).length;
+  const swings = changed.filter((p) => bigSwing(p.current, p.next)).length;
 
   /* ---------------- Review & confirm ---------------- */
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -983,6 +1005,27 @@ export function PriceImportPage() {
                 </ul>
               </details>
             )}
+            {unitSkipped.length > 0 && (
+              <details className="rounded-md border border-amber-300 p-3" open>
+                <summary className="cursor-pointer text-sm font-semibold">
+                  Unit mismatch — not written ({unitSkipped.length})
+                </summary>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The catalog prices these per box / bag / package while the sheet prices per piece
+                  (or the reverse), and the row has no pack quantity to convert with. Enter the
+                  quantity on the catalog screen (Fasteners/Box, Parts/Bag, Parts/Package) and
+                  reload the file.
+                </p>
+                <ul className="mt-1 text-xs text-muted-foreground">
+                  {unitSkipped.map((u) => (
+                    <li key={`${u.item.rowIndex}|${u.mapping.row_label}|${u.mapping.price_col}`}>
+                      {u.item.itemNo} {u.item.description} → {u.mapping.row_label} ·{" "}
+                      {u.mapping.price_col}: {u.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {membraneSkipped.length > 0 && (
               <details className="rounded-md border border-amber-300 p-3">
                 <summary className="cursor-pointer text-sm font-semibold">
@@ -1128,7 +1171,9 @@ export function PriceImportPage() {
             <DialogDescription>
               From {fileName}. {plan.length} price cell{plan.length === 1 ? "" : "s"} will be
               written: {changed.length} change ({increases} up, {decreases} down, {newlyPriced}{" "}
-              newly priced), {plan.length - changed.length} already at the sheet price.
+              newly priced
+              {swings > 0 ? `; ${swings} flagged ⚠ as a likely unit problem` : ""}),{" "}
+              {plan.length - changed.length} already at the sheet price.
               {match && match.unmatched.length > 0
                 ? ` ${match.unmatched.length.toLocaleString()} sheet item(s) with no mapping are skipped.`
                 : ""}{" "}
@@ -1179,8 +1224,14 @@ export function PriceImportPage() {
                                 ? "text-green-700 dark:text-green-400"
                                 : "text-muted-foreground"
                           }`}
+                          title={
+                            bigSwing(p.current, p.next)
+                              ? "More than double or less than half the current price — check the units before applying"
+                              : undefined
+                          }
                         >
                           {pct(p.current, p.next)}
+                          {bigSwing(p.current, p.next) ? " ⚠" : ""}
                         </TableCell>
                       </TableRow>
                     ))}

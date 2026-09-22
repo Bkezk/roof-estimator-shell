@@ -34,7 +34,13 @@ export interface PriceTarget {
   price_cols: string[];
   /** Current catalog value per row label → price column (null when blank / non-numeric). */
   values: Record<string, Record<string, number | null>>;
+  /** The screen's pack-quantity column ("Fasteners/Box", "Parts/Bag", "Parts/Package"), if any. */
+  pack_col?: string;
+  /** Pack quantity per row label (units per box / bag / package) when the screen has one. */
+  packs?: Record<string, number | null>;
 }
+/** Columns that say how many pieces one priced pack holds. */
+const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
 
 const numOrNull = (v: unknown): number | null => {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -45,7 +51,7 @@ const numOrNull = (v: unknown): number | null => {
   return null;
 };
 
-const LABEL_COLS = new Set(["Description", "Name"]);
+import { findRowByKey, labelColOf, rowKeys } from "@/lib/catalog-row-key";
 const NON_PRICE_COLS = new Set([
   "Part #",
   "Open Part #",
@@ -90,19 +96,32 @@ export const listPriceTargets = createServerFn({ method: "GET" })
       }
       if (d.kind) continue; // Exceptional Metals: no Duro-Last item numbers.
       const cols = d.columns ?? [];
-      const labelCol = cols.find((c) => LABEL_COLS.has(c)) ?? cols[0] ?? "Description";
+      const labelCol = labelColOf(cols);
       const priceCols = cols.filter((c) => c !== labelCol && !NON_PRICE_COLS.has(c));
       const values: PriceTarget["values"] = {};
       const rows: string[] = [];
-      for (const r of d.rows ?? []) {
-        const label = String(r[labelCol] ?? "");
+      const packCol = PACK_QTY_COLS.find((c) => cols.includes(c));
+      const packs: Record<string, number | null> = {};
+      // Rows are addressed by their KEY: the label, or "label [Subtype|Part #]" where the label
+      // repeats on the screen (catalog-row-key.ts).
+      const keys = rowKeys(cols, d.rows ?? []);
+      for (const [i, r] of (d.rows ?? []).entries()) {
+        const label = keys[i]!;
         if (label === "") continue;
         rows.push(label);
         const v: Record<string, number | null> = {};
         for (const c of priceCols) v[c] = numOrNull(r[c]);
         values[label] = v;
+        if (packCol) packs[label] = numOrNull(r[packCol]);
       }
-      out.push({ screen_id: s.id, category: s.category, rows, price_cols: priceCols, values });
+      out.push({
+        screen_id: s.id,
+        category: s.category,
+        rows,
+        price_cols: priceCols,
+        values,
+        ...(packCol ? { pack_col: packCol, packs } : {}),
+      });
     }
     return out;
   });
@@ -190,7 +209,7 @@ export const addCatalogProduct = createServerFn({ method: "POST" })
     };
     if (d.kind) throw new Error("This screen has its own editor — add the product there");
     const cols = d.columns ?? [];
-    const labelCol = cols.find((c) => LABEL_COLS.has(c)) ?? cols[0] ?? "Description";
+    const labelCol = labelColOf(cols);
     if (!cols.includes(data.price_col) || data.price_col === labelCol)
       throw new Error(`"${data.price_col}" is not a price column on this screen`);
     const rows = d.rows ?? [];
@@ -308,7 +327,6 @@ export const applyPriceImport = createServerFn({ method: "POST" })
             continue;
           }
           const cols = d.columns ?? [];
-          const labelCol = cols.find((c) => LABEL_COLS.has(c)) ?? cols[0] ?? "Description";
           if (!cols.includes(u.price_col)) {
             missing.push({
               item_no: u.item_no,
@@ -316,7 +334,7 @@ export const applyPriceImport = createServerFn({ method: "POST" })
             });
             continue;
           }
-          const target = (d.rows ?? []).find((r) => String(r[labelCol] ?? "") === u.row_label);
+          const target = findRowByKey(cols, d.rows ?? [], u.row_label);
           if (!target) {
             missing.push({ item_no: u.item_no, reason: `row "${u.row_label}" not on ${screenId}` });
             continue;

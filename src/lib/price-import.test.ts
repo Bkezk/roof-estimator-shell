@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  convertSheetPrice,
   headerSignature,
   membranePerSqFt,
   nameMatchScore,
@@ -280,5 +281,54 @@ describe("price import — layout memory and name suggestions", () => {
     expect(suggestSheetLine("Term Bar White", items)?.item.itemNo).toBe("1225");
     expect(suggestSheetLine("Term Bar Tan", items)?.item.itemNo).toBe("1226");
     expect(suggestSheetLine("Walkway Pad", items)).toBeNull();
+  });
+});
+
+describe("price import — unit conversion to the catalog basis", () => {
+  it("multiplies a per-EA sheet price into a per-box column, divides a per-bag price into a per-part column", () => {
+    // Fasteners & Bits: 1 5/8" #12 screws, catalog Price/Box $598 at 1,000 per box; sheet $0.598 EA.
+    expect(
+      convertSheetPrice({
+        priceCol: "Price/Box",
+        sheetUnit: "EA",
+        sheetPrice: 0.598,
+        packQty: 1000,
+        packCol: "Fasteners/Box",
+      }),
+    ).toEqual({ price: 598, note: "0.598 per EA × 1000 Fasteners/Box" });
+    // Panduit: catalog Price/Part $0.88 at 50 per bag; sheet $44 per BG.
+    expect(
+      convertSheetPrice({
+        priceCol: "Price/Part",
+        sheetUnit: "BG",
+        sheetPrice: 44,
+        packQty: 50,
+        packCol: "Parts/Bag",
+      }),
+    ).toEqual({ price: 0.88, note: "44 per BG ÷ 50 Parts/Bag" });
+    // Same basis on both sides, or a per-foot / per-roll price: as written.
+    expect(
+      convertSheetPrice({
+        priceCol: "Price/Box",
+        sheetUnit: "BX",
+        sheetPrice: 149.5,
+        packQty: 200,
+      }),
+    ).toEqual({ price: 149.5 });
+    expect(
+      convertSheetPrice({ priceCol: "Price", sheetUnit: "EA", sheetPrice: 10.2, packQty: null }),
+    ).toEqual({ price: 10.2 });
+    expect(
+      convertSheetPrice({ priceCol: "Price/Box", sheetUnit: "FT", sheetPrice: 1.9, packQty: null }),
+    ).toEqual({ price: 1.9 });
+    // Different bases and no pack quantity: refused, never written per-each into a per-box cell.
+    const r = convertSheetPrice({
+      priceCol: "Price/Box",
+      sheetUnit: "EA",
+      sheetPrice: 0.21,
+      packQty: null,
+      packCol: "Fasteners/Box",
+    });
+    expect("error" in r && r.error).toMatch(/no Fasteners\/Box/);
   });
 });
