@@ -1,6 +1,13 @@
 /**
  * Inventory phase 1 — the stock ledger. Stock is keyed by the catalog cell the estimator prices
  * (screen › product row key › price column); on-hand is the sum of signed movements.
+ *
+ * Owner decisions (2026-09-23): quantities only, one location; stock is kept in the priced pack
+ * as a decimal and leftovers are counted in pieces of the pack (stock-units.ts); the same part
+ * number can sit on more than one product (legacy 1106 = Duro-Fleece Adhesive(cartridge) AND
+ * OlyBond500 SpotShot), so an item # only auto-picks when unique. Applying stock to a bid
+ * (phase 2/3) NEVER changes the bid's price — a bid is priced as if it used no inventory; stock
+ * only reduces what the ordering summary says to buy.
  */
 import { createServerFn } from "@tanstack/react-start";
 import {

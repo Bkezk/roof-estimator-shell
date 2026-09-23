@@ -280,7 +280,11 @@ function AddMovementCard(props: {
         : [],
     [itemQuery, props.itemNumbers],
   );
-  const exactItem = itemMatches.find((m) => m.item_no.toLowerCase() === itemQuery);
+  // Legacy carries the same part number on more than one product (1106 = Duro-Fleece
+  // Adhesive(cartridge) AND OlyBond500 SpotShot): an exact match only auto-picks when unique.
+  const exactMatches = itemMatches.filter((m) => m.item_no.toLowerCase() === itemQuery);
+  const exactItem = exactMatches.length === 1 ? exactMatches[0] : undefined;
+  const ambiguous = exactMatches.length > 1;
   const pickItem = (m: ItemNumberRow) => {
     setTarget({ screen_id: m.screen_id, row_label: m.row_label, price_col: m.price_col });
     setItemNo(m.item_no);
@@ -355,25 +359,34 @@ function AddMovementCard(props: {
               onChange={(e) => {
                 const v = e.target.value;
                 setItemNo(v);
-                const hit = props.itemNumbers.find(
+                const hits = props.itemNumbers.filter(
                   (m) => m.item_no.toLowerCase() === v.trim().toLowerCase(),
                 );
-                if (hit) pickItem(hit);
+                if (hits.length === 1) pickItem(hits[0]!);
               }}
             />
             <datalist id="inventory-item-numbers">
-              {props.itemNumbers.map((m) => (
-                <option
-                  key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}
-                  value={m.item_no}
-                >
-                  {m.row_label} · {priceColLabel(m.price_col)}
-                </option>
-              ))}
+              {[...new Map(props.itemNumbers.map((m) => [m.item_no, m])).entries()].map(
+                ([no, m]) => {
+                  const all = props.itemNumbers.filter((x) => x.item_no === no);
+                  return (
+                    <option key={no} value={no}>
+                      {all.length > 1
+                        ? all.map((x) => x.row_label).join(" / ")
+                        : `${m.row_label} · ${priceColLabel(m.price_col)}`}
+                    </option>
+                  );
+                },
+              )}
             </datalist>
             {exactItem ? (
               <span className="text-xs text-green-700 dark:text-green-400">
                 ✓ {exactItem.row_label} · {priceColLabel(exactItem.price_col)}
+              </span>
+            ) : ambiguous ? (
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                Item # {exactMatches[0]!.item_no} is on {exactMatches.length} products — pick one
+                below.
               </span>
             ) : itemQuery && itemMatches.length === 0 ? (
               <span className="text-xs text-destructive">
@@ -459,11 +472,6 @@ function AddMovementCard(props: {
               readOnly
               title="Set by the product's catalog entry so every entry for a product adds up in the same unit"
             />
-            {packsPreview !== null && piece && (
-              <p className="text-[11px] text-muted-foreground">
-                = {describeStock(packsPreview, unit, piece)}
-              </p>
-            )}
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Reason</Label>
@@ -504,6 +512,11 @@ function AddMovementCard(props: {
             </Select>
           </div>
         </div>
+        {packsPreview !== null && piece && (
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Records as {describeStock(packsPreview, unit, piece)}
+          </p>
+        )}
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1">
             <Label className="text-[11px]">Counted (what was physically there)</Label>
