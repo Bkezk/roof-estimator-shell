@@ -2,16 +2,18 @@
 
 Sep 20, 2026 · revised Sep 23, 2026 from inside the estimator repo (`roof-estimator-shell`).
 This revision replaces the earlier draft. It orders the work the way the owner wants it
-(Prospecting first, then Takeoff, CRM last), describes what already exists so no module
-re-invents it, and states the rules that keep the bid software stable while the rest grows.
+(Prospecting first, then Takeoff, then CRM; the customer portal last and only if wanted),
+describes what already exists so no module re-invents it, and states the rules that keep the
+bid software stable while the rest grows. Free data sources only until the owner says
+otherwise.
 
 ## Purpose and principles
 
 One portal for the roofing company. The bid tool (Bid-O-Matic, the Duro-Last estimator that
 replaced Bid-Advantage) is live and at parity with the legacy program. Around it, in this
 order: prospecting (territory roof database, condition scores, triggers, report cards), plan
-and aerial takeoff (replacing PlanSwift), a customer roof portal, and last a CRM. Each module
-works on its own; the flows between them are shortcuts, never requirements.
+and aerial takeoff (replacing PlanSwift), a CRM, and last, if at all, a customer roof portal.
+Each module works on its own; the flows between them are shortcuts, never requirements.
 
 Rules every agent follows:
 
@@ -66,10 +68,10 @@ Six modules, in build order. "Alone" is what it must do with nothing else in the
 | --- | --- | --- | --- | --- |
 | — | **Estimator** (built) | Price a Duro-Last or non-DL job from typed quantities; catalogs; proposal | Bid → Job on award (a bid status today; a `jobs` row later); bid value → CRM opportunity (last) | Takeoff quantities prefill inputs; Building prefills address, size, roof type |
 | — | **Inventory** (built) | Stock by item number, movements ledger, order list per bid | Order list → purchase list (print / Excel today; supplier order later) | Bids pull from stock; received stock from deliveries |
-| 1 | **Prospecting** | Territory roof database on a map; owner of record; roof clips; condition scores; nightly triggers (storms, sales, permits, bid boards); tasks-lite; report-card PDFs; mail queue | Building → Estimator (prefill); Building → aerial takeoff (once Takeoff exists); Building → CRM contact/opportunity (last) | Won / installed bids return as "own book" roofs with warranty dates |
-| 2 | **Takeoff** | Open a PDF plan sheet, calibrate scale from one known dimension, draw areas / lines / counts, export quantities | Takeoff → Estimator (quantities map to estimator inputs, live) | Building → aerial takeoff on KyFromAbove imagery, scale already known |
-| 3 | **Roof Portal** (customer-facing) | A customer logs in to see their roofs, warranties, inspection photos, repair history, and request service | Service request → task (Prospecting tasks-lite until CRM exists) → Estimator | Installed bids and inspections publish here |
-| 4 | **CRM** (last) | Contacts, companies, opportunities, activities, tasks, lead source; Bids and Service pipelines; follow-up sequences; maintenance agreements; job costing; win/loss | Opportunity → Estimator; won → Job | Any module creates an activity or opportunity against a building or contact; Prospecting tasks-lite migrates into CRM tasks |
+| 1 | **Prospecting** | Territory roof database on a map (core counties first); owner of record; roof clips; condition scores; nightly triggers from free sources (storms, sales, bid boards); tasks-lite; report-card PDFs printed and mailed in-house | Building → Estimator (prefill); Building → aerial takeoff (once Takeoff exists); Building → CRM contact/opportunity (last) | Won / installed bids return as "own book" roofs with warranty dates |
+| 2 | **Takeoff** | Open a PDF plan sheet, calibrate scale from one known dimension, draw areas / lines / counts, export quantities | **Create bid from takeoff**: every geometry-driven estimator input filled from the drawing, the rest from bid defaults, so the bid is complete without re-typing | Building → aerial takeoff on KyFromAbove imagery, scale already known |
+| 3 | **CRM** | Contacts, companies, opportunities, activities, tasks, lead source; Bids and Service pipelines; follow-up sequences; maintenance agreements; job costing; win/loss | Opportunity → Estimator; won → Job | Any module creates an activity or opportunity against a building or contact; Prospecting tasks-lite migrates into CRM tasks |
+| 4 | **Roof Portal** (customer-facing, optional, last) | A customer logs in to see their roofs, warranties, inspection photos, repair history, and request service | Service request → CRM service ticket → Estimator | Installed bids and inspections publish here |
 
 Takeoff is still the hinge for the automated path, but Prospecting does not wait for it:
 a **budgetary range from the footprint** (building sqft × $/sq ft bands taken from past
@@ -101,9 +103,9 @@ foreign key is nullable; that is what keeps each module standalone. Geometry as 
 | `report_cards` | 2 | Prospecting | building_id, PDF ref, imagery vintage, budgetary range, mailed_at, mail provider id | building_id |
 | `takeoffs` | 3 | Takeoff | underlay type (pdf or aerial), file ref, scale calibration, objects (geometry + type), computed quantities (JSON, versioned) | building_id, roof_id, bid_id |
 | `jobs` | 3 | Estimator | bid_id, status, start/complete dates, warranty registered | bid_id, roof_id |
-| `companies`, `contacts` | 5 | Roof Portal / CRM | name, type, address; name, role, phone, email, company_id, source | company_id |
-| `service_tickets` | 5 | Roof Portal / CRM | kind, reported_by, photos, priority, SLA due, status, quote amount, source | building_id, roof_id, contact_id, bid_id, job_id |
-| `opportunities`, `activities`, `follow_up_sequences`, `maintenance_agreements`, `job_costs`, `bid_outcomes` | 6 | CRM | as in the earlier draft | building_id, contact_id, bid_id, job_id |
+| `companies`, `contacts` | 5 | CRM | name, type, address; name, role, phone, email, company_id, source | company_id |
+| `service_tickets` | 5 | CRM | kind, reported_by, photos, priority, SLA due, status, quote amount, source | building_id, roof_id, contact_id, bid_id, job_id |
+| `opportunities`, `activities`, `follow_up_sequences`, `maintenance_agreements`, `job_costs`, `bid_outcomes` | 5 | CRM | as in the earlier draft | building_id, contact_id, bid_id, job_id |
 
 Conventions carried over from the estimator: `created_by` and `updated_at` on every table
 (with the `update_updated_at_column` trigger), RLS by page flag, a migration file in
@@ -119,11 +121,10 @@ flowchart LR
   E -->|award| J[Job]
   J -->|installed| R[Roof asset<br/>own book]
   R -->|warranty clock| P
-  R -->|publish| RP[Roof Portal]
-  RP -->|service request| TK[Task]
-  TK --> E
-  P -->|contact, last| C[CRM]
+  P -->|contact| C[CRM]
   C -->|request bid| E
+  R -.->|publish, optional| RP[Roof Portal]
+  RP -.->|service request| C
 ```
 
 How a handoff is built, the same way every time:
@@ -155,7 +156,7 @@ forces it.
 | Takeoff canvas | pdf.js to render sheets, Konva for drawing on plans, MapLibre for drawing on aerial tiles | Same object model on both underlays |
 | Map | MapLibre with KyFromAbove as a tile source | Free, 3-inch, statewide |
 | Scoring | Claude vision via the Anthropic API for tier 1; a fine-tuned classifier on the worker for tier 2 | Both write `condition_score` + `score_version` |
-| Mail | Lob API for report cards | Automates the one physical step |
+| Mail | None for now: report cards are PDFs printed and mailed in-house; a mail API is a later, paid option | Free sources only |
 | Telephony | Out of scope for now | — |
 
 Access: `profiles.role` stays admin / user; `profiles.access` gains `prospect`, `takeoff`,
@@ -184,12 +185,12 @@ listed after the table).
 | --- | --- | --- |
 | 0 — Guardrails + link columns | CI workflow, branch/PR rule, module folders and lint rule, `MODULES.md`, feature flags; migration adding nullable link columns to `bids`; PostGIS on | CI blocks a failing commit; estimator rebuilds two saved bids to the same numbers |
 | 1 — Prospecting A: buildings | Parcel ingest for the core counties (PVA / Regrid fallback), Microsoft footprints where PVA has none, KyFromAbove clips per building, map view with search and filters, building page, own-book import from won bids, tasks-lite | Every commercial parcel in the core counties has a building row with a footprint and a clip; sales can open a building and see what we know |
-| 2 — Prospecting B: scores, triggers, report cards | Tier-1 Claude scoring on all clips with 100 hand-labeled roofs held out; nightly SPC, HailTrace, Shovels, and PVA-transfer ingestion into `triggers` → tasks; footprint-based budgetary range; report-card PDF → Lob → task "call in 7 days" | Scoring precision on the held-out set reported and accepted; triggers create tasks with no manual step; first batch of 50 report cards mailed with response tracked |
-| 3 — Takeoff on plans | PDF upload, one-point scale, area / line / count tools, quantity export, object → estimator input mapping, live bid update; `jobs` table | An estimator measures a real plan set and produces a bid without opening PlanSwift |
+| 2 — Prospecting B: scores, triggers, report cards | Tier-1 Claude scoring on all clips, checked against 100 roofs an estimator graded by hand; nightly NOAA storm reports, PVA ownership transfers, and SAM.gov bid notices into `triggers` → tasks; footprint-based budgetary range; report-card PDF → print queue → task "call in 7 days" | Scoring agreement with the hand-graded roofs reported and accepted; triggers create tasks with no manual step; first batch of 50 report cards mailed with response tracked |
+| 3 — Takeoff on plans | PDF upload, one-point scale, area / line / count tools, quantity export, object → estimator input mapping for every geometry-driven input, "Create bid from takeoff", live bid update; `jobs` table | An estimator measures a real plan set and the resulting bid is complete and correct without re-typing a quantity, checked against the same job priced by hand |
 | 4 — Aerial takeoff | The phase-3 tools on KyFromAbove tiles with scale already known; auto-takeoff from the footprint replaces the budgetary range in report cards | A report card carries a measured number with no human drawing |
-| 5 — Roof Portal | Customer accounts (`portal` flag), companies and contacts, roofs, warranties, inspection photos, service requests → tickets → tasks | One customer account live with real data |
-| 6 — CRM | Opportunities, activities, Bids and Service pipelines, follow-up sequences, maintenance agreements, job costing (estimated-vs-actual by the ledger's labor categories), win/loss capture and reporting; tasks-lite folds in | Sales logs a full week in the CRM with nothing in the old system |
-| 7 — Tier-2 model, plan AI | Fine-tuned classifier; vintage diffs; AI roof detection on plans | Classifier beats tier 1 on the same held-out set |
+| 5 — CRM | Companies, contacts, opportunities, activities, service tickets, Bids and Service pipelines, follow-up sequences, maintenance agreements, job costing (estimated-vs-actual by the ledger's labor categories), win/loss capture and reporting; tasks-lite folds in | Sales logs a full week in the CRM with nothing in the old system |
+| 6 — Tier-2 model, plan AI | Fine-tuned classifier; vintage diffs; AI roof detection on plans | Classifier beats tier 1 on the same hand-graded roofs |
+| 7 — Roof Portal (optional) | Customer accounts (`portal` flag), roofs, warranties, inspection photos, service requests → CRM tickets | Only if wanted; one customer account live with real data |
 
 Phase 3 can start while phase 2 is in flight; they share only the spine. Phase 4 waits on
 phase 3 because it reuses the canvas.
@@ -212,8 +213,9 @@ the parity docs like any other.
 ## Data sources and integrations
 
 Status as given in the Sep 20 draft (vendor pages), not re-verified here. Free-and-programmatic
-sources carry the pipeline; paid ones are added per phase; "manual" sources are read by a person
-or parsed by Claude on a schedule. Telephony is dropped.
+sources carry the pipeline. Owner decision (Sep 23): **free sources only for now**; the paid
+rows stay listed as later options and nothing is built against them. "Manual" sources are read
+by a person or parsed by Claude on a schedule. Telephony is dropped.
 
 | Source | Used for | Access | Cost | Phase |
 | --- | --- | --- | --- | --- |
@@ -221,14 +223,14 @@ or parsed by Claude on a schedule. Telephony is dropped.
 | County PVA parcels | Owner of record, footprint, sqft, land use, transfers | ArcGIS MapServer query for published counties; Regrid API for the rest | Free / paid fallback | 1 |
 | Microsoft building footprints | Roof polygons where PVA has none | Bulk download | Free | 1 |
 | NOAA SPC storm reports | Hail / wind triggers | Daily CSV | Free | 2 |
-| HailTrace | Verified hail swaths as polygons | API key | Paid | 2 |
-| Shovels | Permit triggers (rooftop HVAC, re-roofs by competitors) | REST API | Paid | 2 |
+| HailTrace | Verified hail swaths as polygons | API key | Paid | Later option |
+| Shovels | Permit triggers (rooftop HVAC, re-roofs by competitors) | REST API | Paid | Later option (free: county permit portals, read manually) |
 | SAM.gov | Federal bid triggers | Public API | Free | 2 |
 | OpenCorporates | LLC unmasking | API | Free tier / paid | 2 |
-| Anthropic API | Tier-1 scoring, PDF parsing of facility plans | API | Per call | 2 |
+| Anthropic API | Tier-1 scoring, PDF parsing of facility plans | API | Per call (the one paid service the owner already uses) | 2 |
 | KDE district facility plans | School roof projects years ahead | PDFs, parsed quarterly | Free | 2 |
-| Lob | Mailing report cards | API | Per piece | 2 |
-| Apollo | Facility-manager contacts | REST API | Paid | 5–6 |
+| Lob | Mailing report cards | API | Per piece | Later option (print and mail in-house first) |
+| Apollo | Facility-manager contacts | REST API | Paid | Later option |
 | Reonomy | Owner contacts and portfolios | API, enterprise only | Quote | Optional |
 | Nearmap | Fresher imagery and pre-built roof condition scores | AI Feature API | Quote | Optional, after 2 |
 | Dodge / ConstructConnect | Commercial bid boards | Subscription UI | Paid | Manual |
@@ -236,24 +238,40 @@ or parsed by Claude on a schedule. Telephony is dropped.
 
 ## Open decisions
 
-Answer these before the phase-1 migration is written; each changes the schema or the agent
-brief.
+Owner answers of Sep 23 are recorded inline; the rest stay open.
 
-- [ ] **Core counties.** Which counties are the initial territory for parcel ingest and imagery
-  clipping?
-- [ ] **Own-book seed.** Won bids in the database seed `roofs` automatically. For older jobs:
-  .bax files (the importer needs two or three real ones to build against), a spreadsheet, or
-  both?
-- [ ] **Budgetary range bands.** Which past bids define the $/sq ft bands by roof type and size
-  for report cards before Takeoff exists?
-- [ ] **Labeling owner.** Which estimator grades the 100 held-out roofs for the scoring test, and
-  by when?
-- [ ] **Paid sources at launch.** Which of HailTrace, Shovels, Lob are approved for the phase-2
-  budget?
-- [ ] **Portal timing.** Phase 5 as ordered, or pulled forward as a sales tool once own-book
-  roofs exist?
-- [ ] **Takeoff quantity map.** Which estimator inputs should takeoff objects drive first?
-  Suggested minimum: section area + perimeter, parapet LF by height, curbs, drains, pipes,
-  walk pad LF, gutters / downspouts LF.
+- [x] **Core counties.** Owner: rank Kentucky's counties by number of commercial buildings and
+  take the top ten. The county-level figures could not be pulled from the estimator's build
+  container (the Census and state GIS hosts are blocked there), so the ranking is the FIRST job
+  of phase 1: the worker counts commercial-use parcels per county from the PVA services (the
+  same query the ingest needs anyway) and the top ten become the core counties. Provisional
+  list to start design work, in the order the available evidence supports: Jefferson (PVA
+  reports 21,000+ commercial properties), Fayette, Kenton (about 5,000 commercial and
+  industrial), Boone (about 2,500), Warren, then, unverified, Campbell, Daviess, Hardin,
+  Madison, McCracken (2,076 employer establishments in 2022). Replace with the counted list
+  before clipping imagery.
+- [x] **Own-book seed.** Won bids seed `roofs` automatically. Older jobs: owner is gathering
+  .bax files; the importer is built against the first two or three received.
+- [ ] **Budgetary range bands.** A report card carries a rough price before anyone measures
+  the roof. To produce it, the module needs typical dollars per square foot from our own past
+  bids, grouped by roof type and size band (for example, mechanically fastened, 20,000 to
+  50,000 sq ft). The question is which past bids are representative enough to set those
+  bands. Default if unanswered: every won bid in the database, refreshed nightly.
+- [ ] **Hand-graded roofs (was "labeling owner").** Before the AI condition score drives any
+  outreach, we measure it: an estimator grades 100 roofs by eye from the same imagery (good /
+  fair / poor), the model never sees those 100 while it is tuned, and we report how often it
+  agrees with the estimator. The question is who does that grading, and by when.
+- [x] **Paid sources.** Owner: free sources only for now. Storm triggers from NOAA SPC, bid
+  notices from SAM.gov, ownership changes from PVA transfers, permits read manually from
+  county portals, report cards printed and mailed in-house. The Anthropic API for scoring is
+  the one metered service, already in use.
+- [x] **Portal timing.** Owner: the customer portal is last and may not be built. CRM moves
+  ahead of it.
+- [x] **Takeoff quantity map.** Owner: a takeoff must complete a bid. Every estimator input
+  that comes from geometry is driven by the drawing (section area and perimeter with marked
+  sides, parapet feet by height, curbs with dimensions, drains, pipes, walk pad feet, gutter
+  and downspout feet, tear-off area); inputs that are not geometry (roof system, attachment,
+  deck type, existing roof, warranty, markup) come from the bid defaults and are shown for
+  confirmation. "Create bid from takeoff" is the phase-3 exit test.
 - [ ] **CRM scope, when its turn comes.** Build the pipeline layer here (default) or wire an
-  off-the-shelf commercial-roofing CRM and sync? Deferred until phase 6 is next.
+  off-the-shelf commercial-roofing CRM and sync? Deferred until phase 5 is next.
