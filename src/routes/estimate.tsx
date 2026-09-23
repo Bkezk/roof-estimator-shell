@@ -1529,6 +1529,28 @@ function EstimatePage() {
               </button>
             );
           })}
+          {/* Save is always in reach here (owner: no scrolling to save). */}
+          <Button
+            className="ml-auto"
+            onClick={handleSave}
+            disabled={saving || readOnly}
+            title={
+              readOnly
+                ? "Read only"
+                : dirty
+                  ? "Unsaved changes — saves the bid and stays on this step"
+                  : "Saves the bid and stays on this step"
+            }
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
+            {dirty && !saving && (
+              <span
+                className="ml-1 h-2 w-2 rounded-full bg-amber-400"
+                aria-label="Unsaved changes"
+              />
+            )}
+          </Button>
           {/* Legacy frmHome.btnUpdate ("Update Pricing & Labor"): a standing button, set apart
               on the right in black; the dot marks management data newer than the bid's copy. */}
           <button
@@ -1540,7 +1562,7 @@ function EstimatePage() {
                 ? `Management pricing / labor has changed since this bid was priced${frozenAsOf ? ` (${new Date(frozenAsOf).toLocaleDateString()})` : ""}`
                 : "Update this bid from the current management data, template or formulas"
             }
-            className="ml-auto flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/85 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
+            className="flex items-center gap-2 rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/85 disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-white/90"
           >
             <RefreshCw className="h-4 w-4" />
             Update pricing &amp; labor
@@ -4522,7 +4544,7 @@ function EstimatePage() {
                               </TableHead>
                               <TableHead className="text-right">On hand</TableHead>
                               <TableHead className="text-right">To buy</TableHead>
-                              <TableHead className="w-[210px]">Pull / return</TableHead>
+                              <TableHead className="w-[250px]">Use inventory</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -4613,7 +4635,7 @@ function EstimatePage() {
                                                     disabled={!bidId || readOnly}
                                                     title={
                                                       bidId
-                                                        ? `Up to ${describeOrderQty(l, l.pullable)} (${l.unit})`
+                                                        ? `How much of the ${describeOrderQty(l, l.onHand ?? 0)} in inventory to use on this job (up to ${describeOrderQty(l, l.pullable)})`
                                                         : "Save the bid first"
                                                     }
                                                   />
@@ -4638,7 +4660,7 @@ function EstimatePage() {
                                                       );
                                                     }}
                                                   >
-                                                    Pull
+                                                    Use from inventory
                                                   </Button>
                                                 </>
                                               )}
@@ -4650,12 +4672,12 @@ function EstimatePage() {
                                                   disabled={
                                                     !bidId || readOnly || pulling === pullKey(l)
                                                   }
-                                                  title="Put everything this bid pulled back on the shelf"
+                                                  title="Put everything this bid took from inventory back on the shelf"
                                                   onClick={() =>
                                                     void recordPull(l, "released", l.pulled)
                                                   }
                                                 >
-                                                  Return
+                                                  Put back
                                                 </Button>
                                               )}
                                             </div>
