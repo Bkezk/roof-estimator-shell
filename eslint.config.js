@@ -36,5 +36,57 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Module boundaries (MODULES.md rule 2): the estimator and prospecting never import each
+  // other. They share only the `bids` link columns and plain URL values.
+  {
+    files: [
+      "src/routes/estimate.tsx",
+      "src/routes/bids.tsx",
+      "src/routes/proposal.tsx",
+      "src/lib/engine/**",
+      "src/lib/bids.functions.ts",
+      "src/lib/proposal-bid.ts",
+      "src/lib/combine-bids.ts",
+      "src/components/*-screen.tsx",
+      "src/components/*-screens.tsx",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/prospect*", "@/components/prospect*", "**/prospect*"],
+              message: "Estimator code never imports prospecting code (MODULES.md).",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/prospect*", "src/components/prospect*", "src/routes/prospect*"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "@/lib/engine/*",
+                "@/lib/bids.functions",
+                "@/lib/proposal-bid",
+                "@/lib/combine-bids",
+                "@/routes/estimate",
+                "@/components/*-screen",
+                "@/components/*-screens",
+              ],
+              message: "Prospecting code never imports estimator code (MODULES.md).",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslintPluginPrettier,
 );

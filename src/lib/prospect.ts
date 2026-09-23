@@ -9,7 +9,30 @@
  * - `ownBookFromBid`: an accepted bid becomes a building plus one roof per section ("own book"),
  *   so installed roofs re-enter prospecting with their warranty clock.
  */
-import type { SavedBidState } from "@/lib/proposal-bid";
+/**
+ * The slice of a saved bid's JSON that own-book seeding reads. Declared here on purpose:
+ * prospecting reads bid DATA (rows in `bids`) but never imports estimator code.
+ */
+export interface BidDataForOwnBook {
+  roofSystem?: string | null;
+  startDate?: string | null;
+  warrantyName?: string | null;
+  customer: {
+    name?: string;
+    projectAddress?: string;
+    projectAddress2?: string;
+    jobCity?: string;
+    jobState?: string;
+    jobZip?: string;
+    jobCityStZip?: string;
+  };
+  sections: Array<{
+    name?: string;
+    length?: number;
+    width?: number;
+    roofSystem?: string | null;
+  }>;
+}
 
 export interface Rect {
   width: number;
@@ -84,7 +107,7 @@ export interface OwnBookSeed {
  * the warranty name when it carries one.
  */
 export function ownBookFromBid(
-  saved: Pick<SavedBidState, "customer" | "sections" | "roofSystem" | "startDate" | "warrantyName">,
+  saved: BidDataForOwnBook,
   meta: { name: string; updatedAt: string; installer?: string | undefined },
 ): OwnBookSeed {
   const c = saved.customer;

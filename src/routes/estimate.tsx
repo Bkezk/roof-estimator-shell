@@ -27,8 +27,6 @@ import {
   getFastenerLookup,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
-import { getBuilding } from "@/lib/prospect.functions";
-import { equivalentRectangle } from "@/lib/prospect";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -156,20 +154,52 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
+/** /estimate search params: a saved bid, a combine list, or a prefill for a new bid. */
+export interface EstimateSearch {
+  bid?: string;
+  combine?: string;
+  building?: string;
+  pfName?: string;
+  pfOwner?: string;
+  pfAddr?: string;
+  pfAddr2?: string;
+  pfCity?: string;
+  pfState?: string;
+  pfZip?: string;
+  pfW?: number;
+  pfL?: number;
+}
+
 export const Route = createFileRoute("/estimate")({
   head: () => ({ meta: [{ title: "Estimator — Bid-O-Matic" }] }),
-  validateSearch: (
-    s: Record<string, unknown>,
-  ): { bid?: string; combine?: string; building?: string } => {
+  validateSearch: (s: Record<string, unknown>): EstimateSearch => {
     const b = s["bid"];
     const c = s["combine"];
-    const g = s["building"];
+    const str = (k: keyof EstimateSearch) => {
+      const v = s[k];
+      return typeof v === "string" && v ? { [k]: v } : {};
+    };
+    const num = (k: "pfW" | "pfL") => {
+      const v = Number(s[k]);
+      return Number.isFinite(v) && v > 0 ? { [k]: v } : {};
+    };
     return {
       ...(typeof b === "string" ? { bid: b } : {}),
       // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
       ...(typeof c === "string" && c ? { combine: c } : {}),
-      // Prospecting: start a NEW bid from a building (address + one section from its roof area).
-      ...(typeof g === "string" && g ? { building: g } : {}),
+      // Generic prefill for a NEW bid (another module hands the estimator plain values in the
+      // URL — the estimator imports nothing from it): the linked building id (bids.building_id),
+      // client / job-site fields, and one section's width × length.
+      ...str("building"),
+      ...str("pfName"),
+      ...str("pfOwner"),
+      ...str("pfAddr"),
+      ...str("pfAddr2"),
+      ...str("pfCity"),
+      ...str("pfState"),
+      ...str("pfZip"),
+      ...num("pfW"),
+      ...num("pfL"),
     };
   },
   component: EstimatePage,
@@ -337,7 +367,8 @@ function EstimatePage() {
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { bid: bidParam, combine: combineParam, building: buildingParam } = Route.useSearch();
+  const search = Route.useSearch();
+  const { bid: bidParam, combine: combineParam } = search;
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
   const { session, profile } = useAuth();
@@ -679,45 +710,41 @@ function EstimatePage() {
   const [toLaborOpen, setToLaborOpen] = useState(false);
   const [toLaborPct, setToLaborPct] = useState(0);
 
-  // Prospecting link: the building this bid was started from (or linked to). Saved on bids as
-  // the nullable building_id spine column; the estimator never edits the building.
+  // The building this bid was started from (or linked to): bids.building_id, a nullable spine
+  // column. The estimator only stores the id; it never reads or edits the building.
   const [linkedBuildingId, setLinkedBuildingId] = useState<string | null>(null);
-  const getBuildingFn = useServerFn(getBuilding);
-  const { data: fromBuilding } = useQuery({
-    queryKey: ["building", buildingParam],
-    queryFn: () => getBuildingFn({ data: { id: buildingParam! } }),
-    enabled: authed && !!buildingParam && !bidParam,
-  });
-  const buildingApplied = useRef<string | null>(null);
+  // Generic prefill of a NEW bid from URL values (see EstimateSearch), applied once.
+  const prefillApplied = useRef(false);
   useEffect(() => {
-    if (!fromBuilding || bidParam || buildingApplied.current === fromBuilding.building.id) return;
-    buildingApplied.current = fromBuilding.building.id;
-    const b = fromBuilding.building;
-    setLinkedBuildingId(b.id);
-    setBidName(b.name || b.address1 || "Untitled bid");
+    if (bidParam || prefillApplied.current) return;
+    const p = search;
+    const has = p.building || p.pfName || p.pfAddr || p.pfCity || p.pfOwner || (p.pfW && p.pfL);
+    if (!has) return;
+    prefillApplied.current = true;
+    if (p.building) setLinkedBuildingId(p.building);
+    if (p.pfName || p.pfAddr) setBidName(p.pfName || p.pfAddr || "Untitled bid");
     setCustomer((c) => ({
       ...c,
-      name: b.owner_name || b.name || c.name,
-      projectAddress: b.address1,
-      ...(b.address2 ? { projectAddress2: b.address2 } : {}),
-      ...(b.city ? { jobCity: b.city } : {}),
-      jobState: b.state,
-      ...(b.zip ? { jobZip: b.zip } : {}),
-      jobCityStZip: [b.city, [b.state, b.zip].filter(Boolean).join(" ")]
-        .filter((x) => x && x.trim())
-        .join(", "),
+      name: p.pfOwner || p.pfName || c.name,
+      ...(p.pfAddr ? { projectAddress: p.pfAddr } : {}),
+      ...(p.pfAddr2 ? { projectAddress2: p.pfAddr2 } : {}),
+      ...(p.pfCity ? { jobCity: p.pfCity } : {}),
+      ...(p.pfState ? { jobState: p.pfState } : {}),
+      ...(p.pfZip ? { jobZip: p.pfZip } : {}),
+      ...(p.pfCity || p.pfState || p.pfZip
+        ? {
+            jobCityStZip: [p.pfCity, [p.pfState, p.pfZip].filter(Boolean).join(" ")]
+              .filter((x) => x && x.trim())
+              .join(", "),
+          }
+        : {}),
     }));
-    // One section with the roof's area (and perimeter when known) as an equivalent rectangle:
-    // the engine keeps pricing width × length exactly as a typed section.
-    const area = b.roof_sqft ?? b.building_sqft ?? 0;
-    if (area > 0) {
-      const r = equivalentRectangle(area, b.perimeter_ft);
-      setSections([
-        newSection({ ...sectionDefaults, name: "Roof", width: r.width, length: r.length }),
-      ]);
+    // One section with the given width × length — the engine prices it as any typed section.
+    if (p.pfW && p.pfL) {
+      setSections([newSection({ ...sectionDefaults, name: "Roof", width: p.pfW, length: p.pfL })]);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromBuilding, bidParam]);
+  }, [search, bidParam]);
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({

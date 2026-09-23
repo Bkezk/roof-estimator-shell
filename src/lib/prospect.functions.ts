@@ -10,8 +10,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
-import { ownBookFromBid } from "@/lib/prospect";
-import type { SavedBidState } from "@/lib/proposal-bid";
+import { ownBookFromBid, type BidDataForOwnBook } from "@/lib/prospect";
 
 export type BuildingRow = Database["public"]["Tables"]["buildings"]["Row"];
 export type RoofRow = Database["public"]["Tables"]["roofs"]["Row"];
@@ -348,7 +347,7 @@ export const seedOwnBook = createServerFn({ method: "POST" })
     let created = 0;
     let skipped = 0;
     for (const b of bids ?? []) {
-      const saved = b.data as unknown as SavedBidState;
+      const saved = b.data as unknown as BidDataForOwnBook;
       if (!saved || typeof saved !== "object" || !saved.customer) {
         skipped++;
         continue;

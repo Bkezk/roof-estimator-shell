@@ -16,9 +16,13 @@ own route group, access flag, and folder. The plan is `docs/roofing-ops-portal-b
 1. **The estimator's money engine (`src/lib/engine/`) changes only with an entry in
    `docs/legacy-money-parity.md` and a test.** Other modules read bid data; they write only the
    nullable link columns on `bids` (`building_id`, `roof_id`, `takeoff_id`, `opportunity_id`).
-2. **No cross-module imports.** Shared code lives in `src/lib/` (access, auth, engine, UI
-   helpers) and `src/components/ui/`. A module's server functions check its own access flag
-   with `assertPageAccess`; RLS enforces the same flag.
+2. **No cross-module imports** — enforced by ESLint (`eslint.config.js`, CI fails on it).
+   The estimator never imports prospecting code and prospecting never imports estimator code.
+   They meet in exactly two places: the nullable link columns on `bids`, and plain values in a
+   URL (a building hands the estimator an address and a width × length; the estimator's
+   generic prefill reads them without knowing where they came from). Shared code lives in
+   `src/lib/` (access, auth, UI helpers) and `src/components/ui/`. A module's server functions
+   check its own access flag with `assertPageAccess`; RLS enforces the same flag.
 3. **Every live database change ships as a migration** in `supabase/migrations/`, applied and
    verified, in the same commit as the code that needs it.
 4. **`main` must stay green.** CI (`.github/workflows/ci.yml`) runs typecheck, lint and tests.

@@ -429,8 +429,25 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {form.id && canBid && (
+                      /* The estimator gets plain values in the URL (its own generic prefill);
+                         nothing here imports estimator code, and it imports nothing from here. */
                       <Button asChild size="sm" variant="outline">
-                        <Link to="/estimate" search={{ building: form.id }}>
+                        <Link
+                          to="/estimate"
+                          search={{
+                            building: form.id,
+                            ...(form.name ? { pfName: form.name } : {}),
+                            ...(form.owner_name ? { pfOwner: form.owner_name } : {}),
+                            ...(form.address1 ? { pfAddr: form.address1 } : {}),
+                            ...(form.address2 ? { pfAddr2: form.address2 } : {}),
+                            ...(form.city ? { pfCity: form.city } : {}),
+                            ...(form.state ? { pfState: form.state } : {}),
+                            ...(form.zip ? { pfZip: form.zip } : {}),
+                            ...(rect && rect.width > 0
+                              ? { pfW: rect.width, pfL: rect.length }
+                              : {}),
+                          }}
+                        >
                           <FilePlus2 className="mr-1 h-4 w-4" /> New bid from this building
                         </Link>
                       </Button>
