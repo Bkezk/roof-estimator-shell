@@ -3628,3 +3628,19 @@ JSON-text replace with the bids updated_at trigger disabled (a data repair, not 
 rate changes; bid money is unchanged. The Tear-off tiles now group by the legacy category rule
 (name starts with "Spray URET"/"URET" → Urethane, "BUR" → Built Up, else Single Ply), so the
 "… over BUR < 2"" combos stay under Single Ply as in legacy.
+
+### 22.53 Tear-off on a Metal Retrofit / Purlin Fastened deck bills 0 h — legacy seeds it so (2026-09-23)
+
+Owner: a Retrofit-deck section with "Single Ply M F 7' over BUR < 2"" showed Man Hours 0.00.
+Legacy `RoofSection.TearOffBaseLabor` (0x4da98) reads `lookup_TearoffLabor` column 3
+(CustomValue) for [DeckType.ID, TO_Type.ID]; when it is 0 it falls back to column 2
+(LaborValue, the vendor default). The install's upgrade script (release 2.1, version 201201130)
+INSERTs the 14 rows for DeckTypeID 3 and 10 with LaborValue 0 AND CustomValue 0 — those are
+the two metal decks added in 2012 (deck ids: 1 Wood; 2, 3, 10 Metal; 4 Concrete; 5, 8, 9 Gypsum
+family; 6 LW/Steel; 7 LW/Concrete — §11 bucket note), i.e. Metal Retrofit and Purlin Fastened,
+the same two the captured Tearoff Times grid shows all-zero. So legacy bills 0 tear-off hours
+on those decks unless the contractor enters a custom value; the web does the same
+(`tearOffLaborLookup = 0`, warning "No tear-off rate for …"). The Tear-off screen now says so
+inline under the Labor link, naming the deck / type / section and pointing at Estimate Pricing
+→ Tearoff Times. Disposal units are separate: they come from the entered Thickness (in), so a
+0" thickness gives 0 units.

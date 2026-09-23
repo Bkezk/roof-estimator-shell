@@ -4174,6 +4174,28 @@ function EstimatePage() {
                         Labor: <span className="tabular-nums">{toLabor.adjusted.toFixed(2)} h</span>
                         {toLabor.suffix}
                       </button>
+                      {(() => {
+                        // A tear-off with no rate for its deck bills 0 h (legacy lookup_TearoffLabor
+                        // seeds Metal Retrofit / Purlin Fastened at 0 — docs §22.53). Say so here.
+                        const zero = (result?.build.inputs.sections ?? []).filter(
+                          (x) => x.tearOff && x.tearOffLaborLookup === 0,
+                        );
+                        if (zero.length === 0) return null;
+                        return (
+                          <p className="basis-full rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs dark:bg-amber-950/30">
+                            No tear-off labor rate for{" "}
+                            {zero
+                              .map((x) => {
+                                const src = sections.find((y) => y.id === x.id);
+                                return `${src?.deckType ?? "?"} / ${src?.tearOffType || "(no type)"} (${src?.name ?? x.id})`;
+                              })
+                              .join("; ")}
+                            . The Tearoff Times table has 0 for that deck, so these sections bill 0
+                            h — enter an hours-per-100-sq-ft rate under Estimate Pricing → Tearoff
+                            Times to price them.
+                          </p>
+                        );
+                      })()}
                       <Button
                         size="sm"
                         disabled={!toType || toSel.length === 0}
