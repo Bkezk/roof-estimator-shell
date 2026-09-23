@@ -45,6 +45,8 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
+import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
+import { PerDiemChartEditor } from "@/components/per-diem-chart";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
 import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
 import * as XLSX from "xlsx";
@@ -1769,6 +1771,34 @@ function EstimatePage() {
                       value={customer.notes}
                       onChange={(e) => setCustomer((c) => ({ ...c, notes: e.target.value }))}
                     />
+                    {customer.perDiemChart ? (
+                      <div className="mt-2">
+                        <PerDiemChartEditor
+                          chart={normalizePerDiemChart(customer.perDiemChart)}
+                          onChange={(chart) => setCustomer((c) => ({ ...c, perDiemChart: chart }))}
+                          onRemove={() =>
+                            setCustomer((c) => {
+                              const { perDiemChart: _drop, ...rest } = c;
+                              return rest;
+                            })
+                          }
+                          disabled={readOnly}
+                        />
+                      </div>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2"
+                        disabled={readOnly}
+                        onClick={() =>
+                          setCustomer((c) => ({ ...c, perDiemChart: emptyPerDiemChart() }))
+                        }
+                        title="Adds a 'Per diem based on N men N days' chart with a checklist of job costs and prices"
+                      >
+                        Add per diem chart
+                      </Button>
+                    )}
                   </LegacyGroup>
                 </TabsContent>
                 <TabsContent value="client" className="pt-2">

@@ -3500,3 +3500,16 @@ clicked. Now To buy = needed − what this bid actually took (ledger `consumed` 
 whole packs for pack units; on hand is shown and limits what can be pulled but is never assumed
 used. Also: `bids.updated_by_name` (migration `20260923040000`, applied live) — saveBid stamps
 the saver's display name and the Bids page reads "Last saved <when> by <name>".
+
+### 22.49 Setup "6. Notes" per-diem chart; Non-DL custom item Enter → Quantity (2026-09-23)
+
+Owner request. Setup step 6 gains an "Add per diem chart" button: title line "Per diem based on
+N men N days" (both fillable), then the legacy job-cost headings on the left (Mobilization,
+Supervision, Boom truck, Fork lift, Equipment, Rental equipment, Fuel, Dumpsters / trash,
+Security bond, Fringe benefits, Hotel, Food, Porta jon, Mechanical seamer, New cons / multiple
+trips, Miscellaneous) with a tick box each and a price input on the right (a price > 0 ticks the
+row). Saved as `CustomerInfo.perDiemChart` and printed under the proposal notes. It is
+INFORMATIONAL ONLY — it does not feed the engine's Per diem figure, labor, or any total, so bid
+money is unchanged (no legacy equivalent exists; nothing to reconcile). Also: on the Non-DL
+screens, pressing Enter in a new custom item's name now adds the row and moves focus to its
+Quantity box.

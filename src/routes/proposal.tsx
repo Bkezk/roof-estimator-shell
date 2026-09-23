@@ -1,4 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { normalizePerDiemChart } from "@/lib/per-diem-chart";
+import { PerDiemChartView } from "@/components/per-diem-chart";
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -258,6 +260,12 @@ function ProposalPage() {
           </p>
           <p className="mt-1">{scopeNarrative(saved)}</p>
           {saved.customer.notes && <p className="mt-2">{saved.customer.notes}</p>}
+          {saved.customer.perDiemChart && (
+            <PerDiemChartView
+              chart={normalizePerDiemChart(saved.customer.perDiemChart)}
+              className="mt-3"
+            />
+          )}
         </div>
 
         {/* Price summary */}

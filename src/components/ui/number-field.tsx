@@ -27,6 +27,8 @@ export function NumberField(props: {
   blankZero?: boolean | undefined;
   inputMode?: "numeric" | "decimal" | undefined;
   onBlur?: (() => void) | undefined;
+  /** Focus (and select) on mount — a freshly added row's first box. */
+  autoFocus?: boolean | undefined;
 }) {
   const [text, setText] = useState<string | null>(null);
   const min = props.min ?? 0;
@@ -36,6 +38,7 @@ export function NumberField(props: {
   return (
     <Input
       type="number"
+      autoFocus={props.autoFocus}
       min={min}
       max={props.max}
       step={props.step ?? "1"}

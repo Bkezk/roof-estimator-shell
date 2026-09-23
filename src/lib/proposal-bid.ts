@@ -6,6 +6,7 @@
  */
 
 import type { CombineInfo } from "@/lib/combine-bids";
+import type { PerDiemChart } from "@/lib/per-diem-chart";
 import type {
   BidInput,
   BidSectionInput,
@@ -52,6 +53,8 @@ export interface CustomerInfo {
   jobState?: string;
   jobZip?: string;
   shipTo?: string;
+  /** Setup › 6. Notes "per diem chart" (informational, printed under the proposal notes). */
+  perDiemChart?: PerDiemChart;
 }
 
 /** Legacy Home "Building Type" list (Estimate.BuildingType). */

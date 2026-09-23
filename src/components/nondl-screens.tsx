@@ -49,6 +49,7 @@ function Num(props: {
   className?: string;
   step?: string;
   title?: string;
+  autoFocus?: boolean;
 }) {
   return (
     <NumberField
@@ -438,7 +439,9 @@ function GroupGrid(props: {
       return last ? (last.laborRate !== 0 ? last.laborRate : crewRate) : crewRate;
     })();
 
-  const addCustom = () => {
+  // After Enter on a new item's name the cursor lands in its Quantity box (owner request).
+  const [focusQtyRow, setFocusQtyRow] = useState<number | null>(null);
+  const addCustom = (focusQty = false) => {
     const d = draft.trim();
     if (!d) return;
     onCustom([
@@ -446,6 +449,7 @@ function GroupGrid(props: {
       { description: d, qty: 0, unitCost: 0, laborPerUnit: 0, laborRate: lastRate },
     ]);
     setDraft("");
+    setFocusQtyRow(focusQty ? customRows.length : null);
   };
 
   return (
@@ -575,6 +579,7 @@ function GroupGrid(props: {
                 <TableCell className="text-right">
                   <Num
                     value={c.qty}
+                    autoFocus={focusQtyRow === i}
                     onChange={(n) => {
                       const next = { ...c, qty: n };
                       delete next.laborHours;
@@ -638,9 +643,12 @@ function GroupGrid(props: {
                 placeholder={`Add a custom ${NON_DL_CATEGORY_LABEL[group].toLowerCase()} item…`}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                onBlur={addCustom}
+                onBlur={() => addCustom(false)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") addCustom();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustom(true);
+                  }
                 }}
               />
             </TableCell>
