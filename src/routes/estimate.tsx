@@ -1,4 +1,4 @@
-import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -46,7 +46,7 @@ import {
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
-import { listStock } from "@/lib/inventory.functions";
+import { addMovement, listMovements, listStock } from "@/lib/inventory.functions";
 import { listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import {
   adhesiveOptionsForSystem,
@@ -1194,6 +1194,15 @@ function EstimatePage() {
     queryFn: () => targetsFn(),
     enabled: authed && STEPS[step]?.key === "review",
   });
+  // Phase 3: what this bid already pulled from stock (consumed / released entries), and the
+  // Pull / Return actions that write them. A pull needs a saved bid (the entry carries its id).
+  const movesFn = useServerFn(listMovements);
+  const addMoveFn = useServerFn(addMovement);
+  const { data: bidPulls } = useQuery({
+    queryKey: ["bid-pulls", bidId],
+    queryFn: () => movesFn({ data: { bid_id: bidId!, limit: 1000 } }),
+    enabled: authed && STEPS[step]?.key === "review" && !!bidId,
+  });
   const orderList: OrderLine[] = useMemo(() => {
     if (!result || !admin || !priceTargets) return [];
     try {
@@ -1205,11 +1214,49 @@ function EstimatePage() {
         build: result.build,
         targets: priceTargets,
         stock: stockRows ?? [],
+        pulls: bidPulls ?? [],
       });
     } catch {
       return [];
     }
-  }, [result, admin, priceTargets, stockRows, roofSystem, attachment, sections]);
+  }, [result, admin, priceTargets, stockRows, bidPulls, roofSystem, attachment, sections]);
+  const [pullQty, setPullQty] = useState<Record<string, string>>({});
+  const [pulling, setPulling] = useState<string | null>(null);
+  const pullKey = (l: OrderLine) =>
+    l.cell ? `${l.cell.screen_id}|${l.cell.row_label}|${l.cell.price_col}` : l.name;
+  const recordPull = async (l: OrderLine, reason: "consumed" | "released", qty: number) => {
+    if (!l.cell || !bidId || qty <= 0) return;
+    setPulling(pullKey(l));
+    try {
+      await addMoveFn({
+        data: {
+          screen_id: l.cell.screen_id,
+          row_label: l.cell.row_label,
+          price_col: l.cell.price_col,
+          qty,
+          reason,
+          bid_id: bidId,
+          note:
+            reason === "consumed"
+              ? "Pulled on the bid's Order list"
+              : "Returned from the bid's Order list",
+        },
+      });
+      toast.success(
+        reason === "consumed"
+          ? `Pulled ${describeOrderQty(l, qty)} from stock for this bid`
+          : `Returned ${describeOrderQty(l, qty)} to stock`,
+      );
+      setPullQty((p) => ({ ...p, [pullKey(l)]: "" }));
+      void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
+      void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
+      void qc.invalidateQueries({ queryKey: ["bid-pulls", bidId] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record that");
+    } finally {
+      setPulling(null);
+    }
+  };
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
@@ -4390,8 +4437,23 @@ function EstimatePage() {
               <CardHeader>
                 <CardTitle className="text-base">Order list</CardTitle>
                 <CardDescription>
-                  What this bid needs to buy, from the same lines it bills, less what Inventory has
-                  on hand. Stock never changes the price — only the &quot;To buy&quot; column.
+                  What this bid needs to buy, from the same lines it bills. Pull what Inventory has
+                  on hand onto this job and the &quot;To buy&quot; column drops; the price never
+                  changes.
+                  {bidId ? (
+                    <>
+                      {" "}
+                      <Link
+                        to="/inventory"
+                        search={{ bid: bidId }}
+                        className="underline underline-offset-2"
+                      >
+                        Record leftovers for this bid
+                      </Link>
+                    </>
+                  ) : (
+                    " Save the bid to pull from stock."
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
@@ -4406,8 +4468,12 @@ function EstimatePage() {
                         <TableRow>
                           <TableHead>Product</TableHead>
                           <TableHead className="text-right">Needed</TableHead>
+                          <TableHead className="text-right" title="Pulled from stock for this bid">
+                            From stock
+                          </TableHead>
                           <TableHead className="text-right">On hand</TableHead>
                           <TableHead className="text-right">To buy</TableHead>
+                          <TableHead className="w-[210px]">Pull / return</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -4424,7 +4490,7 @@ function EstimatePage() {
                           .map((g) => (
                             <Fragment key={g}>
                               <TableRow className="bg-muted/40">
-                                <TableCell colSpan={4} className="py-1 text-xs font-semibold">
+                                <TableCell colSpan={6} className="py-1 text-xs font-semibold">
                                   {g}
                                 </TableCell>
                               </TableRow>
@@ -4452,12 +4518,99 @@ function EstimatePage() {
                                       )}
                                     </TableCell>
                                     <TableCell className="text-right text-xs tabular-nums">
-                                      {l.onHand !== undefined ? describeOrderQty(l, l.onHand) : "—"}
+                                      {l.pulled > 0 ? describeOrderQty(l, l.pulled) : "—"}
+                                    </TableCell>
+                                    <TableCell className="text-right text-xs tabular-nums">
+                                      {l.stockUnit ? (
+                                        <span
+                                          className="text-muted-foreground"
+                                          title={`Inventory counts this product in ${l.stockUnit}, the bid needs ${l.unit} — not netted`}
+                                        >
+                                          shelf in {l.stockUnit}
+                                        </span>
+                                      ) : l.onHand !== undefined ? (
+                                        describeOrderQty(l, l.onHand)
+                                      ) : (
+                                        "—"
+                                      )}
                                     </TableCell>
                                     <TableCell
                                       className={`text-right text-xs font-semibold tabular-nums ${l.toBuy === 0 ? "text-green-700 dark:text-green-400" : ""}`}
                                     >
                                       {describeOrderQty(l, l.toBuy)}
+                                    </TableCell>
+                                    <TableCell className="text-xs">
+                                      {l.cell && (l.pullable > 0 || l.pulled > 0) && (
+                                        <div className="flex items-center gap-1">
+                                          {l.pullable > 0 && (
+                                            <>
+                                              <Input
+                                                type="number"
+                                                inputMode="decimal"
+                                                step="any"
+                                                min={0}
+                                                max={l.pullable}
+                                                className="h-7 w-20 text-xs"
+                                                placeholder={String(
+                                                  Math.round(l.pullable * 1000) / 1000,
+                                                )}
+                                                value={pullQty[pullKey(l)] ?? ""}
+                                                onChange={(e) =>
+                                                  setPullQty((p) => ({
+                                                    ...p,
+                                                    [pullKey(l)]: e.target.value,
+                                                  }))
+                                                }
+                                                disabled={!bidId || readOnly}
+                                                title={
+                                                  bidId
+                                                    ? `Up to ${describeOrderQty(l, l.pullable)} (${l.unit})`
+                                                    : "Save the bid first"
+                                                }
+                                              />
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-7 px-2 text-xs"
+                                                disabled={
+                                                  !bidId || readOnly || pulling === pullKey(l)
+                                                }
+                                                onClick={() => {
+                                                  const raw = pullQty[pullKey(l)];
+                                                  const n =
+                                                    raw && raw.trim() !== ""
+                                                      ? Number(raw)
+                                                      : l.pullable;
+                                                  if (!Number.isFinite(n) || n <= 0) return;
+                                                  void recordPull(
+                                                    l,
+                                                    "consumed",
+                                                    Math.min(n, l.pullable),
+                                                  );
+                                                }}
+                                              >
+                                                Pull
+                                              </Button>
+                                            </>
+                                          )}
+                                          {l.pulled > 0 && (
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              className="h-7 px-2 text-xs"
+                                              disabled={
+                                                !bidId || readOnly || pulling === pullKey(l)
+                                              }
+                                              title="Put everything this bid pulled back on the shelf"
+                                              onClick={() =>
+                                                void recordPull(l, "released", l.pulled)
+                                              }
+                                            >
+                                              Return
+                                            </Button>
+                                          )}
+                                        </div>
+                                      )}
                                     </TableCell>
                                   </TableRow>
                                 ))}

@@ -3459,3 +3459,21 @@ ft as-is). A line with no catalog row (the uncaptured Two-Piece metal) still lis
 stock match". Checked on the saved Knox County and Summit bids: 20 lines, 18 matched, the two
 unmatched being Two-Piece base / covers. The edge-footage card (terminations, blocking, ARP)
 stays as edge footage only. Nothing here touches a price or a bid payload.
+
+### 22.46 Inventory phase 3 — pull from stock on a bid, return, record leftovers (2026-09-23)
+
+The Order list (§22.45) gains **From stock** and **Pull / return**: an estimator with a SAVED
+bid pulls up to `min(on hand, needed − already pulled)` of a product onto the job — a ledger
+entry `consumed` (negative, `bid_id` set) — and can put it all back (`released`, positive). The
+server refuses a pull beyond the shelf's balance and either reason without a bid id; only
+Estimate access (or admin) may write them (RLS `inventory_movements_insert`). The list nets the
+bid's own pulls: To buy = needed − pulled − what the shelf still covers. "Record leftovers for
+this bid" opens Inventory › Record stock with the job preselected (`/inventory?bid=`). Units:
+every line now carries the unit the engine bills it in (membrane / underlayment sq ft, fastener
+boxes, adhesive packs, term bar / fascia / drip edge / gravel stop runs in ft, their corners
+each, sealants per tube, Panduit per bag, ARP / T-Patch per package, vents / corners / pipe stacks
+/ drains / walk pads each); stock is netted only when the shelf keeps the product in the same
+unit — drip edge and gravel stop are kept by the piece while the bid needs feet, so those show
+"shelf in piece" and are not netted (no piece length is captured to convert). The sealant stock
+unit is now "tube". No reservation state: a pull is a real ledger movement the moment it is
+recorded, so nothing on the shelf can be promised twice. Prices untouched throughout.

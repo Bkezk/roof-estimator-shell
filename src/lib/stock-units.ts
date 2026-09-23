@@ -5,6 +5,30 @@
  * the catalog says how many pieces one pack holds so a count of pieces converts exactly.
  */
 
+/** The unit stock is kept in, per catalog screen (adhesives use the product's own unit type). */
+export const STOCK_UNIT_BY_SCREEN: Record<string, string> = {
+  "duro_last:duro_last_membrane": "sq ft",
+  "duro_last:underlayment": "sq ft",
+  "duro_last:fasteners_and_bits": "box",
+  "duro_last:sealants": "tube",
+  "duro_last:corners": "each",
+  "duro_last:conduit_washers": "each",
+  "duro_last:pipe_stacks": "each",
+  "duro_last:panduit": "bag",
+  "duro_last:drain_boots": "each",
+  "duro_last:cdr_rings": "each",
+  "duro_last:drain_boot_accessories": "each",
+  "duro_last:vents": "each",
+  "duro_last:termination_bars": "ft",
+  "duro_last:facia_bars_vinyl_covers": "ft",
+  "duro_last:drip_edge": "piece",
+  "duro_last:gravel_stops": "piece",
+  "duro_last:walk_pads_wall_vents": "each",
+  "duro_last:membrane_accs": "package",
+  "duro_last:adhesives": "pail",
+};
+export const stockUnitFor = (screenId: string): string => STOCK_UNIT_BY_SCREEN[screenId] ?? "each";
+
 /** Catalog columns that say how many pieces one priced pack holds. */
 export const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
 

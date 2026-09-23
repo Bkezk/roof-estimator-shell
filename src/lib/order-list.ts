@@ -17,8 +17,8 @@ import {
   sectionLayers,
   sectionMembraneDisplayPricing,
 } from "@/lib/engine/bid-builder";
-import type { StockRow } from "@/lib/inventory.functions";
-import { displayStock, type PieceDef } from "@/lib/stock-units";
+import type { MovementRow, StockRow } from "@/lib/inventory.functions";
+import { displayStock, stockUnitFor, type PieceDef } from "@/lib/stock-units";
 
 export interface OrderCell {
   screen_id: string;
@@ -39,10 +39,35 @@ export interface OrderLine {
   cell?: OrderCell;
   /** Ledger on hand for the cell (pack unit); undefined when no stock row exists. */
   onHand?: number;
-  /** needed − on hand, floored at 0; whole packs for pack units. */
+  /** Already pulled from stock FOR THIS BID (consumed − released), pack unit. */
+  pulled: number;
+  /** What could still be pulled now: min(on hand, needed − pulled). */
+  pullable: number;
+  /** needed − pulled − what on hand covers, floored at 0; whole packs for pack units. */
   toBuy: number;
   /** Product pack pieces (cartridges / fasteners / gallons) when the catalog states them. */
   piece?: PieceDef | null;
+  /**
+   * The shelf counts this product in a different unit than the engine bills it (drip edge in
+   * pieces vs feet): on hand is shown in its own unit and NOT netted.
+   */
+  stockUnit?: string;
+}
+
+/**
+ * The unit an Accessories line's quantity is in — what the engine bills: term bar, fascia,
+ * drip edge and gravel stop runs in feet (their corners each), sealants per tube, Panduit per
+ * bag, ARP / T-Patch per package, stripping in feet, everything else per piece.
+ */
+export function accessoryLineUnit(screen: string, name: string): string {
+  const n = name.toLowerCase();
+  if (screen === "Term Bar") return "ft";
+  if (/^Fascia Bar|^Drip Edge$|^Gravel Stop$/.test(screen)) return /corner/.test(n) ? "each" : "ft";
+  if (screen === "Base & Snap Cover") return /\bbase\b/.test(n) ? "ft" : "each";
+  if (screen === "Sealants") return "tube";
+  if (screen === "Panduit Straps") return "bag";
+  if (screen === "Membrane Acc.") return /^stripping/.test(n) ? "ft" : "package";
+  return "each";
 }
 
 const SCREEN = {
@@ -97,10 +122,21 @@ export function fastenerRowKey(accessoriesKey: string, target: PriceTarget | und
   );
 }
 
+const words = (s: string) => norm(s).split(" ").filter(Boolean);
+/**
+ * Every word of the row label appears in the line name (a label word may be the stem of a line
+ * word: "corner" ↔ "corners"), in any order — the catalog says `Drip Edge 2"`, the engine line
+ * `2" Drip Edge White`.
+ */
+const labelMatches = (label: string, name: string): boolean => {
+  const ws = words(name);
+  return words(label).every((t) => ws.some((w) => w === t || (t.length >= 3 && w.startsWith(t))));
+};
+
 /**
  * Best catalog cell for an Accessories line: on the screen(s) the line's screen maps to, the row
- * whose label is contained in the line name (longest wins); the colour column named in the
- * line when the screen has several price columns, else its only price column.
+ * whose label words all appear in the line name (longest label wins); the colour column named
+ * in the line when the screen has several price columns, else its only price column.
  */
 export function matchAccessoryCell(
   line: Pick<AccessoryReviewLine, "screen" | "name">,
@@ -114,7 +150,7 @@ export function matchAccessoryCell(
     if (!screens.includes(t.screen_id)) continue;
     for (const rowKey of t.rows) {
       const label = norm(labelOf(rowKey));
-      if (!label || !name.includes(label)) continue;
+      if (!label || !labelMatches(label, name)) continue;
       // Ties (a label repeated on the screen, e.g. the 3" and 4" fascia vinyl covers): the 4"
       // screens take the later row, the 3" the earlier.
       if (best && label.length < best.len) continue;
@@ -160,6 +196,8 @@ export interface OrderListInput {
   build: Pick<BuildResult, "inputs" | "accessories" | "adhesiveLines">;
   targets: readonly PriceTarget[];
   stock: readonly StockRow[];
+  /** This bid's ledger entries (consumed / released) — what it already drew from stock. */
+  pulls?: readonly MovementRow[];
 }
 
 const isPackUnit = (unit: string) => unit !== "sq ft" && unit !== "ft";
@@ -168,6 +206,12 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
   const stockByCell = new Map<string, StockRow>();
   for (const r of i.stock)
     stockByCell.set(`${r.screen_id}\u0000${r.row_label}\u0000${r.price_col}`, r);
+  const pulledByCell = new Map<string, number>();
+  for (const m of i.pulls ?? []) {
+    if (m.reason !== "consumed" && m.reason !== "released") continue;
+    const k = `${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
+    pulledByCell.set(k, (pulledByCell.get(k) ?? 0) - m.qty);
+  }
   const targetByScreen = new Map(i.targets.map((t) => [t.screen_id, t]));
   const cellExists = (c: OrderCell) => {
     const t = targetByScreen.get(c.screen_id);
@@ -194,10 +238,27 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
         )
       : undefined;
     const u = resolved ? unitFor(resolved, unit) : unit;
-    const onHand = stock ? stock.on_hand : undefined;
-    const remaining = Math.max(0, needed - (onHand ?? 0));
+    // The shelf's unit for the cell: the product's own (adhesives) or the screen's.
+    const shelfUnit = resolved ? unitFor(resolved, stockUnitFor(resolved.screen_id)) : u;
+    const unitsAgree = !resolved || shelfUnit === u;
+    const onHand = stock && unitsAgree ? stock.on_hand : undefined;
+    const pulled = resolved
+      ? Math.max(
+          0,
+          pulledByCell.get(
+            `${resolved.screen_id}\u0000${resolved.row_label}\u0000${resolved.price_col}`,
+          ) ?? 0,
+        )
+      : 0;
+    const stillNeeded = Math.max(0, needed - pulled);
+    const pullable = Math.max(0, Math.min(onHand ?? 0, stillNeeded));
+    const remaining = Math.max(0, stillNeeded - pullable);
     const toBuy = isPackUnit(u) ? Math.ceil(remaining - 1e-9) : Math.round(remaining * 100) / 100;
-    const line: OrderLine = { group, name, needed, unit: u, toBuy };
+    const line: OrderLine = { group, name, needed, unit: u, pulled, pullable, toBuy };
+    if (resolved && !unitsAgree) {
+      line.stockUnit = shelfUnit;
+      line.pullable = 0;
+    }
     if (pieces !== undefined) line.pieces = pieces;
     if (resolved) {
       line.cell = resolved;
@@ -269,7 +330,13 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
   for (const l of i.build.accessories?.lines ?? []) {
     if (l.screen === "Fasteners" || l.qty <= 0) continue;
     if (/labor only|reuse ring/i.test(l.name)) continue;
-    add("Accessories", `${l.screen} — ${l.name}`, l.qty, "each", matchAccessoryCell(l, i.targets));
+    add(
+      "Accessories",
+      `${l.screen} — ${l.name}`,
+      l.qty,
+      accessoryLineUnit(l.screen, l.name),
+      matchAccessoryCell(l, i.targets),
+    );
   }
   return out;
 }

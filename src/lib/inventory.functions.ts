@@ -13,6 +13,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { canAccess } from "@/lib/access";
 import {
   PACK_QTY_COLS,
+  stockUnitFor,
   packsFromPieces,
   pieceDefFromPack,
   pieceDefFromUnitType,
@@ -50,28 +51,7 @@ export const REASON_LABELS: Record<MovementReason, string> = {
  * Conversions to the estimator's units (sq ft, fastener counts…) are phase 2; a movement stores
  * the unit it was recorded in so a later change never rewrites history.
  */
-export const STOCK_UNIT_BY_SCREEN: Record<string, string> = {
-  "duro_last:duro_last_membrane": "sq ft",
-  "duro_last:underlayment": "sq ft",
-  "duro_last:fasteners_and_bits": "box",
-  "duro_last:sealants": "each",
-  "duro_last:corners": "each",
-  "duro_last:conduit_washers": "each",
-  "duro_last:pipe_stacks": "each",
-  "duro_last:panduit": "bag",
-  "duro_last:drain_boots": "each",
-  "duro_last:cdr_rings": "each",
-  "duro_last:drain_boot_accessories": "each",
-  "duro_last:vents": "each",
-  "duro_last:termination_bars": "ft",
-  "duro_last:facia_bars_vinyl_covers": "ft",
-  "duro_last:drip_edge": "piece",
-  "duro_last:gravel_stops": "piece",
-  "duro_last:walk_pads_wall_vents": "each",
-  "duro_last:membrane_accs": "package",
-  "duro_last:adhesives": "pail",
-};
-export const stockUnitFor = (screenId: string): string => STOCK_UNIT_BY_SCREEN[screenId] ?? "each";
+export { STOCK_UNIT_BY_SCREEN, stockUnitFor } from "@/lib/stock-units";
 /**
  * Screens with several price columns key stock by colour / size (White, Tan, 2", …); a
  * single-price screen (Adhesives) stores the generic "price" column — shown as "—".
@@ -223,7 +203,8 @@ const addSchema = cellSchema.extend({
   in_pieces: z.boolean().optional(),
   /** Ignored if sent: the unit is the product screen's stock unit (STOCK_UNIT_BY_SCREEN). */
   unit: z.string().max(20).optional(),
-  reason: z.enum(["leftover", "adjustment", "damaged"]),
+  /** consumed = pulled from stock for a bid (subtracts); released = put back (adds). Both need bid_id. */
+  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released"]),
   bid_id: z.string().uuid().nullable().optional(),
   counted_note: z.string().max(300).nullable().optional(),
   note: z.string().max(1000).nullable().optional(),
@@ -294,9 +275,24 @@ export const addMovement = createServerFn({ method: "POST" })
       counted = packsFromPieces(data.qty, piece);
     }
     let qty = Math.abs(counted);
-    if (data.reason === "damaged") qty = -qty;
+    if (data.reason === "damaged" || data.reason === "consumed") qty = -qty;
     if (data.reason === "adjustment") qty = counted;
     if (qty === 0) throw new Error("Quantity cannot be zero");
+    if ((data.reason === "consumed" || data.reason === "released") && !data.bid_id)
+      throw new Error("Pulling from or returning to stock needs a saved bid");
+    if (data.reason === "consumed") {
+      // Never pull more than the shelf holds (on hand = the sum of the cell's entries).
+      const { data: prior, error: pErr } = await sb
+        .from("inventory_movements")
+        .select("qty")
+        .eq("screen_id", data.screen_id)
+        .eq("row_label", data.row_label)
+        .eq("price_col", data.price_col);
+      if (pErr) throw new Error(pErr.message);
+      const onHand = (prior ?? []).reduce((n, r) => n + Number(r.qty), 0);
+      if (-qty > onHand + 1e-9)
+        throw new Error(`Only ${Math.round(onHand * 1000) / 1000} ${unit} on hand`);
+    }
     let bidName: string | null = null;
     if (data.bid_id) {
       const { data: opts, error: bErr } = await sb.rpc("inventory_bid_options");

@@ -4,7 +4,12 @@ import type { PriceTarget } from "./admin-item-numbers.functions";
 import type { EngineAdminData } from "./engine/adapters";
 import type { BidSectionInput } from "./engine/bid-builder";
 import type { StockRow } from "./inventory.functions";
-import { buildOrderList, matchAccessoryCell, membraneRowForSection } from "./order-list";
+import {
+  accessoryLineUnit,
+  buildOrderList,
+  matchAccessoryCell,
+  membraneRowForSection,
+} from "./order-list";
 
 const targets: PriceTarget[] = [
   {
@@ -122,6 +127,144 @@ describe("order list — matching engine lines to stock cells", () => {
         ?.row_label,
     ).toBe("Duro-Caulk Plus - White");
     expect(matchAccessoryCell({ screen: "Unknown", name: "x" }, targets)).toBeUndefined();
+  });
+
+  it("labels accessory lines in the unit the engine bills them", () => {
+    expect(accessoryLineUnit("Term Bar", "Termination Bars White")).toBe("ft");
+    expect(accessoryLineUnit("Sealants", "Duro-Caulk Plus - White")).toBe("tube");
+    expect(accessoryLineUnit("Panduit Straps", '3/8" x 14" Panduit')).toBe("bag");
+    expect(accessoryLineUnit("Membrane Acc.", "ARP")).toBe("package");
+    expect(accessoryLineUnit("Membrane Acc.", "Stripping 60 White")).toBe("ft");
+    expect(accessoryLineUnit("Drip Edge", '2" Drip Edge White')).toBe("ft");
+    expect(accessoryLineUnit("Drip Edge", '2" Drip Edge Corners White')).toBe("each");
+    expect(accessoryLineUnit("Vents", "White Vent")).toBe("each");
+  });
+
+  it("nets what this bid already pulled and caps a pull at the shelf", () => {
+    const lines = buildOrderList({
+      admin,
+      roofSystem: "Duro-Tuff",
+      attachment: "mechanical",
+      sections: [section({ layers: [] })],
+      build: {
+        inputs: { sections: [{ membraneWithOverlap: 0 }] } as never,
+        accessories: { fasteners: { cost: 0, rows: [] }, lines: [] } as never,
+        adhesiveLines: [
+          {
+            screen: "Adhesives",
+            qty: 3,
+            name: "Duro-Fleece Adhesive(cartridge)",
+            unitCost: 389,
+            totalCost: 1167,
+            hours: 0,
+          },
+        ],
+      },
+      targets,
+      // 1.25 cases left on the shelf after this bid pulled 0.75
+      stock: [
+        {
+          screen_id: "duro_last:adhesives",
+          category: "Adhesives",
+          row_label: "Duro-Fleece Adhesive(cartridge)",
+          price_col: "price",
+          unit: "4-Cartridge Case",
+          on_hand: 1.25,
+          last_at: null,
+          item_nos: [],
+        },
+      ],
+      pulls: [
+        {
+          id: 1,
+          screen_id: "duro_last:adhesives",
+          category: "Adhesives",
+          row_label: "Duro-Fleece Adhesive(cartridge)",
+          price_col: "price",
+          item_no: null,
+          qty: -1,
+          unit: "4-Cartridge Case",
+          reason: "consumed",
+          bid_id: "b",
+          bid_name: "B",
+          counted_note: null,
+          note: null,
+          created_by_name: null,
+          created_at: "",
+        },
+        {
+          id: 2,
+          screen_id: "duro_last:adhesives",
+          category: "Adhesives",
+          row_label: "Duro-Fleece Adhesive(cartridge)",
+          price_col: "price",
+          item_no: null,
+          qty: 0.25,
+          unit: "4-Cartridge Case",
+          reason: "released",
+          bid_id: "b",
+          bid_name: "B",
+          counted_note: null,
+          note: null,
+          created_by_name: null,
+          created_at: "",
+        },
+      ],
+    });
+    const l = lines[0]!;
+    // needed 3, pulled 0.75 net, still needed 2.25, shelf 1.25 covers 1.25 → 1 more case to buy
+    expect(l).toMatchObject({ needed: 3, pulled: 0.75, onHand: 1.25, pullable: 1.25, toBuy: 1 });
+  });
+
+  it("does not net stock kept in a different unit than the bid needs", () => {
+    const t: PriceTarget[] = [
+      ...targets,
+      {
+        screen_id: "duro_last:drip_edge",
+        category: "Drip Edge",
+        rows: ['Drip Edge 2"'],
+        price_cols: ["White Price", "Tan Price"],
+        values: {},
+      },
+    ];
+    const lines = buildOrderList({
+      admin,
+      roofSystem: "Duro-Tuff",
+      attachment: "mechanical",
+      sections: [section({ layers: [] })],
+      build: {
+        inputs: { sections: [{ membraneWithOverlap: 0 }] } as never,
+        accessories: {
+          fasteners: { cost: 0, rows: [] },
+          lines: [
+            {
+              screen: "Drip Edge",
+              qty: 120,
+              name: '2" Drip Edge White',
+              unitCost: 0,
+              totalCost: 0,
+              hours: 0,
+            },
+          ],
+        } as never,
+        adhesiveLines: [],
+      },
+      targets: t,
+      stock: [
+        {
+          screen_id: "duro_last:drip_edge",
+          category: "Drip Edge",
+          row_label: 'Drip Edge 2"',
+          price_col: "White Price",
+          unit: "piece",
+          on_hand: 4,
+          last_at: null,
+          item_nos: [],
+        },
+      ],
+    });
+    expect(lines[0]).toMatchObject({ unit: "ft", stockUnit: "piece", pullable: 0, toBuy: 120 });
+    expect(lines[0]!.onHand).toBeUndefined();
   });
 
   it("names a flat-family section's membrane row like the catalog", () => {

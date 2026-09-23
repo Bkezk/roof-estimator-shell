@@ -57,7 +57,7 @@ const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export function InventoryPage() {
+export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const { role, can } = useAuth();
   // Estimate access (or admin) may record adjustments / damage; Inventory-only logins leftovers.
   const canAdjust = can("estimate");
@@ -117,6 +117,7 @@ export function InventoryPage() {
           <AddMovementCard
             targets={targets}
             itemNumbers={itemNosQ.data ?? []}
+            initialBidId={props.initialBidId}
             bids={bidsQ.data ?? []}
             role={role}
             canAdjust={canAdjust}
@@ -252,6 +253,7 @@ function AddMovementCard(props: {
   targets: Awaited<ReturnType<ReturnType<typeof useServerFn<typeof listPriceTargets>>>>;
   /** Duro-Last item numbers → catalog cell (Admin › Item numbers) — "Record by item #". */
   itemNumbers: ItemNumberRow[];
+  initialBidId?: string | undefined;
   bids: { id: string; name: string; status: string; updated_at: string }[];
   role: string | null;
   canAdjust: boolean;
@@ -269,7 +271,7 @@ function AddMovementCard(props: {
       stockUnitFor(t.screen_id))
     : "each";
   const [reason, setReason] = useState<"leftover" | "adjustment" | "damaged">("leftover");
-  const [bidId, setBidId] = useState<string>("");
+  const [bidId, setBidId] = useState<string>(props.initialBidId ?? "");
   const [counted, setCounted] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
