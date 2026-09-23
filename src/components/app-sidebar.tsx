@@ -13,7 +13,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-store";
 import { PAGE_LABELS } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {

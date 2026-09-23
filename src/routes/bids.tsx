@@ -13,7 +13,7 @@ import {
   purgeBid,
   restoreBid,
 } from "@/lib/bids.functions";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-store";
 import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

@@ -15,7 +15,7 @@ import {
   resolveBidComputeData,
   type SavedBidState,
 } from "@/lib/proposal-bid";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/proposal")({

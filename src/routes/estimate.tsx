@@ -110,7 +110,7 @@ import {
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-store";
 import { useBidLock } from "@/lib/use-bid-lock";
 import { LayerStack, TileGlyph } from "@/components/layer-stack";
 import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-dialog";

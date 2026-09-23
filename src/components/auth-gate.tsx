@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 
-import { useAuth } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-store";
 import { canAccess, homeFor, isAdmin, pageForPath } from "@/lib/access";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";

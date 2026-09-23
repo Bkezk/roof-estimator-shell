@@ -1,22 +1,10 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import { supabase } from "@/integrations/supabase/client";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
-import { canAccess, type Page } from "@/lib/access";
-
-interface AuthState {
-  session: Session | null;
-  profile: UserProfile | null;
-  role: "admin" | "user" | null;
-  /** May this user open the page? Admins always; users by their granted pages. */
-  can: (page: Page) => boolean;
-  loading: boolean;
-  signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthState | undefined>(undefined);
+import { canAccess } from "@/lib/access";
+import { AuthContext, type AuthState } from "@/lib/auth-store";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -82,10 +70,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
 }
