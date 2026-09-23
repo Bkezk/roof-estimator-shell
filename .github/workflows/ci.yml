@@ -15,8 +15,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+      # No lockfile is committed (.gitignore, Lovable convention), so install resolves fresh.
+      - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit -p .
       - run: npm run lint
       - run: npm test
