@@ -10,7 +10,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Building2, CheckSquare, FilePlus2, Plus, ShieldCheck, Trash2 } from "lucide-react";
+import {
+  Building2,
+  CheckSquare,
+  DownloadCloud,
+  FilePlus2,
+  Plus,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { buildingLine, equivalentRectangle } from "@/lib/prospect";
@@ -18,19 +26,23 @@ import {
   deleteBuilding,
   deleteRoof,
   getBuilding,
+  importParcels,
   listBuildings,
   listCounties,
   listOpenTasks,
   listWarrantyLeads,
+  previewParcels,
   saveBuilding,
   saveRoof,
   saveTask,
   setTaskDone,
   type BuildingInput,
   type BuildingRow,
+  type ParcelPreview,
   type RoofInput,
   type RoofRow,
 } from "@/lib/prospect.functions";
+import { countyFromServiceUrl } from "@/lib/gis/arcgis";
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -163,6 +175,8 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const doneFn = useServerFn(setTaskDone);
   const openTasksFn = useServerFn(listOpenTasks);
   const leadsFn = useServerFn(listWarrantyLeads);
+  const previewFn = useServerFn(previewParcels);
+  const importFn = useServerFn(importParcels);
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
@@ -171,6 +185,14 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDue, setTaskDue] = useState("");
+  // Kentucky PVA parcel import (one ArcGIS layer per county; src/lib/gis/arcgis.ts).
+  const [importOpen, setImportOpen] = useState(false);
+  const [layerUrl, setLayerUrl] = useState(
+    "https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/Ky_PVA_Webster_Parcels_WGS84WM/MapServer/1",
+  );
+  const [whereClause, setWhereClause] = useState("CLASS = 'COMMERCIAL'");
+  const [importCounty, setImportCounty] = useState("");
+  const [preview, setPreview] = useState<ParcelPreview | null>(null);
 
   useEffect(() => {
     if (props.initialBuildingId) setSelectedId(props.initialBuildingId);
@@ -265,6 +287,33 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     onSuccess: invalidate,
     onError: fail,
   });
+  const previewM = useMutation({
+    mutationFn: () => previewFn({ data: { layerUrl: layerUrl.trim(), where: whereClause } }),
+    onSuccess: (p) => {
+      setPreview(p);
+      if (!importCounty && p.county) setImportCounty(p.county);
+    },
+    onError: fail,
+  });
+  const importM = useMutation({
+    mutationFn: () =>
+      importFn({
+        data: {
+          layerUrl: layerUrl.trim(),
+          where: whereClause,
+          county: importCounty.trim() || countyFromServiceUrl(layerUrl) || "Unknown",
+        },
+      }),
+    onSuccess: (r) => {
+      toast.success(
+        `${r.upserted} parcel${r.upserted === 1 ? "" : "s"} imported or updated (${r.fetched} read${
+          r.skipped ? `, ${r.skipped} without a parcel id skipped` : ""
+        })`,
+      );
+      invalidate();
+    },
+    onError: fail,
+  });
   const rect = useMemo(() => {
     const b = detail.data?.building;
     if (!b) return null;
@@ -309,6 +358,11 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         </div>
         <div className="flex flex-wrap gap-2">
           {canWrite && (
+            <Button size="sm" variant="outline" onClick={() => setImportOpen((o) => !o)}>
+              <DownloadCloud className="mr-1 h-4 w-4" /> Import parcels
+            </Button>
+          )}
+          {canWrite && (
             <Button
               size="sm"
               onClick={() => {
@@ -321,6 +375,106 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           )}
         </div>
       </div>
+
+      {importOpen && canWrite && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Import parcels from a Kentucky PVA layer</CardTitle>
+            <CardDescription className="text-xs">
+              One ArcGIS layer per county
+              (Ky_PVA_&lt;County&gt;_Parcels_WGS84WM/MapServer/&lt;n&gt;). Preview reads the
+              layer&apos;s fields and counts the matching parcels; Import upserts them on county +
+              parcel id. Parcels are land: they fill owner, class, lot sq ft and the shape; roof sq
+              ft comes later from footprints.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_260px_160px]">
+              <div>
+                <Label className="text-xs text-muted-foreground">Layer URL</Label>
+                <Input
+                  className="h-8 font-mono text-xs"
+                  value={layerUrl}
+                  onChange={(e) => setLayerUrl(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Where (ArcGIS SQL)</Label>
+                <Input
+                  className="h-8 font-mono text-xs"
+                  value={whereClause}
+                  onChange={(e) => setWhereClause(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">County</Label>
+                <Input
+                  className="h-8"
+                  value={importCounty}
+                  placeholder={countyFromServiceUrl(layerUrl) ?? ""}
+                  onChange={(e) => setImportCounty(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => previewM.mutate()}
+                disabled={previewM.isPending}
+              >
+                {previewM.isPending ? "Reading layer…" : "Preview"}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => importM.mutate()}
+                disabled={!preview || importM.isPending}
+              >
+                {importM.isPending
+                  ? "Importing…"
+                  : preview
+                    ? `Import ${preview.total.toLocaleString()} parcels`
+                    : "Import"}
+              </Button>
+              {preview && (
+                <span className="text-xs text-muted-foreground">
+                  {preview.total.toLocaleString()} match · page size {preview.maxRecordCount ?? "?"}{" "}
+                  · owner ← {preview.fieldMap.owner}, property address ←{" "}
+                  {preview.fieldMap.location ?? "(none published)"}, class ←{" "}
+                  {preview.fieldMap.landUse ?? "(none)"}, lot sq ft ←{" "}
+                  {preview.fieldMap.areaSqFt ?? preview.fieldMap.acres ?? "shape"}
+                </span>
+              )}
+            </div>
+            {preview && preview.sample.length > 0 && (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Parcel</TableHead>
+                    <TableHead>Owner</TableHead>
+                    <TableHead>Property address</TableHead>
+                    <TableHead>Class</TableHead>
+                    <TableHead className="text-right">Lot sq ft</TableHead>
+                    <TableHead>Deed</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {preview.sample.map((c) => (
+                    <TableRow key={c.parcelId} className="text-xs">
+                      <TableCell className="font-mono">{c.parcelId}</TableCell>
+                      <TableCell>{c.ownerName ?? "—"}</TableCell>
+                      <TableCell>{c.location ?? "—"}</TableCell>
+                      <TableCell>{c.landUse ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{num(c.lotSqFt)}</TableCell>
+                      <TableCell>{c.deed ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
         {/* ── List ── */}

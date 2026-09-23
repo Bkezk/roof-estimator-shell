@@ -9,8 +9,20 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import {
+  countyFromServiceUrl,
+  guessFieldMap,
+  layerInfoUrl,
+  looksLikeAddress,
+  parcelFromFeature,
+  parcelQueryUrl,
+  type ArcGisFeatureSet,
+  type ArcGisField,
+  type ParcelCandidate,
+  type ParcelFieldMap,
+} from "@/lib/gis/arcgis";
 import {
   sortWarrantyLeads,
   warrantyLeadFrom,
@@ -363,3 +375,148 @@ export const linkBidToBuilding = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+// ── Kentucky PVA parcel import (src/lib/gis/arcgis.ts) ──────────────────────────────────────
+// The server fetches the county's ArcGIS layer (the browser never talks to the state server),
+// parses features into building candidates and upserts them on (county, parcel_id). Parcels
+// are land: lot_sqft is filled, roof_sqft is not.
+
+const layerUrlSchema = z
+  .string()
+  .url()
+  .refine((u) => /\/MapServer\/\d+\/?$/.test(u) || /\/FeatureServer\/\d+\/?$/.test(u), {
+    message: "Give the LAYER url — it ends in /MapServer/<n> (or /FeatureServer/<n>)",
+  });
+
+const fetchJson = async (url: string): Promise<unknown> => {
+  const res = await fetch(url, { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${new URL(url).host}`);
+  const body = (await res.json()) as { error?: { message?: string } };
+  if (body && typeof body === "object" && body.error) {
+    throw new Error(body.error.message ?? "ArcGIS error");
+  }
+  return body;
+};
+
+export interface ParcelPreview {
+  county: string | null;
+  fieldMap: ParcelFieldMap;
+  fields: string[];
+  total: number;
+  maxRecordCount: number | null;
+  sample: ParcelCandidate[];
+}
+
+/** Read the layer's fields, count the matching parcels and parse the first few. */
+export const previewParcels = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ layerUrl: layerUrlSchema, where: z.string().max(500).default("1=1") }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ParcelPreview> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as {
+      fields?: ArcGisField[];
+      maxRecordCount?: number;
+    };
+    const fields = info.fields ?? [];
+    const fieldMap = guessFieldMap(fields);
+    const countBody = (await fetchJson(
+      parcelQueryUrl(data.layerUrl, { where: data.where, countOnly: true }),
+    )) as { count?: number };
+    const page = (await fetchJson(
+      parcelQueryUrl(data.layerUrl, { where: data.where, count: 10 }),
+    )) as ArcGisFeatureSet;
+    const sample = (page.features ?? [])
+      .map((f) => parcelFromFeature(f, fieldMap))
+      .filter((c): c is ParcelCandidate => c !== null);
+    return {
+      county: countyFromServiceUrl(data.layerUrl),
+      fieldMap,
+      fields: fields.map((f) => f.name),
+      total: countBody.count ?? 0,
+      maxRecordCount: info.maxRecordCount ?? null,
+      sample,
+    };
+  });
+
+/**
+ * Import every parcel matching `where` into buildings (upsert on county + parcel_id), paging
+ * through the layer. Capped per call so a runaway filter cannot flood the table; run again to
+ * continue (existing parcels are updated, not duplicated).
+ */
+export const importParcels = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        layerUrl: layerUrlSchema,
+        where: z.string().max(500).default("1=1"),
+        county: z.string().trim().min(1).max(100),
+        maxRows: z.number().int().min(1).max(5000).default(2000),
+      })
+      .parse(d),
+  )
+  .handler(
+    async ({ data, context }): Promise<{ fetched: number; upserted: number; skipped: number }> => {
+      await assertPageAccess(context.supabase, context.userId, "prospect");
+      const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as {
+        fields?: ArcGisField[];
+        maxRecordCount?: number;
+      };
+      const fieldMap = guessFieldMap(info.fields ?? []);
+      const pageSize = Math.min(500, info.maxRecordCount ?? 500);
+      const who = await meName(context);
+      const now = new Date().toISOString();
+      let fetched = 0;
+      let upserted = 0;
+      let skipped = 0;
+      for (let offset = 0; offset < data.maxRows; offset += pageSize) {
+        const page = (await fetchJson(
+          parcelQueryUrl(data.layerUrl, { where: data.where, offset, count: pageSize }),
+        )) as ArcGisFeatureSet;
+        const feats = page.features ?? [];
+        fetched += feats.length;
+        const rows = feats
+          .map((f) => parcelFromFeature(f, fieldMap))
+          .filter((c): c is ParcelCandidate => c !== null)
+          .map((c) => ({
+            county: data.county,
+            parcel_id: c.parcelId,
+            // The property's own address when the county publishes one; else the owner's name
+            // stands in as the building name so the row is findable.
+            name: looksLikeAddress(c.location) ? "" : (c.location ?? c.ownerName ?? ""),
+            address1: looksLikeAddress(c.location) ? c.location! : "",
+            owner_name: c.ownerName,
+            owner_address: c.ownerAddress,
+            land_use: c.landUse,
+            lot_sqft: c.lotSqFt,
+            perimeter_ft: c.perimeterFt,
+            deed: c.deed,
+            tax_year: c.taxYear,
+            notes: c.description,
+            footprint: (c.geometry?.footprint ?? null) as Json | null,
+            centroid_lat: c.geometry?.centroidLat ?? null,
+            centroid_lng: c.geometry?.centroidLng ?? null,
+            source: "pva",
+            source_layer: data.layerUrl,
+            imported_at: now,
+            deleted_at: null, // a re-imported parcel comes back
+            created_by: context.userId,
+            created_by_name: who,
+          }));
+        skipped += feats.length - rows.length;
+        if (rows.length > 0) {
+          const { error, count } = await context.supabase.from("buildings").upsert(rows, {
+            onConflict: "county,parcel_id",
+            ignoreDuplicates: false,
+            count: "exact",
+          });
+          if (error) throw new Error(error.message);
+          upserted += count ?? rows.length;
+        }
+        if (feats.length < pageSize || !page.exceededTransferLimit) break;
+      }
+      return { fetched, upserted, skipped };
+    },
+  );
