@@ -4503,9 +4503,10 @@ function EstimatePage() {
                   </div>
                   <CollapsibleContent>
                     <CardDescription>
-                      What this bid needs to buy, from the same lines it bills. Pull what Inventory
-                      has on hand onto this job and the &quot;To buy&quot; column drops; the price
-                      never changes.
+                      What this bid needs to buy, from the same lines it bills. Where Inventory has
+                      the product on hand, &quot;Use from inventory&quot; takes it off the shelf for
+                      this job (written to the Inventory ledger) and &quot;To buy&quot; drops by
+                      that much; the price never changes.
                       {bidId ? (
                         <>
                           {" "}
@@ -4538,9 +4539,9 @@ function EstimatePage() {
                               <TableHead className="text-right">Needed</TableHead>
                               <TableHead
                                 className="text-right"
-                                title="Pulled from stock for this bid"
+                                title="Taken from inventory for this bid — already subtracted from To buy"
                               >
-                                From stock
+                                From inventory
                               </TableHead>
                               <TableHead className="text-right">On hand</TableHead>
                               <TableHead className="text-right">To buy</TableHead>
@@ -4696,37 +4697,6 @@ function EstimatePage() {
               </Card>
             </Collapsible>
           )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Review &amp; finish</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <p className="text-muted-foreground">
-                The full cost and hours breakdown is in the Bid total panel{" "}
-                <span className="lg:hidden">below</span>
-                <span className="hidden lg:inline">on the right</span>.{" "}
-                {result?.warnings.length
-                  ? "Resolve the warnings shown there before finalizing."
-                  : "No input warnings."}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={handleSave} disabled={saving || readOnly}>
-                  <Save className="mr-2 h-4 w-4" />
-                  {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={!result}
-                  title="Download the estimate review as CSV"
-                  onClick={exportReview}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Export
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         <div className="flex items-center justify-between border-t pt-4">
@@ -4748,6 +4718,17 @@ function EstimatePage() {
             )}
           </span>
           <div className="flex items-center gap-2">
+            {STEPS[step]?.key === "review" && (
+              <Button
+                variant="outline"
+                disabled={!result}
+                title="Download the estimate review as CSV"
+                onClick={exportReview}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Export
+              </Button>
+            )}
             <Button
               variant={step < STEPS.length - 1 ? "outline" : "default"}
               onClick={handleSave}
