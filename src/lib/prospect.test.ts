@@ -4,7 +4,8 @@ import {
   addYears,
   buildingLine,
   equivalentRectangle,
-  ownBookFromBid,
+  sortWarrantyLeads,
+  warrantyLeadFrom,
   warrantyYears,
 } from "./prospect";
 
@@ -34,64 +35,48 @@ describe("warranty helpers", () => {
   });
 });
 
-describe("ownBookFromBid", () => {
-  const base = {
-    roofSystem: "Duro-Bond",
-    startDate: "2026-06-01",
-    warrantyName: "15 Year NDL",
-    customer: {
-      name: "Knox County Fiscal Court",
-      contact: "",
-      projectAddress: "401 Court Square",
-      notes: "",
-      jobCity: "Barbourville",
-      jobState: "KY",
-      jobZip: "40906",
-    },
-    sections: [
-      { id: "s1", name: "Section 1", length: 79.5, width: 98, roofSystem: null },
-      { id: "s2", name: "Section 2", length: 107.5, width: 89 },
-    ],
-  } as unknown as Parameters<typeof ownBookFromBid>[0];
-
-  it("maps an accepted bid to a building and one roof per section", () => {
-    const seed = ownBookFromBid(base, { name: "Knox Admin", updatedAt: "2026-09-23T14:00:00Z" });
-    expect(seed.building).toMatchObject({
-      name: "Knox County Fiscal Court",
-      address1: "401 Court Square",
-      city: "Barbourville",
-      state: "KY",
-      zip: "40906",
-      own_book: true,
-      source: "won_bid",
-      roof_sqft: 7791 + 9567.5,
-    });
-    expect(seed.roofs).toHaveLength(2);
-    expect(seed.roofs[0]).toMatchObject({
-      section_name: "Section 1",
-      roof_system: "Duro-Bond",
-      area_sqft: 7791,
-      install_date: "2026-06-01",
-      warranty_type: "15 Year NDL",
-      warranty_expires: "2041-06-01",
+describe("warrantyLeadFrom", () => {
+  const row = {
+    bid_id: "b1",
+    bid_name: "Knox Admin",
+    customer_name: "Knox County Fiscal Court",
+    address: "401 Court Square",
+    city: "Barbourville",
+    state: "KY",
+    zip: "40906",
+    start_date: "2026-06-01",
+    warranty_name: "15 Year NDL",
+    updated_at: "2026-09-23T14:00:00Z",
+    building_id: null,
+  };
+  it("turns an accepted bid into a lead with its warranty clock", () => {
+    const lead = warrantyLeadFrom(row, "2026-09-24");
+    expect(lead).toMatchObject({
+      bidId: "b1",
+      customerName: "Knox County Fiscal Court",
+      address: "401 Court Square",
+      installDate: "2026-06-01",
+      warrantyName: "15 Year NDL",
+      expires: "2041-06-01",
+      yearsLeft: 14.7,
     });
   });
-  it("uses the save date and a single roof when the bid has no sections", () => {
-    const bare = { ...base, sections: [], warrantyName: "" };
-    delete bare.startDate;
-    const seed = ownBookFromBid(bare, { name: "Bare bid", updatedAt: "2026-09-23T14:00:00Z" });
-    expect(seed.roofs).toEqual([
-      {
-        section_name: "Roof",
-        roof_system: "Duro-Bond",
-        area_sqft: null,
-        install_date: "2026-09-23",
-        installer: null,
-        warranty_type: null,
-        warranty_expires: null,
-      },
-    ]);
-    expect(seed.building.roof_sqft).toBeNull();
+  it("falls back to the save date and reports an unknown expiry", () => {
+    const lead = warrantyLeadFrom(
+      { ...row, start_date: null, warranty_name: "", customer_name: null },
+      "2026-09-24",
+    );
+    expect(lead.installDate).toBe("2026-09-23");
+    expect(lead.customerName).toBe("Knox Admin");
+    expect(lead.expires).toBeNull();
+    expect(lead.yearsLeft).toBeNull();
+  });
+  it("sorts soonest expiry first and unknown last", () => {
+    const a = warrantyLeadFrom({ ...row, bid_id: "a", start_date: "2020-01-01" }, "2026-09-24");
+    const b = warrantyLeadFrom({ ...row, bid_id: "b", start_date: "2010-01-01" }, "2026-09-24");
+    const c = warrantyLeadFrom({ ...row, bid_id: "c", warranty_name: null }, "2026-09-24");
+    expect(sortWarrantyLeads([a, c, b]).map((l) => l.bidId)).toEqual(["b", "a", "c"]);
+    expect(b.yearsLeft).toBeLessThan(0);
   });
 });
 

@@ -154,6 +154,7 @@ export type Database = {
           area_sqft: number | null;
           bid_id: string | null;
           building_id: string;
+          condition: string | null;
           created_at: string;
           id: string;
           install_date: string | null;
@@ -171,6 +172,7 @@ export type Database = {
           area_sqft?: number | null;
           bid_id?: string | null;
           building_id: string;
+          condition?: string | null;
           created_at?: string;
           id?: string;
           install_date?: string | null;
@@ -188,6 +190,7 @@ export type Database = {
           area_sqft?: number | null;
           bid_id?: string | null;
           building_id?: string;
+          condition?: string | null;
           created_at?: string;
           id?: string;
           install_date?: string | null;
@@ -991,6 +994,22 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       release_bid_lock: { Args: { p_bid: string; p_session: string }; Returns: undefined };
+      warranty_leads: {
+        Args: never;
+        Returns: {
+          bid_id: string;
+          bid_name: string;
+          customer_name: string | null;
+          address: string | null;
+          city: string | null;
+          state: string | null;
+          zip: string | null;
+          start_date: string | null;
+          warranty_name: string | null;
+          updated_at: string;
+          building_id: string | null;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

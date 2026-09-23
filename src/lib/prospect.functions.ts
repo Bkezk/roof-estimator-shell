@@ -2,7 +2,8 @@
  * Prospecting phase 1 — server functions for buildings, roofs and tasks-lite
  * (docs/roofing-ops-portal-brief.md). Reads need the Prospecting or Estimate page; writes need
  * Prospecting. RLS enforces the same; these checks give a readable error instead of an empty
- * result. Bids are never edited here except their nullable building link.
+ * result. Prospecting finds NEW business: bids are read (warranty leads) and never edited here
+ * except their nullable building link.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -10,7 +11,12 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
-import { ownBookFromBid, type BidDataForOwnBook } from "@/lib/prospect";
+import {
+  sortWarrantyLeads,
+  warrantyLeadFrom,
+  type WarrantyLead,
+  type WarrantyLeadRow,
+} from "@/lib/prospect";
 
 export type BuildingRow = Database["public"]["Tables"]["buildings"]["Row"];
 export type RoofRow = Database["public"]["Tables"]["roofs"]["Row"];
@@ -63,6 +69,7 @@ export const roofSchema = z.object({
   warranty_type: nullableText,
   warranty_expires: isoDate,
   last_inspection: isoDate,
+  condition: z.enum(["good", "fair", "poor", "unknown"]).nullable().default(null),
   notes: z.string().max(4000).nullable().default(null),
 });
 export type RoofInput = z.infer<typeof roofSchema>;
@@ -98,7 +105,7 @@ const readAccess = async (ctx: {
   }
 };
 
-/** Buildings for the list: newest first, optional search / county / own-book filters. */
+/** Buildings for the list: newest first, optional search / county filters. */
 export const listBuildings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -106,7 +113,6 @@ export const listBuildings = createServerFn({ method: "GET" })
       .object({
         q: z.string().trim().max(200).optional(),
         county: z.string().trim().max(100).optional(),
-        ownBook: z.boolean().optional(),
       })
       .parse(d ?? {}),
   )
@@ -119,7 +125,6 @@ export const listBuildings = createServerFn({ method: "GET" })
       .order("updated_at", { ascending: false })
       .limit(500);
     if (data.county) q = q.eq("county", data.county);
-    if (data.ownBook) q = q.eq("own_book", true);
     if (data.q) {
       const like = `%${data.q.replace(/[%_]/g, "")}%`;
       q = q.or(
@@ -327,53 +332,20 @@ export const listOpenTasks = createServerFn({ method: "GET" })
   });
 
 /**
- * Own book: every ACCEPTED bid not yet linked to a building becomes a building plus one roof per
- * section, and the bid is linked to it. Re-running only picks up bids accepted since. Needs
- * Prospecting (to write buildings) and Estimate (to link bids).
+ * Warranty leads: the roofs WE installed (accepted bids), soonest warranty expiry first — a lead
+ * source for re-roofs and maintenance agreements. Read on demand through `warranty_leads()`
+ * (SECURITY DEFINER, gated on the Prospecting flag); nothing is copied or written.
  */
-export const seedOwnBook = createServerFn({ method: "POST" })
+export const listWarrantyLeads = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ created: number; skipped: number }> => {
+  .handler(async ({ context }): Promise<WarrantyLead[]> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    await assertPageAccess(context.supabase, context.userId, "estimate");
-    const { data: bids, error } = await context.supabase
-      .from("bids")
-      .select("id, name, status, updated_at, data, building_id")
-      .eq("status", "accepted")
-      .is("deleted_at", null)
-      .is("building_id", null);
+    const { data, error } = await context.supabase.rpc("warranty_leads");
     if (error) throw new Error(error.message);
-    const who = await meName(context);
-    let created = 0;
-    let skipped = 0;
-    for (const b of bids ?? []) {
-      const saved = b.data as unknown as BidDataForOwnBook;
-      if (!saved || typeof saved !== "object" || !saved.customer) {
-        skipped++;
-        continue;
-      }
-      const seed = ownBookFromBid(saved, { name: b.name, updatedAt: b.updated_at });
-      const { data: building, error: bErr } = await context.supabase
-        .from("buildings")
-        .insert({ ...seed.building, created_by: context.userId, created_by_name: who })
-        .select()
-        .single();
-      if (bErr || !building) {
-        skipped++;
-        continue;
-      }
-      const { error: rErr } = await context.supabase
-        .from("roofs")
-        .insert(seed.roofs.map((r) => ({ ...r, building_id: building.id, bid_id: b.id })));
-      if (rErr) throw new Error(rErr.message);
-      const { error: lErr } = await context.supabase
-        .from("bids")
-        .update({ building_id: building.id })
-        .eq("id", b.id);
-      if (lErr) throw new Error(lErr.message);
-      created++;
-    }
-    return { created, skipped };
+    const today = new Date().toISOString().slice(0, 10);
+    return sortWarrantyLeads(
+      ((data ?? []) as WarrantyLeadRow[]).map((r) => warrantyLeadFrom(r, today)),
+    );
   });
 
 /** Link (or unlink) an existing bid to a building. Estimate access edits the bid. */

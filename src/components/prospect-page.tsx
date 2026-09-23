@@ -1,16 +1,16 @@
 /**
  * Prospecting phase 1 — the Buildings page (docs/roofing-ops-portal-brief.md, MODULES.md).
- * A territory roof database you can use with nothing else in place: add a building by hand,
- * keep its roofs (what is up there, when we installed it, warranty clock) and follow-up
- * tasks, seed "own book" from accepted bids, and start a bid from a building. The map and
- * the parcel ingest come next; this page is what they populate.
+ * Prospecting finds NEW business. A building here is a prospect: who owns it, what roof is on
+ * it and in what condition, and the follow-up tasks to win it. Our own installed roofs are not
+ * copied here — they show as a warranty-expiry LEAD LIST read from accepted bids on demand. The
+ * map and the parcel ingest come next; this page is what they populate.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Building2, CheckSquare, FilePlus2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Building2, CheckSquare, FilePlus2, Plus, ShieldCheck, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { buildingLine, equivalentRectangle } from "@/lib/prospect";
@@ -21,10 +21,10 @@ import {
   listBuildings,
   listCounties,
   listOpenTasks,
+  listWarrantyLeads,
   saveBuilding,
   saveRoof,
   saveTask,
-  seedOwnBook,
   setTaskDone,
   type BuildingInput,
   type BuildingRow,
@@ -83,6 +83,23 @@ const emptyBuilding = (): BuildingInput => ({
   notes: null,
 });
 
+/** A blank building pre-filled from a warranty lead (so a lead can become a prospect). */
+const buildingFromLead = (l: {
+  customerName: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}): BuildingInput => ({
+  ...emptyBuilding(),
+  name: l.customerName,
+  owner_name: l.customerName,
+  address1: l.address,
+  city: l.city,
+  state: l.state ?? "KY",
+  zip: l.zip,
+});
+
 const toInput = (b: BuildingRow): BuildingInput => ({
   id: b.id,
   name: b.name,
@@ -118,8 +135,16 @@ const emptyRoof = (buildingId: string): RoofInput => ({
   warranty_type: null,
   warranty_expires: null,
   last_inspection: null,
+  condition: null,
   notes: null,
 });
+
+const CONDITION_LABELS: Record<string, string> = {
+  good: "Good",
+  fair: "Fair",
+  poor: "Poor",
+  unknown: "Unknown",
+};
 
 export function ProspectPage(props: { initialBuildingId?: string | undefined }) {
   const { can } = useAuth();
@@ -136,12 +161,11 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const deleteRoofFn = useServerFn(deleteRoof);
   const saveTaskFn = useServerFn(saveTask);
   const doneFn = useServerFn(setTaskDone);
-  const seedFn = useServerFn(seedOwnBook);
   const openTasksFn = useServerFn(listOpenTasks);
+  const leadsFn = useServerFn(listWarrantyLeads);
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
-  const [ownBook, setOwnBook] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(props.initialBuildingId ?? null);
   const [form, setForm] = useState<BuildingInput | null>(null);
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
@@ -153,13 +177,12 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   }, [props.initialBuildingId]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county, ownBook],
+    queryKey: ["buildings", q, county],
     queryFn: () =>
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
           ...(county ? { county } : {}),
-          ...(ownBook ? { ownBook: true } : {}),
         },
       }),
   });
@@ -170,6 +193,11 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     enabled: !!selectedId,
   });
   const openTasks = useQuery({ queryKey: ["open-tasks"], queryFn: () => openTasksFn() });
+  const leads = useQuery({
+    queryKey: ["warranty-leads"],
+    queryFn: () => leadsFn(),
+    enabled: canWrite,
+  });
 
   // The detail form follows the selected building; edits are local until Save.
   useEffect(() => {
@@ -237,19 +265,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     onSuccess: invalidate,
     onError: fail,
   });
-  const seed = useMutation({
-    mutationFn: () => seedFn(),
-    onSuccess: (r) => {
-      toast.success(
-        r.created === 0
-          ? "No accepted bids without a building"
-          : `${r.created} building${r.created === 1 ? "" : "s"} added from accepted bids`,
-      );
-      invalidate();
-    },
-    onError: fail,
-  });
-
   const rect = useMemo(() => {
     const b = detail.data?.building;
     if (!b) return null;
@@ -289,21 +304,10 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         <div>
           <h1 className="text-2xl font-semibold">Buildings</h1>
           <p className="text-sm text-muted-foreground">
-            The territory roof database: every roof we know about, ours and everyone else&apos;s.
+            Prospects: the roofs we want to win, who owns them, and what to do next.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canWrite && canBid && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => seed.mutate()}
-              disabled={seed.isPending}
-              title="Every accepted bid without a building becomes a building plus one roof per section"
-            >
-              <RefreshCw className="mr-1 h-4 w-4" /> Seed own book from accepted bids
-            </Button>
-          )}
           {canWrite && (
             <Button
               size="sm"
@@ -344,17 +348,13 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   ))}
                 </SelectContent>
               </Select>
-              <label className="flex items-center gap-1 text-xs">
-                <Checkbox checked={ownBook} onCheckedChange={(v) => setOwnBook(v === true)} />
-                Own book
-              </label>
             </div>
           </CardHeader>
           <CardContent className="max-h-[70vh] space-y-1 overflow-y-auto p-2">
             {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
             {buildings.data?.length === 0 && (
               <p className="p-2 text-xs text-muted-foreground">
-                No buildings yet. Add one, or seed the own book from accepted bids.
+                No prospects yet. Add a building, or pick one from the warranty leads.
               </p>
             )}
             {(buildings.data ?? []).map((b) => (
@@ -369,11 +369,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 <div className="flex items-center gap-2">
                   <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="truncate font-medium">{buildingLine(b)}</span>
-                  {b.own_book && (
-                    <span className="ml-auto rounded-full bg-emerald-500/15 px-1.5 text-[10px] text-emerald-700 dark:text-emerald-400">
-                      own book
-                    </span>
-                  )}
                 </div>
                 <div className="pl-6 text-xs text-muted-foreground">
                   {[b.county && `${b.county} Co.`, b.roof_sqft && `${num(b.roof_sqft)} sq ft roof`]
@@ -390,7 +385,62 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           {!form ? (
             <Card>
               <CardContent className="space-y-3 p-6 text-sm text-muted-foreground">
-                <p>Select a building on the left, or add one.</p>
+                <p>Select a prospect on the left, or add one.</p>
+                {canWrite && (
+                  <div>
+                    <p className="mb-1 flex items-center gap-1 font-medium text-foreground">
+                      <ShieldCheck className="h-4 w-4" /> Warranty leads — roofs we installed,
+                      soonest expiry first
+                    </p>
+                    {leads.data?.length === 0 && <p className="text-xs">No accepted bids yet.</p>}
+                    <ul className="space-y-1">
+                      {(leads.data ?? []).slice(0, 25).map((l) => (
+                        <li key={l.bidId} className="flex flex-wrap items-center gap-x-2 text-xs">
+                          <span className="font-medium text-foreground">{l.customerName}</span>
+                          <span>{[l.address, l.city].filter(Boolean).join(", ")}</span>
+                          <span>
+                            {l.expires
+                              ? `${l.warrantyName} · expires ${l.expires} (${
+                                  l.yearsLeft !== null && l.yearsLeft < 0
+                                    ? "expired"
+                                    : `${l.yearsLeft} yr left`
+                                })`
+                              : "warranty length unknown"}
+                          </span>
+                          {l.buildingId ? (
+                            <button
+                              type="button"
+                              className="underline underline-offset-2"
+                              onClick={() => setSelectedId(l.buildingId)}
+                            >
+                              open prospect
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="underline underline-offset-2"
+                              onClick={() => {
+                                setSelectedId(null);
+                                setForm(buildingFromLead(l));
+                              }}
+                            >
+                              add as prospect
+                            </button>
+                          )}
+                          {canBid && (
+                            <Link
+                              to="/estimate"
+                              search={{ bid: l.bidId }}
+                              className="underline underline-offset-2"
+                            >
+                              bid
+                            </Link>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {(openTasks.data?.length ?? 0) > 0 && (
                   <div>
                     <p className="mb-1 font-medium text-foreground">Open tasks</p>
@@ -422,9 +472,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                       {form.id ? buildingLine(form as BuildingRow) : "New building"}
                     </CardTitle>
                     <CardDescription className="text-xs">
-                      {detail.data?.building.source === "won_bid"
-                        ? "Own book — created from an accepted bid"
-                        : "Entered by hand; the parcel ingest fills the rest later"}
+                      Entered by hand; the parcel ingest fills the rest later
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -497,16 +545,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   {number("roof_sqft", "Roof sq ft")}
                   {number("perimeter_ft", "Roof perimeter (ft)")}
                   {number("stories", "Stories")}
-                  <div className="flex items-end gap-2 pb-1">
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={!!form.own_book}
-                        disabled={!canWrite}
-                        onCheckedChange={(v) => setF("own_book", v === true)}
-                      />
-                      Own book (we installed it)
-                    </label>
-                  </div>
                   <div className="sm:col-span-2 lg:col-span-4">
                     <Label className="text-xs text-muted-foreground">Notes</Label>
                     <Textarea
@@ -530,7 +568,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   {/* Roofs */}
                   <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                      <CardTitle className="text-sm">Roofs</CardTitle>
+                      <CardTitle className="text-sm">Existing roof</CardTitle>
                       {canWrite && !roofForm && (
                         <Button
                           size="sm"
@@ -543,16 +581,19 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {detail.data.roofs.length === 0 && !roofForm && (
-                        <p className="text-xs text-muted-foreground">No roofs recorded.</p>
+                        <p className="text-xs text-muted-foreground">
+                          Nothing recorded about the roof yet.
+                        </p>
                       )}
                       {detail.data.roofs.length > 0 && (
                         <Table>
                           <TableHeader>
                             <TableRow>
                               <TableHead>Section</TableHead>
-                              <TableHead>Roof</TableHead>
+                              <TableHead>Type</TableHead>
                               <TableHead className="text-right">Sq ft</TableHead>
                               <TableHead>Installed</TableHead>
+                              <TableHead>Condition</TableHead>
                               <TableHead>Warranty</TableHead>
                               <TableHead className="w-8" />
                             </TableRow>
@@ -576,16 +617,20 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                                     warranty_type: r.warranty_type,
                                     warranty_expires: r.warranty_expires,
                                     last_inspection: r.last_inspection,
+                                    condition: (r.condition ?? null) as RoofInput["condition"],
                                     notes: r.notes,
                                   })
                                 }
                               >
                                 <TableCell className="font-medium">{r.section_name}</TableCell>
-                                <TableCell>{r.roof_system ?? r.roof_type ?? "—"}</TableCell>
+                                <TableCell>{r.roof_type ?? "—"}</TableCell>
                                 <TableCell className="text-right tabular-nums">
                                   {num(r.area_sqft)}
                                 </TableCell>
                                 <TableCell>{r.install_date ?? "—"}</TableCell>
+                                <TableCell>
+                                  {r.condition ? CONDITION_LABELS[r.condition] : "—"}
+                                </TableCell>
                                 <TableCell>
                                   {r.warranty_type ?? "—"}
                                   {r.warranty_expires && (
@@ -623,11 +668,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                             value={roofForm.roof_type ?? ""}
                             onChange={(v) => setRoofForm({ ...roofForm, roof_type: v || null })}
                           />
-                          <RoofField
-                            label="Our system (if installed by us)"
-                            value={roofForm.roof_system ?? ""}
-                            onChange={(v) => setRoofForm({ ...roofForm, roof_system: v || null })}
-                          />
                           <div>
                             <Label className="text-xs text-muted-foreground">Area (sq ft)</Label>
                             <NumberField
@@ -639,16 +679,31 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                             />
                           </div>
                           <RoofField
-                            label="Install date"
+                            label="Installed (approx.)"
                             type="date"
                             value={roofForm.install_date ?? ""}
                             onChange={(v) => setRoofForm({ ...roofForm, install_date: v || null })}
                           />
-                          <RoofField
-                            label="Installer"
-                            value={roofForm.installer ?? ""}
-                            onChange={(v) => setRoofForm({ ...roofForm, installer: v || null })}
-                          />
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Condition</Label>
+                            <Select
+                              value={roofForm.condition ?? "unknown"}
+                              onValueChange={(v) =>
+                                setRoofForm({ ...roofForm, condition: v as RoofInput["condition"] })
+                              }
+                            >
+                              <SelectTrigger className="h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(CONDITION_LABELS).map(([k, v]) => (
+                                  <SelectItem key={k} value={k}>
+                                    {v}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                           <RoofField
                             label="Warranty type"
                             value={roofForm.warranty_type ?? ""}

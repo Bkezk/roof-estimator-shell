@@ -6,34 +6,9 @@
  *   rectangle with the SAME area and perimeter (W + L = P/2, W × L = A). When no rectangle has
  *   that pair (P² < 16A — a rounder shape than a square), or no perimeter is known, it falls back
  *   to the square of the same area. The engine is untouched: it still sees width × length.
- * - `ownBookFromBid`: an accepted bid becomes a building plus one roof per section ("own book"),
- *   so installed roofs re-enter prospecting with their warranty clock.
+ * - `warrantyLeadFrom`: an accepted bid read on demand becomes a lead — the roof we installed,
+ *   with its warranty clock — without copying anything out of the estimator.
  */
-/**
- * The slice of a saved bid's JSON that own-book seeding reads. Declared here on purpose:
- * prospecting reads bid DATA (rows in `bids`) but never imports estimator code.
- */
-export interface BidDataForOwnBook {
-  roofSystem?: string | null;
-  startDate?: string | null;
-  warrantyName?: string | null;
-  customer: {
-    name?: string;
-    projectAddress?: string;
-    projectAddress2?: string;
-    jobCity?: string;
-    jobState?: string;
-    jobZip?: string;
-    jobCityStZip?: string;
-  };
-  sections: Array<{
-    name?: string;
-    length?: number;
-    width?: number;
-    roofSystem?: string | null;
-  }>;
-}
-
 export interface Rect {
   width: number;
   length: number;
@@ -72,90 +47,73 @@ export function addYears(fromIso: string, years: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-export interface BuildingSeed {
-  name: string;
-  address1: string;
-  address2: string | null;
+/** What `warranty_leads()` returns per accepted bid (read-only view of estimator data). */
+export interface WarrantyLeadRow {
+  bid_id: string;
+  bid_name: string;
+  customer_name: string | null;
+  address: string | null;
   city: string | null;
-  state: string;
+  state: string | null;
   zip: string | null;
-  owner_name: string | null;
-  roof_sqft: number | null;
-  own_book: boolean;
-  source: "won_bid";
-  notes: string | null;
+  start_date: string | null;
+  warranty_name: string | null;
+  updated_at: string;
+  building_id: string | null;
 }
 
-export interface RoofSeed {
-  section_name: string;
-  roof_system: string | null;
-  area_sqft: number | null;
-  install_date: string | null;
-  installer: string | null;
-  warranty_type: string | null;
-  warranty_expires: string | null;
+export interface WarrantyLead {
+  bidId: string;
+  bidName: string;
+  customerName: string;
+  address: string;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  /** The bid's start date (Setup) when set, else the day it was last saved. */
+  installDate: string;
+  warrantyName: string | null;
+  /** Install + the years in the warranty name; null when the name carries none. */
+  expires: string | null;
+  /** Years from `today` to expiry, one decimal; negative = expired; null = unknown. */
+  yearsLeft: number | null;
+  buildingId: string | null;
 }
 
-export interface OwnBookSeed {
-  building: BuildingSeed;
-  roofs: RoofSeed[];
-}
-
-/**
- * Map an accepted bid to its own-book building and roofs. Install date = the bid's start date
- * (Setup) when set, else the day it was last saved; warranty expiry = install + the years in
- * the warranty name when it carries one.
- */
-export function ownBookFromBid(
-  saved: BidDataForOwnBook,
-  meta: { name: string; updatedAt: string; installer?: string | undefined },
-): OwnBookSeed {
-  const c = saved.customer;
-  const sections = Array.isArray(saved.sections) ? saved.sections : [];
-  const install = (saved.startDate && saved.startDate.slice(0, 10)) || meta.updatedAt.slice(0, 10);
-  const years = warrantyYears(saved.warrantyName);
-  const expires = years !== undefined ? addYears(install, years) : null;
-  const total = sections.reduce((n, s) => n + (s.length || 0) * (s.width || 0), 0);
-  const city = c.jobCity?.trim() || null;
-  const state = c.jobState?.trim() || "KY";
-  const zip = c.jobZip?.trim() || null;
+/** An accepted bid → a warranty lead (the roof we installed and when its warranty runs out). */
+export function warrantyLeadFrom(r: WarrantyLeadRow, today: string): WarrantyLead {
+  const installDate = (r.start_date && r.start_date.slice(0, 10)) || r.updated_at.slice(0, 10);
+  const years = warrantyYears(r.warranty_name);
+  const expires = years !== undefined ? addYears(installDate, years) : null;
+  let yearsLeft: number | null = null;
+  if (expires) {
+    const ms = Date.parse(expires + "T00:00:00Z") - Date.parse(today + "T00:00:00Z");
+    yearsLeft = Math.round((ms / (365.25 * 86_400_000)) * 10) / 10;
+  }
   return {
-    building: {
-      name: (c.name || meta.name).trim() || meta.name,
-      address1: (c.projectAddress || "").trim(),
-      address2: c.projectAddress2?.trim() || null,
-      city,
-      state,
-      zip,
-      owner_name: c.name?.trim() || null,
-      roof_sqft: total > 0 ? total : null,
-      own_book: true,
-      source: "won_bid",
-      notes: c.jobCityStZip && !city ? c.jobCityStZip : null,
-    },
-    roofs:
-      sections.length > 0
-        ? sections.map((s) => ({
-            section_name: s.name || "Roof",
-            roof_system: s.roofSystem ?? saved.roofSystem ?? null,
-            area_sqft: s.length && s.width ? s.length * s.width : null,
-            install_date: install,
-            installer: meta.installer ?? null,
-            warranty_type: saved.warrantyName || null,
-            warranty_expires: expires,
-          }))
-        : [
-            {
-              section_name: "Roof",
-              roof_system: saved.roofSystem ?? null,
-              area_sqft: null,
-              install_date: install,
-              installer: meta.installer ?? null,
-              warranty_type: saved.warrantyName || null,
-              warranty_expires: expires,
-            },
-          ],
+    bidId: r.bid_id,
+    bidName: r.bid_name,
+    customerName: (r.customer_name ?? "").trim() || r.bid_name,
+    address: (r.address ?? "").trim(),
+    city: r.city?.trim() || null,
+    state: r.state?.trim() || null,
+    zip: r.zip?.trim() || null,
+    installDate,
+    warrantyName: r.warranty_name?.trim() || null,
+    expires,
+    yearsLeft,
+    buildingId: r.building_id,
   };
+}
+
+/** Soonest expiry first; unknown expiries last. */
+export function sortWarrantyLeads(leads: WarrantyLead[]): WarrantyLead[] {
+  return [...leads].sort((a, b) => {
+    if (a.expires && b.expires) return a.expires.localeCompare(b.expires);
+    if (a.expires) return -1;
+    if (b.expires) return 1;
+    return a.customerName.localeCompare(b.customerName);
+  });
 }
 
 /** One line for a building in lists: "Name — 123 Main St, City" (whatever is known). */
