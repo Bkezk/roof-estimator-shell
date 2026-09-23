@@ -157,15 +157,6 @@ export function CurbsScreen(p: CurbsScreenProps) {
                 />
               </div>
               <div>
-                <p className="mb-1 text-xs text-muted-foreground"># of Curbs</p>
-                <Num
-                  className="w-[90px]"
-                  step="1"
-                  value={c.quantity}
-                  onChange={(n) => upd({ quantity: Math.floor(n) })}
-                />
-              </div>
-              <div>
                 <p className="mb-1 text-xs text-muted-foreground">Deck</p>
                 <Select value={c.deckType} onValueChange={(v) => upd({ deckType: v })}>
                   <SelectTrigger className="h-8 w-[170px]">
@@ -306,7 +297,15 @@ export function CurbsScreen(p: CurbsScreenProps) {
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 Enter curb dimensions in nearest .25&quot;
               </p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-2">
+                <div>
+                  <p className="mb-1 text-xs"># of Curbs</p>
+                  <Num
+                    step="1"
+                    value={c.quantity}
+                    onChange={(n) => upd({ quantity: Math.floor(n) })}
+                  />
+                </div>
                 <div>
                   <p className="mb-1 text-xs">A:</p>
                   <Num

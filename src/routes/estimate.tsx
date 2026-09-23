@@ -2336,14 +2336,14 @@ function EstimatePage() {
                   className="mt-2"
                   disabled={parapets.length === 0}
                   onClick={() =>
-                    // Legacy Button1_Click_1: membrane type + color onto every present parapet.
+                    // Legacy Button1_Click_1: membrane type + color onto every present parapet;
+                    // owner: the Setup Deck Type and Wall Type go onto them too.
                     setParapets((prev) =>
                       prev.map((pp) => {
                         const nx: ParapetInput = {
                           ...pp,
-                          ...(parapetDefaults.wallType !== undefined
-                            ? { wallType: parapetDefaults.wallType }
-                            : {}),
+                          deckType: sectionDefaults.deckType,
+                          wallType: parapetDefaults.wallType ?? 4,
                         };
                         // Roof System / Attached With / adhesive: the defaults when they differ
                         // from the bid material, else back to "bid default".
@@ -3690,6 +3690,8 @@ function EstimatePage() {
                   newParapet({
                     // Legacy Parapet ctor: a new wall seeds AdjustLabor from Template.ParapetsLabor.
                     adjustLaborPct: seedParapetAdjust(templateDeltas),
+                    // Setup "1. Deck Type" / "2. Wall Type" seed every new wall.
+                    deckType: sectionDefaults.deckType,
                     wallType: parapetDefaults.wallType ?? 4,
                     ...(parapetDefaults.roofSystem
                       ? { roofSystem: parapetDefaults.roofSystem }
@@ -4037,6 +4039,7 @@ function EstimatePage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-8" />
                           <TableHead>Section</TableHead>
                           <TableHead>Deck</TableHead>
                           <TableHead>W x L</TableHead>
@@ -4048,15 +4051,26 @@ function EstimatePage() {
                           return (
                             <TableRow
                               key={s.id}
-                              onClick={() =>
-                                setToSel((prev) =>
-                                  prev.includes(s.id)
-                                    ? prev.filter((x) => x !== s.id)
-                                    : [...prev, s.id],
-                                )
-                              }
+                              // Same as Underlayment: a row click moves the selection to this
+                              // section; the tick box adds/removes it for a multi-section apply.
+                              onClick={() => setToSel([s.id])}
                               className={sel ? "cursor-pointer bg-primary/15" : "cursor-pointer"}
                             >
+                              <TableCell className="w-8" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 align-middle"
+                                  checked={sel}
+                                  aria-label={`Select ${s.name}`}
+                                  onChange={() =>
+                                    setToSel((prev) =>
+                                      prev.includes(s.id)
+                                        ? prev.filter((x) => x !== s.id)
+                                        : [...prev, s.id],
+                                    )
+                                  }
+                                />
+                              </TableCell>
                               <TableCell className="font-medium">{s.name}</TableCell>
                               <TableCell>{s.deckType}</TableCell>
                               <TableCell className="tabular-nums">
