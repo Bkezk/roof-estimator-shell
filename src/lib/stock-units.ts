@@ -41,12 +41,25 @@ export const packsFromPieces = (pieces: number, def: PieceDef): number => pieces
 
 export const plural = (n: number, name: string): string => `${name}${Math.abs(n) === 1 ? "" : "s"}`;
 
-/** "0.75 4-Cartridge Case (3 cartridges)" — the pieces line only when the count is whole-ish. */
-export function describeStock(qty: number, unit: string, def: PieceDef | null | undefined): string {
-  const q = Number.isInteger(qty) ? String(qty) : qty.toFixed(3).replace(/\.?0+$/, "");
-  if (!def) return `${q} ${unit}`;
+const fmt = (n: number): string =>
+  Math.abs(n - Math.round(n)) < 1e-6 ? String(Math.round(n)) : n.toFixed(3).replace(/\.?0+$/, "");
+
+/**
+ * What a stock quantity (kept in priced packs) reads as: in PIECES when the product has a pack
+ * size ("10 cartridges", "600 fasteners"), else in the pack unit ("2 pail").
+ */
+export function displayStock(
+  qty: number,
+  unit: string,
+  def: PieceDef | null | undefined,
+): { amount: number; unit: string } {
+  if (!def) return { amount: qty, unit };
   const pieces = qty * def.perPack;
-  const p =
-    Math.abs(pieces - Math.round(pieces)) < 1e-6 ? String(Math.round(pieces)) : pieces.toFixed(2);
-  return `${q} ${unit} (${p} ${plural(pieces, def.name)})`;
+  return { amount: pieces, unit: plural(pieces, def.name) };
+}
+
+/** "10 cartridges" / "2 pail" — displayStock as one string. */
+export function describeStock(qty: number, unit: string, def: PieceDef | null | undefined): string {
+  const d = displayStock(qty, unit, def);
+  return `${fmt(d.amount)} ${d.unit}`;
 }
