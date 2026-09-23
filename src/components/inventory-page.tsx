@@ -225,8 +225,8 @@ function AddMovementCard(props: {
   const [target, setTarget] = useState<TargetRef | null>(null);
   const t = target ?? firstTarget(props.targets);
   const [qty, setQty] = useState("");
-  const [unitOverride, setUnitOverride] = useState<string | null>(null);
-  const unit = unitOverride ?? (t ? stockUnitFor(t.screen_id) : "each");
+  // One unit per product (by catalog screen) so on-hand sums stay meaningful — not editable.
+  const unit = t ? stockUnitFor(t.screen_id) : "each";
   const [reason, setReason] = useState<"leftover" | "adjustment" | "damaged">("leftover");
   const [bidId, setBidId] = useState<string>("");
   const [counted, setCounted] = useState("");
@@ -250,7 +250,6 @@ function AddMovementCard(props: {
   const exactItem = itemMatches.find((m) => m.item_no.toLowerCase() === itemQuery);
   const pickItem = (m: ItemNumberRow) => {
     setTarget({ screen_id: m.screen_id, row_label: m.row_label, price_col: m.price_col });
-    setUnitOverride(null);
     setItemNo(m.item_no);
   };
   const cellItemNos = t
@@ -374,7 +373,6 @@ function AddMovementCard(props: {
             value={t}
             onChange={(v) => {
               setTarget(v);
-              setUnitOverride(null);
               setItemNo("");
             }}
           />
@@ -402,9 +400,10 @@ function AddMovementCard(props: {
           <div className="space-y-1">
             <Label className="text-[11px]">Unit</Label>
             <Input
-              className="h-8 w-24 text-xs"
+              className="h-8 w-24 bg-muted text-xs"
               value={unit}
-              onChange={(e) => setUnitOverride(e.target.value)}
+              readOnly
+              title="Set by the product's catalog screen so every entry for a product adds up in the same unit"
             />
           </div>
           <div className="space-y-1">

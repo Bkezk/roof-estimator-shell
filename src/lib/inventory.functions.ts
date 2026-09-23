@@ -194,7 +194,8 @@ export const listMovements = createServerFn({ method: "GET" })
 const addSchema = cellSchema.extend({
   /** Positive as counted; the reason decides the sign (damaged always subtracts). */
   qty: z.number().finite(),
-  unit: z.string().min(1).max(20),
+  /** Ignored if sent: the unit is the product screen's stock unit (STOCK_UNIT_BY_SCREEN). */
+  unit: z.string().max(20).optional(),
   reason: z.enum(["leftover", "adjustment", "damaged"]),
   bid_id: z.string().uuid().nullable().optional(),
   counted_note: z.string().max(300).nullable().optional(),
@@ -263,7 +264,8 @@ export const addMovement = createServerFn({ method: "POST" })
       price_col: data.price_col,
       item_no: itemRows?.[0]?.item_no ?? null,
       qty,
-      unit: data.unit.trim(),
+      // One unit per product, always: on hand is a plain sum of entries.
+      unit: stockUnitFor(data.screen_id),
       reason: data.reason,
       bid_id: data.bid_id ?? null,
       bid_name: bidName,
