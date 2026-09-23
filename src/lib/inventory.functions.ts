@@ -56,6 +56,12 @@ export const STOCK_UNIT_BY_SCREEN: Record<string, string> = {
   "duro_last:adhesives": "pail",
 };
 export const stockUnitFor = (screenId: string): string => STOCK_UNIT_BY_SCREEN[screenId] ?? "each";
+/**
+ * Screens with several price columns key stock by colour / size (White, Tan, 2", …); a
+ * single-price screen (Adhesives) stores the generic "price" column — shown as "—".
+ */
+export const SINGLE_PRICE_COL = "price";
+export const priceColLabel = (col: string): string => (col === SINGLE_PRICE_COL ? "—" : col);
 
 const cellSchema = z.object({
   screen_id: z.string().min(1),
@@ -226,11 +232,16 @@ export const addMovement = createServerFn({ method: "POST" })
       kind?: string;
       columns?: string[];
       rows?: Record<string, unknown>[];
-      products?: { name: string }[];
+      products?: { name: string; unit_type?: unknown }[];
     };
+    // Adhesives count in the product's own unit (its catalog unit_type: "5-gal. Box Set",
+    // "4-Cartridge Case", "50-Gal Drum Set"); every other screen in its per-screen unit.
+    let unit = stockUnitFor(data.screen_id);
     if (d.kind === "adhesives") {
-      if (!(d.products ?? []).some((p) => p.name === data.row_label))
-        throw new Error(`"${data.row_label}" is not on the Adhesives screen`);
+      const product = (d.products ?? []).find((p) => p.name === data.row_label);
+      if (!product) throw new Error(`"${data.row_label}" is not on the Adhesives screen`);
+      if (typeof product.unit_type === "string" && product.unit_type.trim())
+        unit = product.unit_type.trim();
     } else {
       const cols = d.columns ?? [];
       const keys = rowKeys(cols, d.rows ?? []);
@@ -265,7 +276,7 @@ export const addMovement = createServerFn({ method: "POST" })
       item_no: itemRows?.[0]?.item_no ?? null,
       qty,
       // One unit per product, always: on hand is a plain sum of entries.
-      unit: stockUnitFor(data.screen_id),
+      unit,
       reason: data.reason,
       bid_id: data.bid_id ?? null,
       bid_name: bidName,

@@ -17,6 +17,7 @@ import {
   OPENED_BOX_LABELS,
   REASON_LABELS,
   setOpenedBoxRule,
+  priceColLabel,
   stockUnitFor,
   type MovementReason,
   type OpenedBoxRule,
@@ -155,7 +156,7 @@ function StockTable(props: {
         <div className="flex flex-wrap items-center gap-3">
           <Input
             className="h-8 max-w-xs text-xs"
-            placeholder="Filter by product, screen, colour or item #…"
+            placeholder="Filter by product, screen, colour / size or item #…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -178,7 +179,7 @@ function StockTable(props: {
                 <TableRow>
                   <TableHead>Screen</TableHead>
                   <TableHead>Product</TableHead>
-                  <TableHead>Colour / column</TableHead>
+                  <TableHead>Colour / size</TableHead>
                   <TableHead>Item #</TableHead>
                   <TableHead className="text-right">On hand</TableHead>
                   <TableHead>Unit</TableHead>
@@ -190,7 +191,7 @@ function StockTable(props: {
                   <TableRow key={`${r.screen_id}|${r.row_label}|${r.price_col}`}>
                     <TableCell className="text-xs text-muted-foreground">{r.category}</TableCell>
                     <TableCell className="text-sm font-medium">{r.row_label}</TableCell>
-                    <TableCell className="text-xs">{r.price_col}</TableCell>
+                    <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
                     <TableCell className="font-mono text-xs">{r.item_nos.join(", ")}</TableCell>
                     <TableCell
                       className={`text-right text-sm font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
@@ -225,8 +226,12 @@ function AddMovementCard(props: {
   const [target, setTarget] = useState<TargetRef | null>(null);
   const t = target ?? firstTarget(props.targets);
   const [qty, setQty] = useState("");
-  // One unit per product (by catalog screen) so on-hand sums stay meaningful — not editable.
-  const unit = t ? stockUnitFor(t.screen_id) : "each";
+  // One unit per product so on-hand sums stay meaningful — not editable. Adhesives use the
+  // product's own catalog unit; other screens the per-screen unit (mirrors the server).
+  const unit = t
+    ? (props.targets.find((x) => x.screen_id === t.screen_id)?.row_units?.[t.row_label] ??
+      stockUnitFor(t.screen_id))
+    : "each";
   const [reason, setReason] = useState<"leftover" | "adjustment" | "damaged">("leftover");
   const [bidId, setBidId] = useState<string>("");
   const [counted, setCounted] = useState("");
@@ -283,7 +288,7 @@ function AddMovementCard(props: {
         },
       });
       toast.success(
-        `${r.qty > 0 ? "+" : ""}${fmtQty(r.qty)} ${unit} — ${t.row_label} · ${t.price_col}`,
+        `${r.qty > 0 ? "+" : ""}${fmtQty(r.qty)} ${unit} — ${t.row_label} · ${priceColLabel(t.price_col)}`,
       );
       setQty("");
       setCounted("");
@@ -332,13 +337,13 @@ function AddMovementCard(props: {
                   key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}
                   value={m.item_no}
                 >
-                  {m.row_label} · {m.price_col}
+                  {m.row_label} · {priceColLabel(m.price_col)}
                 </option>
               ))}
             </datalist>
             {exactItem ? (
               <span className="text-xs text-green-700 dark:text-green-400">
-                ✓ {exactItem.row_label} · {exactItem.price_col}
+                ✓ {exactItem.row_label} · {priceColLabel(exactItem.price_col)}
               </span>
             ) : itemQuery && itemMatches.length === 0 ? (
               <span className="text-xs text-destructive">
@@ -356,7 +361,8 @@ function AddMovementCard(props: {
                   onClick={() => pickItem(m)}
                   title={m.dl_description ?? undefined}
                 >
-                  <span className="font-mono">{m.item_no}</span> — {m.row_label} · {m.price_col}
+                  <span className="font-mono">{m.item_no}</span> — {m.row_label} ·{" "}
+                  {priceColLabel(m.price_col)}
                 </button>
               ))}
               {itemMatches.length > 8 && (
@@ -535,7 +541,7 @@ function LedgerTable(props: {
                     <TableCell className="text-xs">{r.created_by_name ?? ""}</TableCell>
                     <TableCell className="text-xs">
                       <span className="text-muted-foreground">{r.category} › </span>
-                      {r.row_label} · {r.price_col}
+                      {r.row_label} · {priceColLabel(r.price_col)}
                     </TableCell>
                     <TableCell
                       className={`text-right text-xs font-semibold tabular-nums ${r.qty < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}

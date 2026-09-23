@@ -62,25 +62,27 @@ export function TargetPicker(props: {
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-1">
-        <Label className="text-[11px]">Price column</Label>
-        <Select
-          value={props.value.price_col}
-          onValueChange={(v) => props.onChange({ ...props.value, price_col: v })}
-          disabled={!screen}
-        >
-          <SelectTrigger className="h-8 w-[150px] text-xs">
-            <SelectValue placeholder="Column" />
-          </SelectTrigger>
-          <SelectContent>
-            {(screen?.price_cols ?? []).map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {(screen?.price_cols.length ?? 0) > 1 && (
+        <div className="space-y-1">
+          <Label className="text-[11px]">Colour / size</Label>
+          <Select
+            value={props.value.price_col}
+            onValueChange={(v) => props.onChange({ ...props.value, price_col: v })}
+            disabled={!screen}
+          >
+            <SelectTrigger className="h-8 w-[150px] text-xs">
+              <SelectValue placeholder="Column" />
+            </SelectTrigger>
+            <SelectContent>
+              {(screen?.price_cols ?? []).map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
   );
 }

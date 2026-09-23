@@ -38,6 +38,8 @@ export interface PriceTarget {
   pack_col?: string;
   /** Pack quantity per row label (units per box / bag / package) when the screen has one. */
   packs?: Record<string, number | null>;
+  /** Adhesives: the product's own unit ("5-gal. Box Set", "4-Cartridge Case", …) per row. */
+  row_units?: Record<string, string>;
 }
 /** Columns that say how many pieces one priced pack holds. */
 const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
@@ -85,18 +87,24 @@ export const listPriceTargets = createServerFn({ method: "GET" })
         kind?: string;
         columns?: string[];
         rows?: Record<string, unknown>[];
-        products?: { name: string; price?: unknown }[];
+        products?: { name: string; price?: unknown; unit_type?: unknown }[];
       } | null;
       if (!d) continue;
       if (d.kind === "adhesives") {
         const values: PriceTarget["values"] = {};
-        for (const p of d.products ?? []) values[p.name] = { price: numOrNull(p.price) };
+        const rowUnits: Record<string, string> = {};
+        for (const p of d.products ?? []) {
+          values[p.name] = { price: numOrNull(p.price) };
+          if (typeof p.unit_type === "string" && p.unit_type.trim())
+            rowUnits[p.name] = p.unit_type.trim();
+        }
         out.push({
           screen_id: s.id,
           category: s.category,
           rows: (d.products ?? []).map((p) => p.name),
           price_cols: ["price"],
           values,
+          row_units: rowUnits,
         });
         continue;
       }
