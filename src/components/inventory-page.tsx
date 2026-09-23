@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { Package, Plus, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import { listPriceTargets } from "@/lib/admin-item-numbers.functions";
+import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
+import type { ItemNumberRow } from "@/lib/admin-item-numbers.functions";
 import {
   addMovement,
   deleteMovement,
@@ -54,6 +55,7 @@ export function InventoryPage() {
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
   const targetsFn = useServerFn(listPriceTargets);
+  const itemNosFn = useServerFn(listItemNumbers);
   const bidsFn = useServerFn(listBidOptions);
   const settingsFn = useServerFn(getInventorySettings);
   const stockQ = useQuery({ queryKey: ["inventory-stock"], queryFn: () => stockFn() });
@@ -62,6 +64,7 @@ export function InventoryPage() {
     queryFn: () => movesFn({ data: {} }),
   });
   const targetsQ = useQuery({ queryKey: ["price-targets"], queryFn: () => targetsFn() });
+  const itemNosQ = useQuery({ queryKey: ["item-numbers"], queryFn: () => itemNosFn() });
   const bidsQ = useQuery({ queryKey: ["inventory-bids"], queryFn: () => bidsFn() });
   const settingsQ = useQuery({ queryKey: ["inventory-settings"], queryFn: () => settingsFn() });
   const refresh = () => {
@@ -100,6 +103,7 @@ export function InventoryPage() {
         <TabsContent value="add" className="pt-3">
           <AddMovementCard
             targets={targets}
+            itemNumbers={itemNosQ.data ?? []}
             bids={bidsQ.data ?? []}
             role={role}
             rule={rule}
@@ -210,6 +214,8 @@ function StockTable(props: {
 
 function AddMovementCard(props: {
   targets: Awaited<ReturnType<ReturnType<typeof useServerFn<typeof listPriceTargets>>>>;
+  /** Duro-Last item numbers → catalog cell (Admin › Item numbers) — "Record by item #". */
+  itemNumbers: ItemNumberRow[];
   bids: { id: string; name: string; status: string; updated_at: string }[];
   role: string | null;
   rule: OpenedBoxRule;
@@ -226,7 +232,37 @@ function AddMovementCard(props: {
   const [counted, setCounted] = useState("");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [itemNo, setItemNo] = useState("");
   const fieldOnly = props.role === "field";
+  // Item # lookup: an exact match picks the product; a partial match lists candidates.
+  const itemQuery = itemNo.trim().toLowerCase();
+  const itemMatches = useMemo(
+    () =>
+      itemQuery
+        ? props.itemNumbers.filter(
+            (m) =>
+              m.item_no.toLowerCase().includes(itemQuery) ||
+              (m.dl_description ?? "").toLowerCase().includes(itemQuery),
+          )
+        : [],
+    [itemQuery, props.itemNumbers],
+  );
+  const exactItem = itemMatches.find((m) => m.item_no.toLowerCase() === itemQuery);
+  const pickItem = (m: ItemNumberRow) => {
+    setTarget({ screen_id: m.screen_id, row_label: m.row_label, price_col: m.price_col });
+    setUnitOverride(null);
+    setItemNo(m.item_no);
+  };
+  const cellItemNos = t
+    ? props.itemNumbers
+        .filter(
+          (m) =>
+            m.screen_id === t.screen_id &&
+            m.row_label === t.row_label &&
+            m.price_col === t.price_col,
+        )
+        .map((m) => m.item_no)
+    : [];
   const n = Number(qty);
   const canSave = !!t && qty.trim() !== "" && Number.isFinite(n) && n !== 0 && !saving;
 
@@ -272,6 +308,66 @@ function AddMovementCard(props: {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-1">
+          <Label className="text-[11px]">
+            Item # (Duro-Last part number — picks the product below)
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="h-8 w-48 font-mono text-xs"
+              placeholder="e.g. 1767"
+              value={itemNo}
+              list="inventory-item-numbers"
+              onChange={(e) => {
+                const v = e.target.value;
+                setItemNo(v);
+                const hit = props.itemNumbers.find(
+                  (m) => m.item_no.toLowerCase() === v.trim().toLowerCase(),
+                );
+                if (hit) pickItem(hit);
+              }}
+            />
+            <datalist id="inventory-item-numbers">
+              {props.itemNumbers.map((m) => (
+                <option
+                  key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}
+                  value={m.item_no}
+                >
+                  {m.row_label} · {m.price_col}
+                </option>
+              ))}
+            </datalist>
+            {exactItem ? (
+              <span className="text-xs text-green-700 dark:text-green-400">
+                ✓ {exactItem.row_label} · {exactItem.price_col}
+              </span>
+            ) : itemQuery && itemMatches.length === 0 ? (
+              <span className="text-xs text-destructive">
+                No product is mapped to that item number (Admin › Item numbers).
+              </span>
+            ) : null}
+          </div>
+          {!exactItem && itemMatches.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {itemMatches.slice(0, 8).map((m) => (
+                <button
+                  key={`${m.item_no}|${m.screen_id}|${m.row_label}|${m.price_col}`}
+                  type="button"
+                  className="rounded border px-2 py-0.5 text-[11px] hover:bg-muted"
+                  onClick={() => pickItem(m)}
+                  title={m.dl_description ?? undefined}
+                >
+                  <span className="font-mono">{m.item_no}</span> — {m.row_label} · {m.price_col}
+                </button>
+              ))}
+              {itemMatches.length > 8 && (
+                <span className="text-[11px] text-muted-foreground">
+                  +{itemMatches.length - 8} more — keep typing
+                </span>
+              )}
+            </div>
+          )}
+        </div>
         {t ? (
           <TargetPicker
             targets={props.targets}
@@ -279,10 +375,16 @@ function AddMovementCard(props: {
             onChange={(v) => {
               setTarget(v);
               setUnitOverride(null);
+              setItemNo("");
             }}
           />
         ) : (
           <p className="text-sm text-muted-foreground">Loading products…</p>
+        )}
+        {t && cellItemNos.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Item # for this product: <span className="font-mono">{cellItemNos.join(", ")}</span>
+          </p>
         )}
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
