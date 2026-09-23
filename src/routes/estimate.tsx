@@ -4105,9 +4105,13 @@ function EstimatePage() {
                         ["Built Up, Modified & Combinations", []],
                         ["Urethane", []],
                       ];
+                      // Legacy TearoffRooftype.Category (DBLoadRefTables): 1 Single Ply &
+                      // Combinations (ids 1-7, incl. the "… over BUR < 2"" combos), 2 Built Up
+                      // (BUR < 2/4/6"), 3 Urethane (Spray URET, URET … BUR). Anchored at the start
+                      // so the combos stay under Single Ply.
                       for (const t of types) {
-                        if (/uret|spray/i.test(t)) groups[2]![1].push(t);
-                        else if (/bur|built|mod/i.test(t)) groups[1]![1].push(t);
+                        if (/^(spray\s+)?uret/i.test(t)) groups[2]![1].push(t);
+                        else if (/^bur\b/i.test(t)) groups[1]![1].push(t);
                         else groups[0]![1].push(t);
                       }
                       return (

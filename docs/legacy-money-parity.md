@@ -3606,3 +3606,25 @@ Screen changes (no money change unless the user adjusts labor):
   and the Setup parapet defaults now show the resolved bid value (curbs and parapets: the first
   section's mil / color, the engine's own fallback; Setup: the bid membrane). Picking the bid's
   own value clears the override so the item keeps following the bid.
+
+### 22.52 Tear-off type names restored from the legacy binary (2026-09-23)
+
+Owner: "so you can't check the legacy app to see what their actual names are?" — the names are
+DB rows, but the legacy seed list is compiled into DataAccess.dll:
+`Management.DBLoadRefTables` builds 14 `TearoffRooftype(id, name, category)` objects
+(UTF-16 string constants, verified by IL): 1 Ballasted Single Ply(EPDM), 2 Fully Adhered
+Single Ply, 3 Mechanically Fastened Single Ply 7', 4 Mechanically Fastened SP 5' centers,
+5 Single Ply Adhered over BUR < 2", 6 Single Ply M F 7' over BUR < 2", 7 Single Ply MF 5' over
+BUR < 2" (category 1, Single Ply & Combinations); 8 BUR < 2", 9 BUR < 4", 10 BUR < 6"
+(category 2, Built Up, Modified & Combinations); 11 Spray URET < 3", 12 URET < 3" BUR < 2",
+13 URET < 6" BUR < 2", 14 URET < 9" BUR < 2" (category 3, Spray Urethane & Combinations).
+The captured admin grid (Drive "Tearoff Times" screenshots) lists them in exactly that id
+order, so "Mechanically Fas... (1)" = id 3 (7') and "(2)" = id 4 (5' centers) — consistent
+with the values too (5' centers costs more on every deck: Wood 2.1924 vs 1.7676).
+
+Migration `20260923050000` (applied live, verified): renames the 'tearoff_times' rows and
+rewrites every saved bid's `sections[].tearOffType` and frozen `adminSnapshot.tearOff` keys by
+JSON-text replace with the bids updated_at trigger disabled (a data repair, not a save). No
+rate changes; bid money is unchanged. The Tear-off tiles now group by the legacy category rule
+(name starts with "Spray URET"/"URET" → Urethane, "BUR" → Built Up, else Single Ply), so the
+"… over BUR < 2"" combos stay under Single Ply as in legacy.
