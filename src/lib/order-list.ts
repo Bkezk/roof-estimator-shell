@@ -43,7 +43,10 @@ export interface OrderLine {
   pulled: number;
   /** What could still be pulled now: min(on hand, needed − pulled). */
   pullable: number;
-  /** needed − pulled − what on hand covers, floored at 0; whole packs for pack units. */
+  /**
+   * needed − what this bid actually took from inventory, floored at 0; whole packs for pack
+   * units. On hand is NOT assumed used — To buy only drops once "Use from inventory" is clicked.
+   */
   toBuy: number;
   /** Product pack pieces (cartridges / fasteners / gallons) when the catalog states them. */
   piece?: PieceDef | null;
@@ -252,8 +255,9 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
       : 0;
     const stillNeeded = Math.max(0, needed - pulled);
     const pullable = Math.max(0, Math.min(onHand ?? 0, stillNeeded));
-    const remaining = Math.max(0, stillNeeded - pullable);
-    const toBuy = isPackUnit(u) ? Math.ceil(remaining - 1e-9) : Math.round(remaining * 100) / 100;
+    const toBuy = isPackUnit(u)
+      ? Math.ceil(stillNeeded - 1e-9)
+      : Math.round(stillNeeded * 100) / 100;
     const line: OrderLine = { group, name, needed, unit: u, pulled, pullable, toBuy };
     if (resolved && !unitsAgree) {
       line.stockUnit = shelfUnit;

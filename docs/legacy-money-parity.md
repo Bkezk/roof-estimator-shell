@@ -3492,3 +3492,11 @@ adhesive unit types — and those lines already round up to whole packs (13 fast
 EA at $10.20), so 15 tubes is 15; no case size exists to round to. A per-product "order pack"
 for the rest (bars per bundle, pieces per box) is not captured anywhere and would be an admin
 entry if wanted.
+
+### 22.48 Order list: To buy counts only inventory actually used (2026-09-23)
+
+Owner: with 5 sq ft on the shelf and 1 needed, To buy read 0 before "Use from inventory" was
+clicked. Now To buy = needed − what this bid actually took (ledger `consumed` − `released`),
+whole packs for pack units; on hand is shown and limits what can be pulled but is never assumed
+used. Also: `bids.updated_by_name` (migration `20260923040000`, applied live) — saveBid stamps
+the saver's display name and the Bids page reads "Last saved <when> by <name>".

@@ -21,7 +21,7 @@ const lines: OrderLine[] = [
     pulled: 0.75,
     pullable: 1.25,
     onHand: 1.25,
-    toBuy: 1,
+    toBuy: 3,
     piece: { name: "cartridge", perPack: 4 },
   },
   {
@@ -58,7 +58,7 @@ describe("order list export", () => {
       "4-Cartridge Case",
       0.75,
       1.25,
-      1,
+      3,
     ]);
     expect(rows[2]![5]).toBe("shelf in piece");
     expect(rows[3]).toEqual([

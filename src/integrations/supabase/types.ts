@@ -67,6 +67,7 @@ export type Database = {
           name: string;
           status: string;
           updated_at: string;
+          updated_by_name: string | null;
         };
         Insert: {
           created_at?: string;
@@ -78,6 +79,7 @@ export type Database = {
           name: string;
           status?: string;
           updated_at?: string;
+          updated_by_name?: string | null;
         };
         Update: {
           created_at?: string;
@@ -89,6 +91,7 @@ export type Database = {
           name?: string;
           status?: string;
           updated_at?: string;
+          updated_by_name?: string | null;
         };
         Relationships: [];
       };

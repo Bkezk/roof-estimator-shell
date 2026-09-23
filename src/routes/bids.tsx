@@ -440,6 +440,7 @@ function BidsPage() {
                         dateStyle: "short",
                         timeStyle: "short",
                       })}
+                      {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
                     </p>
                   </div>
                 </div>

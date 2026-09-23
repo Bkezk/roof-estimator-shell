@@ -212,8 +212,9 @@ describe("order list — matching engine lines to stock cells", () => {
       ],
     });
     const l = lines[0]!;
-    // needed 3, pulled 0.75 net, still needed 2.25, shelf 1.25 covers 1.25 → 1 more case to buy
-    expect(l).toMatchObject({ needed: 3, pulled: 0.75, onHand: 1.25, pullable: 1.25, toBuy: 1 });
+    // needed 3, pulled 0.75 net → 2.25 still needed → 3 whole cases to buy; 1.25 more could be
+    // pulled from the shelf but is not assumed used
+    expect(l).toMatchObject({ needed: 3, pulled: 0.75, onHand: 1.25, pullable: 1.25, toBuy: 3 });
   });
 
   it("does not net stock kept in a different unit than the bid needs", () => {
@@ -365,28 +366,31 @@ describe("order list — matching engine lines to stock cells", () => {
       stock,
     });
     const by = (name: string) => lines.find((l) => l.name.includes(name))!;
-    // Membrane: 8,591 sq ft needed, 1,500 on hand → 7,091 to buy (sq ft, not rounded to packs).
+    // Membrane: 8,591 sq ft needed, 1,500 on hand but not yet used → still 8,591 to buy;
+    // 1,500 could be pulled.
     expect(by("Duro-Tuff - 60 · Tan")).toMatchObject({
       group: "Membrane",
       needed: 8591,
       onHand: 1500,
-      toBuy: 7091,
+      pullable: 1500,
+      toBuy: 8591,
       unit: "sq ft",
     });
     // Underlayment: 8,000 × 1.03 for ISO, × 1.06 for Geotextile; no stock rows → to buy = needed.
     expect(by('2" ISO')).toMatchObject({ group: "Underlayment", needed: 8240, toBuy: 8240 });
     expect(by("Geotextile").needed).toBe(8480);
     expect(by("Geotextile").onHand).toBeUndefined();
-    // Fasteners: 3 boxes needed, 0.6 box on hand → 2.4 → 3 whole boxes to buy; pieces shown.
+    // Fasteners: 3 boxes needed, 0.6 box on hand (unused) → 3 to buy; pieces shown.
     expect(by("Spade")).toMatchObject({
       group: "Fasteners",
       needed: 3,
       onHand: 0.6,
+      pullable: 0.6,
       toBuy: 3,
       pieces: 2500,
       unit: "box",
     });
-    // Adhesive: 2 cases needed, 0.75 case on hand → 1.25 → 2 cases; unit from the product.
+    // Adhesive: 2 cases needed, 0.75 case on hand (unused) → 2; unit from the product.
     expect(by("cartridge")).toMatchObject({
       group: "Adhesives",
       needed: 2,

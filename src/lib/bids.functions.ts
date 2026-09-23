@@ -61,11 +61,18 @@ export const saveBid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => saveBidSchema.parse(d))
   .handler(async ({ data, context }) => {
+    // Who is saving — shown on the Bids page as "Last saved … by <name>".
+    const { data: me } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
     const payload = {
       name: data.name,
       data: data.data as Json,
       grand_total: data.grandTotal,
       updated_at: new Date().toISOString(),
+      updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       ...(data.status ? { status: data.status } : {}),
     };
     if (data.id) {
