@@ -23,7 +23,13 @@ import {
   type OpenedBoxRule,
 } from "@/lib/inventory.functions";
 import { firstTarget, type TargetRef } from "@/lib/item-number-targets";
-import { describeStock, packsFromPieces, plural, type PieceDef } from "@/lib/stock-units";
+import {
+  describeStock,
+  displayStock,
+  packsFromPieces,
+  plural,
+  type PieceDef,
+} from "@/lib/stock-units";
 import { TargetPicker } from "@/components/item-number-target-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -207,19 +213,24 @@ function StockTable(props: {
                     <TableCell
                       className={`text-right text-sm font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
                     >
-                      {fmtQty(r.on_hand)}
-                      {(() => {
-                        const def = props.pieceOf(r.screen_id, r.row_label);
-                        if (!def) return null;
-                        const pieces = r.on_hand * def.perPack;
-                        return (
-                          <div className="text-[11px] font-normal text-muted-foreground">
-                            {fmtQty(pieces)} {plural(pieces, def.name)}
-                          </div>
-                        );
-                      })()}
+                      {fmtQty(
+                        displayStock(r.on_hand, r.unit, props.pieceOf(r.screen_id, r.row_label))
+                          .amount,
+                      )}
                     </TableCell>
-                    <TableCell className="text-xs">{r.unit}</TableCell>
+                    <TableCell
+                      className="text-xs"
+                      title={
+                        props.pieceOf(r.screen_id, r.row_label)
+                          ? `${fmtQty(r.on_hand)} ${r.unit}`
+                          : undefined
+                      }
+                    >
+                      {
+                        displayStock(r.on_hand, r.unit, props.pieceOf(r.screen_id, r.row_label))
+                          .unit
+                      }
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {r.last_at ? fmtWhen(r.last_at) : ""}
                     </TableCell>
@@ -514,7 +525,7 @@ function AddMovementCard(props: {
         </div>
         {packsPreview !== null && piece && (
           <p className="-mt-2 text-xs text-muted-foreground">
-            Records as {describeStock(packsPreview, unit, piece)}
+            = {fmtQty(packsPreview)} {unit}
           </p>
         )}
         <div className="grid gap-3 md:grid-cols-2">

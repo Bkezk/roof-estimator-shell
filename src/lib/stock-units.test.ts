@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   describeStock,
+  displayStock,
   packsFromPieces,
   pieceDefFromPack,
   pieceDefFromUnitType,
@@ -24,13 +25,10 @@ describe("stock units — pieces of a priced pack", () => {
   it("converts and describes", () => {
     const def = { name: "cartridge", perPack: 4 };
     expect(packsFromPieces(3, def)).toBe(0.75);
-    expect(describeStock(0.75, "4-Cartridge Case", def)).toBe(
-      "0.75 4-Cartridge Case (3 cartridges)",
-    );
-    expect(describeStock(1, "4-Cartridge Case", def)).toBe("1 4-Cartridge Case (4 cartridges)");
-    expect(describeStock(0.6, "box", { name: "fastener", perPack: 1000 })).toBe(
-      "0.6 box (600 fasteners)",
-    );
+    expect(describeStock(0.75, "4-Cartridge Case", def)).toBe("3 cartridges");
+    expect(describeStock(0.25, "4-Cartridge Case", def)).toBe("1 cartridge");
+    expect(describeStock(0.6, "box", { name: "fastener", perPack: 1000 })).toBe("600 fasteners");
     expect(describeStock(2, "pail", null)).toBe("2 pail");
+    expect(displayStock(2.5, "4-Cartridge Case", def)).toEqual({ amount: 10, unit: "cartridges" });
   });
 });
