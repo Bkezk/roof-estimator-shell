@@ -20,7 +20,14 @@ export interface AuthState {
   refreshProfile: () => Promise<void>;
 }
 
-export const AuthContext = createContext<AuthState | undefined>(undefined);
+// One context object per page load, whatever Vite hot-swaps: a re-evaluation of THIS file (an
+// edit to it, or to anything it imports) must not mint a second context, or every mounted
+// useAuth throws until a full reload. Pinned on globalThis for that reason only.
+const g = globalThis as { __bidOMaticAuthContext?: ReturnType<typeof createAuthContext> };
+function createAuthContext() {
+  return createContext<AuthState | undefined>(undefined);
+}
+export const AuthContext = (g.__bidOMaticAuthContext ??= createAuthContext());
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
