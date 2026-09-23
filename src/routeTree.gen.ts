@@ -16,6 +16,7 @@ import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProposalRouteImport } from './routes/proposal'
+import { Route as ProspectRouteImport } from './routes/prospect'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
@@ -58,6 +59,11 @@ const ProposalRoute = ProposalRouteImport.update({
   path: '/proposal',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProspectRoute = ProspectRouteImport.update({
+  id: '/prospect',
+  path: '/prospect',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminDuroLastRoute = AdminDuroLastRouteImport.update({
   id: '/admin/duro-last',
   path: '/admin/duro-last',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
+  '/prospect': typeof ProspectRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -112,6 +119,7 @@ export interface FileRoutesByTo {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
+  '/prospect': typeof ProspectRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -128,6 +136,7 @@ export interface FileRoutesById {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
+  '/prospect': typeof ProspectRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -145,6 +154,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/proposal'
+    | '/prospect'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -160,6 +170,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/proposal'
+    | '/prospect'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -175,6 +186,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/proposal'
+    | '/prospect'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -191,6 +203,7 @@ export interface RootRouteChildren {
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
   ProposalRoute: typeof ProposalRoute
+  ProspectRoute: typeof ProspectRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
@@ -250,6 +263,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProposalRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/prospect': {
+      id: '/prospect'
+      path: '/prospect'
+      fullPath: '/prospect'
+      preLoaderRoute: typeof ProspectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/duro-last': {
       id: '/admin/duro-last'
       path: '/admin/duro-last'
@@ -303,6 +323,7 @@ const rootRouteChildren: RootRouteChildren = {
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
   ProposalRoute: ProposalRoute,
+  ProspectRoute: ProspectRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,

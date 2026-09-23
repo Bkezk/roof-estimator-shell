@@ -5,7 +5,7 @@ This revision replaces the earlier draft. It orders the work the way the owner w
 (Prospecting first, then Takeoff, then CRM; the customer portal last and only if wanted),
 describes what already exists so no module re-invents it, and states the rules that keep the
 bid software stable while the rest grows. Free data sources only until the owner says
-otherwise.
+otherwise; no AI roof grading for now. Prospecting phase 1 started Sep 24 (`MODULES.md`).
 
 ## Purpose and principles
 
@@ -73,10 +73,12 @@ Six modules, in build order. "Alone" is what it must do with nothing else in the
 | 3 | **CRM** | Contacts, companies, opportunities, activities, tasks, lead source; Bids and Service pipelines; follow-up sequences; maintenance agreements; job costing; win/loss | Opportunity → Estimator; won → Job | Any module creates an activity or opportunity against a building or contact; Prospecting tasks-lite migrates into CRM tasks |
 | 4 | **Roof Portal** (customer-facing, optional, last) | A customer logs in to see their roofs, warranties, inspection photos, repair history, and request service | Service request → CRM service ticket → Estimator | Installed bids and inspections publish here |
 
-Takeoff is still the hinge for the automated path, but Prospecting does not wait for it:
-a **budgetary range from the footprint** (building sqft × $/sq ft bands taken from past
-bids by roof type and size) gives report cards a number before any drawing exists. Takeoff
-later replaces that range with a measured one.
+Takeoff is still the hinge for the automated path, but Prospecting does not wait for it.
+Owner (Sep 23): no price bands. A building's roof area and perimeter become a section of the
+same area and perimeter (the equivalent rectangle, `src/lib/prospect.ts`), the estimator's
+own defaults (or a chosen roofing system, underlayment, fastening, edging) fill the rest, and
+the engine prices it as it prices any bid. That is the report card's number, and it is a real
+quick bid. Takeoff later replaces the rectangle with the measured shape.
 
 Two things the earlier draft assumed that are not true here:
 
@@ -155,7 +157,7 @@ forces it.
 | Worker | A separate repo: a small Python service on Railway or Fly, on cron, writing to Supabase with a service key | Imagery clipping, scoring, PDF parsing, and nightly ingestion exceed edge-function limits and share nothing with the web build |
 | Takeoff canvas | pdf.js to render sheets, Konva for drawing on plans, MapLibre for drawing on aerial tiles | Same object model on both underlays |
 | Map | MapLibre with KyFromAbove as a tile source | Free, 3-inch, statewide |
-| Scoring | Claude vision via the Anthropic API for tier 1; a fine-tuned classifier on the worker for tier 2 | Both write `condition_score` + `score_version` |
+| Scoring | Not now (owner, Sep 23). Condition is a hand-entered field; imagery scoring is a later option | — |
 | Mail | None for now: report cards are PDFs printed and mailed in-house; a mail API is a later, paid option | Free sources only |
 | Telephony | Out of scope for now | — |
 
@@ -185,11 +187,11 @@ listed after the table).
 | --- | --- | --- |
 | 0 — Guardrails + link columns | CI workflow, branch/PR rule, module folders and lint rule, `MODULES.md`, feature flags; migration adding nullable link columns to `bids`; PostGIS on | CI blocks a failing commit; estimator rebuilds two saved bids to the same numbers |
 | 1 — Prospecting A: buildings | Parcel ingest for the core counties (PVA / Regrid fallback), Microsoft footprints where PVA has none, KyFromAbove clips per building, map view with search and filters, building page, own-book import from won bids, tasks-lite | Every commercial parcel in the core counties has a building row with a footprint and a clip; sales can open a building and see what we know |
-| 2 — Prospecting B: scores, triggers, report cards | Tier-1 Claude scoring on all clips, checked against 100 roofs an estimator graded by hand; nightly NOAA storm reports, PVA ownership transfers, and SAM.gov bid notices into `triggers` → tasks; footprint-based budgetary range; report-card PDF → print queue → task "call in 7 days" | Scoring agreement with the hand-graded roofs reported and accepted; triggers create tasks with no manual step; first batch of 50 report cards mailed with response tracked |
+| 2 — Prospecting B: triggers, report cards | Nightly NOAA storm reports, PVA ownership transfers, and SAM.gov bid notices into `triggers` → tasks; quick bid from the building (equivalent rectangle + bid defaults); report-card PDF → print queue → task "call in 7 days". No AI roof grading: condition is a hand-entered field until the owner wants scoring (a later option, if at all) | Triggers create tasks with no manual step; first batch of 50 report cards mailed with response tracked |
 | 3 — Takeoff on plans | PDF upload, one-point scale, area / line / count tools, quantity export, object → estimator input mapping for every geometry-driven input, "Create bid from takeoff", live bid update; `jobs` table | An estimator measures a real plan set and the resulting bid is complete and correct without re-typing a quantity, checked against the same job priced by hand |
 | 4 — Aerial takeoff | The phase-3 tools on KyFromAbove tiles with scale already known; auto-takeoff from the footprint replaces the budgetary range in report cards | A report card carries a measured number with no human drawing |
 | 5 — CRM | Companies, contacts, opportunities, activities, service tickets, Bids and Service pipelines, follow-up sequences, maintenance agreements, job costing (estimated-vs-actual by the ledger's labor categories), win/loss capture and reporting; tasks-lite folds in | Sales logs a full week in the CRM with nothing in the old system |
-| 6 — Tier-2 model, plan AI | Fine-tuned classifier; vintage diffs; AI roof detection on plans | Classifier beats tier 1 on the same hand-graded roofs |
+| 6 — AI roof condition, plan AI (optional, later) | Only if wanted: imagery-based condition scores checked against roofs an estimator graded by hand; AI roof detection on plans | Scoring agreement with the hand-graded roofs reported and accepted |
 | 7 — Roof Portal (optional) | Customer accounts (`portal` flag), roofs, warranties, inspection photos, service requests → CRM tickets | Only if wanted; one customer account live with real data |
 
 Phase 3 can start while phase 2 is in flight; they share only the spine. Phase 4 waits on
@@ -252,15 +254,13 @@ Owner answers of Sep 23 are recorded inline; the rest stay open.
   before clipping imagery.
 - [x] **Own-book seed.** Won bids seed `roofs` automatically. Older jobs: owner is gathering
   .bax files; the importer is built against the first two or three received.
-- [ ] **Budgetary range bands.** A report card carries a rough price before anyone measures
-  the roof. To produce it, the module needs typical dollars per square foot from our own past
-  bids, grouped by roof type and size band (for example, mechanically fastened, 20,000 to
-  50,000 sq ft). The question is which past bids are representative enough to set those
-  bands. Default if unanswered: every won bid in the database, refreshed nightly.
-- [ ] **Hand-graded roofs (was "labeling owner").** Before the AI condition score drives any
-  outreach, we measure it: an estimator grades 100 roofs by eye from the same imagery (good /
-  fair / poor), the model never sees those 100 while it is tuned, and we report how often it
-  agrees with the estimator. The question is who does that grading, and by when.
+- [x] **Budgetary range bands.** Owner: not needed. The roofing system, underlayment,
+  fastening, edging and the rest are chosen before (or instead of) a takeoff, and the
+  estimator prices the building's area and perimeter as an equivalent rectangle. A report
+  card's number is a real quick bid, not a band.
+- [x] **Hand-graded roofs / AI grading.** Owner: no AI roof grading for now, later if at all.
+  Condition is a hand-entered field on the building. The hand-graded check stays in the plan
+  only as the exit test for that later option.
 - [x] **Paid sources.** Owner: free sources only for now. Storm triggers from NOAA SPC, bid
   notices from SAM.gov, ownership changes from PVA transfers, permits read manually from
   county portals, report cards printed and mailed in-house. The Anthropic API for scoring is

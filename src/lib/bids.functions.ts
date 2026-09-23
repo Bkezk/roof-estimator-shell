@@ -47,6 +47,8 @@ export const listDeletedBids = createServerFn({ method: "GET" })
   });
 
 const saveBidSchema = z.object({
+  // Prospecting link (nullable spine column); absent = leave as is.
+  buildingId: z.string().uuid().nullable().optional(),
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(200),
   data: z.record(z.string(), z.unknown()),
@@ -74,6 +76,7 @@ export const saveBid = createServerFn({ method: "POST" })
       updated_at: new Date().toISOString(),
       updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       ...(data.status ? { status: data.status } : {}),
+      ...(data.buildingId !== undefined ? { building_id: data.buildingId } : {}),
     };
     if (data.id) {
       const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);

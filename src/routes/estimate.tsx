@@ -27,6 +27,8 @@ import {
   getFastenerLookup,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
+import { getBuilding } from "@/lib/prospect.functions";
+import { equivalentRectangle } from "@/lib/prospect";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -156,13 +158,18 @@ import {
 
 export const Route = createFileRoute("/estimate")({
   head: () => ({ meta: [{ title: "Estimator — Bid-O-Matic" }] }),
-  validateSearch: (s: Record<string, unknown>): { bid?: string; combine?: string } => {
+  validateSearch: (
+    s: Record<string, unknown>,
+  ): { bid?: string; combine?: string; building?: string } => {
     const b = s["bid"];
     const c = s["combine"];
+    const g = s["building"];
     return {
       ...(typeof b === "string" ? { bid: b } : {}),
       // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
       ...(typeof c === "string" && c ? { combine: c } : {}),
+      // Prospecting: start a NEW bid from a building (address + one section from its roof area).
+      ...(typeof g === "string" && g ? { building: g } : {}),
     };
   },
   component: EstimatePage,
@@ -330,7 +337,7 @@ function EstimatePage() {
   const saveBidFn = useServerFn(saveBid);
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { bid: bidParam, combine: combineParam } = Route.useSearch();
+  const { bid: bidParam, combine: combineParam, building: buildingParam } = Route.useSearch();
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
   const { session, profile } = useAuth();
@@ -672,6 +679,46 @@ function EstimatePage() {
   const [toLaborOpen, setToLaborOpen] = useState(false);
   const [toLaborPct, setToLaborPct] = useState(0);
 
+  // Prospecting link: the building this bid was started from (or linked to). Saved on bids as
+  // the nullable building_id spine column; the estimator never edits the building.
+  const [linkedBuildingId, setLinkedBuildingId] = useState<string | null>(null);
+  const getBuildingFn = useServerFn(getBuilding);
+  const { data: fromBuilding } = useQuery({
+    queryKey: ["building", buildingParam],
+    queryFn: () => getBuildingFn({ data: { id: buildingParam! } }),
+    enabled: authed && !!buildingParam && !bidParam,
+  });
+  const buildingApplied = useRef<string | null>(null);
+  useEffect(() => {
+    if (!fromBuilding || bidParam || buildingApplied.current === fromBuilding.building.id) return;
+    buildingApplied.current = fromBuilding.building.id;
+    const b = fromBuilding.building;
+    setLinkedBuildingId(b.id);
+    setBidName(b.name || b.address1 || "Untitled bid");
+    setCustomer((c) => ({
+      ...c,
+      name: b.owner_name || b.name || c.name,
+      projectAddress: b.address1,
+      ...(b.address2 ? { projectAddress2: b.address2 } : {}),
+      ...(b.city ? { jobCity: b.city } : {}),
+      jobState: b.state,
+      ...(b.zip ? { jobZip: b.zip } : {}),
+      jobCityStZip: [b.city, [b.state, b.zip].filter(Boolean).join(" ")]
+        .filter((x) => x && x.trim())
+        .join(", "),
+    }));
+    // One section with the roof's area (and perimeter when known) as an equivalent rectangle:
+    // the engine keeps pricing width × length exactly as a typed section.
+    const area = b.roof_sqft ?? b.building_sqft ?? 0;
+    if (area > 0) {
+      const r = equivalentRectangle(area, b.perimeter_ft);
+      setSections([
+        newSection({ ...sectionDefaults, name: "Roof", width: r.width, length: r.length }),
+      ]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromBuilding, bidParam]);
+
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({
     queryKey: ["bid", bidParam],
@@ -783,6 +830,7 @@ function EstimatePage() {
         createdAt: (loadedBid as { created_at?: string }).created_at,
         updatedAt: loadedBid.updated_at,
       });
+      setLinkedBuildingId(loadedBid.building_id ?? null);
     }
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
@@ -1444,6 +1492,7 @@ function EstimatePage() {
           data: payload as unknown as Record<string, unknown>,
           grandTotal,
           status: bidStatus,
+          ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });

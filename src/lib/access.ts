@@ -7,19 +7,21 @@
  * RLS (`public.has_access(page)`) plus the checks inside every server function; the gate and the
  * sidebar only mirror it.
  */
-export const PAGES = ["estimate", "pricing", "inventory"] as const;
+export const PAGES = ["estimate", "pricing", "inventory", "prospect"] as const;
 export type Page = (typeof PAGES)[number];
 
 export const PAGE_LABELS: Record<Page, string> = {
   estimate: "Estimate",
   pricing: "Estimate Pricing",
   inventory: "Inventory",
+  prospect: "Prospecting",
 };
 
 export const PAGE_HELP: Record<Page, string> = {
   estimate: "Bids and the estimator — and listed as an estimator on Setup",
   pricing: "Labor, Duro-Last and Non-DL pricing, price list import",
   inventory: "Stock ledger (leftovers only, unless Estimate is granted too)",
+  prospect: "Buildings, roofs and tasks — the territory roof database",
 };
 
 export type Role = "admin" | "user";
@@ -41,6 +43,7 @@ export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname.startsWith("/admin/users")) return "admin";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
+  if (pathname.startsWith("/prospect")) return "prospect";
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||
@@ -55,6 +58,7 @@ export function pageForPath(pathname: string): Page | "admin" | null {
 export function homeFor(p: AccessLike | null | undefined): string {
   if (canAccess(p, "estimate")) return "/bids";
   if (canAccess(p, "inventory")) return "/inventory";
+  if (canAccess(p, "prospect")) return "/prospect";
   if (canAccess(p, "pricing")) return "/admin/settings";
   if (isAdmin(p)) return "/admin/users";
   return "/account";

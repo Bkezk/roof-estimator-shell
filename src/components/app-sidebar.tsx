@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   Layers,
   ChevronRight,
+  Building2,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -36,6 +37,7 @@ import {
 // New bids start from the Bids page's "New Bid" button (owner: one entry point, not two).
 const estimatorItems = [{ title: "Bids", url: "/bids", icon: FileText }];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
+const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
 // Admin (role) only: who can sign in and which pages each person may open.
 const adminOnlyItems = [{ title: "Users & access", url: "/admin/users", icon: Users }];
 
@@ -289,6 +291,26 @@ export function AppSidebar() {
                     </SidebarMenuItem>
                   ),
                 )}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {can("prospect") && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Prospecting</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {prospectItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
