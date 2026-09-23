@@ -94,24 +94,16 @@ export const listUsers = createServerFn({ method: "GET" })
   });
 
 // The estimator roster for the Estimate → Setup "Estimator's Name" dropdown: every account with
-// Estimate access (admins included). Any signed-in user may read it, but only the display names
-// leave the server: profiles RLS hides other users' rows from non-admins, so this reads through
-// the service-role client and strips ids / emails / roles before returning.
+// Estimate access (admins included). Any signed-in user may read it; only display names leave.
+// `estimator_names()` is SECURITY DEFINER in the database (profiles RLS hides other users' rows
+// from non-admins), so no service-role key is needed here.
 export const listEstimatorNames = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async (): Promise<string[]> => {
-    const supabaseAdmin = await admin();
-    const { data, error } = await supabaseAdmin
-      .from("profiles")
-      .select("full_name, email, role, access")
-      .order("full_name", { ascending: true });
+  .handler(async ({ context }): Promise<string[]> => {
+    const { data, error } = await context.supabase.rpc("estimator_names");
     if (error) throw new Error(error.message);
     const names = new Set<string>();
-    for (const row of data ?? []) {
-      if (!canAccess(row, "estimate")) continue;
-      const name = (row.full_name ?? "").trim() || (row.email ?? "").trim();
-      if (name) names.add(name);
-    }
+    for (const name of data ?? []) if (name && name.trim()) names.add(name.trim());
     return [...names].sort((a, b) => a.localeCompare(b));
   });
 

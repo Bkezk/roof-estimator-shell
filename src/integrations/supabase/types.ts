@@ -771,6 +771,7 @@ export type Database = {
       };
       current_user_role: { Args: never; Returns: string };
       has_access: { Args: { page: string }; Returns: boolean };
+      estimator_names: { Args: never; Returns: string[] };
       inventory_bid_options: {
         Args: never;
         Returns: { id: string; name: string; status: string; updated_at: string }[];
