@@ -4729,15 +4729,6 @@ function EstimatePage() {
                 Export
               </Button>
             )}
-            <Button
-              variant={step < STEPS.length - 1 ? "outline" : "default"}
-              onClick={handleSave}
-              disabled={saving || readOnly}
-              title={readOnly ? "Read only" : "Saves the bid and stays on this step"}
-            >
-              <Save className="mr-2 h-4 w-4" />
-              {saving ? "Saving…" : bidId ? "Save" : "Save bid"}
-            </Button>
             {step < STEPS.length - 1 && (
               <Button
                 onClick={() => (readOnly ? goStep(step + 1) : saveAndGo(step + 1))}
