@@ -350,11 +350,32 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     onSuccess: setPreview,
     onError: fail,
   });
+  // A county's layer can run to tens of thousands of rows; the server writes 5,000 per call
+  // and says where to continue, so the client loops and shows progress.
+  const [progress, setProgress] = useState<string | null>(null);
+  const runImport = async (url: string, where: string, county: string, label: string) => {
+    let offset = 0;
+    let fetched = 0;
+    let upserted = 0;
+    let skipped = 0;
+    let kind: LayerKind = "facility";
+    for (;;) {
+      setProgress(`${label}: ${fetched.toLocaleString()} read…`);
+      const r = await importFn({
+        data: { layerUrl: url, where, county, startOffset: offset },
+      });
+      kind = r.kind;
+      fetched += r.fetched;
+      upserted += r.upserted;
+      skipped += r.skipped;
+      if (r.done || r.fetched === 0) break;
+      offset = r.nextOffset;
+    }
+    setProgress(null);
+    return { kind, fetched, upserted, skipped };
+  };
   const importM = useMutation({
-    mutationFn: () =>
-      importFn({
-        data: { layerUrl: layerUrl.trim(), where: whereClause, county: importCounty },
-      }),
+    mutationFn: () => runImport(layerUrl.trim(), whereClause, importCounty, "Importing"),
     onSuccess: (r) => {
       const what =
         r.kind === "address" ? "address point" : r.kind === "parcel" ? "parcel" : "building";
@@ -366,20 +387,42 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       invalidate();
       void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
     },
-    onError: fail,
+    onError: (e) => {
+      setProgress(null);
+      fail(e);
+    },
   });
   const addressCounts = useQuery({
     queryKey: ["address-point-counts"],
     queryFn: () => addressCountsFn(),
     enabled: importOpen && canWrite,
   });
-  const fillM = useMutation({
-    mutationFn: () => fillFn({ data: { county: importCounty } }),
-    onSuccess: (r) => {
-      toast.success(`${r.updated.toLocaleString()} footprints given an address`);
-      invalidate();
+  // Step 2 for footprints, in one click: import the county's 911 address points, then give
+  // every address-less footprint the nearest one.
+  const addressesM = useMutation({
+    mutationFn: async () => {
+      const points = await runImport(
+        KY_ADDRESS_POINTS_LAYER,
+        countyWhere("address", importCounty),
+        importCounty,
+        `${importCounty} 911 address points`,
+      );
+      setProgress("Matching footprints to the nearest address…");
+      const fill = await fillFn({ data: { county: importCounty } });
+      setProgress(null);
+      return { points, fill };
     },
-    onError: fail,
+    onSuccess: ({ points, fill }) => {
+      toast.success(
+        `${points.upserted.toLocaleString()} ${importCounty} address points imported; ${fill.updated.toLocaleString()} footprints given an address`,
+      );
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
+    },
+    onError: (e) => {
+      setProgress(null);
+      fail(e);
+    },
   });
   const rect = useMemo(() => {
     const b = detail.data?.building;
@@ -571,6 +614,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                       }`
                     : "Import"}
               </Button>
+              {progress && <span className="text-xs">{progress}</span>}
               {preview && (
                 <span className="text-xs text-muted-foreground">
                   {preview.kind} layer · {preview.total.toLocaleString()} match · page size{" "}
@@ -581,6 +625,13 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 </span>
               )}
             </div>
+            {preview?.kind === "footprint" && (
+              <p className="text-xs text-muted-foreground">
+                Footprints carry only the outline, its size and the county — no name, address or
+                owner. Import them, then use <b>Add addresses</b> below to match each one to the
+                nearest 911 address point.
+              </p>
+            )}
             {preview && preview.sample.length > 0 && (
               <Table>
                 <TableHeader>
@@ -612,26 +663,21 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               </Table>
             )}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => addressesM.mutate()}
+                disabled={addressesM.isPending || importM.isPending || preset.kind === "parcel"}
+              >
+                {addressesM.isPending ? "Working…" : `Add addresses for ${importCounty}`}
+              </Button>
               <span>
-                Addresses for footprints: {importCounty} has{" "}
+                Imports the county&apos;s 911 address points (
                 {(
                   addressCounts.data?.find((c) => c.county === importCounty)?.count ?? 0
                 ).toLocaleString()}{" "}
-                imported 911 points.
+                so far) and gives each address-less footprint the nearest one within 60 m.
               </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => fillM.mutate()}
-                disabled={
-                  fillM.isPending ||
-                  !(addressCounts.data?.find((c) => c.county === importCounty)?.count ?? 0)
-                }
-              >
-                {fillM.isPending
-                  ? "Matching…"
-                  : `Fill ${importCounty} footprint addresses (nearest point within 60 m)`}
-              </Button>
               <a
                 className="underline underline-offset-2"
                 href={countyRankingUrl(KY_FOOTPRINTS_LAYER, minSqFt)}

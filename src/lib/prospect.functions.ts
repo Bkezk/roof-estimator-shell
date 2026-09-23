@@ -590,7 +590,9 @@ export const importLayer = createServerFn({ method: "POST" })
         where: z.string().max(500).default("1=1"),
         /** Parcel layers: the county to file under. Footprints read it from FIPS. */
         county: z.string().trim().max(100).default(""),
+        /** Rows per call; the caller continues from `nextOffset` until `done`. */
         maxRows: z.number().int().min(1).max(20000).default(5000),
+        startOffset: z.number().int().min(0).default(0),
       })
       .parse(d),
   )
@@ -598,7 +600,15 @@ export const importLayer = createServerFn({ method: "POST" })
     async ({
       data,
       context,
-    }): Promise<{ kind: LayerKind; fetched: number; upserted: number; skipped: number }> => {
+    }): Promise<{
+      kind: LayerKind;
+      fetched: number;
+      upserted: number;
+      skipped: number;
+      /** Where the next call should start; meaningful only when `done` is false. */
+      nextOffset: number;
+      done: boolean;
+    }> => {
       await assertPageAccess(context.supabase, context.userId, "prospect");
       const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as LayerInfo;
       const fields = info.fields ?? [];
@@ -618,7 +628,9 @@ export const importLayer = createServerFn({ method: "POST" })
       let fetched = 0;
       let upserted = 0;
       let skipped = 0;
-      for (let offset = 0; offset < data.maxRows; offset += pageSize) {
+      let done = false;
+      let offset = data.startOffset;
+      for (; offset < data.startOffset + data.maxRows; offset += pageSize) {
         const page = (await fetchJson(
           parcelQueryUrl(data.layerUrl, { where: data.where, offset, count: pageSize }),
         )) as ArcGisFeatureSet;
@@ -737,9 +749,13 @@ export const importLayer = createServerFn({ method: "POST" })
           }
         }
         skipped += feats.length - written;
-        if (feats.length < pageSize || !page.exceededTransferLimit) break;
+        if (feats.length < pageSize || !page.exceededTransferLimit) {
+          done = true;
+          offset += feats.length;
+          break;
+        }
       }
-      return { kind, fetched, upserted, skipped };
+      return { kind, fetched, upserted, skipped, nextOffset: offset, done };
     },
   );
 
