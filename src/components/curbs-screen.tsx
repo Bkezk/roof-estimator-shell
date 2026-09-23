@@ -91,6 +91,9 @@ export interface CurbsScreenProps {
 
 export function CurbsScreen(p: CurbsScreenProps) {
   const { curbs, onChange, sections } = p;
+  // The engine's fallback for a curb without its own mil / color is the FIRST section's.
+  const bidMil = sections[0]?.thickness ?? 40;
+  const bidColor = sections[0]?.color ?? "—";
   const i = Math.min(p.selected, curbs.length - 1);
   const c = curbs[i];
   const [copyFrom, setCopyFrom] = useState("");
@@ -171,13 +174,16 @@ export function CurbsScreen(p: CurbsScreenProps) {
                   </SelectContent>
                 </Select>
               </div>
+              {/* Owner: show the bid's actual mil / color instead of "Bid default" (the engine's
+                  fallback is the first section's); picking that value keeps the curb following
+                  the bid. */}
               <div>
                 <p className="mb-1 text-xs text-muted-foreground">Mil</p>
                 <Select
-                  value={c.thicknessMil !== undefined ? String(c.thicknessMil) : "default"}
+                  value={String(c.thicknessMil ?? bidMil)}
                   onValueChange={(v) => {
                     const nx = { ...c };
-                    if (v === "default") delete nx.thicknessMil;
+                    if (Number(v) === bidMil) delete nx.thicknessMil;
                     else nx.thicknessMil = Number(v);
                     onChange(curbs.map((x, j) => (j === i ? nx : x)));
                   }}
@@ -186,8 +192,7 @@ export function CurbsScreen(p: CurbsScreenProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="default">Bid default</SelectItem>
-                    {[40, 50, 60].map((m) => (
+                    {[...new Set([bidMil, 40, 50, 60])].map((m) => (
                       <SelectItem key={m} value={String(m)}>
                         {m}
                       </SelectItem>
@@ -198,10 +203,10 @@ export function CurbsScreen(p: CurbsScreenProps) {
               <div>
                 <p className="mb-1 text-xs text-muted-foreground">Color</p>
                 <Select
-                  value={c.color ?? "default"}
+                  value={c.color ?? bidColor}
                   onValueChange={(v) => {
                     const nx = { ...c };
-                    if (v === "default") delete nx.color;
+                    if (v === bidColor) delete nx.color;
                     else nx.color = v;
                     onChange(curbs.map((x, j) => (j === i ? nx : x)));
                   }}
@@ -210,8 +215,7 @@ export function CurbsScreen(p: CurbsScreenProps) {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="default">Bid default</SelectItem>
-                    {p.colorOptions.map((col) => (
+                    {[...new Set([bidColor, ...p.colorOptions])].map((col) => (
                       <SelectItem key={col} value={col}>
                         {col}
                       </SelectItem>
@@ -513,7 +517,7 @@ export function CurbsScreen(p: CurbsScreenProps) {
                       <TableCell className="text-right tabular-nums">{c2.lengthIn}</TableCell>
                       <TableCell className="text-right tabular-nums">{c2.dimCIn ?? 0}</TableCell>
                       <TableCell className="text-right tabular-nums">{c2.dimDIn ?? 0}</TableCell>
-                      <TableCell className="text-xs">{c2.color ?? "default"}</TableCell>
+                      <TableCell className="text-xs">{c2.color ?? bidColor}</TableCell>
                     </TableRow>
                   ))}
                   <TableRow className="font-semibold">

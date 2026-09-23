@@ -47,6 +47,8 @@ import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estima
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
+import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
+import { tearOffLaborForSection } from "@/lib/engine/quantities";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
 import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
 import * as XLSX from "xlsx";
@@ -666,6 +668,9 @@ function EstimatePage() {
   const [toSel, setToSel] = useState<string[]>([]);
   const [toType, setToType] = useState("");
   const [toDepth, setToDepth] = useState(0);
+  // Legacy frmTearoff.llbItemLabor: TO_Additional (whole percent) on the selected sections.
+  const [toLaborOpen, setToLaborOpen] = useState(false);
+  const [toLaborPct, setToLaborPct] = useState(0);
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
   const { data: loadedBid } = useQuery({
@@ -1200,6 +1205,39 @@ function EstimatePage() {
       sel.length === 0 ? "" : pct === null ? " (Dif.)" : ` (${100 + Math.round(pct)}%)`;
     return { base, adjusted, quote, suffix, differing: pcts.length > 1 };
   }, [result, sections, uSel, templateDeltas]);
+
+  // Legacy Tear-off screen readouts: per-section TearOffBaseLabor / TearOffLabor (the engine's
+  // own per-section formula on the built inputs) and the selection's "Labor: X h (N%)" link.
+  const toLabor = useMemo(() => {
+    const byId: Record<string, { base: number; adjusted: number }> = {};
+    for (const s of result?.build.inputs.sections ?? []) {
+      const base = tearOffLaborForSection({
+        length: s.length,
+        width: s.width,
+        tearOff: s.tearOff,
+        laborLookup: s.tearOffLaborLookup,
+        ...(s.tearOffSheetComplexityMulti !== undefined
+          ? { sheetComplexityMulti: s.tearOffSheetComplexityMulti }
+          : {}),
+        additionalPct: 0,
+      });
+      byId[s.id] = { base, adjusted: base * (1 + s.tearOffAdditionalPct / 100) };
+    }
+    const sel = sections.filter((x) => toSel.includes(x.id));
+    let base = 0;
+    let adjusted = 0;
+    for (const x of sel) {
+      const h = byId[x.id];
+      if (!h) continue;
+      base += h.base;
+      adjusted += h.adjusted;
+    }
+    const pcts = [...new Set(sel.map((x) => x.tearOffAdditionalPct ?? 0))];
+    const pct = pcts.length === 1 ? pcts[0]! : null;
+    const suffix =
+      sel.length === 0 ? "" : pct === null ? " (Dif.)" : ` (${100 + Math.round(pct)}%)`;
+    return { byId, base, adjusted, suffix, differing: pcts.length > 1 };
+  }, [result, sections, toSel]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -2297,18 +2335,16 @@ function EstimatePage() {
                       );
                     })()}
                   </Field>
+                  {/* Owner: show the actual bid value rather than "Bid default"; picking the
+                      bid's own value keeps the parapets following the bid. */}
                   <Field label="Type">
                     <PickOne
-                      value={
-                        parapetDefaults.thicknessMil !== undefined
-                          ? String(parapetDefaults.thicknessMil)
-                          : "Bid default"
-                      }
-                      options={["Bid default", "40", "50", "60"]}
+                      value={String(parapetDefaults.thicknessMil ?? sectionDefaults.thickness)}
+                      options={[...new Set([String(sectionDefaults.thickness), "40", "50", "60"])]}
                       onChange={(v) =>
                         setParapetDefaults((p) => {
                           const nx = { ...p };
-                          if (v === "Bid default") delete nx.thicknessMil;
+                          if (Number(v) === sectionDefaults.thickness) delete nx.thicknessMil;
                           else nx.thicknessMil = Number(v);
                           return nx;
                         })
@@ -2317,12 +2353,12 @@ function EstimatePage() {
                   </Field>
                   <Field label="Color">
                     <PickOne
-                      value={parapetDefaults.color ?? "Bid default"}
-                      options={["Bid default", ...colorOptions]}
+                      value={parapetDefaults.color ?? sectionDefaults.color}
+                      options={[...new Set([sectionDefaults.color, ...colorOptions])]}
                       onChange={(v) =>
                         setParapetDefaults((p) => {
                           const nx = { ...p };
-                          if (v === "Bid default") delete nx.color;
+                          if (v === sectionDefaults.color) delete nx.color;
                           else nx.color = v;
                           return nx;
                         })
@@ -2787,97 +2823,38 @@ function EstimatePage() {
               {/* Legacy frmLaborPopUp for the Underlayment screen: AdjustUnderlaymentLabor on the
                   selected sections (the template writes the same field; quote labor is never
                   adjusted). */}
-              <Dialog open={uLaborOpen} onOpenChange={setULaborOpen}>
-                <DialogContent className="sm:max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>Underlayment Labor Adjustment</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-3 text-xs">
-                    <p className="text-muted-foreground">
-                      {sections.filter((x) => uSel.includes(x.id)).length} selected section(s).
-                      Change the hours or the percent — the other follows. Quote labor is never
-                      adjusted.
-                    </p>
-                    {uSelLabor.base <= 0 ? (
-                      <p className="text-destructive">
-                        There is no labor or none of it is adjustable.
-                      </p>
-                    ) : (
-                      <>
-                        {uSelLabor.differing && (
-                          <p className="rounded-md border border-amber-300 bg-amber-50 p-2 dark:bg-amber-950/30">
-                            Labor adjustments have been made to some of these sections. Finishing
-                            here sets every selected section to the same adjustment.
-                          </p>
-                        )}
-                        <div className="grid grid-cols-2 gap-3">
-                          <Field label="Calculated Man Hours">
-                            <Input value={uSelLabor.base.toFixed(2)} readOnly disabled />
-                          </Field>
-                          <Field label="Change Hours (±)">
-                            <NumberField
-                              className="h-8"
-                              step="0.01"
-                              value={Math.round(uSelLabor.base * uLaborPct) / 100}
-                              onChange={(v) =>
-                                setULaborPct(Math.round((v / uSelLabor.base) * 100 * 100) / 100)
-                              }
-                            />
-                          </Field>
-                          <Field label="Adjust Labor (%)">
-                            <NumberField
-                              className="h-8"
-                              min={-100}
-                              step="1"
-                              value={uLaborPct}
-                              onChange={(v) => setULaborPct(v)}
-                            />
-                          </Field>
-                          <Field label="Adjusted Man Hours">
-                            <Input
-                              value={(uSelLabor.base * (1 + uLaborPct / 100)).toFixed(2)}
-                              readOnly
-                              disabled
-                            />
-                          </Field>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  <DialogFooter className="gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setSections((prev) =>
-                          prev.map((x) =>
-                            uSel.includes(x.id)
-                              ? { ...x, adjustUnderlaymentLaborPct: templateDeltas.underlayment }
-                              : x,
-                          ),
-                        );
-                        setULaborOpen(false);
-                      }}
-                    >
-                      Use template default ({templateDeltas.underlayment}%)
-                    </Button>
-                    <Button
-                      disabled={uSelLabor.base <= 0}
-                      onClick={() => {
-                        setSections((prev) =>
-                          prev.map((x) =>
-                            uSel.includes(x.id)
-                              ? { ...x, adjustUnderlaymentLaborPct: uLaborPct }
-                              : x,
-                          ),
-                        );
-                        setULaborOpen(false);
-                      }}
-                    >
-                      Finished
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <LaborAdjustDialog
+                open={uLaborOpen}
+                onOpenChange={setULaborOpen}
+                title="Underlayment Labor Adjustment"
+                scope={`${sections.filter((x) => uSel.includes(x.id)).length} selected section(s)`}
+                note="Quote labor is never adjusted."
+                baseHours={uSelLabor.base}
+                differing={uSelLabor.differing}
+                pct={uLaborPct}
+                onPct={setULaborPct}
+                templateDefault={{
+                  pct: templateDeltas.underlayment,
+                  onUse: () => {
+                    setSections((prev) =>
+                      prev.map((x) =>
+                        uSel.includes(x.id)
+                          ? { ...x, adjustUnderlaymentLaborPct: templateDeltas.underlayment }
+                          : x,
+                      ),
+                    );
+                    setULaborOpen(false);
+                  },
+                }}
+                onFinish={() => {
+                  setSections((prev) =>
+                    prev.map((x) =>
+                      uSel.includes(x.id) ? { ...x, adjustUnderlaymentLaborPct: uLaborPct } : x,
+                    ),
+                  );
+                  setULaborOpen(false);
+                }}
+              />
 
               <div className="grid items-start gap-4 lg:grid-cols-2">
                 {/* Layer tabs + stack visual (legacy bottom-left) */}
@@ -4033,6 +4010,41 @@ function EstimatePage() {
               </div>
             </CardHeader>
             <CardContent>
+              <LaborAdjustDialog
+                open={toLaborOpen}
+                onOpenChange={setToLaborOpen}
+                title="Tear-off Labor Adjustment"
+                scope={`${sections.filter((x) => toSel.includes(x.id)).length} selected section(s)`}
+                note="Legacy keeps this as a whole percent."
+                baseHours={toLabor.base}
+                differing={toLabor.differing}
+                pct={toLaborPct}
+                onPct={setToLaborPct}
+                integerPct
+                templateDefault={{
+                  pct: templateDeltas.tearOff,
+                  onUse: () => {
+                    setSections((prev) =>
+                      prev.map((x) =>
+                        toSel.includes(x.id)
+                          ? { ...x, tearOffAdditionalPct: Math.round(templateDeltas.tearOff) }
+                          : x,
+                      ),
+                    );
+                    setToLaborOpen(false);
+                  },
+                }}
+                onFinish={() => {
+                  setSections((prev) =>
+                    prev.map((x) =>
+                      toSel.includes(x.id)
+                        ? { ...x, tearOffAdditionalPct: Math.round(toLaborPct) }
+                        : x,
+                    ),
+                  );
+                  setToLaborOpen(false);
+                }}
+              />
               <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
                 <div className="space-y-4">
                   <div className="overflow-x-auto rounded-md border">
@@ -4144,6 +4156,20 @@ function EstimatePage() {
                           onChange={() => {}}
                         />
                       </Field>
+                      <button
+                        type="button"
+                        className="pb-2 text-xs font-medium text-primary underline underline-offset-2 disabled:opacity-50"
+                        disabled={toSel.length === 0}
+                        title="Tear-off hours of the selected sections after their adjustment (100% = as calculated). Click to change the hours or the percent."
+                        onClick={() => {
+                          const first = sections.find((x) => toSel.includes(x.id));
+                          setToLaborPct(first?.tearOffAdditionalPct ?? 0);
+                          setToLaborOpen(true);
+                        }}
+                      >
+                        Labor: <span className="tabular-nums">{toLabor.adjusted.toFixed(2)} h</span>
+                        {toLabor.suffix}
+                      </button>
                       <Button
                         size="sm"
                         disabled={!toType || toSel.length === 0}
@@ -4231,22 +4257,38 @@ function EstimatePage() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead>Section</TableHead>
                           <TableHead>W x L</TableHead>
                           <TableHead>Core Cut</TableHead>
                           <TableHead className="text-right">Thickness</TableHead>
+                          <TableHead className="text-right">Labor (h)</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {sections.map((s) => (
-                          <TableRow key={s.id}>
+                          // Legacy lvSummary: clicking a row selects that section (its labor
+                          // shows on the Labor link and can be adjusted there).
+                          <TableRow
+                            key={s.id}
+                            onClick={() => setToSel([s.id])}
+                            className={
+                              toSel.includes(s.id)
+                                ? "cursor-pointer bg-primary/15"
+                                : "cursor-pointer"
+                            }
+                          >
+                            <TableCell className="font-medium">{s.name}</TableCell>
                             <TableCell className="tabular-nums">
                               {s.width}x{s.length}
                             </TableCell>
-                            <TableCell className="whitespace-nowrap text-xs">
+                            <TableCell className="text-xs">
                               {s.tearOff ? s.tearOffType || "(no type)" : "Unknown"}
                             </TableCell>
                             <TableCell className="text-right tabular-nums">
                               {(s.tearOff ? s.toThicknessInches : 0).toFixed(2)}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {(toLabor.byId[s.id]?.adjusted ?? 0).toFixed(2)}
                             </TableCell>
                           </TableRow>
                         ))}

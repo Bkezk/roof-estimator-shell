@@ -3565,3 +3565,44 @@ Screen changes this round (no money change unless the user adjusts labor):
   name, lump sum / pieces / per piece, labor units, hours-days). Modes: Edit it (default, same id
   — every layer carrying that id is rewritten, as legacy's shared QuoteUL), Add these amounts to
   it (the §10.7 merge), Start a new quote (blank, new id; legacy's tile/menu path passes 1).
+
+### 22.51 Knox County Fiscal Court: Tear-off compared; per-section labor link; "Bid default" shows the value (2026-09-23)
+
+Owner sent the legacy Tear-Off Options screen for the same bid (A 176.54 h, B 154.71 h,
+C 1.98 h; 333.24 h / $12,329.88 at $37; 6 disposal units, all 3.00" thick, Normal Fill).
+
+Formula parity holds; the inputs differ. Legacy `TearOffLabor` = Round(W × L × lookup ×
+SmartSheetMulti × Complexity, 3) × (1 + TO_Additional/100) (§2.6, `tearOffLaborForSection`).
+Solving each legacy figure for its rate with the bid's own sheet multipliers (A/B "1000 sf" 1.1,
+C "500 sf" 2.0 — the same multipliers the Underlayment check confirmed, §22.50):
+- A 176.54 = 7,791 × 0.0206 × 1.1 → 2.06 h/100 sq ft ("Mechanically Fastened SP 5' centers" on
+  Concrete);
+- B 154.71 = 9,567.5 × 0.0147 × 1.1 → 1.47 ("Single Ply MF 5' over BUR < 2"" on Structural
+  Metal);
+- C 1.98 = 80 × 0.012375 × 2.0 → 1.2375 ("Ballasted Single Ply(EPDM)" on Structural Metal).
+All three come out as clean table values, so the legacy bid's frozen management copy (§22.39)
+carries those rates. The captured web table (`rdl_labor_tables` 'tearoff_times', the owner's
+CUSTOM values) has Concrete "Mechanically Fas... (1)" 3.2724 / "(2)" 4.1238, Structural Metal
+"Single Ply MF 5' ..." 2.4543 and "Ballasted Single ..." 1.2438 — different numbers, and the
+type NAMES are truncated at the legacy grid's column width ("..."), which is why the web screen
+reads abbreviated (the web prints the stored name in full; the source is short). The web bid
+also carries different type picks: S1 "Single Ply MF 5' ..." (legacy A = Mechanically Fastened
+SP 5' centers) and S2 "BUR < 2"" (legacy B = Single Ply MF 5' over BUR < 2"). Engine on the
+saved bid: S1 210.34 h (0.024543 × 1.1), S2 130.90 h (0.012438 × 1.1), S3 1.99 h (0.012438 ×
+2.0; legacy 1.98 is the 1.2375 rate) = 343.23 h; disposal 6 = legacy. Nothing to fix in the
+arithmetic; the full 14 type names are needed from the owner (legacy tile drop-downs) to
+rename the captured rows — saved bids reference types by name, so that rename is a migration
+that also rewrites `sections[].tearOffType`.
+
+Screen changes (no money change unless the user adjusts labor):
+- Tear-off "Labor: X h (N%)" link for the selected sections (legacy `frmTearoff.llbItemLabor`)
+  opens the labor pop-up — now one shared component (`labor-adjust-dialog.tsx`, the legacy
+  frmLaborPopUp: Calculated / Change Hours / Adjust % / Adjusted) also used by Underlayment.
+  Tear-off stores a whole percent (`TO_Additional ← Convert.ToInt32`). Same documented
+  departure as §22.50 for a multi-selection that already differs.
+- The right-hand core-cut grid gains Section and Labor (h) columns and a row click selects that
+  section (legacy `lvSummary_SelectedIndexChanged → SelectionUpdate`).
+- Owner: "instead of Bid default show the actual value". Parapet / curb Mil and Color pickers
+  and the Setup parapet defaults now show the resolved bid value (curbs and parapets: the first
+  section's mil / color, the engine's own fallback; Setup: the bid membrane). Picking the bid's
+  own value clears the override so the item keeps following the bid.

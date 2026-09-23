@@ -385,7 +385,7 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
     "No Termination";
   const membraneSummary = `${ps.roofSystem} - ${ATTACHMENT_LABEL[ps.attachment]} - ${
     w.thicknessMil ?? p.sections[0]?.thickness ?? "—"
-  }mil - ${w.color ?? p.sections[0]?.color ?? "bid default"}`;
+  }mil - ${w.color ?? p.sections[0]?.color ?? "—"}`;
 
   return (
     <div className="space-y-3">
@@ -747,15 +747,24 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     );
                   })()}
                 </Field>
+                {/* Owner: show the bid's actual mil / color instead of "Bid default"; picking
+                    the bid's own value keeps the wall following the bid. */}
                 <Field label="Mil">
                   <Pick
                     className="w-[120px]"
-                    value={w.thicknessMil !== undefined ? `${w.thicknessMil}mil` : "Bid default"}
-                    options={["Bid default", "40mil", "50mil", "60mil"]}
+                    value={`${w.thicknessMil ?? p.sections[0]?.thickness ?? 40}mil`}
+                    options={[
+                      ...new Set([
+                        `${p.sections[0]?.thickness ?? 40}mil`,
+                        "40mil",
+                        "50mil",
+                        "60mil",
+                      ]),
+                    ]}
                     onChange={(v) =>
                       updFn((x) => {
                         const nx = { ...x };
-                        if (v === "Bid default") delete nx.thicknessMil;
+                        if (parseInt(v, 10) === p.sections[0]?.thickness) delete nx.thicknessMil;
                         else nx.thicknessMil = parseInt(v, 10);
                         return nx;
                       })
@@ -765,12 +774,12 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                 <Field label="Color">
                   <Pick
                     className="w-[130px]"
-                    value={w.color ?? "Bid default"}
-                    options={["Bid default", ...p.colorOptions]}
+                    value={w.color ?? p.sections[0]?.color ?? "—"}
+                    options={[...new Set([p.sections[0]?.color ?? "—", ...p.colorOptions])]}
                     onChange={(v) =>
                       updFn((x) => {
                         const nx = { ...x };
-                        if (v === "Bid default") delete nx.color;
+                        if (v === p.sections[0]?.color || v === "—") delete nx.color;
                         else nx.color = v;
                         return nx;
                       })
