@@ -18,7 +18,7 @@ import {
   sectionMembraneDisplayPricing,
 } from "@/lib/engine/bid-builder";
 import type { MovementRow, StockRow } from "@/lib/inventory.functions";
-import { displayStock, stockUnitFor, type PieceDef } from "@/lib/stock-units";
+import { plural, stockUnitFor, type PieceDef } from "@/lib/stock-units";
 
 export interface OrderCell {
   screen_id: string;
@@ -341,12 +341,20 @@ export function buildOrderList(i: OrderListInput): OrderLine[] {
   return out;
 }
 
-/** "10 cartridges" / "600 fasteners" / "2 sq ft" for a line's figure in its unit. */
-export const describeOrderQty = (line: OrderLine, qty: number): string =>
-  describeStock(qty, line.unit, line.piece);
-
-function describeStock(qty: number, unit: string, piece: PieceDef | null | undefined): string {
-  const d = displayStock(qty, unit, piece);
-  const n = Number.isInteger(d.amount) ? String(d.amount) : d.amount.toFixed(2);
-  return `${n} ${d.unit}`;
+/**
+ * A line's figure in the unit you BUY it in — "3 box", "7 × 5-gal. Box Set (28 cartridges)",
+ * "210 ft". Pack products with a stated piece count show the pieces alongside, except fasteners,
+ * whose true piece count (not boxes × box size) the line carries separately.
+ */
+export function describeOrderQty(line: OrderLine, qty: number): string {
+  const n = Number.isInteger(qty) ? qty.toLocaleString() : (Math.round(qty * 100) / 100).toString();
+  const sep = /case|set|bucket|drum|pail/i.test(line.unit) ? " × " : " ";
+  const base = `${n}${sep}${line.unit}`;
+  if (!line.piece || line.group === "Fasteners") return base;
+  const pieces = qty * line.piece.perPack;
+  const p =
+    Math.abs(pieces - Math.round(pieces)) < 1e-6
+      ? Math.round(pieces)
+      : Math.round(pieces * 100) / 100;
+  return `${base} (${p.toLocaleString()} ${plural(pieces, line.piece.name)})`;
 }

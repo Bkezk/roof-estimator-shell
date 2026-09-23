@@ -46,6 +46,9 @@ import {
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
+import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
+import * as XLSX from "xlsx";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { addMovement, listMovements, listStock } from "@/lib/inventory.functions";
 import { listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import {
@@ -56,12 +59,7 @@ import {
 import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { EstimateReviewLedger } from "@/components/estimate-review-ledger";
 import type { MarkupMode } from "@/lib/engine/money";
-import {
-  defaultEdges,
-  resolveSectionZones,
-  summarizeEdges,
-  TERMINATION_OPTIONS,
-} from "@/lib/engine/edges";
+import { defaultEdges, resolveSectionZones, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { underlaymentLayerFasteners } from "@/lib/engine/underlayment-fasteners";
 import { SectionsScreen } from "@/components/sections-screen";
 import { AccessoriesScreens } from "@/components/accessories-screens";
@@ -1172,14 +1170,6 @@ function EstimatePage() {
     0,
   );
 
-  // Edge footage summary (display-only): termination / blocking footage and ARP from the edge
-  // definitions. Product quantities live in the Order list below.
-  const edgeSummary = summarizeEdges(sections.map((s) => s.edges ?? []));
-  const hasOrderingSummary =
-    edgeSummary.terminations.length > 0 ||
-    edgeSummary.blockingFt > 0 ||
-    edgeSummary.arpSqFtTotal > 0;
-
   // Order list (inventory phase 2, src/lib/order-list.ts): what to BUY, from the same engine lines
   // the bid bills, less what the stock ledger has on hand. Price is never affected.
   const stockFn = useServerFn(listStock);
@@ -1220,6 +1210,52 @@ function EstimatePage() {
       return [];
     }
   }, [result, admin, priceTargets, stockRows, bidPulls, roofSystem, attachment, sections]);
+  const [orderOpen, setOrderOpen] = useState(false);
+  const orderHeader = () => ({
+    bidName,
+    client: customer.name || undefined,
+    jobSite:
+      [customer.projectAddress, customer.jobCityStZip].filter(Boolean).join(", ") || undefined,
+  });
+  const exportOrderExcel = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`Order list — ${bidName}`],
+      [
+        orderHeader().client ?? "",
+        orderHeader().jobSite ?? "",
+        `printed ${new Date().toLocaleString()}`,
+      ],
+      [],
+      ORDER_COLUMNS,
+      ...orderListRows(orderList),
+    ]);
+    ws["!cols"] = [
+      { wch: 13 },
+      { wch: 48 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 11 },
+      { wch: 14 },
+      { wch: 10 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Order list");
+    XLSX.writeFile(
+      wb,
+      `${bidName.replace(/[\\/:*?"<>|]+/g, " ").trim() || "bid"} - order list.xlsx`,
+    );
+  };
+  const printOrderList = () => {
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) {
+      toast.error("Allow pop-ups to print the order list");
+      return;
+    }
+    w.document.write(orderListHtml(orderList, orderHeader()));
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 250);
+  };
   const [pullQty, setPullQty] = useState<Record<string, string>>({});
   const [pulling, setPulling] = useState<string | null>(null);
   const pullKey = (l: OrderLine) =>
@@ -4398,230 +4434,245 @@ function EstimatePage() {
               </CardContent>
             </Card>
           )}
-          {hasOrderingSummary && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Ordering summary (informational)</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {edgeSummary.terminations.map((t) => (
-                  <div key={t.termination} className="flex justify-between">
-                    <span className="text-muted-foreground">{t.termination}</span>
-                    <span className="tabular-nums">{t.totalFt.toLocaleString()} ft</span>
-                  </div>
-                ))}
-                {edgeSummary.blockingFt > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Wood blocking</span>
-                    <span className="tabular-nums">
-                      {edgeSummary.blockingFt.toLocaleString()} ft
-                    </span>
-                  </div>
-                )}
-                {edgeSummary.arpSqFtTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">ARP (§2.3, incl. 3% waste)</span>
-                    <span className="tabular-nums">
-                      {edgeSummary.arpSqFtTotal.toFixed(1)} sq ft
-                    </span>
-                  </div>
-                )}
-                <p className="border-t pt-2 text-xs text-muted-foreground">
-                  Edge footage only. Products and quantities are in the Order list.
-                </p>
-              </CardContent>
-            </Card>
-          )}
           {result && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Order list</CardTitle>
-                <CardDescription>
-                  What this bid needs to buy, from the same lines it bills. Pull what Inventory has
-                  on hand onto this job and the &quot;To buy&quot; column drops; the price never
-                  changes.
-                  {bidId ? (
-                    <>
-                      {" "}
-                      <Link
-                        to="/inventory"
-                        search={{ bid: bidId }}
-                        className="underline underline-offset-2"
+            <Collapsible open={orderOpen} onOpenChange={setOrderOpen} asChild>
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 text-left"
+                        title={orderOpen ? "Collapse" : "Expand"}
                       >
-                        Record leftovers for this bid
-                      </Link>
-                    </>
-                  ) : (
-                    " Save the bid to pull from stock."
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {!priceTargets ? (
-                  <p className="text-xs text-muted-foreground">Loading…</p>
-                ) : orderList.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Nothing to order yet.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead className="text-right">Needed</TableHead>
-                          <TableHead className="text-right" title="Pulled from stock for this bid">
-                            From stock
-                          </TableHead>
-                          <TableHead className="text-right">On hand</TableHead>
-                          <TableHead className="text-right">To buy</TableHead>
-                          <TableHead className="w-[210px]">Pull / return</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(
-                          [
-                            "Membrane",
-                            "Underlayment",
-                            "Fasteners",
-                            "Adhesives",
-                            "Accessories",
-                          ] as const
-                        )
-                          .filter((g) => orderList.some((l) => l.group === g))
-                          .map((g) => (
-                            <Fragment key={g}>
-                              <TableRow className="bg-muted/40">
-                                <TableCell colSpan={6} className="py-1 text-xs font-semibold">
-                                  {g}
-                                </TableCell>
-                              </TableRow>
-                              {orderList
-                                .filter((l) => l.group === g)
-                                .map((l, idx) => (
-                                  <TableRow key={`${g}-${idx}`}>
-                                    <TableCell className="text-xs">
-                                      {l.name}
-                                      {!l.cell && (
-                                        <span
-                                          className="ml-1 text-[10px] text-muted-foreground"
-                                          title="No catalog product matched this line, so stock cannot be applied"
-                                        >
-                                          (no stock match)
-                                        </span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs tabular-nums">
-                                      {describeOrderQty(l, l.needed)}
-                                      {l.pieces !== undefined && (
-                                        <span className="ml-1 text-[10px] text-muted-foreground">
-                                          ({l.pieces.toLocaleString()} pcs)
-                                        </span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs tabular-nums">
-                                      {l.pulled > 0 ? describeOrderQty(l, l.pulled) : "—"}
-                                    </TableCell>
-                                    <TableCell className="text-right text-xs tabular-nums">
-                                      {l.stockUnit ? (
-                                        <span
-                                          className="text-muted-foreground"
-                                          title={`Inventory counts this product in ${l.stockUnit}, the bid needs ${l.unit} — not netted`}
-                                        >
-                                          shelf in {l.stockUnit}
-                                        </span>
-                                      ) : l.onHand !== undefined ? (
-                                        describeOrderQty(l, l.onHand)
-                                      ) : (
-                                        "—"
-                                      )}
-                                    </TableCell>
-                                    <TableCell
-                                      className={`text-right text-xs font-semibold tabular-nums ${l.toBuy === 0 ? "text-green-700 dark:text-green-400" : ""}`}
-                                    >
-                                      {describeOrderQty(l, l.toBuy)}
-                                    </TableCell>
-                                    <TableCell className="text-xs">
-                                      {l.cell && (l.pullable > 0 || l.pulled > 0) && (
-                                        <div className="flex items-center gap-1">
-                                          {l.pullable > 0 && (
-                                            <>
-                                              <Input
-                                                type="number"
-                                                inputMode="decimal"
-                                                step="any"
-                                                min={0}
-                                                max={l.pullable}
-                                                className="h-7 w-20 text-xs"
-                                                placeholder={String(
-                                                  Math.round(l.pullable * 1000) / 1000,
-                                                )}
-                                                value={pullQty[pullKey(l)] ?? ""}
-                                                onChange={(e) =>
-                                                  setPullQty((p) => ({
-                                                    ...p,
-                                                    [pullKey(l)]: e.target.value,
-                                                  }))
-                                                }
-                                                disabled={!bidId || readOnly}
-                                                title={
-                                                  bidId
-                                                    ? `Up to ${describeOrderQty(l, l.pullable)} (${l.unit})`
-                                                    : "Save the bid first"
-                                                }
-                                              />
-                                              <Button
-                                                size="sm"
-                                                variant="outline"
-                                                className="h-7 px-2 text-xs"
-                                                disabled={
-                                                  !bidId || readOnly || pulling === pullKey(l)
-                                                }
-                                                onClick={() => {
-                                                  const raw = pullQty[pullKey(l)];
-                                                  const n =
-                                                    raw && raw.trim() !== ""
-                                                      ? Number(raw)
-                                                      : l.pullable;
-                                                  if (!Number.isFinite(n) || n <= 0) return;
-                                                  void recordPull(
-                                                    l,
-                                                    "consumed",
-                                                    Math.min(n, l.pullable),
-                                                  );
-                                                }}
-                                              >
-                                                Pull
-                                              </Button>
-                                            </>
-                                          )}
-                                          {l.pulled > 0 && (
-                                            <Button
-                                              size="sm"
-                                              variant="ghost"
-                                              className="h-7 px-2 text-xs"
-                                              disabled={
-                                                !bidId || readOnly || pulling === pullKey(l)
-                                              }
-                                              title="Put everything this bid pulled back on the shelf"
-                                              onClick={() =>
-                                                void recordPull(l, "released", l.pulled)
-                                              }
-                                            >
-                                              Return
-                                            </Button>
-                                          )}
-                                        </div>
-                                      )}
+                        <ChevronRight
+                          className={`h-4 w-4 transition-transform ${orderOpen ? "rotate-90" : ""}`}
+                        />
+                        <CardTitle className="text-base">Order list</CardTitle>
+                        {priceTargets && (
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {orderList.length} product{orderList.length === 1 ? "" : "s"} ·{" "}
+                            {toBuyCount(orderList)} to buy
+                          </span>
+                        )}
+                      </button>
+                    </CollapsibleTrigger>
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={orderList.length === 0}
+                        onClick={printOrderList}
+                        title="Opens a print view — choose Save as PDF in the print dialog"
+                      >
+                        Print / PDF
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        disabled={orderList.length === 0}
+                        onClick={exportOrderExcel}
+                      >
+                        Excel
+                      </Button>
+                    </div>
+                  </div>
+                  <CollapsibleContent>
+                    <CardDescription>
+                      What this bid needs to buy, from the same lines it bills. Pull what Inventory
+                      has on hand onto this job and the &quot;To buy&quot; column drops; the price
+                      never changes.
+                      {bidId ? (
+                        <>
+                          {" "}
+                          <Link
+                            to="/inventory"
+                            search={{ bid: bidId }}
+                            className="underline underline-offset-2"
+                          >
+                            Record leftovers for this bid
+                          </Link>
+                        </>
+                      ) : (
+                        " Save the bid to pull from stock."
+                      )}
+                    </CardDescription>
+                  </CollapsibleContent>
+                </CardHeader>
+                <CollapsibleContent>
+                  <CardContent className="space-y-2 text-sm">
+                    {!priceTargets ? (
+                      <p className="text-xs text-muted-foreground">Loading…</p>
+                    ) : orderList.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Nothing to order yet.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Product</TableHead>
+                              <TableHead className="text-right">Needed</TableHead>
+                              <TableHead
+                                className="text-right"
+                                title="Pulled from stock for this bid"
+                              >
+                                From stock
+                              </TableHead>
+                              <TableHead className="text-right">On hand</TableHead>
+                              <TableHead className="text-right">To buy</TableHead>
+                              <TableHead className="w-[210px]">Pull / return</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(
+                              [
+                                "Membrane",
+                                "Underlayment",
+                                "Fasteners",
+                                "Adhesives",
+                                "Accessories",
+                              ] as const
+                            )
+                              .filter((g) => orderList.some((l) => l.group === g))
+                              .map((g) => (
+                                <Fragment key={g}>
+                                  <TableRow className="bg-muted/40">
+                                    <TableCell colSpan={6} className="py-1 text-xs font-semibold">
+                                      {g}
                                     </TableCell>
                                   </TableRow>
-                                ))}
-                            </Fragment>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                                  {orderList
+                                    .filter((l) => l.group === g)
+                                    .map((l, idx) => (
+                                      <TableRow key={`${g}-${idx}`}>
+                                        <TableCell className="text-xs">
+                                          {l.name}
+                                          {!l.cell && (
+                                            <span
+                                              className="ml-1 text-[10px] text-muted-foreground"
+                                              title="No catalog product matched this line, so stock cannot be applied"
+                                            >
+                                              (no stock match)
+                                            </span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">
+                                          {describeOrderQty(l, l.needed)}
+                                          {l.pieces !== undefined && (
+                                            <span className="ml-1 text-[10px] text-muted-foreground">
+                                              ({l.pieces.toLocaleString()} pcs)
+                                            </span>
+                                          )}
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">
+                                          {l.pulled > 0 ? describeOrderQty(l, l.pulled) : "—"}
+                                        </TableCell>
+                                        <TableCell className="text-right text-xs tabular-nums">
+                                          {l.stockUnit ? (
+                                            <span
+                                              className="text-muted-foreground"
+                                              title={`Inventory counts this product in ${l.stockUnit}, the bid needs ${l.unit} — not netted`}
+                                            >
+                                              shelf in {l.stockUnit}
+                                            </span>
+                                          ) : l.onHand !== undefined ? (
+                                            describeOrderQty(l, l.onHand)
+                                          ) : (
+                                            "—"
+                                          )}
+                                        </TableCell>
+                                        <TableCell
+                                          className={`text-right text-xs font-semibold tabular-nums ${l.toBuy === 0 ? "text-green-700 dark:text-green-400" : ""}`}
+                                        >
+                                          {describeOrderQty(l, l.toBuy)}
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                          {l.cell && (l.pullable > 0 || l.pulled > 0) && (
+                                            <div className="flex items-center gap-1">
+                                              {l.pullable > 0 && (
+                                                <>
+                                                  <Input
+                                                    type="number"
+                                                    inputMode="decimal"
+                                                    step="any"
+                                                    min={0}
+                                                    max={l.pullable}
+                                                    className="h-7 w-20 text-xs"
+                                                    placeholder={String(
+                                                      Math.round(l.pullable * 1000) / 1000,
+                                                    )}
+                                                    value={pullQty[pullKey(l)] ?? ""}
+                                                    onChange={(e) =>
+                                                      setPullQty((p) => ({
+                                                        ...p,
+                                                        [pullKey(l)]: e.target.value,
+                                                      }))
+                                                    }
+                                                    disabled={!bidId || readOnly}
+                                                    title={
+                                                      bidId
+                                                        ? `Up to ${describeOrderQty(l, l.pullable)} (${l.unit})`
+                                                        : "Save the bid first"
+                                                    }
+                                                  />
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-7 px-2 text-xs"
+                                                    disabled={
+                                                      !bidId || readOnly || pulling === pullKey(l)
+                                                    }
+                                                    onClick={() => {
+                                                      const raw = pullQty[pullKey(l)];
+                                                      const n =
+                                                        raw && raw.trim() !== ""
+                                                          ? Number(raw)
+                                                          : l.pullable;
+                                                      if (!Number.isFinite(n) || n <= 0) return;
+                                                      void recordPull(
+                                                        l,
+                                                        "consumed",
+                                                        Math.min(n, l.pullable),
+                                                      );
+                                                    }}
+                                                  >
+                                                    Pull
+                                                  </Button>
+                                                </>
+                                              )}
+                                              {l.pulled > 0 && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="ghost"
+                                                  className="h-7 px-2 text-xs"
+                                                  disabled={
+                                                    !bidId || readOnly || pulling === pullKey(l)
+                                                  }
+                                                  title="Put everything this bid pulled back on the shelf"
+                                                  onClick={() =>
+                                                    void recordPull(l, "released", l.pulled)
+                                                  }
+                                                >
+                                                  Return
+                                                </Button>
+                                              )}
+                                            </div>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    ))}
+                                </Fragment>
+                              ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
           )}
 
           <Card>

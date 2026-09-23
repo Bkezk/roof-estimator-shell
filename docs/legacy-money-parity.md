@@ -3477,3 +3477,18 @@ unit — drip edge and gravel stop are kept by the piece while the bid needs fee
 "shelf in piece" and are not netted (no piece length is captured to convert). The sealant stock
 unit is now "tube". No reservation state: a pull is a real ledger movement the moment it is
 recorded, so nothing on the shelf can be promised twice. Prices untouched throughout.
+
+### 22.47 Order list: compact, printable, exportable; ordering summary removed (2026-09-23)
+
+The old "Ordering summary (informational)" card is gone (its termination footage is on the
+Order list as the Term Bar line; blocking / capstones / ARP auto-price, §8). The Order list is
+collapsed by default with a one-line summary ("N products · M to buy"), and has **Print / PDF**
+(a clean print page — the browser's Save as PDF) and **Excel** (`xlsx`, numbers kept numeric)
+buttons; both carry the bid name, client, job site and print time. Quantities read in the unit
+you BUY: "3 box", "7 × 5-gal. Box Set (28 cartridges)", "210 ft". Pack sizes exist only where
+the catalog states them — Fasteners/Box, Panduit Parts/Bag, Membrane Accs Parts/Package, the
+adhesive unit types — and those lines already round up to whole packs (13 fasteners over a box
+→ one more box). Duro-Last sells caulk by the tube (the price list's "CAULK DURO PLUS" lines are
+EA at $10.20), so 15 tubes is 15; no case size exists to round to. A per-product "order pack"
+for the rest (bars per bundle, pieces per box) is not captured anywhere and would be an admin
+entry if wanted.
