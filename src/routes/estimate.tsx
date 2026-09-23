@@ -46,7 +46,7 @@ import {
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
-import { PerDiemChartEditor } from "@/components/per-diem-chart";
+import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
 import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
 import * as XLSX from "xlsx";
@@ -4594,6 +4594,12 @@ function EstimatePage() {
                   <p className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs">
                     <span className="font-medium">Notes (from Setup):</span> {customer.notes}
                   </p>
+                )}
+                {customer.perDiemChart && (
+                  /* The Setup step's per-diem chart (§22.49) — informational, not in the ledger. */
+                  <div className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                    <PerDiemChartView chart={normalizePerDiemChart(customer.perDiemChart)} />
+                  </div>
                 )}
                 <EstimateReviewLedger
                   ledger={result.ledger}

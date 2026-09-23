@@ -3527,16 +3527,25 @@ What each number is (IL re-read today):
   Labor for selected Roof Sections: 265.91 h (Dif.)" and "Quote labor for selected Roof Sections:
   100" → 265.91 + 100 = 365.91.
 - Web 281.38 = 181.38 priced-layer hours + the same 100 quote hours (engine run on the saved bid:
-  S1 80.73 h, S2 99.14 h, S3 1.51 h = 2 layers × area/2500 × 11.775 layout × 1.10 complexity
-  (Duro-Bond "3"); layout only, Duro-Bond boards never add fastening — §22.28).
+  S1 80.73 h, S2 99.14 h, S3 1.51 h = 2 layers × area/2500 × 11.775 layout × SmartSheetMulti —
+  S1/S2 "1000 sf" 1.1, S3 "500 sf" 2.0; complexity 1.0 because Duro-Bond has no RSComplexityFactor
+  rows and the factor only applies with a ×1.0 sheet; layout only, Duro-Bond boards never add
+  fastening — §22.28). Legacy `UnderlaymentBaseHours` skips NeedQuote layers (`get_NeedQuote →
+  brtrue end-of-layer`), so the Tapered ISO layer adds no layout time on either side.
 - The legacy suffix " (Dif.)" is written ONLY when the selected sections carry DIFFERENT
   `AdjustUnderlaymentLabor` values (IL: the loop compares each section's value with the first and
   sets " (Dif.)"; equal values print " (N%)" with N = 100 + adjust). The web bid has 0% on all
   three. So the legacy bid's underlayment labor was hand-adjusted, section by section, in its
   frmLaborPopUp (Calculated Man Hours / Change Hours / Adjust %); those percentages live only in
   the .bax file. If the legacy base were the web's 181.38 h, the adjustments add 84.53 h (+46.6%).
-  To reconcile: in legacy select A, B, C one at a time and read the " (N%)" after the link, then
-  enter the same in the web pop-up (or send the per-section figures and I will check them).
+  Owner follow-up: the legacy sections read "(70%)", i.e. a −30% adjustment. That makes the gap
+  LARGER, not smaller: 265.91 h at ≤ 100% means the legacy base is ≥ 265.91 h against the web's
+  181.38 h (all at 70% → 379.9 h, 2.09×). So the legacy bid's inputs differ (per-section
+  SheetSize multiplier, the install's 2½" ISO layout time, or a per-section value only the .bax
+  holds), not the arithmetic — the engine is local code (DataAccess.dll), deterministic, and the
+  unsupported parts of legacy are its vendor-DB sync and exports, not this routine. To pin it
+  down: in legacy select A, B and C one at a time and read "Adjustable Labor: X h (N%)" — base =
+  X ÷ (N/100) — plus each section's Sheet Size on the Roof Sections screen.
 
 Screen changes this round (no money change unless the user adjusts labor):
 - The link now reads like legacy — "Adjustable Labor for selected Roof Sections: 265.91 h (100%)"
