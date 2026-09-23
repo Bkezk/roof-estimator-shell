@@ -190,7 +190,9 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const [layerUrl, setLayerUrl] = useState(
     "https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/Ky_PVA_Webster_Parcels_WGS84WM/MapServer/1",
   );
-  const [whereClause, setWhereClause] = useState("CLASS = 'COMMERCIAL'");
+  // Webster's CLASS values (owner-verified 2026-09-24): COMMERCIAL, RESIDENTIAL, CEMETERY, FARM,
+  // PUBLIC SERVICE, blank. Commercial roofing prospects are the first and the last-but-one.
+  const [whereClause, setWhereClause] = useState("CLASS IN ('COMMERCIAL','PUBLIC SERVICE')");
   const [importCounty, setImportCounty] = useState("");
   const [preview, setPreview] = useState<ParcelPreview | null>(null);
 

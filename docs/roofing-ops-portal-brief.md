@@ -238,6 +238,27 @@ by a person or parsed by Claude on a schedule. Telephony is dropped.
 | Dodge / ConstructConnect      | Commercial bid boards                                                                                                                     | Subscription UI                                                                                                                                                                                                                                                                                                                     | Paid                                                   | Manual                                                    |
 | LoopNet / Crexi               | Buildings for sale                                                                                                                        | No public API; use PVA transfers plus a saved search                                                                                                                                                                                                                                                                                | —                                                      | Manual                                                    |
 
+## Kentucky data findings (owner-supplied samples, Sep 24)
+
+- **Parcels.** The state's `WGS84WM_Services` folder publishes exactly ONE PVA parcel service,
+  Webster County. Owner of record for other counties is NOT available from the state; it comes
+  from each county PVA's own site (link out; free) or a paid parcel API (declined for now).
+  Webster `CLASS` values: COMMERCIAL, RESIDENTIAL, CEMETERY, FARM, PUBLIC SERVICE, blank.
+- **Statewide layers that ARE prospect lists** (same folder, free): `Ky_ORNL_Building_Footprints`
+  (building outlines statewide → roof area and shape), `Ky_911_Site_Structure_Address_Points`
+  (every structure's address), `Ky_Schools`, `Ky_Hospitals`, `Ky_Long_Term_Care`,
+  `Ky_PostSecondary_Education`, `Ky_Libraries`, `Ky_NationalGuard_Armories`,
+  `Ky_Existing_Industry`, `Ky_Industrial_Site_Points/Boundaries/Tracts`,
+  `Ky_Available_Industrial_Buildings`, `Ky_Opportunity_Zones`, `Ky_CountyLines`.
+  Plan change: phase 1 builds the buildings list from FOOTPRINTS + ADDRESS POINTS + these
+  facility lists (name, address, roof outline), not from parcels; owner lookup is a per-county
+  PVA link until a free owner source appears.
+- **Imagery.** `WGS84WM_Services/Ky_Imagery_Phase3_3IN_WGS84WM` (3-inch, newest statewide
+  program), `Ky_Imagery_Phase2_6IN_WGS84WM`, `Ky_Imagery_2022_2FT_WGS84WM` are MapServers in
+  Web Mercator (tile-cache candidates for the map); `kyraster.ky.gov/.../ImageServices` holds
+  the per-year KYAPED ImageServers (clips / exports). Tile scheme to be confirmed from the
+  service's `tileInfo`.
+
 ## Open decisions
 
 Owner answers of Sep 23 are recorded inline; the rest stay open.
