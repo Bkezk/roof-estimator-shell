@@ -3440,3 +3440,22 @@ admin-only follow `pricing`; profiles, inventory settings and ledger deletes sta
 Server functions mirror it (`assertPageAccess`); the gate sends a user without a page to the
 first page they may open; the Setup estimator list is every account with Estimate access. Not a
 money-model change.
+
+### 22.45 Inventory phase 2 — the Order list on Review (2026-09-23)
+
+Owner rule: a bid is priced as if it used no inventory; stock only reduces what to buy. The
+Review step's rough "Ordering summary" (4×8 board counts, fastener estimates, adhesive units by
+coverage — none of it what the bid billed) is replaced by an **Order list** built from the
+engine's own billed lines (`src/lib/order-list.ts`): membrane `MembraneWithOverlap` sq ft per
+matrix row (the tier the §1 chain picked, via `sectionMembraneDisplayPricing`; flat families
+`System - variant`) and colour column; underlayment sq ft per priced board (area × 1.03 / 1.06,
+quote layers excluded); Fasteners & Bits boxes from the accessories module's fastener rows (its
+`description|subtype` key resolved to the catalog row key); adhesive units from the Adhesives
+lines (calc + extras); every other Accessories line matched to its catalog row by name (longest
+row label contained in the line, colour column by name; ties on repeated labels go to the 4"
+fascia screen's later row). Each line carries the catalog cell stock is keyed by, the ledger's
+on-hand figure (pack unit), and To buy = needed − on hand (whole packs for pack units; sq ft and
+ft as-is). A line with no catalog row (the uncaptured Two-Piece metal) still lists, marked "no
+stock match". Checked on the saved Knox County and Summit bids: 20 lines, 18 matched, the two
+unmatched being Two-Piece base / covers. The edge-footage card (terminations, blocking, ARP)
+stays as edge footage only. Nothing here touches a price or a bid payload.

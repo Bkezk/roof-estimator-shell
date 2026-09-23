@@ -1,5 +1,5 @@
 import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -45,6 +45,9 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
+import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
+import { listStock } from "@/lib/inventory.functions";
+import { listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import {
   adhesiveOptionsForSystem,
   deriveAdhesiveSubstrate,
@@ -1106,6 +1109,7 @@ function EstimatePage() {
     const r = computeEstimate(inputs);
     return {
       r,
+      build,
       // The legacy Estimate Review ledger rows (attribution of the amounts billed above).
       ledger: buildReviewLedger({
         bid,
@@ -1168,63 +1172,44 @@ function EstimatePage() {
     0,
   );
 
-  // Ordering summary (display-only): termination/blocking footage and ARP from the edge
-  // definitions, plus insulation board / fastener / adhesive-unit counts from the known rules
-  // (4×8 board = 32 sf; fasteners = count/32 × area; adhesive units = area ÷ coverage).
+  // Edge footage summary (display-only): termination / blocking footage and ARP from the edge
+  // definitions. Product quantities live in the Order list below.
   const edgeSummary = summarizeEdges(sections.map((s) => s.edges ?? []));
-  let insulationBoards = 0;
-  let insulationFasteners = 0;
-  const adhesiveUnitTotals: Record<string, number> = {};
-  for (const s of sections) {
-    const area = s.length * s.width;
-    const zones = resolveSectionZones(s);
-    const perimArea = Math.min(area, zones.perimLengthFt * s.enhancementWidthFt);
-    const cornerArea = Math.min(
-      Math.max(0, area - perimArea),
-      zones.cornerLengthFt * s.enhancementWidthFt,
-    );
-    const fieldArea = Math.max(0, area - perimArea - cornerArea);
-    const sLayers = sectionLayers(s);
-    const sIsDuroBond = (s.roofSystem ?? roofSystem) === "Duro-Bond";
-    for (const [li, layer] of sLayers.entries()) {
-      if (layer.quote) continue;
-      // Duro-Bond sections force "Section Fastened w/ Durobond" (legacy, docs §22.28).
-      const att = effectiveLayerAttachment(layer, sIsDuroBond);
-      if (att === "durobond" || att === "none") {
-        insulationBoards += Math.ceil(area / 32);
-      } else if (att === "mechanical") {
-        insulationBoards += Math.ceil(area / 32);
-        // Legacy UnderlaymentFasteners rule (docs §18).
-        insulationFasteners += underlaymentLayerFasteners({
-          areaField: fieldArea,
-          areaPerim: perimArea,
-          areaCorner: cornerArea,
-          subtype: admin?.underlaymentGroups?.groupIdByBoard?.[layer.board],
-          fourByFour: /4'\s?x\s?4/.test(layer.board),
-          membraneMechanical: (s.attachment ?? attachment) === "mechanical",
-          custom: s.uCustomFastenerDensity,
-        }).total;
-      } else if (att === "adhesive" && admin) {
-        insulationBoards += Math.ceil(area / 32);
-        const grid = admin.adhesiveTimes?.bySubstrate[layer.adhesiveName];
-        const derived = deriveAdhesiveSubstrate(admin, s.deckType, sLayers, li).substrate;
-        const entry = grid?.[derived !== undefined && grid?.[derived] ? derived : layer.substrate];
-        if (entry && entry.coverageSqFt > 0) {
-          adhesiveUnitTotals[layer.adhesiveName] =
-            (adhesiveUnitTotals[layer.adhesiveName] ?? 0) +
-            (fieldArea + perimArea) / entry.coverageSqFt;
-        }
-      } else {
-        insulationBoards += Math.ceil(area / 32);
-      }
-    }
-  }
   const hasOrderingSummary =
     edgeSummary.terminations.length > 0 ||
     edgeSummary.blockingFt > 0 ||
-    edgeSummary.arpSqFtTotal > 0 ||
-    insulationBoards > 0 ||
-    Object.keys(adhesiveUnitTotals).length > 0;
+    edgeSummary.arpSqFtTotal > 0;
+
+  // Order list (inventory phase 2, src/lib/order-list.ts): what to BUY, from the same engine lines
+  // the bid bills, less what the stock ledger has on hand. Price is never affected.
+  const stockFn = useServerFn(listStock);
+  const targetsFn = useServerFn(listPriceTargets);
+  const { data: stockRows } = useQuery({
+    queryKey: ["inventory-stock"],
+    queryFn: () => stockFn(),
+    enabled: authed && STEPS[step]?.key === "review",
+  });
+  const { data: priceTargets } = useQuery({
+    queryKey: ["price-targets"],
+    queryFn: () => targetsFn(),
+    enabled: authed && STEPS[step]?.key === "review",
+  });
+  const orderList: OrderLine[] = useMemo(() => {
+    if (!result || !admin || !priceTargets) return [];
+    try {
+      return buildOrderList({
+        admin,
+        roofSystem,
+        attachment,
+        sections,
+        build: result.build,
+        targets: priceTargets,
+        stock: stockRows ?? [],
+      });
+    } catch {
+      return [];
+    }
+  }, [result, admin, priceTargets, stockRows, roofSystem, attachment, sections]);
 
   const editSection = (i: number, patch: Partial<BidSectionInput>) =>
     setSections((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
@@ -4394,29 +4379,94 @@ function EstimatePage() {
                     </span>
                   </div>
                 )}
-                {insulationBoards > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Insulation boards (4×8)</span>
-                    <span className="tabular-nums">{insulationBoards.toLocaleString()}</span>
-                  </div>
-                )}
-                {insulationFasteners > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Insulation fasteners</span>
-                    <span className="tabular-nums">{insulationFasteners.toLocaleString()}</span>
-                  </div>
-                )}
-                {Object.entries(adhesiveUnitTotals).map(([name, units]) => (
-                  <div key={name} className="flex justify-between">
-                    <span className="text-muted-foreground">{name}</span>
-                    <span className="tabular-nums">{units.toFixed(2)} units</span>
-                  </div>
-                ))}
                 <p className="border-t pt-2 text-xs text-muted-foreground">
-                  For ordering only — ARP material and parapet blocking/capstones now auto-price
-                  (§8); termination hardware footage is still priced by adding Accessory / Non-DL
-                  lines until its per-ft vs per-piece basis is extracted.
+                  Edge footage only. Products and quantities are in the Order list.
                 </p>
+              </CardContent>
+            </Card>
+          )}
+          {result && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Order list</CardTitle>
+                <CardDescription>
+                  What this bid needs to buy, from the same lines it bills, less what Inventory has
+                  on hand. Stock never changes the price — only the &quot;To buy&quot; column.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {!priceTargets ? (
+                  <p className="text-xs text-muted-foreground">Loading…</p>
+                ) : orderList.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Nothing to order yet.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="text-right">Needed</TableHead>
+                          <TableHead className="text-right">On hand</TableHead>
+                          <TableHead className="text-right">To buy</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(
+                          [
+                            "Membrane",
+                            "Underlayment",
+                            "Fasteners",
+                            "Adhesives",
+                            "Accessories",
+                          ] as const
+                        )
+                          .filter((g) => orderList.some((l) => l.group === g))
+                          .map((g) => (
+                            <Fragment key={g}>
+                              <TableRow className="bg-muted/40">
+                                <TableCell colSpan={4} className="py-1 text-xs font-semibold">
+                                  {g}
+                                </TableCell>
+                              </TableRow>
+                              {orderList
+                                .filter((l) => l.group === g)
+                                .map((l, idx) => (
+                                  <TableRow key={`${g}-${idx}`}>
+                                    <TableCell className="text-xs">
+                                      {l.name}
+                                      {!l.cell && (
+                                        <span
+                                          className="ml-1 text-[10px] text-muted-foreground"
+                                          title="No catalog product matched this line, so stock cannot be applied"
+                                        >
+                                          (no stock match)
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-right text-xs tabular-nums">
+                                      {describeOrderQty(l, l.needed)}
+                                      {l.pieces !== undefined && (
+                                        <span className="ml-1 text-[10px] text-muted-foreground">
+                                          ({l.pieces.toLocaleString()} pcs)
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-right text-xs tabular-nums">
+                                      {l.onHand !== undefined ? describeOrderQty(l, l.onHand) : "—"}
+                                    </TableCell>
+                                    <TableCell
+                                      className={`text-right text-xs font-semibold tabular-nums ${l.toBuy === 0 ? "text-green-700 dark:text-green-400" : ""}`}
+                                    >
+                                      {describeOrderQty(l, l.toBuy)}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                            </Fragment>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
