@@ -123,12 +123,21 @@ const rowTitle = (b: {
   const a = b.roof_sqft ?? b.building_sqft;
   return a ? `${num(a)} sq ft roof` : "(unnamed building)";
 };
+/** "roof 22 yrs (2004)" from roof_year, else "built 1998 (roof age unknown)", else null. */
+const roofAge = (b: { roof_year?: number | null; year_built?: number | null }) => {
+  const y = new Date().getFullYear();
+  if (b.roof_year) return `roof ${y - b.roof_year} yrs (${b.roof_year})`;
+  if (b.year_built) return `built ${b.year_built}, roof ${y - b.year_built} yrs if original`;
+  return null;
+};
 const rowDetail = (b: {
   name: string;
   address1: string;
   city?: string | null;
   county?: string | null;
   roof_sqft?: number | null;
+  roof_year?: number | null;
+  year_built?: number | null;
   land_use?: string | null;
 }) =>
   [
@@ -137,6 +146,7 @@ const rowDetail = (b: {
     b.county && `${b.county} Co.`,
     (b.name?.trim() || b.address1?.trim()) && b.roof_sqft ? `${num(b.roof_sqft)} sq ft roof` : null,
     !b.address1?.trim() ? "no address yet" : null,
+    roofAge(b),
     b.land_use,
   ]
     .filter(Boolean)
@@ -149,6 +159,8 @@ const summaryLine = (
     roof_sqft?: number | null;
     building_sqft?: number | null;
     perimeter_ft?: number | null;
+    roof_year?: number | null;
+    year_built?: number | null;
   },
   rect: { width: number; length: number } | null,
 ) =>
@@ -159,6 +171,7 @@ const summaryLine = (
         }`
       : "roof size unknown",
     b.address1?.trim() ? [b.address1, b.city].filter(Boolean).join(", ") : "no address yet",
+    roofAge(b) ?? "roof age unknown",
     b.county && `${b.county} County`,
   ]
     .filter(Boolean)
@@ -183,6 +196,7 @@ const emptyBuilding = (): BuildingInput => ({
   roof_sqft: null,
   perimeter_ft: null,
   year_built: null,
+  roof_year: null,
   stories: null,
   centroid_lat: null,
   centroid_lng: null,
@@ -224,6 +238,7 @@ const toInput = (b: BuildingRow): BuildingInput => ({
   roof_sqft: b.roof_sqft,
   perimeter_ft: b.perimeter_ft,
   year_built: b.year_built,
+  roof_year: b.roof_year,
   stories: b.stories,
   centroid_lat: b.centroid_lat,
   centroid_lng: b.centroid_lng,
@@ -277,6 +292,9 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
+  const [minAge, setMinAge] = useState("any"); // any | 10 | 15 | 20 | 25 | unknown
+  const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
+  const [sort, setSort] = useState<"recent" | "biggest" | "oldest">("recent");
   const [selectedId, setSelectedId] = useState<string | null>(props.initialBuildingId ?? null);
   const [form, setForm] = useState<BuildingInput | null>(null);
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
@@ -327,12 +345,19 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   }, [props.initialBuildingId]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county],
+    queryKey: ["buildings", q, county, minAge, minSize, sort],
     queryFn: () =>
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
           ...(county ? { county } : {}),
+          ...(minAge === "unknown"
+            ? { ageUnknown: true }
+            : minAge !== "any"
+              ? { minAge: Number(minAge) }
+              : {}),
+          ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
+          sort,
         },
       }),
   });
@@ -872,6 +897,43 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 </SelectContent>
               </Select>
             </div>
+            <div className="grid grid-cols-3 gap-2">
+              <Select value={minAge} onValueChange={setMinAge}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any roof age</SelectItem>
+                  <SelectItem value="10">Roof 10+ yrs</SelectItem>
+                  <SelectItem value="15">Roof 15+ yrs</SelectItem>
+                  <SelectItem value="20">Roof 20+ yrs</SelectItem>
+                  <SelectItem value="25">Roof 25+ yrs</SelectItem>
+                  <SelectItem value="unknown">Age unknown</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={minSize} onValueChange={setMinSize}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any size</SelectItem>
+                  <SelectItem value="5000">5,000+ sq ft</SelectItem>
+                  <SelectItem value="10000">10,000+ sq ft</SelectItem>
+                  <SelectItem value="20000">20,000+ sq ft</SelectItem>
+                  <SelectItem value="50000">50,000+ sq ft</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
+                <SelectTrigger className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent">Recent first</SelectItem>
+                  <SelectItem value="biggest">Biggest roof</SelectItem>
+                  <SelectItem value="oldest">Oldest roof</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardHeader>
           <CardContent className="max-h-[70vh] space-y-1 overflow-y-auto p-2">
             {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
@@ -1061,6 +1123,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   {text("parcel_id", "Parcel ID")}
                   {text("owner_address", "Owner mailing address", "sm:col-span-2")}
                   {text("land_use", "Land use")}
+                  {number("roof_year", "Roof installed (year)")}
                   {number("year_built", "Year built")}
                   {number("building_sqft", "Building sq ft")}
                   {number("roof_sqft", "Roof sq ft")}

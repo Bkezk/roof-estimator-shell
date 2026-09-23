@@ -69,6 +69,8 @@ export const buildingSchema = z.object({
   roof_sqft: nullableNum,
   perimeter_ft: nullableNum,
   year_built: z.number().int().min(1700).max(2100).nullable().default(null),
+  /** Year the current roof went on (typed, or synced from the newest roof record). */
+  roof_year: z.number().int().min(1700).max(2100).nullable().default(null),
   stories: z.number().int().min(0).max(200).nullable().default(null),
   centroid_lat: z.number().min(-90).max(90).nullable().default(null),
   centroid_lng: z.number().min(-180).max(180).nullable().default(null),
@@ -133,18 +135,35 @@ export const listBuildings = createServerFn({ method: "GET" })
       .object({
         q: z.string().trim().max(200).optional(),
         county: z.string().trim().max(100).optional(),
+        /** Roof at least this many years old: roof_year, else year_built (original roof). */
+        minAge: z.number().int().min(0).max(200).optional(),
+        /** Only buildings whose roof age nobody knows yet. */
+        ageUnknown: z.boolean().optional(),
+        minSqFt: z.number().int().min(0).optional(),
+        sort: z.enum(["recent", "biggest", "oldest"]).optional(),
       })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }): Promise<BuildingRow[]> => {
     await readAccess(context);
-    let q = context.supabase
-      .from("buildings")
-      .select("*")
-      .is("deleted_at", null)
-      .order("updated_at", { ascending: false })
-      .limit(500);
+    let q = context.supabase.from("buildings").select("*").is("deleted_at", null).limit(500);
+    if (data.sort === "biggest") {
+      q = q.order("roof_sqft", { ascending: false, nullsFirst: false });
+    } else if (data.sort === "oldest") {
+      q = q
+        .order("roof_year", { ascending: true, nullsFirst: false })
+        .order("year_built", { ascending: true, nullsFirst: false });
+    } else {
+      q = q.order("updated_at", { ascending: false });
+    }
     if (data.county) q = q.eq("county", data.county);
+    if (data.minSqFt) q = q.gte("roof_sqft", data.minSqFt);
+    if (data.ageUnknown) {
+      q = q.is("roof_year", null).is("year_built", null);
+    } else if (data.minAge) {
+      const cutoff = new Date().getFullYear() - data.minAge;
+      q = q.or(`roof_year.lte.${cutoff},and(roof_year.is.null,year_built.lte.${cutoff})`);
+    }
     if (data.q) {
       const like = `%${data.q.replace(/[%_]/g, "")}%`;
       q = q.or(
