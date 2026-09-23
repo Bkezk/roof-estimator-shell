@@ -3239,6 +3239,11 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
     );
     // priced 9.998 × 1.10 + quote 2 h (never adjusted)
     expect(computeEstimate(adjusted.inputs).underlaymentLaborHours).toBeCloseTo(9.998 * 1.1 + 2, 3);
+    // The screen's per-section readouts: base / adjusted / quote hours.
+    const per = adjusted.inputs.underlaymentHoursBySection?.[bid().sections[0]!.id];
+    expect(per?.base).toBeCloseTo(9.998, 3);
+    expect(per?.adjusted).toBeCloseTo(9.998 * 1.1, 3);
+    expect(per?.quote).toBe(2);
   });
 
   it("attachment None bills layout time only", () => {
@@ -3272,7 +3277,9 @@ describe("§18 underlayment labor — legacy UnderlaymentBaseHours rules", () =>
       substrate: "",
     });
     const five = uHours(
-      bid({ sections: [{ ...bid().sections[0]!, layers: [none(), none(), none(), none(), none()] }] }),
+      bid({
+        sections: [{ ...bid().sections[0]!, layers: [none(), none(), none(), none(), none()] }],
+      }),
     );
     expect(MAX_UNDERLAYMENT_LAYERS).toBe(5);
     expect(five).toBeCloseTo(5 * 7.775, 6);

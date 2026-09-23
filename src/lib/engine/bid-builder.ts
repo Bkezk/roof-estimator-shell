@@ -1128,6 +1128,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
   let underlaymentLaborHours = 0;
   /** §10.7: a quote ID shared across sections/layers bills ONCE (legacy CustomQuotes dedup). */
   const billedQuoteIds = new Set<string>();
+  // Per-section underlayment hours (legacy Underlayment screen: UnderlaymentBaseHours /
+  // UnderlaymentAdjustedBaseHours / UnderlaymentQuoteHours) — informational, for the screen.
+  const uHrsBySection: Record<string, { base: number; adjusted: number; quote: number }> = {};
   // Review-ledger attribution (recorded as we bill; display-only).
   const uMatBySub: Record<number, number> = {};
   const uHrsBySub: Record<number, number> = {};
@@ -1378,6 +1381,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const sLayers = sectionLayers(s);
     const uAdjust = 1 + (s.adjustUnderlaymentLaborPct ?? 0) / 100;
     const uScale = complexity * sheetSizeMulti * uAdjust;
+    const uSec = { base: 0, adjusted: 0, quote: 0 };
+    uHrsBySection[s.id] = uSec;
     const zoneArea = fieldArea + perimArea; // legacy adhesive LABOR basis (corner squares excluded)
     /**
      * Legacy `RoofSection.UnderlaymentAdhesive` (rva 0x4d470, IL-exact — docs §22.6). For an
@@ -1465,6 +1470,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         const amt = layer.quote.laborAmount ?? 0;
         const qHours = layer.quote.laborInDays ? amt * hoursPerDay : amt;
         underlaymentLaborHours += qHours;
+        uSec.quote += qHours;
         addSub(uHrsBySub, uTile, qHours);
         // Legacy UnderlaymentAdhesive has no NeedQuote test: an ADHERED quote layer still bills
         // its adhesive units (quote containers for the tapered groups, else coverage).
@@ -1524,6 +1530,8 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
         layerHours += billLayerAdhesive(layer, li, true);
       }
       const scaled = layerHours * uScale;
+      uSec.base += layerHours * complexity * sheetSizeMulti;
+      uSec.adjusted += scaled;
       underlaymentLaborHours += scaled;
       addSub(uHrsBySub, uTile, scaled);
     }
@@ -2557,6 +2565,7 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     curbLaborHours,
     underlaymentLaborHours,
     underlaymentLaborHoursByTile: uHrsBySub,
+    underlaymentHoursBySection: uHrsBySection,
     crewLaborRatePerHour: bid.crewLaborRatePerHour,
     tearOffFillFraction: 1,
     dumpsterUnitYardage,

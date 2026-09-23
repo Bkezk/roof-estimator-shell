@@ -172,6 +172,13 @@ export interface EstimateInputs {
    * tile — docs §22.3). When present, LaborSubtotal1 rounds per tile; otherwise as one component.
    */
   underlaymentLaborHoursByTile?: Record<number, number>;
+  /**
+   * Per-section underlayment hours keyed by section id (legacy Underlayment screen readouts):
+   * `base` = UnderlaymentBaseHours (× complexity × sheet multiplier, before the per-section
+   * adjust), `adjusted` = × (1 + AdjustUnderlaymentLabor/100), `quote` = quote hours billed at
+   * this section (a shared quote id lands on its first section only). Display only.
+   */
+  underlaymentHoursBySection?: Record<string, { base: number; adjusted: number; quote: number }>;
 
   // tear-off / disposal
   tearOffFillFraction: number; // Estimate.TearOff_VolumeMod

@@ -3513,3 +3513,46 @@ INFORMATIONAL ONLY — it does not feed the engine's Per diem figure, labor, or 
 money is unchanged (no legacy equivalent exists; nothing to reconcile). Also: on the Non-DL
 screens, pressing Enter in a new custom item's name now adds the row and moves focus to its
 Quantity box.
+
+### 22.50 Knox County Fiscal Court: Underlayment man hours 281.38 vs legacy 365.91 (2026-09-23)
+
+Owner: "why is there such a difference in man hours here?" — web Underlayment screen 281.38 h /
+$10,410.91 against the legacy screen's 365.91 h / $13,538.74, same three Duro-Bond sections
+(98 × 79.5 Concrete, 89 × 107.5 Steel, 4 × 20 Steel; 2 × 2½" ISO Duro-Bond + Tapered ISO quote).
+
+What each number is (IL re-read today):
+- Legacy header Man Hours = `RoofSections.UnderlaymentLaborHours` (0x4fed8) = Σ
+  `RoofSection.UnderlaymentAdjustedBaseHours` + `RoofSections.UnderlaymentQuoteHours` (shared
+  quote id once). The screen's two readouts (`frmUnderlayment.UpdateGraphic`) split it: "Adjustable
+  Labor for selected Roof Sections: 265.91 h (Dif.)" and "Quote labor for selected Roof Sections:
+  100" → 265.91 + 100 = 365.91.
+- Web 281.38 = 181.38 priced-layer hours + the same 100 quote hours (engine run on the saved bid:
+  S1 80.73 h, S2 99.14 h, S3 1.51 h = 2 layers × area/2500 × 11.775 layout × 1.10 complexity
+  (Duro-Bond "3"); layout only, Duro-Bond boards never add fastening — §22.28).
+- The legacy suffix " (Dif.)" is written ONLY when the selected sections carry DIFFERENT
+  `AdjustUnderlaymentLabor` values (IL: the loop compares each section's value with the first and
+  sets " (Dif.)"; equal values print " (N%)" with N = 100 + adjust). The web bid has 0% on all
+  three. So the legacy bid's underlayment labor was hand-adjusted, section by section, in its
+  frmLaborPopUp (Calculated Man Hours / Change Hours / Adjust %); those percentages live only in
+  the .bax file. If the legacy base were the web's 181.38 h, the adjustments add 84.53 h (+46.6%).
+  To reconcile: in legacy select A, B, C one at a time and read the " (N%)" after the link, then
+  enter the same in the web pop-up (or send the per-section figures and I will check them).
+
+Screen changes this round (no money change unless the user adjusts labor):
+- The link now reads like legacy — "Adjustable Labor for selected Roof Sections: 265.91 h (100%)"
+  / " (Dif.)" — and "Quote labor for selected Roof Sections: 100" sits beside it. Engine exposes
+  `underlaymentHoursBySection` (base / adjusted / quote per section id) for the readouts.
+- The Labor Adjustment pop-up is the legacy frmLaborPopUp: Calculated Man Hours (Σ base of the
+  selection), Change Hours (±, editable → % = change ÷ base × 100), Adjust Labor (%) (editable →
+  change = Round(base × %/100, 2)), Adjusted Man Hours. "There is no labor or none of it is
+  adjustable." when base = 0 (legacy message). DEPARTURE: legacy refuses a multi-selection whose
+  sections already differ ("…adjust them individually"); the web warns and, on Finish, sets every
+  selected section to the same adjustment.
+- Clicking a layer tab or the stack graphic selects that layer's product in the picker, so the
+  "Underlayment price per sq ft" line (admin price + the bid's own $/sq ft, legacy
+  frmULSqFtPopUp) shows the clicked layer; a quote layer shows its quote and an "Edit quote" link.
+- Quote pop-ups open PRE-FILLED from the layer's saved quote (legacy `llbsqft_LinkClicked` →
+  `HandleGetQuote(idx, 0)` loads `CustomQuotes[id]` into `frmULQuote.DoPopup` "Edit Quote n":
+  name, lump sum / pieces / per piece, labor units, hours-days). Modes: Edit it (default, same id
+  — every layer carrying that id is rewritten, as legacy's shared QuoteUL), Add these amounts to
+  it (the §10.7 merge), Start a new quote (blank, new id; legacy's tile/menu path passes 1).

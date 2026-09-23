@@ -596,24 +596,30 @@ function EstimatePage() {
   const [qCpp, setQCpp] = useState(0);
   const [qLabor, setQLabor] = useState(0);
   const [qLaborDays, setQLaborDays] = useState(false);
-  // frmQuoteDecision (§10.7): merge into an existing quote on the selection, or start new.
-  const [qMerge, setQMerge] = useState(true);
+  // Legacy: the price link re-opens an existing quote PRE-FILLED (HandleGetQuote edit path →
+  // frmULQuote.DoPopup "Edit Quote n"); frmQuoteDecision (§10.7) merges amounts; or start new.
+  const [qMode, setQMode] = useState<"edit" | "merge" | "new">("edit");
   // frmFluteFillerCalc inputs (§10.7): piece length (ft), ridge-to-ridge (in), waste %.
   const [qFfLen, setQFfLen] = useState(8);
   const [qFfR2R, setQFfR2R] = useState(24);
   const [qFfPlus, setQFfPlus] = useState(0);
   // Adhered-layer quote containers over tapered surfaces (§10.7 QuoteAdhesiveUnits).
   const [uQAU, setUQAU] = useState(0);
+  /** Fill the quote form from a saved quote (edit), or blank it (merge / new). */
+  const fillQuoteForm = (q: UnderlaymentLayer["quote"] | undefined, name: string) => {
+    setQName(name);
+    setQPieceMode(!!q?.pieceMode);
+    setQLump(q?.lumpSum ?? 0);
+    setQPieces(q?.pieces ?? 0);
+    setQCpp(q?.costPerPiece ?? 0);
+    setQLabor(q?.laborAmount ?? 0);
+    setQLaborDays(!!q?.laborInDays);
+  };
   const openQuoteDialog = (board: string) => {
-    // When the selection already carries this board's quote, surface its name (the merge target).
-    setQName(existingQuoteFor(board)?.name ?? "New Quote");
-    setQPieceMode(false);
-    setQLump(0);
-    setQPieces(0);
-    setQCpp(0);
-    setQLabor(0);
-    setQLaborDays(false);
-    setQMerge(true);
+    // When the selection already carries this board's quote, open it pre-filled (legacy edit).
+    const ex = existingQuoteFor(board);
+    fillQuoteForm(ex, ex?.name ?? "New Quote");
+    setQMode("edit");
     setUQuoteBoard(board);
   };
   /** The existing quote for this entry on the selected sections' current layer, if any. */
@@ -624,6 +630,19 @@ function EstimatePage() {
       if (l?.quote && l.board === board) return l.quote;
     }
     return undefined;
+  };
+  /**
+   * Legacy: selecting a layer (tab or the stack graphic) shows THAT layer's product — its price
+   * per sq ft line, or its quote — so the picker follows the layer the user clicked.
+   */
+  const selectLayerTab = (n: number) => {
+    setUTab(n);
+    const first = sections.find((x) => uSel.includes(x.id)) ?? sections[0];
+    const l = first ? sectionLayers(first)[n] : undefined;
+    if (l?.board) {
+      setUBoard(l.board);
+      setUGroup(null);
+    }
   };
   const [uAttach, setUAttach] = useState<"mechanical" | "adhesive" | "none" | "durobond">(
     "mechanical",
@@ -1156,6 +1175,31 @@ function EstimatePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admin, JSON.stringify(bid)]);
+
+  // Legacy Underlayment screen readouts (frmUnderlayment.UpdateGraphic) for the selected sections:
+  // Σ UnderlaymentBaseHours / UnderlaymentAdjustedBaseHours / UnderlaymentQuoteHours, and the
+  // link suffix — " (N%)" with N = 100 + AdjustUnderlaymentLabor, or " (Dif.)" when they differ.
+  const uSelLabor = useMemo(() => {
+    const per = result?.build.inputs.underlaymentHoursBySection ?? {};
+    const sel = sections.filter((x) => uSel.includes(x.id));
+    let base = 0;
+    let adjusted = 0;
+    let quote = 0;
+    for (const x of sel) {
+      const h = per[x.id];
+      if (!h) continue;
+      base += h.base;
+      adjusted += h.adjusted;
+      quote += h.quote;
+    }
+    const pcts = [
+      ...new Set(sel.map((x) => x.adjustUnderlaymentLaborPct ?? templateDeltas.underlayment)),
+    ];
+    const pct = pcts.length === 1 ? pcts[0]! : null;
+    const suffix =
+      sel.length === 0 ? "" : pct === null ? " (Dif.)" : ` (${100 + Math.round(pct)}%)`;
+    return { base, adjusted, quote, suffix, differing: pcts.length > 1 };
+  }, [result, sections, uSel, templateDeltas]);
 
   const accessoryTotal = accessories.reduce((sum, a) => sum + a.price * a.quantity, 0);
   const accessoryLaborHours = accessories.reduce(
@@ -2713,20 +2757,19 @@ function EstimatePage() {
                   disabled={uSel.length === 0}
                   onClick={() => {
                     const first = sections.find((x) => uSel.includes(x.id));
-                    setULaborPct(first?.adjustUnderlaymentLaborPct ?? 0);
+                    setULaborPct(first?.adjustUnderlaymentLaborPct ?? templateDeltas.underlayment);
                     setULaborOpen(true);
                   }}
+                  title="Calculated underlayment hours of the selected sections after their labor adjustment (100% = as calculated). Click to change the hours or the percent."
                 >
-                  Adjustable Labor for selected Roof Sections
-                  {(() => {
-                    const sel = sections.filter((x) => uSel.includes(x.id));
-                    const pcts = [...new Set(sel.map((x) => x.adjustUnderlaymentLaborPct ?? null))];
-                    if (sel.length === 0) return "";
-                    if (pcts.length === 1)
-                      return pcts[0] === null ? " (template default)" : ` (${pcts[0]}%)`;
-                    return " (mixed)";
-                  })()}
+                  Adjustable Labor for selected Roof Sections:{" "}
+                  <span className="tabular-nums">{uSelLabor.adjusted.toFixed(2)} h</span>
+                  {uSelLabor.suffix}
                 </button>
+                <span title="Quote labor hours of the selected sections (never adjusted; a shared quote counts once)">
+                  Quote labor for selected Roof Sections:{" "}
+                  <span className="font-semibold tabular-nums">{uSelLabor.quote.toFixed(2)}</span>
+                </span>
                 <span>
                   Man hours (bid):{" "}
                   <span className="font-semibold tabular-nums">
@@ -2751,20 +2794,55 @@ function EstimatePage() {
                   </DialogHeader>
                   <div className="space-y-3 text-xs">
                     <p className="text-muted-foreground">
-                      Adjust the calculated underlayment labor of the{" "}
                       {sections.filter((x) => uSel.includes(x.id)).length} selected section(s).
-                      Without an override the labor template&apos;s Underlayment Labor factor
-                      applies.
+                      Change the hours or the percent — the other follows. Quote labor is never
+                      adjusted.
                     </p>
-                    <Field label="Adjust Labor (%)">
-                      <NumberField
-                        className="h-8 w-[120px]"
-                        min={-100}
-                        step="1"
-                        value={uLaborPct}
-                        onChange={(v) => setULaborPct(v)}
-                      />
-                    </Field>
+                    {uSelLabor.base <= 0 ? (
+                      <p className="text-destructive">
+                        There is no labor or none of it is adjustable.
+                      </p>
+                    ) : (
+                      <>
+                        {uSelLabor.differing && (
+                          <p className="rounded-md border border-amber-300 bg-amber-50 p-2 dark:bg-amber-950/30">
+                            Labor adjustments have been made to some of these sections. Finishing
+                            here sets every selected section to the same adjustment.
+                          </p>
+                        )}
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Calculated Man Hours">
+                            <Input value={uSelLabor.base.toFixed(2)} readOnly disabled />
+                          </Field>
+                          <Field label="Change Hours (±)">
+                            <NumberField
+                              className="h-8"
+                              step="0.01"
+                              value={Math.round(uSelLabor.base * uLaborPct) / 100}
+                              onChange={(v) =>
+                                setULaborPct(Math.round((v / uSelLabor.base) * 100 * 100) / 100)
+                              }
+                            />
+                          </Field>
+                          <Field label="Adjust Labor (%)">
+                            <NumberField
+                              className="h-8"
+                              min={-100}
+                              step="1"
+                              value={uLaborPct}
+                              onChange={(v) => setULaborPct(v)}
+                            />
+                          </Field>
+                          <Field label="Adjusted Man Hours">
+                            <Input
+                              value={(uSelLabor.base * (1 + uLaborPct / 100)).toFixed(2)}
+                              readOnly
+                              disabled
+                            />
+                          </Field>
+                        </div>
+                      </>
+                    )}
                   </div>
                   <DialogFooter className="gap-2">
                     <Button
@@ -2783,6 +2861,7 @@ function EstimatePage() {
                       Use template default ({templateDeltas.underlayment}%)
                     </Button>
                     <Button
+                      disabled={uSelLabor.base <= 0}
                       onClick={() => {
                         setSections((prev) =>
                           prev.map((x) =>
@@ -2812,7 +2891,7 @@ function EstimatePage() {
                         <button
                           key={n}
                           type="button"
-                          onClick={() => setUTab(n)}
+                          onClick={() => selectLayerTab(n)}
                           className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium ${
                             uTab === n
                               ? "border-b-2 border-primary text-primary"
@@ -2840,7 +2919,7 @@ function EstimatePage() {
                             slotsTopDown={LAYER_SLOTS_TOP_DOWN}
                             layers={stackLayers}
                             selected={uTab}
-                            onSelect={setUTab}
+                            onSelect={selectLayerTab}
                             deckLabel={stackSec ? `Deck (${stackSec.deckType})` : "Deck"}
                             attachmentOf={(l) =>
                               effectiveLayerAttachment(
@@ -2960,6 +3039,29 @@ function EstimatePage() {
                     );
                   })()}
                   <div className="flex flex-wrap items-end gap-3 text-xs text-muted-foreground">
+                    {(() => {
+                      const first = sections.find((x) => uSel.includes(x.id)) ?? sections[0];
+                      const cur = first ? sectionLayers(first)[uTab] : undefined;
+                      if (!cur?.quote) return null;
+                      const q = cur.quote;
+                      const mat = q.pieceMode
+                        ? (q.pieces ?? 0) * (q.costPerPiece ?? 0)
+                        : (q.lumpSum ?? 0);
+                      return (
+                        <p className="basis-full">
+                          Layer {uTab + 1} quote “{q.name}”: {money(mat)} + {q.laborAmount ?? 0}
+                          {q.laborInDays ? " days" : " h"} labor{" "}
+                          <button
+                            type="button"
+                            className="font-medium text-primary underline underline-offset-2"
+                            disabled={uSel.length === 0}
+                            onClick={() => openQuoteDialog(cur.board)}
+                          >
+                            Edit quote
+                          </button>
+                        </p>
+                      );
+                    })()}
                     <p>
                       Underlayment price per sq ft:{" "}
                       <span className="font-semibold tabular-nums">
@@ -3282,24 +3384,45 @@ function EstimatePage() {
                               </Field>
                             </div>
                             {uQuoteBoard !== null && existingQuoteFor(uQuoteBoard) && (
-                              /* frmQuoteDecision (§10.7): merge sums LumpSum + labor hours. */
-                              <div className="flex items-center gap-4 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:bg-amber-950/30">
-                                <span>A quote already exists on this layer:</span>
+                              /* Legacy: the price link re-opens the quote pre-filled (HandleGetQuote
+                                 edit path); frmQuoteDecision (§10.7) merge sums LumpSum + labor. */
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:bg-amber-950/30">
+                                <span>
+                                  Quote “{existingQuoteFor(uQuoteBoard)!.name}” is on this layer:
+                                </span>
                                 <label className="flex items-center gap-1">
                                   <input
                                     type="radio"
-                                    checked={qMerge}
-                                    onChange={() => setQMerge(true)}
+                                    checked={qMode === "edit"}
+                                    onChange={() => {
+                                      const ex = existingQuoteFor(uQuoteBoard);
+                                      fillQuoteForm(ex, ex?.name ?? "New Quote");
+                                      setQMode("edit");
+                                    }}
                                   />
-                                  Merge (add amounts)
+                                  Edit it
                                 </label>
                                 <label className="flex items-center gap-1">
                                   <input
                                     type="radio"
-                                    checked={!qMerge}
-                                    onChange={() => setQMerge(false)}
+                                    checked={qMode === "merge"}
+                                    onChange={() => {
+                                      fillQuoteForm(undefined, existingQuoteFor(uQuoteBoard)!.name);
+                                      setQMode("merge");
+                                    }}
                                   />
-                                  Start new quote
+                                  Add these amounts to it
+                                </label>
+                                <label className="flex items-center gap-1">
+                                  <input
+                                    type="radio"
+                                    checked={qMode === "new"}
+                                    onChange={() => {
+                                      fillQuoteForm(undefined, "New Quote");
+                                      setQMode("new");
+                                    }}
+                                  />
+                                  Start a new quote
                                 </label>
                               </div>
                             )}
@@ -3475,28 +3598,52 @@ function EstimatePage() {
                             };
                             const existing = existingQuoteFor(board);
                             const quote: Q =
-                              existing && qMerge
+                              existing && qMode === "merge"
                                 ? {
                                     id: existing.id ?? crypto.randomUUID(),
                                     name: existing.name,
                                     lumpSum: lumpOf(existing) + lumpOf(entered),
                                     laborAmount: norm(existing) + norm(entered),
                                   }
-                                : { id: crypto.randomUUID(), ...entered };
+                                : existing && qMode === "edit"
+                                  ? { ...entered, id: existing.id ?? crypto.randomUUID() }
+                                  : { id: crypto.randomUUID(), ...entered };
+                            // Editing / merging rewrites EVERY layer carrying the quote id (legacy
+                            // CustomQuotes holds one shared object), plus the selection's layer —
+                            // which keeps its attachment / quote containers when it already had
+                            // this entry.
+                            const sharedId = qMode !== "new" ? existing?.id : undefined;
                             setSections((prev) =>
                               prev.map((s) => {
-                                if (!uSel.includes(s.id)) return s;
                                 const nextLayers = [...sectionLayers(s)];
-                                const idx = Math.min(uTab, nextLayers.length);
-                                nextLayers[idx] = {
-                                  board,
-                                  attachment: "mechanical",
-                                  fastenersPerBoard: 0,
-                                  adhesiveName: "",
-                                  substrate: "",
-                                  quote,
-                                };
-                                return { ...s, layers: nextLayers, underlaymentBoard: "" };
+                                let changed = false;
+                                if (sharedId) {
+                                  nextLayers.forEach((l, i) => {
+                                    if (l.quote?.id === sharedId) {
+                                      nextLayers[i] = { ...l, quote };
+                                      changed = true;
+                                    }
+                                  });
+                                }
+                                if (uSel.includes(s.id)) {
+                                  const idx = Math.min(uTab, nextLayers.length);
+                                  const cur = nextLayers[idx];
+                                  nextLayers[idx] =
+                                    cur && cur.board === board
+                                      ? { ...cur, quote }
+                                      : {
+                                          board,
+                                          attachment: "mechanical",
+                                          fastenersPerBoard: 0,
+                                          adhesiveName: "",
+                                          substrate: "",
+                                          quote,
+                                        };
+                                  changed = true;
+                                }
+                                return changed
+                                  ? { ...s, layers: nextLayers, underlaymentBoard: "" }
+                                  : s;
                               }),
                             );
                             setUQuoteBoard(null);
