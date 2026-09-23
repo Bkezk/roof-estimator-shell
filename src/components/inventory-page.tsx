@@ -85,10 +85,10 @@ export function InventoryPage() {
         </p>
       </div>
 
-      <Tabs defaultValue={role === "field" ? "add" : "stock"}>
+      <Tabs defaultValue="add">
         <TabsList>
-          <TabsTrigger value="stock">Stock on hand</TabsTrigger>
           <TabsTrigger value="add">Record stock</TabsTrigger>
+          <TabsTrigger value="stock">Stock on hand</TabsTrigger>
           <TabsTrigger value="ledger">Ledger</TabsTrigger>
           {role === "admin" && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
