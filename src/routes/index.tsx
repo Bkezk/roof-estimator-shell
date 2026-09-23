@@ -6,14 +6,12 @@ export const Route = createFileRoute("/")({
       { title: "Bid-O-Matic" },
       {
         name: "description",
-        content:
-          "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
+        content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
       { property: "og:title", content: "Bid-O-Matic" },
       {
         property: "og:description",
-        content:
-          "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
+        content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
     ],
   }),

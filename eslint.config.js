@@ -6,7 +6,9 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", ".output", ".vinxi"] },
+  // src/integrations is written by Lovable's sync in its own style (single quotes, no semicolons
+  // in places); it is typechecked but not linted so its regeneration cannot turn CI red.
+  { ignores: ["dist", ".output", ".vinxi", "src/integrations/**"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
