@@ -1,4 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
+import {
+  PACK_QTY_COLS,
+  pieceDefFromPack,
+  pieceDefFromUnitType,
+  type PieceDef,
+} from "@/lib/stock-units";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -40,9 +46,9 @@ export interface PriceTarget {
   packs?: Record<string, number | null>;
   /** Adhesives: the product's own unit ("5-gal. Box Set", "4-Cartridge Case", …) per row. */
   row_units?: Record<string, string>;
+  /** Pieces one priced pack holds, per row, where the catalog says (stock-units.ts). */
+  pieces?: Record<string, PieceDef>;
 }
-/** Columns that say how many pieces one priced pack holds. */
-const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
 
 const numOrNull = (v: unknown): number | null => {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -93,10 +99,14 @@ export const listPriceTargets = createServerFn({ method: "GET" })
       if (d.kind === "adhesives") {
         const values: PriceTarget["values"] = {};
         const rowUnits: Record<string, string> = {};
+        const pieces: Record<string, PieceDef> = {};
         for (const p of d.products ?? []) {
           values[p.name] = { price: numOrNull(p.price) };
-          if (typeof p.unit_type === "string" && p.unit_type.trim())
+          if (typeof p.unit_type === "string" && p.unit_type.trim()) {
             rowUnits[p.name] = p.unit_type.trim();
+            const def = pieceDefFromUnitType(p.unit_type);
+            if (def) pieces[p.name] = def;
+          }
         }
         out.push({
           screen_id: s.id,
@@ -105,6 +115,7 @@ export const listPriceTargets = createServerFn({ method: "GET" })
           price_cols: ["price"],
           values,
           row_units: rowUnits,
+          pieces,
         });
         continue;
       }
@@ -128,13 +139,19 @@ export const listPriceTargets = createServerFn({ method: "GET" })
         values[label] = v;
         if (packCol) packs[label] = numOrNull(r[packCol]);
       }
+      const pieces: Record<string, PieceDef> = {};
+      if (packCol)
+        for (const [label, q] of Object.entries(packs)) {
+          const def = pieceDefFromPack(packCol, q);
+          if (def) pieces[label] = def;
+        }
       out.push({
         screen_id: s.id,
         category: s.category,
         rows,
         price_cols: priceCols,
         values,
-        ...(packCol ? { pack_col: packCol, packs } : {}),
+        ...(packCol ? { pack_col: packCol, packs, pieces } : {}),
       });
     }
     return out;

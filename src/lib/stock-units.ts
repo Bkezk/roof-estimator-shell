@@ -1,0 +1,52 @@
+/**
+ * Stock units: leftovers are usually PART of a priced pack — three cartridges from a
+ * 4-Cartridge Case, 600 screws from a box of 1,000, a few gallons in a bucket. Stock is kept in
+ * the priced pack (so it lines up with what the estimator bills and orders) as a decimal, and
+ * the catalog says how many pieces one pack holds so a count of pieces converts exactly.
+ */
+
+/** Catalog columns that say how many pieces one priced pack holds. */
+export const PACK_QTY_COLS = ["Fasteners/Box", "Parts/Bag", "Parts/Package"];
+
+export interface PieceDef {
+  /** Singular piece name ("cartridge", "fastener", "gallon", "part"). */
+  name: string;
+  /** Pieces in one priced pack. */
+  perPack: number;
+}
+
+/** Adhesive unit types as captured on the catalog ("4-Cartridge Case", "5-gal. Bucket", …). */
+export function pieceDefFromUnitType(unitType: string | null | undefined): PieceDef | null {
+  const u = (unitType ?? "").trim();
+  let m = /^(\d+)\s*-\s*cartridge\b/i.exec(u);
+  if (m) return { name: "cartridge", perPack: Number(m[1]) };
+  m = /^(\d+(?:\.\d+)?)\s*-?\s*gal\b/i.exec(u);
+  // A "Box Set" is two-part (A + B) — a partial set is not a usable quantity of pieces.
+  if (m && !/box set/i.test(u)) return { name: "gallon", perPack: Number(m[1]) };
+  return null;
+}
+
+/** Row screens with a pack-quantity column ("Fasteners/Box", "Parts/Bag", "Parts/Package"). */
+export function pieceDefFromPack(
+  packCol: string | undefined,
+  packQty: number | null | undefined,
+): PieceDef | null {
+  if (!packCol || typeof packQty !== "number" || !Number.isFinite(packQty) || packQty <= 0)
+    return null;
+  const name = /^fasteners/i.test(packCol) ? "fastener" : "part";
+  return { name, perPack: packQty };
+}
+
+export const packsFromPieces = (pieces: number, def: PieceDef): number => pieces / def.perPack;
+
+export const plural = (n: number, name: string): string => `${name}${Math.abs(n) === 1 ? "" : "s"}`;
+
+/** "0.75 4-Cartridge Case (3 cartridges)" — the pieces line only when the count is whole-ish. */
+export function describeStock(qty: number, unit: string, def: PieceDef | null | undefined): string {
+  const q = Number.isInteger(qty) ? String(qty) : qty.toFixed(3).replace(/\.?0+$/, "");
+  if (!def) return `${q} ${unit}`;
+  const pieces = qty * def.perPack;
+  const p =
+    Math.abs(pieces - Math.round(pieces)) < 1e-6 ? String(Math.round(pieces)) : pieces.toFixed(2);
+  return `${q} ${unit} (${p} ${plural(pieces, def.name)})`;
+}

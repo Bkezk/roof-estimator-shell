@@ -23,6 +23,7 @@ import {
   type OpenedBoxRule,
 } from "@/lib/inventory.functions";
 import { firstTarget, type TargetRef } from "@/lib/item-number-targets";
+import { describeStock, packsFromPieces, plural, type PieceDef } from "@/lib/stock-units";
 import { TargetPicker } from "@/components/item-number-target-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -73,6 +74,9 @@ export function InventoryPage() {
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
   };
   const targets = useMemo(() => targetsQ.data ?? [], [targetsQ.data]);
+  /** Pieces-per-pack for a stock cell, when the catalog states one (stock-units.ts). */
+  const pieceOf = (screenId: string, rowLabel: string): PieceDef | null =>
+    targets.find((t) => t.screen_id === screenId)?.pieces?.[rowLabel] ?? null;
   const stock = stockQ.data ?? [];
   const moves = movesQ.data ?? [];
   const rule = settingsQ.data?.opened_box_rule ?? "half";
@@ -98,7 +102,7 @@ export function InventoryPage() {
         </TabsList>
 
         <TabsContent value="stock" className="pt-3">
-          <StockTable rows={stock} loading={stockQ.isLoading} />
+          <StockTable rows={stock} loading={stockQ.isLoading} pieceOf={pieceOf} />
         </TabsContent>
 
         <TabsContent value="add" className="pt-3">
@@ -113,7 +117,13 @@ export function InventoryPage() {
         </TabsContent>
 
         <TabsContent value="ledger" className="pt-3">
-          <LedgerTable rows={moves} loading={movesQ.isLoading} role={role} onChanged={refresh} />
+          <LedgerTable
+            rows={moves}
+            loading={movesQ.isLoading}
+            role={role}
+            onChanged={refresh}
+            pieceOf={pieceOf}
+          />
         </TabsContent>
 
         {role === "admin" && (
@@ -129,6 +139,7 @@ export function InventoryPage() {
 function StockTable(props: {
   rows: Awaited<ReturnType<ReturnType<typeof useServerFn<typeof listStock>>>>;
   loading: boolean;
+  pieceOf: (screenId: string, rowLabel: string) => PieceDef | null;
 }) {
   const [q, setQ] = useState("");
   const [zeros, setZeros] = useState(false);
@@ -197,6 +208,16 @@ function StockTable(props: {
                       className={`text-right text-sm font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
                     >
                       {fmtQty(r.on_hand)}
+                      {(() => {
+                        const def = props.pieceOf(r.screen_id, r.row_label);
+                        if (!def) return null;
+                        const pieces = r.on_hand * def.perPack;
+                        return (
+                          <div className="text-[11px] font-normal text-muted-foreground">
+                            {fmtQty(pieces)} {plural(pieces, def.name)}
+                          </div>
+                        );
+                      })()}
                     </TableCell>
                     <TableCell className="text-xs">{r.unit}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
@@ -238,6 +259,13 @@ function AddMovementCard(props: {
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [itemNo, setItemNo] = useState("");
+  // Count in pieces of the pack (cartridges / fasteners / gallons) when the catalog states how
+  // many one pack holds — leftovers are usually part of a pack.
+  const piece = t
+    ? (props.targets.find((x) => x.screen_id === t.screen_id)?.pieces?.[t.row_label] ?? null)
+    : null;
+  const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
+  const inPieces = !!piece && countMode === "pieces";
   const fieldOnly = props.role === "field";
   // Item # lookup: an exact match picks the product; a partial match lists candidates.
   const itemQuery = itemNo.trim().toLowerCase();
@@ -269,6 +297,7 @@ function AddMovementCard(props: {
     : [];
   const n = Number(qty);
   const canSave = !!t && qty.trim() !== "" && Number.isFinite(n) && n !== 0 && !saving;
+  const packsPreview = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : null;
 
   const save = async () => {
     if (!t || !canSave) return;
@@ -280,6 +309,7 @@ function AddMovementCard(props: {
           row_label: t.row_label,
           price_col: t.price_col,
           qty: n,
+          ...(inPieces ? { in_pieces: true } : {}),
           unit,
           reason,
           bid_id: bidId || null,
@@ -288,7 +318,7 @@ function AddMovementCard(props: {
         },
       });
       toast.success(
-        `${r.qty > 0 ? "+" : ""}${fmtQty(r.qty)} ${unit} — ${t.row_label} · ${priceColLabel(t.price_col)}`,
+        `${r.qty > 0 ? "+" : ""}${describeStock(r.qty, r.unit, piece)} — ${t.row_label} · ${priceColLabel(t.price_col)}`,
       );
       setQty("");
       setCounted("");
@@ -392,7 +422,9 @@ function AddMovementCard(props: {
         )}
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <Label className="text-[11px]">Quantity</Label>
+            <Label className="text-[11px]">
+              Quantity{inPieces && piece ? ` (${plural(2, piece.name)})` : ""}
+            </Label>
             <Input
               type="number"
               inputMode="decimal"
@@ -403,14 +435,35 @@ function AddMovementCard(props: {
               placeholder={reason === "adjustment" ? "+ or −" : "0"}
             />
           </div>
+          {piece && (
+            <div className="space-y-1">
+              <Label className="text-[11px]">Count in</Label>
+              <Select value={countMode} onValueChange={(v) => setCountMode(v as typeof countMode)}>
+                <SelectTrigger className="h-8 w-[200px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pieces">
+                    {plural(2, piece.name)} ({piece.perPack} per {unit})
+                  </SelectItem>
+                  <SelectItem value="packs">whole {unit}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1">
             <Label className="text-[11px]">Unit</Label>
             <Input
-              className="h-8 w-24 bg-muted text-xs"
+              className="h-8 w-40 bg-muted text-xs"
               value={unit}
               readOnly
-              title="Set by the product's catalog screen so every entry for a product adds up in the same unit"
+              title="Set by the product's catalog entry so every entry for a product adds up in the same unit"
             />
+            {packsPreview !== null && piece && (
+              <p className="text-[11px] text-muted-foreground">
+                = {describeStock(packsPreview, unit, piece)}
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <Label className="text-[11px]">Reason</Label>
@@ -484,6 +537,7 @@ function LedgerTable(props: {
   loading: boolean;
   role: string | null;
   onChanged: () => void;
+  pieceOf: (screenId: string, rowLabel: string) => PieceDef | null;
 }) {
   const delFn = useServerFn(deleteMovement);
   const [q, setQ] = useState("");
@@ -547,7 +601,7 @@ function LedgerTable(props: {
                       className={`text-right text-xs font-semibold tabular-nums ${r.qty < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
                     >
                       {r.qty > 0 ? "+" : ""}
-                      {fmtQty(r.qty)} {r.unit}
+                      {describeStock(r.qty, r.unit, props.pieceOf(r.screen_id, r.row_label))}
                     </TableCell>
                     <TableCell className="text-xs">{REASON_LABELS[r.reason]}</TableCell>
                     <TableCell className="text-xs">{r.bid_name ?? ""}</TableCell>

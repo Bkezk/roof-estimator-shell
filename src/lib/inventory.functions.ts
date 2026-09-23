@@ -3,6 +3,14 @@
  * (screen › product row key › price column); on-hand is the sum of signed movements.
  */
 import { createServerFn } from "@tanstack/react-start";
+import {
+  PACK_QTY_COLS,
+  packsFromPieces,
+  pieceDefFromPack,
+  pieceDefFromUnitType,
+  plural,
+  type PieceDef,
+} from "@/lib/stock-units";
 import { z } from "zod";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -200,6 +208,11 @@ export const listMovements = createServerFn({ method: "GET" })
 const addSchema = cellSchema.extend({
   /** Positive as counted; the reason decides the sign (damaged always subtracts). */
   qty: z.number().finite(),
+  /**
+   * When set, `qty` was counted in PIECES of the pack (cartridges, fasteners, gallons) and the
+   * server converts it with the catalog's pieces-per-pack (stock-units.ts).
+   */
+  in_pieces: z.boolean().optional(),
   /** Ignored if sent: the unit is the product screen's stock unit (STOCK_UNIT_BY_SCREEN). */
   unit: z.string().max(20).optional(),
   reason: z.enum(["leftover", "adjustment", "damaged"]),
@@ -237,22 +250,37 @@ export const addMovement = createServerFn({ method: "POST" })
     // Adhesives count in the product's own unit (its catalog unit_type: "5-gal. Box Set",
     // "4-Cartridge Case", "50-Gal Drum Set"); every other screen in its per-screen unit.
     let unit = stockUnitFor(data.screen_id);
+    let piece: PieceDef | null = null;
     if (d.kind === "adhesives") {
       const product = (d.products ?? []).find((p) => p.name === data.row_label);
       if (!product) throw new Error(`"${data.row_label}" is not on the Adhesives screen`);
-      if (typeof product.unit_type === "string" && product.unit_type.trim())
+      if (typeof product.unit_type === "string" && product.unit_type.trim()) {
         unit = product.unit_type.trim();
+        piece = pieceDefFromUnitType(product.unit_type);
+      }
     } else {
       const cols = d.columns ?? [];
       const keys = rowKeys(cols, d.rows ?? []);
-      if (!keys.includes(data.row_label))
-        throw new Error(`"${data.row_label}" is not on this screen`);
+      const rowIdx = keys.indexOf(data.row_label);
+      if (rowIdx < 0) throw new Error(`"${data.row_label}" is not on this screen`);
       if (!cols.includes(data.price_col) || data.price_col === labelColOf(cols))
         throw new Error(`"${data.price_col}" is not a price column on this screen`);
+      const packCol = PACK_QTY_COLS.find((c) => cols.includes(c));
+      const packRaw = packCol ? (d.rows ?? [])[rowIdx]?.[packCol] : undefined;
+      const packQty =
+        typeof packRaw === "number" ? packRaw : packRaw != null ? Number(packRaw) : null;
+      piece = pieceDefFromPack(packCol, Number.isFinite(packQty) ? packQty : null);
     }
-    let qty = Math.abs(data.qty);
+    // Pieces convert to a decimal of the pack from the catalog's own pack size.
+    let counted = data.qty;
+    if (data.in_pieces) {
+      if (!piece)
+        throw new Error("This product has no pieces-per-pack on the catalog — count whole packs");
+      counted = packsFromPieces(data.qty, piece);
+    }
+    let qty = Math.abs(counted);
     if (data.reason === "damaged") qty = -qty;
-    if (data.reason === "adjustment") qty = data.qty;
+    if (data.reason === "adjustment") qty = counted;
     if (qty === 0) throw new Error("Quantity cannot be zero");
     let bidName: string | null = null;
     if (data.bid_id) {
@@ -280,13 +308,15 @@ export const addMovement = createServerFn({ method: "POST" })
       reason: data.reason,
       bid_id: data.bid_id ?? null,
       bid_name: bidName,
-      counted_note: data.counted_note ?? null,
+      counted_note:
+        data.counted_note ??
+        (data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null),
       note: data.note ?? null,
       created_by: context.userId,
       created_by_name: me?.full_name?.trim() || me?.email || null,
     });
     if (insErr) throw new Error(insErr.message);
-    return { ok: true, qty };
+    return { ok: true, qty, unit };
   });
 
 /** Bids a leftover can be attributed to (a field login cannot read bids directly). */
