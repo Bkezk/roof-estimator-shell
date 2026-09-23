@@ -5,7 +5,7 @@
  * copied here — they show as a warranty-expiry LEAD LIST read from accepted bids on demand. The
  * map and the parcel ingest come next; this page is what they populate.
  */
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
@@ -15,6 +15,7 @@ import {
   CheckSquare,
   DownloadCloud,
   FilePlus2,
+  Map as MapIcon,
   Plus,
   ShieldCheck,
   Trash2,
@@ -26,23 +27,65 @@ import {
   deleteBuilding,
   deleteRoof,
   getBuilding,
-  importParcels,
+  countAddressPoints,
+  fillFootprintAddresses,
+  importLayer,
   listBuildings,
   listCounties,
   listOpenTasks,
   listWarrantyLeads,
-  previewParcels,
+  previewLayer,
   saveBuilding,
   saveRoof,
   saveTask,
   setTaskDone,
   type BuildingInput,
   type BuildingRow,
-  type ParcelPreview,
+  type LayerPreview,
   type RoofInput,
   type RoofRow,
 } from "@/lib/prospect.functions";
-import { countyFromServiceUrl } from "@/lib/gis/arcgis";
+import {
+  KY_ADDRESS_POINTS_LAYER,
+  KY_CORE_COUNTIES,
+  KY_COUNTIES,
+  KY_FOOTPRINTS_LAYER,
+  KY_SCHOOLS_LAYER,
+  KY_WEBSTER_PARCELS_LAYER,
+  countyRankingUrl,
+  countyWhere,
+  type LayerKind,
+} from "@/lib/gis/ky-layers";
+
+const ProspectMap = lazy(() => import("@/components/prospect-map"));
+
+/** The Kentucky layers whose fields are sample-verified (src/lib/gis/fixtures). */
+const LAYER_PRESETS: { key: string; label: string; url: string; kind: LayerKind }[] = [
+  {
+    key: "footprints",
+    label: "Building footprints — ORNL, statewide",
+    url: KY_FOOTPRINTS_LAYER,
+    kind: "footprint",
+  },
+  {
+    key: "addresses",
+    label: "911 address points — statewide (addresses for footprints)",
+    url: KY_ADDRESS_POINTS_LAYER,
+    kind: "address",
+  },
+  { key: "schools", label: "Schools — statewide", url: KY_SCHOOLS_LAYER, kind: "facility" },
+  {
+    key: "webster",
+    label: "PVA parcels — Webster County (the only county the state publishes)",
+    url: KY_WEBSTER_PARCELS_LAYER,
+    kind: "parcel",
+  },
+  { key: "custom", label: "Another layer URL…", url: "", kind: "facility" },
+];
+const COUNTY_CHOICES = [
+  ...KY_CORE_COUNTIES,
+  ...KY_COUNTIES.filter((c) => !KY_CORE_COUNTIES.includes(c)),
+];
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -175,8 +218,10 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const doneFn = useServerFn(setTaskDone);
   const openTasksFn = useServerFn(listOpenTasks);
   const leadsFn = useServerFn(listWarrantyLeads);
-  const previewFn = useServerFn(previewParcels);
-  const importFn = useServerFn(importParcels);
+  const previewFn = useServerFn(previewLayer);
+  const importFn = useServerFn(importLayer);
+  const fillFn = useServerFn(fillFootprintAddresses);
+  const addressCountsFn = useServerFn(countAddressPoints);
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
@@ -185,16 +230,27 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDue, setTaskDue] = useState("");
-  // Kentucky PVA parcel import (one ArcGIS layer per county; src/lib/gis/arcgis.ts).
+  // Kentucky layer import (src/lib/gis/ky-layers.ts): a preset (or any layer URL), a county and
+  // a where clause the preset writes and the operator may edit.
   const [importOpen, setImportOpen] = useState(false);
-  const [layerUrl, setLayerUrl] = useState(
-    "https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/Ky_PVA_Webster_Parcels_WGS84WM/MapServer/1",
+  const [presetKey, setPresetKey] = useState("footprints");
+  const preset = LAYER_PRESETS.find((p) => p.key === presetKey) ?? LAYER_PRESETS[0]!;
+  const [customUrl, setCustomUrl] = useState("");
+  const layerUrl = preset.key === "custom" ? customUrl : preset.url;
+  const [importCounty, setImportCounty] = useState<string>(KY_CORE_COUNTIES[0]!);
+  const [minSqFt, setMinSqFt] = useState(5000);
+  const [whereClause, setWhereClause] = useState(() =>
+    countyWhere("footprint", KY_CORE_COUNTIES[0]!, 5000),
   );
-  // Webster's CLASS values (owner-verified 2026-09-24): COMMERCIAL, RESIDENTIAL, CEMETERY, FARM,
-  // PUBLIC SERVICE, blank. Commercial roofing prospects are the first and the last-but-one.
-  const [whereClause, setWhereClause] = useState("CLASS IN ('COMMERCIAL','PUBLIC SERVICE')");
-  const [importCounty, setImportCounty] = useState("");
-  const [preview, setPreview] = useState<ParcelPreview | null>(null);
+  const [preview, setPreview] = useState<LayerPreview | null>(null);
+  const [showMap, setShowMap] = useState(false);
+  useEffect(() => {
+    // Parcels are one layer per county: the county is the layer's.
+    const county = preset.kind === "parcel" ? "Webster" : importCounty;
+    if (preset.kind === "parcel" && importCounty !== "Webster") setImportCounty("Webster");
+    setWhereClause(preset.key === "custom" ? "1=1" : countyWhere(preset.kind, county, minSqFt));
+    setPreview(null);
+  }, [preset, importCounty, minSqFt]);
 
   useEffect(() => {
     if (props.initialBuildingId) setSelectedId(props.initialBuildingId);
@@ -291,27 +347,36 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   });
   const previewM = useMutation({
     mutationFn: () => previewFn({ data: { layerUrl: layerUrl.trim(), where: whereClause } }),
-    onSuccess: (p) => {
-      setPreview(p);
-      if (!importCounty && p.county) setImportCounty(p.county);
-    },
+    onSuccess: setPreview,
     onError: fail,
   });
   const importM = useMutation({
     mutationFn: () =>
       importFn({
-        data: {
-          layerUrl: layerUrl.trim(),
-          where: whereClause,
-          county: importCounty.trim() || countyFromServiceUrl(layerUrl) || "Unknown",
-        },
+        data: { layerUrl: layerUrl.trim(), where: whereClause, county: importCounty },
       }),
     onSuccess: (r) => {
+      const what =
+        r.kind === "address" ? "address point" : r.kind === "parcel" ? "parcel" : "building";
       toast.success(
-        `${r.upserted} parcel${r.upserted === 1 ? "" : "s"} imported or updated (${r.fetched} read${
-          r.skipped ? `, ${r.skipped} without a parcel id skipped` : ""
+        `${r.upserted.toLocaleString()} ${what}${r.upserted === 1 ? "" : "s"} imported or updated (${r.fetched.toLocaleString()} read${
+          r.skipped ? `, ${r.skipped} unusable skipped` : ""
         })`,
       );
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
+    },
+    onError: fail,
+  });
+  const addressCounts = useQuery({
+    queryKey: ["address-point-counts"],
+    queryFn: () => addressCountsFn(),
+    enabled: importOpen && canWrite,
+  });
+  const fillM = useMutation({
+    mutationFn: () => fillFn({ data: { county: importCounty } }),
+    onSuccess: (r) => {
+      toast.success(`${r.updated.toLocaleString()} footprints given an address`);
       invalidate();
     },
     onError: fail,
@@ -359,9 +424,12 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => setShowMap((o) => !o)}>
+            <MapIcon className="mr-1 h-4 w-4" /> {showMap ? "Hide map" : "Map"}
+          </Button>
           {canWrite && (
             <Button size="sm" variant="outline" onClick={() => setImportOpen((o) => !o)}>
-              <DownloadCloud className="mr-1 h-4 w-4" /> Import parcels
+              <DownloadCloud className="mr-1 h-4 w-4" /> Import buildings
             </Button>
           )}
           {canWrite && (
@@ -378,26 +446,94 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         </div>
       </div>
 
+      {showMap && (
+        <Suspense fallback={<div className="h-[420px] w-full rounded-md border bg-muted/30" />}>
+          <ProspectMap
+            buildings={(buildings.data ?? []).map((b) => ({
+              id: b.id,
+              name: b.name,
+              address1: b.address1,
+              lat: b.centroid_lat,
+              lng: b.centroid_lng,
+              footprint: b.footprint,
+              roofSqFt: b.roof_sqft,
+            }))}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+          />
+        </Suspense>
+      )}
+
       {importOpen && canWrite && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Import parcels from a Kentucky PVA layer</CardTitle>
+            <CardTitle className="text-sm">Import buildings from a Kentucky layer</CardTitle>
             <CardDescription className="text-xs">
-              One ArcGIS layer per county
-              (Ky_PVA_&lt;County&gt;_Parcels_WGS84WM/MapServer/&lt;n&gt;). Preview reads the
-              layer&apos;s fields and counts the matching parcels; Import upserts them on county +
-              parcel id. Parcels are land: they fill owner, class, lot sq ft and the shape; roof sq
-              ft comes later from footprints.
+              Free statewide GIS. Footprints give every building&apos;s roof area and outline (no
+              owner, usually no address); 911 address points then lend the nearest address; the
+              facility lists (schools, …) come with a name and address. Preview reads the layer and
+              counts the matches; Import upserts them, so running it again updates rather than
+              duplicates. Owner of record is not published statewide — it stays a per-county PVA
+              lookup.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_260px_160px]">
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_200px_140px]">
+              <div>
+                <Label className="text-xs text-muted-foreground">Layer</Label>
+                <Select value={presetKey} onValueChange={setPresetKey}>
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LAYER_PRESETS.map((p) => (
+                      <SelectItem key={p.key} value={p.key}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">County</Label>
+                <Select
+                  value={importCounty}
+                  onValueChange={setImportCounty}
+                  disabled={preset.kind === "parcel"}
+                >
+                  <SelectTrigger className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COUNTY_CHOICES.map((c, i) => (
+                      <SelectItem key={c} value={c}>
+                        {i < KY_CORE_COUNTIES.length ? `${i + 1}. ${c}` : c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Min roof sq ft</Label>
+                <NumberField
+                  className="h-8"
+                  value={minSqFt}
+                  min={0}
+                  step="1000"
+                  disabled={preset.kind !== "footprint"}
+                  onChange={(v) => setMinSqFt(Math.max(0, Math.round(v)))}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div>
                 <Label className="text-xs text-muted-foreground">Layer URL</Label>
                 <Input
                   className="h-8 font-mono text-xs"
                   value={layerUrl}
-                  onChange={(e) => setLayerUrl(e.target.value)}
+                  readOnly={preset.key !== "custom"}
+                  placeholder="https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/…/MapServer/0"
+                  onChange={(e) => setCustomUrl(e.target.value)}
                 />
               </div>
               <div>
@@ -408,22 +544,13 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   onChange={(e) => setWhereClause(e.target.value)}
                 />
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">County</Label>
-                <Input
-                  className="h-8"
-                  value={importCounty}
-                  placeholder={countyFromServiceUrl(layerUrl) ?? ""}
-                  onChange={(e) => setImportCounty(e.target.value)}
-                />
-              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => previewM.mutate()}
-                disabled={previewM.isPending}
+                disabled={previewM.isPending || !layerUrl.trim()}
               >
                 {previewM.isPending ? "Reading layer…" : "Preview"}
               </Button>
@@ -435,16 +562,22 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 {importM.isPending
                   ? "Importing…"
                   : preview
-                    ? `Import ${preview.total.toLocaleString()} parcels`
+                    ? `Import ${preview.total.toLocaleString()} ${
+                        preview.kind === "address"
+                          ? "address points"
+                          : preview.kind === "parcel"
+                            ? "parcels"
+                            : "buildings"
+                      }`
                     : "Import"}
               </Button>
               {preview && (
                 <span className="text-xs text-muted-foreground">
-                  {preview.total.toLocaleString()} match · page size {preview.maxRecordCount ?? "?"}{" "}
-                  · owner ← {preview.fieldMap.owner}, property address ←{" "}
-                  {preview.fieldMap.location ?? "(none published)"}, class ←{" "}
-                  {preview.fieldMap.landUse ?? "(none)"}, lot sq ft ←{" "}
-                  {preview.fieldMap.areaSqFt ?? preview.fieldMap.acres ?? "shape"}
+                  {preview.kind} layer · {preview.total.toLocaleString()} match · page size{" "}
+                  {preview.maxRecordCount ?? "?"} ·{" "}
+                  {Object.entries(preview.mapping)
+                    .map(([k, v]) => `${k} ← ${v}`)
+                    .join(", ")}
                 </span>
               )}
             </div>
@@ -452,28 +585,62 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Parcel</TableHead>
-                    <TableHead>Owner</TableHead>
-                    <TableHead>Property address</TableHead>
+                    <TableHead>Key</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Address</TableHead>
+                    <TableHead>City</TableHead>
+                    <TableHead>County</TableHead>
                     <TableHead>Class</TableHead>
-                    <TableHead className="text-right">Lot sq ft</TableHead>
-                    <TableHead>Deed</TableHead>
+                    <TableHead className="text-right">
+                      {preview.kind === "parcel" ? "Lot sq ft" : "Roof sq ft"}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {preview.sample.map((c) => (
-                    <TableRow key={c.parcelId} className="text-xs">
-                      <TableCell className="font-mono">{c.parcelId}</TableCell>
-                      <TableCell>{c.ownerName ?? "—"}</TableCell>
-                      <TableCell>{c.location ?? "—"}</TableCell>
-                      <TableCell>{c.landUse ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{num(c.lotSqFt)}</TableCell>
-                      <TableCell>{c.deed ?? "—"}</TableCell>
+                    <TableRow key={c.key} className="text-xs">
+                      <TableCell className="font-mono">{c.key}</TableCell>
+                      <TableCell>{c.name ?? "—"}</TableCell>
+                      <TableCell>{c.address ?? "—"}</TableCell>
+                      <TableCell>{c.city ?? "—"}</TableCell>
+                      <TableCell>{c.county ?? "—"}</TableCell>
+                      <TableCell>{c.cls ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{num(c.sqft)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             )}
+            <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+              <span>
+                Addresses for footprints: {importCounty} has{" "}
+                {(
+                  addressCounts.data?.find((c) => c.county === importCounty)?.count ?? 0
+                ).toLocaleString()}{" "}
+                imported 911 points.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => fillM.mutate()}
+                disabled={
+                  fillM.isPending ||
+                  !(addressCounts.data?.find((c) => c.county === importCounty)?.count ?? 0)
+                }
+              >
+                {fillM.isPending
+                  ? "Matching…"
+                  : `Fill ${importCounty} footprint addresses (nearest point within 60 m)`}
+              </Button>
+              <a
+                className="underline underline-offset-2"
+                href={countyRankingUrl(KY_FOOTPRINTS_LAYER, minSqFt)}
+                target="_blank"
+                rel="noreferrer"
+              >
+                buildings ≥ {minSqFt.toLocaleString()} sq ft per county (state count)
+              </a>
+            </div>
           </CardContent>
         </Card>
       )}

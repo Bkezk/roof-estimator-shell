@@ -1,0 +1,199 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+import type { ArcGisFeatureSet } from "./arcgis";
+import {
+  KY_COUNTIES,
+  addressPointFromFeature,
+  canonicalCounty,
+  composeAddress,
+  countyFromFips,
+  countyRankingUrl,
+  countyWhere,
+  detectLayerKind,
+  facilityFromFeature,
+  fipsForCounty,
+  footprintFromFeature,
+  guessFacilityFieldMap,
+  layerShortName,
+  parseCountyRanking,
+  tileScheme,
+  tileUrlTemplate,
+  type TileServiceInfo,
+} from "./ky-layers";
+
+const load = <T>(name: string): T =>
+  JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")) as T;
+const footprints = load<ArcGisFeatureSet>("ornl-footprints.json");
+const points = load<ArcGisFeatureSet>("ky911-address-points.json");
+const schools = load<ArcGisFeatureSet>("ky-schools.json");
+const imagery = load<TileServiceInfo>("imagery-phase3-3in.json");
+
+describe("Kentucky FIPS / county names", () => {
+  it("has the 120 counties in FIPS order", () => {
+    expect(KY_COUNTIES).toHaveLength(120);
+    expect(countyFromFips("21001")).toBe("Adair");
+    expect(countyFromFips("21239")).toBe("Woodford");
+    expect(countyFromFips("21111")).toBe("Jefferson");
+    expect(countyFromFips("21067")).toBe("Fayette");
+    expect(countyFromFips("21002")).toBeNull();
+    expect(countyFromFips("47001")).toBeNull();
+    expect(fipsForCounty("Graves")).toBe("21083");
+    expect(fipsForCounty("mclean")).toBe("21149");
+    expect(fipsForCounty("Nowhere")).toBeNull();
+  });
+  it("normalises the spellings the layers use", () => {
+    expect(canonicalCounty("MCLEAN COUNTY")).toBe("McLean");
+    expect(canonicalCounty("ADAIR")).toBe("Adair");
+    expect(canonicalCounty(" ")).toBeNull();
+    expect(canonicalCounty("Somewhere Else")).toBe("Somewhere Else");
+  });
+});
+
+describe("ORNL building footprints (owner sample, 2026-09-24)", () => {
+  it("detects the layer from its URL or fields", () => {
+    expect(detectLayerKind("https://x/Ky_ORNL_Building_Footprints_WGS84WM/MapServer/0", [])).toBe(
+      "footprint",
+    );
+    expect(detectLayerKind("https://x/anything/MapServer/0", footprints.fields!)).toBe("footprint");
+  });
+  it("reads area, county (from FIPS) and the centre point", () => {
+    const c = footprintFromFeature(footprints.features![0]!)!;
+    expect(c).toMatchObject({
+      buildId: "9847973",
+      fips: "21083",
+      county: "Graves",
+      roofSqFt: 2760,
+      address: null,
+      occupancyClass: null,
+      lat: 36.5184884,
+      lng: -88.78851224,
+    });
+    expect(c.geometry?.footprint.type).toBe("Polygon");
+    // The published SQFEET agrees with the ground-corrected ring area within 1 %.
+    expect(c.geometry!.computedAreaSqFt / 2760).toBeCloseTo(1, 1);
+    expect(footprintFromFeature(footprints.features![1]!)!.county).toBe("Calloway");
+  });
+  it("falls back to the ring centroid when the lat/lng columns are empty", () => {
+    const f = footprints.features![2]!;
+    const bare = { ...f, attributes: { ...f.attributes, LATITUDE: null, LONGITUDE: null } };
+    const c = footprintFromFeature(bare)!;
+    expect(c.lat).toBeCloseTo(36.519, 3);
+    expect(c.lng).toBeCloseTo(-88.3253, 3);
+  });
+});
+
+describe("911 address points (owner sample, 2026-09-24)", () => {
+  it("detects the layer", () => {
+    expect(detectLayerKind("https://x/y/MapServer/0", points.fields!)).toBe("address");
+  });
+  it("assembles the address from the NG911 parts", () => {
+    const a = points.features![0]!.attributes;
+    expect(composeAddress(a)).toBe("1169 STATE ROUTE 136 W");
+    expect(composeAddress({ ...a, Add_Number: null })).toBeNull();
+    expect(
+      composeAddress({
+        AddNum_Pre: null,
+        Add_Number: 12,
+        AddNum_Suf: "B",
+        LSt_PreDir: "N",
+        LSt_Name: "MAIN",
+        LSt_Type: "ST",
+        LSt_PosDir: null,
+      }),
+    ).toBe("12B N MAIN ST");
+  });
+  it("gives a keyed point with the county name cleaned up", () => {
+    const p = addressPointFromFeature(points.features![1]!)!;
+    expect(p).toMatchObject({
+      key: "SSAP2@mcsoky.com",
+      address: "833 STATE ROUTE 136 W",
+      county: "McLean",
+      city: null, // Post_Comm null and Inc_Muni = UNINCORPORATED
+      zip: null,
+    });
+    expect(p.lat).toBeCloseTo(37.5556, 3);
+    expect(p.lng).toBeCloseTo(-87.2676, 3);
+  });
+});
+
+describe("facility layers (Schools sample, 2026-09-24)", () => {
+  it("maps the Schools fields", () => {
+    const map = guessFacilityFieldMap(schools.fields!);
+    expect(map).toEqual({
+      id: "KDEID",
+      name: "SCHNAME",
+      address: "STREETADDRESS",
+      city: "CITY",
+      zip: "ZIP",
+      county: "COUNTY",
+      lat: "LATDDWGS84",
+      lng: "LONDDWGS84",
+      kind: "CLASSIFICA",
+    });
+    expect(detectLayerKind("https://x/Ky_Schools_WGS84WM/MapServer/0", schools.fields!)).toBe(
+      "facility",
+    );
+    const c = facilityFromFeature(schools.features![0]!, map)!;
+    expect(c).toEqual({
+      key: "1010",
+      name: "Adair County High School",
+      address: "526 Indian Dr",
+      city: "Columbia",
+      zip: "42728",
+      county: "Adair",
+      kind: "Four-year High School",
+      lat: 37.107858,
+      lng: -85.328527,
+    });
+  });
+  it("names the layer for the source key", () => {
+    expect(layerShortName("https://x/WGS84WM_Services/Ky_Schools_WGS84WM/MapServer/0")).toBe(
+      "Ky_Schools",
+    );
+  });
+});
+
+describe("county scoping and ranking", () => {
+  it("writes the per-kind where clause", () => {
+    expect(countyWhere("footprint", "Graves")).toBe("FIPS = '21083' AND SQFEET >= 5000");
+    expect(countyWhere("footprint", "Graves", 10000)).toBe("FIPS = '21083' AND SQFEET >= 10000");
+    expect(countyWhere("address", "McLean")).toBe("UPPER(County) = 'MCLEAN COUNTY'");
+    expect(countyWhere("facility", "Adair")).toBe("UPPER(COUNTY) = 'ADAIR'");
+  });
+  it("builds the grouped count and ranks the pasted answer", () => {
+    const u = new URL(countyRankingUrl());
+    expect(u.searchParams.get("groupByFieldsForStatistics")).toBe("FIPS");
+    expect(u.searchParams.get("where")).toBe("SQFEET >= 5000");
+    expect(JSON.parse(u.searchParams.get("outStatistics")!)[0].onStatisticField).toBe("BUILD_ID");
+    const ranked = parseCountyRanking({
+      features: [
+        { attributes: { FIPS: "21067", n: 5000 } },
+        { attributes: { FIPS: "21111", n: 12000 } },
+        { attributes: { FIPS: null, n: 3 } },
+      ],
+    });
+    expect(ranked.map((r) => r.county)).toEqual(["Jefferson", "Fayette"]);
+  });
+});
+
+describe("Phase 3 3-inch imagery service (owner sample, 2026-09-24)", () => {
+  it("is a standard Web Mercator tile cache", () => {
+    const s = tileScheme(imagery)!;
+    expect(s.minZoom).toBe(0);
+    expect(s.maxZoom).toBe(21);
+    expect(s.bounds[0]).toBeCloseTo(-89.72, 1);
+    expect(s.bounds[1]).toBeCloseTo(36.44, 1);
+    expect(s.bounds[2]).toBeCloseTo(-81.88, 1);
+    expect(s.bounds[3]).toBeCloseTo(39.2, 1);
+    expect(tileUrlTemplate("https://x/Ky_Imagery_Phase3_3IN_WGS84WM/MapServer/")).toBe(
+      "https://x/Ky_Imagery_Phase3_3IN_WGS84WM/MapServer/tile/{z}/{y}/{x}",
+    );
+  });
+  it("rejects a cache that is not XYZ-compatible", () => {
+    expect(tileScheme({ ...imagery, singleFusedMapCache: false })).toBeNull();
+    expect(
+      tileScheme({ ...imagery, tileInfo: { ...imagery.tileInfo, origin: { x: 0, y: 0 } } }),
+    ).toBeNull();
+  });
+});

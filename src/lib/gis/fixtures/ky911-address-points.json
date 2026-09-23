@@ -1,0 +1,533 @@
+{
+ "displayFieldName": "LSt_Name",
+ "fieldAliases": {
+  "Lat": "Lat",
+  "Long": "Long",
+  "F_gc_src_obj_id": "_gc_src_obj_id",
+  "OBJECTID": "OBJECTID",
+  "AddCode": "AddCode",
+  "AddDataURI": "AddDataURI",
+  "AddNum_Pre": "AddNum_Pre",
+  "AddNum_Suf": "AddNum_Suf",
+  "Add_Number": "Add_Number",
+  "Addtl_Loc": "Addtl_Loc",
+  "Building": "Building",
+  "Country": "Country",
+  "County": "County",
+  "DateUpdate": "DateUpdate",
+  "DiscrpAgID": "DiscrpAgID",
+  "ESN": "ESN",
+  "Effective": "Effective",
+  "Elev": "Elev",
+  "Expire": "Expire",
+  "Floor": "Floor",
+  "Inc_Muni": "Inc_Muni",
+  "LSt_Name": "LSt_Name",
+  "LSt_PosDir": "LSt_PosDir",
+  "LSt_PreDir": "LSt_PreDir",
+  "LSt_Type": "LSt_Type",
+  "LandmkName": "LandmkName",
+  "MSAGComm": "MSAGComm",
+  "Mile_Post": "Mile_Post",
+  "Nbrhd_Comm": "Nbrhd_Comm",
+  "Place_Type": "Place_Type",
+  "Placement": "Placement",
+  "Post_Code": "Post_Code",
+  "Post_Code4": "Post_Code4",
+  "Post_Comm": "Post_Comm",
+  "Room": "Room",
+  "Seat": "Seat",
+  "Site_NGUID": "Site_NGUID",
+  "St_Name": "St_Name",
+  "St_PosDir": "St_PosDir",
+  "St_PosMod": "St_PosMod",
+  "St_PosTyp": "St_PosTyp",
+  "St_PreDir": "St_PreDir",
+  "St_PreMod": "St_PreMod",
+  "St_PreSep": "St_PreSep",
+  "St_PreTyp": "St_PreTyp",
+  "State": "State",
+  "Uninc_Comm": "Uninc_Comm",
+  "Unit": "Unit",
+  "auto_id": "auto_id",
+  "gc_exception": "gc_exception"
+ },
+ "geometryType": "esriGeometryPoint",
+ "spatialReference": {
+  "wkid": 102100,
+  "latestWkid": 3857
+ },
+ "fields": [
+  {
+   "name": "Lat",
+   "type": "esriFieldTypeDouble",
+   "alias": "Lat"
+  },
+  {
+   "name": "Long",
+   "type": "esriFieldTypeDouble",
+   "alias": "Long"
+  },
+  {
+   "name": "F_gc_src_obj_id",
+   "type": "esriFieldTypeString",
+   "alias": "_gc_src_obj_id",
+   "length": 100
+  },
+  {
+   "name": "OBJECTID",
+   "type": "esriFieldTypeOID",
+   "alias": "OBJECTID"
+  },
+  {
+   "name": "AddCode",
+   "type": "esriFieldTypeString",
+   "alias": "AddCode",
+   "length": 6
+  },
+  {
+   "name": "AddDataURI",
+   "type": "esriFieldTypeString",
+   "alias": "AddDataURI",
+   "length": 254
+  },
+  {
+   "name": "AddNum_Pre",
+   "type": "esriFieldTypeString",
+   "alias": "AddNum_Pre",
+   "length": 15
+  },
+  {
+   "name": "AddNum_Suf",
+   "type": "esriFieldTypeString",
+   "alias": "AddNum_Suf",
+   "length": 15
+  },
+  {
+   "name": "Add_Number",
+   "type": "esriFieldTypeInteger",
+   "alias": "Add_Number"
+  },
+  {
+   "name": "Addtl_Loc",
+   "type": "esriFieldTypeString",
+   "alias": "Addtl_Loc",
+   "length": 225
+  },
+  {
+   "name": "Building",
+   "type": "esriFieldTypeString",
+   "alias": "Building",
+   "length": 75
+  },
+  {
+   "name": "Country",
+   "type": "esriFieldTypeString",
+   "alias": "Country",
+   "length": 2
+  },
+  {
+   "name": "County",
+   "type": "esriFieldTypeString",
+   "alias": "County",
+   "length": 50
+  },
+  {
+   "name": "DateUpdate",
+   "type": "esriFieldTypeDate",
+   "alias": "DateUpdate",
+   "length": 8
+  },
+  {
+   "name": "DiscrpAgID",
+   "type": "esriFieldTypeString",
+   "alias": "DiscrpAgID",
+   "length": 75
+  },
+  {
+   "name": "ESN",
+   "type": "esriFieldTypeString",
+   "alias": "ESN",
+   "length": 5
+  },
+  {
+   "name": "Effective",
+   "type": "esriFieldTypeDate",
+   "alias": "Effective",
+   "length": 8
+  },
+  {
+   "name": "Elev",
+   "type": "esriFieldTypeInteger",
+   "alias": "Elev"
+  },
+  {
+   "name": "Expire",
+   "type": "esriFieldTypeDate",
+   "alias": "Expire",
+   "length": 8
+  },
+  {
+   "name": "Floor",
+   "type": "esriFieldTypeString",
+   "alias": "Floor",
+   "length": 75
+  },
+  {
+   "name": "Inc_Muni",
+   "type": "esriFieldTypeString",
+   "alias": "Inc_Muni",
+   "length": 100
+  },
+  {
+   "name": "LSt_Name",
+   "type": "esriFieldTypeString",
+   "alias": "LSt_Name",
+   "length": 75
+  },
+  {
+   "name": "LSt_PosDir",
+   "type": "esriFieldTypeString",
+   "alias": "LSt_PosDir",
+   "length": 2
+  },
+  {
+   "name": "LSt_PreDir",
+   "type": "esriFieldTypeString",
+   "alias": "LSt_PreDir",
+   "length": 2
+  },
+  {
+   "name": "LSt_Type",
+   "type": "esriFieldTypeString",
+   "alias": "LSt_Type",
+   "length": 4
+  },
+  {
+   "name": "LandmkName",
+   "type": "esriFieldTypeString",
+   "alias": "LandmkName",
+   "length": 150
+  },
+  {
+   "name": "MSAGComm",
+   "type": "esriFieldTypeString",
+   "alias": "MSAGComm",
+   "length": 30
+  },
+  {
+   "name": "Mile_Post",
+   "type": "esriFieldTypeString",
+   "alias": "Mile_Post",
+   "length": 150
+  },
+  {
+   "name": "Nbrhd_Comm",
+   "type": "esriFieldTypeString",
+   "alias": "Nbrhd_Comm",
+   "length": 1073741822
+  },
+  {
+   "name": "Place_Type",
+   "type": "esriFieldTypeString",
+   "alias": "Place_Type",
+   "length": 50
+  },
+  {
+   "name": "Placement",
+   "type": "esriFieldTypeString",
+   "alias": "Placement",
+   "length": 25
+  },
+  {
+   "name": "Post_Code",
+   "type": "esriFieldTypeString",
+   "alias": "Post_Code",
+   "length": 7
+  },
+  {
+   "name": "Post_Code4",
+   "type": "esriFieldTypeString",
+   "alias": "Post_Code4",
+   "length": 4
+  },
+  {
+   "name": "Post_Comm",
+   "type": "esriFieldTypeString",
+   "alias": "Post_Comm",
+   "length": 40
+  },
+  {
+   "name": "Room",
+   "type": "esriFieldTypeString",
+   "alias": "Room",
+   "length": 75
+  },
+  {
+   "name": "Seat",
+   "type": "esriFieldTypeString",
+   "alias": "Seat",
+   "length": 75
+  },
+  {
+   "name": "Site_NGUID",
+   "type": "esriFieldTypeString",
+   "alias": "Site_NGUID",
+   "length": 254
+  },
+  {
+   "name": "St_Name",
+   "type": "esriFieldTypeString",
+   "alias": "St_Name",
+   "length": 60
+  },
+  {
+   "name": "St_PosDir",
+   "type": "esriFieldTypeString",
+   "alias": "St_PosDir",
+   "length": 9
+  },
+  {
+   "name": "St_PosMod",
+   "type": "esriFieldTypeString",
+   "alias": "St_PosMod",
+   "length": 25
+  },
+  {
+   "name": "St_PosTyp",
+   "type": "esriFieldTypeString",
+   "alias": "St_PosTyp",
+   "length": 50
+  },
+  {
+   "name": "St_PreDir",
+   "type": "esriFieldTypeString",
+   "alias": "St_PreDir",
+   "length": 9
+  },
+  {
+   "name": "St_PreMod",
+   "type": "esriFieldTypeString",
+   "alias": "St_PreMod",
+   "length": 15
+  },
+  {
+   "name": "St_PreSep",
+   "type": "esriFieldTypeString",
+   "alias": "St_PreSep",
+   "length": 20
+  },
+  {
+   "name": "St_PreTyp",
+   "type": "esriFieldTypeString",
+   "alias": "St_PreTyp",
+   "length": 50
+  },
+  {
+   "name": "State",
+   "type": "esriFieldTypeString",
+   "alias": "State",
+   "length": 2
+  },
+  {
+   "name": "Uninc_Comm",
+   "type": "esriFieldTypeString",
+   "alias": "Uninc_Comm",
+   "length": 100
+  },
+  {
+   "name": "Unit",
+   "type": "esriFieldTypeString",
+   "alias": "Unit",
+   "length": 75
+  },
+  {
+   "name": "auto_id",
+   "type": "esriFieldTypeInteger",
+   "alias": "auto_id"
+  },
+  {
+   "name": "gc_exception",
+   "type": "esriFieldTypeString",
+   "alias": "gc_exception",
+   "length": 75
+  }
+ ],
+ "features": [
+  {
+   "attributes": {
+    "Lat": null,
+    "Long": null,
+    "F_gc_src_obj_id": "1",
+    "OBJECTID": 1,
+    "AddCode": null,
+    "AddDataURI": null,
+    "AddNum_Pre": null,
+    "AddNum_Suf": " ",
+    "Add_Number": 1169,
+    "Addtl_Loc": null,
+    "Building": null,
+    "Country": "US",
+    "County": "MCLEAN COUNTY",
+    "DateUpdate": 1644883200000,
+    "DiscrpAgID": "mcsoky.com",
+    "ESN": "081",
+    "Effective": null,
+    "Elev": null,
+    "Expire": null,
+    "Floor": null,
+    "Inc_Muni": "UNINCORPORATED",
+    "LSt_Name": "STATE ROUTE 136",
+    "LSt_PosDir": "W",
+    "LSt_PreDir": " ",
+    "LSt_Type": " ",
+    "LandmkName": null,
+    "MSAGComm": null,
+    "Mile_Post": null,
+    "Nbrhd_Comm": null,
+    "Place_Type": null,
+    "Placement": "Unknown",
+    "Post_Code": null,
+    "Post_Code4": null,
+    "Post_Comm": null,
+    "Room": null,
+    "Seat": null,
+    "Site_NGUID": "SSAP1@mcsoky.com",
+    "St_Name": "136",
+    "St_PosDir": "WEST",
+    "St_PosMod": " ",
+    "St_PosTyp": " ",
+    "St_PreDir": " ",
+    "St_PreMod": "STATE",
+    "St_PreSep": null,
+    "St_PreTyp": "ROUTE",
+    "State": "KY",
+    "Uninc_Comm": null,
+    "Unit": null,
+    "auto_id": null,
+    "gc_exception": null
+   },
+   "geometry": {
+    "x": -9715142.433503874,
+    "y": 4516906.324522029
+   }
+  },
+  {
+   "attributes": {
+    "Lat": null,
+    "Long": null,
+    "F_gc_src_obj_id": "2",
+    "OBJECTID": 2,
+    "AddCode": null,
+    "AddDataURI": null,
+    "AddNum_Pre": null,
+    "AddNum_Suf": " ",
+    "Add_Number": 833,
+    "Addtl_Loc": null,
+    "Building": null,
+    "Country": "US",
+    "County": "MCLEAN COUNTY",
+    "DateUpdate": 1644883200000,
+    "DiscrpAgID": "mcsoky.com",
+    "ESN": "081",
+    "Effective": null,
+    "Elev": null,
+    "Expire": null,
+    "Floor": null,
+    "Inc_Muni": "UNINCORPORATED",
+    "LSt_Name": "STATE ROUTE 136",
+    "LSt_PosDir": "W",
+    "LSt_PreDir": " ",
+    "LSt_Type": " ",
+    "LandmkName": null,
+    "MSAGComm": null,
+    "Mile_Post": null,
+    "Nbrhd_Comm": null,
+    "Place_Type": null,
+    "Placement": "Unknown",
+    "Post_Code": null,
+    "Post_Code4": null,
+    "Post_Comm": null,
+    "Room": null,
+    "Seat": null,
+    "Site_NGUID": "SSAP2@mcsoky.com",
+    "St_Name": "136",
+    "St_PosDir": "WEST",
+    "St_PosMod": " ",
+    "St_PosTyp": " ",
+    "St_PreDir": " ",
+    "St_PreMod": "STATE",
+    "St_PreSep": null,
+    "St_PreTyp": "ROUTE",
+    "State": "KY",
+    "Uninc_Comm": null,
+    "Unit": null,
+    "auto_id": null,
+    "gc_exception": null
+   },
+   "geometry": {
+    "x": -9714579.609728398,
+    "y": 4516834.608193022
+   }
+  },
+  {
+   "attributes": {
+    "Lat": null,
+    "Long": null,
+    "F_gc_src_obj_id": "4",
+    "OBJECTID": 3,
+    "AddCode": null,
+    "AddDataURI": null,
+    "AddNum_Pre": null,
+    "AddNum_Suf": " ",
+    "Add_Number": 807,
+    "Addtl_Loc": null,
+    "Building": null,
+    "Country": "US",
+    "County": "MCLEAN COUNTY",
+    "DateUpdate": 1644883200000,
+    "DiscrpAgID": "mcsoky.com",
+    "ESN": "080",
+    "Effective": null,
+    "Elev": null,
+    "Expire": null,
+    "Floor": null,
+    "Inc_Muni": "UNINCORPORATED",
+    "LSt_Name": "STATE ROUTE 136",
+    "LSt_PosDir": "W",
+    "LSt_PreDir": " ",
+    "LSt_Type": " ",
+    "LandmkName": null,
+    "MSAGComm": null,
+    "Mile_Post": null,
+    "Nbrhd_Comm": null,
+    "Place_Type": null,
+    "Placement": "Unknown",
+    "Post_Code": null,
+    "Post_Code4": null,
+    "Post_Comm": null,
+    "Room": null,
+    "Seat": null,
+    "Site_NGUID": "SSAP4@mcsoky.com",
+    "St_Name": "136",
+    "St_PosDir": "WEST",
+    "St_PosMod": " ",
+    "St_PosTyp": " ",
+    "St_PreDir": " ",
+    "St_PreMod": "STATE",
+    "St_PreSep": null,
+    "St_PreTyp": "ROUTE",
+    "State": "KY",
+    "Uninc_Comm": null,
+    "Unit": null,
+    "auto_id": null,
+    "gc_exception": null
+   },
+   "geometry": {
+    "x": -9714554.24144018,
+    "y": 4516720.690232204
+   }
+  }
+ ],
+ "exceededTransferLimit": true
+}

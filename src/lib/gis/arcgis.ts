@@ -23,7 +23,8 @@ export interface ArcGisField {
 
 export interface ArcGisFeature {
   attributes: Record<string, unknown>;
-  geometry?: { rings?: number[][][] } | null;
+  /** Polygon layers carry `rings`; point layers carry `x`/`y` (both Web Mercator here). */
+  geometry?: { rings?: number[][][]; x?: number; y?: number } | null;
 }
 
 export interface ArcGisFeatureSet {
@@ -207,12 +208,15 @@ export interface ParcelCandidate {
   geometry: ParcelGeometry | null;
 }
 
-const str = (v: unknown): string | null => {
+/** Trimmed string or null (ArcGIS pads empty strings with a single space). */
+export const str = (v: unknown): string | null => {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s ? s : null;
 };
-const num = (v: unknown): number | null => {
+/** Finite number or null. */
+export const num = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
 };

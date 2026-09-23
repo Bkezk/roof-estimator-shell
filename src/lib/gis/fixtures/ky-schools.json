@@ -1,0 +1,300 @@
+{
+ "displayFieldName": "Name",
+ "fieldAliases": {
+  "OBJECTID": "OBJECTID",
+  "KDEID": "KDEID",
+  "CLASSIFICA": "CLASSIFICA",
+  "LOW_GRADE": "LOW_GRADE",
+  "HIGH_GRADE": "HIGH_GRADE",
+  "ATT_SOURCE": "ATT_SOURCE",
+  "DATEMODIFI": "DATEMODIFI",
+  "DATECREATE": "DATECREATE",
+  "COUNTY": "County",
+  "KDEDIST_ID": "KDEDIST_ID",
+  "KDEDIST_NM": "KDEDIST_NM",
+  "KDESCH_ID": "KDESCH_ID",
+  "CITY": "CITY",
+  "STATE": "STATE",
+  "ZIP": "ZIP",
+  "LATDDWGS84": "LATDDWGS84",
+  "LONDDWGS84": "LONDDWGS84",
+  "REGION": "REGION",
+  "PIC_URL": "PIC_URL",
+  "OBJECTID_1": "OBJECTID_1",
+  "SCHNAME": "SCHNAME",
+  "STREETADDRESS": "STREETADDRESS",
+  "SCHTYPE": "SCHTYPE",
+  "ADD_NAME": "ADD_NAME",
+  "DATEUPDT": "DATEUPDT",
+  "AGENCYUPDT": "AGENCYUPDT",
+  "UPDT_BY": "UPDT_BY"
+ },
+ "geometryType": "esriGeometryPoint",
+ "spatialReference": {
+  "wkid": 102100,
+  "latestWkid": 3857
+ },
+ "fields": [
+  {
+   "name": "OBJECTID",
+   "type": "esriFieldTypeInteger",
+   "alias": "OBJECTID"
+  },
+  {
+   "name": "KDEID",
+   "type": "esriFieldTypeInteger",
+   "alias": "KDEID"
+  },
+  {
+   "name": "CLASSIFICA",
+   "type": "esriFieldTypeString",
+   "alias": "CLASSIFICA",
+   "length": 1073741822
+  },
+  {
+   "name": "LOW_GRADE",
+   "type": "esriFieldTypeString",
+   "alias": "LOW_GRADE",
+   "length": 1073741822
+  },
+  {
+   "name": "HIGH_GRADE",
+   "type": "esriFieldTypeString",
+   "alias": "HIGH_GRADE",
+   "length": 1073741822
+  },
+  {
+   "name": "ATT_SOURCE",
+   "type": "esriFieldTypeString",
+   "alias": "ATT_SOURCE",
+   "length": 1073741822
+  },
+  {
+   "name": "DATEMODIFI",
+   "type": "esriFieldTypeString",
+   "alias": "DATEMODIFI",
+   "length": 1073741822
+  },
+  {
+   "name": "DATECREATE",
+   "type": "esriFieldTypeString",
+   "alias": "DATECREATE",
+   "length": 1073741822
+  },
+  {
+   "name": "COUNTY",
+   "type": "esriFieldTypeString",
+   "alias": "County",
+   "length": 1073741822
+  },
+  {
+   "name": "KDEDIST_ID",
+   "type": "esriFieldTypeInteger",
+   "alias": "KDEDIST_ID"
+  },
+  {
+   "name": "KDEDIST_NM",
+   "type": "esriFieldTypeString",
+   "alias": "KDEDIST_NM",
+   "length": 1073741822
+  },
+  {
+   "name": "KDESCH_ID",
+   "type": "esriFieldTypeInteger",
+   "alias": "KDESCH_ID"
+  },
+  {
+   "name": "CITY",
+   "type": "esriFieldTypeString",
+   "alias": "CITY",
+   "length": 1073741822
+  },
+  {
+   "name": "STATE",
+   "type": "esriFieldTypeString",
+   "alias": "STATE",
+   "length": 1073741822
+  },
+  {
+   "name": "ZIP",
+   "type": "esriFieldTypeInteger",
+   "alias": "ZIP"
+  },
+  {
+   "name": "LATDDWGS84",
+   "type": "esriFieldTypeDouble",
+   "alias": "LATDDWGS84"
+  },
+  {
+   "name": "LONDDWGS84",
+   "type": "esriFieldTypeDouble",
+   "alias": "LONDDWGS84"
+  },
+  {
+   "name": "REGION",
+   "type": "esriFieldTypeInteger",
+   "alias": "REGION"
+  },
+  {
+   "name": "PIC_URL",
+   "type": "esriFieldTypeString",
+   "alias": "PIC_URL",
+   "length": 1073741822
+  },
+  {
+   "name": "OBJECTID_1",
+   "type": "esriFieldTypeOID",
+   "alias": "OBJECTID_1"
+  },
+  {
+   "name": "SCHNAME",
+   "type": "esriFieldTypeString",
+   "alias": "SCHNAME",
+   "length": 1073741822
+  },
+  {
+   "name": "STREETADDRESS",
+   "type": "esriFieldTypeString",
+   "alias": "STREETADDRESS",
+   "length": 1073741822
+  },
+  {
+   "name": "SCHTYPE",
+   "type": "esriFieldTypeString",
+   "alias": "SCHTYPE",
+   "length": 1073741822
+  },
+  {
+   "name": "ADD_NAME",
+   "type": "esriFieldTypeString",
+   "alias": "ADD_NAME",
+   "length": 1073741822
+  },
+  {
+   "name": "DATEUPDT",
+   "type": "esriFieldTypeString",
+   "alias": "DATEUPDT",
+   "length": 1073741822
+  },
+  {
+   "name": "AGENCYUPDT",
+   "type": "esriFieldTypeString",
+   "alias": "AGENCYUPDT",
+   "length": 1073741822
+  },
+  {
+   "name": "UPDT_BY",
+   "type": "esriFieldTypeString",
+   "alias": "UPDT_BY",
+   "length": 1073741822
+  }
+ ],
+ "features": [
+  {
+   "attributes": {
+    "OBJECTID": 1,
+    "KDEID": 1010,
+    "CLASSIFICA": "Four-year High School",
+    "LOW_GRADE": "9th",
+    "HIGH_GRADE": "Ungraded",
+    "ATT_SOURCE": "SSRINEN1",
+    "DATEMODIFI": "08/21/2015",
+    "DATECREATE": "08/21/2015",
+    "COUNTY": "ADAIR",
+    "KDEDIST_ID": 1,
+    "KDEDIST_NM": "Adair County",
+    "KDESCH_ID": 10,
+    "CITY": "Columbia",
+    "STATE": "KY",
+    "ZIP": 42728,
+    "LATDDWGS84": 37.107858,
+    "LONDDWGS84": -85.328527,
+    "REGION": 6,
+    "PIC_URL": "http://applications.education.ky.gov/SRC/SRCImages/DistrictMapImages/SchoolImages/001010.jpg",
+    "OBJECTID_1": 1,
+    "SCHNAME": "Adair County High School",
+    "STREETADDRESS": "526 Indian Dr",
+    "SCHTYPE": "PUBLIC",
+    "ADD_NAME": null,
+    "DATEUPDT": "05/15/2026 10:10:02",
+    "AGENCYUPDT": "KDE_SDS",
+    "UPDT_BY": "Ryan Adcock"
+   },
+   "geometry": {
+    "x": -9498728.935379384,
+    "y": 4454152.846539018
+   }
+  },
+  {
+   "attributes": {
+    "OBJECTID": 2,
+    "KDEID": 1012,
+    "CLASSIFICA": "Elementary/High School Combination",
+    "LOW_GRADE": "5th",
+    "HIGH_GRADE": "12th",
+    "ATT_SOURCE": "Carla Perkins",
+    "DATEMODIFI": "04/20/2015",
+    "DATECREATE": "04/20/2015",
+    "COUNTY": "ADAIR",
+    "KDEDIST_ID": 1,
+    "KDEDIST_NM": "Adair County",
+    "KDESCH_ID": 12,
+    "CITY": "Columbia",
+    "STATE": "KY",
+    "ZIP": 42728,
+    "LATDDWGS84": 37.08540711,
+    "LONDDWGS84": -85.30522446,
+    "REGION": 6,
+    "PIC_URL": "http://applications.education.ky.gov/SRC/SRCImages/DistrictMapImages/SchoolImages/001012.jpg",
+    "OBJECTID_1": 2,
+    "SCHNAME": "Adair Learning Academy",
+    "STREETADDRESS": "401 Appleby Dr",
+    "SCHTYPE": "PUBLIC",
+    "ADD_NAME": null,
+    "DATEUPDT": "05/15/2026 10:10:02",
+    "AGENCYUPDT": "KDE_SDS",
+    "UPDT_BY": "Ryan Adcock"
+   },
+   "geometry": {
+    "x": -9496134.90446972,
+    "y": 4451019.498238263
+   }
+  },
+  {
+   "attributes": {
+    "OBJECTID": 3,
+    "KDEID": 1014,
+    "CLASSIFICA": "Middle or Upper Elementary School",
+    "LOW_GRADE": "6th",
+    "HIGH_GRADE": "8th",
+    "ATT_SOURCE": "Carla Perkins",
+    "DATEMODIFI": "05/09/2011",
+    "DATECREATE": "05/09/2011",
+    "COUNTY": "ADAIR",
+    "KDEDIST_ID": 1,
+    "KDEDIST_NM": "Adair County",
+    "KDESCH_ID": 14,
+    "CITY": "Columbia",
+    "STATE": "KY",
+    "ZIP": 42728,
+    "LATDDWGS84": 37.103889,
+    "LONDDWGS84": -85.324549,
+    "REGION": 6,
+    "PIC_URL": "http://applications.education.ky.gov/SRC/SRCImages/DistrictMapImages/SchoolImages/001014.jpg",
+    "OBJECTID_1": 3,
+    "SCHNAME": "Adair County Middle School",
+    "STREETADDRESS": "322 General John Adair Dr",
+    "SCHTYPE": "PUBLIC",
+    "ADD_NAME": null,
+    "DATEUPDT": "05/15/2026 10:10:02",
+    "AGENCYUPDT": "KDE_SDS",
+    "UPDT_BY": "Ryan Adcock"
+   },
+   "geometry": {
+    "x": -9498286.105739266,
+    "y": 4453598.847210607
+   }
+  }
+ ],
+ "exceededTransferLimit": true
+}

@@ -21,8 +21,16 @@ import {
   type ArcGisFeatureSet,
   type ArcGisField,
   type ParcelCandidate,
-  type ParcelFieldMap,
 } from "@/lib/gis/arcgis";
+import {
+  addressPointFromFeature,
+  detectLayerKind,
+  facilityFromFeature,
+  footprintFromFeature,
+  guessFacilityFieldMap,
+  layerShortName,
+  type LayerKind,
+} from "@/lib/gis/ky-layers";
 import {
   sortWarrantyLeads,
   warrantyLeadFrom,
@@ -376,10 +384,13 @@ export const linkBidToBuilding = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-// ── Kentucky PVA parcel import (src/lib/gis/arcgis.ts) ──────────────────────────────────────
-// The server fetches the county's ArcGIS layer (the browser never talks to the state server),
-// parses features into building candidates and upserts them on (county, parcel_id). Parcels
-// are land: lot_sqft is filled, roof_sqft is not.
+// ── Kentucky layer import (src/lib/gis/arcgis.ts, src/lib/gis/ky-layers.ts) ─────────────────
+// The server fetches the ArcGIS layer (the browser never talks to the state server), detects
+// what kind of layer it is and upserts:
+//   parcel    → buildings on (county, parcel_id)   — land: lot_sqft, owner, class
+//   footprint → buildings on source_key            — roof_sqft, shape, county from FIPS
+//   facility  → buildings on source_key            — schools, hospitals, …: name + address
+//   address   → address_points on source_key       — lends addresses to footprints (RPC)
 
 const layerUrlSchema = z
   .string()
@@ -398,76 +409,212 @@ const fetchJson = async (url: string): Promise<unknown> => {
   return body;
 };
 
-export interface ParcelPreview {
+/** One preview line, whatever the layer kind. */
+export interface PreviewRow {
+  key: string;
+  name: string | null;
+  address: string | null;
+  city: string | null;
   county: string | null;
-  fieldMap: ParcelFieldMap;
-  fields: string[];
-  total: number;
-  maxRecordCount: number | null;
-  sample: ParcelCandidate[];
+  /** Roof sq ft (footprint) or lot sq ft (parcel). */
+  sqft: number | null;
+  /** Class / occupancy / facility type. */
+  cls: string | null;
+  lat: number | null;
+  lng: number | null;
 }
 
-/** Read the layer's fields, count the matching parcels and parse the first few. */
-export const previewParcels = createServerFn({ method: "POST" })
+export interface LayerPreview {
+  kind: LayerKind;
+  /** Parcel layers: the county in the service name. */
+  county: string | null;
+  fields: string[];
+  /** Which attribute fills what (for the operator to sanity-check). */
+  mapping: Record<string, string>;
+  total: number;
+  maxRecordCount: number | null;
+  sample: PreviewRow[];
+}
+
+interface LayerInfo {
+  fields?: ArcGisField[];
+  maxRecordCount?: number;
+}
+
+/** Parse one page of features by kind into preview rows and the rows to write. */
+function parseFeatures(
+  kind: LayerKind,
+  fields: ArcGisField[],
+  feats: ArcGisFeatureSet["features"],
+) {
+  const list = feats ?? [];
+  if (kind === "parcel") {
+    const map = guessFieldMap(fields);
+    const parcels = list
+      .map((f) => parcelFromFeature(f, map))
+      .filter((c): c is ParcelCandidate => c !== null);
+    return {
+      mapping: map as unknown as Record<string, string>,
+      parcels,
+      footprints: [],
+      points: [],
+      facilities: [],
+      rows: parcels.map<PreviewRow>((c) => ({
+        key: c.parcelId,
+        name: looksLikeAddress(c.location) ? c.ownerName : (c.location ?? c.ownerName),
+        address: looksLikeAddress(c.location) ? c.location : null,
+        city: null,
+        county: null,
+        sqft: c.lotSqFt,
+        cls: c.landUse,
+        lat: c.geometry?.centroidLat ?? null,
+        lng: c.geometry?.centroidLng ?? null,
+      })),
+    };
+  }
+  if (kind === "footprint") {
+    const footprints = list
+      .map(footprintFromFeature)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    return {
+      mapping: { key: "BUILD_ID", roofSqFt: "SQFEET", county: "FIPS", address: "PROP_ADDR" },
+      parcels: [],
+      footprints,
+      points: [],
+      facilities: [],
+      rows: footprints.map<PreviewRow>((c) => ({
+        key: c.buildId,
+        name: c.primaryOccupancy,
+        address: c.address,
+        city: c.city,
+        county: c.county,
+        sqft: c.roofSqFt,
+        cls: c.occupancyClass,
+        lat: c.lat,
+        lng: c.lng,
+      })),
+    };
+  }
+  if (kind === "address") {
+    const points = list
+      .map(addressPointFromFeature)
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+    return {
+      mapping: {
+        key: "Site_NGUID",
+        address: "Add_Number + LSt_*",
+        county: "County",
+        city: "Post_Comm",
+      },
+      parcels: [],
+      footprints: [],
+      points,
+      facilities: [],
+      rows: points.map<PreviewRow>((c) => ({
+        key: c.key,
+        name: c.landmark,
+        address: c.address,
+        city: c.city,
+        county: c.county,
+        sqft: null,
+        cls: c.placeType,
+        lat: c.lat,
+        lng: c.lng,
+      })),
+    };
+  }
+  const map = guessFacilityFieldMap(fields);
+  const facilities = list
+    .map((f) => facilityFromFeature(f, map))
+    .filter((c): c is NonNullable<typeof c> => c !== null);
+  return {
+    mapping: map as unknown as Record<string, string>,
+    parcels: [],
+    footprints: [],
+    points: [],
+    facilities,
+    rows: facilities.map<PreviewRow>((c) => ({
+      key: c.key,
+      name: c.name,
+      address: c.address,
+      city: c.city,
+      county: c.county,
+      sqft: null,
+      cls: c.kind,
+      lat: c.lat,
+      lng: c.lng,
+    })),
+  };
+}
+
+/** Read the layer's fields, detect its kind, count the matches and parse the first few. */
+export const previewLayer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z.object({ layerUrl: layerUrlSchema, where: z.string().max(500).default("1=1") }).parse(d),
   )
-  .handler(async ({ data, context }): Promise<ParcelPreview> => {
+  .handler(async ({ data, context }): Promise<LayerPreview> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as {
-      fields?: ArcGisField[];
-      maxRecordCount?: number;
-    };
+    const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as LayerInfo;
     const fields = info.fields ?? [];
-    const fieldMap = guessFieldMap(fields);
+    const kind = detectLayerKind(data.layerUrl, fields);
     const countBody = (await fetchJson(
       parcelQueryUrl(data.layerUrl, { where: data.where, countOnly: true }),
     )) as { count?: number };
     const page = (await fetchJson(
       parcelQueryUrl(data.layerUrl, { where: data.where, count: 10 }),
     )) as ArcGisFeatureSet;
-    const sample = (page.features ?? [])
-      .map((f) => parcelFromFeature(f, fieldMap))
-      .filter((c): c is ParcelCandidate => c !== null);
+    const parsed = parseFeatures(kind, fields, page.features);
     return {
-      county: countyFromServiceUrl(data.layerUrl),
-      fieldMap,
+      kind,
+      county: kind === "parcel" ? countyFromServiceUrl(data.layerUrl) : null,
       fields: fields.map((f) => f.name),
+      mapping: parsed.mapping,
       total: countBody.count ?? 0,
       maxRecordCount: info.maxRecordCount ?? null,
-      sample,
+      sample: parsed.rows,
     };
   });
 
 /**
- * Import every parcel matching `where` into buildings (upsert on county + parcel_id), paging
- * through the layer. Capped per call so a runaway filter cannot flood the table; run again to
- * continue (existing parcels are updated, not duplicated).
+ * Import everything matching `where`, paging through the layer and upserting per kind (see the
+ * header). Capped per call so a runaway filter cannot flood the table; run again to continue
+ * (existing rows are updated, not duplicated).
  */
-export const importParcels = createServerFn({ method: "POST" })
+export const importLayer = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z
       .object({
         layerUrl: layerUrlSchema,
         where: z.string().max(500).default("1=1"),
-        county: z.string().trim().min(1).max(100),
-        maxRows: z.number().int().min(1).max(5000).default(2000),
+        /** Parcel layers: the county to file under. Footprints read it from FIPS. */
+        county: z.string().trim().max(100).default(""),
+        maxRows: z.number().int().min(1).max(20000).default(5000),
       })
       .parse(d),
   )
   .handler(
-    async ({ data, context }): Promise<{ fetched: number; upserted: number; skipped: number }> => {
+    async ({
+      data,
+      context,
+    }): Promise<{ kind: LayerKind; fetched: number; upserted: number; skipped: number }> => {
       await assertPageAccess(context.supabase, context.userId, "prospect");
-      const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as {
-        fields?: ArcGisField[];
-        maxRecordCount?: number;
-      };
-      const fieldMap = guessFieldMap(info.fields ?? []);
+      const info = (await fetchJson(layerInfoUrl(data.layerUrl))) as LayerInfo;
+      const fields = info.fields ?? [];
+      const kind = detectLayerKind(data.layerUrl, fields);
+      if (kind === "parcel" && !data.county) throw new Error("Parcel imports need a county");
       const pageSize = Math.min(500, info.maxRecordCount ?? 500);
       const who = await meName(context);
       const now = new Date().toISOString();
+      const layerName = layerShortName(data.layerUrl);
+      const stamp = {
+        source_layer: data.layerUrl,
+        imported_at: now,
+        deleted_at: null, // a re-imported row comes back
+        created_by: context.userId,
+        created_by_name: who,
+      };
       let fetched = 0;
       let upserted = 0;
       let skipped = 0;
@@ -477,12 +624,13 @@ export const importParcels = createServerFn({ method: "POST" })
         )) as ArcGisFeatureSet;
         const feats = page.features ?? [];
         fetched += feats.length;
-        const rows = feats
-          .map((f) => parcelFromFeature(f, fieldMap))
-          .filter((c): c is ParcelCandidate => c !== null)
-          .map((c) => ({
+        const parsed = parseFeatures(kind, fields, feats);
+        let written = 0;
+        if (kind === "parcel") {
+          const rows = parsed.parcels.map((c) => ({
             county: data.county,
             parcel_id: c.parcelId,
+            source_key: `pva:${data.county}:${c.parcelId}`,
             // The property's own address when the county publishes one; else the owner's name
             // stands in as the building name so the row is findable.
             name: looksLikeAddress(c.location) ? "" : (c.location ?? c.ownerName ?? ""),
@@ -499,24 +647,136 @@ export const importParcels = createServerFn({ method: "POST" })
             centroid_lat: c.geometry?.centroidLat ?? null,
             centroid_lng: c.geometry?.centroidLng ?? null,
             source: "pva",
+            ...stamp,
+          }));
+          written = rows.length;
+          if (rows.length > 0) {
+            const { error, count } = await context.supabase.from("buildings").upsert(rows, {
+              onConflict: "county,parcel_id",
+              ignoreDuplicates: false,
+              count: "exact",
+            });
+            if (error) throw new Error(error.message);
+            upserted += count ?? rows.length;
+          }
+        } else if (kind === "footprint") {
+          const rows = parsed.footprints.map((c) => ({
+            source_key: `ornl:${c.buildId}`,
+            county: c.county ?? (data.county || null),
+            name: c.primaryOccupancy ?? "",
+            address1: c.address ?? "",
+            city: c.city,
+            zip: c.zip,
+            roof_sqft: c.roofSqFt,
+            perimeter_ft: c.geometry?.computedPerimeterFt ?? null,
+            height_ft: c.heightFt,
+            land_use: c.occupancyClass,
+            footprint: (c.geometry?.footprint ?? null) as Json | null,
+            centroid_lat: c.lat,
+            centroid_lng: c.lng,
+            source: "ornl",
+            ...stamp,
+          }));
+          written = rows.length;
+          if (rows.length > 0) {
+            const { error, count } = await context.supabase.from("buildings").upsert(rows, {
+              onConflict: "source_key",
+              ignoreDuplicates: false,
+              count: "exact",
+            });
+            if (error) throw new Error(error.message);
+            upserted += count ?? rows.length;
+          }
+        } else if (kind === "address") {
+          const rows = parsed.points.map((c) => ({
+            source_key: `ky911:${c.key}`,
+            county: c.county ?? (data.county || null),
+            address: c.address,
+            city: c.city,
+            zip: c.zip,
+            landmark: c.landmark,
+            place_type: c.placeType,
+            lat: c.lat,
+            lng: c.lng,
             source_layer: data.layerUrl,
             imported_at: now,
-            deleted_at: null, // a re-imported parcel comes back
-            created_by: context.userId,
-            created_by_name: who,
           }));
-        skipped += feats.length - rows.length;
-        if (rows.length > 0) {
-          const { error, count } = await context.supabase.from("buildings").upsert(rows, {
-            onConflict: "county,parcel_id",
-            ignoreDuplicates: false,
-            count: "exact",
-          });
-          if (error) throw new Error(error.message);
-          upserted += count ?? rows.length;
+          written = rows.length;
+          if (rows.length > 0) {
+            const { error, count } = await context.supabase.from("address_points").upsert(rows, {
+              onConflict: "source_key",
+              ignoreDuplicates: false,
+              count: "exact",
+            });
+            if (error) throw new Error(error.message);
+            upserted += count ?? rows.length;
+          }
+        } else {
+          const rows = parsed.facilities.map((c) => ({
+            source_key: `${layerName}:${c.key}`,
+            county: c.county ?? (data.county || null),
+            name: c.name,
+            address1: c.address ?? "",
+            city: c.city,
+            zip: c.zip,
+            land_use: c.kind,
+            centroid_lat: c.lat,
+            centroid_lng: c.lng,
+            source: "facility",
+            ...stamp,
+          }));
+          written = rows.length;
+          if (rows.length > 0) {
+            const { error, count } = await context.supabase.from("buildings").upsert(rows, {
+              onConflict: "source_key",
+              ignoreDuplicates: false,
+              count: "exact",
+            });
+            if (error) throw new Error(error.message);
+            upserted += count ?? rows.length;
+          }
         }
+        skipped += feats.length - written;
         if (feats.length < pageSize || !page.exceededTransferLimit) break;
       }
-      return { fetched, upserted, skipped };
+      return { kind, fetched, upserted, skipped };
     },
   );
+
+/** Give address-less footprints in a county the nearest imported 911 address point. */
+export const fillFootprintAddresses = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        county: z.string().trim().min(1).max(100),
+        maxMetres: z.number().min(5).max(500).default(60),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ updated: number }> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const { data: n, error } = await context.supabase.rpc("fill_footprint_addresses", {
+      p_county: data.county,
+      p_max_m: data.maxMetres,
+    });
+    if (error) throw new Error(error.message);
+    return { updated: n ?? 0 };
+  });
+
+/** How many 911 address points are imported per county (so the fill button can say). */
+export const countAddressPoints = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ county: string; count: number }[]> => {
+    await readAccess(context);
+    const { data, error } = await context.supabase.from("address_points").select("county");
+    if (error) throw new Error(error.message);
+    const m = new Map<string, number>();
+    for (const r of data ?? []) {
+      const c = r.county ?? "(unknown)";
+      m.set(c, (m.get(c) ?? 0) + 1);
+    }
+    return [...m.entries()]
+      .map(([county, count]) => ({ county, count }))
+      .sort((a, b) => a.county.localeCompare(b.county));
+  });

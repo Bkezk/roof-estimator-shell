@@ -240,39 +240,51 @@ by a person or parsed by Claude on a schedule. Telephony is dropped.
 
 ## Kentucky data findings (owner-supplied samples, Sep 24)
 
-- **Parcels.** The state's `WGS84WM_Services` folder publishes exactly ONE PVA parcel service,
-  Webster County. Owner of record for other counties is NOT available from the state; it comes
-  from each county PVA's own site (link out; free) or a paid parcel API (declined for now).
-  Webster `CLASS` values: COMMERCIAL, RESIDENTIAL, CEMETERY, FARM, PUBLIC SERVICE, blank.
-- **Statewide layers that ARE prospect lists** (same folder, free): `Ky_ORNL_Building_Footprints`
-  (building outlines statewide → roof area and shape), `Ky_911_Site_Structure_Address_Points`
-  (every structure's address), `Ky_Schools`, `Ky_Hospitals`, `Ky_Long_Term_Care`,
-  `Ky_PostSecondary_Education`, `Ky_Libraries`, `Ky_NationalGuard_Armories`,
-  `Ky_Existing_Industry`, `Ky_Industrial_Site_Points/Boundaries/Tracts`,
-  `Ky_Available_Industrial_Buildings`, `Ky_Opportunity_Zones`, `Ky_CountyLines`.
-  Plan change: phase 1 builds the buildings list from FOOTPRINTS + ADDRESS POINTS + these
-  facility lists (name, address, roof outline), not from parcels; owner lookup is a per-county
-  PVA link until a free owner source appears.
-- **Imagery.** `WGS84WM_Services/Ky_Imagery_Phase3_3IN_WGS84WM` (3-inch, newest statewide
-  program), `Ky_Imagery_Phase2_6IN_WGS84WM`, `Ky_Imagery_2022_2FT_WGS84WM` are MapServers in
-  Web Mercator (tile-cache candidates for the map); `kyraster.ky.gov/.../ImageServices` holds
-  the per-year KYAPED ImageServers (clips / exports). Tile scheme to be confirmed from the
-  service's `tileInfo`.
+All from `https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/` (free, no key). Each
+layer below is pinned by a sample in `src/lib/gis/fixtures` and parsed by `src/lib/gis/ky-layers.ts`.
+
+- **Parcels.** The folder publishes exactly ONE PVA parcel service, Webster County. Owner of
+  record for other counties is NOT available from the state; it comes from each county PVA's own
+  site (link out; free) or a paid parcel API (declined for now). Webster `CLASS` values:
+  COMMERCIAL, RESIDENTIAL, CEMETERY, FARM, PUBLIC SERVICE, blank.
+- **Building footprints** (`Ky_ORNL_Building_Footprints_WGS84WM/MapServer/0`): one polygon per
+  building statewide; `SQFEET` = footprint area (the roof area of a flat roof), `LONGITUDE` /
+  `LATITUDE`, `FIPS` = county, `BUILD_ID` = key. `PROP_ADDR` and `OCC_CLS` were null in every
+  sampled record, so the commercial filter is size (`SQFEET >= 5000`, adjustable) and the address
+  is joined from the 911 points. Import fills `roof_sqft`, the outline, county, height when given.
+- **911 address points** (`Ky_911_Site_Structure_Address_Points_WGS84WM/MapServer/0`): one point
+  per addressed structure (NG911 schema; address assembled from `Add_Number` + `LSt_*`; `County`
+  reads "MCLEAN COUNTY"). They are NOT prospects (mostly homes): they go to `address_points` and
+  `fill_footprint_addresses(county)` gives each address-less footprint the nearest point within
+  60 m (verified live with two synthetic rows: the near one matched, the far one did not).
+- **Facility lists** (`Ky_Schools_WGS84WM/MapServer/0` verified; Hospitals, Long_Term_Care,
+  PostSecondary_Education, Libraries, NationalGuard_Armories, Existing_Industry,
+  Available_Industrial_Buildings exist in the folder, layer index to confirm on first use): name,
+  street address, city, zip, county and WGS84 lat/lng. Import as buildings with `source =
+'facility'`.
+- **Imagery.** `Ky_Imagery_Phase3_3IN_WGS84WM/MapServer` is a fused tile cache: 256 px PNG8,
+  standard Web Mercator levels 0–21, origin −20037508.34 (`tileScheme()` checks all of this), so
+  the map pulls `.../MapServer/tile/{z}/{y}/{x}` straight into MapLibre — no clipping, no
+  storage. `Ky_Imagery_Phase2_6IN` and `Ky_Imagery_2022_2FT` are the same shape; the per-year
+  KYAPED ImageServers at `kyraster.ky.gov` remain for exports. To confirm on first open: the tile
+  server must allow cross-origin image fetches (MapLibre loads tiles with `fetch`); if it does
+  not, the tiles go through a server function.
+- **County ranking** (Census County Business Patterns 2022, from the owner's Drive):
+  `docs/ky-county-ranking.md`. Core counties, in order: Jefferson, Fayette, Kenton, Boone,
+  Warren, Daviess, Hardin, McCracken, Campbell, Madison. `KY_CORE_COUNTIES` orders the county
+  picker; the import card links a state query that counts footprints ≥ n sq ft per county as a
+  second opinion.
 
 ## Open decisions
 
 Owner answers of Sep 23 are recorded inline; the rest stay open.
 
 - [x] **Core counties.** Owner: rank Kentucky's counties by number of commercial buildings and
-      take the top ten. The county-level figures could not be pulled from the estimator's build
-      container (the Census and state GIS hosts are blocked there), so the ranking is the FIRST job
-      of phase 1: the worker counts commercial-use parcels per county from the PVA services (the
-      same query the ingest needs anyway) and the top ten become the core counties. Provisional
-      list to start design work, in the order the available evidence supports: Jefferson (PVA
-      reports 21,000+ commercial properties), Fayette, Kenton (about 5,000 commercial and
-      industrial), Boone (about 2,500), Warren, then, unverified, Campbell, Daviess, Hardin,
-      Madison, McCracken (2,076 employer establishments in 2022). Replace with the counted list
-      before clipping imagery.
+      take the top ten. Done from Census County Business Patterns 2022 (establishments with
+      payroll per county — `docs/ky-county-ranking.md`): Jefferson 20,128; Fayette 9,129; Kenton
+      3,248; Boone 3,178; Warren 2,992; Daviess 2,392; Hardin 2,231; McCracken 2,076; Campbell
+      1,733; Madison 1,731. The same ten lead on the 20-plus-employee cut. Pulaski (1,448) is
+      next.
 - [x] **Own-book seed.** Won bids seed `roofs` automatically. Older jobs: owner is gathering
       .bax files; the importer is built against the first two or three received.
 - [x] **Budgetary range bands.** Owner: not needed. The roofing system, underlayment,

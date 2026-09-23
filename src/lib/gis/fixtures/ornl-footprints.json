@@ -1,0 +1,384 @@
+{
+ "displayFieldName": "IMAGE_NAME",
+ "fieldAliases": {
+  "HEIGHT": "HEIGHT",
+  "SQMETERS": "SQMETERS",
+  "SQFEET": "SQFEET",
+  "H_ADJ_ELEV": "H_ADJ_ELEV",
+  "L_ADJ_ELEV": "L_ADJ_ELEV",
+  "LONGITUDE": "LONGITUDE",
+  "LATITUDE": "LATITUDE",
+  "OBJECTID": "OBJECTID",
+  "BUILD_ID": "BUILD_ID",
+  "OCC_CLS": "OCC_CLS",
+  "PRIM_OCC": "PRIM_OCC",
+  "SEC_OCC": "SEC_OCC",
+  "PROP_ADDR": "PROP_ADDR",
+  "PROP_CITY": "PROP_CITY",
+  "PROP_ST": "PROP_ST",
+  "PROP_ZIP": "PROP_ZIP",
+  "OUTBLDG": "OUTBLDG",
+  "FIPS": "FIPS",
+  "CENSUSCODE": "CENSUSCODE",
+  "PROD_DATE": "PROD_DATE",
+  "SOURCE": "SOURCE",
+  "USNG": "USNG",
+  "IMAGE_NAME": "IMAGE_NAME",
+  "IMAGE_DATE": "IMAGE_DATE",
+  "VAL_METHOD": "VAL_METHOD",
+  "REMARKS": "REMARKS",
+  "UUID": "UUID",
+  "Shape.STArea()": "Shape.STArea()",
+  "Shape.STLength()": "Shape.STLength()"
+ },
+ "geometryType": "esriGeometryPolygon",
+ "spatialReference": {
+  "wkid": 102100,
+  "latestWkid": 3857
+ },
+ "fields": [
+  {
+   "name": "HEIGHT",
+   "type": "esriFieldTypeDouble",
+   "alias": "HEIGHT"
+  },
+  {
+   "name": "SQMETERS",
+   "type": "esriFieldTypeDouble",
+   "alias": "SQMETERS"
+  },
+  {
+   "name": "SQFEET",
+   "type": "esriFieldTypeDouble",
+   "alias": "SQFEET"
+  },
+  {
+   "name": "H_ADJ_ELEV",
+   "type": "esriFieldTypeDouble",
+   "alias": "H_ADJ_ELEV"
+  },
+  {
+   "name": "L_ADJ_ELEV",
+   "type": "esriFieldTypeDouble",
+   "alias": "L_ADJ_ELEV"
+  },
+  {
+   "name": "LONGITUDE",
+   "type": "esriFieldTypeDouble",
+   "alias": "LONGITUDE"
+  },
+  {
+   "name": "LATITUDE",
+   "type": "esriFieldTypeDouble",
+   "alias": "LATITUDE"
+  },
+  {
+   "name": "OBJECTID",
+   "type": "esriFieldTypeOID",
+   "alias": "OBJECTID"
+  },
+  {
+   "name": "BUILD_ID",
+   "type": "esriFieldTypeInteger",
+   "alias": "BUILD_ID"
+  },
+  {
+   "name": "OCC_CLS",
+   "type": "esriFieldTypeString",
+   "alias": "OCC_CLS",
+   "length": 20
+  },
+  {
+   "name": "PRIM_OCC",
+   "type": "esriFieldTypeString",
+   "alias": "PRIM_OCC",
+   "length": 35
+  },
+  {
+   "name": "SEC_OCC",
+   "type": "esriFieldTypeString",
+   "alias": "SEC_OCC",
+   "length": 13
+  },
+  {
+   "name": "PROP_ADDR",
+   "type": "esriFieldTypeString",
+   "alias": "PROP_ADDR",
+   "length": 80
+  },
+  {
+   "name": "PROP_CITY",
+   "type": "esriFieldTypeString",
+   "alias": "PROP_CITY",
+   "length": 50
+  },
+  {
+   "name": "PROP_ST",
+   "type": "esriFieldTypeString",
+   "alias": "PROP_ST",
+   "length": 50
+  },
+  {
+   "name": "PROP_ZIP",
+   "type": "esriFieldTypeString",
+   "alias": "PROP_ZIP",
+   "length": 50
+  },
+  {
+   "name": "OUTBLDG",
+   "type": "esriFieldTypeString",
+   "alias": "OUTBLDG",
+   "length": 13
+  },
+  {
+   "name": "FIPS",
+   "type": "esriFieldTypeString",
+   "alias": "FIPS",
+   "length": 13
+  },
+  {
+   "name": "CENSUSCODE",
+   "type": "esriFieldTypeString",
+   "alias": "CENSUSCODE",
+   "length": 20
+  },
+  {
+   "name": "PROD_DATE",
+   "type": "esriFieldTypeDate",
+   "alias": "PROD_DATE",
+   "length": 8
+  },
+  {
+   "name": "SOURCE",
+   "type": "esriFieldTypeString",
+   "alias": "SOURCE",
+   "length": 50
+  },
+  {
+   "name": "USNG",
+   "type": "esriFieldTypeString",
+   "alias": "USNG",
+   "length": 50
+  },
+  {
+   "name": "IMAGE_NAME",
+   "type": "esriFieldTypeString",
+   "alias": "IMAGE_NAME",
+   "length": 50
+  },
+  {
+   "name": "IMAGE_DATE",
+   "type": "esriFieldTypeDate",
+   "alias": "IMAGE_DATE",
+   "length": 8
+  },
+  {
+   "name": "VAL_METHOD",
+   "type": "esriFieldTypeString",
+   "alias": "VAL_METHOD",
+   "length": 50
+  },
+  {
+   "name": "REMARKS",
+   "type": "esriFieldTypeString",
+   "alias": "REMARKS",
+   "length": 500
+  },
+  {
+   "name": "UUID",
+   "type": "esriFieldTypeString",
+   "alias": "UUID",
+   "length": 50
+  },
+  {
+   "name": "Shape.STArea()",
+   "type": "esriFieldTypeDouble",
+   "alias": "Shape.STArea()"
+  },
+  {
+   "name": "Shape.STLength()",
+   "type": "esriFieldTypeDouble",
+   "alias": "Shape.STLength()"
+  }
+ ],
+ "features": [
+  {
+   "attributes": {
+    "HEIGHT": null,
+    "SQMETERS": 256.37533569,
+    "SQFEET": 2759.59838867,
+    "H_ADJ_ELEV": null,
+    "L_ADJ_ELEV": null,
+    "LONGITUDE": -88.78851224,
+    "LATITUDE": 36.5184884,
+    "OBJECTID": 1,
+    "BUILD_ID": 9847973,
+    "OCC_CLS": null,
+    "PRIM_OCC": null,
+    "SEC_OCC": null,
+    "PROP_ADDR": null,
+    "PROP_CITY": null,
+    "PROP_ST": null,
+    "PROP_ZIP": null,
+    "OUTBLDG": null,
+    "FIPS": "21083",
+    "CENSUSCODE": "21083020500",
+    "PROD_DATE": 1578873600000,
+    "SOURCE": "ORNL",
+    "USNG": "16S CF 39860 42947",
+    "IMAGE_NAME": "103001005D9D8200",
+    "IMAGE_DATE": 1475798400000,
+    "VAL_METHOD": "Automated",
+    "REMARKS": null,
+    "UUID": "{56c93902-b288-44b8-934c-e63245a122ff}",
+    "Shape.STArea()": 2721.0155173018297,
+    "Shape.STLength()": 211.16749292089807
+   },
+   "geometry": {
+    "rings": [
+     [
+      [
+       -9883899.782338282,
+       4372190.908015014
+      ],
+      [
+       -9883900.847661693,
+       4372214.054431966
+      ],
+      [
+       -9883883.947275834,
+       4372214.839045889
+      ],
+      [
+       -9883882.881861601,
+       4372191.692504795
+      ],
+      [
+       -9883899.782338282,
+       4372190.908015014
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "attributes": {
+    "HEIGHT": null,
+    "SQMETERS": 84.09835052,
+    "SQFEET": 905.22625732,
+    "H_ADJ_ELEV": null,
+    "L_ADJ_ELEV": null,
+    "LONGITUDE": -88.31188028,
+    "LATITUDE": 36.51899826,
+    "OBJECTID": 2,
+    "BUILD_ID": 9848136,
+    "OCC_CLS": null,
+    "PRIM_OCC": null,
+    "SEC_OCC": null,
+    "PROP_ADDR": null,
+    "PROP_CITY": null,
+    "PROP_ST": null,
+    "PROP_ZIP": null,
+    "OUTBLDG": null,
+    "FIPS": "21035",
+    "CENSUSCODE": "21035010800",
+    "PROD_DATE": 1578873600000,
+    "SOURCE": "ORNL",
+    "USNG": "16S CF 82539 42315",
+    "IMAGE_NAME": "1040010025491C00",
+    "IMAGE_DATE": 1477958400000,
+    "VAL_METHOD": "Automated",
+    "REMARKS": null,
+    "UUID": "{66b7cd40-db6a-4762-85d7-182dddfb7176}",
+    "Shape.STArea()": 989.7473019910199,
+    "Shape.STLength()": 129.9678482082743
+   },
+   "geometry": {
+    "rings": [
+     [
+      [
+       -9830830.091045905,
+       4372264.662333244
+      ],
+      [
+       -9830843.123456253,
+       4372272.870137352
+      ],
+      [
+       -9830838.220066804,
+       4372280.723629596
+      ],
+      [
+       -9830825.187653914,
+       4372272.515937942
+      ],
+      [
+       -9830830.091045905,
+       4372264.662333244
+      ]
+     ]
+    ]
+   }
+  },
+  {
+   "attributes": {
+    "HEIGHT": null,
+    "SQMETERS": 187.71115112,
+    "SQFEET": 2020.50402832,
+    "H_ADJ_ELEV": null,
+    "L_ADJ_ELEV": null,
+    "LONGITUDE": -88.32528627,
+    "LATITUDE": 36.51899078,
+    "OBJECTID": 3,
+    "BUILD_ID": 9848150,
+    "OCC_CLS": null,
+    "PRIM_OCC": null,
+    "SEC_OCC": null,
+    "PROP_ADDR": null,
+    "PROP_CITY": null,
+    "PROP_ST": null,
+    "PROP_ZIP": null,
+    "OUTBLDG": null,
+    "FIPS": "21035",
+    "CENSUSCODE": "21035010700",
+    "PROD_DATE": 1578873600000,
+    "SOURCE": "ORNL",
+    "USNG": "16S CF 81339 42330",
+    "IMAGE_NAME": "1040010025491C00",
+    "IMAGE_DATE": 1477958400000,
+    "VAL_METHOD": "Automated",
+    "REMARKS": null,
+    "UUID": "{5761b193-e6ac-4e90-b4e3-263afed9899d}",
+    "Shape.STArea()": 1880.4992200634813,
+    "Shape.STLength()": 203.07434290448714
+   },
+   "geometry": {
+    "rings": [
+     [
+      [
+       -9832333.348004725,
+       4372257.065347276
+      ],
+      [
+       -9832329.014181156,
+       4372286.09539399
+      ],
+      [
+       -9832319.886499412,
+       4372284.720656578
+      ],
+      [
+       -9832324.22059966,
+       4372255.690735347
+      ],
+      [
+       -9832333.348004725,
+       4372257.065347276
+      ]
+     ]
+    ]
+   }
+  }
+ ],
+ "exceededTransferLimit": true
+}

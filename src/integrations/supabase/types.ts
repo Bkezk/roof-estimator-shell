@@ -56,6 +56,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      address_points: {
+        Row: {
+          address: string;
+          city: string | null;
+          county: string | null;
+          id: string;
+          imported_at: string;
+          landmark: string | null;
+          lat: number;
+          lng: number;
+          place_type: string | null;
+          source_key: string;
+          source_layer: string | null;
+          zip: string | null;
+        };
+        Insert: {
+          address: string;
+          city?: string | null;
+          county?: string | null;
+          id?: string;
+          imported_at?: string;
+          landmark?: string | null;
+          lat: number;
+          lng: number;
+          place_type?: string | null;
+          source_key: string;
+          source_layer?: string | null;
+          zip?: string | null;
+        };
+        Update: {
+          address?: string;
+          city?: string | null;
+          county?: string | null;
+          id?: string;
+          imported_at?: string;
+          landmark?: string | null;
+          lat?: number;
+          lng?: number;
+          place_type?: string | null;
+          source_key?: string;
+          source_layer?: string | null;
+          zip?: string | null;
+        };
+        Relationships: [];
+      };
       buildings: {
         Row: {
           address1: string;
@@ -71,10 +116,12 @@ export type Database = {
           deleted_at: string | null;
           deed: string | null;
           footprint: Json | null;
+          height_ft: number | null;
           id: string;
           imported_at: string | null;
           land_use: string | null;
           lot_sqft: number | null;
+          source_key: string | null;
           source_layer: string | null;
           tax_year: number | null;
           name: string;
@@ -106,10 +153,12 @@ export type Database = {
           deleted_at?: string | null;
           deed?: string | null;
           footprint?: Json | null;
+          height_ft?: number | null;
           id?: string;
           imported_at?: string | null;
           land_use?: string | null;
           lot_sqft?: number | null;
+          source_key?: string | null;
           source_layer?: string | null;
           tax_year?: number | null;
           name?: string;
@@ -141,10 +190,12 @@ export type Database = {
           deleted_at?: string | null;
           deed?: string | null;
           footprint?: Json | null;
+          height_ft?: number | null;
           id?: string;
           imported_at?: string | null;
           land_use?: string | null;
           lot_sqft?: number | null;
+          source_key?: string | null;
           source_layer?: string | null;
           tax_year?: number | null;
           name?: string;
@@ -1009,6 +1060,10 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       release_bid_lock: { Args: { p_bid: string; p_session: string }; Returns: undefined };
+      fill_footprint_addresses: {
+        Args: { p_county: string; p_max_m?: number };
+        Returns: number;
+      };
       warranty_leads: {
         Args: never;
         Returns: {
