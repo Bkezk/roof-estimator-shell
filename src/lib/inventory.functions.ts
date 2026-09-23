@@ -10,6 +10,7 @@
  * only reduces what the ordering summary says to buy.
  */
 import { createServerFn } from "@tanstack/react-start";
+import { canAccess } from "@/lib/access";
 import {
   PACK_QTY_COLS,
   packsFromPieces,
@@ -239,13 +240,20 @@ export const addMovement = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
     const [{ data: me }, { data: screen, error }] = await Promise.all([
-      sb.from("profiles").select("role, full_name, email").eq("id", context.userId).maybeSingle(),
+      sb
+        .from("profiles")
+        .select("role, access, full_name, email")
+        .eq("id", context.userId)
+        .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", data.screen_id).maybeSingle(),
     ]);
-    const role = me?.role ?? "";
-    if (!["admin", "estimator", "field"].includes(role)) throw new Error("Forbidden");
-    if (role === "field" && data.reason !== "leftover")
-      throw new Error("Field logins record leftovers only — ask an estimator for adjustments");
+    // Inventory access records leftovers; Estimate access (or admin) records anything.
+    if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
+      throw new Error("Forbidden: Inventory access required");
+    if (!canAccess(me, "estimate") && data.reason !== "leftover")
+      throw new Error(
+        "Inventory-only logins record leftovers only — ask an estimator for adjustments",
+      );
     if (error) throw new Error(error.message);
     if (!screen) throw new Error("Catalog screen not found");
     const d = screen.data as {

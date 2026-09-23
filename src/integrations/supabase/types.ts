@@ -621,6 +621,7 @@ export type Database = {
       };
       profiles: {
         Row: {
+          access: string[];
           commission_pct: number;
           created_at: string;
           email: string;
@@ -630,6 +631,7 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          access?: string[];
           commission_pct?: number;
           created_at?: string;
           email: string;
@@ -639,6 +641,7 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          access?: string[];
           commission_pct?: number;
           created_at?: string;
           email?: string;
@@ -767,6 +770,7 @@ export type Database = {
         }[];
       };
       current_user_role: { Args: never; Returns: string };
+      has_access: { Args: { page: string }; Returns: boolean };
       inventory_bid_options: {
         Args: never;
         Returns: { id: string; name: string; status: string; updated_at: string }[];

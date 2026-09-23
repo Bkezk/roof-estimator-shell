@@ -4,6 +4,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
+import { assertPageAccess } from "@/lib/auth.functions";
 
 type Tables = Database["public"]["Tables"];
 export type CompanySettings = Tables["company_settings"]["Row"];
@@ -20,11 +21,9 @@ export interface GeneralSettings {
   highWind: HighWindUpcharge[];
 }
 
+// Estimate Pricing access (admins, or users granted the page — src/lib/access.ts).
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
-  const { data } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  if (!data || data.role !== "admin") {
-    throw new Error("Forbidden: admin access required");
-  }
+  await assertPageAccess(supabase, userId, "pricing");
 }
 
 // Whole General group in one round trip. Any signed-in user may read (estimators

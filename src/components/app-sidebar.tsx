@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
+  Users,
   FileText,
   Settings,
   LogOut,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
+import { PAGE_LABELS } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -34,6 +36,8 @@ import {
 // New bids start from the Bids page's "New Bid" button (owner: one entry point, not two).
 const estimatorItems = [{ title: "Bids", url: "/bids", icon: FileText }];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
+// Admin (role) only: who can sign in and which pages each person may open.
+const adminOnlyItems = [{ title: "Users & access", url: "/admin/users", icon: Users }];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
 // tab via ?tab= (the first sub is the page's default tab). Tab keys must match
@@ -81,7 +85,6 @@ const adminItems: {
       { title: "Sales Tax", tab: "salestax" },
       { title: "Basic Labor Settings", tab: "basiclabor" },
       { title: "Labor & Markup Options", tab: "markup" },
-      { title: "Estimators", url: "/admin/users" },
       { title: "Warranties", tab: "warranties" },
     ],
   },
@@ -154,7 +157,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const navigate = useNavigate();
-  const { profile, role, signOut } = useAuth();
+  const { profile, role, can, signOut } = useAuth();
 
   const pathname = useRouterState({
     select: (router) => router.location.pathname,
@@ -185,7 +188,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
-        {role !== "field" && (
+        {can("estimate") && (
           <SidebarGroup>
             <SidebarGroupLabel>Estimate</SidebarGroupLabel>
             <SidebarGroupContent>
@@ -205,9 +208,9 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
 
-        {role === "admin" && (
+        {can("pricing") && (
           <SidebarGroup>
-            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupLabel>Estimate Pricing</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {adminItems.map((item) =>
@@ -291,23 +294,45 @@ export function AppSidebar() {
           </SidebarGroup>
         )}
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Inventory</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {inventoryItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                    <Link to={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {can("inventory") && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Inventory</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {inventoryItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
+        {role === "admin" && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Admin</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {adminOnlyItems.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>
@@ -317,7 +342,11 @@ export function AppSidebar() {
               <div className="truncate font-medium text-foreground">
                 {profile.full_name || profile.email}
               </div>
-              <div className="truncate capitalize">{profile.role}</div>
+              <div className="truncate">
+                {profile.role === "admin"
+                  ? "Admin"
+                  : profile.access.map((p) => PAGE_LABELS[p]).join(" · ") || "No pages"}
+              </div>
             </div>
           )}
           <SidebarMenuItem>

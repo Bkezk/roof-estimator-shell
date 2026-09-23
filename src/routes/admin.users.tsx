@@ -8,23 +8,16 @@ import { Trash2, UserPlus } from "lucide-react";
 import {
   listUsers,
   createUser,
-  updateUserRole,
+  updateUserAccess,
   deleteUser,
-  type Role,
   type UserProfile,
 } from "@/lib/auth.functions";
+import { PAGES, PAGE_HELP, PAGE_LABELS, type Page, type Role } from "@/lib/access";
 import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -36,16 +29,64 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/admin/users")({
-  head: () => ({ meta: [{ title: "Users — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Users & access — Bid-O-Matic" }] }),
   component: UsersPage,
 });
 
+/** Admin checkbox + one checkbox per page; admin implies every page (shown ticked, disabled). */
+function AccessPicker(props: {
+  role: Role;
+  access: Page[];
+  disabled?: boolean;
+  compact?: boolean;
+  onChange: (role: Role, access: Page[]) => void;
+}) {
+  const isAdmin = props.role === "admin";
+  return (
+    <div className={props.compact ? "flex flex-wrap gap-x-4 gap-y-1" : "flex flex-col gap-1.5"}>
+      <label className="flex items-center gap-1.5 text-sm" title="Everything, plus Users & access">
+        <input
+          type="checkbox"
+          className="h-4 w-4"
+          checked={isAdmin}
+          disabled={props.disabled}
+          onChange={(e) => props.onChange(e.target.checked ? "admin" : "user", props.access)}
+        />
+        <span className="font-medium">Admin</span>
+      </label>
+      {PAGES.map((p) => (
+        <label
+          key={p}
+          className={`flex items-center gap-1.5 text-sm ${isAdmin ? "text-muted-foreground" : ""}`}
+          title={PAGE_HELP[p]}
+        >
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={isAdmin || props.access.includes(p)}
+            disabled={props.disabled || isAdmin}
+            onChange={(e) =>
+              props.onChange(
+                "user",
+                e.target.checked
+                  ? [...props.access.filter((x) => x !== p), p]
+                  : props.access.filter((x) => x !== p),
+              )
+            }
+          />
+          {PAGE_LABELS[p]}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function UsersPage() {
   const queryClient = useQueryClient();
-  const { profile: me } = useAuth();
+  const { profile: me, refreshProfile } = useAuth();
   const listUsersFn = useServerFn(listUsers);
   const createUserFn = useServerFn(createUser);
-  const updateRoleFn = useServerFn(updateUserRole);
+  const updateAccessFn = useServerFn(updateUserAccess);
   const deleteUserFn = useServerFn(deleteUser);
 
   const { data: users, isLoading } = useQuery({
@@ -56,31 +97,40 @@ function UsersPage() {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("estimator");
+  const [role, setRole] = useState<Role>("user");
+  const [access, setAccess] = useState<Page[]>(["estimate"]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
   const createMut = useMutation({
-    mutationFn: (input: { email: string; password: string; full_name?: string; role: Role }) =>
-      createUserFn({ data: input }),
+    mutationFn: (input: {
+      email: string;
+      password: string;
+      full_name?: string;
+      role: Role;
+      access: Page[];
+    }) => createUserFn({ data: input }),
     onSuccess: () => {
       toast.success("User created");
       setEmail("");
       setFullName("");
       setPassword("");
-      setRole("estimator");
+      setRole("user");
+      setAccess(["estimate"]);
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message || "Could not create user"),
   });
 
-  const roleMut = useMutation({
-    mutationFn: (input: { id: string; role: Role }) => updateRoleFn({ data: input }),
-    onSuccess: () => {
-      toast.success("Role updated");
+  const accessMut = useMutation({
+    mutationFn: (input: { id: string; role: Role; access: Page[] }) =>
+      updateAccessFn({ data: input }),
+    onSuccess: (_r, input) => {
+      toast.success("Access updated");
       invalidate();
+      if (input.id === me?.id) void refreshProfile();
     },
-    onError: (e: Error) => toast.error(e.message || "Could not update role"),
+    onError: (e: Error) => toast.error(e.message || "Could not update access"),
   });
 
   const deleteMut = useMutation({
@@ -98,11 +148,16 @@ function UsersPage() {
       toast.error("Password must be at least 8 characters");
       return;
     }
+    if (role !== "admin" && access.length === 0) {
+      toast.error("Tick at least one page, or make the user an admin");
+      return;
+    }
     const trimmedName = fullName.trim();
     createMut.mutate({
       email: email.trim(),
       password,
       role,
+      access,
       ...(trimmedName ? { full_name: trimmedName } : {}),
     });
   };
@@ -110,10 +165,11 @@ function UsersPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Users</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Users &amp; access</h1>
         <p className="text-sm text-muted-foreground">
-          Create and manage who can sign in. Admins can reach both the estimator and admin sides;
-          estimators only the estimator side.
+          Who can sign in and which pages each person may open. Admins reach everything and manage
+          this page. Anyone with Estimate access is listed as an estimator on a bid&apos;s Setup
+          step; Inventory-only logins record leftovers but not adjustments.
         </p>
       </div>
 
@@ -159,17 +215,15 @@ function UsersPage() {
               />
             </div>
             <div className="space-y-2 lg:col-span-1">
-              <Label htmlFor="role">Role</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-                <SelectTrigger id="role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="estimator">Estimator</SelectItem>
-                  <SelectItem value="field">Field (Inventory only)</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Access</Label>
+              <AccessPicker
+                role={role}
+                access={access}
+                onChange={(r, a) => {
+                  setRole(r);
+                  setAccess(a);
+                }}
+              />
             </div>
             <div className="flex items-end lg:col-span-1">
               <Button type="submit" className="w-full" disabled={createMut.isPending}>
@@ -183,6 +237,9 @@ function UsersPage() {
       <Card>
         <CardHeader>
           <CardTitle>All users</CardTitle>
+          <CardDescription>
+            Tick the pages a person may open; changes apply the next time their app loads a page.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -193,7 +250,7 @@ function UsersPage() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
+                  <TableHead>Access</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -212,19 +269,13 @@ function UsersPage() {
                       </TableCell>
                       <TableCell>{u.email}</TableCell>
                       <TableCell>
-                        <Select
-                          value={u.role}
-                          onValueChange={(v) => roleMut.mutate({ id: u.id, role: v as Role })}
-                        >
-                          <SelectTrigger className="w-36">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="estimator">Estimator</SelectItem>
-                            <SelectItem value="field">Field (Inventory only)</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <AccessPicker
+                          compact
+                          role={u.role}
+                          access={u.access}
+                          disabled={accessMut.isPending}
+                          onChange={(r, a) => accessMut.mutate({ id: u.id, role: r, access: a })}
+                        />
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

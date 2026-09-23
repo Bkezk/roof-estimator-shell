@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { assertPageAccess } from "@/lib/auth.functions";
 
 export interface RdlData {
   base?: {
@@ -38,9 +39,9 @@ export interface RdlData {
 
 export type RdlComboRow = Database["public"]["Tables"]["rdl_combos"]["Row"];
 
+// Estimate Pricing access (admins, or users granted the page — src/lib/access.ts).
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
-  const { data } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  if (!data || data.role !== "admin") throw new Error("Forbidden: admin access required");
+  await assertPageAccess(supabase, userId, "pricing");
 }
 
 export const getRdlCombos = createServerFn({ method: "GET" })

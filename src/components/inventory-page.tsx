@@ -58,7 +58,9 @@ const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function InventoryPage() {
-  const { role } = useAuth();
+  const { role, can } = useAuth();
+  // Estimate access (or admin) may record adjustments / damage; Inventory-only logins leftovers.
+  const canAdjust = can("estimate");
   const qc = useQueryClient();
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
@@ -117,6 +119,7 @@ export function InventoryPage() {
             itemNumbers={itemNosQ.data ?? []}
             bids={bidsQ.data ?? []}
             role={role}
+            canAdjust={canAdjust}
             rule={rule}
             onSaved={refresh}
           />
@@ -251,6 +254,7 @@ function AddMovementCard(props: {
   itemNumbers: ItemNumberRow[];
   bids: { id: string; name: string; status: string; updated_at: string }[];
   role: string | null;
+  canAdjust: boolean;
   rule: OpenedBoxRule;
   onSaved: () => void;
 }) {
@@ -277,7 +281,7 @@ function AddMovementCard(props: {
     : null;
   const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
   const inPieces = !!piece && countMode === "pieces";
-  const fieldOnly = props.role === "field";
+  const fieldOnly = !props.canAdjust;
   // Item # lookup: an exact match picks the product; a partial match lists candidates.
   const itemQuery = itemNo.trim().toLowerCase();
   const itemMatches = useMemo(

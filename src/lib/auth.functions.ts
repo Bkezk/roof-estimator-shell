@@ -4,15 +4,45 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { PAGES, PAGE_LABELS, canAccess, normalizeAccess, type Page, type Role } from "@/lib/access";
 
-/** admin: everything; estimator: bids + inventory; field: Inventory only (records leftovers). */
-export type Role = "admin" | "estimator" | "field";
+export type { Role } from "@/lib/access";
+/** admin: everything + user management; user: the pages in `access` (src/lib/access.ts). */
 export interface UserProfile {
   id: string;
   email: string;
   full_name: string | null;
   role: Role;
+  access: Page[];
   created_at?: string;
+}
+const PROFILE_COLS = "id, email, full_name, role, access, created_at";
+const toProfile = (row: {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: string;
+  access: unknown;
+  created_at?: string;
+}): UserProfile => ({
+  ...row,
+  role: row.role === "admin" ? "admin" : "user",
+  access: normalizeAccess(row.access),
+});
+
+/** Admin or a user granted the page — the server-side twin of RLS `has_access(page)`. */
+export async function assertPageAccess(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  page: Page,
+) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role, access")
+    .eq("id", userId)
+    .single();
+  if (error || !data || !canAccess(data, page))
+    throw new Error(`Forbidden: ${PAGE_LABELS[page]} access required`);
 }
 
 // supabaseAdmin bypasses RLS and requires SUPABASE_SERVICE_ROLE_KEY; it is only
@@ -41,14 +71,14 @@ export const getMyProfile = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<UserProfile | null> => {
     const { data, error } = await context.supabase
       .from("profiles")
-      .select("id, email, full_name, role, created_at")
+      .select(PROFILE_COLS)
       .eq("id", context.userId)
       .maybeSingle();
     // A missing row is a state, not a server error: returning null (instead of throwing a 500)
     // lets the client degrade to no-role and retry — right after login the first read can race
     // token propagation (seen on mobile) and momentarily see zero rows under RLS.
     if (error) throw new Error(error.message);
-    return (data as UserProfile | null) ?? null;
+    return data ? toProfile(data) : null;
   });
 
 export const listUsers = createServerFn({ method: "GET" })
@@ -57,27 +87,28 @@ export const listUsers = createServerFn({ method: "GET" })
     await assertAdmin(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("profiles")
-      .select("id, email, full_name, role, created_at")
+      .select(PROFILE_COLS)
       .order("created_at", { ascending: true });
     if (error) throw error;
-    return (data ?? []) as UserProfile[];
+    return (data ?? []).map(toProfile);
   });
 
-// The estimator roster for the Estimate → Setup "Estimator's Name" dropdown (the accounts the
-// admin General → Estimators page manages). Any signed-in user may read it, but only the
-// display names leave the server: profiles RLS hides other users' rows from non-admins, so
-// this reads through the service-role client and strips ids / emails / roles before returning.
+// The estimator roster for the Estimate → Setup "Estimator's Name" dropdown: every account with
+// Estimate access (admins included). Any signed-in user may read it, but only the display names
+// leave the server: profiles RLS hides other users' rows from non-admins, so this reads through
+// the service-role client and strips ids / emails / roles before returning.
 export const listEstimatorNames = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async (): Promise<string[]> => {
     const supabaseAdmin = await admin();
     const { data, error } = await supabaseAdmin
       .from("profiles")
-      .select("full_name, email")
+      .select("full_name, email, role, access")
       .order("full_name", { ascending: true });
     if (error) throw new Error(error.message);
     const names = new Set<string>();
     for (const row of data ?? []) {
+      if (!canAccess(row, "estimate")) continue;
       const name = (row.full_name ?? "").trim() || (row.email ?? "").trim();
       if (name) names.add(name);
     }
@@ -88,7 +119,8 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   full_name: z.string().trim().max(200).optional(),
-  role: z.enum(["admin", "estimator", "field"]),
+  role: z.enum(["admin", "user"]),
+  access: z.array(z.enum(PAGES)).default([]),
 });
 
 // Admin-only account creation. There is no public sign-up anywhere in the app;
@@ -117,8 +149,9 @@ export const createUser = createServerFn({ method: "POST" })
         email: data.email,
         full_name: data.full_name ?? null,
         role: data.role,
+        access: data.role === "admin" ? [] : data.access,
       })
-      .select("id, email, full_name, role, created_at")
+      .select(PROFILE_COLS)
       .single();
 
     if (profErr || !profile) {
@@ -126,17 +159,19 @@ export const createUser = createServerFn({ method: "POST" })
       await supabaseAdmin.auth.admin.deleteUser(created.user.id);
       throw new Error(profErr?.message ?? "Could not create profile");
     }
-    return profile as UserProfile;
+    return toProfile(profile);
   });
 
-const updateRoleSchema = z.object({
+const updateAccessSchema = z.object({
   id: z.string().uuid(),
-  role: z.enum(["admin", "estimator", "field"]),
+  role: z.enum(["admin", "user"]),
+  access: z.array(z.enum(PAGES)).default([]),
 });
 
-export const updateUserRole = createServerFn({ method: "POST" })
+/** Set a user's role (admin / user) and, for a user, the pages they may open. */
+export const updateUserAccess = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((data) => updateRoleSchema.parse(data))
+  .validator((data) => updateAccessSchema.parse(data))
   .handler(async ({ data, context }): Promise<UserProfile> => {
     await assertAdmin(context.supabase, context.userId);
     const sb = context.supabase;
@@ -155,12 +190,12 @@ export const updateUserRole = createServerFn({ method: "POST" })
 
     const { data: profile, error } = await sb
       .from("profiles")
-      .update({ role: data.role })
+      .update({ role: data.role, access: data.role === "admin" ? [] : data.access })
       .eq("id", data.id)
-      .select("id, email, full_name, role, created_at")
+      .select(PROFILE_COLS)
       .single();
     if (error || !profile) throw new Error(error?.message ?? "Update failed");
-    return profile as UserProfile;
+    return toProfile(profile);
   });
 
 const deleteUserSchema = z.object({ id: z.string().uuid() });

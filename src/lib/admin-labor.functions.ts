@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { assertPageAccess } from "@/lib/auth.functions";
 
 type Tables = Database["public"]["Tables"];
 export type SetupStep = Tables["labor_setup_steps"]["Row"];
@@ -30,9 +31,9 @@ export interface LaborEngines {
 
 const NIL = "00000000-0000-0000-0000-000000000000";
 
+// Estimate Pricing access (admins, or users granted the page — src/lib/access.ts).
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
-  const { data } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  if (!data || data.role !== "admin") throw new Error("Forbidden: admin access required");
+  await assertPageAccess(supabase, userId, "pricing");
 }
 
 export const getLaborEngines = createServerFn({ method: "GET" })

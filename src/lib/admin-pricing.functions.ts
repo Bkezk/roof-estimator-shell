@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { assertPageAccess } from "@/lib/auth.functions";
 
 export type PricingRow = Database["public"]["Tables"]["pricing_catalog"]["Row"];
 
@@ -16,9 +17,9 @@ export interface CatalogScreenData {
   extras?: Record<string, string | number> | null;
 }
 
+// Estimate Pricing access (admins, or users granted the page — src/lib/access.ts).
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
-  const { data } = await supabase.from("profiles").select("role").eq("id", userId).single();
-  if (!data || data.role !== "admin") throw new Error("Forbidden: admin access required");
+  await assertPageAccess(supabase, userId, "pricing");
 }
 
 const branchSchema = z.object({ branch: z.string() });

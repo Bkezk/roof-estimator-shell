@@ -3,11 +3,14 @@ import type { Session } from "@supabase/supabase-js";
 
 import { supabase } from "@/integrations/supabase/client";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
+import { canAccess, type Page } from "@/lib/access";
 
 interface AuthState {
   session: Session | null;
   profile: UserProfile | null;
-  role: "admin" | "estimator" | "field" | null;
+  role: "admin" | "user" | null;
+  /** May this user open the page? Admins always; users by their granted pages. */
+  can: (page: Page) => boolean;
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -66,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     profile,
     role: profile?.role ?? null,
+    can: (page) => canAccess(profile, page),
     loading,
     signOut: async () => {
       await supabase.auth.signOut();

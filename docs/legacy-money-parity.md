@@ -3424,3 +3424,19 @@ no number; the Import price sheet page's gap list proposes a workbook line by na
 (name matching, admin confirms each); the rest (underlayment boards, tabs / parapet prefabs,
 Non-DL and EPDM membrane rows, most adhesives) have no line on the Duro-Last list under that name
 and are mapped by hand when needed.
+
+### 22.44 Per-page access; "Admin" nav group is now "Estimate Pricing" (2026-09-23)
+
+Owner: rename the Admin nav header to Estimate Pricing; a new Admin tab where an admin assigns
+each user access to individual pages — Estimate, Inventory, etc. — in any combination; anyone
+with Estimate access is offered as an estimator on Setup; without Inventory access they cannot
+open Inventory. Model (`src/lib/access.ts`, migration `20260923020000`): `profiles.role` is
+`admin | user`; `profiles.access` is the granted pages ⊆ {estimate, pricing, inventory}; admins
+reach everything and manage Admin › Users & access. Existing estimator rows became `user` with
+estimate + inventory (what they could open before); field rows `user` with inventory. RLS:
+`has_access(page)` (SECURITY DEFINER) — bids need `estimate`; ledger inserts need `estimate`, or
+`inventory` for leftovers only; the 23 pricing / labor / catalog write policies that were
+admin-only follow `pricing`; profiles, inventory settings and ledger deletes stay admin-only.
+Server functions mirror it (`assertPageAccess`); the gate sends a user without a page to the
+first page they may open; the Setup estimator list is every account with Estimate access. Not a
+money-model change.

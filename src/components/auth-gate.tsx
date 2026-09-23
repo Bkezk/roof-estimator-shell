@@ -3,6 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
+import { canAccess, homeFor, isAdmin, pageForPath } from "@/lib/access";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 
@@ -30,30 +31,32 @@ function AuthedShell({ children }: { children: ReactNode }) {
 // Central access control. UI routing here is convenience; the real enforcement
 // is RLS + the admin checks inside every server function.
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { session, role, loading } = useAuth();
+  const { session, profile, loading } = useAuth();
   const navigate = useNavigate();
   const pathname = useRouterState({
     select: (s) => s.location.pathname,
   });
 
   const isLogin = pathname === "/login";
-  const isAdminRoute = pathname.startsWith("/admin");
-  // A field login lives on Inventory (and its own password page); everything else is off-limits.
-  const fieldAllowed = pathname.startsWith("/inventory") || pathname === "/account";
-  const fieldBlocked = role === "field" && !fieldAllowed;
+  // Per-page access (src/lib/access.ts): a route belongs to a page; a user without that page is
+  // sent to the first page they may open. Until the profile has loaded nothing is blocked.
+  const page = pageForPath(pathname);
+  const blocked =
+    !!profile &&
+    page !== null &&
+    (page === "admin" ? !isAdmin(profile) : !canAccess(profile, page));
+  const home = homeFor(profile);
 
   useEffect(() => {
     if (loading) return;
     if (!session && !isLogin) {
       navigate({ to: "/login" });
     } else if (session && isLogin) {
-      navigate({ to: role === "field" ? "/inventory" : "/bids" });
-    } else if (session && fieldBlocked) {
-      navigate({ to: "/inventory" });
-    } else if (session && isAdminRoute && role && role !== "admin") {
-      navigate({ to: "/bids" });
+      navigate({ to: home });
+    } else if (session && blocked) {
+      navigate({ to: home });
     }
-  }, [loading, session, role, pathname, isLogin, isAdminRoute, fieldBlocked, navigate]);
+  }, [loading, session, pathname, isLogin, blocked, home, navigate]);
 
   // The login screen renders full-bleed, with no app chrome.
   if (isLogin) return <>{children}</>;
@@ -66,9 +69,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
 
-  // An estimator mid-redirect away from an admin route (or a field login off Inventory): don't
-  // flash the other UI.
-  if ((isAdminRoute && role !== "admin") || fieldBlocked) {
+  // Mid-redirect away from a page this user may not open: don't flash the other UI.
+  if (blocked) {
     return (
       <FullScreen>
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
