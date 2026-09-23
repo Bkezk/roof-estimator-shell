@@ -4,7 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { getMyProfile, type UserProfile } from "@/lib/auth.functions";
 import { canAccess } from "@/lib/access";
-import { AuthContext, type AuthState } from "@/lib/auth-store";
+import { AuthContext, UNAUTHORIZED_EVENT, type AuthState } from "@/lib/auth-store";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -54,9 +54,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
+    // A query hit Unauthorized (router.tsx): the stored token is unusable — drop the session so
+    // the gate redirects to /login. Local sign-out only: no network round trip that could hang.
+    const onUnauthorized = () => {
+      if (!active) return;
+      void supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      setSession(null);
+      setProfile(null);
+      setLoading(false);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+
     return () => {
       active = false;
       clearTimeout(guard);
+      window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
       sub.subscription.unsubscribe();
     };
   }, []);

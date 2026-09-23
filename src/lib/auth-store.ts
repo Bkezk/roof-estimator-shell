@@ -27,3 +27,6 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }
+
+/** Dispatched on window when any query fails with an Unauthorized server-function error. */
+export const UNAUTHORIZED_EVENT = "bid-o-matic:unauthorized";

@@ -62,37 +62,69 @@ function Num(props: {
 
 type TileId = "blocking" | "deck" | "sheetMetal" | "masonry" | "subsServices" | "custom";
 
-const TILES: Array<{ id: TileId; label: string; icon: string; groups: NonDlGroup[] }> = [
+/**
+ * Legacy frmNonDL colours (designer IL): each tile button's BackColor / hover pair, and
+ * `AddListViewItem` shades every summary row with the group's light colour — LightCoral for the
+ * two blocking groups, PaleTurquoise deck, PaleGoldenrod sheet metal (the tile itself is
+ * LightGoldenrodYellow), LightBlue masonry, Thistle subs & services, LightSalmon custom.
+ */
+const TILES: Array<{
+  id: TileId;
+  label: string;
+  icon: string;
+  groups: NonDlGroup[];
+  /** Tile button classes (legacy BackColor + hover colour). */
+  tile: string;
+  /** Summary row shading (legacy ListViewSubItem.BackColor). */
+  row: string;
+}> = [
   {
     id: "blocking",
     label: "Wood & Edge Blocking",
     icon: "/nondl-blocking.png",
     groups: ["roofEdgeBlocking", "wallBlocking"],
+    tile: "bg-[#F08080] hover:bg-[#CD5C5C] dark:bg-[#F08080]/50 dark:hover:bg-[#CD5C5C]/60",
+    row: "bg-[#F08080]/60 dark:bg-[#F08080]/25",
   },
   {
     id: "deck",
     label: "Structural Roof Deck Materials",
     icon: "/nondl-deck.png",
     groups: ["deckMaterials"],
+    tile: "bg-[#AFEEEE] hover:bg-[#48D1CC] dark:bg-[#AFEEEE]/50 dark:hover:bg-[#48D1CC]/60",
+    row: "bg-[#AFEEEE]/60 dark:bg-[#AFEEEE]/25",
   },
   {
     id: "sheetMetal",
     label: "Sheet Metal Work",
     icon: "/nondl-sheetmetal.png",
     groups: ["sheetMetal"],
+    tile: "bg-[#FAFAD2] hover:bg-[#F0E68C] dark:bg-[#FAFAD2]/50 dark:hover:bg-[#F0E68C]/60",
+    row: "bg-[#EEE8AA]/60 dark:bg-[#EEE8AA]/25",
   },
-  { id: "masonry", label: "Masonry Work", icon: "/nondl-masonry.png", groups: ["masonry"] },
+  {
+    id: "masonry",
+    label: "Masonry Work",
+    icon: "/nondl-masonry.png",
+    groups: ["masonry"],
+    tile: "bg-[#ADD8E6] hover:bg-[#87CEEB] dark:bg-[#ADD8E6]/50 dark:hover:bg-[#87CEEB]/60",
+    row: "bg-[#ADD8E6]/60 dark:bg-[#ADD8E6]/25",
+  },
   {
     id: "subsServices",
     label: "Sub-Contractors and Services",
     icon: "/nondl-subs.png",
     groups: ["services", "subcontractors"],
+    tile: "bg-[#D8BFD8] hover:bg-[#DDA0DD] dark:bg-[#D8BFD8]/50 dark:hover:bg-[#DDA0DD]/60",
+    row: "bg-[#D8BFD8]/60 dark:bg-[#D8BFD8]/25",
   },
   {
     id: "custom",
     label: "Customized Contractor Applications",
     icon: "/nondl-custom.png",
     groups: ["customApps"],
+    tile: "bg-[#FFA07A] hover:bg-[#FF7F50] dark:bg-[#FFA07A]/50 dark:hover:bg-[#FF7F50]/60",
+    row: "bg-[#FFA07A]/60 dark:bg-[#FFA07A]/25",
   },
 ];
 
@@ -151,7 +183,7 @@ export function NonDlScreens({ refData, state, onChange, result, crewRate }: Non
             key={t.id}
             type="button"
             onClick={() => setOpenTile(t.id)}
-            className="flex flex-col items-center gap-2 rounded-md border-2 border-border bg-muted/40 p-3 text-center text-xs font-medium transition-colors hover:bg-muted"
+            className={`flex flex-col items-center gap-2 rounded-md border-2 border-border p-3 text-center text-xs font-medium transition-colors ${t.tile}`}
           >
             <img src={t.icon} alt="" className="h-12 w-16 object-contain" />
             {t.label}
@@ -182,10 +214,13 @@ export function NonDlScreens({ refData, state, onChange, result, crewRate }: Non
           <TableBody>
             {lines.map((ln, i) => {
               const t = TILE_BY_GROUP[ln.group];
+              const shade = TILES.find((x) => x.id === t)?.row ?? "";
               return (
                 <TableRow
                   key={i}
-                  className={ln.unpriced ? "text-destructive" : undefined}
+                  className={
+                    `${shade} ${ln.unpriced ? "text-destructive" : ""}`.trim() || undefined
+                  }
                   onDoubleClick={() => t && setOpenTile(t)}
                 >
                   <TableCell className="text-muted-foreground">
