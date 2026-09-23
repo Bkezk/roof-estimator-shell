@@ -3405,3 +3405,22 @@ Conclusion: the web bills the legacy formula on the legacy figures; no over-coun
 the app data. Whether legacy's Summit bid showed a different number depends on that install's
 own DensDeck Prime layout time / CR-20 labor values (both DualValue custom cells) — the owner's
 legacy Summit review screen is needed to go further.
+
+### 22.43 Item numbers come from the Duro-Last price workbook only (2026-09-23)
+
+Owner: "the item numbers should only come from the item column on the Excel price list; the
+numbers in Bid-Advantage have not been updated in ages." Migration `20260923010000` drops every
+mapping whose number is not on the workbook's "Price List" sheet (13,506 items) — 199 rows, all
+from the legacy Part # seed, none ever touched by an import: every adhesive, all CDR rings, conduit
+washers, drip edge, gravel stops, termination bars, 128 fasteners / bits, 12 sealants, six fascia
+metal covers / corners, five walk pads / wall vents, one dome strainer, ARP. The 229 mappings whose
+numbers ARE on the workbook stay (membrane rolls, pipe stacks, drain boots, Panduit, most corners
+and drain-boot accessories, some fasteners / sealants / fascia / walk pads). Not a money-model
+change: the engine never reads item numbers (they index workbook lines to catalog cells for the
+price import, and label stock); catalog prices and the screens' own Part # columns (part of the
+row keys) are untouched. Applied live: 428 → 229 rows; the one ledger entry stamped with a dropped
+number (1106) had its stamp cleared, quantity unchanged. Of the 406 priced products, 287 now have
+no number; the Import price sheet page's gap list proposes a workbook line by name for 45 of them
+(name matching, admin confirms each); the rest (underlayment boards, tabs / parapet prefabs,
+Non-DL and EPDM membrane rows, most adhesives) have no line on the Duro-Last list under that name
+and are mapped by hand when needed.
