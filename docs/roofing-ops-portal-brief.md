@@ -285,6 +285,10 @@ Owner answers of Sep 23 are recorded inline; the rest stay open.
       3,248; Boone 3,178; Warren 2,992; Daviess 2,392; Hardin 2,231; McCracken 2,076; Campbell
       1,733; Madison 1,731. The same ten lead on the 20-plus-employee cut. Pulaski (1,448) is
       next.
+- [x] **Who uses it.** Owner (Sep 24): a non-technical salesperson. Every screen outside the
+      estimator is judged by clicks-to-useful-sales-info: the map, the building's size, address
+      and the "New bid" button are on screen at once; imports, layer URLs and filters sit behind
+      one "Load county data" button with an Advanced section nobody has to open.
 - [x] **Own-book seed.** Won bids seed `roofs` automatically. Older jobs: owner is gathering
       .bax files; the importer is built against the first two or three received.
 - [x] **Budgetary range bands.** Owner: not needed. The roofing system, underlayment,

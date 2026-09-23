@@ -33,3 +33,7 @@ own route group, access flag, and folder. The plan is `docs/roofing-ops-portal-b
 6. **New tables** carry `created_by`, `created_at`, `updated_at` (with the
    `update_updated_at_column` trigger) and RLS by page flag; deletes are soft where history
    matters.
+7. **Salesperson-first outside the estimator** (owner, Sep 24). The user is a non-technical
+   salesperson: the map, the building's size and address and the "New bid" button are on
+   screen at once, and anything that needs a layer URL, a filter or a preview lives behind one
+   setup button with an Advanced section. Judge a screen by clicks-to-useful-sales-info.
