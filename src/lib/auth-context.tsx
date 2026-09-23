@@ -33,6 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    // Safety net: if the stored session / profile read never settles (a stuck auth lock in the
+    // browser, an unreachable auth server), stop "loading" so the gate can show a way out
+    // instead of spinning forever.
+    const guard = setTimeout(() => {
+      if (active) setLoading(false);
+    }, 12_000);
+
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return;
       setSession(data.session);
@@ -49,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      clearTimeout(guard);
       sub.subscription.unsubscribe();
     };
   }, []);
