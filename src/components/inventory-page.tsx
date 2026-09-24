@@ -1,15 +1,26 @@
 /**
  * Inventory — one screen (owner rule, MODULES.md §7: a non-technical crew lead or salesperson
- * uses this, often on a phone). Stock on hand is the page; every row has "Use on job" and
- * "Add leftover"; the form is a dialog with a search box for the product and one for the job,
- * which remembers the last job used on this phone. Adjustments and write-offs are not offered
- * here (owner, Sep 24) — the server still accepts them from estimators for the bid's order list.
+ * uses this, often on a phone). Stock on hand is the page; every row has "Take from inventory"
+ * and "Put in inventory"; the form is a dialog that asks WHERE first (the shop or a service
+ * vehicle — owner, Sep 24), then the product, the amount and the job, which remembers the
+ * last job used on this phone. "Load a vehicle" / "Return to shop" move stock between the shop
+ * and a vehicle; what does not come back is written off as used on the vehicle. Adjustments
+ * and write-offs are not offered here — the server still accepts them from estimators.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { History, Package, PackageMinus, PackagePlus, Trash2 } from "lucide-react";
+import {
+  ArrowRightLeft,
+  History,
+  Package,
+  PackageMinus,
+  PackagePlus,
+  Trash2,
+  Truck,
+  Warehouse,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
@@ -20,14 +31,18 @@ import {
   deleteMovement,
   getInventorySettings,
   listBidOptions,
+  listLocations,
   listMovements,
   listStock,
   OPENED_BOX_LABELS,
   REASON_LABELS,
   setOpenedBoxRule,
+  SHOP_LOCATION_ID,
+  transferStock,
   undoMovement,
   priceColLabel,
   stockUnitFor,
+  type InventoryLocation,
   type MovementReason,
   type OpenedBoxRule,
   type StockRow,
@@ -142,8 +157,13 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const itemNosFn = useServerFn(listItemNumbers);
   const bidsFn = useServerFn(listBidOptions);
   const settingsFn = useServerFn(getInventorySettings);
+  const locationsFn = useServerFn(listLocations);
   const undoFn = useServerFn(undoMovement);
   const stockQ = useQuery({ queryKey: ["inventory-stock"], queryFn: () => stockFn() });
+  const locationsQ = useQuery({
+    queryKey: ["inventory-locations"],
+    queryFn: () => locationsFn(),
+  });
   const movesQ = useQuery({
     queryKey: ["inventory-movements"],
     queryFn: () => movesFn({ data: {} }),
@@ -164,18 +184,29 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const stock = stockQ.data ?? [];
   const moves = movesQ.data ?? [];
   const rule = settingsQ.data?.opened_box_rule ?? "half";
+  const locations = useMemo(() => locationsQ.data ?? [], [locationsQ.data]);
+  const vehicles = locations.filter((l) => l.kind === "vehicle");
+  const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
 
   const [q, setQ] = useState("");
   const [zeros, setZeros] = useState(false);
-  const [dialog, setDialog] = useState<{ mode: Mode; ref: TargetRef | null } | null>(null);
+  // Which location the list shows: the shop by default, a vehicle, or everywhere.
+  const [where, setWhere] = useState<string>(SHOP_LOCATION_ID);
+  const [dialog, setDialog] = useState<{
+    mode: Mode;
+    ref: TargetRef | null;
+    location: string | null;
+  } | null>(null);
+  const [transfer, setTransfer] = useState<"load" | "return" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => {
     // "Record leftovers for this bid" on the estimate lands here with ?bid=: open the form.
-    if (props.initialBidId) setDialog({ mode: "leftover", ref: null });
+    if (props.initialBidId) setDialog({ mode: "leftover", ref: null, location: null });
   }, [props.initialBidId]);
 
   const filter = q.trim().toLowerCase();
   const rows = stock.filter((r) => {
+    if (where !== "all" && r.location_id !== where) return false;
     if (!zeros && Math.abs(r.on_hand) < 0.0005) return false;
     return (
       !filter ||
@@ -185,12 +216,15 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
       r.item_nos.some((n) => n.toLowerCase().includes(filter))
     );
   });
-  const inStock = stock.filter((r) => Math.abs(r.on_hand) >= 0.0005).length;
+  const shown = where === "all" ? stock : stock.filter((r) => r.location_id === where);
+  const inStock = shown.filter((r) => Math.abs(r.on_hand) >= 0.0005).length;
 
   const open = (mode: Mode, r?: StockRow) =>
     setDialog({
       mode,
       ref: r ? { screen_id: r.screen_id, row_label: r.row_label, price_col: r.price_col } : null,
+      // A row already says where it is; the header buttons ask first.
+      location: r ? r.location_id : null,
     });
 
   return (
@@ -201,16 +235,27 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
             <Package className="h-6 w-6" /> Inventory
           </h1>
           <p className="text-sm text-muted-foreground">
-            What is on the shelf. Tap a product to use it on a job or to add leftovers.
+            What is at the shop and on each service vehicle. Tap a product to take it for a job or
+            to put some back.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => open("consumed")}>
-            <PackageMinus className="mr-1 h-4 w-4" /> Use on job
+            <PackageMinus className="mr-1 h-4 w-4" /> Take from inventory
           </Button>
           <Button onClick={() => open("leftover")}>
-            <PackagePlus className="mr-1 h-4 w-4" /> Add leftover
+            <PackagePlus className="mr-1 h-4 w-4" /> Put in inventory
           </Button>
+          {vehicles.length > 0 && (
+            <>
+              <Button variant="outline" onClick={() => setTransfer("load")}>
+                <Truck className="mr-1 h-4 w-4" /> Load a vehicle
+              </Button>
+              <Button variant="outline" onClick={() => setTransfer("return")}>
+                <ArrowRightLeft className="mr-1 h-4 w-4" /> Return to shop
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -223,19 +268,35 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
+            {locations.length > 1 && (
+              <Select value={where} onValueChange={setWhere}>
+                <SelectTrigger className="h-10 w-[260px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {locations.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="all">Everywhere</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             <label className="flex items-center gap-1.5 text-sm">
               <input type="checkbox" checked={zeros} onChange={(e) => setZeros(e.target.checked)} />
               Show products at zero
             </label>
             <span className="text-xs text-muted-foreground">
-              {rows.length} of {zeros ? stock.length : inStock} product(s)
+              {rows.length} of {zeros ? shown.length : inStock} product(s)
             </span>
           </div>
           {stockQ.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : stock.length === 0 ? (
+          ) : shown.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Nothing on the shelf yet. Tap <b>Add leftover</b> to record the first material.
+              Nothing {where === "all" ? "in inventory" : `at ${locationName(where)}`} yet. Tap{" "}
+              <b>Put in inventory</b> to record the first material.
             </p>
           ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -251,14 +312,18 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                   const d = displayStock(r.on_hand, r.unit, pieceOf(r.screen_id, r.row_label));
                   return (
                     <li
-                      key={`${r.screen_id}|${r.row_label}|${r.price_col}`}
+                      key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
                       className="rounded-md border p-3"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="truncate font-medium">{r.row_label}</p>
                           <p className="text-xs text-muted-foreground">
-                            {[priceColLabel(r.price_col) !== "—" ? r.price_col : null, r.category]
+                            {[
+                              priceColLabel(r.price_col) !== "—" ? r.price_col : null,
+                              r.category,
+                              where === "all" ? locationName(r.location_id) : null,
+                            ]
                               .filter(Boolean)
                               .join(" · ")}
                             {r.item_nos.length > 0 && (
@@ -279,10 +344,10 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                           disabled={r.on_hand <= 0}
                           onClick={() => open("consumed", r)}
                         >
-                          <PackageMinus className="mr-1 h-4 w-4" /> Use on job
+                          <PackageMinus className="mr-1 h-4 w-4" /> Take
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => open("leftover", r)}>
-                          <PackagePlus className="mr-1 h-4 w-4" /> Add leftover
+                          <PackagePlus className="mr-1 h-4 w-4" /> Put in
                         </Button>
                       </div>
                     </li>
@@ -296,6 +361,7 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                     <TableRow>
                       <TableHead>Product</TableHead>
                       <TableHead>Colour / size</TableHead>
+                      {where === "all" && <TableHead>Where</TableHead>}
                       <TableHead>Category</TableHead>
                       <TableHead>Item #</TableHead>
                       <TableHead className="text-right">On hand</TableHead>
@@ -308,9 +374,14 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                       const piece = pieceOf(r.screen_id, r.row_label);
                       const d = displayStock(r.on_hand, r.unit, piece);
                       return (
-                        <TableRow key={`${r.screen_id}|${r.row_label}|${r.price_col}`}>
+                        <TableRow
+                          key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
+                        >
                           <TableCell className="text-sm font-medium">{r.row_label}</TableCell>
                           <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
+                          {where === "all" && (
+                            <TableCell className="text-xs">{locationName(r.location_id)}</TableCell>
+                          )}
                           <TableCell className="text-xs text-muted-foreground">
                             {r.category}
                           </TableCell>
@@ -338,14 +409,14 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                                 disabled={r.on_hand <= 0}
                                 onClick={() => open("consumed", r)}
                               >
-                                Use on job
+                                Take from inventory
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => open("leftover", r)}
                               >
-                                Add leftover
+                                Put in inventory
                               </Button>
                             </div>
                           </TableCell>
@@ -388,6 +459,7 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
               rows={moves}
               loading={movesQ.isLoading}
               role={role}
+              locations={locations}
               onChanged={refresh}
               pieceOf={pieceOf}
             />
@@ -397,10 +469,41 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
 
       {role === "admin" && <SettingsCard rule={rule} />}
 
+      {transfer && (
+        <TransferDialog
+          mode={transfer}
+          locations={locations}
+          products={products}
+          targets={targets}
+          stock={stock}
+          onClose={() => setTransfer(null)}
+          onSaved={(saved) => {
+            refresh();
+            toast.success(saved.message, {
+              duration: 10000,
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  void undoFn({ data: { id: saved.id } })
+                    .then(() => {
+                      refresh();
+                      toast.info("Undone — the move was removed");
+                    })
+                    .catch((e: unknown) =>
+                      toast.error(e instanceof Error ? e.message : "Could not undo"),
+                    );
+                },
+              },
+            });
+          }}
+        />
+      )}
       {dialog && (
         <RecordDialog
           mode={dialog.mode}
           initialRef={dialog.ref}
+          initialLocation={dialog.location}
+          locations={locations}
           products={products}
           targets={targets}
           stock={stock}
@@ -631,9 +734,65 @@ function JobPicker(props: {
   );
 }
 
+/** Step one of every form (owner, Sep 24): where — the shop, then the service vehicles. */
+function LocationPicker(props: {
+  locations: InventoryLocation[];
+  value: string | null;
+  only?: "vehicle" | undefined;
+  exclude?: string | undefined;
+  onChange: (id: string) => void;
+}) {
+  const list = props.locations.filter(
+    (l) => (!props.only || l.kind === props.only) && l.id !== props.exclude,
+  );
+  const chosen = list.find((l) => l.id === props.value);
+  if (chosen) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+        <p className="flex items-center gap-2 font-medium">
+          {chosen.kind === "vehicle" ? (
+            <Truck className="h-4 w-4" />
+          ) : (
+            <Warehouse className="h-4 w-4" />
+          )}
+          {chosen.name}
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => props.onChange("")}>
+          Change
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <ul className="divide-y rounded-md border">
+      {list.length === 0 && (
+        <li className="px-3 py-2 text-sm text-muted-foreground">No location is set up.</li>
+      )}
+      {list.map((l) => (
+        <li key={l.id}>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-3 text-left text-sm hover:bg-muted"
+            onClick={() => props.onChange(l.id)}
+          >
+            {l.kind === "vehicle" ? (
+              <Truck className="h-4 w-4 text-muted-foreground" />
+            ) : (
+              <Warehouse className="h-4 w-4 text-muted-foreground" />
+            )}
+            {l.name}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function RecordDialog(props: {
   mode: Mode;
   initialRef: TargetRef | null;
+  initialLocation: string | null;
+  locations: InventoryLocation[];
   products: ProductOption[];
   targets: PriceTarget[];
   stock: StockRow[];
@@ -645,6 +804,8 @@ function RecordDialog(props: {
 }) {
   const addFn = useServerFn(addMovement);
   const consumed = props.mode === "consumed";
+  // The form unfolds one step at a time: where → product → how much → job → note.
+  const [locationId, setLocationId] = useState<string>(props.initialLocation ?? "");
   const [ref, setRef] = useState<TargetRef | null>(props.initialRef);
   const [qty, setQty] = useState("");
   const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
@@ -660,12 +821,18 @@ function RecordDialog(props: {
     }
   }, [jobId, props.bids]);
 
+  const location = props.locations.find((l) => l.id === locationId);
+  const locName = location?.name ?? "";
+  const stockHere = useMemo(
+    () => props.stock.filter((s) => s.location_id === locationId),
+    [props.stock, locationId],
+  );
   const target = ref ? props.targets.find((t) => t.screen_id === ref.screen_id) : undefined;
   const unit = ref ? (target?.row_units?.[ref.row_label] ?? stockUnitFor(ref.screen_id)) : "";
   const piece = ref ? (target?.pieces?.[ref.row_label] ?? null) : null;
   const inPieces = !!piece && countMode === "pieces";
   const onHand = ref
-    ? (props.stock.find(
+    ? (stockHere.find(
         (s) =>
           s.screen_id === ref.screen_id &&
           s.row_label === ref.row_label &&
@@ -673,14 +840,14 @@ function RecordDialog(props: {
       )?.on_hand ?? 0)
     : 0;
   const n = Number(qty);
+  const amountOk = qty.trim() !== "" && Number.isFinite(n) && n > 0;
   const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
   const tooMany = consumed && Number.isFinite(packs) && packs > onHand + 1e-9;
   const jobOk = consumed ? !!jobId && !pickingJob : true;
-  const canSave =
-    !!ref && qty.trim() !== "" && Number.isFinite(n) && n > 0 && jobOk && !tooMany && !saving;
+  const canSave = !!location && !!ref && amountOk && jobOk && !tooMany && !saving;
 
   const save = async () => {
-    if (!ref || !canSave) return;
+    if (!ref || !location || !canSave) return;
     setSaving(true);
     try {
       const r = await addFn({
@@ -692,6 +859,7 @@ function RecordDialog(props: {
           ...(inPieces ? { in_pieces: true } : {}),
           unit,
           reason: props.mode,
+          location_id: location.id,
           bid_id: jobId && !pickingJob ? jobId : null,
           note: note.trim() || null,
         },
@@ -701,8 +869,8 @@ function RecordDialog(props: {
       props.onSaved({
         id: r.id,
         message: consumed
-          ? `${describeStock(-r.qty, r.unit, piece)} of ${ref.row_label} used on ${job?.name ?? "the job"}`
-          : `${describeStock(r.qty, r.unit, piece)} of ${ref.row_label} added to the shelf`,
+          ? `${describeStock(-r.qty, r.unit, piece)} of ${ref.row_label} taken from ${locName} for ${job?.name ?? "the job"}`
+          : `${describeStock(r.qty, r.unit, piece)} of ${ref.row_label} put in ${locName}`,
       });
       props.onClose();
     } catch (e) {
@@ -716,35 +884,51 @@ function RecordDialog(props: {
     <Dialog open onOpenChange={(o) => !o && props.onClose()}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{consumed ? "Use on a job" : "Add leftover"}</DialogTitle>
+          <DialogTitle>{consumed ? "Take from inventory" : "Put in inventory"}</DialogTitle>
           <DialogDescription>
             {consumed
-              ? "Takes material off the shelf and puts it on the job's order list."
-              : `Adds what came back from a job. ${OPENED_BOX_LABELS[props.rule]}.`}
+              ? "Takes material from the shop or a service vehicle and puts it on the job's order list."
+              : `Adds what came back from a job, or was bought, to the shop or a service vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1">
-            <Label>Product</Label>
-            <ProductPicker
-              products={props.products}
-              stock={props.stock}
-              value={ref}
-              onlyInStock={consumed}
-              onChange={(v) => {
-                setRef(v);
-                setCountMode("pieces");
+            <Label>{consumed ? "Take it from where" : "Put it where"}</Label>
+            <LocationPicker
+              locations={props.locations}
+              value={locationId}
+              onChange={(id) => {
+                setLocationId(id);
+                // Stock differs per location: pick the product again.
+                setRef(null);
+                setQty("");
               }}
             />
           </div>
-          {ref && (
+          {location && (
+            <div className="space-y-1">
+              <Label>Product</Label>
+              <ProductPicker
+                products={props.products}
+                stock={stockHere}
+                value={ref}
+                onlyInStock={consumed}
+                onChange={(v) => {
+                  setRef(v);
+                  setCountMode("pieces");
+                }}
+              />
+            </div>
+          )}
+          {location && ref && (
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label>
-                  {consumed ? "How much" : "How much"}
+                  How much
                   {inPieces && piece ? ` (${plural(2, piece.name)})` : unit ? ` (${unit})` : ""}
                 </Label>
                 <Input
+                  autoFocus
                   type="number"
                   inputMode="decimal"
                   step="any"
@@ -775,7 +959,7 @@ function RecordDialog(props: {
                 </div>
               )}
               <p className="pb-2 text-sm text-muted-foreground">
-                {consumed ? `${fmtQty(onHand)} ${unit} on the shelf` : ""}
+                {consumed ? `${fmtQty(onHand)} ${unit} at ${locName}` : ""}
                 {inPieces && piece && Number.isFinite(n) && n > 0
                   ? `${consumed ? " · " : ""}= ${fmtQty(packs)} ${unit}`
                   : ""}
@@ -784,33 +968,263 @@ function RecordDialog(props: {
           )}
           {tooMany && (
             <p className="text-sm text-destructive">
-              Only {fmtQty(onHand)} {unit} on the shelf.
+              Only {fmtQty(onHand)} {unit} at {locName}.
             </p>
           )}
-          <div className="space-y-1">
-            <Label>{consumed ? "Which job" : "Left over from which job (optional)"}</Label>
-            <JobPicker
-              bids={props.bids}
-              value={pickingJob ? "" : jobId}
-              required={consumed}
-              onChange={setJobId}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label>Note (optional)</Label>
-            <AutoTextarea
-              className="min-h-10"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={consumed ? "e.g. finished the north section" : "e.g. 1 opened box"}
-            />
-          </div>
+          {location && ref && amountOk && (
+            <>
+              <div className="space-y-1">
+                <Label>{consumed ? "Which job" : "Left over from which job (optional)"}</Label>
+                <JobPicker
+                  bids={props.bids}
+                  value={pickingJob ? "" : jobId}
+                  required={consumed}
+                  onChange={setJobId}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Note (optional)</Label>
+                <AutoTextarea
+                  className="min-h-10"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={consumed ? "e.g. finished the north section" : "e.g. 1 opened box"}
+                />
+              </div>
+            </>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={props.onClose}>
               Cancel
             </Button>
             <Button onClick={save} disabled={!canSave} className="min-w-40">
-              {saving ? "Saving…" : consumed ? "Take from shelf" : "Add to shelf"}
+              {saving
+                ? "Saving…"
+                : consumed
+                  ? `Take from ${locName || "inventory"}`
+                  : `Put in ${locName || "inventory"}`}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Load a service vehicle from the shop, or return a vehicle's stock to the shop. On a return,
+ * what did not come back is written off as used on the vehicle (owner rule, Sep 24: if it is not
+ * at the shop and not on a job, it is assumed on the vehicle until it returns — or used).
+ */
+function TransferDialog(props: {
+  mode: "load" | "return";
+  locations: InventoryLocation[];
+  products: ProductOption[];
+  targets: PriceTarget[];
+  stock: StockRow[];
+  onClose: () => void;
+  onSaved: (saved: { id: number; message: string }) => void;
+}) {
+  const moveFn = useServerFn(transferStock);
+  const load = props.mode === "load";
+  const [vehicleId, setVehicleId] = useState("");
+  const [ref, setRef] = useState<TargetRef | null>(null);
+  const [qty, setQty] = useState("");
+  const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
+  const [restUsed, setRestUsed] = useState(true);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const vehicle = props.locations.find((l) => l.id === vehicleId);
+  const fromId = load ? SHOP_LOCATION_ID : vehicleId;
+  const toId = load ? vehicleId : SHOP_LOCATION_ID;
+  const stockFrom = useMemo(
+    () => props.stock.filter((s) => s.location_id === fromId),
+    [props.stock, fromId],
+  );
+  const target = ref ? props.targets.find((t) => t.screen_id === ref.screen_id) : undefined;
+  const unit = ref ? (target?.row_units?.[ref.row_label] ?? stockUnitFor(ref.screen_id)) : "";
+  const piece = ref ? (target?.pieces?.[ref.row_label] ?? null) : null;
+  const inPieces = !!piece && countMode === "pieces";
+  const onHand = ref
+    ? (stockFrom.find(
+        (s) =>
+          s.screen_id === ref.screen_id &&
+          s.row_label === ref.row_label &&
+          s.price_col === ref.price_col,
+      )?.on_hand ?? 0)
+    : 0;
+  // On hand in the unit being counted (pieces or packs).
+  const onHandCounted = inPieces && piece ? onHand * piece.perPack : onHand;
+  const n = qty.trim() === "" ? NaN : Number(qty);
+  const amountOk = Number.isFinite(n) && n >= 0 && (load ? n > 0 : true);
+  const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
+  const tooMany = Number.isFinite(packs) && packs > onHand + 1e-9;
+  const rest = !load && Number.isFinite(n) ? Math.max(0, onHandCounted - n) : 0;
+  const usedCounted = !load && restUsed ? rest : 0;
+  const canSave =
+    !!vehicle && !!ref && amountOk && !tooMany && !saving && (load || n > 0 || usedCounted > 0);
+  const fmtCounted = (v: number) =>
+    inPieces && piece ? `${fmtQty(v)} ${plural(v, piece.name)}` : `${fmtQty(v)} ${unit}`;
+
+  const save = async () => {
+    if (!ref || !vehicle || !canSave) return;
+    setSaving(true);
+    try {
+      const r = await moveFn({
+        data: {
+          screen_id: ref.screen_id,
+          row_label: ref.row_label,
+          price_col: ref.price_col,
+          from_location_id: fromId,
+          to_location_id: toId,
+          qty: n,
+          ...(inPieces ? { in_pieces: true } : {}),
+          ...(usedCounted > 0 ? { used_qty: usedCounted } : {}),
+          note: note.trim() || null,
+        },
+      });
+      const moved = describeStock(r.moved, r.unit, piece);
+      const used = r.used > 0 ? describeStock(r.used, r.unit, piece) : "";
+      props.onSaved({
+        id: r.ids[0] ?? 0,
+        message: load
+          ? `${moved} of ${ref.row_label} loaded onto ${vehicle.name}`
+          : `${r.moved > 0 ? `${moved} of ${ref.row_label} returned to the shop` : `Nothing of ${ref.row_label} returned`}${used ? `; ${used} used on ${vehicle.name}` : ""}`,
+      });
+      props.onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record that");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && props.onClose()}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{load ? "Load a service vehicle" : "Return to the shop"}</DialogTitle>
+          <DialogDescription>
+            {load
+              ? "Moves material from the shop onto a service vehicle. It stays on the vehicle until it is returned or used."
+              : "Counts what came back off a service vehicle. Whatever did not come back is written off as used on the vehicle."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <Label>{load ? "Which vehicle" : "Which vehicle is it coming off"}</Label>
+            <LocationPicker
+              locations={props.locations}
+              only="vehicle"
+              value={vehicleId}
+              onChange={(id) => {
+                setVehicleId(id);
+                setRef(null);
+                setQty("");
+              }}
+            />
+          </div>
+          {vehicle && (
+            <div className="space-y-1">
+              <Label>Product</Label>
+              <ProductPicker
+                products={props.products}
+                stock={stockFrom}
+                value={ref}
+                onlyInStock
+                onChange={(v) => {
+                  setRef(v);
+                  setCountMode("pieces");
+                  setQty("");
+                }}
+              />
+            </div>
+          )}
+          {vehicle && ref && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <Label>
+                  {load ? "How much to load" : "How much came back"}
+                  {inPieces && piece ? ` (${plural(2, piece.name)})` : unit ? ` (${unit})` : ""}
+                </Label>
+                <Input
+                  autoFocus
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min={0}
+                  className="h-11 w-36 text-lg"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              {piece && (
+                <div className="space-y-1">
+                  <Label>Count in</Label>
+                  <Select
+                    value={countMode}
+                    onValueChange={(v) => setCountMode(v as typeof countMode)}
+                  >
+                    <SelectTrigger className="h-11 w-[220px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pieces">
+                        {plural(2, piece.name)} ({piece.perPack} per {unit})
+                      </SelectItem>
+                      <SelectItem value="packs">whole {unit}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <p className="pb-2 text-sm text-muted-foreground">
+                {fmtCounted(onHandCounted)} {load ? "at the shop" : `on ${vehicle.name}`}
+              </p>
+            </div>
+          )}
+          {tooMany && (
+            <p className="text-sm text-destructive">
+              Only {fmtCounted(onHandCounted)} {load ? "at the shop" : `on ${vehicle?.name}`}.
+            </p>
+          )}
+          {!load && vehicle && ref && amountOk && rest > 0 && (
+            <label className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={restUsed}
+                onChange={(e) => setRestUsed(e.target.checked)}
+              />
+              <span>
+                The other <b>{fmtCounted(rest)}</b> was used on the vehicle — take it off the
+                vehicle's list. Untick to leave it on the vehicle.
+              </span>
+            </label>
+          )}
+          {vehicle && ref && amountOk && (
+            <div className="space-y-1">
+              <Label>Note (optional)</Label>
+              <AutoTextarea
+                className="min-h-10"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={
+                  load ? "e.g. restocked for the week" : "e.g. Smith roof leak, Jones gutter"
+                }
+              />
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={props.onClose}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={!canSave} className="min-w-40">
+              {saving
+                ? "Saving…"
+                : load
+                  ? `Load onto ${vehicle?.name ?? "vehicle"}`
+                  : "Return to shop"}
             </Button>
           </div>
         </div>
@@ -823,6 +1237,7 @@ function LedgerTable(props: {
   rows: Awaited<ReturnType<ReturnType<typeof useServerFn<typeof listMovements>>>>;
   loading: boolean;
   role: string | null;
+  locations: InventoryLocation[];
   onChanged: () => void;
   pieceOf: (screenId: string, rowLabel: string) => PieceDef | null;
 }) {
@@ -839,11 +1254,13 @@ function LedgerTable(props: {
       })
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not undo"));
   };
+  const locName = (id: string) => props.locations.find((l) => l.id === id)?.name ?? id;
   const rows = props.rows.filter(
     (r) =>
       !f ||
       r.row_label.toLowerCase().includes(f) ||
       r.category.toLowerCase().includes(f) ||
+      locName(r.location_id).toLowerCase().includes(f) ||
       (r.bid_name ?? "").toLowerCase().includes(f) ||
       (r.created_by_name ?? "").toLowerCase().includes(f) ||
       REASON_LABELS[r.reason as MovementReason]?.toLowerCase().includes(f),
@@ -852,7 +1269,7 @@ function LedgerTable(props: {
     <div className="space-y-3">
       <Input
         className="h-9 max-w-xs"
-        placeholder="Search by product, job, person or reason…"
+        placeholder="Search by product, place, job, person or reason…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -870,6 +1287,7 @@ function LedgerTable(props: {
                 <TableHead>When</TableHead>
                 <TableHead>Who</TableHead>
                 <TableHead>Product</TableHead>
+                <TableHead>Where</TableHead>
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead>What</TableHead>
                 <TableHead>Job</TableHead>
@@ -889,6 +1307,7 @@ function LedgerTable(props: {
                     {priceColLabel(r.price_col) !== "—" ? ` · ${r.price_col}` : ""}
                     <span className="text-muted-foreground"> · {r.category}</span>
                   </TableCell>
+                  <TableCell className="text-xs">{locName(r.location_id)}</TableCell>
                   <TableCell
                     className={`whitespace-nowrap text-right text-xs font-semibold tabular-nums ${r.qty < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
                   >

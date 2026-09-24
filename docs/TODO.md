@@ -47,6 +47,11 @@ the bottom with the commit that closed them.
    Open: Ballard, Clark, Fulton and Martin keep almost no address points (Clark 0 of 16,695;
    Martin 19 of 6,169) — their 911 layer rows likely lack the number/street fields or
    coordinates the reader expects; paste a sample feature from one of them to fix the reader.
+   3b. **Inventory locations (built Sep 24).** Shop + four service vehicles (plates N2X384,
+   08 D4L983, V3C058, 08 995892 — the owner's list had "08 D4L983" twice; confirm the fourth
+   plate). Admins edit `inventory_locations` (name / order / active) in the database for now;
+   an admin screen for vehicles is a small follow-up. Next: a standard load (par list) per
+   vehicle with "restock to par".
 4. **Verify in the browser:** aerial imagery tiles show on the map; the state outline layer
    draws when zoomed in; tap-to-add works on a small shop. Both depend on the state server
    allowing cross-origin tile fetches, which cannot be checked from the build container.

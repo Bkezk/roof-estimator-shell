@@ -35,16 +35,51 @@ export const MOVEMENT_REASONS = [
   "allocated",
   "released",
   "consumed",
+  "transfer_out",
+  "transfer_in",
+  "vehicle_used",
 ] as const;
 export type MovementReason = (typeof MOVEMENT_REASONS)[number];
 export const REASON_LABELS: Record<MovementReason, string> = {
-  leftover: "Leftover from job",
+  leftover: "Put in inventory",
   adjustment: "Count adjustment",
   damaged: "Damaged / written off",
   allocated: "Allocated to bid",
   released: "Released from bid",
   consumed: "Used on job",
+  transfer_out: "Moved out",
+  transfer_in: "Moved in",
+  vehicle_used: "Used from the vehicle",
 };
+
+/**
+ * Where stock sits (owner, Sep 24): the shop is the hub; each service vehicle is a location of
+ * its own. Stock checked out to a vehicle is assumed there until it comes back to the shop
+ * (transfer) or is written off as used on the vehicle. Jobs draw from the shop.
+ */
+export const SHOP_LOCATION_ID = "shop";
+export interface InventoryLocation {
+  id: string;
+  name: string;
+  kind: "shop" | "vehicle";
+  sort: number;
+}
+export const listLocations = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<InventoryLocation[]> => {
+    const { data, error } = await context.supabase
+      .from("inventory_locations")
+      .select("id, name, kind, sort")
+      .eq("active", true)
+      .order("sort");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      kind: l.kind === "vehicle" ? "vehicle" : "shop",
+      sort: l.sort,
+    }));
+  });
 
 /**
  * The unit stock is COUNTED in per screen — the purchase unit the material physically sits in.
@@ -66,6 +101,8 @@ const cellSchema = z.object({
 });
 
 export interface StockRow {
+  /** Where it sits: "shop" or a service vehicle (inventory_locations.id). */
+  location_id: string;
   screen_id: string;
   category: string;
   row_label: string;
@@ -78,6 +115,10 @@ export interface StockRow {
 
 export interface MovementRow {
   id: number;
+  /** Where the entry happened (inventory_locations.id). */
+  location_id: string;
+  /** Links the two halves of a transfer (out of one location, into another). */
+  pair_id: string | null;
   screen_id: string;
   category: string;
   row_label: string;
@@ -115,7 +156,7 @@ export const listStock = createServerFn({ method: "GET" })
     const [{ data, error }, cats, { data: nums }] = await Promise.all([
       sb
         .from("inventory_movements")
-        .select("screen_id, row_label, price_col, qty, unit, created_at, item_no")
+        .select("location_id, screen_id, row_label, price_col, qty, unit, created_at, item_no")
         .order("created_at"),
       categories(sb),
       sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
@@ -123,10 +164,11 @@ export const listStock = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     const byCell = new Map<string, StockRow>();
     for (const m of data ?? []) {
-      const key = `${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
+      const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
       let row = byCell.get(key);
       if (!row) {
         row = {
+          location_id: m.location_id,
           screen_id: m.screen_id,
           category: cats.get(m.screen_id) ?? m.screen_id,
           row_label: m.row_label,
@@ -142,14 +184,23 @@ export const listStock = createServerFn({ method: "GET" })
       row.unit = m.unit;
       row.last_at = m.created_at;
     }
+    const numsByCell = new Map<string, string[]>();
     for (const n of nums ?? []) {
-      const row = byCell.get(`${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`);
-      if (row && !row.item_nos.includes(n.item_no)) row.item_nos.push(n.item_no);
+      const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
+      const list = numsByCell.get(k) ?? [];
+      if (!list.includes(n.item_no)) list.push(n.item_no);
+      numsByCell.set(k, list);
     }
+    for (const row of byCell.values())
+      row.item_nos =
+        numsByCell.get(`${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`) ?? [];
     return [...byCell.values()]
       .map((r) => ({ ...r, on_hand: Math.round(r.on_hand * 1000) / 1000 }))
       .sort(
-        (a, b) => a.category.localeCompare(b.category) || a.row_label.localeCompare(b.row_label),
+        (a, b) =>
+          a.location_id.localeCompare(b.location_id) ||
+          a.category.localeCompare(b.category) ||
+          a.row_label.localeCompare(b.row_label),
       );
   });
 
@@ -183,6 +234,8 @@ export const listMovements = createServerFn({ method: "GET" })
     const now = Date.now();
     return (rows ?? []).map((r) => ({
       id: r.id,
+      location_id: r.location_id,
+      pair_id: r.pair_id,
       can_undo:
         me?.role === "admin" ||
         (r.created_by === context.userId && now - Date.parse(r.created_at) < 24 * 3600 * 1000),
@@ -213,8 +266,13 @@ const addSchema = cellSchema.extend({
   in_pieces: z.boolean().optional(),
   /** Ignored if sent: the unit is the product screen's stock unit (STOCK_UNIT_BY_SCREEN). */
   unit: z.string().max(20).optional(),
-  /** consumed = pulled from stock for a bid (subtracts); released = put back (adds). Both need bid_id. */
-  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released"]),
+  /**
+   * consumed = pulled from stock for a bid (subtracts); released = put back (adds). Both need
+   * bid_id. vehicle_used = written off a service vehicle (subtracts, no bid).
+   */
+  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released", "vehicle_used"]),
+  /** Where: "shop" (default) or a service vehicle's inventory_locations.id. */
+  location_id: z.string().min(1).max(60).optional(),
   bid_id: z.string().uuid().nullable().optional(),
   counted_note: z.string().max(300).nullable().optional(),
   note: z.string().max(1000).nullable().optional(),
@@ -242,10 +300,19 @@ export const addMovement = createServerFn({ method: "POST" })
     // admin) records anything (adjustments, write-offs, returns).
     if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
       throw new Error("Forbidden: Inventory access required");
-    if (!canAccess(me, "estimate") && data.reason !== "leftover" && data.reason !== "consumed")
+    if (
+      !canAccess(me, "estimate") &&
+      data.reason !== "leftover" &&
+      data.reason !== "consumed" &&
+      data.reason !== "vehicle_used"
+    )
       throw new Error("Only an estimator can adjust counts or write stock off");
     if (error) throw new Error(error.message);
     if (!screen) throw new Error("Catalog screen not found");
+    const locationId = data.location_id ?? SHOP_LOCATION_ID;
+    const location = await locationOf(sb, locationId);
+    if (data.reason === "vehicle_used" && location.kind !== "vehicle")
+      throw new Error("Pick the service vehicle the material was used from");
     const d = screen.data as {
       kind?: string;
       columns?: string[];
@@ -284,23 +351,19 @@ export const addMovement = createServerFn({ method: "POST" })
       counted = packsFromPieces(data.qty, piece);
     }
     let qty = Math.abs(counted);
-    if (data.reason === "damaged" || data.reason === "consumed") qty = -qty;
+    if (data.reason === "damaged" || data.reason === "consumed" || data.reason === "vehicle_used")
+      qty = -qty;
     if (data.reason === "adjustment") qty = counted;
     if (qty === 0) throw new Error("Quantity cannot be zero");
     if ((data.reason === "consumed" || data.reason === "released") && !data.bid_id)
       throw new Error("Pick the job this material is for");
-    if (data.reason === "consumed") {
-      // Never pull more than the shelf holds (on hand = the sum of the cell's entries).
-      const { data: prior, error: pErr } = await sb
-        .from("inventory_movements")
-        .select("qty")
-        .eq("screen_id", data.screen_id)
-        .eq("row_label", data.row_label)
-        .eq("price_col", data.price_col);
-      if (pErr) throw new Error(pErr.message);
-      const onHand = (prior ?? []).reduce((n, r) => n + Number(r.qty), 0);
+    if (data.reason === "consumed" || data.reason === "vehicle_used") {
+      // Never take more than the location holds (on hand = the sum of the cell's entries there).
+      const onHand = await onHandAt(sb, locationId, data);
       if (-qty > onHand + 1e-9)
-        throw new Error(`Only ${Math.round(onHand * 1000) / 1000} ${unit} on the shelf`);
+        throw new Error(
+          `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}`,
+        );
     }
     let bidName: string | null = null;
     if (data.bid_id) {
@@ -320,6 +383,7 @@ export const addMovement = createServerFn({ method: "POST" })
     const { data: inserted, error: insErr } = await sb
       .from("inventory_movements")
       .insert({
+        location_id: locationId,
         screen_id: data.screen_id,
         row_label: data.row_label,
         price_col: data.price_col,
@@ -343,9 +407,201 @@ export const addMovement = createServerFn({ method: "POST" })
     return { ok: true, id: inserted.id, qty, unit };
   });
 
+async function locationOf(sb: SupabaseClient<Database>, id: string): Promise<InventoryLocation> {
+  const { data, error } = await sb
+    .from("inventory_locations")
+    .select("id, name, kind, sort")
+    .eq("id", id)
+    .eq("active", true)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("That location is not set up");
+  return {
+    id: data.id,
+    name: data.name,
+    kind: data.kind === "vehicle" ? "vehicle" : "shop",
+    sort: data.sort,
+  };
+}
+
+/** On hand for one cell at one location: the sum of its entries there. */
+async function onHandAt(
+  sb: SupabaseClient<Database>,
+  locationId: string,
+  cell: { screen_id: string; row_label: string; price_col: string },
+): Promise<number> {
+  const { data, error } = await sb
+    .from("inventory_movements")
+    .select("qty")
+    .eq("location_id", locationId)
+    .eq("screen_id", cell.screen_id)
+    .eq("row_label", cell.row_label)
+    .eq("price_col", cell.price_col);
+  if (error) throw new Error(error.message);
+  return (data ?? []).reduce((n, r) => n + Number(r.qty), 0);
+}
+
+/** The stock unit and pieces-per-pack of a catalog cell (the same rules addMovement applies). */
+async function cellUnit(
+  sb: SupabaseClient<Database>,
+  cell: { screen_id: string; row_label: string; price_col: string },
+): Promise<{ unit: string; piece: PieceDef | null }> {
+  const { data: screen, error } = await sb
+    .from("pricing_catalog")
+    .select("data")
+    .eq("id", cell.screen_id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!screen) throw new Error("Catalog screen not found");
+  const d = screen.data as {
+    kind?: string;
+    columns?: string[];
+    rows?: Record<string, unknown>[];
+    products?: { name: string; unit_type?: unknown }[];
+  };
+  let unit = stockUnitFor(cell.screen_id);
+  let piece: PieceDef | null = null;
+  if (d.kind === "adhesives") {
+    const product = (d.products ?? []).find((p) => p.name === cell.row_label);
+    if (!product) throw new Error(`"${cell.row_label}" is not on the Adhesives screen`);
+    if (typeof product.unit_type === "string" && product.unit_type.trim()) {
+      unit = product.unit_type.trim();
+      piece = pieceDefFromUnitType(product.unit_type);
+    }
+  } else {
+    const cols = d.columns ?? [];
+    const keys = rowKeys(cols, d.rows ?? []);
+    const rowIdx = keys.indexOf(cell.row_label);
+    if (rowIdx < 0) throw new Error(`"${cell.row_label}" is not on this screen`);
+    if (!cols.includes(cell.price_col) || cell.price_col === labelColOf(cols))
+      throw new Error(`"${cell.price_col}" is not a price column on this screen`);
+    const packCol = PACK_QTY_COLS.find((c) => cols.includes(c));
+    const packRaw = packCol ? (d.rows ?? [])[rowIdx]?.[packCol] : undefined;
+    const packQty =
+      typeof packRaw === "number" ? packRaw : packRaw != null ? Number(packRaw) : null;
+    piece = pieceDefFromPack(packCol, Number.isFinite(packQty) ? packQty : null);
+  }
+  return { unit, piece };
+}
+
+const transferSchema = cellSchema.extend({
+  from_location_id: z.string().min(1).max(60),
+  to_location_id: z.string().min(1).max(60),
+  /** Positive, as counted (pieces when in_pieces; else whole packs). */
+  qty: z.number().finite().min(0),
+  in_pieces: z.boolean().optional(),
+  /**
+   * On a return to the shop: how much of what was on the vehicle did NOT come back and is
+   * written off as used on the vehicle (same counting unit as qty). Optional.
+   */
+  used_qty: z.number().finite().min(0).optional(),
+  note: z.string().max(1000).nullable().optional(),
+});
+
+/**
+ * Move stock between locations: a pair of entries sharing pair_id (−qty where it left, +qty
+ * where it arrived). Loading a service vehicle is shop → vehicle; a return is vehicle → shop,
+ * where `used_qty` writes off what did not come back as used on the vehicle. Never moves more
+ * than the source location holds. Inventory access is enough (RLS matches).
+ */
+export const transferStock = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => transferSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const sb = context.supabase;
+    const { data: me } = await sb
+      .from("profiles")
+      .select("role, access, full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
+      throw new Error("Forbidden: Inventory access required");
+    if (data.from_location_id === data.to_location_id)
+      throw new Error("Pick two different locations");
+    const [from, to, { unit, piece }] = await Promise.all([
+      locationOf(sb, data.from_location_id),
+      locationOf(sb, data.to_location_id),
+      cellUnit(sb, data),
+    ]);
+    const toPacks = (n: number) => {
+      if (!data.in_pieces) return n;
+      if (!piece)
+        throw new Error("This product has no pieces-per-pack on the catalog — count whole packs");
+      return packsFromPieces(n, piece);
+    };
+    const moved = toPacks(data.qty);
+    const used = toPacks(data.used_qty ?? 0);
+    if (moved <= 0 && used <= 0) throw new Error("Quantity cannot be zero");
+    const onHand = await onHandAt(sb, from.id, data);
+    if (moved + used > onHand + 1e-9)
+      throw new Error(
+        `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${from.kind === "shop" ? "on the shelf" : `on ${from.name}`}`,
+      );
+    const { data: itemRows } = await sb
+      .from("catalog_item_numbers")
+      .select("item_no")
+      .eq("screen_id", data.screen_id)
+      .eq("row_label", data.row_label)
+      .eq("price_col", data.price_col)
+      .limit(1);
+    const base = {
+      screen_id: data.screen_id,
+      row_label: data.row_label,
+      price_col: data.price_col,
+      item_no: itemRows?.[0]?.item_no ?? null,
+      unit,
+      note: data.note ?? null,
+      created_by: context.userId,
+      created_by_name: me.full_name?.trim() || me.email || null,
+    };
+    const pairId = crypto.randomUUID();
+    const counted = data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null;
+    const rows: Database["public"]["Tables"]["inventory_movements"]["Insert"][] = [];
+    if (moved > 0) {
+      rows.push({
+        ...base,
+        location_id: from.id,
+        qty: -moved,
+        reason: "transfer_out",
+        pair_id: pairId,
+        counted_note: counted ? `${counted} → ${to.name}` : `→ ${to.name}`,
+      });
+      rows.push({
+        ...base,
+        location_id: to.id,
+        qty: moved,
+        reason: "transfer_in",
+        pair_id: pairId,
+        counted_note: counted ? `${counted} ← ${from.name}` : `← ${from.name}`,
+      });
+    }
+    if (used > 0) {
+      if (from.kind !== "vehicle")
+        throw new Error("Only a service vehicle can write off what it used");
+      rows.push({
+        ...base,
+        location_id: from.id,
+        qty: -used,
+        reason: "vehicle_used",
+        pair_id: moved > 0 ? pairId : null,
+        counted_note:
+          data.in_pieces && piece
+            ? `${data.used_qty ?? 0} ${plural(data.used_qty ?? 0, piece.name)} not returned`
+            : "not returned",
+      });
+    }
+    const { data: inserted, error: insErr } = await sb
+      .from("inventory_movements")
+      .insert(rows)
+      .select("id");
+    if (insErr) throw new Error(insErr.message);
+    return { ok: true, ids: (inserted ?? []).map((r) => r.id), moved, used, unit, pair_id: pairId };
+  });
+
 /**
  * Undo: remove an entry you recorded in the last 24 hours (a wrong number or job); admins may
- * remove any. RLS enforces the same rule. Stock on hand and the bid's order list follow.
+ * remove any. RLS enforces the same rule. Stock on hand and the bid's order list follow. A
+ * transfer's two halves go together.
  */
 export const undoMovement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -354,7 +610,7 @@ export const undoMovement = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: row, error } = await sb
       .from("inventory_movements")
-      .select("id, created_by, created_at")
+      .select("id, created_by, created_at, pair_id")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -368,10 +624,10 @@ export const undoMovement = createServerFn({ method: "POST" })
     const fresh = Date.now() - Date.parse(row.created_at) < 24 * 3600 * 1000;
     if (me?.role !== "admin" && !(mine && fresh))
       throw new Error("Only your own entries from the last 24 hours can be undone");
-    const { error: delErr, count } = await sb
-      .from("inventory_movements")
-      .delete({ count: "exact" })
-      .eq("id", data.id);
+    const del = sb.from("inventory_movements").delete({ count: "exact" });
+    const { error: delErr, count } = await (row.pair_id
+      ? del.eq("pair_id", row.pair_id)
+      : del.eq("id", data.id));
     if (delErr) throw new Error(delErr.message);
     if (!count) throw new Error("Could not undo that entry");
     return { ok: true };
@@ -434,7 +690,13 @@ export const deleteMovement = createServerFn({ method: "POST" })
       .eq("id", context.userId)
       .maybeSingle();
     if (me?.role !== "admin") throw new Error("Forbidden: admin access required");
-    const { error } = await context.supabase.from("inventory_movements").delete().eq("id", data.id);
+    const { data: row } = await context.supabase
+      .from("inventory_movements")
+      .select("pair_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    const del = context.supabase.from("inventory_movements").delete();
+    const { error } = await (row?.pair_id ? del.eq("pair_id", row.pair_id) : del.eq("id", data.id));
     if (error) throw new Error(error.message);
     return { ok: true };
   });

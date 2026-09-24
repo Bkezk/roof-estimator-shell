@@ -612,6 +612,30 @@ export type Database = {
         };
         Relationships: [];
       };
+      inventory_locations: {
+        Row: {
+          active: boolean;
+          id: string;
+          kind: string;
+          name: string;
+          sort: number;
+        };
+        Insert: {
+          active?: boolean;
+          id: string;
+          kind: string;
+          name: string;
+          sort?: number;
+        };
+        Update: {
+          active?: boolean;
+          id?: string;
+          kind?: string;
+          name?: string;
+          sort?: number;
+        };
+        Relationships: [];
+      };
       inventory_movements: {
         Row: {
           bid_id: string | null;
@@ -622,7 +646,9 @@ export type Database = {
           created_by_name: string | null;
           id: number;
           item_no: string | null;
+          location_id: string;
           note: string | null;
+          pair_id: string | null;
           price_col: string;
           qty: number;
           reason: string;
@@ -639,7 +665,9 @@ export type Database = {
           created_by_name?: string | null;
           id?: number;
           item_no?: string | null;
+          location_id?: string;
           note?: string | null;
+          pair_id?: string | null;
           price_col: string;
           qty: number;
           reason: string;
@@ -656,7 +684,9 @@ export type Database = {
           created_by_name?: string | null;
           id?: number;
           item_no?: string | null;
+          location_id?: string;
           note?: string | null;
+          pair_id?: string | null;
           price_col?: string;
           qty?: number;
           reason?: string;
@@ -670,6 +700,13 @@ export type Database = {
             columns: ["bid_id"];
             isOneToOne: false;
             referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "inventory_movements_location_id_fkey";
+            columns: ["location_id"];
+            isOneToOne: false;
+            referencedRelation: "inventory_locations";
             referencedColumns: ["id"];
           },
         ];

@@ -206,8 +206,9 @@ export interface OrderListInput {
 const isPackUnit = (unit: string) => unit !== "sq ft" && unit !== "ft";
 
 export function buildOrderList(i: OrderListInput): OrderLine[] {
+  // Only the shop's stock counts for a job: what is on a service vehicle is assumed used there.
   const stockByCell = new Map<string, StockRow>();
-  for (const r of i.stock)
+  for (const r of i.stock.filter((s) => s.location_id === "shop"))
     stockByCell.set(`${r.screen_id}\u0000${r.row_label}\u0000${r.price_col}`, r);
   const pulledByCell = new Map<string, number>();
   for (const m of i.pulls ?? []) {

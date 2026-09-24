@@ -4909,7 +4909,7 @@ function EstimatePage() {
                             search={{ bid: bidId }}
                             className="underline underline-offset-2"
                           >
-                            Record leftovers for this bid
+                            Put this bid's leftovers in inventory
                           </Link>
                         </>
                       ) : (

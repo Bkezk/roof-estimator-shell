@@ -164,6 +164,7 @@ describe("order list — matching engine lines to stock cells", () => {
       // 1.25 cases left on the shelf after this bid pulled 0.75
       stock: [
         {
+          location_id: "shop",
           screen_id: "duro_last:adhesives",
           category: "Adhesives",
           row_label: "Duro-Fleece Adhesive(cartridge)",
@@ -177,6 +178,8 @@ describe("order list — matching engine lines to stock cells", () => {
       pulls: [
         {
           id: 1,
+          location_id: "shop",
+          pair_id: null,
           screen_id: "duro_last:adhesives",
           category: "Adhesives",
           row_label: "Duro-Fleece Adhesive(cartridge)",
@@ -194,6 +197,8 @@ describe("order list — matching engine lines to stock cells", () => {
         },
         {
           id: 2,
+          location_id: "shop",
+          pair_id: null,
           screen_id: "duro_last:adhesives",
           category: "Adhesives",
           row_label: "Duro-Fleece Adhesive(cartridge)",
@@ -253,6 +258,7 @@ describe("order list — matching engine lines to stock cells", () => {
       targets: t,
       stock: [
         {
+          location_id: "shop",
           screen_id: "duro_last:drip_edge",
           category: "Drip Edge",
           row_label: 'Drip Edge 2"',
@@ -277,6 +283,7 @@ describe("order list — matching engine lines to stock cells", () => {
   it("needs less on hand; pack units round up; unmatched lines still list", () => {
     const stock: StockRow[] = [
       {
+        location_id: "shop",
         screen_id: "duro_last:duro_last_membrane",
         category: "Duro-Last Membrane",
         row_label: "Duro-Tuff - 60",
@@ -287,6 +294,7 @@ describe("order list — matching engine lines to stock cells", () => {
         item_nos: [],
       },
       {
+        location_id: "shop",
         screen_id: "duro_last:fasteners_and_bits",
         category: "Fasteners & Bits",
         row_label: '3" [Spade]',
@@ -297,6 +305,7 @@ describe("order list — matching engine lines to stock cells", () => {
         item_nos: [],
       },
       {
+        location_id: "shop",
         screen_id: "duro_last:adhesives",
         category: "Adhesives",
         row_label: "Duro-Fleece Adhesive(cartridge)",
