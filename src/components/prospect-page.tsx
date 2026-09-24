@@ -1199,7 +1199,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                     <CardDescription className="text-xs">
                       {form.id
                         ? summaryLine(form, rect)
-                        : "Type what you know; anything can be left blank."}
+                        : "Saves as a prospect in the Buildings list. Type what you know; anything can be left blank."}
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -1227,13 +1227,23 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                         </Link>
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setForm(null);
+                        setSelectedId(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
                     {canWrite && (
                       <Button
                         size="sm"
                         onClick={() => save.mutate(form)}
                         disabled={save.isPending || (!form.name.trim() && !form.address1.trim())}
                       >
-                        Save
+                        {form.id ? "Save" : "Save as prospect"}
                       </Button>
                     )}
                     {form.id && canWrite && (

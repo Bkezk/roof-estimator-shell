@@ -9,12 +9,19 @@ import {
   DELETED_BID_RETENTION_DAYS,
   deleteBid,
   listBids,
+  setBidStatus,
   listDeletedBids,
   purgeBid,
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
-import { BID_STATUSES, STATUS_LABELS, STATUS_BADGE_CLASSES, asBidStatus } from "@/lib/bid-status";
+import {
+  BID_STATUSES,
+  STATUS_LABELS,
+  STATUS_BADGE_CLASSES,
+  asBidStatus,
+  type BidStatus,
+} from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -108,11 +115,21 @@ function BidsPage() {
     setCombineSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const qc = useQueryClient();
   const deleteBidFn = useServerFn(deleteBid);
+  const setStatusFn = useServerFn(setBidStatus);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["bids"] });
     void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
   };
+  const setStatus = useMutation({
+    mutationFn: (v: { id: string; status: BidStatus }) => setStatusFn({ data: v }),
+    onSuccess: (b) => {
+      toast.success(`Status: ${STATUS_LABELS[asBidStatus(b.status)]}`);
+      refresh();
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Could not change status"),
+  });
   const del = useMutation({
     mutationFn: (id: string) => deleteBidFn({ data: { id } }),
     onSuccess: () => {
@@ -444,11 +461,31 @@ function BidsPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6">
+                  {/* Status changes here save at once and stamp "Last saved … by". */}
+                  <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                    <Select
+                      value={st}
+                      onValueChange={(v) =>
+                        setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                      }
+                    >
+                      <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {BID_STATUSES.map((v) => (
+                          <SelectItem key={v} value={v}>
+                            {STATUS_LABELS[v]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   {/* Stored at save time — the estimator recomputes live, so an engine change
                       (or an empty-data row) can differ from this until the bid is re-saved. */}
                   <span
-                    className="text-sm font-semibold tabular-nums"
+                    className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
                     title="Total as of the last save — open the bid for the live figure"
                   >
                     {money(Number(bid.grand_total ?? 0))}

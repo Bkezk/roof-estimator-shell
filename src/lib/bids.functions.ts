@@ -102,6 +102,30 @@ export const saveBid = createServerFn({ method: "POST" })
     return bid;
   });
 
+/** Change a bid's status from the list (Bids page dropdown); stamps who and when like a save. */
+export const setBidStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ id: z.string().uuid(), status: z.enum(BID_STATUSES) }).parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: me } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const { data: bid, error } = await context.supabase
+      .from("bids")
+      .update({
+        status: data.status,
+        updated_at: new Date().toISOString(),
+        updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
+      })
+      .eq("id", data.id)
+      .select("id, status, updated_at, updated_by_name")
+      .single();
+    if (error) throw new Error(error.message);
+    return bid;
+  });
+
 const getBidSchema = z.object({ id: z.string().uuid() });
 
 /**
