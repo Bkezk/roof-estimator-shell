@@ -37,3 +37,5 @@ own route group, access flag, and folder. The plan is `docs/roofing-ops-portal-b
    salesperson: the map, the building's size and address and the "New bid" button are on
    screen at once, and anything that needs a layer URL, a filter or a preview lives behind one
    setup button with an Advanced section. Judge a screen by clicks-to-useful-sales-info.
+
+The owner's running to-do list is `docs/TODO.md`; read it at the start of a session and move items to Done with the closing commit.
