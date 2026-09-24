@@ -545,8 +545,15 @@ async function loadCounty(county: string) {
  */
 async function signIn(): Promise<void> {
   if (serviceKey) return;
-  const { error } = await sb.auth.signInWithPassword({ email: email!, password: password! });
-  if (error) throw new Error(`Could not sign in as ${email}: ${error.message}`);
+  // The auth gateway answers "Gateway Timeout" while the database instance is catching its
+  // breath after a heavy run (run 8 died on its very first request), so try for a few minutes.
+  for (let attempt = 1; ; attempt++) {
+    const { error } = await sb.auth.signInWithPassword({ email: email!, password: password! });
+    if (!error) break;
+    if (attempt >= 6) throw new Error(`Could not sign in as ${email}: ${error.message}`);
+    console.log(`sign-in failed (${error.message}); retrying in ${attempt * 30} s`);
+    await new Promise((r) => setTimeout(r, attempt * 30_000));
+  }
   await sb.auth.startAutoRefresh();
 }
 
