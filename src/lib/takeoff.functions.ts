@@ -13,7 +13,18 @@ import { assertPageAccess } from "@/lib/auth.functions";
 import type { TakeoffObject, TakeoffPage, TakeoffSetup } from "@/lib/takeoff/model";
 
 export type TakeoffRow = Database["public"]["Tables"]["takeoffs"]["Row"];
+/** The bid a takeoff last produced (its name and status), when the reader may see bids. */
+export interface LinkedBid {
+  id: string;
+  name: string;
+  status: string;
+}
+/** A takeoff row with its linked bid joined (null when none, or not visible to this user). */
+export type TakeoffWithBid = TakeoffRow & { bid: LinkedBid | null };
 export const TAKEOFF_BUCKET = "takeoffs";
+/** Soft-deleted takeoffs are kept this long, then purged (lazily, whenever the bin is listed). */
+export const DELETED_TAKEOFF_RETENTION_DAYS = 30;
+const WITH_BID = "*, bid:bids!takeoffs_bid_id_fkey(id, name, status)";
 
 const pageSchema = z.object({
   index: z.number().int().min(0),
@@ -54,6 +65,18 @@ const readAccess = async (ctx: {
 };
 const writeAccess = (ctx: { supabase: Parameters<typeof assertPageAccess>[0]; userId: string }) =>
   assertPageAccess(ctx.supabase, ctx.userId, "takeoff");
+/** Who is saving — shown on the list as "Last updated … by <name>". */
+const meName = async (ctx: {
+  supabase: Parameters<typeof assertPageAccess>[0];
+  userId: string;
+}): Promise<string | null> => {
+  const { data } = await ctx.supabase
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  return (data?.full_name ?? "").trim() || data?.email || null;
+};
 
 /** The typed view of a row's JSON columns (the row itself keeps `Json`). */
 export interface TakeoffDoc {
@@ -79,31 +102,67 @@ export function storageFileName(name: string): string {
 
 export const listTakeoffs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<TakeoffRow[]> => {
+  .handler(async ({ context }): Promise<TakeoffWithBid[]> => {
     await readAccess(context);
     const { data, error } = await context.supabase
       .from("takeoffs")
-      .select("*")
+      .select(WITH_BID)
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(500);
     if (error) throw new Error(error.message);
+    return (data ?? []) as unknown as TakeoffWithBid[];
+  });
+
+/** The "Recently deleted" bin: soft-deleted takeoffs still inside the retention window. */
+export const listDeletedTakeoffs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<TakeoffRow[]> => {
+    await readAccess(context);
+    const cutoff = new Date(
+      Date.now() - DELETED_TAKEOFF_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    // Purge anything past the window (the row; its file stays in the bucket until an admin
+    // clears storage) before listing what is left.
+    await context.supabase
+      .from("takeoffs")
+      .delete()
+      .not("deleted_at", "is", null)
+      .lt("deleted_at", cutoff);
+    const { data, error } = await context.supabase
+      .from("takeoffs")
+      .select("*")
+      .not("deleted_at", "is", null)
+      .order("deleted_at", { ascending: false });
+    if (error) throw new Error(error.message);
     return data ?? [];
+  });
+
+export const restoreTakeoff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<void> => {
+    await writeAccess(context);
+    const { error } = await context.supabase
+      .from("takeoffs")
+      .update({ deleted_at: null })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
   });
 
 export const getTakeoff = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<TakeoffRow | null> => {
+  .handler(async ({ data, context }): Promise<TakeoffWithBid | null> => {
     await readAccess(context);
     const { data: row, error } = await context.supabase
       .from("takeoffs")
-      .select("*")
+      .select(WITH_BID)
       .eq("id", data.id)
       .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new Error(error.message);
-    return row;
+    return (row as unknown as TakeoffWithBid | null) ?? null;
   });
 
 /**
@@ -136,6 +195,7 @@ export const createTakeoff = createServerFn({ method: "POST" })
         pages: data.pages as unknown as Json,
         building_id: data.building_id ?? null,
         created_by: context.userId,
+        updated_by_name: await meName(context),
       })
       .select("*")
       .single();
@@ -171,7 +231,9 @@ export const saveTakeoff = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<TakeoffRow> => {
     await writeAccess(context);
     const { id, ...rest } = data;
-    const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {};
+    const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {
+      updated_by_name: await meName(context),
+    };
     if (rest.name !== undefined) patch.name = rest.name;
     if (rest.status !== undefined) patch.status = rest.status;
     if (rest.pages !== undefined) patch.pages = rest.pages as unknown as Json;

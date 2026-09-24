@@ -425,6 +425,8 @@ export const LEGACY_NDL_OTHERS_LABOR_DROPPED = true;
 export interface ParapetInput {
   id: string;
   name: string;
+  /** Seeded from a Takeoff parapet run (docs/planswift-research.md §4.6); an update from the takeoff replaces it. */
+  fromTakeoff?: true;
   lengthFt: number;
   heightBand: string; // picked from the seeded wall-height bands
   deckType: string; // labor deck name (Wood/Steel/…), bridged via TEAROFF_DECK_BY_LABOR_DECK
@@ -574,6 +576,8 @@ const parapetGirthInches = (p: ParapetInput): number =>
 export interface CurbInput {
   id: string;
   name: string;
+  /** Seeded from a Takeoff curb count; an update from the takeoff replaces it. */
+  fromTakeoff?: true;
   quantity: number;
   widthIn: number; // footprint A (inches)
   lengthIn: number; // footprint B (inches)

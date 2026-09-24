@@ -47,7 +47,7 @@ import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estima
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
-import { bidSeedFromTakeoff } from "@/lib/takeoff/create-bid";
+import { applyTakeoffToBid, bidSeedFromTakeoff } from "@/lib/takeoff/create-bid";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
@@ -967,13 +967,18 @@ function EstimatePage() {
   const { data: takeoffRow, error: takeoffError } = useQuery({
     queryKey: ["takeoff-seed", takeoffParam],
     queryFn: () => getTakeoffFn({ data: { id: takeoffParam! } }),
-    enabled: authed && !bidParam && !!takeoffParam,
+    enabled: authed && !!takeoffParam,
   });
   const takeoffSeededFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!takeoffParam || takeoffRow === undefined || takeoffSeededFor.current === takeoffParam)
-      return;
-    takeoffSeededFor.current = takeoffParam;
+    if (!takeoffParam || takeoffRow === undefined) return;
+    // With ?bid= too, the takeoff UPDATES that saved bid (owner, Sep 24): wait until the bid is
+    // hydrated, then replace only what the drawing owns and keep everything else.
+    const updating = !!bidParam;
+    if (updating && hydratedFor.current !== bidParam) return;
+    const seedKey = `${bidParam ?? ""}|${takeoffParam}`;
+    if (takeoffSeededFor.current === seedKey) return;
+    takeoffSeededFor.current = seedKey;
     if (!takeoffRow) {
       toast.error("No takeoff with this id is visible to you.");
       return;
@@ -982,6 +987,33 @@ function EstimatePage() {
       const doc = takeoffDoc(takeoffRow);
       const q = takeoffQuantities(doc.pages, doc.objects);
       const seed = bidSeedFromTakeoff(doc.setup, q, { takeoffName: takeoffRow.name });
+      if (updating) {
+        const r = applyTakeoffToBid(
+          { sections, parapets, curbs, pipeStacks: accessoriesCalc.pipeStacks },
+          seed,
+          { newSection, newParapet, newCurb },
+        );
+        setSections(r.sections.map((x) => ({ ...x, layers: sectionLayers(x) })));
+        setParapets(r.parapets);
+        setCurbs(r.curbs);
+        setAccessoriesCalc((prev) => ({ ...prev, pipeStacks: r.pipeStacks }));
+        setTakeoffInfo({
+          takeoffId: takeoffRow.id,
+          takeoffName: takeoffRow.name,
+          createdAt: new Date().toISOString(),
+          summary: `Updated from the takeoff on ${new Date().toLocaleString()}: ${
+            r.changes.length ? r.changes.join(" ") : "nothing in the drawing changed."
+          } ${seed.summary}`,
+          unmapped: seed.unmapped,
+        });
+        setLinkedTakeoffId(takeoffRow.id);
+        toast.success(
+          `Quantities updated from the takeoff (${r.changes.length} change${r.changes.length === 1 ? "" : "s"}). Review the notice, then save.`,
+        );
+        // Drop ?takeoff= so a reload shows the saved bid as it is, not a second update.
+        void navigate({ to: "/estimate", search: { bid: bidParam }, replace: true });
+        return;
+      }
       const secDefaults = { ...sectionDefaults, ...seed.sectionDefaults };
       const info: TakeoffInfo = {
         takeoffId: takeoffRow.id,
@@ -1016,8 +1048,8 @@ function EstimatePage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not start a bid from this takeoff.");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per ?takeoff value
-  }, [takeoffRow, takeoffParam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per ?takeoff (and ?bid) value
+  }, [takeoffRow, takeoffParam, bidParam, hydrationStamp]);
   useEffect(() => {
     if (takeoffError)
       toast.error(

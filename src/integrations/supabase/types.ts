@@ -1456,6 +1456,7 @@ export type Database = {
           status: string;
           underlay_kind: string;
           updated_at: string;
+          updated_by_name: string | null;
         };
         Insert: {
           bid_id?: string | null;
@@ -1474,6 +1475,7 @@ export type Database = {
           status?: string;
           underlay_kind: string;
           updated_at?: string;
+          updated_by_name?: string | null;
         };
         Update: {
           bid_id?: string | null;
@@ -1492,6 +1494,7 @@ export type Database = {
           status?: string;
           underlay_kind?: string;
           updated_at?: string;
+          updated_by_name?: string | null;
         };
         Relationships: [
           {

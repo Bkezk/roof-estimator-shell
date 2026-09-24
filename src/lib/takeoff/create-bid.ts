@@ -102,7 +102,11 @@ export function bidSeedFromTakeoff(
   const parapets: Array<Partial<ParapetInput>> = q.linears
     .filter((l) => l.role === "parapet")
     .map((l) => {
-      const p: Partial<ParapetInput> = { name: l.name, lengthFt: round1(l.lengthFt) };
+      const p: Partial<ParapetInput> = {
+        name: l.name,
+        lengthFt: round1(l.lengthFt),
+        fromTakeoff: true,
+      };
       if (parapetDeck) p.deckType = parapetDeck;
       if (l.heightIn !== undefined && l.heightIn > 0) p.verticalInches = l.heightIn;
       if (setup.parapet?.heightBand) p.heightBand = setup.parapet.heightBand;
@@ -112,7 +116,7 @@ export function bidSeedFromTakeoff(
   const curbs: Array<Partial<CurbInput>> = q.counts
     .filter((c) => c.role === "curb")
     .map((c) => {
-      const k: Partial<CurbInput> = { name: c.name, quantity: c.qty };
+      const k: Partial<CurbInput> = { name: c.name, quantity: c.qty, fromTakeoff: true };
       if (c.widthIn) k.widthIn = c.widthIn;
       if (c.lengthIn) k.lengthIn = c.lengthIn;
       if (setup.deckType) k.deckType = setup.deckType;
@@ -191,4 +195,141 @@ export function bidSeedFromTakeoff(
   if (setup.attachment) seed.attachment = setup.attachment;
   if (setup.membraneAdhesiveName) seed.membraneAdhesiveName = setup.membraneAdhesiveName;
   return seed;
+}
+
+/** Pipe stack rows the seed creates carry this id prefix so an update can replace them. */
+export const TAKEOFF_PIPE_ID_PREFIX = "takeoff-pipe-";
+
+/**
+ * Apply a re-measured takeoff onto an EXISTING bid (owner, Sep 24: "update the existing bid
+ * linked to it"). Only what the drawing owns changes:
+ *  - measured sections (`measured.source === "takeoff"`): matched by name to the new seed; a
+ *    match keeps every material / labor field the estimator set and takes the new geometry
+ *    (length, width, edges, corners, outline, notes); a new name is added through `newSection`;
+ *    a measured section no longer in the drawing is removed. Typed sections are untouched.
+ *  - parapets / curbs flagged `fromTakeoff`: matched by name the same way (parapets keep their
+ *    profile and options, take length and wall height; curbs keep their style, take quantity and
+ *    footprint); hand-added ones are untouched.
+ *  - pipe stacks with the takeoff id prefix are replaced by the seed's.
+ * Bid-level defaults, pricing, accessories, customer and everything else are left alone.
+ */
+export function applyTakeoffToBid(
+  bid: {
+    sections: BidSectionInput[];
+    parapets?: ParapetInput[] | undefined;
+    curbs?: CurbInput[] | undefined;
+    pipeStacks?: PipeStackEntry[] | undefined;
+  },
+  seed: TakeoffBidSeed,
+  make: {
+    newSection: (defaults: Partial<BidSectionInput>) => BidSectionInput;
+    newParapet: (defaults: Partial<ParapetInput>) => ParapetInput;
+    newCurb: (defaults: Partial<CurbInput>) => CurbInput;
+  },
+): {
+  sections: BidSectionInput[];
+  parapets: ParapetInput[];
+  curbs: CurbInput[];
+  pipeStacks: PipeStackEntry[];
+  changes: string[];
+} {
+  const changes: string[] = [];
+  const key = (n: string | undefined) => (n ?? "").trim().toLowerCase();
+
+  // Sections
+  const seedByName = new Map(seed.sections.map((o) => [key(o.name), o] as const));
+  const used = new Set<string>();
+  const sections: BidSectionInput[] = [];
+  for (const s of bid.sections) {
+    if (s.measured?.source !== "takeoff") {
+      sections.push(s);
+      continue;
+    }
+    const o = seedByName.get(key(s.name));
+    if (!o || used.has(key(s.name))) {
+      changes.push(`Removed section "${s.name}" (no longer in the drawing).`);
+      continue;
+    }
+    used.add(key(s.name));
+    const next: BidSectionInput = { ...s };
+    if (o.length !== undefined) next.length = o.length;
+    if (o.width !== undefined) next.width = o.width;
+    if (o.edges) next.edges = o.edges;
+    if (o.perimCorners) next.perimCorners = o.perimCorners;
+    if (o.measured) next.measured = o.measured;
+    if (o.notes !== undefined) next.notes = o.notes;
+    sections.push(next);
+    changes.push(`Re-measured section "${s.name}".`);
+  }
+  for (const o of seed.sections) {
+    if (used.has(key(o.name))) continue;
+    used.add(key(o.name));
+    sections.push(make.newSection({ ...seed.sectionDefaults, ...o }));
+    changes.push(`Added section "${o.name ?? "Section"}" from the drawing.`);
+  }
+
+  // Parapets
+  const pSeed = new Map(seed.parapets.map((o) => [key(o.name), o] as const));
+  const pUsed = new Set<string>();
+  const parapets: ParapetInput[] = [];
+  for (const p of bid.parapets ?? []) {
+    if (!p.fromTakeoff) {
+      parapets.push(p);
+      continue;
+    }
+    const o = pSeed.get(key(p.name));
+    if (!o || pUsed.has(key(p.name))) {
+      changes.push(`Removed parapet "${p.name}" (no longer in the drawing).`);
+      continue;
+    }
+    pUsed.add(key(p.name));
+    const next: ParapetInput = { ...p };
+    if (o.lengthFt !== undefined) next.lengthFt = o.lengthFt;
+    if (o.verticalInches !== undefined) next.verticalInches = o.verticalInches;
+    parapets.push(next);
+    changes.push(`Re-measured parapet "${p.name}".`);
+  }
+  for (const o of seed.parapets) {
+    if (pUsed.has(key(o.name))) continue;
+    pUsed.add(key(o.name));
+    parapets.push(make.newParapet(o));
+    changes.push(`Added parapet "${o.name ?? "Parapet"}" from the drawing.`);
+  }
+
+  // Curbs
+  const cSeed = new Map(seed.curbs.map((o) => [key(o.name), o] as const));
+  const cUsed = new Set<string>();
+  const curbs: CurbInput[] = [];
+  for (const c of bid.curbs ?? []) {
+    if (!c.fromTakeoff) {
+      curbs.push(c);
+      continue;
+    }
+    const o = cSeed.get(key(c.name));
+    if (!o || cUsed.has(key(c.name))) {
+      changes.push(`Removed curb "${c.name}" (no longer in the drawing).`);
+      continue;
+    }
+    cUsed.add(key(c.name));
+    const next: CurbInput = { ...c };
+    if (o.quantity !== undefined) next.quantity = o.quantity;
+    if (o.widthIn !== undefined) next.widthIn = o.widthIn;
+    if (o.lengthIn !== undefined) next.lengthIn = o.lengthIn;
+    curbs.push(next);
+    changes.push(`Re-counted curb "${c.name}".`);
+  }
+  for (const o of seed.curbs) {
+    if (cUsed.has(key(o.name))) continue;
+    cUsed.add(key(o.name));
+    curbs.push(make.newCurb(o));
+    changes.push(`Added curb "${o.name ?? "Curb"}" from the drawing.`);
+  }
+
+  // Pipe stacks
+  const kept = (bid.pipeStacks ?? []).filter((x) => !x.id.startsWith(TAKEOFF_PIPE_ID_PREFIX));
+  const pipeStacks = [...kept, ...seed.pipeStacks];
+  if (seed.pipeStacks.length || kept.length !== (bid.pipeStacks ?? []).length)
+    changes.push(`Pipe stacks from the drawing: ${seed.pipeStacks.length} row(s).`);
+
+  return { sections, parapets, curbs, pipeStacks, changes };
 }
