@@ -3,6 +3,13 @@
 -- p_limit and does that many rows per call; callers loop until a call returns fewer than the
 -- limit. Same results, short statements, and the app stays responsive during a load.
 
+-- The old two-argument versions must go first: a new signature would otherwise sit beside them
+-- as an overload and calls through the API become ambiguous.
+drop function if exists public.fill_footprint_addresses(text, numeric);
+drop function if exists public.promote_commercial_points(text, numeric);
+drop function if exists public.trim_address_points(text, numeric);
+alter table public.buildings add column if not exists address_checked_at timestamptz;
+
 create or replace function public.fill_footprint_addresses(p_county text, p_max_m numeric default 100, p_limit integer default 400)
 returns integer
 language plpgsql
