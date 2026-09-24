@@ -17,6 +17,7 @@ import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
+import { Route as TakeoffRouteImport } from './routes/takeoff'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
@@ -64,6 +65,11 @@ const ProspectRoute = ProspectRouteImport.update({
   path: '/prospect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TakeoffRoute = TakeoffRouteImport.update({
+  id: '/takeoff',
+  path: '/takeoff',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminDuroLastRoute = AdminDuroLastRouteImport.update({
   id: '/admin/duro-last',
   path: '/admin/duro-last',
@@ -104,6 +110,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -137,6 +145,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
@@ -155,6 +164,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -171,6 +181,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -187,6 +198,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
     | '/admin/non-dl'
@@ -204,6 +216,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
+  TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
@@ -270,6 +283,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProspectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/takeoff': {
+      id: '/takeoff'
+      path: '/takeoff'
+      fullPath: '/takeoff'
+      preLoaderRoute: typeof TakeoffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/duro-last': {
       id: '/admin/duro-last'
       path: '/admin/duro-last'
@@ -324,6 +344,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
+  TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
