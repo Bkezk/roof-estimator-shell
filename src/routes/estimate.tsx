@@ -760,12 +760,26 @@ function EstimatePage() {
   }, [search, bidParam]);
 
   // Load a saved bid when arriving with ?bid=<id>, and hydrate the form once.
-  const { data: loadedBid } = useQuery({
+  const hydratedFor = useRef<string | null>(null);
+  const {
+    data: loadedBid,
+    error: loadBidError,
+    isFetching: loadingBid,
+    refetch: refetchBid,
+  } = useQuery({
     queryKey: ["bid", bidParam],
     queryFn: () => getBidFn({ data: { id: bidParam! } }),
     enabled: authed && !!bidParam,
   });
-  const hydratedFor = useRef<string | null>(null);
+  // The saved bid could not be read (a timed-out or cancelled query while the database is
+  // busy, an expired session…) or the id matches nothing this user may see. The form below is
+  // the empty default estimate, NOT the bid — say so and offer a retry instead of showing a
+  // blank "Untitled bid" that looks like the save was lost.
+  const bidLoadFailed =
+    !!bidParam &&
+    !loadingBid &&
+    hydratedFor.current !== bidParam &&
+    (!!loadBidError || loadedBid === null);
   // Bumped when a saved bid finishes hydrating so the unsaved-changes baseline is captured
   // from the hydrated state (not the empty pre-load render).
   const [hydrationStamp, setHydrationStamp] = useState(0);
@@ -1685,6 +1699,22 @@ function EstimatePage() {
                 ))}
               </ul>
             )}
+          </div>
+        )}
+        {bidLoadFailed && (
+          <div className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <span className="font-semibold">This bid could not be loaded.</span>{" "}
+              {loadBidError
+                ? `${loadBidError instanceof Error ? loadBidError.message : String(loadBidError)}. `
+                : "No bid with this id is visible to you. "}
+              What you see below is an empty default estimate, not the saved bid — nothing here came
+              from the save, and saving would create a new bid.
+            </div>
+            <Button size="sm" variant="outline" onClick={() => void refetchBid()}>
+              Try again
+            </Button>
           </div>
         )}
         {loadedBidEmpty && (
