@@ -195,19 +195,11 @@ export const listCounties = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ county: string; count: number }[]> => {
     await readAccess(context);
-    const { data, error } = await context.supabase
-      .from("buildings")
-      .select("county")
-      .is("deleted_at", null);
+    // Counted in SQL (building_county_counts): reading every row through the API stops at its
+    // 1,000-row page, which showed one county once the whole state was loaded.
+    const { data, error } = await context.supabase.rpc("building_county_counts");
     if (error) throw new Error(error.message);
-    const counts = new Map<string, number>();
-    for (const r of data ?? []) {
-      const c = (r.county ?? "").trim();
-      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .map(([county, count]) => ({ county, count }))
-      .sort((a, b) => b.count - a.count || a.county.localeCompare(b.county));
+    return (data ?? []).map((r) => ({ county: r.county, count: Number(r.n) }));
   });
 
 export interface BuildingDetail {

@@ -1580,6 +1580,10 @@ export type Database = {
         Args: { p_county: string; p_keep_m?: number; p_limit?: number };
         Returns: number;
       };
+      building_county_counts: {
+        Args: never;
+        Returns: { county: string; n: number }[];
+      };
       reset_address_checks: {
         Args: { p_county: string };
         Returns: number;
