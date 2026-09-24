@@ -213,14 +213,23 @@ export default function ProspectMap({
     m.addControl(new ScaleControl({ unit: "imperial" }));
     // City labels as HTML markers (no font glyphs needed): the eight largest in view, fading
     // with zoom, hidden when the toggle is off.
+    // A small dot on the city with the name beside it (the dot sits on the point, the name to
+    // its right).
     cityMarkers.current = KY_CITIES.map(([name, lng, lat]) => {
       const el = document.createElement("div");
-      el.textContent = name;
-      el.className =
-        "pointer-events-none select-none rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-semibold text-white shadow";
+      el.className = "pointer-events-none flex select-none items-center gap-1";
       el.style.transition = "opacity 150ms";
       el.style.display = "none";
-      return new Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(m);
+      const dot = document.createElement("span");
+      dot.className = "h-2 w-2 shrink-0 rounded-full border border-white bg-black/80 shadow";
+      const label = document.createElement("span");
+      label.textContent = name;
+      label.className = "text-[12px] font-semibold text-white";
+      label.style.textShadow = "0 0 3px #000, 0 0 3px #000, 0 1px 2px #000";
+      el.append(dot, label);
+      return new Marker({ element: el, anchor: "left", offset: [-4, 0] })
+        .setLngLat([lng, lat])
+        .addTo(m);
     });
     const placeCities = () => {
       const bounds = m.getBounds();
