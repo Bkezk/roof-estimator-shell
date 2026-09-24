@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import {
   Building2,
   CheckSquare,
-  DownloadCloud,
+  ExternalLink,
   FilePlus2,
   Map as MapIcon,
   PanelLeftClose,
@@ -25,14 +25,13 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isAdmin } from "@/lib/access";
+import { KY_COUNTIES } from "@/lib/gis/ky-layers";
 import { buildingLine, equivalentRectangle } from "@/lib/prospect";
 import {
   deleteBuilding,
   deleteRoof,
   getBuilding,
-  countAddressPoints,
-  fillFootprintAddresses,
-  importLayer,
   listBuildings,
   listProspects,
   setProspectStage,
@@ -43,63 +42,18 @@ import {
   listOpenTasks,
   listRefreshes,
   listWarrantyLeads,
-  previewLayer,
-  promoteCommercialPoints,
   addBuildingAtPoint,
-  attachFootprints,
-  trimAddressPoints,
-  recordRefresh,
   saveBuilding,
   saveRoof,
   saveTask,
   setTaskDone,
   type BuildingInput,
   type BuildingRow,
-  type LayerPreview,
   type RoofInput,
   type RoofRow,
 } from "@/lib/prospect.functions";
-import {
-  KY_ADDRESS_POINTS_LAYER,
-  KY_CORE_COUNTIES,
-  KY_COUNTIES,
-  KY_FOOTPRINTS_LAYER,
-  KY_SCHOOLS_LAYER,
-  KY_WEBSTER_PARCELS_LAYER,
-  countyRankingUrl,
-  countyWhere,
-  type LayerKind,
-} from "@/lib/gis/ky-layers";
-
 const ProspectMap = lazy(() => import("@/components/prospect-map"));
 
-/** The Kentucky layers whose fields are sample-verified (src/lib/gis/fixtures). */
-const LAYER_PRESETS: { key: string; label: string; url: string; kind: LayerKind }[] = [
-  {
-    key: "footprints",
-    label: "Building footprints — ORNL, statewide",
-    url: KY_FOOTPRINTS_LAYER,
-    kind: "footprint",
-  },
-  {
-    key: "addresses",
-    label: "911 address points — statewide (addresses for footprints)",
-    url: KY_ADDRESS_POINTS_LAYER,
-    kind: "address",
-  },
-  { key: "schools", label: "Schools — statewide", url: KY_SCHOOLS_LAYER, kind: "facility" },
-  {
-    key: "webster",
-    label: "PVA parcels — Webster County (the only county the state publishes)",
-    url: KY_WEBSTER_PARCELS_LAYER,
-    kind: "parcel",
-  },
-  { key: "custom", label: "Another layer URL…", url: "", kind: "facility" },
-];
-const COUNTY_CHOICES = [
-  ...KY_CORE_COUNTIES,
-  ...KY_COUNTIES.filter((c) => !KY_CORE_COUNTIES.includes(c)),
-];
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -283,7 +237,7 @@ const CONDITION_LABELS: Record<string, string> = {
 };
 
 export function ProspectPage(props: { initialBuildingId?: string | undefined }) {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
   const canWrite = can("prospect");
   const canBid = can("estimate");
   const qc = useQueryClient();
@@ -301,17 +255,9 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const prospectsFn = useServerFn(listProspects);
   const stageFn = useServerFn(setProspectStage);
   const leadsFn = useServerFn(listWarrantyLeads);
-  const promoteFn = useServerFn(promoteCommercialPoints);
   const addAtPointFn = useServerFn(addBuildingAtPoint);
-  const attachFn = useServerFn(attachFootprints);
-  const trimFn = useServerFn(trimAddressPoints);
-  const recordRefreshFn = useServerFn(recordRefresh);
   const refreshesFn = useServerFn(listRefreshes);
   const refreshes = useQuery({ queryKey: ["data-refreshes"], queryFn: () => refreshesFn() });
-  const previewFn = useServerFn(previewLayer);
-  const importFn = useServerFn(importLayer);
-  const fillFn = useServerFn(fillFootprintAddresses);
-  const addressCountsFn = useServerFn(countAddressPoints);
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
@@ -323,21 +269,8 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDue, setTaskDue] = useState("");
-  // Kentucky layer import (src/lib/gis/ky-layers.ts): a preset (or any layer URL), a county and
-  // a where clause the preset writes and the operator may edit.
-  const [importOpen, setImportOpen] = useState(false);
-  const [presetKey, setPresetKey] = useState("footprints");
-  const preset = LAYER_PRESETS.find((p) => p.key === presetKey) ?? LAYER_PRESETS[0]!;
-  const [customUrl, setCustomUrl] = useState("");
-  const layerUrl = preset.key === "custom" ? customUrl : preset.url;
-  const [importCounty, setImportCounty] = useState<string>(KY_CORE_COUNTIES[0]!);
-  const [minSqFt, setMinSqFt] = useState(5000);
-  const [whereClause, setWhereClause] = useState(() =>
-    countyWhere("footprint", KY_CORE_COUNTIES[0]!, 5000),
-  );
-  const [preview, setPreview] = useState<LayerPreview | null>(null);
-  // Salesperson-first (owner rule, Sep 24): the map and the building facts are on screen at
-  // once; setup controls live behind "Load county data" and its Advanced section.
+  // Salesperson-first (owner rule, Sep 24): the map, the search panel and the prospects list
+  // are the whole page; the state's data arrives by the monthly workflow, not by hand.
   const [showMap, setShowMap] = useState(() => {
     try {
       return localStorage.getItem("bid-o-matic:prospect-map") !== "off";
@@ -354,7 +287,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       }
       return !o;
     });
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   // The state's outlines for every building: handy for tap-to-add, distracting when you want
   // to look at a roof. Off by default; remembered per browser.
   const [showOutlines, setShowOutlines] = useState(() => {
@@ -389,14 +321,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       }
       return !o;
     });
-  useEffect(() => {
-    // Parcels are one layer per county: the county is the layer's.
-    const county = preset.kind === "parcel" ? "Webster" : importCounty;
-    if (preset.kind === "parcel" && importCounty !== "Webster") setImportCounty("Webster");
-    setWhereClause(preset.key === "custom" ? "1=1" : countyWhere(preset.kind, county, minSqFt));
-    setPreview(null);
-  }, [preset, importCounty, minSqFt]);
-
   useEffect(() => {
     if (props.initialBuildingId) setSelectedId(props.initialBuildingId);
   }, [props.initialBuildingId]);
@@ -512,179 +436,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     mutationFn: (v: { id: string; done: boolean }) => doneFn({ data: v }),
     onSuccess: invalidate,
     onError: fail,
-  });
-  const previewM = useMutation({
-    mutationFn: () => previewFn({ data: { layerUrl: layerUrl.trim(), where: whereClause } }),
-    onSuccess: setPreview,
-    onError: fail,
-  });
-  // A county's layer can run to tens of thousands of rows; the server writes 1,500 per call
-  // and says where to continue, so the client loops and shows progress.
-  const [progress, setProgress] = useState<string | null>(null);
-  const runImport = async (url: string, where: string, county: string, label: string) => {
-    let offset = 0;
-    let fetched = 0;
-    let upserted = 0;
-    let skipped = 0;
-    let kind: LayerKind = "facility";
-    for (;;) {
-      setProgress(`${label}: ${fetched.toLocaleString()} read…`);
-      const r = await importFn({
-        data: { layerUrl: url, where, county, startOffset: offset },
-      });
-      kind = r.kind;
-      fetched += r.fetched;
-      upserted += r.upserted;
-      skipped += r.skipped;
-      if (r.done || r.fetched === 0) break;
-      offset = r.nextOffset;
-    }
-    setProgress(null);
-    return { kind, fetched, upserted, skipped };
-  };
-  const importM = useMutation({
-    mutationFn: () => runImport(layerUrl.trim(), whereClause, importCounty, "Importing"),
-    onSuccess: (r) => {
-      const what =
-        r.kind === "address" ? "address point" : r.kind === "parcel" ? "parcel" : "building";
-      toast.success(
-        `${r.upserted.toLocaleString()} ${what}${r.upserted === 1 ? "" : "s"} imported or updated (${r.fetched.toLocaleString()} read${
-          r.skipped ? `, ${r.skipped} unusable skipped` : ""
-        })`,
-      );
-      invalidate();
-      void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
-    },
-    onError: (e) => {
-      setProgress(null);
-      fail(e);
-    },
-  });
-  const addressCounts = useQuery({
-    queryKey: ["address-point-counts"],
-    queryFn: () => addressCountsFn(),
-    enabled: importOpen && canWrite,
-  });
-  // Step 2 for footprints, in one click: import the county's 911 address points, then give
-  // every address-less footprint the nearest one.
-  const addressesM = useMutation({
-    mutationFn: async () => {
-      const points = await runImport(
-        KY_ADDRESS_POINTS_LAYER,
-        countyWhere("address", importCounty),
-        importCounty,
-        `${importCounty} 911 address points`,
-      );
-      let updated = 0;
-      for (let reset = true; ; reset = false) {
-        setProgress(`Matching footprints to the nearest address… ${updated.toLocaleString()}`);
-        const r = await fillFn({ data: { county: importCounty, reset } });
-        updated += r.updated;
-        if (r.done) break;
-      }
-      setProgress(null);
-      return { points, fill: { updated } };
-    },
-    onSuccess: ({ points, fill }) => {
-      toast.success(
-        `${points.upserted.toLocaleString()} ${importCounty} address points imported; ${fill.updated.toLocaleString()} footprints given an address`,
-      );
-      invalidate();
-      void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
-    },
-    onError: (e) => {
-      setProgress(null);
-      fail(e);
-    },
-  });
-  // The whole county in one click: buildings of the chosen size, their addresses, the schools.
-  // The whole county in one click (the same steps the monthly loader runs):
-  //   1 footprints of the chosen size  2 every 911 address point  3 match addresses to
-  //   footprints  4 named / commercially typed points become buildings of their own
-  //   5 those get their outline from the footprint layer  6 schools  7 drop the house points
-  //   8 log the refresh. Nothing a person typed is overwritten (upsert_buildings).
-  const loadCountyM = useMutation({
-    mutationFn: async () => {
-      const county = importCounty;
-      const fp = await runImport(
-        KY_FOOTPRINTS_LAYER,
-        countyWhere("footprint", county, minSqFt),
-        county,
-        `${county} buildings`,
-      );
-      const pts = await runImport(
-        KY_ADDRESS_POINTS_LAYER,
-        countyWhere("address", county),
-        county,
-        `${county} addresses`,
-      );
-      let addressed = 0;
-      for (let reset = true; ; reset = false) {
-        setProgress(`Matching buildings to the nearest address… ${addressed.toLocaleString()}`);
-        const r = await fillFn({ data: { county, reset } });
-        addressed += r.updated;
-        if (r.done) break;
-      }
-      const fill = { updated: addressed };
-      let promotedN = 0;
-      for (;;) {
-        setProgress(`Adding named businesses… ${promotedN.toLocaleString()}`);
-        const r = await promoteFn({ data: { county } });
-        promotedN += r.promoted;
-        if (r.done) break;
-      }
-      const promoted = { promoted: promotedN };
-      let attached = 0;
-      for (;;) {
-        setProgress(`Finding outlines for named businesses… ${attached.toLocaleString()} done`);
-        const r = await attachFn({ data: { county } });
-        attached += r.attached;
-        if (r.done) break;
-      }
-      const sch = await runImport(
-        KY_SCHOOLS_LAYER,
-        countyWhere("facility", county),
-        county,
-        `${county} schools`,
-      );
-      let trimmedN = 0;
-      for (;;) {
-        setProgress("Tidying up…");
-        const r = await trimFn({ data: { county } });
-        trimmedN += r.trimmed;
-        if (r.done) break;
-      }
-      const trimmed = { trimmed: trimmedN };
-      await recordRefreshFn({
-        data: {
-          county,
-          ranBy: "browser",
-          buildings: fp.upserted,
-          addressed: fill.updated,
-          promoted: promoted.promoted,
-          pointsKept: pts.upserted - trimmed.trimmed,
-          facilities: sch.upserted,
-          notes: `${attached} named businesses given an outline`,
-        },
-      });
-      setProgress(null);
-      return { county, fp, pts, fill, promoted, attached, sch };
-    },
-    onSuccess: (r) => {
-      toast.success(
-        `${r.county}: ${r.fp.upserted.toLocaleString()} buildings by size, ${r.promoted.promoted.toLocaleString()} named businesses added (${r.attached.toLocaleString()} with outlines), ${r.fill.updated.toLocaleString()} addresses matched, ${r.sch.upserted.toLocaleString()} schools`,
-        { duration: 12000 },
-      );
-      setCounty(r.county);
-      setSort("biggest");
-      invalidate();
-      void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
-      void qc.invalidateQueries({ queryKey: ["data-refreshes"] });
-    },
-    onError: (e) => {
-      setProgress(null);
-      fail(e);
-    },
   });
   const tapAdd = useMutation({
     mutationFn: (p: { lng: number; lat: number }) => addAtPointFn({ data: p }),
@@ -815,6 +566,18 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
             </SelectContent>
           </Select>
         </div>
+        {canWrite && (
+          <button
+            type="button"
+            className="text-left text-xs text-muted-foreground underline underline-offset-2"
+            onClick={() => {
+              setSelectedId(null);
+              setForm(emptyBuilding());
+            }}
+          >
+            <Plus className="mr-1 inline h-3 w-3" /> Not listed? Add a building by hand
+          </button>
+        )}
       </CardHeader>
       <CardContent className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
@@ -873,12 +636,8 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
             Your prospects, and every commercial building in Kentucky to find the next one.
             {(refreshes.data?.length ?? 0) > 0 && (
               <span className="ml-1 text-xs">
-                Data refreshed:{" "}
-                {(refreshes.data ?? [])
-                  .slice(0, 6)
-                  .map((r) => `${r.county} ${new Date(r.ran_at).toLocaleDateString()}`)
-                  .join(", ")}
-                {(refreshes.data?.length ?? 0) > 6 ? ", …" : ""}
+                Data refreshed {new Date(refreshes.data![0]!.ran_at).toLocaleDateString()} (
+                {refreshes.data!.length} of {KY_COUNTIES.length} counties)
               </span>
             )}
           </p>
@@ -907,20 +666,18 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               {showCities ? "Cities on" : "Cities off"}
             </Button>
           )}
-          {canWrite && (
-            <Button size="sm" variant="outline" onClick={() => setImportOpen((o) => !o)}>
-              <DownloadCloud className="mr-1 h-4 w-4" /> Load county data
-            </Button>
-          )}
-          {canWrite && (
-            <Button
-              size="sm"
-              onClick={() => {
-                setSelectedId(null);
-                setForm(emptyBuilding());
-              }}
-            >
-              <Plus className="mr-1 h-4 w-4" /> Add building
+          {isAdmin(profile) && (
+            /* The state's data is loaded by the monthly GitHub workflow (docs/TODO.md item 3);
+               this opens its page, where "Run workflow" refreshes one county or all of them. */
+            <Button asChild size="sm" variant="outline">
+              <a
+                href="https://github.com/Bkezk/roof-estimator-shell/actions/workflows/refresh-kentucky.yml"
+                target="_blank"
+                rel="noreferrer"
+                title="Runs on the 1st of each month; open to refresh a county now"
+              >
+                <ExternalLink className="mr-1 h-4 w-4" /> Refresh data
+              </a>
             </Button>
           )}
         </div>
@@ -970,233 +727,6 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               : " Turn “Outlines on” to see every building in the state and tap one to add it."}
           </p>
         </Suspense>
-      )}
-
-      {importOpen && canWrite && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Load county data</CardTitle>
-            <CardDescription className="text-xs">
-              One click pulls a county&apos;s buildings of the chosen size, their street addresses
-              and its schools from Kentucky&apos;s free map data. Run it again any time; it updates
-              rather than duplicates. Owner of record is not published statewide, so it stays a
-              county PVA lookup.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <div className="w-48">
-                <Label className="text-xs text-muted-foreground">County</Label>
-                <Select value={importCounty} onValueChange={setImportCounty}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {COUNTY_CHOICES.map((c, i) => (
-                      <SelectItem key={c} value={c}>
-                        {i < KY_CORE_COUNTIES.length ? `${i + 1}. ${c}` : c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="w-36">
-                <Label className="text-xs text-muted-foreground">Roofs at least (sq ft)</Label>
-                <NumberField
-                  className="h-9"
-                  value={minSqFt}
-                  min={0}
-                  step="1000"
-                  onChange={(v) => setMinSqFt(Math.max(0, Math.round(v)))}
-                />
-              </div>
-              <Button
-                onClick={() => loadCountyM.mutate()}
-                disabled={loadCountyM.isPending || importM.isPending || addressesM.isPending}
-              >
-                <DownloadCloud className="mr-1 h-4 w-4" />
-                {loadCountyM.isPending ? "Loading…" : `Load ${importCounty} County`}
-              </Button>
-              {progress && <span className="text-xs">{progress}</span>}
-            </div>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground underline underline-offset-2"
-              onClick={() => setAdvancedOpen((o) => !o)}
-            >
-              {advancedOpen ? "Hide advanced" : "Advanced: one layer at a time, preview, filters"}
-            </button>
-            {advancedOpen && (
-              <div className="space-y-3 border-t pt-3">
-                <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_200px_140px]">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Layer</Label>
-                    <Select value={presetKey} onValueChange={setPresetKey}>
-                      <SelectTrigger className="h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {LAYER_PRESETS.map((p) => (
-                          <SelectItem key={p.key} value={p.key}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">County</Label>
-                    <Select
-                      value={importCounty}
-                      onValueChange={setImportCounty}
-                      disabled={preset.kind === "parcel"}
-                    >
-                      <SelectTrigger className="h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {COUNTY_CHOICES.map((c, i) => (
-                          <SelectItem key={c} value={c}>
-                            {i < KY_CORE_COUNTIES.length ? `${i + 1}. ${c}` : c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Min roof sq ft</Label>
-                    <NumberField
-                      className="h-8"
-                      value={minSqFt}
-                      min={0}
-                      step="1000"
-                      onChange={(v) => setMinSqFt(Math.max(0, Math.round(v)))}
-                    />
-                  </div>
-                </div>
-                <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Layer URL</Label>
-                    <Input
-                      className="h-8 font-mono text-xs"
-                      value={layerUrl}
-                      readOnly={preset.key !== "custom"}
-                      placeholder="https://kygisserver.ky.gov/arcgis/rest/services/WGS84WM_Services/…/MapServer/0"
-                      onChange={(e) => setCustomUrl(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs text-muted-foreground">Where (ArcGIS SQL)</Label>
-                    <Input
-                      className="h-8 font-mono text-xs"
-                      value={whereClause}
-                      onChange={(e) => setWhereClause(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => previewM.mutate()}
-                    disabled={previewM.isPending || !layerUrl.trim()}
-                  >
-                    {previewM.isPending ? "Reading layer…" : "Preview"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => importM.mutate()}
-                    disabled={!preview || importM.isPending}
-                  >
-                    {importM.isPending
-                      ? "Importing…"
-                      : preview
-                        ? `Import ${preview.total.toLocaleString()} ${
-                            preview.kind === "address"
-                              ? "address points"
-                              : preview.kind === "parcel"
-                                ? "parcels"
-                                : "buildings"
-                          }`
-                        : "Import"}
-                  </Button>
-                  {progress && <span className="text-xs">{progress}</span>}
-                  {preview && (
-                    <span className="text-xs text-muted-foreground">
-                      {preview.kind} layer · {preview.total.toLocaleString()} match · page size{" "}
-                      {preview.maxRecordCount ?? "?"} ·{" "}
-                      {Object.entries(preview.mapping)
-                        .map(([k, v]) => `${k} ← ${v}`)
-                        .join(", ")}
-                    </span>
-                  )}
-                </div>
-                {preview?.kind === "footprint" && (
-                  <p className="text-xs text-muted-foreground">
-                    Footprints carry only the outline, its size and the county — no name, address or
-                    owner. Import them, then use <b>Add addresses</b> below to match each one to the
-                    nearest 911 address point.
-                  </p>
-                )}
-                {preview && preview.sample.length > 0 && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Key</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Address</TableHead>
-                        <TableHead>City</TableHead>
-                        <TableHead>County</TableHead>
-                        <TableHead>Class</TableHead>
-                        <TableHead className="text-right">
-                          {preview.kind === "parcel" ? "Lot sq ft" : "Roof sq ft"}
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {preview.sample.map((c) => (
-                        <TableRow key={c.key} className="text-xs">
-                          <TableCell className="font-mono">{c.key}</TableCell>
-                          <TableCell>{c.name ?? "—"}</TableCell>
-                          <TableCell>{c.address ?? "—"}</TableCell>
-                          <TableCell>{c.city ?? "—"}</TableCell>
-                          <TableCell>{c.county ?? "—"}</TableCell>
-                          <TableCell>{c.cls ?? "—"}</TableCell>
-                          <TableCell className="text-right tabular-nums">{num(c.sqft)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
-                <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => addressesM.mutate()}
-                    disabled={addressesM.isPending || importM.isPending || preset.kind === "parcel"}
-                  >
-                    {addressesM.isPending ? "Working…" : `Add addresses for ${importCounty}`}
-                  </Button>
-                  <span>
-                    Imports the county&apos;s 911 address points (
-                    {(
-                      addressCounts.data?.find((c) => c.county === importCounty)?.count ?? 0
-                    ).toLocaleString()}{" "}
-                    so far) and gives each address-less footprint the nearest one within 60 m.
-                  </span>
-                  <a
-                    className="underline underline-offset-2"
-                    href={countyRankingUrl(KY_FOOTPRINTS_LAYER, minSqFt)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    buildings ≥ {minSqFt.toLocaleString()} sq ft per county (state count)
-                  </a>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
       )}
 
       <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
