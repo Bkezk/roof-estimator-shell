@@ -91,6 +91,17 @@ export const emptyCustomer = (): CustomerInfo => ({
 });
 
 /** The persisted estimator state (stored in bids.data jsonb). */
+/** Where a bid's geometry came from when it was created from a Takeoff. */
+export interface TakeoffInfo {
+  takeoffId: string;
+  takeoffName: string;
+  createdAt: string;
+  /** One-line description of the drawing (sections, area, edge, parapet, counts). */
+  summary: string;
+  /** Measured items the estimator still has to place by hand, with their numbers. */
+  unmapped: Array<{ label: string; detail: string }>;
+}
+
 export interface SavedBidState {
   /** Legacy Review "Shipping (Other)" editable cell — extra shipping $ on top of freight. */
   extraShipping?: number;
@@ -186,6 +197,8 @@ export interface SavedBidState {
   pricingAsOf?: string;
   /** Set on a bid produced by the Bid Combiner (legacy Description text's data, docs §22.41). */
   combineInfo?: CombineInfo;
+  /** Set when the bid was created from a Takeoff drawing (docs/planswift-research.md §4.6). */
+  takeoffInfo?: TakeoffInfo;
   /** Set on a bid imported from a legacy Bid-Advantage .bax file (src/lib/bax). */
   importInfo?: BaxImportInfo;
 }

@@ -313,6 +313,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
   );
   const isQuickBid = s.isQuickBid !== false;
   const edges = s.edges?.length ? s.edges : defaultEdges(s.length, s.width);
+  // A section drawn in Takeoff keeps its measured outline: its sides are the drawn edges
+  // ("1".."N" or A–D for a four-sided outline), and Length / Width are the equivalent rectangle
+  // the layout maths use — re-measure in Takeoff to change them (docs/planswift-research.md §4.5).
+  const measured = !!s.measured;
+  const sideNames: string[] = measured ? edges.map((e) => e.side) : [...EDGE_SIDES];
+  const tabValue = sideNames.includes(tab) ? tab : (sideNames[0] ?? "A");
   const bySide = (side: string) => edges.find((e) => e.side === side);
   const sideLength = (side: string) => (side === "A" || side === "C" ? s.length : s.width);
   const corners: PerimCorners = s.perimCorners ?? [false, false, false, false];
@@ -690,24 +696,34 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 onChange={(e) => upd({ name: e.target.value })}
               />
             </Field>
-            <Field label="Length (ft)">
+            <Field label={measured ? "Length (ft, layout)" : "Length (ft)"}>
               <Num
                 className="w-[96px]"
                 step="0.01"
                 invalid={!(s.length > 0)}
                 value={s.length}
+                disabled={measured}
                 onChange={(v) => setDims({ length: v })}
               />
             </Field>
-            <Field label="Width (ft)">
+            <Field label={measured ? "Width (ft, layout)" : "Width (ft)"}>
               <Num
                 className="w-[96px]"
                 step="0.01"
                 invalid={!(s.width > 0)}
                 value={s.width}
+                disabled={measured}
                 onChange={(v) => setDims({ width: v })}
               />
             </Field>
+            {measured && s.measured && (
+              <p className="basis-full text-xs text-muted-foreground">
+                Measured in Takeoff: {n0(s.measured.areaSqFt)} sq ft, {n0(s.measured.perimeterFt)}{" "}
+                ft around, {edges.length} sides. Length × Width is the rectangle of the same area
+                and perimeter (the sheet and roll layout); the edges below are the drawn sides.
+                Re-measure in Takeoff to change the shape.
+              </p>
+            )}
             <Field label="Deck Type">
               <Pick
                 className="w-[150px]"
@@ -999,15 +1015,15 @@ export function SectionsScreen(p: SectionsScreenProps) {
         <div className="space-y-3">
           <div className="rounded-md border p-3">
             <p className="mb-2 text-xs font-semibold">Edge Options</p>
-            <Tabs value={tab} onValueChange={setTab}>
-              <TabsList className="h-8">
-                {EDGE_SIDES.map((side) => (
+            <Tabs value={tabValue} onValueChange={setTab}>
+              <TabsList className="h-8 flex-wrap">
+                {sideNames.map((side) => (
                   <TabsTrigger key={side} value={side} className="h-7 px-3 text-xs">
                     Side {side}
                   </TabsTrigger>
                 ))}
               </TabsList>
-              {EDGE_SIDES.map((side) => (
+              {sideNames.map((side) => (
                 <TabsContent key={side} value={side} className="mt-2">
                   {sideRow(side)}
                 </TabsContent>
@@ -1016,57 +1032,75 @@ export function SectionsScreen(p: SectionsScreenProps) {
           </div>
 
           {/* Legacy pnlView preview: rectangle, side captions, "n' Perim" labels, corner boxes */}
-          <div className="rounded-md border p-3">
-            <div className="grid grid-cols-[minmax(0,1fr)] gap-1 text-[11px]">
-              <p className="text-center">{sideCaption("A")}</p>
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
-                <p className="max-w-[90px] text-right">{sideCaption("D")}</p>
-                <div className="relative mx-auto h-36 w-full max-w-[220px] border-2 border-foreground/60 bg-muted/30">
-                  {cornerBox(3, "left-0.5 top-0.5")}
-                  {cornerBox(0, "right-0.5 top-0.5")}
-                  {cornerBox(1, "bottom-0.5 right-0.5")}
-                  {cornerBox(2, "bottom-0.5 left-0.5")}
-                  {perimCaption("A") && (
-                    <span className="absolute inset-x-0 top-1 text-center text-[10px] text-primary">
-                      {perimCaption("A")}
-                    </span>
-                  )}
-                  {perimCaption("C") && (
-                    <span className="absolute inset-x-0 bottom-1 text-center text-[10px] text-primary">
-                      {perimCaption("C")}
-                    </span>
-                  )}
-                  {perimCaption("D") && (
-                    <span
-                      className="absolute inset-y-0 left-1 flex items-center text-[10px] text-primary"
-                      style={{ writingMode: "vertical-rl" }}
-                    >
-                      {perimCaption("D")}
-                    </span>
-                  )}
-                  {perimCaption("B") && (
-                    <span
-                      className="absolute inset-y-0 right-1 flex items-center text-[10px] text-primary"
-                      style={{ writingMode: "vertical-rl" }}
-                    >
-                      {perimCaption("B")}
-                    </span>
-                  )}
-                  <span className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
-                    {laborTable ? `${n0(area)} sf (fill)` : "No Membrane"}
-                  </span>
-                </div>
-                <p className="max-w-[90px]">{sideCaption("B")}</p>
-              </div>
-              <p className="text-center">{sideCaption("C")}</p>
-              {cornerAvail.some(Boolean) && (
-                <p className="text-center text-[10px] text-muted-foreground">
-                  Tick a corner box to enhance that corner (both adjacent sides are perimeter
-                  edges).
-                </p>
-              )}
+          {measured ? (
+            <div className="rounded-md border p-3 text-[11px]">
+              <p className="mb-1 text-xs font-semibold">Drawn sides</p>
+              <ul className="space-y-0.5">
+                {edges.map((e, i) => (
+                  <li key={e.side}>
+                    {sideCaption(e.side)}
+                    {perimCaption(e.side) ? ` — ${perimCaption(e.side)}` : ""}
+                    {corners[i] && cornerAvail[i] ? " — corner enhanced" : ""}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-muted-foreground">
+                Corners were marked in Takeoff on outside corners between two perimeter sides.
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-md border p-3">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-1 text-[11px]">
+                <p className="text-center">{sideCaption("A")}</p>
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+                  <p className="max-w-[90px] text-right">{sideCaption("D")}</p>
+                  <div className="relative mx-auto h-36 w-full max-w-[220px] border-2 border-foreground/60 bg-muted/30">
+                    {cornerBox(3, "left-0.5 top-0.5")}
+                    {cornerBox(0, "right-0.5 top-0.5")}
+                    {cornerBox(1, "bottom-0.5 right-0.5")}
+                    {cornerBox(2, "bottom-0.5 left-0.5")}
+                    {perimCaption("A") && (
+                      <span className="absolute inset-x-0 top-1 text-center text-[10px] text-primary">
+                        {perimCaption("A")}
+                      </span>
+                    )}
+                    {perimCaption("C") && (
+                      <span className="absolute inset-x-0 bottom-1 text-center text-[10px] text-primary">
+                        {perimCaption("C")}
+                      </span>
+                    )}
+                    {perimCaption("D") && (
+                      <span
+                        className="absolute inset-y-0 left-1 flex items-center text-[10px] text-primary"
+                        style={{ writingMode: "vertical-rl" }}
+                      >
+                        {perimCaption("D")}
+                      </span>
+                    )}
+                    {perimCaption("B") && (
+                      <span
+                        className="absolute inset-y-0 right-1 flex items-center text-[10px] text-primary"
+                        style={{ writingMode: "vertical-rl" }}
+                      >
+                        {perimCaption("B")}
+                      </span>
+                    )}
+                    <span className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+                      {laborTable ? `${n0(area)} sf (fill)` : "No Membrane"}
+                    </span>
+                  </div>
+                  <p className="max-w-[90px]">{sideCaption("B")}</p>
+                </div>
+                <p className="text-center">{sideCaption("C")}</p>
+                {cornerAvail.some(Boolean) && (
+                  <p className="text-center text-[10px] text-muted-foreground">
+                    Tick a corner box to enhance that corner (both adjacent sides are perimeter
+                    edges).
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* lvSummary: Section | L | W | System | Attach | Deck Type | Color | Lap */}
           <div className="overflow-x-auto rounded-md border">

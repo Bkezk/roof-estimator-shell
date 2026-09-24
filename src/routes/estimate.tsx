@@ -45,6 +45,9 @@ import {
 } from "@/lib/engine/bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estimate";
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
+import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
+import { takeoffQuantities } from "@/lib/takeoff/model";
+import { bidSeedFromTakeoff } from "@/lib/takeoff/create-bid";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
@@ -100,6 +103,7 @@ import {
   type CustomerInfo,
   type SavedBidState,
   type WarrantyData,
+  type TakeoffInfo,
 } from "@/lib/proposal-bid";
 import { LEGACY_ROOF_SYSTEM_IDS, universalFastenerSpacing } from "@/lib/engine/fastener-spacing";
 import { DESIGN_TABLE_OPTIONS } from "@/lib/engine/fastener-spacing";
@@ -159,6 +163,8 @@ import {
 export interface EstimateSearch {
   bid?: string;
   combine?: string;
+  /** A takeoff id: a NEW bid seeded from that drawing (docs/planswift-research.md §4.6). */
+  takeoff?: string;
   building?: string;
   pfName?: string;
   pfOwner?: string;
@@ -188,6 +194,7 @@ export const Route = createFileRoute("/estimate")({
       ...(typeof b === "string" ? { bid: b } : {}),
       // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
       ...(typeof c === "string" && c ? { combine: c } : {}),
+      ...str("takeoff"),
       // Generic prefill for a NEW bid (another module hands the estimator plain values in the
       // URL — the estimator imports nothing from it): the linked building id (bids.building_id),
       // client / job-site fields, and one section's width × length.
@@ -369,7 +376,7 @@ function EstimatePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const search = Route.useSearch();
-  const { bid: bidParam, combine: combineParam } = search;
+  const { bid: bidParam, combine: combineParam, takeoff: takeoffParam } = search;
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
   const { session, profile } = useAuth();
@@ -590,6 +597,9 @@ function EstimatePage() {
   const [bidName, setBidName] = useState("Untitled bid");
   // Set on a bid the Bid Combiner produced (legacy Description text); persisted until dismissed.
   const [combineInfo, setCombineInfo] = useState<CombineInfo | undefined>(undefined);
+  // Set when this bid came from a Takeoff drawing; the notice lists what still needs placing.
+  const [takeoffInfo, setTakeoffInfo] = useState<TakeoffInfo | undefined>(undefined);
+  const [linkedTakeoffId, setLinkedTakeoffId] = useState<string | null>(null);
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [lostReason, setLostReason] = useState<string | null>(null);
   const [askLost, setAskLost] = useState(false);
@@ -851,6 +861,8 @@ function EstimatePage() {
         : null,
     );
     setCombineInfo(d.combineInfo);
+    setTakeoffInfo(d.takeoffInfo);
+    setLinkedTakeoffId(d.takeoffInfo?.takeoffId ?? null);
     const bump = (ids: string[], prefix: string, cur: number) =>
       Math.max(
         cur,
@@ -945,6 +957,73 @@ function EstimatePage() {
         combineError instanceof Error ? combineError.message : "Could not load the bids.",
       );
   }, [combineError]);
+
+  // Create bid from Takeoff (docs/planswift-research.md §4.6): ?takeoff=<id> loads the drawing,
+  // measures it, and seeds THIS new bid — the material answers as the defaults, one section per
+  // drawn area (the measured outline), parapets, curbs and sized pipe stacks. Whatever the
+  // drawing cannot place by itself is listed in the notice with its numbers.
+  const getTakeoffFn = useServerFn(getTakeoff);
+  const saveTakeoffFn = useServerFn(saveTakeoff);
+  const { data: takeoffRow, error: takeoffError } = useQuery({
+    queryKey: ["takeoff-seed", takeoffParam],
+    queryFn: () => getTakeoffFn({ data: { id: takeoffParam! } }),
+    enabled: authed && !bidParam && !!takeoffParam,
+  });
+  const takeoffSeededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!takeoffParam || takeoffRow === undefined || takeoffSeededFor.current === takeoffParam)
+      return;
+    takeoffSeededFor.current = takeoffParam;
+    if (!takeoffRow) {
+      toast.error("No takeoff with this id is visible to you.");
+      return;
+    }
+    try {
+      const doc = takeoffDoc(takeoffRow);
+      const q = takeoffQuantities(doc.pages, doc.objects);
+      const seed = bidSeedFromTakeoff(doc.setup, q, { takeoffName: takeoffRow.name });
+      const secDefaults = { ...sectionDefaults, ...seed.sectionDefaults };
+      const info: TakeoffInfo = {
+        takeoffId: takeoffRow.id,
+        takeoffName: takeoffRow.name,
+        createdAt: new Date().toISOString(),
+        summary: seed.summary,
+        unmapped: seed.unmapped,
+      };
+      const merged: SavedBidState = {
+        ...saved,
+        ...(seed.roofSystem ? { roofSystem: seed.roofSystem } : {}),
+        ...(seed.attachment ? { attachment: seed.attachment } : {}),
+        ...(seed.membraneAdhesiveName ? { membraneAdhesiveName: seed.membraneAdhesiveName } : {}),
+        sections: seed.sections.map((o) => newSection({ ...secDefaults, ...o })),
+        parapets: seed.parapets.map((o) => newParapet(o)),
+        curbs: seed.curbs.map((o) => newCurb(o)),
+        accessoriesCalc: { ...saved.accessoriesCalc, pipeStacks: seed.pipeStacks },
+        sectionDefaults: secDefaults,
+        parapetDefaults: { ...parapetDefaults, ...seed.parapetDefaults },
+        takeoffInfo: info,
+      };
+      hydrateSaved(merged, {});
+      setBidId(undefined);
+      setBidName(takeoffRow.name.trim() || "Untitled bid");
+      setBidStatus("draft");
+      setLostReason(null);
+      if (takeoffRow.building_id) setLinkedBuildingId(takeoffRow.building_id);
+      // Unsaved on purpose, like a combined bid: nothing exists until the estimator saves.
+      toast.success(
+        `Bid started from the takeoff: ${q.sections.length} section${q.sections.length === 1 ? "" : "s"} measured. Read the notice for what still needs placing, then save.`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not start a bid from this takeoff.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per ?takeoff value
+  }, [takeoffRow, takeoffParam]);
+  useEffect(() => {
+    if (takeoffError)
+      toast.error(
+        takeoffError instanceof Error ? takeoffError.message : "Could not load the takeoff.",
+      );
+  }, [takeoffError]);
 
   // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
   // $45/hr, 35% gross profit) instead of hardcoded fallbacks; saved bids keep their own values.
@@ -1165,6 +1244,7 @@ function EstimatePage() {
     highWindTermYears,
     highWindBand,
     ...(combineInfo ? { combineInfo } : {}),
+    ...(takeoffInfo ? { takeoffInfo } : {}),
   };
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
@@ -1560,6 +1640,7 @@ function EstimatePage() {
           status: bidStatus,
           lostReason: bidStatus === "lost" ? lostReason : null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
+          ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
@@ -1570,6 +1651,9 @@ function EstimatePage() {
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
+        // The takeoff remembers the bid it produced (best effort; the bid already links back).
+        if (linkedTakeoffId)
+          void saveTakeoffFn({ data: { id: linkedTakeoffId, bid_id: row.id } }).catch(() => {});
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
       }
       return true;
@@ -1699,6 +1783,48 @@ function EstimatePage() {
                 ))}
               </ul>
             )}
+          </div>
+        )}
+        {takeoffInfo && (
+          <div className="space-y-1 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold">From Takeoff</p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setTakeoffInfo(undefined)}
+                title="Remove this notice from the bid"
+              >
+                Dismiss
+              </Button>
+            </div>
+            <p>{takeoffInfo.summary}</p>
+            {takeoffInfo.unmapped.length > 0 ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Measured but not placed automatically — add these by hand:
+                </p>
+                <ul className="list-disc pl-5 text-xs">
+                  {takeoffInfo.unmapped.map((u) => (
+                    <li key={`${u.label}|${u.detail}`}>
+                      <span className="font-medium">{u.label}</span> — {u.detail}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Everything measured has been placed.</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Sections drawn in Takeoff keep their measured outline; re-measure there to change
+              their size.{" "}
+              <a
+                href={`/takeoff?id=${encodeURIComponent(takeoffInfo.takeoffId)}`}
+                className="underline"
+              >
+                Open the takeoff
+              </a>
+            </p>
           </div>
         )}
         {bidLoadFailed && (
