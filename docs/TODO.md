@@ -29,18 +29,20 @@ the bottom with the commit that closed them.
    button per building if the card's web address carries the address or parcel; (c) the
    salesperson types "Roof installed (year)" on first contact (already on the form; the
    "age unknown" filter shows what is left).
-3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` and the
-   `Refresh Kentucky data` workflow (1st of each month). Secrets LOADER_EMAIL and
-   LOADER_PASSWORD are set. Runs 5–7 (Sep 24) loaded footprints for all 120 counties, then
-   stalled: the database is a small instance with a burst disk-IO budget, and doing the
-   address matching in SQL against a 2.1 M-row points table (85 % of the state's points were
-   kept by a too-coarse filter) starved it — every county hit the 30 s statement timeout; the
-   loader's login also expired after an hour. Fixed: matching now happens in the loader's
-   memory and only linked / business points reach the database (`apply_building_addresses`
-   batch update), the session refresh ticker is started, one shard. Owner: run
-   `truncate table public.address_points;` in the database console to drop run 5's 2.1 M junk
-   rows (or run the loader with `--trim`). Next run: "footprints = false". After it: every
-   county has a `data_refreshes` row and the Buildings page's "Data refreshed" line moves.
+3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` (matching in
+   the loader's memory; only linked / business points reach the database) and the
+   `Refresh Kentucky data` workflow (1st of each month, one shard). Secrets LOADER_EMAIL and
+   LOADER_PASSWORD are set. State after runs 5–9 (Sep 24): footprints for all 120 counties;
+   addresses and businesses matched for ~40 counties. Every run stalled on the same thing: the
+   database is a small instance with a burst disk-IO budget, run 5 left 2.1 M junk address
+   points (1.3 GB), and once the budget is spent a 200-row upsert into that table takes over
+   30 s. Owner: run `truncate table public.address_points;` in the database console (the
+   loader rebuilds only the useful rows), then dispatch the workflow with footprints = false
+   at night. Lessons: never run DDL while the loader is writing (an `alter table` blocked it
+   and PostgREST lost its schema cache for six minutes); one shard only.
+   Open: Ballard, Clark, Fulton and Martin keep almost no address points (Clark 0 of 16,695;
+   Martin 19 of 6,169) — their 911 layer rows likely lack the number/street fields or
+   coordinates the reader expects; paste a sample feature from one of them to fix the reader.
 4. **Verify in the browser:** aerial imagery tiles show on the map; the state outline layer
    draws when zoomed in; tap-to-add works on a small shop. Both depend on the state server
    allowing cross-origin tile fetches, which cannot be checked from the build container.
