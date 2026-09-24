@@ -462,6 +462,17 @@ function BidsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
+                  {/* Stored at save time — the estimator recomputes live, so an engine change
+                      (or an empty-data row) can differ from this until the bid is re-saved. */}
+                  <span
+                    className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
+                    title="Total as of the last save — open the bid for the live figure"
+                  >
+                    {money(Number(bid.grand_total ?? 0))}
+                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                      (last saved)
+                    </span>
+                  </span>
                   {/* Status changes here save at once and stamp "Last saved … by". */}
                   <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                     <Select
@@ -482,17 +493,6 @@ function BidsPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {/* Stored at save time — the estimator recomputes live, so an engine change
-                      (or an empty-data row) can differ from this until the bid is re-saved. */}
-                  <span
-                    className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
-                    title="Total as of the last save — open the bid for the live figure"
-                  >
-                    {money(Number(bid.grand_total ?? 0))}
-                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                      (last saved)
-                    </span>
-                  </span>
                   <Button
                     variant="ghost"
                     size="sm"
