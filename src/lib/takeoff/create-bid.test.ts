@@ -167,6 +167,31 @@ describe("bidSeedFromTakeoff", () => {
     ]);
   });
 
+  it("a drain with a boot and ring picked becomes a Roof Drains row; without them it is listed", () => {
+    const picked = objects.map((o) =>
+      o.kind === "count" && o.attrs.role === "drain"
+        ? {
+            ...o,
+            attrs: { ...o.attrs, roofType: "EPDM", bootSize: '4" Boot', ringSize: '4" Ring' },
+          }
+        : o,
+    );
+    const s2 = bidSeedFromTakeoff(setup, takeoffQuantities([page], picked));
+    expect(s2.drains).toEqual([
+      {
+        id: "takeoff-drain-1",
+        quantity: 2,
+        roofType: "EPDM",
+        reuseRings: false,
+        bootSize: '4" Boot',
+        ringSize: '4" Ring',
+        adjustPct: 0,
+      },
+    ]);
+    expect(s2.unmapped.map((u) => u.label)).toEqual(["South gutter: 100 ft"]);
+    expect(seed.drains).toEqual([]);
+  });
+
   it("drains and gutters are handed to the estimator with their numbers, not guessed", () => {
     expect(seed.unmapped.map((u) => u.label)).toEqual(["2 × Drain (4 in)", "South gutter: 100 ft"]);
     expect(seed.unmapped[0]!.detail).toContain("Roof Drains");
@@ -282,6 +307,7 @@ describe("applyTakeoffToBid", () => {
       ["manual-1", 4],
       ["takeoff-pipe-1", 2],
     ]);
+    expect(r.drains).toEqual([]);
     expect(r.changes).toEqual([
       'Re-measured section "Main roof".',
       'Added section "Wing" from the drawing.',

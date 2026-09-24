@@ -12,7 +12,7 @@
  */
 
 import type { BidSectionInput, CurbInput, ParapetInput } from "@/lib/engine/bid-builder";
-import type { PipeStackEntry } from "@/lib/engine/accessories";
+import type { DrainEntry, PipeStackEntry } from "@/lib/engine/accessories";
 import type { Attachment } from "@/lib/engine/estimate";
 import {
   COUNT_ROLE_LABELS,
@@ -46,6 +46,8 @@ export interface TakeoffBidSeed {
   curbs: Array<Partial<CurbInput>>;
   /** Pipe stack rows for AccessoriesState.pipeStacks (usage Plumbing, closed, the bid colour). */
   pipeStacks: PipeStackEntry[];
+  /** Drain rows for AccessoriesState.drains — only drains with a boot AND ring picked. */
+  drains: DrainEntry[];
   /** Measured things the estimator must place by hand, with their numbers. */
   unmapped: Array<{ label: string; detail: string }>;
   /** Free-text summary of the drawing for the bid's notes. */
@@ -135,14 +137,27 @@ export function bidSeedFromTakeoff(
       adjustPct: 0,
     }));
 
+  const drainReady = (c: TakeoffQuantities["counts"][number]) =>
+    c.role === "drain" && !!c.bootSize && !!c.ringSize;
+  const drains: DrainEntry[] = q.counts.filter(drainReady).map((c, i) => ({
+    id: `${TAKEOFF_DRAIN_ID_PREFIX}${i + 1}`,
+    quantity: c.qty,
+    roofType: c.roofType ?? "None",
+    reuseRings: c.reuseRings ?? false,
+    bootSize: c.bootSize!,
+    ringSize: c.ringSize!,
+    adjustPct: 0,
+  }));
+
   const unmapped: TakeoffBidSeed["unmapped"] = [];
   for (const c of q.counts) {
     if (c.role === "curb") continue;
     if (c.role === "pipe" && c.sizeIn !== undefined && c.sizeIn > 0) continue;
+    if (drainReady(c)) continue;
     const size = c.sizeIn ? ` (${c.sizeIn} in)` : "";
     const where =
       c.role === "drain"
-        ? "Accessories › Roof Drains & Boots (pick the roof type, boot and ring)"
+        ? "Accessories › Roof Drains & Boots (no boot and ring were picked — set the drain defaults on the takeoff's Setup tab or on each drain)"
         : c.role === "pipe"
           ? "Accessories › Pipe Stacks (no size was given)"
           : c.role === "vent"
@@ -188,6 +203,7 @@ export function bidSeedFromTakeoff(
     parapets,
     curbs,
     pipeStacks,
+    drains,
     unmapped,
     summary: `${opts.takeoffName ? `From takeoff "${opts.takeoffName}"` : "From a takeoff"}: ${summaryParts.join("; ")}.`,
   };
@@ -197,8 +213,9 @@ export function bidSeedFromTakeoff(
   return seed;
 }
 
-/** Pipe stack rows the seed creates carry this id prefix so an update can replace them. */
+/** Pipe stack / drain rows the seed creates carry these id prefixes so an update can replace them. */
 export const TAKEOFF_PIPE_ID_PREFIX = "takeoff-pipe-";
+export const TAKEOFF_DRAIN_ID_PREFIX = "takeoff-drain-";
 
 /**
  * Apply a re-measured takeoff onto an EXISTING bid (owner, Sep 24: "update the existing bid
@@ -219,6 +236,7 @@ export function applyTakeoffToBid(
     parapets?: ParapetInput[] | undefined;
     curbs?: CurbInput[] | undefined;
     pipeStacks?: PipeStackEntry[] | undefined;
+    drains?: DrainEntry[] | undefined;
   },
   seed: TakeoffBidSeed,
   make: {
@@ -231,6 +249,7 @@ export function applyTakeoffToBid(
   parapets: ParapetInput[];
   curbs: CurbInput[];
   pipeStacks: PipeStackEntry[];
+  drains: DrainEntry[];
   changes: string[];
 } {
   const changes: string[] = [];
@@ -331,5 +350,11 @@ export function applyTakeoffToBid(
   if (seed.pipeStacks.length || kept.length !== (bid.pipeStacks ?? []).length)
     changes.push(`Pipe stacks from the drawing: ${seed.pipeStacks.length} row(s).`);
 
-  return { sections, parapets, curbs, pipeStacks, changes };
+  // Drains
+  const keptDrains = (bid.drains ?? []).filter((x) => !x.id.startsWith(TAKEOFF_DRAIN_ID_PREFIX));
+  const drains = [...keptDrains, ...seed.drains];
+  if (seed.drains.length || keptDrains.length !== (bid.drains ?? []).length)
+    changes.push(`Drains from the drawing: ${seed.drains.length} row(s).`);
+
+  return { sections, parapets, curbs, pipeStacks, drains, changes };
 }

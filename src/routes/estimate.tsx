@@ -989,14 +989,20 @@ function EstimatePage() {
       const seed = bidSeedFromTakeoff(doc.setup, q, { takeoffName: takeoffRow.name });
       if (updating) {
         const r = applyTakeoffToBid(
-          { sections, parapets, curbs, pipeStacks: accessoriesCalc.pipeStacks },
+          {
+            sections,
+            parapets,
+            curbs,
+            pipeStacks: accessoriesCalc.pipeStacks,
+            drains: accessoriesCalc.drains,
+          },
           seed,
           { newSection, newParapet, newCurb },
         );
         setSections(r.sections.map((x) => ({ ...x, layers: sectionLayers(x) })));
         setParapets(r.parapets);
         setCurbs(r.curbs);
-        setAccessoriesCalc((prev) => ({ ...prev, pipeStacks: r.pipeStacks }));
+        setAccessoriesCalc((prev) => ({ ...prev, pipeStacks: r.pipeStacks, drains: r.drains }));
         setTakeoffInfo({
           takeoffId: takeoffRow.id,
           takeoffName: takeoffRow.name,
@@ -1030,7 +1036,11 @@ function EstimatePage() {
         sections: seed.sections.map((o) => newSection({ ...secDefaults, ...o })),
         parapets: seed.parapets.map((o) => newParapet(o)),
         curbs: seed.curbs.map((o) => newCurb(o)),
-        accessoriesCalc: { ...saved.accessoriesCalc, pipeStacks: seed.pipeStacks },
+        accessoriesCalc: {
+          ...saved.accessoriesCalc,
+          pipeStacks: seed.pipeStacks,
+          drains: seed.drains,
+        },
         sectionDefaults: secDefaults,
         parapetDefaults: { ...parapetDefaults, ...seed.parapetDefaults },
         takeoffInfo: info,

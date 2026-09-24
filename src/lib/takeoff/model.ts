@@ -93,6 +93,15 @@ export interface CountAttrs {
   /** Curb footprint (in). */
   widthIn?: number;
   lengthIn?: number;
+  /**
+   * Drain picks (the estimator's Roof Drains & Boots entry needs them): existing roof type,
+   * reuse the existing rings, boot and ring descriptions from the reference lists. Prefilled
+   * from `TakeoffSetup.drain`; a drain without a boot and ring stays "place by hand".
+   */
+  roofType?: string;
+  reuseRings?: boolean;
+  bootSize?: string;
+  ringSize?: string;
 }
 
 interface ObjectBase {
@@ -135,6 +144,13 @@ export interface TakeoffSetup {
     membraneAdhesiveName?: string;
     heightBand?: string;
     deckType?: string;
+  };
+  /** Defaults for every drain placed (each drain can still be changed). */
+  drain?: {
+    roofType?: string;
+    reuseRings?: boolean;
+    bootSize?: string;
+    ringSize?: string;
   };
   notes?: string;
 }
@@ -215,6 +231,10 @@ export interface CountQuantity {
   sizeIn?: number;
   widthIn?: number;
   lengthIn?: number;
+  roofType?: string;
+  reuseRings?: boolean;
+  bootSize?: string;
+  ringSize?: string;
   objectIds: string[];
 }
 export interface TakeoffQuantities {
@@ -254,6 +274,10 @@ export function takeoffQuantities(
         a.sizeIn ?? "",
         a.widthIn ?? "",
         a.lengthIn ?? "",
+        a.roofType ?? "",
+        a.reuseRings ? "reuse" : "",
+        a.bootSize ?? "",
+        a.ringSize ?? "",
       ].join("|");
       const g =
         countGroups.get(key) ??
@@ -262,6 +286,10 @@ export function takeoffQuantities(
           if (a.sizeIn !== undefined) n.sizeIn = a.sizeIn;
           if (a.widthIn !== undefined) n.widthIn = a.widthIn;
           if (a.lengthIn !== undefined) n.lengthIn = a.lengthIn;
+          if (a.roofType !== undefined) n.roofType = a.roofType;
+          if (a.reuseRings !== undefined) n.reuseRings = a.reuseRings;
+          if (a.bootSize !== undefined) n.bootSize = a.bootSize;
+          if (a.ringSize !== undefined) n.ringSize = a.ringSize;
           countGroups.set(key, n);
           return n;
         })();
