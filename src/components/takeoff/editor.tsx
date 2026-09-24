@@ -4,11 +4,20 @@
  * any change to the name, pages, setup or objects.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowLeft, Check, FilePlus2, Loader2, RotateCw, Ruler } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  FilePlus2,
+  Loader2,
+  RefreshCw,
+  RotateCw,
+  Ruler,
+} from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-store";
@@ -17,7 +26,7 @@ import {
   saveTakeoff,
   takeoffDoc,
   TAKEOFF_BUCKET,
-  type TakeoffRow,
+  type TakeoffWithBid,
 } from "@/lib/takeoff.functions";
 import {
   rotatePoints,
@@ -34,9 +43,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { BidStatusBadge } from "./bid-status-badge";
 import { ObjectsTab } from "./objects-tab";
 import { QuantitiesTab } from "./quantities-tab";
 import { SetupTab } from "./setup-tab";
@@ -84,6 +101,9 @@ export function TakeoffEditor({ id }: { id: string }) {
   return <LoadedEditor key={q.data.id} row={q.data} />;
 }
 
+type TakeoffStatus = "draft" | "done";
+const NO_AREA_TIP = "Draw at least one roof area on a scaled page first";
+
 const SAVE_LABEL: Record<SaveState, string> = {
   idle: "Saved",
   saving: "Saving…",
@@ -107,7 +127,7 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
-function LoadedEditor({ row }: { row: TakeoffRow }) {
+function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const initial = useMemo(() => takeoffDoc(row), [row]);
   const [name, setName] = useState(row.name);
   const [pages, setPages] = useState<TakeoffPage[]>(() =>
@@ -173,17 +193,47 @@ function LoadedEditor({ row }: { row: TakeoffRow }) {
   const pageObjects = useMemo(() => objects.filter((o) => o.page === page.index), [objects, page]);
   const quantities = useMemo(() => takeoffQuantities(pages, objects), [pages, objects]);
 
-  // Create bid from takeoff (docs/planswift-research.md §4.6): save what is pending, then open
-  // the estimator on a NEW bid seeded from this drawing (/estimate?takeoff=<id>).
+  // Draft / Done — saved at once (separately from the autosave, which never sends status).
+  const qc = useQueryClient();
+  const [status, setStatus] = useState<TakeoffStatus>(row.status === "done" ? "done" : "draft");
+  const saveStatus = useMutation({
+    mutationFn: (next: TakeoffStatus) => saveFn({ data: { id: row.id, status: next } }),
+    onMutate: (next) => {
+      const prev = status;
+      setStatus(next);
+      return { prev };
+    },
+    onSuccess: (_row, next) => {
+      toast.success(next === "done" ? "Takeoff marked Done" : "Takeoff moved back to Draft");
+      void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+    },
+    onError: (e, _next, ctx) => {
+      if (ctx) setStatus(ctx.prev);
+      toast.error(e instanceof Error ? e.message : "Could not change the status");
+    },
+  });
+
+  // Bid from takeoff (docs/planswift-research.md §4.6): save what is pending, then open the
+  // estimator — on a NEW bid seeded from this drawing (/estimate?takeoff=<id>), or on the bid
+  // this takeoff already made, with the drawing's new quantities applied
+  // (/estimate?bid=<bid id>&takeoff=<id>).
   const navigate = useNavigate();
+  const linkedBid = row.bid;
   const canCreateBid = quantities.sections.length > 0;
-  const createBid = async () => {
+  const toBid = async (bidId: string | null) => {
     const ok = await flushSave();
     if (!ok) {
-      toast.error("The takeoff could not be saved, so no bid was started. Try again.");
+      toast.error(
+        bidId
+          ? "The takeoff could not be saved, so the bid was not updated. Try again."
+          : "The takeoff could not be saved, so no bid was started. Try again.",
+      );
       return;
     }
-    void navigate({ to: "/estimate", search: { takeoff: row.id } });
+    void navigate({
+      to: "/estimate",
+      search: bidId ? { bid: bidId, takeoff: row.id } : { takeoff: row.id },
+    });
   };
 
   const onPageSize = useCallback((index: number, rotation: number, w: number, h: number) => {
@@ -297,28 +347,90 @@ function LoadedEditor({ row }: { row: TakeoffRow }) {
           </span>
         )}
         <SaveIndicator state={saveState} />
-        <div className="ml-auto flex items-center gap-2">
-          {row.bid_id && (
-            <Button asChild size="sm" variant="outline">
-              <Link to="/estimate" search={{ bid: row.bid_id }}>
-                Open the bid made from this
-              </Link>
-            </Button>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={0}>
-                <Button size="sm" disabled={!canCreateBid} onClick={() => void createBid()}>
-                  <FilePlus2 className="mr-1 h-4 w-4" /> Create bid
-                </Button>
+        <Select value={status} onValueChange={(v) => saveStatus.mutate(v as TakeoffStatus)}>
+          <SelectTrigger
+            className="h-8 w-[100px] text-xs"
+            aria-label="Takeoff status"
+            title="Mark this takeoff Done, or move it back to Draft"
+            disabled={saveStatus.isPending}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="draft">Draft</SelectItem>
+            <SelectItem value="done">Done</SelectItem>
+          </SelectContent>
+        </Select>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {linkedBid ? (
+            <>
+              <span className="flex items-center gap-1.5 text-xs">
+                <Link
+                  to="/estimate"
+                  search={{ bid: linkedBid.id }}
+                  className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  title={`Open “${linkedBid.name}” as it is saved now`}
+                >
+                  Open bid
+                </Link>
+                <BidStatusBadge status={linkedBid.status} />
               </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {canCreateBid
-                ? "Start a new bid with these sections, edges, parapets and counts filled in"
-                : "Draw at least one roof area on a scaled page first"}
-            </TooltipContent>
-          </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!canCreateBid}
+                      onClick={() => void toBid(null)}
+                    >
+                      <FilePlus2 className="mr-1 h-4 w-4" /> Create a new bid
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {canCreateBid
+                    ? "Start another, separate bid with these sections, edges, parapets and counts filled in"
+                    : NO_AREA_TIP}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="min-w-0">
+                    <Button
+                      size="sm"
+                      disabled={!canCreateBid}
+                      className="max-w-[320px]"
+                      onClick={() => void toBid(linkedBid.id)}
+                    >
+                      <RefreshCw className="mr-1 h-4 w-4 shrink-0" />
+                      <span className="truncate">Update bid “{linkedBid.name}”</span>
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {canCreateBid
+                    ? `Open “${linkedBid.name}” with this drawing's new quantities applied`
+                    : NO_AREA_TIP}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>
+                  <Button size="sm" disabled={!canCreateBid} onClick={() => void toBid(null)}>
+                    <FilePlus2 className="mr-1 h-4 w-4" /> Create bid
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {canCreateBid
+                  ? "Start a new bid with these sections, edges, parapets and counts filled in"
+                  : NO_AREA_TIP}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
       </div>
 
