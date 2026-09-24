@@ -27,9 +27,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two runs in parallel, each taking every other county (four saturated the database).
-        # A single county runs in shard 1 alone.
-        shard: [1, 2]
+        # Three runs in parallel, each taking every third county (four saturated the database
+        # before the address-point filter was tightened). A single county runs in shard 1 alone.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,7 +48,7 @@ jobs:
             if [ "$SHARD" != "1" ]; then echo "single county: shard $SHARD has nothing to do"; exit 0; fi
             ARGS="--county $COUNTY"
           else
-            ARGS="--all --shard $SHARD/2"
+            ARGS="--all --shard $SHARD/3"
           fi
           if [ "${{ github.event_name }}" = "schedule" ] || [ "$FOOTPRINTS" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
           echo "running: $ARGS"

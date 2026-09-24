@@ -25,10 +25,14 @@ the bottom with the commit that closed them.
    salesperson types "Roof installed (year)" on first contact (already on the form; the
    "age unknown" filter shows what is left).
 3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` and the
-   `Refresh Kentucky data` workflow (1st of each month, four shards). Secrets LOADER_EMAIL and
-   LOADER_PASSWORD are set. First full run with "Load footprints too" in progress / to verify;
-   after it, confirm the schedule fires on the 1st and the Buildings page's "Data refreshed"
-   line moves.
+   `Refresh Kentucky data` workflow (1st of each month, three shards). Secrets LOADER_EMAIL and
+   LOADER_PASSWORD are set. Run 5 (Sep 24) loaded footprints and address points for all 120
+   counties, then every county failed at the address matcher (30 s statement timeout): the
+   "near a building" filter kept 85 % of the state's 2.5 M points (2.1 M rows, 1.25 GB) and the
+   matcher thrashed under the write load. Fixed: 0.0015° grid (keeps points within ~150 m),
+   chunks that halve on a timeout, three shards. Next run needs only "footprints = false".
+   After it: confirm every county has a `data_refreshes` row, the Buildings page's "Data
+   refreshed" line moves, and the point table is back to a few hundred thousand rows.
 4. **Verify in the browser:** aerial imagery tiles show on the map; the state outline layer
    draws when zoomed in; tap-to-add works on a small shop. Both depend on the state server
    allowing cross-origin tile fetches, which cannot be checked from the build container.

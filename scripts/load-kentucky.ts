@@ -3,7 +3,7 @@
  * from a machine that can reach the state server (GitHub Actions monthly, or a laptop):
  *
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
- *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/4]
+ *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/3]
  *
  * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
  * secrets; never in the repo). The project URL and public key are read from the committed .env. Per county: footprints of the size floor → every 911 address point → match
@@ -41,7 +41,7 @@ const all = args.includes("--all");
 const only = flag("--county");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
-// --shard 2/4: this run takes every 4th county starting at the 2nd (GitHub runs shards in
+// --shard 2/3: this run takes every 3rd county starting at the 2nd (GitHub runs shards in
 // parallel so the whole state fits inside one job's time limit).
 const shard = (() => {
   const m = /^(\d+)\/(\d+)$/.exec(flag("--shard") ?? "");
@@ -109,6 +109,38 @@ async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<
   }
 }
 
+/**
+ * Run a chunked database step (fill / promote / trim) until a call comes back short. The API
+ * role's statement timeout is 30 s; when a chunk hits it, the chunk is halved and retried
+ * rather than failing the county (the first statewide run lost every county this way).
+ */
+async function chunked(
+  name: string,
+  params: Record<string, unknown>,
+  limit: number,
+  progress?: (total: number) => void,
+): Promise<number> {
+  let total = 0;
+  let size = limit;
+  for (;;) {
+    let n: number;
+    try {
+      n = await rpc<number>(name, { ...params, p_limit: size });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/statement timeout/i.test(msg) && size > 25) {
+        size = Math.max(25, Math.floor(size / 2));
+        console.log(`\n${name}: timed out, retrying ${size} at a time`);
+        continue;
+      }
+      throw e;
+    }
+    total += n;
+    progress?.(total);
+    if (n < size) return total;
+  }
+}
+
 /** Every feature matching `where`, page by page. */
 async function* pages(layerUrl: string, where: string) {
   for (let offset = 0; ; offset += pageSize) {
@@ -133,10 +165,18 @@ const rpc = async <T>(name: string, params: Record<string, unknown>): Promise<T>
   return data;
 };
 
-/** A cheap "is there a stored building within ~250 m" test for one county (grid of 0.003°). */
+/**
+ * A cheap "is there a stored building within ~150 m" test for one county. Grid cells of 0.0015°
+ * (≈ 165 m north–south, ≈ 130 m east–west in Kentucky); a point counts as near when its cell or
+ * one of the eight neighbours holds a building centroid, so nothing inside the matcher's radius
+ * (100 m, or the building's own size, up to ~300 m for the biggest roofs) is dropped. The first
+ * statewide run used 0.003° cells and kept 85 % of the state's 2.5 million points (2.1 million
+ * rows, 1.25 GB), which is what made the address matcher time out.
+ */
+const GRID = 0.0015;
 async function centroidGrid(county: string): Promise<(lat: number, lng: number) => boolean> {
   const cells = new Set<string>();
-  const key = (lat: number, lng: number) => `${Math.floor(lat / 0.003)}|${Math.floor(lng / 0.003)}`;
+  const key = (lat: number, lng: number) => `${Math.floor(lat / GRID)}|${Math.floor(lng / GRID)}`;
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
       .from("buildings")
@@ -149,9 +189,9 @@ async function centroidGrid(county: string): Promise<(lat: number, lng: number) 
     for (const r of data ?? []) {
       const la = r.centroid_lat!;
       const ln = r.centroid_lng!;
-      // Mark the cell and its neighbours so anything within one cell (≈ 330 m) counts as near.
+      // Mark the cell and its neighbours so anything within one cell counts as near.
       for (let a = -1; a <= 1; a++)
-        for (let b = -1; b <= 1; b++) cells.add(key(la + a * 0.003, ln + b * 0.003));
+        for (let b = -1; b <= 1; b++) cells.add(key(la + a * GRID, ln + b * GRID));
     }
     if (!data || data.length < 1000) break;
   }
@@ -246,11 +286,9 @@ async function loadCounty(county: string) {
     .eq("county", county)
     .is("deleted_at", null)
     .neq("address1", "");
-  for (;;) {
-    const n = await rpc<number>("fill_footprint_addresses", { p_county: county, p_limit: 400 });
-    process.stdout.write(`\r[${county}] matching addresses… ${n} checked`);
-    if (n < 400) break;
-  }
+  await chunked("fill_footprint_addresses", { p_county: county }, 150, (n) =>
+    process.stdout.write(`\r[${county}] matching addresses… ${n} checked`),
+  );
   const { count: after } = await sb
     .from("buildings")
     .select("id", { count: "exact", head: true })
@@ -260,12 +298,7 @@ async function loadCounty(county: string) {
   const addressed = (after ?? 0) - (before ?? 0);
   console.log("");
   log(`addresses matched: ${addressed}`);
-  let promoted = 0;
-  for (;;) {
-    const n = await rpc<number>("promote_commercial_points", { p_county: county, p_limit: 300 });
-    promoted += n;
-    if (n < 300) break;
-  }
+  const promoted = await chunked("promote_commercial_points", { p_county: county }, 200);
   log(`named businesses added: ${promoted}`);
   // Outlines for the promoted buildings: one multipoint request per 150.
   let attached = 0;
@@ -353,12 +386,10 @@ async function loadCounty(county: string) {
     if (rows.length > 0)
       facilities += await rpc<number>("upsert_buildings", { rows: rows as unknown as Json });
   }
-  let trimmed = 0;
-  for (;;) {
-    const n = await rpc<number>("trim_address_points", { p_county: county, p_limit: 5000 });
-    trimmed += n;
-    if (n < 5000) break;
-  }
+  const trimmed = await chunked("trim_address_points", { p_county: county }, 5000, (n) =>
+    process.stdout.write(`\r[${county}] trimming house points… ${n}`),
+  );
+  console.log("");
   const { error: rErr } = await sb.from("data_refreshes").insert({
     county,
     ran_by: "scheduled",
