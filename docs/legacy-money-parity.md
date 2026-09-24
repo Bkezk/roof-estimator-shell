@@ -2289,7 +2289,12 @@ below) → +Infinity — the web warns and bills 0 there.
   and SUBTRACTS units for an adhered Duro-Tuff wall — a vendor defect; the web warns and bills 0.
 - `non_dl:others` (NDLOthers: "DL Approved Slipsheet" = Ceil(parapet + curb polyethylene sq ft),
   curb ISO sq ft) existed only in the live database; migration `20260918110000` records it
-  (rows `_uncaptured`, $0 — prices must come from the licensed Estimator).
+  (rows `_uncaptured`, $0 — prices must come from the licensed Estimator). **Captured
+  2026-09-24:** every legacy `.bax` carries the rows under `<nondl><otherndl>` with the live
+  unit costs — all five owner bids agree on refid 1 "DL Approved Slipsheet" $0.01375/sq ft and
+  refid 2 `Curbs 1 1/2" ISO` $0.30/sq ft (labor 0 on both; row 2 matches the §22.24 pin).
+  Migration `20260924200000` sets row 1's price, clears `_uncaptured`, and renames row 2 to the
+  legacy description.
 - Frozen-snapshot fallback: parapet wood blocking bills the row's MATERIAL too (`ReviewCalc.NonDL`
   case 1 = WallBlockings + EdgeBlockings `get_MaterialCost`), not labor only.
 
