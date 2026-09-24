@@ -208,8 +208,10 @@ Built so far: phase 0 (engine measured sections + parity test, `src/lib/engine/e
 access page; the data model and quantities (`src/lib/takeoff/model.ts`); server functions
 (`src/lib/takeoff.functions.ts`); the bid seed (`src/lib/takeoff/create-bid.ts`); the
 estimator side of Create bid (`/estimate?takeoff=<id>`, the "From Takeoff" notice, measured
-sections read-only on the Sections screen). In progress: the Takeoff page itself
-(`src/routes/takeoff.tsx`, `src/components/takeoff-page.tsx`, `src/components/takeoff/`).
+sections read-only on the Sections screen); the Takeoff page itself (`src/routes/takeoff.tsx`,
+`src/components/takeoff-page.tsx`, `src/components/takeoff/`) with Create bid wired. Not yet
+done: a run on a real plan set in the browser (owner test), underlayment layers on the Setup
+tab, a phone layout, the Prospecting-map aerial mode (phase 3).
 
 | Phase | Scope                                                                                                                                                                 | Done when                                                          |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
