@@ -444,12 +444,11 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         toast.info("No building outline under that spot — zoom in and tap inside an outline");
         return;
       }
-      const size = r.roofSqFt ? ` (${r.roofSqFt.toLocaleString()} sq ft roof)` : "";
-      if (r.flagged) {
-        toast.success(`Added to my prospects${size}`);
+      const size = r.roofSqFt ? ` — ${r.roofSqFt.toLocaleString()} sq ft roof` : "";
+      if (r.existed) toast.info(`Opened${size}`);
+      else {
+        toast.success(`Outline added and opened${size}`);
         invalidate();
-      } else {
-        toast.info(`Already on your prospects list — opened${size}`);
       }
       setSelectedId(r.id);
     },
@@ -722,8 +721,8 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           <p className="-mt-2 text-xs text-muted-foreground">
             Blue outlines are the buildings in the search results.
             {showOutlines
-              ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to add it as a prospect with its size and address" : ""}.`
-              : " Turn “Outlines on” to see every building in the state and tap one to add it."}
+              ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to open it, then “Add to my prospects”" : ""}.`
+              : " Turn “Outlines on” to see every building in the state and tap one to open it."}
           </p>
         </Suspense>
       )}
@@ -929,7 +928,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                         </Link>
                       </Button>
                     )}
-                    {form.id && canWrite && (
+                    {form.id && canWrite && !detail.data?.building.prospect_stage && (
+                      <Button
+                        size="sm"
+                        disabled={stage.isPending}
+                        onClick={() => stage.mutate({ id: form.id!, stage: "prospect" })}
+                      >
+                        <Star className="mr-1 h-4 w-4" /> Add to my prospects
+                      </Button>
+                    )}
+                    {form.id && canWrite && !!detail.data?.building.prospect_stage && (
                       <Select
                         value={detail.data?.building.prospect_stage ?? "none"}
                         onValueChange={(v) =>
@@ -946,7 +954,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">Not a prospect</SelectItem>
+                          <SelectItem value="none">Remove from my prospects</SelectItem>
                           {PROSPECT_STAGES.map((st) => (
                             <SelectItem key={st} value={st}>
                               {PROSPECT_STAGE_LABELS[st]}

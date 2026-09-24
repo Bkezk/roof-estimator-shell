@@ -1136,10 +1136,8 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
     }): Promise<{
       id: string | null;
       roofSqFt: number | null;
-      /** The building was already in the statewide data. */
+      /** The building was already in the statewide data (nothing was written). */
       existed: boolean;
-      /** This tap put it on the prospects list (false = it was already there). */
-      flagged: boolean;
     }> => {
       await assertPageAccess(context.supabase, context.userId, "prospect");
       const page = (await fetchJson(
@@ -1148,29 +1146,17 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
       const hit = (page.features ?? [])
         .map(footprintFromFeature)
         .find((c) => c !== null && pointInFootprint(data.lng, data.lat, c.geometry?.footprint));
-      if (!hit) return { id: null, roofSqFt: null, existed: false, flagged: false };
-      // Already stored (the statewide load holds most outlines)? Then tapping means "make it a
-      // prospect": flag it unless it already is one, and open it either way.
+      if (!hit) return { id: null, roofSqFt: null, existed: false };
+      // Already stored (the statewide load holds most outlines)? Just open it. Tapping only
+      // opens a building; "Add to my prospects" on the detail card is the deliberate step
+      // (owner, Sep 24).
       const { data: prior } = await context.supabase
         .from("buildings")
-        .select("id, prospect_stage")
+        .select("id")
         .eq("source_key", `ornl:${hit.buildId}`)
         .is("deleted_at", null)
         .maybeSingle();
-      if (prior) {
-        if (prior.prospect_stage)
-          return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true, flagged: false };
-        const { error: pErr } = await context.supabase
-          .from("buildings")
-          .update({
-            prospect_stage: "prospect",
-            prospected_at: new Date().toISOString(),
-            prospect_owner_name: await meName(context),
-          })
-          .eq("id", prior.id);
-        if (pErr) throw new Error(pErr.message);
-        return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true, flagged: true };
-      }
+      if (prior) return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true };
       const who = await meName(context);
       const county = hit.county;
       const { error } = await context.supabase.rpc("upsert_buildings", {
@@ -1209,19 +1195,6 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
         .eq("source_key", `ornl:${hit.buildId}`)
         .maybeSingle();
       if (rErr) throw new Error(rErr.message);
-      // Tapping an outline means "this is a prospect".
-      if (row?.id) {
-        const { error: pErr } = await context.supabase
-          .from("buildings")
-          .update({
-            prospect_stage: "prospect",
-            prospected_at: new Date().toISOString(),
-            prospect_owner_name: who,
-          })
-          .eq("id", row.id)
-          .is("prospect_stage", null);
-        if (pErr) throw new Error(pErr.message);
-      }
-      return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false, flagged: true };
+      return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false };
     },
   );
