@@ -32,7 +32,15 @@ the bottom with the commit that closed them.
    consumed movement then carries a service_job_id), material + hours per service job, and
    remove the "rest was used on the vehicle" write-off. Half a day; the UI is a good Opus
    subagent task once the table shape is settled.
-   Destination (owner, Sep 24): **replace CenterPoint by the end**, in steps that each stand
+   The bigger goal (owner, Sep 24): the company runs four products today — Bid-Advantage,
+   PlanSwift, CenterPoint and Sage — and the target is **this web app + Sage only**.
+   Bid-Advantage → Estimator (built; importer for old bids built). PlanSwift → aerial takeoff
+   (brief phase 2, not started). CenterPoint → service jobs, customers, scheduling, invoicing
+   here. Sage stays for accounting and payments; a live Sage integration is OPTIONAL — the app
+   only has to hand Sage clean invoice / payment numbers (an export the bookkeeper imports is
+   enough). Order: CenterPoint replacement first (daily use), then takeoff, then history
+   migration and cancelling the two subscriptions.
+   Destination for CenterPoint: **replace it by the end**, in steps that each stand
    alone: (1) service jobs + material + hours here, linked by CenterPoint ticket number;
    (2) customers, contacts and scheduling here, techs create repairs here, CenterPoint still
    invoices; (3) invoicing here pushed to the accounting system (do not build accounting —
