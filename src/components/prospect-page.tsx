@@ -37,6 +37,7 @@ import {
   listWarrantyLeads,
   previewLayer,
   promoteCommercialPoints,
+  addBuildingAtPoint,
   attachFootprints,
   trimAddressPoints,
   recordRefresh,
@@ -291,6 +292,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const openTasksFn = useServerFn(listOpenTasks);
   const leadsFn = useServerFn(listWarrantyLeads);
   const promoteFn = useServerFn(promoteCommercialPoints);
+  const addAtPointFn = useServerFn(addBuildingAtPoint);
   const attachFn = useServerFn(attachFootprints);
   const trimFn = useServerFn(trimAddressPoints);
   const recordRefreshFn = useServerFn(recordRefresh);
@@ -601,6 +603,19 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       fail(e);
     },
   });
+  const tapAdd = useMutation({
+    mutationFn: (p: { lng: number; lat: number }) => addAtPointFn({ data: p }),
+    onSuccess: (r) => {
+      if (!r.id) {
+        toast.info("No building outline under that spot — zoom in and tap inside an outline");
+        return;
+      }
+      toast.success(`Added${r.roofSqFt ? ` — ${r.roofSqFt.toLocaleString()} sq ft roof` : ""}`);
+      invalidate();
+      setSelectedId(r.id);
+    },
+    onError: fail,
+  });
   const rect = useMemo(() => {
     const b = detail.data?.building;
     if (!b) return null;
@@ -690,7 +705,14 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
             }))}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            {...(canWrite
+              ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
+              : {})}
           />
+          <p className="-mt-2 text-xs text-muted-foreground">
+            Blue outlines are your prospects. Zoom in and every building outline in the state
+            appears{canWrite ? "; tap one to add it as a prospect with its size and address" : ""}.
+          </p>
         </Suspense>
       )}
 

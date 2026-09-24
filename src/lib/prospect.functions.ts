@@ -26,6 +26,7 @@ import {
   addressPointFromFeature,
   detectLayerKind,
   facilityFromFeature,
+  footprintAtPointUrl,
   footprintFromFeature,
   footprintsAtPointsRequest,
   guessFacilityFieldMap,
@@ -1007,4 +1008,64 @@ export const listRefreshes = createServerFn({ method: "GET" })
       seen.add(r.county);
       return true;
     });
+  });
+
+/**
+ * Tap-to-add: the building outline under a tapped map point becomes a prospect (source ornl,
+ * keyed by its BUILD_ID, so tapping a stored building again just returns it), with its size,
+ * county from FIPS and the nearest 911 address when the county's points are loaded.
+ */
+export const addBuildingAtPoint = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ id: string | null; roofSqFt: number | null }> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const page = (await fetchJson(
+      footprintAtPointUrl(KY_FOOTPRINTS_LAYER, data.lng, data.lat),
+    )) as ArcGisFeatureSet;
+    const hit = (page.features ?? [])
+      .map(footprintFromFeature)
+      .find((c) => c !== null && pointInFootprint(data.lng, data.lat, c.geometry?.footprint));
+    if (!hit) return { id: null, roofSqFt: null };
+    const who = await meName(context);
+    const county = hit.county;
+    const { error } = await context.supabase.rpc("upsert_buildings", {
+      rows: [
+        {
+          source_key: `ornl:${hit.buildId}`,
+          source: "ornl",
+          county,
+          name: hit.primaryOccupancy ?? "",
+          address1: hit.address ?? "",
+          city: hit.city,
+          zip: hit.zip,
+          land_use: hit.occupancyClass,
+          roof_sqft: hit.roofSqFt,
+          perimeter_ft: hit.geometry?.computedPerimeterFt ?? null,
+          height_ft: hit.heightFt,
+          footprint: hit.geometry?.footprint ?? null,
+          centroid_lat: hit.lat,
+          centroid_lng: hit.lng,
+          source_layer: KY_FOOTPRINTS_LAYER,
+          created_by: context.userId,
+          created_by_name: who,
+        },
+      ] as unknown as Json,
+    });
+    if (error) throw new Error(error.message);
+    if (county) {
+      const { error: fErr } = await context.supabase.rpc("fill_footprint_addresses", {
+        p_county: county,
+      });
+      if (fErr) throw new Error(fErr.message);
+    }
+    const { data: row, error: rErr } = await context.supabase
+      .from("buildings")
+      .select("id")
+      .eq("source_key", `ornl:${hit.buildId}`)
+      .maybeSingle();
+    if (rErr) throw new Error(rErr.message);
+    return { id: row?.id ?? null, roofSqFt: hit.roofSqFt };
   });

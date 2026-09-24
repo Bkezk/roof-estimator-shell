@@ -13,7 +13,9 @@ import {
   detectLayerKind,
   facilityFromFeature,
   fipsForCounty,
+  footprintAtPointUrl,
   footprintFromFeature,
+  footprintOutlineTileUrl,
   footprintsAtPointsRequest,
   guessFacilityFieldMap,
   layerShortName,
@@ -246,5 +248,18 @@ describe("point in footprint", () => {
     expect(r.url).toBe("https://x/MapServer/0/query");
     expect(r.body.get("geometryType")).toBe("esriGeometryMultipoint");
     expect(JSON.parse(r.body.get("geometry")!).points).toEqual([[-85.45, 37.55]]);
+  });
+});
+
+describe("tap-to-add", () => {
+  it("asks for the footprint under a point and the outline tiles", () => {
+    const u = new URL(footprintAtPointUrl("https://x/MapServer/0", -85.45, 37.55));
+    expect(u.searchParams.get("geometry")).toBe("-85.45,37.55");
+    expect(u.searchParams.get("geometryType")).toBe("esriGeometryPoint");
+    expect(
+      footprintOutlineTileUrl("https://x/Ky_ORNL_Building_Footprints_WGS84WM/MapServer/0"),
+    ).toBe(
+      "https://x/Ky_ORNL_Building_Footprints_WGS84WM/MapServer/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image",
+    );
   });
 });

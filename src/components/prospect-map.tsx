@@ -18,7 +18,12 @@ import {
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
-import { KY_IMAGERY_PHASE3_SERVICE, tileUrlTemplate } from "@/lib/gis/ky-layers";
+import {
+  KY_FOOTPRINTS_LAYER,
+  KY_IMAGERY_PHASE3_SERVICE,
+  footprintOutlineTileUrl,
+  tileUrlTemplate,
+} from "@/lib/gis/ky-layers";
 
 export interface MapBuilding {
   id: string;
@@ -34,6 +39,8 @@ interface Props {
   buildings: MapBuilding[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** A tap on an outline that is not stored yet (zoomed in): add that building. */
+  onTapEmpty?: (lng: number, lat: number) => void;
   className?: string;
 }
 
@@ -48,13 +55,21 @@ const asGeoJson = (b: MapBuilding) => {
   return null;
 };
 
-export default function ProspectMap({ buildings, selectedId, onSelect, className }: Props) {
+export default function ProspectMap({
+  buildings,
+  selectedId,
+  onSelect,
+  onTapEmpty,
+  className,
+}: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
   const ready = useRef(false);
   const pending = useRef<(() => void) | null>(null);
   const select = useRef(onSelect);
   select.current = onSelect;
+  const tapEmpty = useRef(onTapEmpty);
+  tapEmpty.current = onTapEmpty;
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -71,8 +86,26 @@ export default function ProspectMap({ buildings, selectedId, onSelect, className
             maxzoom: 21,
             attribution: "Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch)",
           },
+          // Every building outline in the state, drawn by the state server when zoomed in —
+          // what is not stored yet. A tap on one adds it.
+          outlines: {
+            type: "raster",
+            tiles: [footprintOutlineTileUrl(KY_FOOTPRINTS_LAYER)],
+            tileSize: 256,
+            minzoom: 15,
+            maxzoom: 19,
+          },
         },
-        layers: [{ id: "ky3in", type: "raster", source: "ky3in" }],
+        layers: [
+          { id: "ky3in", type: "raster", source: "ky3in" },
+          {
+            id: "outlines",
+            type: "raster",
+            source: "outlines",
+            minzoom: 15,
+            paint: { "raster-opacity": 0.55 },
+          },
+        ],
       },
       bounds: KY_BOUNDS,
       attributionControl: {},
@@ -122,6 +155,13 @@ export default function ProspectMap({ buildings, selectedId, onSelect, className
         m.on("mouseenter", layer, () => (m.getCanvas().style.cursor = "pointer"));
         m.on("mouseleave", layer, () => (m.getCanvas().style.cursor = ""));
       }
+      // A tap that hits none of our features, zoomed in enough to see outlines: add that one.
+      m.on("click", (e) => {
+        if (m.getZoom() < 15) return;
+        const hits = m.queryRenderedFeatures(e.point, { layers: ["footprints-fill", "points"] });
+        if (hits.length > 0) return;
+        tapEmpty.current?.(e.lngLat.lng, e.lngLat.lat);
+      });
       ready.current = true;
       pending.current?.();
     });

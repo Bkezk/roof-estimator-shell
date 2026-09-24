@@ -596,3 +596,30 @@ export function footprintsAtPointsRequest(
   body.set("outSR", "102100");
   return { url: `${layerUrl.replace(/\/+$/, "")}/query`, body };
 }
+
+// ── Tap-to-add: the footprint under one point ───────────────────────────────────────────────
+
+/** Query for the footprint(s) containing one WGS84 point. */
+export function footprintAtPointUrl(layerUrl: string, lng: number, lat: number): string {
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set("where", "1=1");
+  p.set("geometry", `${lng},${lat}`);
+  p.set("geometryType", "esriGeometryPoint");
+  p.set("inSR", "4326");
+  p.set("spatialRel", "esriSpatialRelIntersects");
+  p.set(
+    "outFields",
+    "BUILD_ID,SQFEET,HEIGHT,FIPS,PROP_ADDR,PROP_CITY,PROP_ZIP,OCC_CLS,PRIM_OCC,LATITUDE,LONGITUDE,UUID",
+  );
+  p.set("returnGeometry", "true");
+  p.set("outSR", "102100");
+  return `${layerUrl.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+/**
+ * Every building outline in the state, drawn by the state server per map tile (a dynamic
+ * ArcGIS "export" with the tile's bounds), so the map shows what is NOT stored yet.
+ */
+export const footprintOutlineTileUrl = (serviceUrl: string): string =>
+  `${serviceUrl.replace(/\/MapServer\/\d+\/?$/, "/MapServer")}/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image`;
