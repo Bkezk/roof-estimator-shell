@@ -1147,8 +1147,8 @@ function RecordDialog(props: {
                 onChange={(e) => setRestUsed(e.target.checked)}
               />
               <span>
-                The other <b>{fmtCounted(rest)}</b> was used on {returnVehicle.name} — take it off
-                the vehicle's list. Untick to leave it on the vehicle.
+                The remaining <b>{fmtCounted(rest)}</b> were used on {returnVehicle.name}. Take them
+                off the vehicle&apos;s list. Untick this to leave them on the vehicle.
               </span>
             </label>
           )}
