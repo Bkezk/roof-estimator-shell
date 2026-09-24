@@ -25,6 +25,7 @@ import {
   OPENED_BOX_LABELS,
   REASON_LABELS,
   setOpenedBoxRule,
+  undoMovement,
   priceColLabel,
   stockUnitFor,
   type MovementReason,
@@ -141,6 +142,7 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const itemNosFn = useServerFn(listItemNumbers);
   const bidsFn = useServerFn(listBidOptions);
   const settingsFn = useServerFn(getInventorySettings);
+  const undoFn = useServerFn(undoMovement);
   const stockQ = useQuery({ queryKey: ["inventory-stock"], queryFn: () => stockFn() });
   const movesQ = useQuery({
     queryKey: ["inventory-movements"],
@@ -405,8 +407,26 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
           initialBidId={props.initialBidId}
           rule={rule}
           onClose={() => setDialog(null)}
-          onSaved={() => {
+          onSaved={(saved) => {
             refresh();
+            // The confirmation carries Undo for a wrong number or job: one tap removes the
+            // entry (own entries, 24 h — undoMovement) and the shelf and the bid follow.
+            toast.success(saved.message, {
+              duration: 10000,
+              action: {
+                label: "Undo",
+                onClick: () => {
+                  void undoFn({ data: { id: saved.id } })
+                    .then(() => {
+                      refresh();
+                      toast.info("Undone — the entry was removed");
+                    })
+                    .catch((e: unknown) =>
+                      toast.error(e instanceof Error ? e.message : "Could not undo"),
+                    );
+                },
+              },
+            });
           }}
         />
       )}
@@ -620,7 +640,7 @@ function RecordDialog(props: {
   initialBidId?: string | undefined;
   rule: OpenedBoxRule;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved: { id: number; message: string }) => void;
 }) {
   const addFn = useServerFn(addMovement);
   const consumed = props.mode === "consumed";
@@ -677,12 +697,12 @@ function RecordDialog(props: {
       });
       if (jobId && !pickingJob) writeLastJob(jobId);
       const job = props.bids.find((b) => b.id === jobId);
-      toast.success(
-        consumed
+      props.onSaved({
+        id: r.id,
+        message: consumed
           ? `${describeStock(-r.qty, r.unit, piece)} of ${ref.row_label} used on ${job?.name ?? "the job"}`
           : `${describeStock(r.qty, r.unit, piece)} of ${ref.row_label} added to the shelf`,
-      );
-      props.onSaved();
+      });
       props.onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record that");

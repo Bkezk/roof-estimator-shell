@@ -307,26 +307,64 @@ export const addMovement = createServerFn({ method: "POST" })
       .eq("row_label", data.row_label)
       .eq("price_col", data.price_col)
       .limit(1);
-    const { error: insErr } = await sb.from("inventory_movements").insert({
-      screen_id: data.screen_id,
-      row_label: data.row_label,
-      price_col: data.price_col,
-      item_no: itemRows?.[0]?.item_no ?? null,
-      qty,
-      // One unit per product, always: on hand is a plain sum of entries.
-      unit,
-      reason: data.reason,
-      bid_id: data.bid_id ?? null,
-      bid_name: bidName,
-      counted_note:
-        data.counted_note ??
-        (data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null),
-      note: data.note ?? null,
-      created_by: context.userId,
-      created_by_name: me?.full_name?.trim() || me?.email || null,
-    });
+    const { data: inserted, error: insErr } = await sb
+      .from("inventory_movements")
+      .insert({
+        screen_id: data.screen_id,
+        row_label: data.row_label,
+        price_col: data.price_col,
+        item_no: itemRows?.[0]?.item_no ?? null,
+        qty,
+        // One unit per product, always: on hand is a plain sum of entries.
+        unit,
+        reason: data.reason,
+        bid_id: data.bid_id ?? null,
+        bid_name: bidName,
+        counted_note:
+          data.counted_note ??
+          (data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null),
+        note: data.note ?? null,
+        created_by: context.userId,
+        created_by_name: me?.full_name?.trim() || me?.email || null,
+      })
+      .select("id")
+      .single();
     if (insErr) throw new Error(insErr.message);
-    return { ok: true, qty, unit };
+    return { ok: true, id: inserted.id, qty, unit };
+  });
+
+/**
+ * Undo: remove an entry you recorded in the last 24 hours (a wrong number or job); admins may
+ * remove any. RLS enforces the same rule. Stock on hand and the bid's order list follow.
+ */
+export const undoMovement = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ id: z.number().int() }).parse(d))
+  .handler(async ({ data, context }) => {
+    const sb = context.supabase;
+    const { data: row, error } = await sb
+      .from("inventory_movements")
+      .select("id, created_by, created_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("That entry is already gone");
+    const { data: me } = await sb
+      .from("profiles")
+      .select("role")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const mine = row.created_by === context.userId;
+    const fresh = Date.now() - Date.parse(row.created_at) < 24 * 3600 * 1000;
+    if (me?.role !== "admin" && !(mine && fresh))
+      throw new Error("Only your own entries from the last 24 hours can be undone");
+    const { error: delErr, count } = await sb
+      .from("inventory_movements")
+      .delete({ count: "exact" })
+      .eq("id", data.id);
+    if (delErr) throw new Error(delErr.message);
+    if (!count) throw new Error("Could not undo that entry");
+    return { ok: true };
   });
 
 /** Bids a leftover can be attributed to (a field login cannot read bids directly). */
