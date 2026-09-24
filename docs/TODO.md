@@ -36,7 +36,7 @@ the bottom with the commit that closed them.
    alone: (1) service jobs + material + hours here, linked by CenterPoint ticket number;
    (2) customers, contacts and scheduling here, techs create repairs here, CenterPoint still
    invoices; (3) invoicing here pushed to the accounting system (do not build accounting —
-   ask the owner which system: QuickBooks?) — the day CenterPoint stops being needed for new
+   accounting and payments are **Sage** — confirm WHICH Sage: 100 Contractor or Sage 50 (desktop; import files / ODBC / SDK on the office PC) vs Intacct or Business Cloud (web API, direct push)) — the day CenterPoint stops being needed for new
    work; (4) import CenterPoint history from its export, run both a month, cancel. So the
    exploration must also record every export / integration CenterPoint offers and what a full
    data export contains; that decides whether step 4 is easy or a migration project. Hard
