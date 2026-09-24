@@ -3845,7 +3845,15 @@ function EstimatePage() {
                 crewRate={laborRate}
                 hoursById={result?.curbHoursById ?? {}}
                 totalHours={result?.r.curbLaborHours ?? 0}
-                newCurb={() => newCurb({ adjustLaborPct: seedCurbAdjust(templateDeltas) })}
+                newCurb={() =>
+                  newCurb({
+                    adjustLaborPct: seedCurbAdjust(templateDeltas),
+                    // Seed from the Setup deck when the Curbs deck picker offers it (else "Wood").
+                    ...(admin.deckOrder.includes(sectionDefaults.deckType)
+                      ? { deckType: sectionDefaults.deckType }
+                      : {}),
+                  })
+                }
               />
             </CardContent>
           </Card>

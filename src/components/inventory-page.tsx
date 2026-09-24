@@ -311,7 +311,7 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                             {[
                               priceColLabel(r.price_col) !== "—" ? r.price_col : null,
                               r.category,
-                              where === "all" ? locationName(r.location_id) : null,
+                              locationName(r.location_id),
                             ]
                               .filter(Boolean)
                               .join(" · ")}
@@ -350,10 +350,10 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                     <TableRow>
                       <TableHead>Product</TableHead>
                       <TableHead>Colour / size</TableHead>
-                      {where === "all" && <TableHead>Where</TableHead>}
                       <TableHead>Category</TableHead>
                       <TableHead>Item #</TableHead>
                       <TableHead className="text-right">On hand</TableHead>
+                      <TableHead>Location</TableHead>
                       <TableHead>Last entry</TableHead>
                       <TableHead className="w-[250px]" />
                     </TableRow>
@@ -368,9 +368,6 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                         >
                           <TableCell className="text-sm font-medium">{r.row_label}</TableCell>
                           <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
-                          {where === "all" && (
-                            <TableCell className="text-xs">{locationName(r.location_id)}</TableCell>
-                          )}
                           <TableCell className="text-xs text-muted-foreground">
                             {r.category}
                           </TableCell>
@@ -386,6 +383,9 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                                 ({fmtQty(r.on_hand)} {r.unit})
                               </span>
                             )}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap text-xs">
+                            {locationName(r.location_id)}
                           </TableCell>
                           <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                             {r.last_at ? fmtWhen(r.last_at) : ""}
