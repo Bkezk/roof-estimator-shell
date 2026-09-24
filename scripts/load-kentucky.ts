@@ -132,6 +132,31 @@ const rpc = async <T>(name: string, params: Record<string, unknown>): Promise<T>
   return data;
 };
 
+/** A cheap "is there a stored building within ~250 m" test for one county (grid of 0.003°). */
+async function centroidGrid(county: string): Promise<(lat: number, lng: number) => boolean> {
+  const cells = new Set<string>();
+  const key = (lat: number, lng: number) => `${Math.floor(lat / 0.003)}|${Math.floor(lng / 0.003)}`;
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("buildings")
+      .select("centroid_lat, centroid_lng")
+      .eq("county", county)
+      .is("deleted_at", null)
+      .not("centroid_lat", "is", null)
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) {
+      const la = r.centroid_lat!;
+      const ln = r.centroid_lng!;
+      // Mark the cell and its neighbours so anything within one cell (≈ 330 m) counts as near.
+      for (let a = -1; a <= 1; a++)
+        for (let b = -1; b <= 1; b++) cells.add(key(la + a * 0.003, ln + b * 0.003));
+    }
+    if (!data || data.length < 1000) break;
+  }
+  return (lat, lng) => cells.has(key(lat, lng));
+}
+
 async function loadCounty(county: string) {
   const t0 = Date.now();
   const log = (m: string) => console.log(`[${county}] ${m}`);
@@ -168,11 +193,20 @@ async function loadCounty(county: string) {
     }
     console.log("");
   }
+  // Address points: the state has 2.5 million and 85 % are houses nowhere near a prospect.
+  // Keep, before anything touches the database, only the points near a stored building
+  // (grid lookup against the county's centroids, 250 m — wider than any match radius) or
+  // carrying a landmark / place type (the ones that can become businesses). The trim step
+  // then has little to do and the database stays responsive for the people using it.
+  const near = await centroidGrid(county);
   let points = 0;
+  let seen = 0;
   for await (const feats of pages(KY_ADDRESS_POINTS_LAYER, countyWhere("address", county))) {
+    seen += feats.length;
     const rows = feats
       .map(addressPointFromFeature)
       .filter((c): c is NonNullable<typeof c> => c !== null)
+      .filter((c) => c.landmark !== null || c.placeType !== null || near(c.lat, c.lng))
       .map((c) => ({
         source_key: `ky911:${c.key}`,
         county: c.county ?? county,
@@ -193,7 +227,7 @@ async function loadCounty(county: string) {
       if (error) throw new Error(error.message);
       points += rows.length;
     }
-    process.stdout.write(`\r[${county}] address points ${points}`);
+    process.stdout.write(`\r[${county}] address points kept ${points} of ${seen}`);
   }
   console.log("");
   const addressed = await rpc<number>("fill_footprint_addresses", { p_county: county });
