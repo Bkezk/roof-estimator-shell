@@ -437,6 +437,134 @@ export function layerShortName(layerUrl: string): string {
 }
 
 const sqlLit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+
+/**
+ * How each county's 911 agency spells its own name in the statewide address-point layer —
+ * the exact distinct values (owner-supplied, 2026-09-24). The comparison on the state server
+ * is case-sensitive, so these exact strings are what the filter must use.
+ */
+export const KY_911_COUNTY_SPELLINGS: Record<string, string[]> = {
+  Adair: ["ADAIR COUNTY"],
+  Allen: ["Allen County"],
+  Anderson: ["Anderson County"],
+  Ballard: ["Ballard County"],
+  Barren: ["Barren County"],
+  Bath: ["Bath County"],
+  Bell: ["Bell County"],
+  Boone: ["BOONE COUNTY"],
+  Bourbon: ["Bourbon County"],
+  Boyd: ["BOYD COUNTY"],
+  Boyle: ["Boyle County"],
+  Bracken: ["Bracken County"],
+  Breathitt: ["Breathitt County"],
+  Breckinridge: ["Breckinridge County"],
+  Bullitt: ["Bullitt County"],
+  Butler: ["Butler County"],
+  Caldwell: ["Caldwell County"],
+  Calloway: ["Calloway County"],
+  Campbell: ["CAMPBELL COUNTY"],
+  Carlisle: ["Carlisle County"],
+  Carroll: ["Carroll County"],
+  Carter: ["Carter County"],
+  Casey: ["Casey County", "CASEY"],
+  Christian: ["CHRISTIAN COUNTY"],
+  Clark: ["Clark"],
+  Clay: ["Clay County"],
+  Clinton: ["CLINTON COUNTY"],
+  Crittenden: ["Crittenden County"],
+  Cumberland: ["Cumberland County"],
+  Daviess: ["Daviess County"],
+  Edmonson: ["Edmonson County"],
+  Elliott: ["ELLIOTT COUNTY"],
+  Estill: ["Estill County"],
+  Fayette: ["Fayette County"],
+  Fleming: ["Fleming County"],
+  Floyd: ["Floyd County"],
+  Franklin: ["Franklin County"],
+  Fulton: ["FULTON"],
+  Gallatin: ["GALLATIN COUNTY"],
+  Garrard: ["Garrard County"],
+  Grant: ["Grant County"],
+  Graves: ["Graves County"],
+  Grayson: ["GRAYSON COUNTY"],
+  Green: ["Green County"],
+  Greenup: ["Greenup County"],
+  Hancock: ["Hancock County"],
+  Hardin: ["HARDIN COUNTY"],
+  Harlan: ["Harlan County"],
+  Harrison: ["Harrison County"],
+  Hart: ["Hart County"],
+  Henderson: ["Henderson County"],
+  Henry: ["Henry County"],
+  Hickman: ["Hickman County"],
+  Hopkins: ["Hopkins County"],
+  Jackson: ["JACKSON County"],
+  Jefferson: ["JEFFERSON COUNTY"],
+  Jessamine: ["Jessamine County"],
+  Johnson: ["JOHNSON COUNTY"],
+  Kenton: ["KENTON COUNTY"],
+  Knott: ["Knott County"],
+  Knox: ["KNOX COUNTY"],
+  Larue: ["LaRue County"],
+  Laurel: ["Laurel County"],
+  Lawrence: ["Lawrence County"],
+  Lee: ["Lee County"],
+  Leslie: ["Leslie County"],
+  Letcher: ["Letcher County"],
+  Lewis: ["LEWIS COUNTY"],
+  Lincoln: ["Lincoln County"],
+  Livingston: ["Livingston County"],
+  Logan: ["Logan County"],
+  Lyon: ["Lyon County"],
+  Madison: ["Madison County"],
+  Magoffin: ["Magoffin County"],
+  Marion: ["MARION", "MARION COUNTY", "MARION County COUNTY"],
+  Marshall: ["Marshall County"],
+  Martin: ["MARTIN COUNTY"],
+  Mason: ["Mason County"],
+  McCracken: ["McCracken County"],
+  McCreary: ["McCreary County"],
+  McLean: ["MCLEAN COUNTY"],
+  Meade: ["Meade County"],
+  Menifee: ["Menifee County"],
+  Mercer: ["Mercer County"],
+  Metcalfe: ["Metcalfe County"],
+  Monroe: ["MONROE COUNTY"],
+  Montgomery: ["Montgomery County"],
+  Morgan: ["Morgan County"],
+  Muhlenberg: ["Muhlenberg County"],
+  Nelson: ["Nelson County"],
+  Nicholas: ["Nicholas County"],
+  Ohio: ["Ohio County"],
+  Oldham: ["Oldham County"],
+  Owen: ["Owen County"],
+  Owsley: ["Owsley County"],
+  Pendleton: ["Pendleton County"],
+  Perry: ["PERRY County"],
+  Pike: ["Pike County"],
+  Powell: ["Powell County"],
+  Pulaski: ["Pulaski County"],
+  Robertson: ["Robertson County"],
+  Rockcastle: ["Rockcastle County"],
+  Rowan: ["ROWAN COUNTY", "ROWAN COUNTRY"],
+  Russell: ["RUSSELL COUNTY"],
+  Scott: ["Scott County"],
+  Shelby: ["Shelby County"],
+  Simpson: ["Simpson County"],
+  Spencer: ["Spencer County"],
+  Taylor: ["Taylor County"],
+  Todd: ["TODD COUNTY"],
+  Trigg: ["TRIGG COUNTY"],
+  Trimble: ["Trimble County"],
+  Union: ["Union County"],
+  Warren: ["Warren County"],
+  Washington: ["Washington County"],
+  Wayne: ["Wayne County"],
+  Webster: ["Webster County"],
+  Whitley: ["Whitley County"],
+  Wolfe: ["Wolfe County"],
+  Woodford: ["WOODFORD COUNTY"],
+};
 /** "McLean" → the spellings a county's own file might use for itself. */
 export function countySpellings(county: string, withSuffix: boolean): string[] {
   const c = county.trim();
@@ -465,8 +593,11 @@ export function countyWhere(kind: LayerKind, county: string, minSqFt = 5000): st
     // capitals (McLean and Adair samples), so the upper-cased literal matches as is.
     // Each county's 911 agency spells its own name: Hardin's file says "HARDIN COUNTY", Ballard's
     // returned 3 rows for that pattern. An IN list of the usual spellings keeps the index.
-    case "address":
-      return `County IN (${countySpellings(county, true).map(sqlLit).join(",")})`;
+    case "address": {
+      const exact = KY_911_COUNTY_SPELLINGS[canonicalCounty(county) ?? county] ?? [];
+      const all = [...new Set([...exact, ...countySpellings(county, true)])];
+      return `County IN (${all.map(sqlLit).join(",")})`;
+    }
     case "facility":
       return `COUNTY IN (${countySpellings(county, false).map(sqlLit).join(",")})`;
     case "parcel":

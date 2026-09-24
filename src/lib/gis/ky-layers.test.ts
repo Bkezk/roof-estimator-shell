@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ArcGisFeatureSet } from "./arcgis";
 import {
+  KY_911_COUNTY_SPELLINGS,
   KY_COUNTIES,
   addressPointFromFeature,
   canonicalCounty,
@@ -162,9 +163,14 @@ describe("county scoping and ranking", () => {
   it("writes the per-kind where clause", () => {
     expect(countyWhere("footprint", "Graves")).toBe("FIPS = '21083' AND SQFEET >= 5000");
     expect(countyWhere("footprint", "Graves", 10000)).toBe("FIPS = '21083' AND SQFEET >= 10000");
-    expect(countyWhere("address", "McLean")).toBe(
-      "County IN ('MCLEAN','McLean','mclean','MCLEAN COUNTY','MCLEAN CO','McLean County','McLean Co','mclean county','mclean Co')",
+    // The county's own spelling comes first (Ballard's file says "Ballard County", Marion's
+    // three different things), then the generic variants.
+    expect(countyWhere("address", "Ballard")).toMatch(/^County IN \('Ballard County','BALLARD',/);
+    expect(countyWhere("address", "Marion")).toMatch(
+      /^County IN \('MARION','MARION COUNTY','MARION County COUNTY',/,
     );
+    expect(countyWhere("address", "Rowan")).toContain("'ROWAN COUNTRY'");
+    expect(Object.keys(KY_911_COUNTY_SPELLINGS)).toHaveLength(120);
     expect(countyWhere("facility", "Adair")).toBe("COUNTY IN ('ADAIR','Adair','adair')");
   });
   it("builds the grouped count and ranks the pasted answer", () => {

@@ -33,8 +33,14 @@ the bottom with the commit that closed them.
    Summit fire-rated figure; "Remove all extra lines" button on Non-DL.
 8. **Inventory:** a "your recent entries" strip with Undo if the History path proves too many
    taps; a supplier order from the order list (later).
-9. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
-   zero-item column pick, prefill the new-product dialog.
+9. **Roof time-lapse (owner idea, Sep 24).** On a selected building, step through the aerial
+   imagery years (Kentucky's Phase 1/2/3 flights, plus USDA NAIP for the in-between years,
+   free) to see whether the roof changed — a replaced roof shows as a colour / texture jump.
+   Needs: the per-year KYAPED ImageServers at kyraster.ky.gov and the NAIP service URL; a
+   small year slider on the map. Later, the same comparison can flag likely re-roofs
+   automatically.
+10. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
+    zero-item column pick, prefill the new-product dialog.
 
 ## Done
 
