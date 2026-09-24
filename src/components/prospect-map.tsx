@@ -41,6 +41,8 @@ interface Props {
   onSelect: (id: string) => void;
   /** A tap on an outline that is not stored yet (zoomed in): add that building. */
   onTapEmpty?: (lng: number, lat: number) => void;
+  /** Draw the state's outlines for every building (zoomed in). Off shows the roofs plainly. */
+  showOutlines?: boolean;
   className?: string;
 }
 
@@ -60,6 +62,7 @@ export default function ProspectMap({
   selectedId,
   onSelect,
   onTapEmpty,
+  showOutlines = true,
   className,
 }: Props) {
   const el = useRef<HTMLDivElement>(null);
@@ -157,7 +160,7 @@ export default function ProspectMap({
       }
       // A tap that hits none of our features, zoomed in enough to see outlines: add that one.
       m.on("click", (e) => {
-        if (m.getZoom() < 15) return;
+        if (m.getZoom() < 15 || m.getLayoutProperty("outlines", "visibility") === "none") return;
         const hits = m.queryRenderedFeatures(e.point, { layers: ["footprints-fill", "points"] });
         if (hits.length > 0) return;
         tapEmpty.current?.(e.lngLat.lng, e.lngLat.lat);
@@ -172,6 +175,15 @@ export default function ProspectMap({
       ready.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const apply = () =>
+      m.setLayoutProperty("outlines", "visibility", showOutlines ? "visible" : "none");
+    if (ready.current) apply();
+    else m.once("load", apply);
+  }, [showOutlines]);
 
   // Push the buildings and the selection into the sources; frame the selection or everything.
   useEffect(() => {

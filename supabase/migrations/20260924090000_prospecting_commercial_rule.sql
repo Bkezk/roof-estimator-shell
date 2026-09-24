@@ -143,7 +143,9 @@ begin
       and b.deleted_at is null
   ),
   matched as (
-    select c.building_id, p.*
+    -- Explicit columns: address_points has its own building_id (the link), so p.* would make
+    -- m.building_id ambiguous.
+    select c.building_id, p.id, p.address, p.city, p.zip, p.landmark, p.kind, p.place_type
     from candidates c
     join public.address_points p on p.id = c.point_id
     join public.buildings b on b.id = c.building_id

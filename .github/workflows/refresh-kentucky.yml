@@ -22,7 +22,13 @@ on:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        # Four runs in parallel, each taking every 4th county, so all 120 fit inside the
+        # 6-hour job limit. A single county runs in shard 1 alone.
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,8 +39,16 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          COUNTY: ${{ github.event.inputs.county }}
+          FOOTPRINTS: ${{ github.event.inputs.footprints }}
+          SHARD: ${{ matrix.shard }}
         run: |
-          ARGS=""
-          if [ -n "${{ github.event.inputs.county }}" ]; then ARGS="--county ${{ github.event.inputs.county }}"; else ARGS="--all"; fi
-          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.footprints }}" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
+          if [ -n "$COUNTY" ]; then
+            if [ "$SHARD" != "1" ]; then echo "single county: shard $SHARD has nothing to do"; exit 0; fi
+            ARGS="--county $COUNTY"
+          else
+            ARGS="--all --shard $SHARD/4"
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "$FOOTPRINTS" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
+          echo "running: $ARGS"
           npx vite-node scripts/load-kentucky.ts $ARGS

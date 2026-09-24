@@ -3,7 +3,7 @@
  * from a machine that can reach the state server (GitHub Actions monthly, or a laptop):
  *
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
- *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints]
+ *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/4]
  *
  * Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment (GitHub secrets; never
  * in the repo). Per county: footprints of the size floor → every 911 address point → match
@@ -40,6 +40,12 @@ const all = args.includes("--all");
 const only = flag("--county");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
+// --shard 2/4: this run takes every 4th county starting at the 2nd (GitHub runs shards in
+// parallel so the whole state fits inside one job's time limit).
+const shard = (() => {
+  const m = /^(\d+)\/(\d+)$/.exec(flag("--shard") ?? "");
+  return m ? { i: Number(m[1]) - 1, n: Number(m[2]) } : null;
+})();
 const pageSize = 500;
 
 const url = process.env["SUPABASE_URL"];
@@ -271,7 +277,8 @@ async function loadCounty(county: string) {
 }
 
 async function main() {
-  const counties = only ? [only] : all ? [...KY_COUNTIES] : [];
+  let counties = only ? [only] : all ? [...KY_COUNTIES] : [];
+  if (shard && !only) counties = counties.filter((_, idx) => idx % shard.n === shard.i);
   if (counties.length === 0) {
     console.error("Give --county <Name> or --all");
     process.exit(2);

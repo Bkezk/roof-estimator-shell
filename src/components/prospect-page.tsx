@@ -345,6 +345,24 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       return !o;
     });
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // The state's outlines for every building: handy for tap-to-add, distracting when you want
+  // to look at a roof. Off by default; remembered per browser.
+  const [showOutlines, setShowOutlines] = useState(() => {
+    try {
+      return localStorage.getItem("bid-o-matic:prospect-outlines") === "on";
+    } catch {
+      return false;
+    }
+  });
+  const toggleOutlines = () =>
+    setShowOutlines((o) => {
+      try {
+        localStorage.setItem("bid-o-matic:prospect-outlines", o ? "off" : "on");
+      } catch {
+        /* private window */
+      }
+      return !o;
+    });
   useEffect(() => {
     // Parcels are one layer per county: the county is the layer's.
     const county = preset.kind === "parcel" ? "Webster" : importCounty;
@@ -672,6 +690,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           <Button size="sm" variant="outline" onClick={toggleMap}>
             <MapIcon className="mr-1 h-4 w-4" /> {showMap ? "Hide map" : "Show map"}
           </Button>
+          {showMap && (
+            <Button
+              size="sm"
+              variant={showOutlines ? "secondary" : "outline"}
+              onClick={toggleOutlines}
+              title="Draw every building outline in the state when zoomed in; tap one to add it"
+            >
+              {showOutlines ? "Outlines on" : "Outlines off"}
+            </Button>
+          )}
           {canWrite && (
             <Button size="sm" variant="outline" onClick={() => setImportOpen((o) => !o)}>
               <DownloadCloud className="mr-1 h-4 w-4" /> Load county data
@@ -705,13 +733,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
             }))}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            showOutlines={showOutlines}
             {...(canWrite
               ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
               : {})}
           />
           <p className="-mt-2 text-xs text-muted-foreground">
-            Blue outlines are your prospects. Zoom in and every building outline in the state
-            appears{canWrite ? "; tap one to add it as a prospect with its size and address" : ""}.
+            Blue outlines are your prospects.
+            {showOutlines
+              ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to add it as a prospect with its size and address" : ""}.`
+              : " Turn “Outlines on” to see every building in the state and tap one to add it."}
           </p>
         </Suspense>
       )}
