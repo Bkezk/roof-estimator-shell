@@ -23,6 +23,7 @@ import {
   type BidStatus,
 } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
+import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -121,8 +122,10 @@ function BidsPage() {
     void qc.invalidateQueries({ queryKey: ["bids"] });
     void qc.invalidateQueries({ queryKey: ["bids-deleted"] });
   };
+  const [lostFor, setLostFor] = useState<{ id: string; name: string } | null>(null);
   const setStatus = useMutation({
-    mutationFn: (v: { id: string; status: BidStatus }) => setStatusFn({ data: v }),
+    mutationFn: (v: { id: string; status: BidStatus; lostReason?: string | null }) =>
+      setStatusFn({ data: v }),
     onSuccess: (b) => {
       toast.success(`Status: ${STATUS_LABELS[asBidStatus(b.status)]}`);
       refresh();
@@ -458,6 +461,7 @@ function BidsPage() {
                         timeStyle: "short",
                       })}
                       {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
+                      {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
                     </p>
                   </div>
                 </div>
@@ -478,7 +482,9 @@ function BidsPage() {
                     <Select
                       value={st}
                       onValueChange={(v) =>
-                        setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                        v === "lost"
+                          ? setLostFor({ id: bid.id, name: bid.name })
+                          : setStatus.mutate({ id: bid.id, status: v as BidStatus })
                       }
                     >
                       <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
@@ -577,6 +583,17 @@ function BidsPage() {
         )}
       </div>
 
+      {lostFor && (
+        <LostReasonDialog
+          open
+          bidName={lostFor.name}
+          onCancel={() => setLostFor(null)}
+          onConfirm={(reason) => {
+            setStatus.mutate({ id: lostFor.id, status: "lost", lostReason: reason });
+            setLostFor(null);
+          }}
+        />
+      )}
       <AlertDialog
         open={confirmPurge !== null}
         onOpenChange={(open) => {

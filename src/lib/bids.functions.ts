@@ -54,6 +54,8 @@ const saveBidSchema = z.object({
   data: z.record(z.string(), z.unknown()),
   grandTotal: z.number(),
   status: z.enum(BID_STATUSES).optional(),
+  /** Why the bid was lost (only meaningful with status "lost"; null clears it). */
+  lostReason: z.string().trim().max(300).nullable().optional(),
   /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
   sessionKey: z.string().min(8).max(80).optional(),
 });
@@ -76,6 +78,11 @@ export const saveBid = createServerFn({ method: "POST" })
       updated_at: new Date().toISOString(),
       updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       ...(data.status ? { status: data.status } : {}),
+      ...(data.status && data.status !== "lost"
+        ? { lost_reason: null }
+        : data.lostReason !== undefined
+          ? { lost_reason: data.lostReason }
+          : {}),
       ...(data.buildingId !== undefined ? { building_id: data.buildingId } : {}),
     };
     if (data.id) {
@@ -105,7 +112,15 @@ export const saveBid = createServerFn({ method: "POST" })
 /** Change a bid's status from the list (Bids page dropdown); stamps who and when like a save. */
 export const setBidStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d) => z.object({ id: z.string().uuid(), status: z.enum(BID_STATUSES) }).parse(d))
+  .validator((d) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        status: z.enum(BID_STATUSES),
+        lostReason: z.string().trim().max(300).nullable().optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }) => {
     const { data: me } = await context.supabase
       .from("profiles")
@@ -116,6 +131,7 @@ export const setBidStatus = createServerFn({ method: "POST" })
       .from("bids")
       .update({
         status: data.status,
+        lost_reason: data.status === "lost" ? (data.lostReason ?? null) : null,
         updated_at: new Date().toISOString(),
         updated_by_name: (me?.full_name ?? "").trim() || me?.email || null,
       })

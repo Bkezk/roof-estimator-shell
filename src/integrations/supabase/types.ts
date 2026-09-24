@@ -252,6 +252,7 @@ export type Database = {
           data: Json;
           deleted_at: string | null;
           grand_total: number;
+          lost_reason: string | null;
           id: string;
           name: string;
           opportunity_id: string | null;
@@ -268,6 +269,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           grand_total?: number;
+          lost_reason?: string | null;
           id?: string;
           name: string;
           opportunity_id?: string | null;
@@ -284,6 +286,7 @@ export type Database = {
           data?: Json;
           deleted_at?: string | null;
           grand_total?: number;
+          lost_reason?: string | null;
           id?: string;
           name?: string;
           opportunity_id?: string | null;

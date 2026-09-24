@@ -48,6 +48,7 @@ import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/c
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
+import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { tearOffLaborForSection } from "@/lib/engine/quantities";
 import { buildOrderList, describeOrderQty, type OrderLine } from "@/lib/order-list";
 import { ORDER_COLUMNS, orderListHtml, orderListRows, toBuyCount } from "@/lib/order-list-export";
@@ -590,6 +591,18 @@ function EstimatePage() {
   // Set on a bid the Bid Combiner produced (legacy Description text); persisted until dismissed.
   const [combineInfo, setCombineInfo] = useState<CombineInfo | undefined>(undefined);
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
+  const [lostReason, setLostReason] = useState<string | null>(null);
+  const [askLost, setAskLost] = useState(false);
+  // Picking Lost asks why (the same dialog the Bids list uses); anything else clears the reason.
+  const changeStatus = (v: string) => {
+    const st = asBidStatus(v);
+    if (st === "lost") {
+      setAskLost(true);
+      return;
+    }
+    setBidStatus(st);
+    setLostReason(null);
+  };
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(0);
   // Bid total panel starts minimized (just the grand total); the choice is remembered per browser.
@@ -862,6 +875,7 @@ function EstimatePage() {
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
+    setLostReason(loadedBid.lost_reason ?? null);
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
   }, [loadedBid]);
@@ -902,6 +916,7 @@ function EstimatePage() {
       setBidId(undefined);
       setBidName("Combined Bid");
       setBidStatus("draft");
+      setLostReason(null);
       // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.
       toast.success(`Combined ${sources.length} bids — review the steps in the notice, then save.`);
     } catch (e) {
@@ -1519,6 +1534,7 @@ function EstimatePage() {
           data: payload as unknown as Record<string, unknown>,
           grandTotal,
           status: bidStatus,
+          lostReason: bidStatus === "lost" ? lostReason : null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
         },
       });
@@ -1794,10 +1810,7 @@ function EstimatePage() {
                         />
                       </Field>
                       <Field label="Status">
-                        <Select
-                          value={bidStatus}
-                          onValueChange={(v) => setBidStatus(asBidStatus(v))}
-                        >
+                        <Select value={bidStatus} onValueChange={changeStatus}>
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
@@ -5121,11 +5134,7 @@ function EstimatePage() {
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-0 flex-1 space-y-1">
             <Label className="text-xs">Status</Label>
-            <Select
-              value={bidStatus}
-              onValueChange={(v) => setBidStatus(v as BidStatus)}
-              disabled={readOnly}
-            >
+            <Select value={bidStatus} onValueChange={changeStatus} disabled={readOnly}>
               <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>
@@ -5137,6 +5146,24 @@ function EstimatePage() {
                 ))}
               </SelectContent>
             </Select>
+            {bidStatus === "lost" && (
+              <p className="text-[11px] text-muted-foreground">
+                Lost: {lostReason ?? "reason not known"}
+              </p>
+            )}
+            {askLost && (
+              <LostReasonDialog
+                open
+                bidName={bidName || "This bid"}
+                initial={lostReason}
+                onCancel={() => setAskLost(false)}
+                onConfirm={(reason) => {
+                  setBidStatus("lost");
+                  setLostReason(reason);
+                  setAskLost(false);
+                }}
+              />
+            )}
           </div>
           <Button
             variant="outline"
