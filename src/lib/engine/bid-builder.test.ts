@@ -19,6 +19,7 @@ import {
 } from "./bid-builder";
 import { computeEstimate, computeSectionInstallHours } from "./estimate";
 import { buildLaborTables, type EngineAdminData, type LaborCombo } from "./adapters";
+import { sectionFromOutline, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 
 const deckOrder = [
   "Wood",
@@ -3992,5 +3993,141 @@ describe("Non-DL TPO / EPDM Rubber — non-Duro-Last membranes (docs §22.35)", 
     const { inputs, warnings } = buildEstimateInputs(ndlBid("EPDM Rubber", 120), blank);
     expect(inputs.otherMaterial).toBe(0);
     expect(warnings.some((w) => w.includes("No EPDM Rubber membrane price"))).toBe(true);
+  });
+});
+
+describe("Takeoff parity: a drawn outline prices like the typed section (docs/planswift-research.md §4.5)", () => {
+  const typedRect = (): BidSectionInput => ({
+    ...bid().sections[0]!,
+    length: 100,
+    width: 40,
+    perimFastenerOc: 12,
+    cornerFastenerOc: 6,
+    perimLap: 28,
+    cornerLap: 28,
+    edges: [
+      {
+        side: "A",
+        lengthFt: 100,
+        isPerimeter: true,
+        perimLengthFt: 100,
+        termination: '4" Fascia',
+        blockingFt: 100,
+        arpSizeIn: 12,
+      },
+      {
+        side: "B",
+        lengthFt: 40,
+        isPerimeter: true,
+        perimLengthFt: 40,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "C",
+        lengthFt: 100,
+        isPerimeter: true,
+        perimLengthFt: 100,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+      {
+        side: "D",
+        lengthFt: 40,
+        isPerimeter: true,
+        perimLengthFt: 40,
+        termination: "No Termination",
+        blockingFt: 0,
+        arpSizeIn: 0,
+      },
+    ],
+    perimCorners: [true, true, true, true],
+  });
+  const price = (section: BidSectionInput) => {
+    const { inputs, warnings } = buildEstimateInputs(bid({ sections: [section] }), admin);
+    const r = computeEstimate(inputs);
+    return { warnings, inputs, r };
+  };
+
+  it("a rectangle drawn from any start point / winding is the typed rectangle, to the cent", () => {
+    const typed = price(typedRect());
+    // The typed section's A edge carries the fascia / blocking / ARP; find that edge as drawn.
+    const opts = (i: number): OutlineEdgeOptions =>
+      i === 0
+        ? { isPerimeter: true, termination: '4" Fascia', blockingFt: 100, arpSizeIn: 12 }
+        : { isPerimeter: true };
+    const drawings: Array<{ pts: Array<[number, number]>; longEdge: number }> = [
+      // as drawn: top edge first, clockwise on screen
+      {
+        pts: [
+          [0, 0],
+          [100, 0],
+          [100, 40],
+          [0, 40],
+        ],
+        longEdge: 0,
+      },
+      // start on a short side
+      {
+        pts: [
+          [100, 0],
+          [100, 40],
+          [0, 40],
+          [0, 0],
+        ],
+        longEdge: 1,
+      },
+      // counter-clockwise
+      {
+        pts: [
+          [0, 0],
+          [0, 40],
+          [100, 40],
+          [100, 0],
+        ],
+        longEdge: 1,
+      },
+    ];
+    for (const d of drawings) {
+      const o = sectionFromOutline(
+        d.pts,
+        d.pts.map((_, i) => (i === d.longEdge ? opts(0) : opts(1))),
+      );
+      const drawn = price({ ...typedRect(), ...o });
+      expect(drawn.warnings).toEqual(typed.warnings);
+      expect(drawn.inputs.duroLastMaterial).toBeCloseTo(typed.inputs.duroLastMaterial, 6);
+      expect(drawn.r.installHours).toBeCloseTo(typed.r.installHours, 9);
+      expect(drawn.r.money.grandTotal).toBeCloseTo(typed.r.money.grandTotal, 6);
+      expect(drawn.inputs.sections[0]!.arpSqFt).toBeCloseTo(typed.inputs.sections[0]!.arpSqFt, 9);
+    }
+  });
+
+  it("an L-shaped outline prices on its true area and real perimeter, warning-free", () => {
+    const ell: Array<[number, number]> = [
+      [0, 0],
+      [100, 0],
+      [100, 70],
+      [60, 70],
+      [60, 40],
+      [0, 40],
+    ];
+    const o = sectionFromOutline(
+      ell,
+      ell.map(() => ({ isPerimeter: true })),
+    );
+    const { warnings, inputs, r } = price({ ...typedRect(), ...o });
+    expect(warnings).toEqual([]); // no ARP edge on this outline, so no unpriced-ARP warning
+    expect(o.length * o.width).toBeCloseTo(5200, 9);
+    // Zones from the six real edges: perimeter 340 − 5 corners × 2 × 3 ft = 310 ft, corners
+    // 5 × 3 ft = 15 ft. The engine bills each zone as its SHARE of MembraneWithOverlap (§20.1),
+    // so compare the shares against the raw areas (45 / 930 / rest of 5200 sq ft).
+    const sec = inputs.sections[0]!;
+    const share = sec.membraneWithOverlap / 5200;
+    expect(sec.cornerArea).toBeCloseTo(15 * 3 * share, 6);
+    expect(sec.perimArea).toBeCloseTo(310 * 3 * share, 6);
+    expect(sec.fieldArea).toBeCloseTo((5200 - 930 - 45) * share, 6);
+    expect(r.money.grandTotal).toBeGreaterThan(0);
   });
 });

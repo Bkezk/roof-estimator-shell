@@ -26,7 +26,7 @@
 import { bankersRound } from "./rounding";
 import type { BidSectionInput, ParapetInput, CurbInput } from "./bid-builder";
 import { sectionLayers, parapetEffectiveCanted } from "./bid-builder";
-import { edgePerimLength, edgeTermLength, resolveSectionZones } from "./edges";
+import { edgePerimLength, edgeTermLength, legacyFourSides, resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 import { parapetDeckFasteners, underlaymentLayerFasteners } from "./consumption";
 
@@ -1876,10 +1876,13 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
     // mf — §2.2 row-style field + perimeter counts (Round each).
     let mf = 0;
     if (rowStyle && s.fastenerOc > 0 && s.fieldLap > 6) {
-      const bySide = (side: string) => (s.edges ?? []).find((e) => e.side === side);
-      const sideIsPerim = (["A", "B", "C", "D"] as const).map(
-        (side) => bySide(side)?.isPerimeter ?? false,
-      ) as [boolean, boolean, boolean, boolean];
+      const four = legacyFourSides(s.edges, s.perimCorners, s).sides;
+      const sideIsPerim = four.map((e) => e?.isPerimeter ?? false) as [
+        boolean,
+        boolean,
+        boolean,
+        boolean,
+      ];
       mf =
         dlRowStyleFastenersField({
           lengthFt: s.length,
@@ -1897,10 +1900,12 @@ export function computeAccessories(args: ComputeAccessoriesArgs): AccessoriesRes
           fieldLapIn: s.fieldLap,
           spacingIn: s.fastenerOc,
           // Legacy PerimSideLength(i): the perimeter run (0 on a non-perimeter side).
-          perimSideLengthsFt: (["A", "B", "C", "D"] as const).map((side) => {
-            const e = bySide(side);
-            return e ? edgePerimLength(e) : 0;
-          }) as [number, number, number, number],
+          perimSideLengthsFt: four.map((e) => (e ? edgePerimLength(e) : 0)) as [
+            number,
+            number,
+            number,
+            number,
+          ],
           sideIsPerim,
         });
     }

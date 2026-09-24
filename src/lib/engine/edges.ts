@@ -92,19 +92,45 @@ export function edgeSideIndex(e: EdgeInput): number {
   return i === -1 ? 4 : i;
 }
 
-export type PerimCorners = [boolean, boolean, boolean, boolean];
+/**
+ * Corner flags, one per side slot: corner i sits between side i and side i+1 (the last corner
+ * closes the ring). A typed rectangle has four (legacy IsPerimCorner(0..3)); a measured outline
+ * from Takeoff has one per drawn side.
+ */
+export type PerimCorners = boolean[];
+
+/**
+ * True for the legacy lettered edge set (≤ 4 edges, every side one of A–D). A measured outline
+ * (Takeoff) names its sides "1".."N" instead and can have any number of them.
+ */
+export function isLetteredEdges(edges: EdgeInput[]): boolean {
+  return (
+    edges.length <= 4 &&
+    edges.every((e) => EDGE_SIDES.includes(e.side as (typeof EDGE_SIDES)[number]))
+  );
+}
+
+/**
+ * The section's side slots as a ring. Lettered edges fill the four legacy slots A..D (a missing
+ * letter is an inert slot, so older bids with fewer edges behave as before); a measured outline
+ * is its edges in drawing order. Corner i lies between slot i and slot i+1 (mod ring length).
+ */
+export function sideRing(edges: EdgeInput[]): Array<EdgeInput | undefined> {
+  if (!isLetteredEdges(edges)) return edges;
+  const ring: Array<EdgeInput | undefined> = [undefined, undefined, undefined, undefined];
+  for (const e of edges) ring[edgeSideIndex(e)] = e;
+  return ring;
+}
 
 /**
  * Legacy frmRoofSection.CheckCorners: corner i is offered only while BOTH adjacent sides are
  * perimeter edges (corner 0 = A∧B, 1 = B∧C, 2 = C∧D, 3 = D∧A); a hidden corner is unchecked.
+ * On a measured ring the same rule runs over N slots.
  */
 export function availableCorners(edges: EdgeInput[]): PerimCorners {
-  const perim = [false, false, false, false];
-  for (const e of edges) {
-    const i = edgeSideIndex(e);
-    if (i < 4) perim[i] = e.isPerimeter;
-  }
-  return [0, 1, 2, 3].map((i) => perim[i]! && perim[(i + 1) % 4]!) as PerimCorners;
+  const ring = sideRing(edges);
+  const n = ring.length;
+  return ring.map((e, i) => (e?.isPerimeter ?? false) && (ring[(i + 1) % n]?.isPerimeter ?? false));
 }
 
 /** The corners that actually count: marked AND still available (both adjacent sides perimeter). */
@@ -113,7 +139,7 @@ export function effectiveCorners(
   corners: readonly boolean[] | undefined,
 ): PerimCorners {
   const avail = availableCorners(edges);
-  return avail.map((a, i) => a && (corners?.[i] ?? false)) as PerimCorners;
+  return avail.map((a, i) => a && (corners?.[i] ?? false));
 }
 
 /**
@@ -127,19 +153,18 @@ export function perimeterFromEdges(
   edges: EdgeInput[],
   zone?: { enhancementWidthFt: number; corners?: readonly boolean[] | undefined },
 ): number {
-  const corners = zone ? effectiveCorners(edges, zone.corners) : [false, false, false, false];
+  const ring = sideRing(edges);
+  const n = ring.length;
+  const corners = zone ? effectiveCorners(edges, zone.corners) : ring.map(() => false);
   const w = zone?.enhancementWidthFt ?? 0;
   let total = 0;
-  for (const e of edges) {
-    if (!e.isPerimeter) continue;
-    const i = edgeSideIndex(e);
+  ring.forEach((e, i) => {
+    if (!e?.isPerimeter) return;
     let len = edgePerimLength(e);
-    if (i < 4) {
-      if (corners[i]) len -= w;
-      if (corners[(i + 3) % 4]) len -= w;
-    }
+    if (corners[i]) len -= w;
+    if (corners[(i + n - 1) % n]) len -= w;
     total += Math.max(0, len);
-  }
+  });
   return total;
 }
 
@@ -158,6 +183,72 @@ export function edgesArpSqFt(edges: EdgeInput[]): number {
     (sum, e) => (e.arpSizeIn > 0 ? sum + arpSqFt(e.arpSizeIn, [edgeArpLength(e)]) : sum),
     0,
   );
+}
+
+/** The four legacy side slots (A..D) with their corner flags, as the 4-sided legacy calcs read them. */
+export interface LegacyFourSides {
+  /** Slot A..D: the edge on that side, or undefined for an inert slot. */
+  sides: [
+    EdgeInput | undefined,
+    EdgeInput | undefined,
+    EdgeInput | undefined,
+    EdgeInput | undefined,
+  ];
+  /** IsPerimCorner(0..3): corner i between slot i and i+1, effective (marked AND available). */
+  corners: [boolean, boolean, boolean, boolean];
+}
+
+/**
+ * What the legacy 4-sided membrane routines (RollGoodsMembraneCalc's per-side perimeter rows,
+ * DuroTuffSystem.CalculateMembraneQty, the §2.2 row-style fastener counts) see for a section.
+ *
+ * Lettered edges pass straight through by slot: exact legacy behaviour. A measured outline with
+ * N sides has no A..D, so it is represented on its equivalent rectangle (`rect` = the section's
+ * length × width, which the Takeoff mapping sets to the rectangle of the same area and
+ * perimeter): the share of the outline marked as perimeter is rounded to 0..4 synthetic
+ * perimeter sides filled in ring order A, B, C, D (each running its full rectangle side), and
+ * the outline's effective corners are placed, up to that many, on the corner slots those
+ * synthetic sides make available. Only the seam / perimeter-row layout terms depend on this;
+ * the zone lengths, ARP, terminations and blocking always use the real edges.
+ */
+export function legacyFourSides(
+  edges: EdgeInput[] | undefined,
+  corners: readonly boolean[] | undefined,
+  rect: { length: number; width: number },
+): LegacyFourSides {
+  const list = edges ?? [];
+  if (isLetteredEdges(list)) {
+    const ring = sideRing(list);
+    const eff = effectiveCorners(list, corners);
+    return {
+      sides: [ring[0], ring[1], ring[2], ring[3]],
+      corners: [eff[0] ?? false, eff[1] ?? false, eff[2] ?? false, eff[3] ?? false],
+    };
+  }
+  const totalLen = list.reduce((s, e) => s + e.lengthFt, 0);
+  const perimLen = list.reduce((s, e) => s + edgePerimLength(e), 0);
+  const k = totalLen > 0 ? Math.min(4, Math.max(0, Math.round((4 * perimLen) / totalLen))) : 0;
+  const blank = { termination: "No Termination", blockingFt: 0, arpSizeIn: 0 };
+  const sides = EDGE_SIDES.map((side, i) => {
+    const lengthFt = i % 2 === 0 ? rect.length : rect.width;
+    const isPerimeter = i < k;
+    return {
+      side,
+      lengthFt,
+      isPerimeter,
+      perimLengthFt: isPerimeter ? lengthFt : 0,
+      ...blank,
+    } satisfies EdgeInput;
+  }) as unknown as LegacyFourSides["sides"];
+  let remaining = effectiveCorners(list, corners).filter(Boolean).length;
+  const out: boolean[] = [false, false, false, false];
+  for (let i = 0; i < 4 && remaining > 0; i++) {
+    if (sides[i]?.isPerimeter && sides[(i + 1) % 4]?.isPerimeter) {
+      out[i] = true;
+      remaining--;
+    }
+  }
+  return { sides, corners: out as LegacyFourSides["corners"] };
 }
 
 /** Minimal section shape for the perimeter / corner zone lengths. */

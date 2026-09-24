@@ -215,13 +215,26 @@ What we deliberately do not build: assemblies and parts, report designer, Excel 
 DWG or DXF input (PDF export from the architect covers it), pitch (flat commercial roofs; a
 pitch factor is a one-field addition if a sloped job ever appears).
 
-## 5. Open questions for the owner
+## 5. Owner's answers (Sep 24) and what they change
 
-1. On a typical plan set, what do you measure in PlanSwift beyond the roof area, the roof edge
-   and the parapet walls? (Gutters, expansion joints, walkway pads, tapered crickets?)
-2. Do you ever use PlanSwift's parts and assemblies to price, or is the price always built in
-   Bid-Advantage from the PlanSwift numbers? (The proposal assumes the latter.)
-3. Do your plan PDFs carry a printed scale you trust, or do you always calibrate from a known
-   dimension?
-4. Aerial: is the aerial takeoff done in PlanSwift on a screenshot, or in another tool? This
-   decides whether phase 3 needs its own scale step or can rely on the map's known scale.
+1. **What else is measured beyond area, edge and parapets:** not sure yet. The three tools stay
+   generic enough (any linear or count object can be "other" with a name and a quantity) that
+   nothing is lost while we find out on the first real plan set.
+2. **Pricing happens in Bid-Advantage, never in PlanSwift:** everything is measured in PlanSwift
+   and transferred by hand. Confirms the scope: Takeoff replaces the measuring and the
+   transfer, the estimator keeps pricing.
+3. **Scale:** mostly a known dimension, on plans and on aerial shots alike. Calibrate-from-two-
+   points is the primary scale tool on every underlay; the standard-scale dropdown is secondary.
+4. **Aerial takeoffs are done on a screenshot.** So the aerial underlay in phase 1 is simply an
+   image file (PNG or JPG screenshot) with the same calibration step, not a map layer. The
+   Prospecting-map mode in phase 3 is a convenience on top of that (the footprint and scale
+   already known), not a prerequisite.
+
+Net change to the phases: phase 1 accepts PDF **and image** underlays; phase 3 shrinks.
+
+## 6. Open questions for the owner
+
+1. Which parapet fields should the setup step ask up front (system, height band, deck) and
+   which stay per wall in the bid?
+2. When the first real plan set is measured: the list of things measured that are not a section,
+   an edge, a parapet, a drain, a pipe or a curb.

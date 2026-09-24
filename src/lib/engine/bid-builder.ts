@@ -78,7 +78,7 @@ import {
   edgePerimLength,
   edgeSideIndex,
   edgesArpSqFt,
-  effectiveCorners,
+  legacyFourSides,
   resolveSectionZones,
   type EdgeInput,
   type PerimCorners,
@@ -210,6 +210,15 @@ export function fluteFillerPieces(i: {
   };
 }
 
+/** A drawn roof outline (Takeoff): local feet coordinates, closed implicitly. */
+export interface MeasuredOutline {
+  /** Outline vertices in feet (x east, y south on the drawing); edge i runs points[i] → points[i+1]. */
+  points: Array<[number, number]>;
+  areaSqFt: number;
+  perimeterFt: number;
+  source: "takeoff" | "footprint";
+}
+
 export interface BidSectionInput {
   id: string;
   name: string;
@@ -267,6 +276,14 @@ export interface BidSectionInput {
    * runs. Absent = no corner data (older bids keep their manual cornerLengthFt).
    */
   perimCorners?: PerimCorners;
+  /**
+   * Set when the section came from Takeoff (a drawn outline) rather than typed length × width.
+   * `length` / `width` then hold the equivalent rectangle (same area and perimeter as the
+   * outline) for the sheet / roll layout maths, while `edges` carry the outline's real sides
+   * ("1".."N") and `perimCorners` one flag per side. The Sections screen shows such a section
+   * read-only (re-measure in Takeoff); the engine treats it like any other section.
+   */
+  measured?: MeasuredOutline;
   /**
    * Per-section Roof System / Attached With / adhesive (legacy: RoofSystem and the attachment
    * systems are section properties; the Home > Defaults panel only seeds new sections). Absent =
@@ -1165,6 +1182,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
     const edgeList = s.edges?.length
       ? [...s.edges].sort((a, b) => edgeSideIndex(a) - edgeSideIndex(b))
       : undefined;
+    // The 4-sided legacy membrane routines read side slots A..D; a measured outline is mapped
+    // onto its equivalent rectangle here (edges.ts `legacyFourSides`).
+    const four = legacyFourSides(edgeList, s.perimCorners, s);
     // Duro-Tuff: DuroTuffSystem.CalculateMembraneQty lays 30"/60" perimeter rows + field strips
     // and WRITES the custom laps it used back onto the section (docs §21.4) — those feed the
     // labor tab lookups below. Custom settings (a user perimeter lap) map to one outer row.
@@ -1200,17 +1220,12 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             customRows: tuffCustomRows,
             customPerimLapIn: tuffCustomPerimLap,
             customCornerLapIn: tuffCustomCornerLap,
-            sides: [0, 1, 2, 3].map((i) => {
-              const e = edgeList?.[i];
-              return {
-                isPerim: e?.isPerimeter ?? false,
-                perimLengthFt: e ? edgePerimLength(e) : 0,
-                has2ftWall: e?.hasTallWall ?? false,
-              };
-            }),
-            corners: edgeList
-              ? effectiveCorners(edgeList, s.perimCorners)
-              : [false, false, false, false],
+            sides: four.sides.map((e) => ({
+              isPerim: e?.isPerimeter ?? false,
+              perimLengthFt: e ? edgePerimLength(e) : 0,
+              has2ftWall: e?.hasTallWall ?? false,
+            })),
+            corners: four.corners,
             rollLengthFt: LEGACY_ROLL_LENGTH_FT,
             rollWidthsIn: Object.keys(
               admin.rollGoodWidthMulti?.[3] ?? { 30: 1, 60: 1, 120: 1 },
@@ -1229,9 +1244,9 @@ export function buildEstimateInputs(bid: BidInput, admin: EngineAdminData): Buil
             customFieldLapFt: 0,
             customPerimeterLapIn: s.perimLap !== undefined && s.perimLap !== -1 ? s.perimLap : 0,
             perimEnhancementWidthFt: s.enhancementWidthFt,
-            sides: (edgeList ?? []).map((e) => ({
-              isPerim: e.isPerimeter,
-              perimLengthFt: edgePerimLength(e),
+            sides: four.sides.map((e) => ({
+              isPerim: e?.isPerimeter ?? false,
+              perimLengthFt: e ? edgePerimLength(e) : 0,
             })),
             isQuickBid: s.isQuickBid !== false,
             rolls: sheetRollsFromLabel(sheetLabel),

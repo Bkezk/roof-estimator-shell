@@ -16,7 +16,7 @@ export {
   type UnderlaymentLayerFastenerArgs,
 } from "./underlayment-fasteners";
 import { sectionLayers } from "./bid-builder";
-import { resolveSectionZones } from "./edges";
+import { legacyFourSides, resolveSectionZones } from "./edges";
 import { dlRowStyleFastenersField, dlRowStyleFastenersPerim } from "./membrane-fasteners";
 
 /** Row-style tab systems whose membrane screws come from the DLRowStyle port (§2.2). */
@@ -186,10 +186,14 @@ export function computeNeededQuantities(args: {
   for (const s of args.sections) {
     if (rowStyle && s.fastenerOc > 0 && s.fieldLap > OVERLAP_WIDTH_IN) {
       // Sides A–D map to legacy 0–3 (A/C are the length-run tab sides that carve the width).
-      const bySide = (side: string) => (s.edges ?? []).find((e) => e.side === side);
-      const sideIsPerim = (["A", "B", "C", "D"] as const).map(
-        (side) => bySide(side)?.isPerimeter ?? false,
-      ) as [boolean, boolean, boolean, boolean];
+      // A measured outline is mapped onto its equivalent rectangle (edges.ts `legacyFourSides`).
+      const four = legacyFourSides(s.edges, s.perimCorners, s).sides;
+      const sideIsPerim = four.map((e) => e?.isPerimeter ?? false) as [
+        boolean,
+        boolean,
+        boolean,
+        boolean,
+      ];
       membraneScrews += dlRowStyleFastenersField({
         lengthFt: s.length,
         widthFt: s.width,
@@ -205,9 +209,7 @@ export function computeNeededQuantities(args: {
       membraneScrews += dlRowStyleFastenersPerim({
         fieldLapIn: s.fieldLap,
         spacingIn: s.fastenerOc, // legacy divides by the FIELD-column spacing (port note)
-        perimSideLengthsFt: (["A", "B", "C", "D"] as const).map(
-          (side) => bySide(side)?.lengthFt ?? 0,
-        ) as [number, number, number, number],
+        perimSideLengthsFt: four.map((e) => e?.lengthFt ?? 0) as [number, number, number, number],
         sideIsPerim,
       });
     }
