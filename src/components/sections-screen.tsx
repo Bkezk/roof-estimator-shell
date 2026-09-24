@@ -223,15 +223,11 @@ export function SectionsScreen(p: SectionsScreenProps) {
   const lapSyncKey = s
     ? `${s.id}|${s.fieldLap}|${lapSync!.checkPull ? "cp" : lapSync!.options.join(",")}`
     : "";
-  useEffect(() => {
-    if (!s || !lapSync || lapSync.raw.length === 0) return;
-    if (lapSync.checkPull) {
-      if (s.fieldLap !== 0) upd({ fieldLap: 0 });
-      return;
-    }
-    if (!lapSync.options.includes(s.fieldLap)) upd({ fieldLap: lapSync.options[0]! });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lapSyncKey]);
+  // The pull test is typed into a draft and committed when the box is left (legacy txt Leave):
+  // committing every keystroke ("4", "42", "425") emptied the lap list mid-typing, flipped the
+  // tab spacing to "Check Pull" and left the fastener spacing stale (owner report, Sep 24).
+  const [pullDraft, setPullDraft] = useState<number | null>(null);
+  useEffect(() => setPullDraft(null), [s?.id]);
 
   // Legacy pull-test autofill (§1): with a pull test entered, re-derive the field/perim/corner
   // o.c. from MechFastenerLookup whenever a lookup key changes. Manual OC edits still stick.
@@ -267,6 +263,19 @@ export function SectionsScreen(p: SectionsScreenProps) {
       ...(corner.ok ? { cornerFastenerOc: corner.inches } : {}),
     });
   };
+
+  // Legacy LoadLapSpacings selection: keep the saved FieldLap while it is still listed, else the
+  // first entry; "Check Pull" stores 0. A lap the list forces on the section re-derives the
+  // fastener spacing too, so the o.c. never lags the lap it belongs to.
+  useEffect(() => {
+    if (!s || !lapSync || lapSync.raw.length === 0) return;
+    if (lapSync.checkPull) {
+      if (s.fieldLap !== 0) updWithSpacing({ fieldLap: 0 });
+      return;
+    }
+    if (!lapSync.options.includes(s.fieldLap)) updWithSpacing({ fieldLap: lapSync.options[0]! });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lapSyncKey]);
 
   if (!s) {
     return (
@@ -800,9 +809,14 @@ export function SectionsScreen(p: SectionsScreenProps) {
             <Field label="Pull Test (lbs)">
               <Num
                 className="w-[100px]"
-                value={s.pullTest ?? 0}
+                value={pullDraft ?? s.pullTest ?? 0}
                 invalid={sys.rsId === 1 && (s.pullTest ?? 0) > 0 && s.pullTest! < 140}
-                onChange={(v) => updWithSpacing({ pullTest: v })}
+                onChange={setPullDraft}
+                onBlur={() => {
+                  if (pullDraft === null) return;
+                  if (pullDraft !== (s.pullTest ?? 0)) updWithSpacing({ pullTest: pullDraft });
+                  setPullDraft(null);
+                }}
               />
             </Field>
             <Field label="Design Table (psf)">
