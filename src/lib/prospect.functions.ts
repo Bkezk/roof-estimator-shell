@@ -419,7 +419,20 @@ const layerUrlSchema = z
   });
 
 const fetchJson = async (url: string): Promise<unknown> => {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(40_000),
+    });
+  } catch (e) {
+    const host = new URL(url).host;
+    throw new Error(
+      e instanceof Error && e.name === "TimeoutError"
+        ? `The state map server (${host}) took too long to answer — try again in a minute`
+        : `Could not reach the state map server (${host})`,
+    );
+  }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${new URL(url).host}`);
   const body = (await res.json()) as { error?: { message?: string } };
   if (body && typeof body === "object" && body.error) {
@@ -610,7 +623,7 @@ export const importLayer = createServerFn({ method: "POST" })
         /** Parcel layers: the county to file under. Footprints read it from FIPS. */
         county: z.string().trim().max(100).default(""),
         /** Rows per call; the caller continues from `nextOffset` until `done`. */
-        maxRows: z.number().int().min(1).max(20000).default(5000),
+        maxRows: z.number().int().min(1).max(20000).default(1500),
         startOffset: z.number().int().min(0).default(0),
       })
       .parse(d),

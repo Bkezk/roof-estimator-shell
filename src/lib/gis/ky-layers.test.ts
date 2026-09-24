@@ -158,8 +158,8 @@ describe("county scoping and ranking", () => {
   it("writes the per-kind where clause", () => {
     expect(countyWhere("footprint", "Graves")).toBe("FIPS = '21083' AND SQFEET >= 5000");
     expect(countyWhere("footprint", "Graves", 10000)).toBe("FIPS = '21083' AND SQFEET >= 10000");
-    expect(countyWhere("address", "McLean")).toBe("UPPER(County) = 'MCLEAN COUNTY'");
-    expect(countyWhere("facility", "Adair")).toBe("UPPER(COUNTY) = 'ADAIR'");
+    expect(countyWhere("address", "McLean")).toBe("County = 'MCLEAN COUNTY'");
+    expect(countyWhere("facility", "Adair")).toBe("COUNTY = 'ADAIR'");
   });
   it("builds the grouped count and ranks the pasted answer", () => {
     const u = new URL(countyRankingUrl());

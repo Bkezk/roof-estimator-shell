@@ -443,10 +443,13 @@ export function countyWhere(kind: LayerKind, county: string, minSqFt = 5000): st
       const fips = fipsForCounty(county);
       return fips ? `FIPS = '${fips}' AND SQFEET >= ${minSqFt}` : `SQFEET >= ${minSqFt}`;
     }
+    // Plain equality only: a function on the column (UPPER(County) = …) makes the state server
+    // scan every row in Kentucky and the request times out. Both layers store the county in
+    // capitals (McLean and Adair samples), so the upper-cased literal matches as is.
     case "address":
-      return `UPPER(County) = '${county.trim().toUpperCase()} COUNTY'`;
+      return `County = '${county.trim().toUpperCase()} COUNTY'`;
     case "facility":
-      return `UPPER(COUNTY) = '${county.trim().toUpperCase()}'`;
+      return `COUNTY = '${county.trim().toUpperCase()}'`;
     case "parcel":
       return "CLASS IN ('COMMERCIAL','PUBLIC SERVICE')";
   }

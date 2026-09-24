@@ -445,7 +445,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     onSuccess: setPreview,
     onError: fail,
   });
-  // A county's layer can run to tens of thousands of rows; the server writes 5,000 per call
+  // A county's layer can run to tens of thousands of rows; the server writes 1,500 per call
   // and says where to continue, so the client loops and shows progress.
   const [progress, setProgress] = useState<string | null>(null);
   const runImport = async (url: string, where: string, county: string, label: string) => {
