@@ -28,6 +28,9 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+import { DrainFields } from "./drain-fields";
+import { withDrainPick } from "./shapes";
+
 type Opt = { value: string; label: string };
 const opts = (xs: readonly (string | number)[]): Opt[] =>
   xs.map((x) => ({ value: String(x), label: String(x) }));
@@ -151,6 +154,13 @@ export function SetupTab(props: {
     if (v === undefined || v === "") delete nx[k];
     else nx[k] = v;
     onChange({ ...setup, parapet: nx });
+  };
+
+  const setDrain = (k: Parameters<typeof withDrainPick>[1], v: string | boolean | undefined) => {
+    const drain = withDrainPick(setup.drain ?? {}, k, v);
+    const nx: TakeoffSetup = { ...setup, drain };
+    if (Object.keys(drain).length === 0) delete nx.drain;
+    onChange(nx);
   };
 
   return (
@@ -311,6 +321,13 @@ export function SetupTab(props: {
             onChange={(v) => setParapet("deckType", v)}
           />
         </Field>
+      </Group>
+
+      <Group
+        title="Drains"
+        note="Given to every drain you place from now on (each drain can still be changed). A drain needs a boot and a ring to go into the bid's Roof Drains & Boots."
+      >
+        <DrainFields idPrefix="setup-drain" value={setup.drain ?? {}} onChange={setDrain} />
       </Group>
 
       <section className="space-y-1">

@@ -8,6 +8,7 @@ import {
   COUNT_ROLE_LABELS,
   feetPerPx,
   nextColor,
+  type CountAttrs,
   type CountRole,
   type LinearRole,
   type ObjectKind,
@@ -265,8 +266,48 @@ export function buildObject(
     page,
     points,
     color,
-    attrs: { name: uniqueName(COUNT_BASE_NAMES.drain, existing), role: "drain" },
+    attrs: {
+      name: uniqueName(COUNT_BASE_NAMES.drain, existing),
+      role: "drain",
+      ...drainDefaults(setup),
+    },
   };
+}
+
+/** The drain picks (setup defaults, or one drain's attrs). */
+export type DrainPicks = NonNullable<TakeoffSetup["drain"]>;
+export type DrainKey = keyof DrainPicks;
+export const DRAIN_KEYS: readonly DrainKey[] = ["roofType", "reuseRings", "bootSize", "ringSize"];
+
+/** The setup's drain defaults that are set, ready to spread into a drain's attrs. */
+export function drainDefaults(setup: TakeoffSetup): DrainPicks {
+  const d = setup.drain ?? {};
+  const out: DrainPicks = {};
+  if (d.roofType) out.roofType = d.roofType;
+  if (d.reuseRings) out.reuseRings = true;
+  if (d.bootSize) out.bootSize = d.bootSize;
+  if (d.ringSize) out.ringSize = d.ringSize;
+  return out;
+}
+
+/** Set or clear one drain pick; `false`, "" and undefined clear it (nothing unset is saved). */
+export function withDrainPick<T extends DrainPicks>(
+  picks: T,
+  k: DrainKey,
+  v: string | boolean | undefined,
+): T {
+  const nx: T = { ...picks };
+  delete nx[k];
+  if (v === undefined || v === "" || v === false) return nx;
+  const patch: DrainPicks = k === "reuseRings" ? { reuseRings: true } : { [k]: String(v) };
+  return { ...nx, ...patch };
+}
+
+/** A drain object's attrs without any drain picks (when its role changes away from drain). */
+export function withoutDrainPicks(attrs: CountAttrs): CountAttrs {
+  const nx = { ...attrs };
+  for (const k of DRAIN_KEYS) delete nx[k];
+  return nx;
 }
 
 export const countRoleLabel = (r: CountRole): string => COUNT_ROLE_LABELS[r];

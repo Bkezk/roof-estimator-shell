@@ -8,6 +8,7 @@ import { AlertTriangle, Download } from "lucide-react";
 import {
   COUNT_ROLE_LABELS,
   LINEAR_ROLE_LABELS,
+  type CountQuantity,
   type TakeoffPage,
   type TakeoffQuantities,
 } from "@/lib/takeoff/model";
@@ -39,7 +40,21 @@ const CSV_HEADER = [
   "Size (in)",
   "Curb W (in)",
   "Curb L (in)",
+  "Drain roof type",
+  "Reuse rings",
+  "Drain boot",
+  "Drain ring",
 ];
+const DRAIN_COLS = 4;
+
+/** "Boot · ring" for a drain row; the missing part named, so it is clear what is left to pick. */
+function drainPicksLabel(c: CountQuantity): { text: string; complete: boolean } {
+  if (!c.bootSize && !c.ringSize) return { text: "no boot / ring picked", complete: false };
+  return {
+    text: `${c.bootSize ?? "no boot picked"} · ${c.ringSize ?? "no ring picked"}`,
+    complete: !!c.bootSize && !!c.ringSize,
+  };
+}
 
 function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): string {
   const rows: string[] = [csvLine(CSV_HEADER)];
@@ -56,7 +71,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         s.edgeLengthsFt.length,
         s.section.length,
         s.section.width,
-        ...blank(6),
+        ...blank(6 + DRAIN_COLS),
       ]),
     );
   for (const l of q.linears)
@@ -69,7 +84,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         ...blank(5),
         l.lengthFt,
         l.heightIn,
-        ...blank(4),
+        ...blank(4 + DRAIN_COLS),
       ]),
     );
   for (const c of q.counts)
@@ -84,13 +99,32 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         c.sizeIn,
         c.widthIn,
         c.lengthIn,
+        ...(c.role === "drain"
+          ? [c.roofType, c.reuseRings ? "Yes" : "", c.bootSize, c.ringSize]
+          : blank(DRAIN_COLS)),
       ]),
     );
-  rows.push(csvLine(["Total", "Roof area", "", "", q.totals.roofAreaSqFt, ...blank(10)]));
-  rows.push(csvLine(["Total", "Perimeter", "", "", "", q.totals.perimeterFt, ...blank(9)]));
-  rows.push(csvLine(["Total", "Parapet", "", "", ...blank(5), q.totals.parapetFt, ...blank(5)]));
+  rows.push(
+    csvLine(["Total", "Roof area", "", "", q.totals.roofAreaSqFt, ...blank(10 + DRAIN_COLS)]),
+  );
+  rows.push(
+    csvLine(["Total", "Perimeter", "", "", "", q.totals.perimeterFt, ...blank(9 + DRAIN_COLS)]),
+  );
+  rows.push(
+    csvLine([
+      "Total",
+      "Parapet",
+      "",
+      "",
+      ...blank(5),
+      q.totals.parapetFt,
+      ...blank(5 + DRAIN_COLS),
+    ]),
+  );
   for (const u of q.unscaled)
-    rows.push(csvLine(["Unscaled (no scale on page)", u.name, pageName(u.page), ...blank(12)]));
+    rows.push(
+      csvLine(["Unscaled (no scale on page)", u.name, pageName(u.page), ...blank(12 + DRAIN_COLS)]),
+    );
   return rows.join("\r\n") + "\r\n";
 }
 
@@ -224,6 +258,7 @@ export function QuantitiesTab(props: {
                 <H>Role</H>
                 <H right>Qty</H>
                 <H right>Size</H>
+                <H>Drain boot · ring</H>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -241,6 +276,25 @@ export function QuantitiesTab(props: {
                     ]
                       .filter(Boolean)
                       .join(" · ")}
+                  </C>
+                  <C>
+                    {c.role === "drain" &&
+                      (() => {
+                        const d = drainPicksLabel(c);
+                        return (
+                          <span
+                            className={d.complete ? "" : "text-amber-700 dark:text-amber-400"}
+                            title={
+                              d.complete
+                                ? `Goes into the bid's Roof Drains & Boots${c.roofType ? ` (roof: ${c.roofType})` : ""}${c.reuseRings ? ", reusing the existing rings" : ""}`
+                                : "Not carried into the bid until a boot and a ring are picked (Objects tab)"
+                            }
+                          >
+                            {d.text}
+                            {c.reuseRings && d.complete ? " (reuse rings)" : ""}
+                          </span>
+                        );
+                      })()}
                   </C>
                 </TableRow>
               ))}

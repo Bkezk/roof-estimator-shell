@@ -518,6 +518,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                   objects={objects}
                   pages={pages}
                   quantities={quantities}
+                  setup={setup}
                   selectedId={selectedId}
                   onSelect={selectFromList}
                   onUpdate={updateObject}

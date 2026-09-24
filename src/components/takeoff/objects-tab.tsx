@@ -3,7 +3,7 @@
  * area's per-side edge table and cut-outs, a linear's role (and parapet height), a count's role
  * and sizes. Number boxes stay blank when 0 (placeholder 0); nothing is prefilled.
  */
-import { Trash2 } from "lucide-react";
+import { AlertTriangle, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
@@ -18,6 +18,7 @@ import {
   type TakeoffObject,
   type TakeoffPage,
   type TakeoffQuantities,
+  type TakeoffSetup,
 } from "@/lib/takeoff/model";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,9 +33,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { DrainFields } from "./drain-fields";
 import {
   COUNT_BASE_NAMES,
   LINEAR_BASE_NAMES,
+  drainDefaults,
   edgeLengthsFt,
   fmtFt,
   fmtNum,
@@ -43,6 +46,8 @@ import {
   netAreaSqFt,
   polylineLengthPx,
   uniqueName,
+  withDrainPick,
+  withoutDrainPicks,
 } from "./shapes";
 
 type Update = (id: string, fn: (o: TakeoffObject) => TakeoffObject) => void;
@@ -51,6 +56,8 @@ export interface ObjectsTabProps {
   objects: readonly TakeoffObject[];
   pages: readonly TakeoffPage[];
   quantities: TakeoffQuantities;
+  /** The takeoff's setup: a count switched to Drain takes its drain defaults. */
+  setup: TakeoffSetup;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onUpdate: Update;
@@ -81,6 +88,7 @@ export function ObjectsTab(props: ObjectsTabProps) {
           object={selected}
           page={pageOf(selected.page)}
           objects={objects}
+          setup={props.setup}
           onUpdate={props.onUpdate}
           onDelete={props.onDelete}
         />
@@ -159,6 +167,7 @@ function SelectedEditor(props: {
   object: TakeoffObject;
   page: TakeoffPage | undefined;
   objects: readonly TakeoffObject[];
+  setup: TakeoffSetup;
   onUpdate: Update;
   onDelete: (id: string) => void;
 }) {
@@ -267,6 +276,9 @@ function SelectedEditor(props: {
                     attrs = withAttr(attrs, "widthIn", undefined);
                     attrs = withAttr(attrs, "lengthIn", undefined);
                   }
+                  if (role !== "drain") attrs = withoutDrainPicks(attrs);
+                  else if (x.attrs.role !== "drain")
+                    attrs = { ...attrs, ...drainDefaults(props.setup) };
                   return { ...x, attrs };
                 })
               }
@@ -310,6 +322,25 @@ function SelectedEditor(props: {
               }
             />
           </div>
+          {o.attrs.role === "drain" && (
+            <>
+              <DrainFields
+                idPrefix={`drain-${o.id}`}
+                value={o.attrs}
+                onChange={(k, v) =>
+                  update((x) =>
+                    x.kind === "count" ? { ...x, attrs: withDrainPick(x.attrs, k, v) } : x,
+                  )
+                }
+              />
+              {(!o.attrs.bootSize || !o.attrs.ringSize) && (
+                <p className="col-span-2 flex items-center gap-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Pick a boot and ring so this drain goes into the bid
+                </p>
+              )}
+            </>
+          )}
           {o.attrs.role === "curb" && (
             <div className="col-span-2 space-y-1">
               <Label className="text-xs text-muted-foreground">Curb width × length (in)</Label>
