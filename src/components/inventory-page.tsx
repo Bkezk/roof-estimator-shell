@@ -190,8 +190,8 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
 
   const [q, setQ] = useState("");
   const [zeros, setZeros] = useState(false);
-  // Which location the list shows: the shop by default, a vehicle, or everywhere.
-  const [where, setWhere] = useState<string>(SHOP_LOCATION_ID);
+  // Which location the list shows: everywhere by default (owner, Sep 24), or one place.
+  const [where, setWhere] = useState<string>("all");
   const [dialog, setDialog] = useState<{
     mode: Mode;
     ref: TargetRef | null;
