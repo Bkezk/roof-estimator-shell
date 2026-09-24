@@ -158,6 +158,7 @@ export default function ProspectMap({
   className,
 }: Props) {
   const cityMarkers = useRef<Marker[]>([]);
+  const framed = useRef<string>("");
   const placeCitiesRef = useRef<(() => void) | null>(null);
   const citiesOn = useRef(showCities);
   citiesOn.current = showCities;
@@ -358,6 +359,11 @@ export default function ProspectMap({
           })),
       };
       pts.setData(pc);
+      // Re-frame only when the set of buildings or the selection changed, never on a plain
+      // re-render (a toggle, a filter elsewhere on the page).
+      const frameKey = `${selectedId ?? ""}|${buildings.length}|${buildings[0]?.id ?? ""}|${buildings[buildings.length - 1]?.id ?? ""}`;
+      if (framed.current === frameKey) return;
+      framed.current = frameKey;
       const sel = buildings.find((b) => b.id === selectedId);
       if (sel && sel.lat !== null && sel.lng !== null) {
         m.easeTo({ center: [sel.lng, sel.lat], zoom: Math.max(m.getZoom(), 18), duration: 600 });

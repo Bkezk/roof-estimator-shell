@@ -656,6 +656,21 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     },
     onError: fail,
   });
+  // Stable list for the map: a fresh array on every render would make the map re-frame the
+  // view (and jump the zoom) whenever anything else on the page changed, such as a toggle.
+  const mapBuildings = useMemo(
+    () =>
+      (buildings.data ?? []).map((b) => ({
+        id: b.id,
+        name: b.name,
+        address1: b.address1,
+        lat: b.centroid_lat,
+        lng: b.centroid_lng,
+        footprint: b.footprint,
+        roofSqFt: b.roof_sqft,
+      })),
+    [buildings.data],
+  );
   const rect = useMemo(() => {
     const b = detail.data?.building;
     if (!b) return null;
@@ -754,15 +769,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       {showMap && (
         <Suspense fallback={<div className="h-[420px] w-full rounded-md border bg-muted/30" />}>
           <ProspectMap
-            buildings={(buildings.data ?? []).map((b) => ({
-              id: b.id,
-              name: b.name,
-              address1: b.address1,
-              lat: b.centroid_lat,
-              lng: b.centroid_lng,
-              footprint: b.footprint,
-              roofSqFt: b.roof_sqft,
-            }))}
+            buildings={mapBuildings}
             selectedId={selectedId}
             onSelect={setSelectedId}
             showOutlines={showOutlines}
