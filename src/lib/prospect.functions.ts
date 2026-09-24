@@ -1133,7 +1133,14 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
     async ({
       data,
       context,
-    }): Promise<{ id: string | null; roofSqFt: number | null; existed: boolean }> => {
+    }): Promise<{
+      id: string | null;
+      roofSqFt: number | null;
+      /** The building was already in the statewide data. */
+      existed: boolean;
+      /** This tap put it on the prospects list (false = it was already there). */
+      flagged: boolean;
+    }> => {
       await assertPageAccess(context.supabase, context.userId, "prospect");
       const page = (await fetchJson(
         footprintAtPointUrl(KY_FOOTPRINTS_LAYER, data.lng, data.lat),
@@ -1141,15 +1148,29 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
       const hit = (page.features ?? [])
         .map(footprintFromFeature)
         .find((c) => c !== null && pointInFootprint(data.lng, data.lat, c.geometry?.footprint));
-      if (!hit) return { id: null, roofSqFt: null, existed: false };
-      // Already a prospect (the map only draws the buildings in the current list)? Just open it.
+      if (!hit) return { id: null, roofSqFt: null, existed: false, flagged: false };
+      // Already stored (the statewide load holds most outlines)? Then tapping means "make it a
+      // prospect": flag it unless it already is one, and open it either way.
       const { data: prior } = await context.supabase
         .from("buildings")
-        .select("id")
+        .select("id, prospect_stage")
         .eq("source_key", `ornl:${hit.buildId}`)
         .is("deleted_at", null)
         .maybeSingle();
-      if (prior) return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true };
+      if (prior) {
+        if (prior.prospect_stage)
+          return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true, flagged: false };
+        const { error: pErr } = await context.supabase
+          .from("buildings")
+          .update({
+            prospect_stage: "prospect",
+            prospected_at: new Date().toISOString(),
+            prospect_owner_name: await meName(context),
+          })
+          .eq("id", prior.id);
+        if (pErr) throw new Error(pErr.message);
+        return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true, flagged: true };
+      }
       const who = await meName(context);
       const county = hit.county;
       const { error } = await context.supabase.rpc("upsert_buildings", {
@@ -1201,6 +1222,6 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
           .is("prospect_stage", null);
         if (pErr) throw new Error(pErr.message);
       }
-      return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false };
+      return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false, flagged: true };
     },
   );

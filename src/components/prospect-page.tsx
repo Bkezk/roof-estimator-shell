@@ -444,13 +444,12 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         toast.info("No building outline under that spot — zoom in and tap inside an outline");
         return;
       }
-      if (r.existed) {
-        toast.info(
-          `Already a prospect — opened${r.roofSqFt ? ` (${r.roofSqFt.toLocaleString()} sq ft roof)` : ""}`,
-        );
-      } else {
-        toast.success(`Added${r.roofSqFt ? ` — ${r.roofSqFt.toLocaleString()} sq ft roof` : ""}`);
+      const size = r.roofSqFt ? ` (${r.roofSqFt.toLocaleString()} sq ft roof)` : "";
+      if (r.flagged) {
+        toast.success(`Added to my prospects${size}`);
         invalidate();
+      } else {
+        toast.info(`Already on your prospects list — opened${size}`);
       }
       setSelectedId(r.id);
     },
