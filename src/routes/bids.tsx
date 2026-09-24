@@ -2,7 +2,15 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { FileUp, Layers, PlusCircle, RotateCcw, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileUp,
+  Layers,
+  PlusCircle,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -87,6 +95,25 @@ const estimatorOf = (bid: { data: unknown }): string => {
   return d?.customer?.estimatorName?.trim() ?? "";
 };
 
+/** Status groups the user has collapsed, remembered across reloads (per browser). */
+const COLLAPSED_KEY = "bid-o-matic:bids-collapsed";
+const readCollapsed = (): BidStatus[] => {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw: unknown = JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return Array.isArray(raw) ? BID_STATUSES.filter((s) => raw.includes(s)) : [];
+  } catch {
+    return [];
+  }
+};
+const writeCollapsed = (statuses: BidStatus[]) => {
+  try {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(statuses));
+  } catch {
+    // Storage unavailable (private mode, blocked site data) — collapse still works this visit.
+  }
+};
+
 function BidsPage() {
   const navigate = useNavigate();
   const listBidsFn = useServerFn(listBids);
@@ -114,6 +141,14 @@ function BidsPage() {
   // Bid Combiner (legacy BidAdvantage.BidCombiner, docs §22.41): tick two or more bids, then
   // "Combine" opens a NEW estimate merged from them.
   const [combineSel, setCombineSel] = useState<string[]>([]);
+  // Collapsed status groups (default: none, i.e. every group expanded).
+  const [collapsed, setCollapsed] = useState<BidStatus[]>(readCollapsed);
+  const toggleGroup = (status: BidStatus) =>
+    setCollapsed((prev) => {
+      const next = prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status];
+      writeCollapsed(next);
+      return next;
+    });
   const toggleCombine = (id: string) =>
     setCombineSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const qc = useQueryClient();
@@ -434,122 +469,141 @@ function BidsPage() {
         </div>
       ) : (
         <div className="grid gap-8">
-          {groups.map(({ status, rows }) => (
-            <section key={status} aria-label={`${STATUS_LABELS[status]} bids`}>
-              {/* Group header with a grey rule beneath it; empty groups are not shown. */}
-              <div className="mb-3 flex items-baseline gap-2 border-b border-border pb-1.5">
-                <h2 className="text-sm font-semibold uppercase tracking-wide">
-                  {STATUS_LABELS[status]}
+          {groups.map(({ status, rows }) => {
+            const open = !collapsed.includes(status);
+            const Chevron = open ? ChevronDown : ChevronRight;
+            return (
+              <section key={status} aria-label={`${STATUS_LABELS[status]} bids`}>
+                {/* Group header with a grey rule beneath it; empty groups are not shown.
+                  Clicking it collapses/expands the group (remembered in localStorage). */}
+                <h2 className={`border-b border-border pb-1.5 ${open ? "mb-3" : ""}`}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-sm text-left hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-expanded={open}
+                    aria-controls={`bids-group-${status}`}
+                    title={open ? "Collapse this group" : "Expand this group"}
+                    onClick={() => toggleGroup(status)}
+                  >
+                    <Chevron className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <span className="text-sm font-semibold uppercase tracking-wide">
+                      {STATUS_LABELS[status]}
+                    </span>
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {rows.length} bid{rows.length === 1 ? "" : "s"}
+                    </span>
+                  </button>
                 </h2>
-                <span className="text-xs text-muted-foreground">
-                  {rows.length} bid{rows.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <div className="grid gap-3">
-                {rows.map((bid) => {
-                  const st = asBidStatus(bid.status);
-                  return (
-                    <div
-                      key={bid.id}
-                      role="link"
-                      tabIndex={0}
-                      title="Open this bid"
-                      className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          void navigate({ to: "/estimate", search: { bid: bid.id } });
-                        }
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 shrink-0 cursor-pointer"
-                          aria-label={`Select ${bid.name} to combine`}
-                          title="Tick to combine with other bids"
-                          checked={combineSel.includes(bid.id)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          onChange={() => toggleCombine(bid.id)}
-                        />
-                        <div>
-                          <p className="font-medium">{bid.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Estimator: {estimatorOf(bid) || "—"} · Created{" "}
-                            {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
-                            {new Date(bid.updated_at).toLocaleString(undefined, {
-                              dateStyle: "short",
-                              timeStyle: "short",
-                            })}
-                            {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
-                            {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
-                            {importedFrom(bid.data) ? ` · Imported from Bid-Advantage` : ""}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-6">
-                        {/* Stored at save time — the estimator recomputes live, so an engine change
-                      (or an empty-data row) can differ from this until the bid is re-saved. */}
-                        <span
-                          className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
-                          title="Total as of the last save — open the bid for the live figure"
-                        >
-                          {money(Number(bid.grand_total ?? 0))}
-                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                            (last saved)
-                          </span>
-                        </span>
-                        {/* Status changes here save at once and stamp "Last saved … by". */}
+                {open && (
+                  <div id={`bids-group-${status}`} className="grid gap-3">
+                    {rows.map((bid) => {
+                      const st = asBidStatus(bid.status);
+                      return (
                         <div
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => e.stopPropagation()}
-                        >
-                          <Select
-                            value={st}
-                            onValueChange={(v) =>
-                              v === "lost"
-                                ? setLostFor({ id: bid.id, name: bid.name })
-                                : setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                          key={bid.id}
+                          role="link"
+                          tabIndex={0}
+                          title="Open this bid"
+                          className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              void navigate({ to: "/estimate", search: { bid: bid.id } });
                             }
-                          >
-                            <SelectTrigger
-                              className="h-8 w-[130px] text-xs"
-                              aria-label="Bid status"
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {BID_STATUSES.map((v) => (
-                                <SelectItem key={v} value={v}>
-                                  {STATUS_LABELS[v]}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive"
-                          title="Delete this bid"
-                          disabled={del.isPending}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConfirmDelete({ id: bid.id, name: bid.name });
                           }}
                         >
-                          <Trash2 className="h-4 w-4" />
-                          <span className="sr-only">Delete</span>
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 shrink-0 cursor-pointer"
+                              aria-label={`Select ${bid.name} to combine`}
+                              title="Tick to combine with other bids"
+                              checked={combineSel.includes(bid.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                              onChange={() => toggleCombine(bid.id)}
+                            />
+                            <div>
+                              <p className="font-medium">{bid.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+                                {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+                                {new Date(bid.updated_at).toLocaleString(undefined, {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })}
+                                {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
+                                {st === "lost" && bid.lost_reason
+                                  ? ` · Lost: ${bid.lost_reason}`
+                                  : ""}
+                                {importedFrom(bid.data) ? ` · Imported from Bid-Advantage` : ""}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-6">
+                            {/* Stored at save time — the estimator recomputes live, so an engine change
+                      (or an empty-data row) can differ from this until the bid is re-saved. */}
+                            <span
+                              className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
+                              title="Total as of the last save — open the bid for the live figure"
+                            >
+                              {money(Number(bid.grand_total ?? 0))}
+                              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                                (last saved)
+                              </span>
+                            </span>
+                            {/* Status changes here save at once and stamp "Last saved … by". */}
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              <Select
+                                value={st}
+                                onValueChange={(v) =>
+                                  v === "lost"
+                                    ? setLostFor({ id: bid.id, name: bid.name })
+                                    : setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                                }
+                              >
+                                <SelectTrigger
+                                  className="h-8 w-[130px] text-xs"
+                                  aria-label="Bid status"
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {BID_STATUSES.map((v) => (
+                                    <SelectItem key={v} value={v}>
+                                      {STATUS_LABELS[v]}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
+                              title="Delete this bid"
+                              disabled={del.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDelete({ id: bid.id, name: bid.name });
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Delete</span>
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       )}
 
