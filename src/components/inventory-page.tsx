@@ -817,7 +817,12 @@ function RecordDialog(props: {
     : 0;
   const onHandCounted = inPieces && piece ? onHand * piece.perPack : onHand;
   const n = qty.trim() === "" ? NaN : Number(qty);
-  const isReturn = !consumed && purpose?.kind === "vehicle";
+  // A vehicle → shop move, from either side of the dialog: what does not come back can be
+  // written off as used on the vehicle.
+  const isReturn =
+    (!consumed && purpose?.kind === "vehicle") ||
+    (consumed && purpose?.kind === "shop" && location?.kind === "vehicle");
+  const returnVehicle = consumed ? location : vehicle;
   const amountOk = Number.isFinite(n) && n >= 0 && (isReturn || n > 0);
   const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
   // Taking, returning off a vehicle, or loading from the shop never exceeds what that place holds.
@@ -857,13 +862,15 @@ function RecordDialog(props: {
             to_location_id: consumed ? SHOP_LOCATION_ID : location.id,
             qty: n,
             ...pieces,
+            ...(usedCounted > 0 ? { used_qty: usedCounted } : {}),
             note: noteOrNull,
           },
         });
+        const used = r.used > 0 ? describeStock(r.used, r.unit, piece) : "";
         saved = {
           id: r.ids[0] ?? 0,
           message: consumed
-            ? `${describeStock(r.moved, r.unit, piece)} of ${product} moved from ${locName} back to the shop`
+            ? `${r.moved > 0 ? `${describeStock(r.moved, r.unit, piece)} of ${product} moved from ${locName} back to the shop` : `Nothing of ${product} moved to the shop`}${used ? `; ${used} used on ${locName}` : ""}`
             : `${describeStock(r.moved, r.unit, piece)} of ${product} moved from the shop to ${locName}`,
         };
       } else if (purpose.kind === "vehicle" && vehicle) {
@@ -1008,7 +1015,11 @@ function RecordDialog(props: {
             <div className="flex flex-wrap items-end gap-3">
               <div className="space-y-1">
                 <Label>
-                  {isReturn ? "How much came back" : "How much"}
+                  {isReturn
+                    ? consumed
+                      ? "How much goes back to the shop"
+                      : "How much came back"
+                    : "How much"}
                   {inPieces && piece ? ` (${plural(2, piece.name)})` : unit ? ` (${unit})` : ""}
                 </Label>
                 <Input
@@ -1127,7 +1138,7 @@ function RecordDialog(props: {
               />
             </div>
           )}
-          {isReturn && vehicle && ref && amountOk && rest > 0 && (
+          {isReturn && returnVehicle && ref && amountOk && rest > 0 && (
             <label className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
               <input
                 type="checkbox"
@@ -1136,8 +1147,8 @@ function RecordDialog(props: {
                 onChange={(e) => setRestUsed(e.target.checked)}
               />
               <span>
-                The other <b>{fmtCounted(rest)}</b> was used on {vehicle.name} — take it off the
-                vehicle's list. Untick to leave it on the vehicle.
+                The other <b>{fmtCounted(rest)}</b> was used on {returnVehicle.name} — take it off
+                the vehicle's list. Untick to leave it on the vehicle.
               </span>
             </label>
           )}
