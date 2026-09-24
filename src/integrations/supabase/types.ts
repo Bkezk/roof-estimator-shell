@@ -1438,6 +1438,78 @@ export type Database = {
         };
         Relationships: [];
       };
+      takeoffs: {
+        Row: {
+          bid_id: string | null;
+          building_id: string | null;
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          file_name: string | null;
+          file_path: string | null;
+          file_size: number | null;
+          id: string;
+          name: string;
+          objects: Json;
+          pages: Json;
+          setup: Json;
+          status: string;
+          underlay_kind: string;
+          updated_at: string;
+        };
+        Insert: {
+          bid_id?: string | null;
+          building_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          file_name?: string | null;
+          file_path?: string | null;
+          file_size?: number | null;
+          id?: string;
+          name?: string;
+          objects?: Json;
+          pages?: Json;
+          setup?: Json;
+          status?: string;
+          underlay_kind: string;
+          updated_at?: string;
+        };
+        Update: {
+          bid_id?: string | null;
+          building_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          file_name?: string | null;
+          file_path?: string | null;
+          file_size?: number | null;
+          id?: string;
+          name?: string;
+          objects?: Json;
+          pages?: Json;
+          setup?: Json;
+          status?: string;
+          underlay_kind?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "takeoffs_bid_id_fkey";
+            columns: ["bid_id"];
+            isOneToOne: false;
+            referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "takeoffs_building_id_fkey";
+            columns: ["building_id"];
+            isOneToOne: false;
+            referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       tasks: {
         Row: {
           assignee: string | null;
