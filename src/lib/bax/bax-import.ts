@@ -1305,7 +1305,10 @@ export function convertBax(doc: XNode, opts: ConvertOptions): BaxConversion {
     laborTemplateName: templateName,
     extraShipping: num(est, "extrashipping"),
     salesTaxRate: salesTax,
-    taxMaterialOnly: num(est, "taxmode") === 1,
+    // Legacy Estimate reads <taxmode> as bTaxMaterialOnly = (toBool(text) = False): 0 = tax the
+    // material only, 1 = tax everything. (Monticello Banking: taxmode 0, Sales Tax 3,057.57 =
+    // 6.25% × Materials 48,921.12 on the legacy Review screen.)
+    taxMaterialOnly: num(est, "taxmode") === 0,
     maxWindExpected: windOpt ? maxWind : 72,
     warrantyName: warranty?.name ?? "",
     highWind: warranty?.isHighWind ?? false,
@@ -1479,8 +1482,9 @@ export function applyLegacyPricing(
     const hpd = num(settings, "mandayhours", 0);
     if (hpd > 0) out.settings.hoursPerDay = hpd;
     out.settings.salesTax = num(settings, "salestax", out.settings.salesTax);
+    // Same encoding as the estimate's <taxmode>: 0 = material only, 1 = tax everything.
     out.settings.taxMaterialOnly =
-      num(settings, "taxmode", out.settings.taxMaterialOnly ? 1 : 0) === 1;
+      num(settings, "taxmode", out.settings.taxMaterialOnly ? 0 : 1) === 0;
     out.settings.masterEliteCont = bool(text(settings, "masterelite") || "1");
     const mode = text(settings, "shipcalcmode");
     if (mode) out.settings.shippingMode = mode;
@@ -1674,8 +1678,91 @@ export function applyLegacyPricing(
     void tpatch;
     if (n) applied.push(`accessory catalog prices (${n} items)`);
   }
+  // Underlayment boards: the file's own $/sqft and layout hours (legacy DualValue.SmartValue:
+  // custom when > 0, else default). Monticello Banking proves both: 4x8 ISO 13,535.23 =
+  // (2 × 4,200 × 1.44 + 1,100 × 0.95) × 1.03 uses the custom 1.44 / 0.95, not the defaults
+  // 1.52 / 0.93; Fire Rated 4,094.25 = 5,300 × 0.75 × 1.03. Quote boards are priced by their
+  // quote and are skipped. Names are spelled the live way when the app knows the board.
+  const boardKeys = new Map<string, string>();
+  for (const n of Object.keys(out.underlaymentLabor?.layoutHoursByProduct ?? {}))
+    boardKeys.set(nameKey(n), n);
+  for (const n of Object.keys(out.underlaymentPrices ?? {})) boardKeys.set(nameKey(n), n);
+  const smartValue = (node: XNode | undefined): number | null => {
+    if (!node) return null;
+    const custom = attrNum(node, "custom");
+    return custom > 0 ? custom : attrNum(node, "default");
+  };
+  let uPrices = 0;
+  let uLayouts = 0;
+  for (const u of children(child(m, "underlayments"), "underlayment")) {
+    if (/^true$/i.test(u.attrs["needquote"] ?? "")) continue;
+    const norm = normalizeLegacyName(u.attrs["name"] ?? "");
+    if (!norm) continue;
+    const name = boardKeys.get(nameKey(norm)) ?? norm;
+    const price = smartValue(child(u, "sqftcosts"));
+    if (price !== null) {
+      (out.underlaymentPrices ??= {})[name] = price;
+      uPrices++;
+    }
+    const layout = smartValue(child(u, "layout"));
+    if (layout !== null && out.underlaymentLabor) {
+      out.underlaymentLabor.layoutHoursByProduct[name] = layout;
+      uLayouts++;
+    }
+  }
+  if (uPrices) applied.push(`underlayment $/sqft (${uPrices} boards)`);
+  if (uLayouts) applied.push(`underlayment layout hours (${uLayouts} boards)`);
+
+  // Fastener box prices (perbox = $/box, boxquan = pieces/box), matched by part number, else by
+  // description + subtype. Monticello Banking: 8" XHD 363/box in the file vs 378 live.
+  if (acc?.fasteners?.length) {
+    const byPart = new Map(acc.fasteners.filter((f) => f.part).map((f) => [f.part, f]));
+    const byKey = new Map(
+      acc.fasteners.map((f) => [`${nameKey(f.description)}|${nameKey(f.subtype)}`, f]),
+    );
+    let n = 0;
+    for (const f of children(child(m, "fasteners"), "fastener")) {
+      const part = f.attrs["partnumber"] ?? "";
+      const row =
+        (part ? byPart.get(part) : undefined) ??
+        byKey.get(
+          `${nameKey(normalizeLegacyName(f.attrs["description"] ?? ""))}|${nameKey(f.attrs["subtype"] ?? "")}`,
+        );
+      if (!row) continue;
+      const perBox = attrNum(f, "perbox", -1);
+      if (perBox < 0) continue;
+      row.boxPrice = perBox;
+      const boxQuan = attrNum(f, "boxquan");
+      if (boxQuan > 0) row.perBox = boxQuan;
+      n++;
+    }
+    if (n) applied.push(`fastener box prices (${n})`);
+  }
+  // Pipe stack sizes: colour prices by size (legacy rows are oddly named <blocking>).
+  // Monticello Banking: 4" Closed/Open white 12.80 in the file vs 14.25 live.
+  if (acc?.pipeStackSizes?.length) {
+    let n = 0;
+    for (const p of children(child(m, "pipestacksizes"), "blocking")) {
+      const size = attrNum(p, "size");
+      const row = acc.pipeStackSizes.find((x) => x.size === size);
+      if (!row) continue;
+      const pairs: Array<[string, string]> = [
+        ["price", "White"],
+        ["tanprice", "Tan"],
+        ["grayprice", "Gray"],
+        ["darkgrayprice", "Dark Gray"],
+        ["terracottaprice", "Terra Cotta"],
+      ];
+      for (const [attr, color] of pairs) {
+        if (p.attrs[attr] === undefined) continue;
+        row.priceByColor[color] = attrNum(p, attr);
+        n++;
+      }
+    }
+    if (n) applied.push(`pipe stack prices (${n} cells)`);
+  }
   notes.push(
-    "Not in the file: underlayment $/sqft, fastener box prices and the labor hour tables — the live values apply.",
+    "Not in the file: the labor time tables (fastening minutes, parapet / curb / tear-off times) — the live values apply.",
   );
   return { admin: out, applied, notes };
 }

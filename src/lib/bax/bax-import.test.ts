@@ -134,7 +134,8 @@ describe("Knox County Fiscal Court .bax", () => {
     expect(s.extraShipping).toBe(2000);
     expect(s.salesTaxRate).toBe(0.0625);
     expect(s.taxExempt).toBe(false);
-    expect(s.taxMaterialOnly).toBe(false);
+    // <taxmode>0</taxmode> = material only (legacy bTaxMaterialOnly = toBool(taxmode) = False).
+    expect(s.taxMaterialOnly).toBe(true);
     expect(s.hoursPerDay).toBe(9);
     expect(s.warrantyName).toBe("20 Yr NDL");
     expect(s.maxWindExpected).toBe(72);
@@ -447,7 +448,7 @@ describe("pricing overlay", () => {
     expect(out.settings).toMatchObject({
       hoursPerDay: 9,
       salesTax: 0.0625,
-      taxMaterialOnly: true,
+      taxMaterialOnly: false, // company <taxmode>1</taxmode> = tax everything
       shippingMode: "stepped",
       shippingPercent: 0,
     });
