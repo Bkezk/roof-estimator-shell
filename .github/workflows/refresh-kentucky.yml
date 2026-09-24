@@ -1,8 +1,9 @@
 # Monthly refresh of the prospecting data from Kentucky's free GIS (docs/roofing-ops-portal-brief.md).
 # Footprints are a one-time survey, so the monthly run refreshes addresses, named businesses and
 # facilities; run it by hand with "Load footprints too" for the first statewide load or when the
-# state republishes footprints. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (repository
-# settings → Secrets and variables → Actions).
+# state republishes footprints. Secrets (repository settings → Secrets and variables → Actions):
+# LOADER_EMAIL and LOADER_PASSWORD, a Bid-O-Matic login with Prospecting access made in Users &
+# access. The project URL and public key come from the committed .env.
 name: Refresh Kentucky data
 
 on:
@@ -37,8 +38,8 @@ jobs:
       - run: npm install --no-audit --no-fund
       - name: Load
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LOADER_EMAIL: ${{ secrets.LOADER_EMAIL }}
+          LOADER_PASSWORD: ${{ secrets.LOADER_PASSWORD }}
           COUNTY: ${{ github.event.inputs.county }}
           FOOTPRINTS: ${{ github.event.inputs.footprints }}
           SHARD: ${{ matrix.shard }}

@@ -5,8 +5,8 @@
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
  *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/4]
  *
- * Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment (GitHub secrets; never
- * in the repo). Per county: footprints of the size floor → every 911 address point → match
+ * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
+ * secrets; never in the repo). The project URL and public key are read from the committed .env. Per county: footprints of the size floor → every 911 address point → match
  * addresses → promote named / commercially typed points → attach their outlines → schools →
  * trim the house points → log the refresh. Nothing a person typed is overwritten
  * (upsert_buildings). Footprints are a one-time survey, so --skip-footprints makes the monthly
@@ -48,13 +48,40 @@ const shard = (() => {
 })();
 const pageSize = 500;
 
-const url = process.env["SUPABASE_URL"];
-const key = process.env["SUPABASE_SERVICE_ROLE_KEY"];
-if (!url || !key) {
-  console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY");
+// Connection: the project URL and PUBLIC key come from the committed .env (they are public by
+// design; the app ships them to every browser). Writes need a signed-in user with Prospecting
+// access: LOADER_EMAIL / LOADER_PASSWORD (a dedicated login made in Users & access). A
+// SUPABASE_SERVICE_ROLE_KEY still works when one is at hand.
+import { readFileSync } from "node:fs";
+const dotenv = (() => {
+  const out: Record<string, string> = {};
+  try {
+    for (const line of readFileSync(new URL("../.env", import.meta.url), "utf8").split("\n")) {
+      const m = /^\s*([A-Z0-9_]+)\s*=\s*"?([^"\n]*)"?\s*$/.exec(line);
+      if (m) out[m[1]!] = m[2]!;
+    }
+  } catch {
+    /* no .env */
+  }
+  return out;
+})();
+const url = process.env["SUPABASE_URL"] ?? dotenv["SUPABASE_URL"] ?? dotenv["VITE_SUPABASE_URL"];
+const publicKey =
+  process.env["SUPABASE_PUBLISHABLE_KEY"] ??
+  dotenv["SUPABASE_PUBLISHABLE_KEY"] ??
+  dotenv["VITE_SUPABASE_PUBLISHABLE_KEY"];
+const serviceKey = process.env["SUPABASE_SERVICE_ROLE_KEY"];
+const email = process.env["LOADER_EMAIL"];
+const password = process.env["LOADER_PASSWORD"];
+if (!url || !(serviceKey || (publicKey && email && password))) {
+  console.error(
+    "Need SUPABASE_URL (or .env) and either LOADER_EMAIL + LOADER_PASSWORD (a Prospecting login) or SUPABASE_SERVICE_ROLE_KEY",
+  );
   process.exit(2);
 }
-const sb = createClient<Database>(url, key, { auth: { persistSession: false } });
+const sb = createClient<Database>(url, serviceKey ?? publicKey!, {
+  auth: { persistSession: false, autoRefreshToken: true },
+});
 
 async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<unknown> {
   for (let attempt = 1; ; attempt++) {
@@ -277,6 +304,13 @@ async function loadCounty(county: string) {
 }
 
 async function main() {
+  if (!serviceKey) {
+    const { error } = await sb.auth.signInWithPassword({ email: email!, password: password! });
+    if (error) {
+      console.error(`Could not sign in as ${email}: ${error.message}`);
+      process.exit(2);
+    }
+  }
   let counties = only ? [only] : all ? [...KY_COUNTIES] : [];
   if (shard && !only) counties = counties.filter((_, idx) => idx % shard.n === shard.i);
   if (counties.length === 0) {

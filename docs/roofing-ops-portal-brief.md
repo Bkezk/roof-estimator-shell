@@ -282,9 +282,10 @@ The database is the source; the Buildings page never queries the state server. T
 - **A county from the browser:** Buildings → Load county data → Load. Same steps as below.
 - **All 120 counties, and the monthly refresh:** `scripts/load-kentucky.ts`, run by the
   GitHub workflow `Refresh Kentucky data` (07:00 UTC on the 1st; also by hand from the Actions
-  tab with an optional county and "Load footprints too"). It needs two repository secrets,
-  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Lovable Cloud → project settings; never in
-  the repo). Locally: `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… npx vite-node
+  tab with an optional county and "Load footprints too"). It signs in as a Bid-O-Matic user:
+  make a login in Users & access with Prospecting access and store its email and password as
+  the repository secrets `LOADER_EMAIL` and `LOADER_PASSWORD`. The project URL and public key
+  are read from the committed `.env`. Locally: `LOADER_EMAIL=… LOADER_PASSWORD=… npx vite-node
 scripts/load-kentucky.ts --all`.
 
 Per county, in order: footprints of the size floor (5,000 sq ft; `--min-sqft`) → every 911
