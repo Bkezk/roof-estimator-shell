@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { readBaxXml } from "./zip";
+import { listZipEntries, readBaxXml } from "./zip";
 import {
   applyLegacyPricing,
   applyLegacyWarranty,
@@ -41,6 +41,20 @@ const BOARDS = [
   '3" ISO',
   '5/8" DensDeck Prime',
 ];
+
+describe("zip reader", () => {
+  it("reads the real entry sizes from the zip64 extra field (Chrome rejects trailing junk)", () => {
+    // Bid-Advantage writes 0xFFFFFFFF in the 32-bit size fields; the sizes live in a zip64
+    // extra field. Node's inflate ignores bytes after the deflate stream, so only this
+    // assertion (not the parse below) proves the browser path gets an exact slice.
+    const bytes = fixture("summit-project.bax");
+    const [entry] = listZipEntries(bytes);
+    expect(entry?.name).toBe("EstimateData");
+    expect(entry?.compressedSize).toBe(25638);
+    expect(entry?.uncompressedSize).toBe(256616);
+    expect(entry!.compressedSize).toBeLessThan(bytes.length);
+  });
+});
 
 describe("xml", () => {
   it("parses elements, attributes, text and entities", () => {

@@ -2,8 +2,12 @@
  * Minimal ZIP reader for legacy Bid-Advantage `.bax` files (a zip holding one `EstimateData`
  * entry, stored or plain-deflate). No dependency: the central directory is walked by hand and
  * deflate goes through the platform's `DecompressionStream("deflate-raw")`, which every current
- * browser and Node 18+ provide. Only what a .bax needs is supported (no encryption, no zip64,
- * no data descriptors beyond what the central directory already states).
+ * browser and Node 18+ provide. Only what a .bax needs is supported (no encryption, no data
+ * descriptors beyond what the central directory already states). Bid-Advantage writes the
+ * entry through .NET's packaging layer, which puts 0xFFFFFFFF in the 32-bit size fields and the
+ * real sizes in a zip64 extra field — those are read, because handing the decompressor the
+ * rest of the file (deflate data + central directory) is "Failed to fetch" in Chrome, which
+ * refuses trailing junk, while Node's inflate quietly ignores it.
  */
 
 export interface ZipEntry {
@@ -49,10 +53,50 @@ export function listZipEntries(bytes: Uint8Array): ZipEntry[] {
     const commentLen = dv.getUint16(p + 32, true);
     const localHeaderOffset = dv.getUint32(p + 42, true);
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen));
-    entries.push({ name, method, compressedSize, uncompressedSize, localHeaderOffset });
+    const entry: ZipEntry = { name, method, compressedSize, uncompressedSize, localHeaderOffset };
+    applyZip64(dv, p + 46 + nameLen, extraLen, entry);
+    entries.push(entry);
     p += 46 + nameLen + extraLen + commentLen;
   }
   return entries;
+}
+
+const ZIP64_MARK = 0xffffffff;
+const EXTRA_ZIP64 = 0x0001;
+
+/**
+ * Replace 0xFFFFFFFF size / offset fields with the 64-bit values from the zip64 extended
+ * information extra field (APPNOTE 4.5.3). Only the fields marked 0xFFFFFFFF are present, in
+ * this order: uncompressed size, compressed size, local header offset.
+ */
+function applyZip64(dv: DataView, extraStart: number, extraLen: number, e: ZipEntry): void {
+  if (
+    e.compressedSize !== ZIP64_MARK &&
+    e.uncompressedSize !== ZIP64_MARK &&
+    e.localHeaderOffset !== ZIP64_MARK
+  )
+    return;
+  let q = extraStart;
+  const end = extraStart + extraLen;
+  while (q + 4 <= end) {
+    const id = dv.getUint16(q, true);
+    const len = dv.getUint16(q + 2, true);
+    if (id === EXTRA_ZIP64) {
+      let f = q + 4;
+      const fieldEnd = Math.min(end, q + 4 + len);
+      const take = (): number | null => {
+        if (f + 8 > fieldEnd) return null;
+        const v = Number(dv.getBigUint64(f, true));
+        f += 8;
+        return v;
+      };
+      if (e.uncompressedSize === ZIP64_MARK) e.uncompressedSize = take() ?? e.uncompressedSize;
+      if (e.compressedSize === ZIP64_MARK) e.compressedSize = take() ?? e.compressedSize;
+      if (e.localHeaderOffset === ZIP64_MARK) e.localHeaderOffset = take() ?? e.localHeaderOffset;
+      return;
+    }
+    q += 4 + len;
+  }
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
@@ -73,6 +117,8 @@ export async function readZipEntry(bytes: Uint8Array, entry: ZipEntry): Promise<
   const nameLen = dv.getUint16(p + 26, true);
   const extraLen = dv.getUint16(p + 28, true);
   const start = p + 30 + nameLen + extraLen;
+  if (entry.compressedSize === ZIP64_MARK || start + entry.compressedSize > bytes.length)
+    throw new Error(`Corrupt zip entry "${entry.name}" (size unknown).`);
   const data = bytes.subarray(start, start + entry.compressedSize);
   if (entry.method === 0) return data;
   if (entry.method === 8) return inflateRaw(data);
