@@ -1,4 +1,4 @@
-# PlanSwift research and the Takeoff module proposal
+# PlanSwift research and the Takeoff proposal (the module is called "Takeoff")
 
 Written Sep 24, 2026 for the owner's question: "do some research on PlanSwift's capabilities and
 menus instead of just going off our prompt." Everything under **Verified** was read from
@@ -172,10 +172,19 @@ the existing per-edge attributes), and the count of marked outside corners. The 
 before any takeoff UI: a rectangle drawn as a four-point polygon must produce the same money as
 the same rectangle typed on the Sections screen, on the existing fixture bids.
 
-### 4.6 Create bid from takeoff
+### 4.6 Materials first, then draw, then Create bid (owner, Sep 24)
 
-One button. It creates a new estimate with sections, edges, parapets, curbs, drains and pipe
-stacks filled from the drawing and everything else from bid defaults, then opens it. The
+Where Takeoff differs from PlanSwift: it asks the material questions **up front**, before any
+drawing, then prefills as much of the new bid as it can when the drawing is finished. The
+setup step is the estimator's own Setup/Defaults panel in short form: roofing system, membrane
+mil and colour, attachment and adhesive, underlayment layers, deck type, edge termination and
+wood blocking defaults, parapet system, fastening (pull test or on-centre). Every object drawn
+afterwards already knows what it becomes in the bid, so the quantities panel can show the bid's
+own names (sections, edges, parapets, curbs) rather than generic areas and lines.
+
+**Create bid** is one button. It creates a new estimate with those setup answers as the bid's
+defaults and with sections, edges, parapets, curbs, drains and pipe stacks filled from the
+drawing, then opens it. The
 takeoff row stores the bid id; the estimate stores `takeoff_id`. Re-running after the drawing
 changes shows "quantities updated" on the estimate rather than overwriting silently, as the
 brief already states.
