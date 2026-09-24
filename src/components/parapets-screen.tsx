@@ -993,7 +993,8 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
           <DialogHeader>
             <DialogTitle>Labor Adjustment — {w.name}</DialogTitle>
             <DialogDescription>
-              Calculated Man Hours: {n2(baseHours)}. Man Hours = base × (1 + Adjust Labor / 100).
+              Calculated Man Hours: {n2(baseHours)}. Change Hours is the new total; Adjust Labor is
+              the percent of the calculated hours (100 = as calculated, legacy).
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-wrap items-end gap-3 text-xs">
@@ -1001,16 +1002,16 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
               <Input
                 type="number"
                 className="h-8 w-[110px]"
-                min={-100}
+                min={0}
                 step="1"
-                value={laborPct}
+                value={100 + laborPct}
                 onChange={(e) => {
                   const v = Number(e.target.value);
-                  setLaborPct(Number.isFinite(v) ? Math.max(-100, v) : 0);
+                  setLaborPct(Number.isFinite(v) ? Math.max(-100, Math.round(v) - 100) : 0);
                 }}
               />
             </Field>
-            <Field label="Change Hours">
+            <Field label="Change Hours (new total)">
               <Input
                 type="number"
                 className="h-8 w-[110px]"
