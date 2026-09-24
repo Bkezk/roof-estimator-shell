@@ -201,7 +201,15 @@ brief already states.
   brief's suggestion; a small hand-rolled overlay is enough for three tools); MapLibre is
   already present for the aerial mode.
 
-### 4.8 Phases
+### 4.8 Phases (status Sep 24 evening)
+
+Built so far: phase 0 (engine measured sections + parity test, `src/lib/engine/edges.ts`,
+`src/lib/takeoff/geometry.ts`); the `takeoffs` table, private `takeoffs` bucket and `takeoff`
+access page; the data model and quantities (`src/lib/takeoff/model.ts`); server functions
+(`src/lib/takeoff.functions.ts`); the bid seed (`src/lib/takeoff/create-bid.ts`); the
+estimator side of Create bid (`/estimate?takeoff=<id>`, the "From Takeoff" notice, measured
+sections read-only on the Sections screen). In progress: the Takeoff page itself
+(`src/routes/takeoff.tsx`, `src/components/takeoff-page.tsx`, `src/components/takeoff/`).
 
 | Phase | Scope                                                                                                                                                                 | Done when                                                          |
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
