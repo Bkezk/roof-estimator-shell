@@ -27,8 +27,11 @@ import {
   detectLayerKind,
   facilityFromFeature,
   footprintFromFeature,
+  footprintsAtPointsRequest,
   guessFacilityFieldMap,
   layerShortName,
+  pointInFootprint,
+  KY_FOOTPRINTS_LAYER,
   type LayerKind,
 } from "@/lib/gis/ky-layers";
 import {
@@ -418,11 +421,16 @@ const layerUrlSchema = z
     message: "Give the LAYER url — it ends in /MapServer/<n> (or /FeatureServer/<n>)",
   });
 
-const fetchJson = async (url: string): Promise<unknown> => {
+const fetchJson = async (url: string, body?: URLSearchParams): Promise<unknown> => {
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { accept: "application/json" },
+      method: body ? "POST" : "GET",
+      headers: {
+        accept: "application/json",
+        ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
+      },
+      ...(body ? { body: body.toString() } : {}),
       signal: AbortSignal.timeout(40_000),
     });
   } catch (e) {
@@ -434,11 +442,11 @@ const fetchJson = async (url: string): Promise<unknown> => {
     );
   }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${new URL(url).host}`);
-  const body = (await res.json()) as { error?: { message?: string } };
-  if (body && typeof body === "object" && body.error) {
-    throw new Error(body.error.message ?? "ArcGIS error");
+  const json = (await res.json()) as { error?: { message?: string } };
+  if (json && typeof json === "object" && json.error) {
+    throw new Error(json.error.message ?? "ArcGIS error");
   }
-  return body;
+  return json;
 };
 
 /** One preview line, whatever the layer kind. */
@@ -704,32 +712,34 @@ export const importLayer = createServerFn({ method: "POST" })
             upserted += count ?? rows.length;
           }
         } else if (kind === "footprint") {
+          // upsert_buildings keeps what a person typed or a match filled (name, address, city,
+          // zip, land use); size, outline and county refresh.
           const rows = parsed.footprints.map((c) => ({
             source_key: `ornl:${c.buildId}`,
+            source: "ornl",
             county: c.county ?? (data.county || null),
             name: c.primaryOccupancy ?? "",
             address1: c.address ?? "",
             city: c.city,
             zip: c.zip,
+            land_use: c.occupancyClass,
             roof_sqft: c.roofSqFt,
             perimeter_ft: c.geometry?.computedPerimeterFt ?? null,
             height_ft: c.heightFt,
-            land_use: c.occupancyClass,
             footprint: (c.geometry?.footprint ?? null) as Json | null,
             centroid_lat: c.lat,
             centroid_lng: c.lng,
-            source: "ornl",
-            ...stamp,
+            source_layer: data.layerUrl,
+            created_by: context.userId,
+            created_by_name: who,
           }));
           written = rows.length;
           if (rows.length > 0) {
-            const { error, count } = await context.supabase.from("buildings").upsert(rows, {
-              onConflict: "source_key",
-              ignoreDuplicates: false,
-              count: "exact",
+            const { data: n, error } = await context.supabase.rpc("upsert_buildings", {
+              rows: rows as unknown as Json,
             });
             if (error) throw new Error(error.message);
-            upserted += count ?? rows.length;
+            upserted += n ?? rows.length;
           }
         } else if (kind === "address") {
           const rows = parsed.points.map((c) => ({
@@ -758,26 +768,30 @@ export const importLayer = createServerFn({ method: "POST" })
         } else {
           const rows = parsed.facilities.map((c) => ({
             source_key: `${layerName}:${c.key}`,
+            source: "facility",
             county: c.county ?? (data.county || null),
             name: c.name,
             address1: c.address ?? "",
             city: c.city,
             zip: c.zip,
             land_use: c.kind,
+            roof_sqft: null,
+            perimeter_ft: null,
+            height_ft: null,
+            footprint: null,
             centroid_lat: c.lat,
             centroid_lng: c.lng,
-            source: "facility",
-            ...stamp,
+            source_layer: data.layerUrl,
+            created_by: context.userId,
+            created_by_name: who,
           }));
           written = rows.length;
           if (rows.length > 0) {
-            const { error, count } = await context.supabase.from("buildings").upsert(rows, {
-              onConflict: "source_key",
-              ignoreDuplicates: false,
-              count: "exact",
+            const { data: n, error } = await context.supabase.rpc("upsert_buildings", {
+              rows: rows as unknown as Json,
             });
             if (error) throw new Error(error.message);
-            upserted += count ?? rows.length;
+            upserted += n ?? rows.length;
           }
         }
         skipped += feats.length - written;
@@ -827,4 +841,170 @@ export const countAddressPoints = createServerFn({ method: "GET" })
     return [...m.entries()]
       .map(([county, count]) => ({ county, count }))
       .sort((a, b) => a.county.localeCompare(b.county));
+  });
+
+/**
+ * Named / commercially typed 911 points that no stored building claimed become buildings
+ * (source ky911). Returns how many.
+ */
+export const promoteCommercialPoints = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ county: z.string().trim().min(1).max(100) }).parse(d))
+  .handler(async ({ data, context }): Promise<{ promoted: number }> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const { data: n, error } = await context.supabase.rpc("promote_commercial_points", {
+      p_county: data.county,
+    });
+    if (error) throw new Error(error.message);
+    return { promoted: n ?? 0 };
+  });
+
+/**
+ * Give promoted buildings (a named business with no outline yet) their footprint: one spatial
+ * request per batch of points asks the ORNL layer for the polygons that contain them, and each
+ * point takes the polygon it falls in. Loops from the client until `done`.
+ */
+export const attachFootprints = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        county: z.string().trim().min(1).max(100),
+        batch: z.number().int().min(10).max(500).default(150),
+      })
+      .parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ checked: number; attached: number; remaining: number; done: boolean }> => {
+      await assertPageAccess(context.supabase, context.userId, "prospect");
+      const sb = context.supabase;
+      const { data: pending, error } = await sb
+        .from("buildings")
+        .select("id, centroid_lat, centroid_lng")
+        .eq("county", data.county)
+        .eq("source", "ky911")
+        .is("deleted_at", null)
+        .is("roof_sqft", null)
+        .not("centroid_lat", "is", null)
+        .order("id")
+        .limit(data.batch + 1);
+      if (error) throw new Error(error.message);
+      const rows = (pending ?? []).slice(0, data.batch);
+      if (rows.length === 0) return { checked: 0, attached: 0, remaining: 0, done: true };
+      const req = footprintsAtPointsRequest(
+        KY_FOOTPRINTS_LAYER,
+        rows.map((r) => [r.centroid_lng!, r.centroid_lat!] as [number, number]),
+      );
+      const page = (await fetchJson(req.url, req.body)) as ArcGisFeatureSet;
+      const polys = (page.features ?? [])
+        .map(footprintFromFeature)
+        .filter((c): c is NonNullable<typeof c> => c !== null && c.geometry !== null);
+      let attached = 0;
+      const unmatched: string[] = [];
+      for (const r of rows) {
+        const hit = polys.find((c) =>
+          pointInFootprint(r.centroid_lng!, r.centroid_lat!, c.geometry!.footprint),
+        );
+        if (!hit) {
+          unmatched.push(r.id);
+          continue;
+        }
+        const { error: uErr } = await sb
+          .from("buildings")
+          .update({
+            roof_sqft: hit.roofSqFt,
+            perimeter_ft: hit.geometry!.computedPerimeterFt,
+            height_ft: hit.heightFt,
+            footprint: hit.geometry!.footprint as unknown as Json,
+            notes: null,
+          })
+          .eq("id", r.id);
+        if (uErr) throw new Error(uErr.message);
+        attached++;
+      }
+      // A point with no outline under it (a lot, a sign, a kiosk) gets 0 so it is not asked again;
+      // the salesperson can still type a size.
+      if (unmatched.length > 0) {
+        const { error: zErr } = await sb
+          .from("buildings")
+          .update({ roof_sqft: 0 })
+          .in("id", unmatched);
+        if (zErr) throw new Error(zErr.message);
+      }
+      const done = (pending ?? []).length <= data.batch;
+      return {
+        checked: rows.length,
+        attached,
+        remaining: done ? 0 : (pending ?? []).length - data.batch,
+        done,
+      };
+    },
+  );
+
+/** Drop a county's address points that neither read commercial nor named a building. */
+export const trimAddressPoints = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ county: z.string().trim().min(1).max(100) }).parse(d))
+  .handler(async ({ data, context }): Promise<{ trimmed: number }> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const { data: n, error } = await context.supabase.rpc("trim_address_points", {
+      p_county: data.county,
+    });
+    if (error) throw new Error(error.message);
+    return { trimmed: n ?? 0 };
+  });
+
+const refreshSchema = z.object({
+  county: z.string().trim().min(1).max(100),
+  ranBy: z.string().max(60).default("browser"),
+  buildings: z.number().int().nullable().default(null),
+  addressed: z.number().int().nullable().default(null),
+  promoted: z.number().int().nullable().default(null),
+  pointsKept: z.number().int().nullable().default(null),
+  facilities: z.number().int().nullable().default(null),
+  notes: z.string().max(500).nullable().default(null),
+});
+
+/** Log a county refresh (the Buildings page shows "Data refreshed …"). */
+export const recordRefresh = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => refreshSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const { error } = await context.supabase.from("data_refreshes").insert({
+      county: data.county,
+      ran_by: data.ranBy,
+      buildings: data.buildings,
+      addressed: data.addressed,
+      promoted: data.promoted,
+      points_kept: data.pointsKept,
+      facilities: data.facilities,
+      notes: data.notes,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+export type RefreshRow = Database["public"]["Tables"]["data_refreshes"]["Row"];
+
+/** The latest refresh per county. */
+export const listRefreshes = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<RefreshRow[]> => {
+    await readAccess(context);
+    const { data, error } = await context.supabase
+      .from("data_refreshes")
+      .select("*")
+      .order("ran_at", { ascending: false })
+      .limit(400);
+    if (error) throw new Error(error.message);
+    const seen = new Set<string>();
+    return (data ?? []).filter((r) => {
+      if (seen.has(r.county)) return false;
+      seen.add(r.county);
+      return true;
+    });
   });

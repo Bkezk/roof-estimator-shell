@@ -33,8 +33,13 @@ import {
   listBuildings,
   listCounties,
   listOpenTasks,
+  listRefreshes,
   listWarrantyLeads,
   previewLayer,
+  promoteCommercialPoints,
+  attachFootprints,
+  trimAddressPoints,
+  recordRefresh,
   saveBuilding,
   saveRoof,
   saveTask,
@@ -285,6 +290,12 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const doneFn = useServerFn(setTaskDone);
   const openTasksFn = useServerFn(listOpenTasks);
   const leadsFn = useServerFn(listWarrantyLeads);
+  const promoteFn = useServerFn(promoteCommercialPoints);
+  const attachFn = useServerFn(attachFootprints);
+  const trimFn = useServerFn(trimAddressPoints);
+  const recordRefreshFn = useServerFn(recordRefresh);
+  const refreshesFn = useServerFn(listRefreshes);
+  const refreshes = useQuery({ queryKey: ["data-refreshes"], queryFn: () => refreshesFn() });
   const previewFn = useServerFn(previewLayer);
   const importFn = useServerFn(importLayer);
   const fillFn = useServerFn(fillFootprintAddresses);
@@ -520,6 +531,11 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     },
   });
   // The whole county in one click: buildings of the chosen size, their addresses, the schools.
+  // The whole county in one click (the same steps the monthly loader runs):
+  //   1 footprints of the chosen size  2 every 911 address point  3 match addresses to
+  //   footprints  4 named / commercially typed points become buildings of their own
+  //   5 those get their outline from the footprint layer  6 schools  7 drop the house points
+  //   8 log the refresh. Nothing a person typed is overwritten (upsert_buildings).
   const loadCountyM = useMutation({
     mutationFn: async () => {
       const county = importCounty;
@@ -537,23 +553,48 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       );
       setProgress("Matching buildings to the nearest address…");
       const fill = await fillFn({ data: { county } });
+      setProgress("Adding named businesses…");
+      const promoted = await promoteFn({ data: { county } });
+      let attached = 0;
+      for (;;) {
+        setProgress(`Finding outlines for named businesses… ${attached.toLocaleString()} done`);
+        const r = await attachFn({ data: { county } });
+        attached += r.attached;
+        if (r.done) break;
+      }
       const sch = await runImport(
         KY_SCHOOLS_LAYER,
         countyWhere("facility", county),
         county,
         `${county} schools`,
       );
+      setProgress("Tidying up…");
+      const trimmed = await trimFn({ data: { county } });
+      await recordRefreshFn({
+        data: {
+          county,
+          ranBy: "browser",
+          buildings: fp.upserted,
+          addressed: fill.updated,
+          promoted: promoted.promoted,
+          pointsKept: pts.upserted - trimmed.trimmed,
+          facilities: sch.upserted,
+          notes: `${attached} named businesses given an outline`,
+        },
+      });
       setProgress(null);
-      return { county, fp, pts, fill, sch };
+      return { county, fp, pts, fill, promoted, attached, sch };
     },
     onSuccess: (r) => {
       toast.success(
-        `${r.county}: ${r.fp.upserted.toLocaleString()} buildings, ${r.fill.updated.toLocaleString()} given an address (${r.pts.upserted.toLocaleString()} address points), ${r.sch.upserted.toLocaleString()} schools`,
-        { duration: 10000 },
+        `${r.county}: ${r.fp.upserted.toLocaleString()} buildings by size, ${r.promoted.promoted.toLocaleString()} named businesses added (${r.attached.toLocaleString()} with outlines), ${r.fill.updated.toLocaleString()} addresses matched, ${r.sch.upserted.toLocaleString()} schools`,
+        { duration: 12000 },
       );
       setCounty(r.county);
+      setSort("biggest");
       invalidate();
       void qc.invalidateQueries({ queryKey: ["address-point-counts"] });
+      void qc.invalidateQueries({ queryKey: ["data-refreshes"] });
     },
     onError: (e) => {
       setProgress(null);
@@ -600,6 +641,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
           <h1 className="text-2xl font-semibold">Buildings</h1>
           <p className="text-sm text-muted-foreground">
             Prospects: the roofs we want to win, who owns them, and what to do next.
+            {(refreshes.data?.length ?? 0) > 0 && (
+              <span className="ml-1 text-xs">
+                Data refreshed:{" "}
+                {(refreshes.data ?? [])
+                  .slice(0, 6)
+                  .map((r) => `${r.county} ${new Date(r.ran_at).toLocaleDateString()}`)
+                  .join(", ")}
+                {(refreshes.data?.length ?? 0) > 6 ? ", …" : ""}
+              </span>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">

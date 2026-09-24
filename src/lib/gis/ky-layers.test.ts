@@ -14,9 +14,11 @@ import {
   facilityFromFeature,
   fipsForCounty,
   footprintFromFeature,
+  footprintsAtPointsRequest,
   guessFacilityFieldMap,
   layerShortName,
   parseCountyRanking,
+  pointInFootprint,
   tileScheme,
   tileUrlTemplate,
   type TileServiceInfo,
@@ -195,5 +197,54 @@ describe("Phase 3 3-inch imagery service (owner sample, 2026-09-24)", () => {
     expect(
       tileScheme({ ...imagery, tileInfo: { ...imagery.tileInfo, origin: { x: 0, y: 0 } } }),
     ).toBeNull();
+  });
+});
+
+describe("point in footprint", () => {
+  const square = {
+    type: "Polygon",
+    coordinates: [
+      [
+        [-85.5, 37.5],
+        [-85.4, 37.5],
+        [-85.4, 37.6],
+        [-85.5, 37.6],
+        [-85.5, 37.5],
+      ],
+    ],
+  };
+  it("finds points inside, outside and in holes", () => {
+    expect(pointInFootprint(-85.45, 37.55, square)).toBe(true);
+    expect(pointInFootprint(-85.3, 37.55, square)).toBe(false);
+    const holed = {
+      type: "Polygon",
+      coordinates: [
+        square.coordinates[0]!,
+        [
+          [-85.47, 37.53],
+          [-85.43, 37.53],
+          [-85.43, 37.57],
+          [-85.47, 37.57],
+          [-85.47, 37.53],
+        ],
+      ],
+    };
+    expect(pointInFootprint(-85.45, 37.55, holed)).toBe(false);
+    expect(pointInFootprint(-85.41, 37.51, holed)).toBe(true);
+    expect(
+      pointInFootprint(-85.45, 37.55, { type: "MultiPolygon", coordinates: [square.coordinates] }),
+    ).toBe(true);
+    expect(pointInFootprint(-85.45, 37.55, null)).toBe(false);
+  });
+  it("works on the real ORNL sample (its own centre is inside its outline)", () => {
+    const c = footprintFromFeature(footprints.features![0]!)!;
+    expect(pointInFootprint(c.lng!, c.lat!, c.geometry!.footprint)).toBe(true);
+    expect(pointInFootprint(c.lng! + 0.01, c.lat!, c.geometry!.footprint)).toBe(false);
+  });
+  it("builds the multipoint request", () => {
+    const r = footprintsAtPointsRequest("https://x/MapServer/0/", [[-85.45, 37.55]]);
+    expect(r.url).toBe("https://x/MapServer/0/query");
+    expect(r.body.get("geometryType")).toBe("esriGeometryMultipoint");
+    expect(JSON.parse(r.body.get("geometry")!).points).toEqual([[-85.45, 37.55]]);
   });
 });

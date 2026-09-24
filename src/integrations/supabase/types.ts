@@ -32,10 +32,12 @@ export type Database = {
       address_points: {
         Row: {
           address: string;
+          building_id: string | null;
           city: string | null;
           county: string | null;
           id: string;
           imported_at: string;
+          kind: string | null;
           landmark: string | null;
           lat: number;
           lng: number;
@@ -46,10 +48,12 @@ export type Database = {
         };
         Insert: {
           address: string;
+          building_id?: string | null;
           city?: string | null;
           county?: string | null;
           id?: string;
           imported_at?: string;
+          kind?: string | null;
           landmark?: string | null;
           lat: number;
           lng: number;
@@ -60,10 +64,12 @@ export type Database = {
         };
         Update: {
           address?: string;
+          building_id?: string | null;
           city?: string | null;
           county?: string | null;
           id?: string;
           imported_at?: string;
+          kind?: string | null;
           landmark?: string | null;
           lat?: number;
           lng?: number;
@@ -303,6 +309,45 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      data_refreshes: {
+        Row: {
+          addressed: number | null;
+          buildings: number | null;
+          county: string;
+          facilities: number | null;
+          id: number;
+          notes: string | null;
+          points_kept: number | null;
+          promoted: number | null;
+          ran_at: string;
+          ran_by: string | null;
+        };
+        Insert: {
+          addressed?: number | null;
+          buildings?: number | null;
+          county: string;
+          facilities?: number | null;
+          id?: number;
+          notes?: string | null;
+          points_kept?: number | null;
+          promoted?: number | null;
+          ran_at?: string;
+          ran_by?: string | null;
+        };
+        Update: {
+          addressed?: number | null;
+          buildings?: number | null;
+          county?: string;
+          facilities?: number | null;
+          id?: number;
+          notes?: string | null;
+          points_kept?: number | null;
+          promoted?: number | null;
+          ran_at?: string;
+          ran_by?: string | null;
+        };
+        Relationships: [];
       };
       buildings: {
         Row: {
@@ -1508,6 +1553,22 @@ export type Database = {
       };
       current_user_role: { Args: never; Returns: string };
       estimator_names: { Args: never; Returns: string[] };
+      classify_place: {
+        Args: { place_type: string; landmark: string };
+        Returns: string;
+      };
+      promote_commercial_points: {
+        Args: { p_county: string; p_max_m?: number };
+        Returns: number;
+      };
+      trim_address_points: {
+        Args: { p_county: string; p_keep_m?: number };
+        Returns: number;
+      };
+      upsert_buildings: {
+        Args: { rows: Json };
+        Returns: number;
+      };
       fill_footprint_addresses: {
         Args: { p_county: string; p_max_m?: number };
         Returns: number;

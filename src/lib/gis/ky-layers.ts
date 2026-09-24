@@ -541,3 +541,58 @@ export function tileScheme(
 /** The XYZ tile template for an ArcGIS tile cache (ArcGIS orders the path z/y/x). */
 export const tileUrlTemplate = (serviceUrl: string): string =>
   `${serviceUrl.replace(/\/+$/, "")}/tile/{z}/{y}/{x}`;
+
+// ── Point-in-polygon (attaching a footprint to a promoted address point) ──────────────────
+
+/** Ray-cast test of [lng, lat] against a GeoJSON Polygon / MultiPolygon (holes respected). */
+export function pointInFootprint(
+  lng: number,
+  lat: number,
+  footprint: { type: string; coordinates: unknown } | null | undefined,
+): boolean {
+  if (!footprint) return false;
+  const inRing = (ring: number[][]) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i]![0]!;
+      const yi = ring[i]![1]!;
+      const xj = ring[j]![0]!;
+      const yj = ring[j]![1]!;
+      const crosses = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+      if (crosses) inside = !inside;
+    }
+    return inside;
+  };
+  const inPolygon = (rings: number[][][]) =>
+    rings.length > 0 && inRing(rings[0]!) && !rings.slice(1).some((h) => inRing(h));
+  if (footprint.type === "Polygon") return inPolygon(footprint.coordinates as number[][][]);
+  if (footprint.type === "MultiPolygon") {
+    return (footprint.coordinates as number[][][][]).some((poly) => inPolygon(poly));
+  }
+  return false;
+}
+
+/**
+ * A spatial query: the footprints that contain any of `points` (WGS84 [lng, lat]), sent as an
+ * ArcGIS multipoint so one request covers a whole batch of promoted buildings. POST body, since
+ * a few hundred points overflow a URL.
+ */
+export function footprintsAtPointsRequest(
+  layerUrl: string,
+  points: [number, number][],
+): { url: string; body: URLSearchParams } {
+  const body = new URLSearchParams();
+  body.set("f", "pjson");
+  body.set("where", "1=1");
+  body.set("geometry", JSON.stringify({ points, spatialReference: { wkid: 4326 } }));
+  body.set("geometryType", "esriGeometryMultipoint");
+  body.set("inSR", "4326");
+  body.set("spatialRel", "esriSpatialRelIntersects");
+  body.set(
+    "outFields",
+    "BUILD_ID,SQFEET,HEIGHT,FIPS,PROP_ADDR,PROP_CITY,PROP_ZIP,OCC_CLS,PRIM_OCC,LATITUDE,LONGITUDE,UUID",
+  );
+  body.set("returnGeometry", "true");
+  body.set("outSR", "102100");
+  return { url: `${layerUrl.replace(/\/+$/, "")}/query`, body };
+}
