@@ -3,14 +3,16 @@
  * from a machine that can reach the state server (GitHub Actions monthly, or a laptop):
  *
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
- *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/2]
+ *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--trim] [--shard 1/2]
  *
  * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
- * secrets; never in the repo). The project URL and public key are read from the committed .env. Per county: footprints of the size floor → every 911 address point → match
- * addresses → promote named / commercially typed points → attach their outlines → schools →
- * trim the house points → log the refresh. Nothing a person typed is overwritten
- * (upsert_buildings). Footprints are a one-time survey, so --skip-footprints makes the monthly
- * run refresh addresses and facilities only.
+ * secrets; never in the repo). The project URL and public key are read from the committed .env.
+ * Per county: footprints of the size floor → every 911 address point, matched to the buildings
+ * IN MEMORY (only linked and business points reach the database) → promote business points
+ * with no building → attach their outlines → schools → log the refresh. Nothing a person typed
+ * is overwritten (upsert_buildings). Footprints are a one-time survey, so --skip-footprints
+ * makes the monthly run refresh addresses and facilities only; --trim deletes a county's
+ * leftover house points (cleanup after the first statewide runs).
  */
 import { createClient } from "@supabase/supabase-js";
 
@@ -41,6 +43,7 @@ const all = args.includes("--all");
 const only = flag("--county");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
+const trim = args.includes("--trim");
 // --shard 2/2: this run takes every other county starting at the 2nd (GitHub runs shards in
 // parallel so the whole state fits inside one job's time limit).
 const shard = (() => {
@@ -166,36 +169,88 @@ const rpc = async <T>(name: string, params: Record<string, unknown>): Promise<T>
 };
 
 /**
- * A cheap "is there a stored building within ~150 m" test for one county. Grid cells of 0.0015°
- * (≈ 165 m north–south, ≈ 130 m east–west in Kentucky); a point counts as near when its cell or
- * one of the eight neighbours holds a building centroid, so nothing inside the matcher's radius
- * (100 m, or the building's own size, up to ~300 m for the biggest roofs) is dropped. The first
- * statewide run used 0.003° cells and kept 85 % of the state's 2.5 million points (2.1 million
- * rows, 1.25 GB), which is what made the address matcher time out.
+ * Grid cells of 0.0015° (≈ 165 m north–south, ≈ 130 m east–west in Kentucky). `around` returns
+ * what sits in the cell and its eight neighbours, so every match radius the pipeline uses
+ * (100 m, or the building's own size — ~300 m for the biggest roofs) is covered.
  */
 const GRID = 0.0015;
-async function centroidGrid(county: string): Promise<(lat: number, lng: number) => boolean> {
-  const cells = new Set<string>();
-  const key = (lat: number, lng: number) => `${Math.floor(lat / GRID)}|${Math.floor(lng / GRID)}`;
+class Grid {
+  private cells = new Map<string, number[]>();
+  private key(lat: number, lng: number) {
+    return `${Math.floor(lat / GRID)}|${Math.floor(lng / GRID)}`;
+  }
+  add(lat: number, lng: number, idx: number) {
+    const k = this.key(lat, lng);
+    const list = this.cells.get(k);
+    if (list) list.push(idx);
+    else this.cells.set(k, [idx]);
+  }
+  around(lat: number, lng: number): number[] {
+    const out: number[] = [];
+    for (let a = -1; a <= 1; a++)
+      for (let b = -1; b <= 1; b++) {
+        const list = this.cells.get(this.key(lat + a * GRID, lng + b * GRID));
+        if (list) out.push(...list);
+      }
+    return out;
+  }
+}
+
+/** Equirectangular distance in metres (the same arithmetic as the SQL matcher). */
+const metres = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+  const dy = (lat2 - lat1) * 111320;
+  const dx = (lng2 - lng1) * 111320 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+interface CountyBuilding {
+  id: string;
+  lat: number;
+  lng: number;
+  roofSqFt: number | null;
+  /** A footprint or promoted point with no address yet: the matcher's target. */
+  needsAddress: boolean;
+}
+
+interface KeptPoint {
+  key: string;
+  address: string;
+  city: string | null;
+  zip: string | null;
+  county: string | null;
+  landmark: string | null;
+  placeType: string | null;
+  lat: number;
+  lng: number;
+  kind: ReturnType<typeof classifyPlace>;
+  buildingId: string | null;
+}
+
+/** The county's stored buildings with a location (one read, paged). */
+async function countyBuildings(county: string): Promise<CountyBuilding[]> {
+  const out: CountyBuilding[] = [];
   for (let from = 0; ; from += 1000) {
     const { data, error } = await sb
       .from("buildings")
-      .select("centroid_lat, centroid_lng")
+      .select("id, centroid_lat, centroid_lng, roof_sqft, address1, source")
       .eq("county", county)
       .is("deleted_at", null)
       .not("centroid_lat", "is", null)
+      .order("id")
       .range(from, from + 999);
     if (error) throw new Error(error.message);
     for (const r of data ?? []) {
-      const la = r.centroid_lat!;
-      const ln = r.centroid_lng!;
-      // Mark the cell and its neighbours so anything within one cell counts as near.
-      for (let a = -1; a <= 1; a++)
-        for (let b = -1; b <= 1; b++) cells.add(key(la + a * GRID, ln + b * GRID));
+      out.push({
+        id: r.id,
+        lat: r.centroid_lat!,
+        lng: r.centroid_lng!,
+        roofSqFt: r.roof_sqft,
+        needsAddress: (r.address1 ?? "") === "" && (r.source === "ornl" || r.source === "ky911"),
+      });
     }
     if (!data || data.length < 1000) break;
   }
-  return (lat, lng) => cells.has(key(lat, lng));
+  return out;
 }
 
 async function loadCounty(county: string) {
@@ -238,67 +293,138 @@ async function loadCounty(county: string) {
     }
     console.log("");
   }
-  // Address points: the state has 2.5 million and 85 % are houses nowhere near a prospect.
-  // Keep, before anything touches the database, only the points near a stored building
-  // (grid lookup against the county's centroids, 250 m — wider than any match radius) or
-  // carrying a landmark / place type (the ones that can become businesses). The trim step
-  // then has little to do and the database stays responsive for the people using it.
-  const near = await centroidGrid(county);
-  let points = 0;
+  // Address points. The state has 2.5 million and 85 % are houses nowhere near a prospect,
+  // so the matching happens HERE, in memory, against the county's buildings, and the database
+  // only ever sees the results: the points that matched a building (linked) or read as a
+  // business, one batched address update, and the promoted businesses. Runs 5–7 did the
+  // matching in the database and starved the small instance (docs/TODO.md item 3).
+  const blds = await countyBuildings(county);
+  const bGrid = new Grid();
+  blds.forEach((b, i) => bGrid.add(b.lat, b.lng, i));
+  const kept: KeptPoint[] = [];
   let seen = 0;
   for await (const feats of pages(KY_ADDRESS_POINTS_LAYER, countyWhere("address", county))) {
     seen += feats.length;
-    const rows = feats
-      .map(addressPointFromFeature)
-      .filter((c): c is NonNullable<typeof c> => c !== null)
+    for (const f of feats) {
+      const c = addressPointFromFeature(f);
+      if (!c) continue;
+      const kind = classifyPlace(c.placeType, c.landmark);
       // Some counties type every point ("RESIDENTIAL" on each house), so the type alone is not
       // a reason to keep it: keep what reads commercial, or sits near a stored building.
-      .filter((c) => classifyPlace(c.placeType, c.landmark) === "commercial" || near(c.lat, c.lng))
-      .map((c) => ({
-        source_key: `ky911:${c.key}`,
-        county: c.county ?? county,
-        address: c.address,
-        city: c.city,
-        zip: c.zip,
-        landmark: c.landmark,
-        place_type: c.placeType,
-        lat: c.lat,
-        lng: c.lng,
-        source_layer: KY_ADDRESS_POINTS_LAYER,
-        imported_at: new Date().toISOString(),
-      }));
-    if (rows.length > 0) {
-      const { error } = await sb
-        .from("address_points")
-        .upsert(rows, { onConflict: "source_key", ignoreDuplicates: false });
-      if (error) throw new Error(error.message);
-      points += rows.length;
+      if (kind === "commercial" || bGrid.around(c.lat, c.lng).length > 0)
+        kept.push({ ...c, kind, buildingId: null });
     }
-    process.stdout.write(`\r[${county}] address points kept ${points} of ${seen}`);
+    process.stdout.write(`\r[${county}] address points kept ${kept.length} of ${seen}`);
   }
   console.log("");
-  // Chunked database steps: each call handles a few hundred rows (well inside the statement
-  // timeout) and the loop runs until a call comes back short.
-  await rpc<number>("reset_address_checks", { p_county: county });
-  const { count: before } = await sb
-    .from("buildings")
-    .select("id", { count: "exact", head: true })
-    .eq("county", county)
-    .is("deleted_at", null)
-    .neq("address1", "");
-  await chunked("fill_footprint_addresses", { p_county: county }, 150, (n) =>
-    process.stdout.write(`\r[${county}] matching addresses… ${n} checked`),
-  );
-  const { count: after } = await sb
-    .from("buildings")
-    .select("id", { count: "exact", head: true })
-    .eq("county", county)
-    .is("deleted_at", null)
-    .neq("address1", "");
-  const addressed = (after ?? 0) - (before ?? 0);
+  // Match: for each building without an address, the nearest point (not "other") inside
+  // max(100 m, √roof area) — the same rule as fill_footprint_addresses.
+  const pGrid = new Grid();
+  kept.forEach((k, i) => {
+    if (k.kind !== "other") pGrid.add(k.lat, k.lng, i);
+  });
+  const updates: Array<Record<string, unknown>> = [];
+  for (const b of blds) {
+    if (!b.needsAddress) continue;
+    const radius = Math.max(100, Math.sqrt((b.roofSqFt ?? 0) * 0.092903));
+    let best: KeptPoint | null = null;
+    let bestD = Infinity;
+    for (const i of pGrid.around(b.lat, b.lng)) {
+      const k = kept[i]!;
+      const d = metres(b.lat, b.lng, k.lat, k.lng);
+      if (d < bestD) {
+        bestD = d;
+        best = k;
+      }
+    }
+    if (!best || bestD > radius) continue;
+    if (!best.buildingId) best.buildingId = b.id;
+    updates.push({
+      id: b.id,
+      address: best.address,
+      city: best.city,
+      zip: best.zip,
+      landmark: best.landmark,
+      kind: best.kind,
+      place_type: best.placeType,
+    });
+  }
+  let addressed = 0;
+  for (let i = 0; i < updates.length; i += 200) {
+    addressed += await rpc<number>("apply_building_addresses", {
+      rows: updates.slice(i, i + 200) as unknown as Json,
+    });
+    process.stdout.write(`\r[${county}] addresses written ${addressed} of ${updates.length}`);
+  }
   console.log("");
   log(`addresses matched: ${addressed}`);
-  const promoted = await chunked("promote_commercial_points", { p_county: county }, 200);
+  // Store only the points that matter: linked to a building, or a business.
+  const toStore = kept.filter((k) => k.buildingId || k.kind === "commercial");
+  let points = 0;
+  for (let i = 0; i < toStore.length; i += 200) {
+    const rows = toStore.slice(i, i + 200).map((c) => ({
+      source_key: `ky911:${c.key}`,
+      county: c.county ?? county,
+      address: c.address,
+      city: c.city,
+      zip: c.zip,
+      landmark: c.landmark,
+      place_type: c.placeType,
+      lat: c.lat,
+      lng: c.lng,
+      building_id: c.buildingId,
+      source_layer: KY_ADDRESS_POINTS_LAYER,
+      imported_at: new Date().toISOString(),
+    }));
+    const { error } = await sb
+      .from("address_points")
+      .upsert(rows, { onConflict: "source_key", ignoreDuplicates: false });
+    if (error) throw new Error(error.message);
+    points += rows.length;
+    process.stdout.write(`\r[${county}] points stored ${points} of ${toStore.length}`);
+  }
+  console.log("");
+  // Promote: a business point with no stored building inside its radius becomes a building
+  // (source ky911, idempotent on source_key — the same rule as promote_commercial_points).
+  const promoteRows: Array<Record<string, unknown>> = [];
+  for (const k of kept) {
+    if (k.kind !== "commercial" || k.buildingId) continue;
+    let covered = false;
+    for (const i of bGrid.around(k.lat, k.lng)) {
+      const b = blds[i]!;
+      const radius = Math.max(100, Math.sqrt((b.roofSqFt ?? 0) * 0.092903));
+      if (metres(k.lat, k.lng, b.lat, b.lng) <= radius) {
+        covered = true;
+        break;
+      }
+    }
+    if (covered) continue;
+    promoteRows.push({
+      source_key: `ky911:${k.key}`,
+      source: "ky911",
+      county: k.county ?? county,
+      name: k.landmark ?? "",
+      address1: k.address,
+      city: k.city,
+      zip: k.zip,
+      land_use: k.placeType,
+      roof_sqft: null,
+      perimeter_ft: null,
+      height_ft: null,
+      footprint: null,
+      centroid_lat: k.lat,
+      centroid_lng: k.lng,
+      source_layer: KY_ADDRESS_POINTS_LAYER,
+      created_by: null,
+      created_by_name: "scheduled load",
+    });
+  }
+  let promoted = 0;
+  for (let i = 0; i < promoteRows.length; i += 200) {
+    promoted += await rpc<number>("upsert_buildings", {
+      rows: promoteRows.slice(i, i + 200) as unknown as Json,
+    });
+  }
   log(`named businesses added: ${promoted}`);
   // Outlines for the promoted buildings: one multipoint request per 150.
   let attached = 0;
@@ -386,23 +512,28 @@ async function loadCounty(county: string) {
     if (rows.length > 0)
       facilities += await rpc<number>("upsert_buildings", { rows: rows as unknown as Json });
   }
-  const trimmed = await chunked("trim_address_points", { p_county: county }, 5000, (n) =>
-    process.stdout.write(`\r[${county}] trimming house points… ${n}`),
-  );
-  console.log("");
+  // Nothing junk is stored any more, so trimming is only for cleaning up after the first
+  // statewide runs (--trim): deletes the county's unlinked house points in chunks.
+  let trimmed = 0;
+  if (trim) {
+    trimmed = await chunked("trim_address_points", { p_county: county }, 5000, (n) =>
+      process.stdout.write(`\r[${county}] trimming house points… ${n}`),
+    );
+    console.log("");
+  }
   const { error: rErr } = await sb.from("data_refreshes").insert({
     county,
     ran_by: "scheduled",
     buildings,
     addressed,
     promoted,
-    points_kept: points - trimmed,
+    points_kept: points,
     facilities,
     notes: `${attached} named businesses given an outline; ${Math.round((Date.now() - t0) / 1000)} s`,
   });
   if (rErr) throw new Error(rErr.message);
   log(
-    `done: ${buildings} buildings by size, ${promoted} named businesses (${attached} with outlines), ${addressed} addresses, ${facilities} schools, ${points - trimmed} points kept, ${Math.round((Date.now() - t0) / 1000)} s`,
+    `done: ${buildings} buildings by size, ${promoted} named businesses (${attached} with outlines), ${addressed} addresses, ${facilities} schools, ${points} points kept${trimmed ? `, ${trimmed} house points trimmed` : ""}, ${Math.round((Date.now() - t0) / 1000)} s`,
   );
 }
 

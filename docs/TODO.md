@@ -25,14 +25,17 @@ the bottom with the commit that closed them.
    salesperson types "Roof installed (year)" on first contact (already on the form; the
    "age unknown" filter shows what is left).
 3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` and the
-   `Refresh Kentucky data` workflow (1st of each month, three shards). Secrets LOADER_EMAIL and
-   LOADER_PASSWORD are set. Run 5 (Sep 24) loaded footprints and address points for all 120
-   counties, then every county failed at the address matcher (30 s statement timeout): the
-   "near a building" filter kept 85 % of the state's 2.5 M points (2.1 M rows, 1.25 GB) and the
-   matcher thrashed under the write load. Fixed: 0.0015° grid (keeps points within ~150 m),
-   chunks that halve on a timeout, three shards. Next run needs only "footprints = false".
-   After it: confirm every county has a `data_refreshes` row, the Buildings page's "Data
-   refreshed" line moves, and the point table is back to a few hundred thousand rows.
+   `Refresh Kentucky data` workflow (1st of each month). Secrets LOADER_EMAIL and
+   LOADER_PASSWORD are set. Runs 5–7 (Sep 24) loaded footprints for all 120 counties, then
+   stalled: the database is a small instance with a burst disk-IO budget, and doing the
+   address matching in SQL against a 2.1 M-row points table (85 % of the state's points were
+   kept by a too-coarse filter) starved it — every county hit the 30 s statement timeout; the
+   loader's login also expired after an hour. Fixed: matching now happens in the loader's
+   memory and only linked / business points reach the database (`apply_building_addresses`
+   batch update), the session refresh ticker is started, one shard. Owner: run
+   `truncate table public.address_points;` in the database console to drop run 5's 2.1 M junk
+   rows (or run the loader with `--trim`). Next run: "footprints = false". After it: every
+   county has a `data_refreshes` row and the Buildings page's "Data refreshed" line moves.
 4. **Verify in the browser:** aerial imagery tiles show on the map; the state outline layer
    draws when zoomed in; tap-to-add works on a small shop. Both depend on the state server
    allowing cross-origin tile fetches, which cannot be checked from the build container.

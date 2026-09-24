@@ -27,10 +27,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two runs in parallel, each taking every other county. The database is a small
-        # instance with a burst disk-IO budget: three shards plus a 2 M-row points table
-        # starved it in run 6. A single county runs in shard 1 alone.
-        shard: [1, 2]
+        # One run at a time: the database is a small instance with a burst disk-IO budget and
+        # two or three parallel loaders starved it (runs 5–7). Matching now happens in the
+        # loader's memory, so one shard finishes the state in a few hours. To parallelise
+        # again, list more shards here; each takes every n-th county.
+        shard: [1]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,7 +50,7 @@ jobs:
             if [ "$SHARD" != "1" ]; then echo "single county: shard $SHARD has nothing to do"; exit 0; fi
             ARGS="--county $COUNTY"
           else
-            ARGS="--all --shard $SHARD/2"
+            ARGS="--all --shard $SHARD/1"
           fi
           if [ "${{ github.event_name }}" = "schedule" ] || [ "$FOOTPRINTS" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
           echo "running: $ARGS"
