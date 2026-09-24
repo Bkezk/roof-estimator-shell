@@ -3929,7 +3929,8 @@ function EstimatePage() {
                       {
                         description: `${item.category} — ${item.description}`,
                         price: item.price,
-                        quantity: 1,
+                        // Blank until typed (owner, Sep 24: no prefilled quantities).
+                        quantity: 0,
                         laborHoursPerUnit,
                       },
                     ]);
@@ -4065,7 +4066,7 @@ function EstimatePage() {
                         price: item.unitCost,
                         laborPerUnit: item.laborPerUnit,
                         laborRate: item.laborRate,
-                        quantity: 1,
+                        quantity: 0,
                       },
                     ]);
                   }}
@@ -4544,7 +4545,7 @@ function EstimatePage() {
                         price: item.price,
                         laborPerUnit: item.laborPerUnit,
                         laborRate: item.laborRate,
-                        quantity: 1,
+                        quantity: 0,
                       },
                     ]);
                   }}

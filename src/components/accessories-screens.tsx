@@ -22,6 +22,7 @@ import {
 } from "@/lib/engine/accessories";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberField } from "@/components/ui/number-field";
 import {
   Select,
   SelectContent,
@@ -214,7 +215,8 @@ function PipeStacksScreen(
   props: AccessoriesScreensProps & { upd: (fn: (d: AccessoriesState) => void) => void },
 ) {
   const { state, refData, result, upd } = props;
-  const [qty, setQty] = useState(1);
+  // Blank until typed (owner, Sep 24: no prefilled quantities — a 0 placeholder that goes away).
+  const [qty, setQty] = useState(0);
   const [usage, setUsage] = useState("Plumbing");
   const [color, setColor] = useState("White");
   const [open, setOpen] = useState(false);
@@ -227,11 +229,11 @@ function PipeStacksScreen(
       <div className="flex flex-wrap items-end gap-3 text-xs">
         <label className="space-y-1">
           <span>Quantity:</span>
-          <Input
-            type="number"
+          <NumberField
             className="h-7 w-16 px-1 text-right text-xs"
+            inputMode="numeric"
             value={qty}
-            onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))}
+            onChange={setQty}
           />
         </label>
         <label className="space-y-1">
@@ -306,8 +308,8 @@ function PipeStacksScreen(
         <Button
           size="sm"
           className="h-7 text-xs"
-          disabled={size === null}
-          onClick={() =>
+          disabled={size === null || qty <= 0}
+          onClick={() => {
             upd((d) => {
               d.pipeStacks.push({
                 id: crypto.randomUUID(),
@@ -318,8 +320,9 @@ function PipeStacksScreen(
                 quantity: qty,
                 adjustPct: 0,
               });
-            })
-          }
+            });
+            setQty(0);
+          }}
         >
           Save
         </Button>
@@ -376,7 +379,7 @@ function DrainsScreen(
   props: AccessoriesScreensProps & { upd: (fn: (d: AccessoriesState) => void) => void },
 ) {
   const { state, refData, result, upd } = props;
-  const [qty, setQty] = useState(1);
+  const [qty, setQty] = useState(0);
   const [roofType, setRoofType] = useState("None");
   const [reuse, setReuse] = useState(false);
   const [boot, setBoot] = useState("");
@@ -387,11 +390,11 @@ function DrainsScreen(
       <div className="flex flex-wrap items-end gap-3 text-xs">
         <label className="space-y-1">
           <span>Qty:</span>
-          <Input
-            type="number"
+          <NumberField
             className="h-7 w-16 px-1 text-right text-xs"
+            inputMode="numeric"
             value={qty}
-            onChange={(e) => setQty(Math.max(1, Number(e.target.value) || 1))}
+            onChange={setQty}
           />
         </label>
         <label className="space-y-1">
@@ -446,8 +449,8 @@ function DrainsScreen(
         <Button
           size="sm"
           className="h-7 text-xs"
-          disabled={!boot || !ring}
-          onClick={() =>
+          disabled={!boot || !ring || qty <= 0}
+          onClick={() => {
             upd((d) => {
               d.drains.push({
                 id: crypto.randomUUID(),
@@ -458,8 +461,9 @@ function DrainsScreen(
                 ringSize: ring,
                 adjustPct: 0,
               });
-            })
-          }
+            });
+            setQty(0);
+          }}
         >
           Save
         </Button>
