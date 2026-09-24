@@ -275,6 +275,30 @@ layer below is pinned by a sample in `src/lib/gis/fixtures` and parsed by `src/l
   picker; the import card links a state query that counts footprints ≥ n sq ft per county as a
   second opinion.
 
+## Statewide data: loading and monthly refresh
+
+The database is the source; the Buildings page never queries the state server. Two ways to load:
+
+- **A county from the browser:** Buildings → Load county data → Load. Same steps as below.
+- **All 120 counties, and the monthly refresh:** `scripts/load-kentucky.ts`, run by the
+  GitHub workflow `Refresh Kentucky data` (07:00 UTC on the 1st; also by hand from the Actions
+  tab with an optional county and "Load footprints too"). It needs two repository secrets,
+  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Lovable Cloud → project settings; never in
+  the repo). Locally: `SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… npx vite-node
+scripts/load-kentucky.ts --all`.
+
+Per county, in order: footprints of the size floor (5,000 sq ft; `--min-sqft`) → every 911
+address point → `fill_footprint_addresses` (nearest point, 100 m floor growing with roof size,
+never a non-roof point) → `promote_commercial_points` (named or commercially typed points no
+building claimed become buildings, source `ky911`) → their outlines from the footprint layer by
+one multipoint spatial request per 150 → schools → `trim_address_points` (keep commercial or
+linked points; Hardin 56,335 → about 8,000) → a `data_refreshes` row. `upsert_buildings` never
+overwrites a name, address, city, zip or land use that is already set. Footprints are a
+one-time survey, so the scheduled run passes `--skip-footprints`.
+
+Sizing from the owner's counts (Sep 24): 154,549 footprints ≥ 5,000 sq ft statewide (about
+260 MB stored), 2,482,611 address points of which roughly a tenth is kept (about 100 MB).
+
 ## Open decisions
 
 Owner answers of Sep 23 are recorded inline; the rest stay open.

@@ -1,0 +1,40 @@
+# Monthly refresh of the prospecting data from Kentucky's free GIS (docs/roofing-ops-portal-brief.md).
+# Footprints are a one-time survey, so the monthly run refreshes addresses, named businesses and
+# facilities; run it by hand with "Load footprints too" for the first statewide load or when the
+# state republishes footprints. Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (repository
+# settings → Secrets and variables → Actions).
+name: Refresh Kentucky data
+
+on:
+  schedule:
+    - cron: "0 7 1 * *" # 07:00 UTC on the 1st = 3 am Eastern
+  workflow_dispatch:
+    inputs:
+      county:
+        description: "One county (blank = all 120)"
+        required: false
+        default: ""
+      footprints:
+        description: "Load footprints too (first load / new survey)"
+        type: boolean
+        default: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Load
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.county }}" ]; then ARGS="--county ${{ github.event.inputs.county }}"; else ARGS="--all"; fi
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event.inputs.footprints }}" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
+          npx vite-node scripts/load-kentucky.ts $ARGS
