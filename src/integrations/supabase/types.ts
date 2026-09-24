@@ -356,6 +356,7 @@ export type Database = {
         Row: {
           address1: string;
           address2: string | null;
+          address_checked_at: string | null;
           building_sqft: number | null;
           centroid_lat: number | null;
           centroid_lng: number | null;
@@ -394,6 +395,7 @@ export type Database = {
         Insert: {
           address1?: string;
           address2?: string | null;
+          address_checked_at?: string | null;
           building_sqft?: number | null;
           centroid_lat?: number | null;
           centroid_lng?: number | null;
@@ -432,6 +434,7 @@ export type Database = {
         Update: {
           address1?: string;
           address2?: string | null;
+          address_checked_at?: string | null;
           building_sqft?: number | null;
           centroid_lat?: number | null;
           centroid_lng?: number | null;
@@ -1561,11 +1564,15 @@ export type Database = {
         Returns: string;
       };
       promote_commercial_points: {
-        Args: { p_county: string; p_max_m?: number };
+        Args: { p_county: string; p_max_m?: number; p_limit?: number };
         Returns: number;
       };
       trim_address_points: {
-        Args: { p_county: string; p_keep_m?: number };
+        Args: { p_county: string; p_keep_m?: number; p_limit?: number };
+        Returns: number;
+      };
+      reset_address_checks: {
+        Args: { p_county: string };
         Returns: number;
       };
       upsert_buildings: {
@@ -1573,7 +1580,7 @@ export type Database = {
         Returns: number;
       };
       fill_footprint_addresses: {
-        Args: { p_county: string; p_max_m?: number };
+        Args: { p_county: string; p_max_m?: number; p_limit?: number };
         Returns: number;
       };
       has_access: { Args: { page: string }; Returns: boolean };

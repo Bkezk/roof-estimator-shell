@@ -22,6 +22,7 @@ import {
   KY_FOOTPRINTS_LAYER,
   KY_SCHOOLS_LAYER,
   addressPointFromFeature,
+  classifyPlace,
   countyWhere,
   facilityFromFeature,
   footprintFromFeature,
@@ -188,7 +189,11 @@ async function loadCounty(county: string) {
           created_by: null,
           created_by_name: "scheduled load",
         }));
-      buildings += await rpc<number>("upsert_buildings", { rows: rows as unknown as Json });
+      for (let i = 0; i < rows.length; i += 200) {
+        buildings += await rpc<number>("upsert_buildings", {
+          rows: rows.slice(i, i + 200) as unknown as Json,
+        });
+      }
       process.stdout.write(`\r[${county}] footprints ${buildings}`);
     }
     console.log("");
@@ -206,7 +211,9 @@ async function loadCounty(county: string) {
     const rows = feats
       .map(addressPointFromFeature)
       .filter((c): c is NonNullable<typeof c> => c !== null)
-      .filter((c) => c.landmark !== null || c.placeType !== null || near(c.lat, c.lng))
+      // Some counties type every point ("RESIDENTIAL" on each house), so the type alone is not
+      // a reason to keep it: keep what reads commercial, or sits near a stored building.
+      .filter((c) => classifyPlace(c.placeType, c.landmark) === "commercial" || near(c.lat, c.lng))
       .map((c) => ({
         source_key: `ky911:${c.key}`,
         county: c.county ?? county,
@@ -230,9 +237,35 @@ async function loadCounty(county: string) {
     process.stdout.write(`\r[${county}] address points kept ${points} of ${seen}`);
   }
   console.log("");
-  const addressed = await rpc<number>("fill_footprint_addresses", { p_county: county });
+  // Chunked database steps: each call handles a few hundred rows (well inside the statement
+  // timeout) and the loop runs until a call comes back short.
+  await rpc<number>("reset_address_checks", { p_county: county });
+  const { count: before } = await sb
+    .from("buildings")
+    .select("id", { count: "exact", head: true })
+    .eq("county", county)
+    .is("deleted_at", null)
+    .neq("address1", "");
+  for (;;) {
+    const n = await rpc<number>("fill_footprint_addresses", { p_county: county, p_limit: 400 });
+    process.stdout.write(`\r[${county}] matching addresses… ${n} checked`);
+    if (n < 400) break;
+  }
+  const { count: after } = await sb
+    .from("buildings")
+    .select("id", { count: "exact", head: true })
+    .eq("county", county)
+    .is("deleted_at", null)
+    .neq("address1", "");
+  const addressed = (after ?? 0) - (before ?? 0);
+  console.log("");
   log(`addresses matched: ${addressed}`);
-  const promoted = await rpc<number>("promote_commercial_points", { p_county: county });
+  let promoted = 0;
+  for (;;) {
+    const n = await rpc<number>("promote_commercial_points", { p_county: county, p_limit: 300 });
+    promoted += n;
+    if (n < 300) break;
+  }
   log(`named businesses added: ${promoted}`);
   // Outlines for the promoted buildings: one multipoint request per 150.
   let attached = 0;
@@ -320,7 +353,12 @@ async function loadCounty(county: string) {
     if (rows.length > 0)
       facilities += await rpc<number>("upsert_buildings", { rows: rows as unknown as Json });
   }
-  const trimmed = await rpc<number>("trim_address_points", { p_county: county });
+  let trimmed = 0;
+  for (;;) {
+    const n = await rpc<number>("trim_address_points", { p_county: county, p_limit: 5000 });
+    trimmed += n;
+    if (n < 5000) break;
+  }
   const { error: rErr } = await sb.from("data_refreshes").insert({
     county,
     ran_by: "scheduled",

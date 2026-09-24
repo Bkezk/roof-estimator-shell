@@ -773,3 +773,31 @@ export function footprintAtPointUrl(layerUrl: string, lng: number, lat: number):
  */
 export const footprintOutlineTileUrl = (serviceUrl: string): string =>
   `${serviceUrl.replace(/\/MapServer\/\d+\/?$/, "/MapServer")}/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image`;
+
+// ── Place-type classification (mirrors public.classify_place in the database) ─────────────
+
+const RX = {
+  residentialStart: /^\s*(resid|resd|reisd|resit|residence)/,
+  business:
+    /(store|shop|retail|supply|improvement|decor|dealer|sales|office|market|restaur|resturant|restsurant|funeral|nursing|assisted|hospice|company|complex|clubhouse|rackhouse|gas station|fuel station|fire station|police station|radio station|train.station|sawmill|distill)/,
+  residential:
+    /(resid|resd|reisd|resit|single|multi|mulit|\bapt\b|apt_|apart|duplex|triplex|fourplex|sixplex|townhouse|condo|mobil|moblie|\bmh\b|swmh|dwmh|trailer|trlr|cabin|camp|\brv\b|\bhouse\b|home\b|household|shed|barn|farm|\bag\b|agri|garage|outbuild|out build|parsonage|dwelling|\bres\b|\bresi\b|\br\b|\bmf\b|homeless|airbnb)/,
+  other:
+    /(tower|\bcell|antenna|pond|lake|creek|river|gate|mile|marker|intersection|bridge|crossing|trestle|ramp|underpass|overpass|\blot\b|land\b|vacant|vacabt|park\b|picnic|field|court\b|pool|cemet|hydrant|meter|vault|pump|substation|switching|well\b|tank|pipeline|gas line|transmission|walkway|way\b|trail|dock|boat|helipad|road|street|alias|temp|waypoint|gps|milepoint|no structure|feature|site\b|tract|parcel|block|property|acrs|greenbelt|playground|common area|access point|security|traffic|bus stop|recycle|mailbox|unknown|unkown|n\/a|other\b|^0$|rd \d|road \d|rail|electric|gas\b|water\b|sewer|utility|telco|teleco|telecom|infrastructure|tennis|soccer|football|baseball|softball|body of water|dry hydrant|exit|construction|new const|home const|seasonal|outdoor|golf course|disc golf|greenhouse|grain|chicken|dairy|pole barn|abandon|pavilion|shelter|cave|arena)/,
+  commercial:
+    /(comm|cafe|\bbar\b|pizza|donut|ice cream|coffee|fast food|food|grocery|mall|plaza|medic|health|hosp|clinic|dentist|doctor|pharm|drug|optom|veterin|church|relig|worship|convent|school|college|universit|daycare|child care|preschool|classroom|librar|museum|theat|cinema|bowling|fitness|gym|golf|stadium|hotel|motel|\binn\b|lodg|bank|insur|attorney|lawyer|account|financ|real estate|salon|nail|hair|barber|clean|laundr|industr|indistr|indust|manufact|factory|plant\b|warehouse|storage|mill\b|hardware|lumber|auto|\bcar\b|tire|rental|towing|truck|station|fuel|convenien|civic|govern|goverm|city hall|justice|police|sheriff|fire|\bems\b|ambulance|post office|detention|prison|jail|armory|club|venue|event|convention|business|profession|center\b|centre|department|radio|shipping|pest|photograph|thrift|antique|boutique|jewl|jewel|shoe|clothing|book|video|sport|pet\b|liquor|smoke|vape|tattoo|hangar|hanger|airport|marina|racetrack|campground|recreation|public|emergency|maintenance|outreach|nutrition|consumer|historical|barrel)/,
+};
+
+export type PlaceKind = "commercial" | "residential" | "other" | null;
+
+/** What a 911 place type / landmark says — the same rule as the database's classify_place. */
+export function classifyPlace(placeType: string | null, landmark: string | null): PlaceKind {
+  const p = (placeType ?? "").toLowerCase();
+  if (RX.residentialStart.test(p)) return "residential";
+  if (RX.business.test(p)) return "commercial";
+  if (RX.residential.test(p)) return "residential";
+  if (RX.other.test(p)) return "other";
+  if (RX.commercial.test(p)) return "commercial";
+  if ((landmark ?? "").trim()) return "commercial";
+  return null;
+}

@@ -7,6 +7,7 @@ import {
   KY_COUNTIES,
   addressPointFromFeature,
   canonicalCounty,
+  classifyPlace,
   composeAddress,
   countyFromFips,
   countyRankingUrl,
@@ -269,5 +270,21 @@ describe("tap-to-add", () => {
     ).toBe(
       "https://x/Ky_ORNL_Building_Footprints_WGS84WM/MapServer/export?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=256,256&format=png32&transparent=true&layers=show:0&f=image",
     );
+  });
+});
+
+describe("classifyPlace (mirrors the database rule)", () => {
+  it("reads the statewide vocabulary the way the SQL does", () => {
+    expect(classifyPlace("Commercial - Retail", null)).toBe("commercial");
+    expect(classifyPlace("HOME IMPROVEMENT", null)).toBe("commercial");
+    expect(classifyPlace("FUNERAL HOME", null)).toBe("commercial");
+    expect(classifyPlace("GAS STATION", null)).toBe("commercial");
+    expect(classifyPlace("Residential - Garage or Shop", null)).toBe("residential");
+    expect(classifyPlace("MULIT FAMILY", null)).toBe("residential");
+    expect(classifyPlace("CELL TOWER", null)).toBe("other");
+    expect(classifyPlace("COON CREEK RD 1464", null)).toBe("other");
+    expect(classifyPlace(null, "TRI-COUNTY FORD")).toBe("commercial");
+    expect(classifyPlace(null, null)).toBeNull();
+    expect(classifyPlace("CoWOOWOO", null)).toBeNull();
   });
 });

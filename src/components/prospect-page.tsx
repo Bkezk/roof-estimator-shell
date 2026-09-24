@@ -549,10 +549,15 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         importCounty,
         `${importCounty} 911 address points`,
       );
-      setProgress("Matching footprints to the nearest address…");
-      const fill = await fillFn({ data: { county: importCounty } });
+      let updated = 0;
+      for (let reset = true; ; reset = false) {
+        setProgress(`Matching footprints to the nearest address… ${updated.toLocaleString()}`);
+        const r = await fillFn({ data: { county: importCounty, reset } });
+        updated += r.updated;
+        if (r.done) break;
+      }
       setProgress(null);
-      return { points, fill };
+      return { points, fill: { updated } };
     },
     onSuccess: ({ points, fill }) => {
       toast.success(
@@ -587,10 +592,22 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         county,
         `${county} addresses`,
       );
-      setProgress("Matching buildings to the nearest address…");
-      const fill = await fillFn({ data: { county } });
-      setProgress("Adding named businesses…");
-      const promoted = await promoteFn({ data: { county } });
+      let addressed = 0;
+      for (let reset = true; ; reset = false) {
+        setProgress(`Matching buildings to the nearest address… ${addressed.toLocaleString()}`);
+        const r = await fillFn({ data: { county, reset } });
+        addressed += r.updated;
+        if (r.done) break;
+      }
+      const fill = { updated: addressed };
+      let promotedN = 0;
+      for (;;) {
+        setProgress(`Adding named businesses… ${promotedN.toLocaleString()}`);
+        const r = await promoteFn({ data: { county } });
+        promotedN += r.promoted;
+        if (r.done) break;
+      }
+      const promoted = { promoted: promotedN };
       let attached = 0;
       for (;;) {
         setProgress(`Finding outlines for named businesses… ${attached.toLocaleString()} done`);
@@ -604,8 +621,14 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         county,
         `${county} schools`,
       );
-      setProgress("Tidying up…");
-      const trimmed = await trimFn({ data: { county } });
+      let trimmedN = 0;
+      for (;;) {
+        setProgress("Tidying up…");
+        const r = await trimFn({ data: { county } });
+        trimmedN += r.trimmed;
+        if (r.done) break;
+      }
+      const trimmed = { trimmed: trimmedN };
       await recordRefreshFn({
         data: {
           county,

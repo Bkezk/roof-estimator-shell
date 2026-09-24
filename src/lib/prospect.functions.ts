@@ -813,18 +813,45 @@ export const fillFootprintAddresses = createServerFn({ method: "POST" })
     z
       .object({
         county: z.string().trim().min(1).max(100),
-        maxMetres: z.number().min(5).max(500).default(60),
+        maxMetres: z.number().min(5).max(500).default(100),
+        /** Start over on the county (after a fresh point import). */
+        reset: z.boolean().default(false),
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<{ updated: number }> => {
+  .handler(async ({ data, context }): Promise<{ updated: number; done: boolean }> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    const { data: n, error } = await context.supabase.rpc("fill_footprint_addresses", {
-      p_county: data.county,
-      p_max_m: data.maxMetres,
-    });
-    if (error) throw new Error(error.message);
-    return { updated: n ?? 0 };
+    const sb = context.supabase;
+    const countAddressed = async () => {
+      const { count } = await sb
+        .from("buildings")
+        .select("id", { count: "exact", head: true })
+        .eq("county", data.county)
+        .is("deleted_at", null)
+        .neq("address1", "");
+      return count ?? 0;
+    };
+    if (data.reset) {
+      const { error } = await sb.rpc("reset_address_checks", { p_county: data.county });
+      if (error) throw new Error(error.message);
+    }
+    const before = await countAddressed();
+    // Chunks of 400 for up to ~20 s per call; the page calls again until done.
+    const t0 = Date.now();
+    let done = false;
+    while (Date.now() - t0 < 20_000) {
+      const { data: n, error } = await sb.rpc("fill_footprint_addresses", {
+        p_county: data.county,
+        p_max_m: data.maxMetres,
+        p_limit: 400,
+      });
+      if (error) throw new Error(error.message);
+      if ((n ?? 0) < 400) {
+        done = true;
+        break;
+      }
+    }
+    return { updated: (await countAddressed()) - before, done };
   });
 
 /** How many 911 address points are imported per county (so the fill button can say). */
@@ -851,13 +878,24 @@ export const countAddressPoints = createServerFn({ method: "GET" })
 export const promoteCommercialPoints = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ county: z.string().trim().min(1).max(100) }).parse(d))
-  .handler(async ({ data, context }): Promise<{ promoted: number }> => {
+  .handler(async ({ data, context }): Promise<{ promoted: number; done: boolean }> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    const { data: n, error } = await context.supabase.rpc("promote_commercial_points", {
-      p_county: data.county,
-    });
-    if (error) throw new Error(error.message);
-    return { promoted: n ?? 0 };
+    const t0 = Date.now();
+    let promoted = 0;
+    let done = false;
+    while (Date.now() - t0 < 20_000) {
+      const { data: n, error } = await context.supabase.rpc("promote_commercial_points", {
+        p_county: data.county,
+        p_limit: 300,
+      });
+      if (error) throw new Error(error.message);
+      promoted += n ?? 0;
+      if ((n ?? 0) < 300) {
+        done = true;
+        break;
+      }
+    }
+    return { promoted, done };
   });
 
 /**
@@ -949,13 +987,24 @@ export const attachFootprints = createServerFn({ method: "POST" })
 export const trimAddressPoints = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ county: z.string().trim().min(1).max(100) }).parse(d))
-  .handler(async ({ data, context }): Promise<{ trimmed: number }> => {
+  .handler(async ({ data, context }): Promise<{ trimmed: number; done: boolean }> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    const { data: n, error } = await context.supabase.rpc("trim_address_points", {
-      p_county: data.county,
-    });
-    if (error) throw new Error(error.message);
-    return { trimmed: n ?? 0 };
+    const t0 = Date.now();
+    let trimmed = 0;
+    let done = false;
+    while (Date.now() - t0 < 20_000) {
+      const { data: n, error } = await context.supabase.rpc("trim_address_points", {
+        p_county: data.county,
+        p_limit: 5000,
+      });
+      if (error) throw new Error(error.message);
+      trimmed += n ?? 0;
+      if ((n ?? 0) < 5000) {
+        done = true;
+        break;
+      }
+    }
+    return { trimmed, done };
   });
 
 const refreshSchema = z.object({
