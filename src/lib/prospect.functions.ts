@@ -199,7 +199,10 @@ export const listCounties = createServerFn({ method: "GET" })
     // 1,000-row page, which showed one county once the whole state was loaded.
     const { data, error } = await context.supabase.rpc("building_county_counts");
     if (error) throw new Error(error.message);
-    return (data ?? []).map((r) => ({ county: r.county, count: Number(r.n) }));
+    // Alphabetical (owner, Sep 24): a salesperson looks a county up by name.
+    return (data ?? [])
+      .map((r) => ({ county: r.county, count: Number(r.n) }))
+      .sort((a, b) => a.county.localeCompare(b.county));
   });
 
 export interface BuildingDetail {
