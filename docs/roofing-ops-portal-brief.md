@@ -197,9 +197,10 @@ listed after the table).
 Phase 3 can start while phase 2 is in flight; they share only the spine. Phase 4 waits on
 phase 3 because it reuses the canvas.
 
-**Estimator maintenance track** (owner's open list, in no fixed order): .bax importer (the
-file is a zip holding one XML document with the bid, its frozen pricing copy, and reports;
-mapping into the tile screens is the work), an admin "order pack" size per product for the
+**Estimator maintenance track** (owner's open list, in no fixed order): .bax importer — built
+(Saved Bids › Import old bids; `src/lib/bax`): the file's own catalog resolves every id, the
+bid keeps its legacy labor rate, markup, per diem and the file's price tables as its frozen
+snapshot; owner to compare the imported Summit and Knox bids with the hand-keyed ones — an admin "order pack" size per product for the
 order list, the opened-box rule for partial packs, induction-welding attachment for TPO, the
 fire-rated adhered-layer check against a legacy Summit figure, tear-off rates for Metal
 Retrofit / Purlin Fastened decks (legacy seeds them at 0), and a "Remove all extra lines"

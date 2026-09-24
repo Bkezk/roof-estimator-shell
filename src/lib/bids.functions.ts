@@ -109,6 +109,55 @@ export const saveBid = createServerFn({ method: "POST" })
     return bid;
   });
 
+const importBidsSchema = z.object({
+  bids: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        data: z.record(z.string(), z.unknown()),
+        grandTotal: z.number(),
+        status: z.enum(BID_STATUSES),
+        /** The legacy file's last-save time; becomes created_at so the list dates read right. */
+        createdAt: z.string().datetime().nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
+/**
+ * Insert bids converted from legacy Bid-Advantage .bax files (src/lib/bax). Each row keeps the
+ * legacy last-save time as created_at and is stamped "imported by <name>"; the data blob already
+ * carries the frozen pricing snapshot the dialog built from the file's own price tables.
+ */
+export const importBids = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => importBidsSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: me } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const who = (me?.full_name ?? "").trim() || me?.email || null;
+    const now = new Date().toISOString();
+    const rows = data.bids.map((b) => ({
+      name: b.name,
+      data: b.data as Json,
+      grand_total: b.grandTotal,
+      status: b.status,
+      created_at: b.createdAt ?? now,
+      updated_at: now,
+      updated_by_name: who ? `${who} (import)` : "import",
+    }));
+    const { data: inserted, error } = await context.supabase
+      .from("bids")
+      .insert(rows)
+      .select("id, name");
+    if (error) throw new Error(error.message);
+    return inserted ?? [];
+  });
+
 /** Change a bid's status from the list (Bids page dropdown); stamps who and when like a save. */
 export const setBidStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

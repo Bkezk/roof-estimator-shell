@@ -6,6 +6,7 @@
  */
 
 import type { CombineInfo } from "@/lib/combine-bids";
+import type { BaxImportInfo } from "@/lib/bax/bax-import";
 import type { PerDiemChart } from "@/lib/per-diem-chart";
 import type {
   BidInput,
@@ -185,6 +186,8 @@ export interface SavedBidState {
   pricingAsOf?: string;
   /** Set on a bid produced by the Bid Combiner (legacy Description text's data, docs §22.41). */
   combineInfo?: CombineInfo;
+  /** Set on a bid imported from a legacy Bid-Advantage .bax file (src/lib/bax). */
+  importInfo?: BaxImportInfo;
 }
 
 /**

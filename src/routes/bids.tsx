@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Layers, PlusCircle, RotateCcw, Trash2 } from "lucide-react";
+import { FileUp, Layers, PlusCircle, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -18,6 +18,7 @@ import { useAuth } from "@/lib/auth-store";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
+import { ImportBaxDialog } from "@/components/import-bax-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -38,6 +39,12 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+/** True when the bid's data carries a legacy .bax import record (src/lib/bax). */
+const importedFrom = (data: unknown): boolean =>
+  !!data &&
+  typeof data === "object" &&
+  (data as { importInfo?: { source?: string } }).importInfo?.source === "bid-advantage";
 
 export const Route = createFileRoute("/bids")({
   head: () => ({
@@ -96,6 +103,7 @@ function BidsPage() {
     enabled: !!session,
   });
   const [statusFilter, setStatusFilter] = useState("all");
+  const [importOpen, setImportOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [estimatorFilter, setEstimatorFilter] = useState("all");
   const [systemFilter, setSystemFilter] = useState("all");
@@ -265,6 +273,15 @@ function BidsPage() {
               </Button>
             </>
           )}
+          <Button
+            variant="outline"
+            size="lg"
+            title="Bring in bids saved by the old Bid-Advantage program (.bax files)"
+            onClick={() => setImportOpen(true)}
+          >
+            <FileUp className="mr-2 h-5 w-5" />
+            Import old bids
+          </Button>
           <Button asChild size="lg" className="text-base font-semibold">
             <Link to="/estimate">
               <PlusCircle className="mr-2 h-5 w-5" />
@@ -273,6 +290,7 @@ function BidsPage() {
           </Button>
         </div>
       </div>
+      <ImportBaxDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
       {bids.length > 0 && (
         <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
@@ -467,6 +485,7 @@ function BidsPage() {
                             })}
                             {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
                             {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
+                            {importedFrom(bid.data) ? ` · Imported from Bid-Advantage` : ""}
                           </p>
                         </div>
                       </div>

@@ -5,10 +5,18 @@ the bottom with the commit that closed them.
 
 ## Open
 
-1. **Import old bids (.bax files).** The legacy Bid-Advantage file is a zip with an
-   `EstimateData` XML (management, estimate, reports). Build the importer against the first
-   two or three files the owner supplies; each imported bid keeps its frozen pricing and shows
-   "Update Pricing & Labor" like any old bid. Owner is gathering the files.
+1. **Import old bids (.bax files).** Built (Saved Bids › "Import old bids"): the file's own
+   catalog resolves every id; labor rate, markup, commission, per diem, tax and extra shipping
+   come from the estimate; Non-DL items and Exceptional Metals keep their stored unit costs
+   and labor rates; the file's price tables (membrane by mil × tier × colour, Duro-Bond / Tuff
+   / Fleece, adhesives, accessories, freight, setup and inspection bands, warranties, high
+   wind) become the bid's frozen snapshot, dated at the legacy last save, so "Update pricing &
+   labor" shows the catalog moved on. Legacy statuses fold to the four (In Progress /
+   Finished / Review / Final → Draft; Submitted; Accepted → Won; Denied → Lost). Still to do:
+   owner compares the imported Summit and Knox bids with the hand-keyed ones and reports the
+   gaps; drip edge / gravel stop / fascia bar accessory entries are not read yet (the four
+   samples had none); underlayment $/sqft is not in the file, so those price from the live
+   list.
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and
