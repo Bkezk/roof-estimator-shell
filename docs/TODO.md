@@ -32,6 +32,16 @@ the bottom with the commit that closed them.
    consumed movement then carries a service_job_id), material + hours per service job, and
    remove the "rest was used on the vehicle" write-off. Half a day; the UI is a good Opus
    subagent task once the table shape is settled.
+   Destination (owner, Sep 24): **replace CenterPoint by the end**, in steps that each stand
+   alone: (1) service jobs + material + hours here, linked by CenterPoint ticket number;
+   (2) customers, contacts and scheduling here, techs create repairs here, CenterPoint still
+   invoices; (3) invoicing here pushed to the accounting system (do not build accounting —
+   ask the owner which system: QuickBooks?) — the day CenterPoint stops being needed for new
+   work; (4) import CenterPoint history from its export, run both a month, cancel. So the
+   exploration must also record every export / integration CenterPoint offers and what a full
+   data export contains; that decides whether step 4 is easy or a migration project. Hard
+   parts to size honestly: money (invoices, payments, accounting sync), the tech's phone
+   (dispatch, photos, signatures, no signal on a roof), customer email / text with a record.
    Owner rules to keep: number boxes start blank (0 placeholder, never prefilled);
    prospecting code must not touch bidding code; the loader runs only at night; never rewrite
    pushed history (Lovable); push straight to main.
