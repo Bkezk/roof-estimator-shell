@@ -377,7 +377,8 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
           </button>
           {historyOpen && (
             <CardDescription>
-              Every entry, newest first. On hand is the sum of these.
+              Every entry, newest first. On hand is the sum of these. Your own entries from the last
+              24 hours can be undone here.
             </CardDescription>
           )}
         </CardHeader>
@@ -826,8 +827,18 @@ function LedgerTable(props: {
   pieceOf: (screenId: string, rowLabel: string) => PieceDef | null;
 }) {
   const delFn = useServerFn(deleteMovement);
+  const undoFn = useServerFn(undoMovement);
   const [q, setQ] = useState("");
   const f = q.trim().toLowerCase();
+  const undo = (id: number) => {
+    if (!window.confirm("Remove this entry? Stock on hand changes accordingly.")) return;
+    void (props.role === "admin" ? delFn({ data: { id } }) : undoFn({ data: { id } }))
+      .then(() => {
+        props.onChanged();
+        toast.info("Undone — the entry was removed");
+      })
+      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not undo"));
+  };
   const rows = props.rows.filter(
     (r) =>
       !f ||
@@ -863,7 +874,7 @@ function LedgerTable(props: {
                 <TableHead>What</TableHead>
                 <TableHead>Job</TableHead>
                 <TableHead>Note</TableHead>
-                {props.role === "admin" && <TableHead className="w-10" />}
+                <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -891,29 +902,23 @@ function LedgerTable(props: {
                     {r.counted_note && r.note ? " — " : ""}
                     {r.note}
                   </TableCell>
-                  {props.role === "admin" && (
-                    <TableCell>
+                  <TableCell>
+                    {r.can_undo && (
                       <Button
                         variant="ghost"
                         size="sm"
                         className="text-destructive"
-                        title="Delete this entry (admin)"
-                        onClick={() => {
-                          if (
-                            !window.confirm("Delete this entry? Stock on hand changes accordingly.")
-                          )
-                            return;
-                          void delFn({ data: { id: r.id } })
-                            .then(() => props.onChanged())
-                            .catch((e: unknown) =>
-                              toast.error(e instanceof Error ? e.message : "Could not delete"),
-                            );
-                        }}
+                        title={
+                          props.role === "admin"
+                            ? "Remove this entry (admin)"
+                            : "Undo — your own entries can be removed for 24 hours"
+                        }
+                        onClick={() => undo(r.id)}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="mr-1 h-4 w-4" /> Undo
                       </Button>
-                    </TableCell>
-                  )}
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

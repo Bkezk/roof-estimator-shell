@@ -92,6 +92,8 @@ export interface MovementRow {
   note: string | null;
   created_by_name: string | null;
   created_at: string;
+  /** May the caller undo this entry now (own entry within 24 h, or admin)? */
+  can_undo?: boolean;
 }
 
 async function categories(sb: SupabaseClient<Database>) {
@@ -172,10 +174,18 @@ export const listMovements = createServerFn({ method: "GET" })
       .limit(data.limit ?? 300);
     if (data.screen_id) q = q.eq("screen_id", data.screen_id);
     if (data.bid_id) q = q.eq("bid_id", data.bid_id);
-    const [{ data: rows, error }, cats] = await Promise.all([q, categories(sb)]);
+    const [{ data: rows, error }, cats, { data: me }] = await Promise.all([
+      q,
+      categories(sb),
+      sb.from("profiles").select("role").eq("id", context.userId).maybeSingle(),
+    ]);
     if (error) throw new Error(error.message);
+    const now = Date.now();
     return (rows ?? []).map((r) => ({
       id: r.id,
+      can_undo:
+        me?.role === "admin" ||
+        (r.created_by === context.userId && now - Date.parse(r.created_at) < 24 * 3600 * 1000),
       screen_id: r.screen_id,
       category: cats.get(r.screen_id) ?? r.screen_id,
       row_label: r.row_label,
