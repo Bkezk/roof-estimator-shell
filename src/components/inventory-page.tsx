@@ -750,7 +750,7 @@ function LocationPicker(props: {
 
 /** What the material is for (taking) or where it came from (putting in). */
 type Purpose =
-  { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "used" } | { kind: "other" };
+  { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "shop" } | { kind: "used" };
 
 function RecordDialog(props: {
   mode: Mode;
@@ -795,8 +795,10 @@ function RecordDialog(props: {
   const vehicles = props.locations.filter((l) => l.kind === "vehicle" && l.id !== locationId);
   const vehicle =
     purpose?.kind === "vehicle" ? props.locations.find((l) => l.id === purpose.id) : undefined;
-  // A return counts what is on the vehicle; everything else counts the chosen location.
-  const countAt = !consumed && vehicle ? vehicle.id : locationId;
+  // Putting in from somewhere else counts THAT place (the vehicle it comes off, or the shop it
+  // is loaded from); everything else counts the chosen location.
+  const fromShop = !consumed && purpose?.kind === "shop";
+  const countAt = !consumed && vehicle ? vehicle.id : fromShop ? SHOP_LOCATION_ID : locationId;
   const stockHere = useMemo(
     () => props.stock.filter((s) => s.location_id === countAt),
     [props.stock, countAt],
@@ -818,8 +820,8 @@ function RecordDialog(props: {
   const isReturn = !consumed && purpose?.kind === "vehicle";
   const amountOk = Number.isFinite(n) && n >= 0 && (isReturn || n > 0);
   const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
-  // Taking, or returning off a vehicle, never exceeds what that place holds.
-  const limited = consumed || isReturn;
+  // Taking, returning off a vehicle, or loading from the shop never exceeds what that place holds.
+  const limited = consumed || isReturn || fromShop;
   const tooMany = limited && Number.isFinite(packs) && packs > onHand + 1e-9;
   const rest = isReturn && Number.isFinite(n) ? Math.max(0, onHandCounted - n) : 0;
   const usedCounted = isReturn && restUsed ? rest : 0;
@@ -844,7 +846,25 @@ function RecordDialog(props: {
       const pieces = inPieces ? { in_pieces: true as const } : {};
       const noteOrNull = note.trim() || null;
       let saved: { id: number; message: string };
-      if (purpose.kind === "vehicle" && vehicle) {
+      if (purpose.kind === "shop") {
+        // Loading a vehicle from the shop's stock.
+        const r = await moveFn({
+          data: {
+            screen_id: ref.screen_id,
+            row_label: ref.row_label,
+            price_col: ref.price_col,
+            from_location_id: SHOP_LOCATION_ID,
+            to_location_id: location.id,
+            qty: n,
+            ...pieces,
+            note: noteOrNull,
+          },
+        });
+        saved = {
+          id: r.ids[0] ?? 0,
+          message: `${describeStock(r.moved, r.unit, piece)} of ${product} moved from the shop to ${locName}`,
+        };
+      } else if (purpose.kind === "vehicle" && vehicle) {
         // Shop → vehicle (loading) or vehicle → shop (returning; the rest is used on it).
         const r = await moveFn({
           data: {
@@ -915,15 +935,17 @@ function RecordDialog(props: {
       ? consumed
         ? "Take from inventory"
         : "Put in inventory"
-      : purpose.kind === "vehicle"
-        ? consumed
-          ? `Load onto ${vehicle?.name ?? "the vehicle"}`
-          : `Put back in ${locName}`
-        : purpose.kind === "used"
-          ? "Write off as used"
-          : consumed
-            ? `Take from ${locName}`
-            : `Put in ${locName}`;
+      : purpose.kind === "shop"
+        ? `Move from the shop to ${locName}`
+        : purpose.kind === "vehicle"
+          ? consumed
+            ? `Load onto ${vehicle?.name ?? "the vehicle"}`
+            : `Put back in ${locName}`
+          : purpose.kind === "used"
+            ? "Write off as used"
+            : consumed
+              ? `Take from ${locName}`
+              : `Put in ${locName}`;
 
   const choice = (label: string, active: boolean, onClick: () => void, icon?: React.ReactNode) => (
     <button
@@ -944,7 +966,7 @@ function RecordDialog(props: {
           <DialogDescription>
             {consumed
               ? "Takes material from the shop or a service vehicle — for a job, to load a vehicle, or written off as used on a vehicle."
-              : `Puts material in the shop or on a service vehicle — leftovers from a job, a purchase, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
+              : `Puts material in the shop or on a service vehicle — leftovers from a job (or a purchase), stock moved from the shop, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -1018,7 +1040,7 @@ function RecordDialog(props: {
               )}
               <p className="pb-2 text-sm text-muted-foreground">
                 {limited
-                  ? `${fmtCounted(onHandCounted)} ${isReturn && vehicle ? `on ${vehicle.name}` : `at ${locName}`}`
+                  ? `${fmtCounted(onHandCounted)} ${isReturn && vehicle ? `on ${vehicle.name}` : fromShop ? "at the shop" : `at ${locName}`}`
                   : ""}
                 {inPieces && piece && Number.isFinite(n) && n > 0
                   ? `${limited ? " · " : ""}= ${fmtQty(packs)} ${unit}`
@@ -1029,7 +1051,12 @@ function RecordDialog(props: {
           {tooMany && (
             <p className="text-sm text-destructive">
               Only {fmtCounted(onHandCounted)}{" "}
-              {isReturn && vehicle ? `on ${vehicle.name}` : `at ${locName}`}.
+              {isReturn && vehicle
+                ? `on ${vehicle.name}`
+                : fromShop
+                  ? "at the shop"
+                  : `at ${locName}`}
+              .
             </p>
           )}
           {location && ref && (
@@ -1043,10 +1070,16 @@ function RecordDialog(props: {
                     () => setPurpose({ kind: "job" }),
                   )}
                 </li>
-                {!consumed && (
+                {!consumed && location.kind === "vehicle" && (
                   <li>
-                    {choice("Bought, or not from a job", purpose?.kind === "other", () =>
-                      setPurpose({ kind: "other" }),
+                    {choice(
+                      "The shop (takes it off the shop's list)",
+                      purpose?.kind === "shop",
+                      () => {
+                        setPurpose({ kind: "shop" });
+                        setQty("");
+                      },
+                      <Warehouse className="h-4 w-4 text-muted-foreground" />,
                     )}
                   </li>
                 )}
@@ -1059,7 +1092,7 @@ function RecordDialog(props: {
                     )}
                   </li>
                 )}
-                {(consumed ? location.kind === "shop" : location.kind === "shop") &&
+                {location.kind === "shop" &&
                   vehicles.map((v) => (
                     <li key={v.id}>
                       {choice(
@@ -1078,7 +1111,9 @@ function RecordDialog(props: {
           )}
           {location && ref && purpose?.kind === "job" && (
             <div className="space-y-1">
-              <Label>{consumed ? "Which job" : "Which job (optional)"}</Label>
+              <Label>
+                {consumed ? "Which job" : "Which job (optional — leave blank for a purchase)"}
+              </Label>
               <JobPicker
                 bids={props.bids}
                 value={pickingJob ? "" : jobId}
