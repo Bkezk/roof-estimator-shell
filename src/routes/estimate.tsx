@@ -914,7 +914,8 @@ function EstimatePage() {
       const { saved: merged } = combineSavedBids(sources, saved);
       hydrateSaved(merged, {});
       setBidId(undefined);
-      setBidName("Combined Bid");
+      // Named after the bids it came from, e.g. "Summit + Knox County Fiscal Court".
+      setBidName(sources.map((b) => b.name.trim() || "Untitled").join(" + "));
       setBidStatus("draft");
       setLostReason(null);
       // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.

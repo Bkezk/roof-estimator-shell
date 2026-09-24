@@ -15,13 +15,7 @@ import {
   restoreBid,
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
-import {
-  BID_STATUSES,
-  STATUS_LABELS,
-  STATUS_BADGE_CLASSES,
-  asBidStatus,
-  type BidStatus,
-} from "@/lib/bid-status";
+import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
 import { Button } from "@/components/ui/button";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { Input } from "@/components/ui/input";
@@ -217,6 +211,12 @@ function BidsPage() {
     if (maxPrice !== null && Number.isFinite(maxPrice) && total > maxPrice) return false;
     return true;
   });
+  // Grouped Draft → Submitted → Won → Lost, in the list's order inside each group;
+  // filters above apply first, and a group with nothing in it is left out.
+  const groups = BID_STATUSES.map((status) => ({
+    status,
+    rows: filtered.filter((b) => asBidStatus(b.status) === status),
+  })).filter((g) => g.rows.length > 0);
   const anyFilter =
     statusFilter !== "all" ||
     q !== "" ||
@@ -415,108 +415,122 @@ function BidsPage() {
           </Button>
         </div>
       ) : (
-        <div className="grid gap-4">
-          {filtered.map((bid) => {
-            const st = asBidStatus(bid.status);
-            return (
-              <div
-                key={bid.id}
-                role="link"
-                tabIndex={0}
-                title="Open this bid"
-                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    void navigate({ to: "/estimate", search: { bid: bid.id } });
-                  }
-                }}
-              >
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 shrink-0 cursor-pointer"
-                    aria-label={`Select ${bid.name} to combine`}
-                    title="Tick to combine with other bids"
-                    checked={combineSel.includes(bid.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    onChange={() => toggleCombine(bid.id)}
-                  />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium">{bid.name}</p>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASSES[st]}`}
-                      >
-                        {STATUS_LABELS[st]}
-                      </span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Estimator: {estimatorOf(bid) || "—"} · Created{" "}
-                      {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
-                      {new Date(bid.updated_at).toLocaleString(undefined, {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                      {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
-                      {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  {/* Stored at save time — the estimator recomputes live, so an engine change
-                      (or an empty-data row) can differ from this until the bid is re-saved. */}
-                  <span
-                    className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
-                    title="Total as of the last save — open the bid for the live figure"
-                  >
-                    {money(Number(bid.grand_total ?? 0))}
-                    <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                      (last saved)
-                    </span>
-                  </span>
-                  {/* Status changes here save at once and stamp "Last saved … by". */}
-                  <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                    <Select
-                      value={st}
-                      onValueChange={(v) =>
-                        v === "lost"
-                          ? setLostFor({ id: bid.id, name: bid.name })
-                          : setStatus.mutate({ id: bid.id, status: v as BidStatus })
-                      }
-                    >
-                      <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BID_STATUSES.map((v) => (
-                          <SelectItem key={v} value={v}>
-                            {STATUS_LABELS[v]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-destructive hover:text-destructive"
-                    title="Delete this bid"
-                    disabled={del.isPending}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setConfirmDelete({ id: bid.id, name: bid.name });
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    <span className="sr-only">Delete</span>
-                  </Button>
-                </div>
+        <div className="grid gap-8">
+          {groups.map(({ status, rows }) => (
+            <section key={status} aria-label={`${STATUS_LABELS[status]} bids`}>
+              {/* Group header with a grey rule beneath it; empty groups are not shown. */}
+              <div className="mb-3 flex items-baseline gap-2 border-b border-border pb-1.5">
+                <h2 className="text-sm font-semibold uppercase tracking-wide">
+                  {STATUS_LABELS[status]}
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {rows.length} bid{rows.length === 1 ? "" : "s"}
+                </span>
               </div>
-            );
-          })}
+              <div className="grid gap-3">
+                {rows.map((bid) => {
+                  const st = asBidStatus(bid.status);
+                  return (
+                    <div
+                      key={bid.id}
+                      role="link"
+                      tabIndex={0}
+                      title="Open this bid"
+                      className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          void navigate({ to: "/estimate", search: { bid: bid.id } });
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 cursor-pointer"
+                          aria-label={`Select ${bid.name} to combine`}
+                          title="Tick to combine with other bids"
+                          checked={combineSel.includes(bid.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          onChange={() => toggleCombine(bid.id)}
+                        />
+                        <div>
+                          <p className="font-medium">{bid.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+                            {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+                            {new Date(bid.updated_at).toLocaleString(undefined, {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })}
+                            {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
+                            {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        {/* Stored at save time — the estimator recomputes live, so an engine change
+                      (or an empty-data row) can differ from this until the bid is re-saved. */}
+                        <span
+                          className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
+                          title="Total as of the last save — open the bid for the live figure"
+                        >
+                          {money(Number(bid.grand_total ?? 0))}
+                          <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                            (last saved)
+                          </span>
+                        </span>
+                        {/* Status changes here save at once and stamp "Last saved … by". */}
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <Select
+                            value={st}
+                            onValueChange={(v) =>
+                              v === "lost"
+                                ? setLostFor({ id: bid.id, name: bid.name })
+                                : setStatus.mutate({ id: bid.id, status: v as BidStatus })
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-8 w-[130px] text-xs"
+                              aria-label="Bid status"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BID_STATUSES.map((v) => (
+                                <SelectItem key={v} value={v}>
+                                  {STATUS_LABELS[v]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:text-destructive"
+                          title="Delete this bid"
+                          disabled={del.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDelete({ id: bid.id, name: bid.name });
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
 
