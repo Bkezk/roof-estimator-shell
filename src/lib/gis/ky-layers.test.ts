@@ -162,8 +162,10 @@ describe("county scoping and ranking", () => {
   it("writes the per-kind where clause", () => {
     expect(countyWhere("footprint", "Graves")).toBe("FIPS = '21083' AND SQFEET >= 5000");
     expect(countyWhere("footprint", "Graves", 10000)).toBe("FIPS = '21083' AND SQFEET >= 10000");
-    expect(countyWhere("address", "McLean")).toBe("County = 'MCLEAN COUNTY'");
-    expect(countyWhere("facility", "Adair")).toBe("COUNTY = 'ADAIR'");
+    expect(countyWhere("address", "McLean")).toBe(
+      "County IN ('MCLEAN','McLean','mclean','MCLEAN COUNTY','MCLEAN CO','McLean County','McLean Co','mclean county','mclean Co')",
+    );
+    expect(countyWhere("facility", "Adair")).toBe("COUNTY IN ('ADAIR','Adair','adair')");
   });
   it("builds the grouped count and ranks the pasted answer", () => {
     const u = new URL(countyRankingUrl());

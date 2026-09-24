@@ -436,6 +436,23 @@ export function layerShortName(layerUrl: string): string {
   return m?.[1] ?? "layer";
 }
 
+const sqlLit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+/** "McLean" → the spellings a county's own file might use for itself. */
+export function countySpellings(county: string, withSuffix: boolean): string[] {
+  const c = county.trim();
+  const upper = c.toUpperCase();
+  const title = c;
+  const bases = [...new Set([upper, title, c.toLowerCase()])];
+  const out: string[] = [...bases];
+  if (withSuffix) {
+    for (const b of bases) {
+      const suffix = b === upper ? " COUNTY" : b === title ? " County" : " county";
+      out.push(`${b}${suffix}`, `${b}${b === upper ? " CO" : " Co"}`);
+    }
+  }
+  return [...new Set(out)];
+}
+
 /** The per-kind where clause that scopes a statewide layer to one county. */
 export function countyWhere(kind: LayerKind, county: string, minSqFt = 5000): string {
   switch (kind) {
@@ -446,10 +463,12 @@ export function countyWhere(kind: LayerKind, county: string, minSqFt = 5000): st
     // Plain equality only: a function on the column (UPPER(County) = …) makes the state server
     // scan every row in Kentucky and the request times out. Both layers store the county in
     // capitals (McLean and Adair samples), so the upper-cased literal matches as is.
+    // Each county's 911 agency spells its own name: Hardin's file says "HARDIN COUNTY", Ballard's
+    // returned 3 rows for that pattern. An IN list of the usual spellings keeps the index.
     case "address":
-      return `County = '${county.trim().toUpperCase()} COUNTY'`;
+      return `County IN (${countySpellings(county, true).map(sqlLit).join(",")})`;
     case "facility":
-      return `COUNTY = '${county.trim().toUpperCase()}'`;
+      return `COUNTY IN (${countySpellings(county, false).map(sqlLit).join(",")})`;
     case "parcel":
       return "CLASS IN ('COMMERCIAL','PUBLIC SERVICE')";
   }
