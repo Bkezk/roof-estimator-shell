@@ -19,6 +19,10 @@ on:
         description: "Load footprints too (first load / new survey)"
         type: boolean
         default: false
+      skip_fresh_days:
+        description: "Skip counties refreshed in the last N days (resume a cancelled pass; blank = none)"
+        required: false
+        default: ""
 
 jobs:
   refresh:
@@ -44,6 +48,7 @@ jobs:
           LOADER_PASSWORD: ${{ secrets.LOADER_PASSWORD }}
           COUNTY: ${{ github.event.inputs.county }}
           FOOTPRINTS: ${{ github.event.inputs.footprints }}
+          SKIP_FRESH: ${{ github.event.inputs.skip_fresh_days }}
           SHARD: ${{ matrix.shard }}
         run: |
           if [ -n "$COUNTY" ]; then
@@ -53,5 +58,6 @@ jobs:
             ARGS="--all --shard $SHARD/1"
           fi
           if [ "${{ github.event_name }}" = "schedule" ] || [ "$FOOTPRINTS" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
+          if [ -n "$SKIP_FRESH" ]; then ARGS="$ARGS --skip-fresh $SKIP_FRESH"; fi
           echo "running: $ARGS"
           npx vite-node scripts/load-kentucky.ts $ARGS

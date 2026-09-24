@@ -3,7 +3,7 @@
  * from a machine that can reach the state server (GitHub Actions monthly, or a laptop):
  *
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
- *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--trim] [--shard 1/2]
+ *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--trim] [--shard 1/2] [--skip-fresh 2]
  *
  * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
  * secrets; never in the repo). The project URL and public key are read from the committed .env.
@@ -44,6 +44,10 @@ const only = flag("--county");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
 const trim = args.includes("--trim");
+// --skip-fresh 2: leave out counties that already have a data_refreshes row from the last N
+// days, so a pass that was cancelled part-way (the database starves when the app and the
+// loader share the small instance) can be resumed without redoing the finished counties.
+const skipFreshDays = Number(flag("--skip-fresh") ?? 0);
 // --shard 2/2: this run takes every other county starting at the 2nd (GitHub runs shards in
 // parallel so the whole state fits inside one job's time limit).
 const shard = (() => {
@@ -248,6 +252,24 @@ async function countyBuildings(county: string): Promise<CountyBuilding[]> {
         needsAddress: (r.address1 ?? "") === "" && (r.source === "ornl" || r.source === "ky911"),
       });
     }
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
+/** Counties with a data_refreshes row newer than `days` days (any pass, hand or scheduled). */
+async function recentlyRefreshed(days: number): Promise<Set<string>> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const out = new Set<string>();
+  // PostgREST pages at 1,000 rows; the table holds one row per county per pass.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("data_refreshes")
+      .select("county")
+      .gte("ran_at", since)
+      .range(from, from + 999);
+    if (error) throw new Error(`data_refreshes: ${error.message}`);
+    for (const r of data ?? []) out.add(r.county);
     if (!data || data.length < 1000) break;
   }
   return out;
@@ -569,6 +591,14 @@ async function main() {
   }
   let counties = only ? [only] : all ? [...KY_COUNTIES] : [];
   if (shard && !only) counties = counties.filter((_, idx) => idx % shard.n === shard.i);
+  if (skipFreshDays > 0 && !only) {
+    const fresh = await recentlyRefreshed(skipFreshDays);
+    const before = counties.length;
+    counties = counties.filter((c) => !fresh.has(c));
+    console.log(
+      `skipping ${before - counties.length} counties refreshed in the last ${skipFreshDays} days; ${counties.length} to do`,
+    );
+  }
   if (counties.length === 0) {
     console.error("Give --county <Name> or --all");
     process.exit(2);

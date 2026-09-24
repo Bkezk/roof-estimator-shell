@@ -32,14 +32,18 @@ the bottom with the commit that closed them.
 3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` (matching in
    the loader's memory; only linked / business points reach the database) and the
    `Refresh Kentucky data` workflow (1st of each month, one shard). Secrets LOADER_EMAIL and
-   LOADER_PASSWORD are set. State after runs 5–9 (Sep 24): footprints for all 120 counties;
-   addresses and businesses matched for ~40 counties. Every run stalled on the same thing: the
-   database is a small instance with a burst disk-IO budget, run 5 left 2.1 M junk address
-   points (1.3 GB), and once the budget is spent a 200-row upsert into that table takes over
-   30 s. Owner: run `truncate table public.address_points;` in the database console (the
-   loader rebuilds only the useful rows), then dispatch the workflow with footprints = false
-   at night. Lessons: never run DDL while the loader is writing (an `alter table` blocked it
-   and PostgREST lost its schema cache for six minutes); one shard only.
+   LOADER_PASSWORD are set. State after run 10 (Sep 24, after the owner truncated the 2.1 M
+   junk address points): footprints for all 120 counties; addresses and businesses matched
+   for 58 counties (Adair … Johnson, plus Knott/Knox/Larue/Laurel partly). Run 10 went well
+   for 25 minutes and then the small instance starved: every 200-row `apply_building_addresses`
+   call hit the 30 s statement timeout, even `select 1` was cancelled, and the owner could not
+   open a bid — so it was cancelled at 13:26 UTC. The write itself is an index lookup per row
+   (EXPLAIN: nested loop on buildings_pkey), so this is the instance's burst budget, not a bad
+   plan. Rule: the loader runs only when nobody is using the app (night pass at 02:00 UTC,
+   `skip_fresh_days=3` resumes where the last pass stopped) and one shard only; never run
+   DDL while it writes (an `alter table` blocked it and PostgREST lost its schema cache for
+   six minutes). If the night pass also starves, the next step is the Lovable Cloud instance
+   upgrade, not more loader tuning.
    Open: Ballard, Clark, Fulton and Martin keep almost no address points (Clark 0 of 16,695;
    Martin 19 of 6,169) — their 911 layer rows likely lack the number/street fields or
    coordinates the reader expects; paste a sample feature from one of them to fix the reader.
