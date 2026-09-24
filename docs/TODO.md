@@ -34,8 +34,9 @@ the bottom with the commit that closed them.
    subagent task once the table shape is settled.
    The bigger goal (owner, Sep 24): the company runs four products today — Bid-Advantage,
    PlanSwift, CenterPoint and Sage — and the target is **this web app + Sage only**.
-   Bid-Advantage → Estimator (built; importer for old bids built). PlanSwift → aerial takeoff
-   (brief phase 2, not started). CenterPoint → service jobs, customers, scheduling, invoicing
+   Bid-Advantage → Estimator (built; importer for old bids built). PlanSwift → takeoff on
+   plans + aerial (brief phase 2, not started; research and module proposal in
+   `docs/planswift-research.md`). CenterPoint → service jobs, customers, scheduling, invoicing
    here. Sage stays for accounting and payments; a live Sage integration is OPTIONAL — the app
    only has to hand Sage clean invoice / payment numbers (an export the bookkeeper imports is
    enough). Order: CenterPoint replacement first (daily use), then takeoff, then history
