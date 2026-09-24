@@ -5,6 +5,36 @@ the bottom with the commit that closed them.
 
 ## Open
 
+0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
+   first in a new session. Context: new-roof work is estimated and sold in this app; repair
+   work, invoices and customer records live in **CenterPoint Connect** (the company's CRM).
+   Inventory now sits at the shop or on a service vehicle (`inventory_locations`); the four
+   movements are shop→job, shop→vehicle, vehicle→job, vehicle→shop, all through the two
+   Inventory buttons (Take from / Put in inventory, location asked first). Repairs have no
+   record in the app, so material used off a truck on a repair can only be written off as
+   "used on the vehicle" (the tick box on a vehicle→shop move). The owner wants that box gone
+   once repairs can carry material.
+   Agreed direction (owner, Sep 24): do NOT make repairs bids and do not bolt them onto
+   CenterPoint; build a lightweight **service job** in the app and keep CenterPoint as the
+   customer / invoicing system of record until the CRM phase (brief §phase 5), when service
+   jobs become CRM service tickets.
+   Step 1 — explore CenterPoint (needs a session whose environment allows
+   centerpointconnect.io / centerpointconnect.com; the owner sets Network access on the cloud
+   environment, and creates a separate CenterPoint login for Claude — never the owner's own).
+   Walk the site in the installed Chromium (Playwright, `/opt/pw-browsers`) and record here:
+   which objects the team uses daily (repair ticket, job, invoice, customer, reports) and which
+   they ignore; a repair's life from first call to invoice; the fields techs fill in; any
+   export (CSV) or API / integration CenterPoint offers (decides whether the app links to a
+   ticket by a typed number or a live connection).
+   Step 2 — build the service job: `service_jobs` table (customer / building, date, tech,
+   vehicle, notes, CenterPoint ticket + invoice numbers, status), a Service page next to Bids
+   (list + one-screen form), the Inventory "A job" picker listing bids AND service jobs (a
+   consumed movement then carries a service_job_id), material + hours per service job, and
+   remove the "rest was used on the vehicle" write-off. Half a day; the UI is a good Opus
+   subagent task once the table shape is settled.
+   Owner rules to keep: number boxes start blank (0 placeholder, never prefilled);
+   prospecting code must not touch bidding code; the loader runs only at night; never rewrite
+   pushed history (Lovable); push straight to main.
 1. **Import old bids (.bax files).** Built (Saved Bids › "Import old bids"): the file's own
    catalog resolves every id; labor rate, markup, commission, per diem, tax and extra shipping
    come from the estimate; Non-DL items and Exceptional Metals keep their stored unit costs
