@@ -10,6 +10,7 @@ import {
   GeoJSONSource,
   LngLatBounds,
   Map as MlMap,
+  Marker,
   NavigationControl,
   ScaleControl,
   type LngLatBoundsLike,
@@ -45,6 +46,40 @@ interface Props {
   showOutlines?: boolean;
   className?: string;
 }
+
+/**
+ * Kentucky's 25 largest cities (approximate centres) as orientation labels; they fade out as
+ * the map zooms in so they never sit on a roof.
+ */
+const KY_CITIES: [string, number, number][] = [
+  ["Louisville", -85.7585, 38.2527],
+  ["Lexington", -84.5037, 38.0406],
+  ["Bowling Green", -86.4808, 36.9685],
+  ["Owensboro", -87.1112, 37.7719],
+  ["Covington", -84.5086, 39.0837],
+  ["Georgetown", -84.5588, 38.2098],
+  ["Richmond", -84.2947, 37.7479],
+  ["Florence", -84.6266, 38.9989],
+  ["Elizabethtown", -85.8591, 37.6939],
+  ["Nicholasville", -84.573, 37.8806],
+  ["Hopkinsville", -87.4886, 36.8656],
+  ["Frankfort", -84.8733, 38.2009],
+  ["Henderson", -87.59, 37.8361],
+  ["Paducah", -88.6, 37.0834],
+  ["Independence", -84.5441, 38.9431],
+  ["Radcliff", -85.9491, 37.8403],
+  ["Ashland", -82.6379, 38.4784],
+  ["Madisonville", -87.4989, 37.3281],
+  ["Murray", -88.3148, 36.6103],
+  ["Winchester", -84.1797, 37.9901],
+  ["Erlanger", -84.6008, 39.0167],
+  ["Danville", -84.7722, 37.6456],
+  ["Shelbyville", -85.2236, 38.212],
+  ["Glasgow", -85.9119, 36.9959],
+  ["Somerset", -84.6041, 37.092],
+];
+/** Label opacity by zoom: solid to zoom 9, gone by zoom 13. */
+const cityOpacity = (zoom: number) => Math.max(0, Math.min(1, (13 - zoom) / 4));
 
 const KY_BOUNDS: LngLatBoundsLike = [
   [-89.72, 36.44],
@@ -115,6 +150,21 @@ export default function ProspectMap({
     });
     m.addControl(new NavigationControl({ visualizePitch: false }), "top-right");
     m.addControl(new ScaleControl({ unit: "imperial" }));
+    // City labels as HTML markers (no font glyphs needed); fade with zoom.
+    const labels = KY_CITIES.map(([name, lng, lat]) => {
+      const el = document.createElement("div");
+      el.textContent = name;
+      el.className =
+        "pointer-events-none select-none rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-semibold text-white shadow";
+      el.style.transition = "opacity 150ms";
+      return new Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(m);
+    });
+    const fade = () => {
+      const o = String(cityOpacity(m.getZoom()));
+      for (const l of labels) l.getElement().style.opacity = o;
+    };
+    fade();
+    m.on("zoom", fade);
     m.on("load", () => {
       m.addSource("footprints", {
         type: "geojson",
