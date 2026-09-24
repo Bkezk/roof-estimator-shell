@@ -484,6 +484,24 @@ describe("pricing overlay", () => {
   });
 });
 
+describe("sheet sections (Combined Bid Project Test)", () => {
+  it("keeps the file's 60\" tab spacing, sheet size and pull test on every section", async () => {
+    const doc = await load("combined-bid-project-test.bax");
+    const r = convertBax(doc, { fileName: "combined.bax", boardNames: BOARDS });
+    // Legacy RoofSection.FieldLap is the <tabrgwidth> field (_fieldTabSizeOrRollWidth): the
+    // tab spacing on a sheet section, the roll width on roll goods. This bid was saved with
+    // 60" tabs (one of the sheettabspacings 28 / 60 / 120), not the 28" default.
+    expect(r.saved.sections).toHaveLength(3);
+    for (const s of r.saved.sections) {
+      expect(s.fieldLap).toBe(60);
+      expect(s.sheetSizeLabel).toBe("2000 sf");
+      expect(s.pullTest).toBe(425);
+      expect(s.designTable).toBe(60);
+      expect(s.deckType).toBe("Steel");
+    }
+  });
+});
+
 describe("engine smoke run", () => {
   const admin: EngineAdminData = {
     deckOrder: [],
