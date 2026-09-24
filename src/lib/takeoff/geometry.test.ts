@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   convexCorners,
+  drawnSideLabels,
   edgeLengths,
   equivalentRect,
   polygonArea,
@@ -52,6 +53,24 @@ describe("polygon maths", () => {
     expect(2 * (r.length + r.width)).toBeCloseTo(340, 9);
     // a rounder-than-square pair falls back to the square
     expect(equivalentRect(100, 10)).toEqual({ length: 10, width: 10 });
+  });
+});
+
+describe("drawnSideLabels", () => {
+  it("labels a four-sided outline A–D from its longest side, in drawing order, and others 1..N", () => {
+    // drawn starting on a short side: the long side drawn second is A
+    const drawn: Array<[number, number]> = [
+      [100, 0],
+      [100, 40],
+      [0, 40],
+      [0, 0],
+    ];
+    expect(drawnSideLabels(drawn)).toEqual(["D", "A", "B", "C"]);
+    const s = sectionFromOutline(drawn, [{ termination: '4" Fascia' }]);
+    // the drawn edge 0 (labelled D above) is the one carrying the fascia in the section
+    expect(s.edges.find((e) => e.termination === '4" Fascia')!.side).toBe("D");
+    expect(drawnSideLabels(rect)).toEqual(["A", "B", "C", "D"]);
+    expect(drawnSideLabels(ell)).toEqual(["1", "2", "3", "4", "5", "6"]);
   });
 });
 

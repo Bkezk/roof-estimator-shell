@@ -6,7 +6,7 @@
 import { AlertTriangle, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
-import { polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
+import { drawnSideLabels, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 import {
   COUNT_ROLES,
   COUNT_ROLE_LABELS,
@@ -379,6 +379,8 @@ function AreaEditor(props: {
   const o = props.object;
   const { fpp } = props;
   const lens = edgeLengthsFt(o.points, fpp);
+  // Side labels as the drawing and the bid show them (A–D on a four-sided outline, else 1..N).
+  const sideLabels = drawnSideLabels(o.points);
   const edges: OutlineEdgeOptions[] = o.points.map((_, i) => o.attrs.edges?.[i] ?? {});
   const cutouts = o.attrs.cutouts ?? [];
   const net = netAreaSqFt(o.points, cutouts, fpp);
@@ -426,7 +428,7 @@ function AreaEditor(props: {
           <tbody>
             {edges.map((e, i) => (
               <tr key={i} className="border-t">
-                <td className="py-1 pr-1">{i + 1}</td>
+                <td className="py-1 pr-1 font-medium">{sideLabels[i]}</td>
                 <td className="whitespace-nowrap pr-1 tabular-nums">
                   {fpp === null ? "—" : `${fmtNum(lens[i]!)} ft`}
                 </td>
@@ -434,7 +436,7 @@ function AreaEditor(props: {
                   <Checkbox
                     checked={e.isPerimeter ?? false}
                     onCheckedChange={(c) => setEdge(i, "isPerimeter", c === true)}
-                    aria-label={`Side ${i + 1} perimeter`}
+                    aria-label={`Side ${sideLabels[i]} perimeter`}
                   />
                 </td>
                 <td className="pr-1">
@@ -484,7 +486,7 @@ function AreaEditor(props: {
                     onCheckedChange={(c) =>
                       setEdge(i, "hasTallWall", c === true ? true : undefined)
                     }
-                    aria-label={`Side ${i + 1} tall wall`}
+                    aria-label={`Side ${sideLabels[i]} tall wall`}
                   />
                 </td>
               </tr>

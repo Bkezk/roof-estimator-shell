@@ -5,7 +5,7 @@
  */
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
 
-import { edgeLengths, polygonArea } from "@/lib/takeoff/geometry";
+import { drawnSideLabels, edgeLengths, polygonArea } from "@/lib/takeoff/geometry";
 import type { PagePoint, PageScale, TakeoffObject } from "@/lib/takeoff/model";
 
 import {
@@ -81,6 +81,7 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
           const [cx, cy] = centroid(o.points);
           const area = netAreaSqFt(o.points, cut, fpp);
           const lens = edgeLengths(o.points);
+          const sideLabels = drawnSideLabels(o.points);
           return (
             <g key={o.id}>
               <path
@@ -109,6 +110,8 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
               ))}
               {o.points.map((p, i) => {
                 const q = o.points[(i + 1) % o.points.length]!;
+                // "A · 100 ft": the side label matches the Objects tab and the bid's Sections
+                // screen (A–D from the longest side on a four-sided outline, else 1..N).
                 return (
                   <SvgLabel
                     key={i}
@@ -117,7 +120,7 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                     zoom={zoom}
                     size={11}
                   >
-                    {lengthLabel(lens[i]!, fpp)}
+                    {`${sideLabels[i]} · ${lengthLabel(lens[i]!, fpp)}`}
                   </SvgLabel>
                 );
               })}

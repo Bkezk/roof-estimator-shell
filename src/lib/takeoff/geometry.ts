@@ -117,6 +117,23 @@ export function normalizeStart<T>(
 }
 
 /**
+ * The side label of each DRAWN edge (index i = points[i] → points[i+1]), exactly as
+ * `sectionFromOutline` will name it: A–D for a four-sided outline (A = the longest side, then
+ * clockwise in drawing order), "1".."N" otherwise. The drawing, the Objects tab and the bid's
+ * Sections screen all show these same labels.
+ */
+export function drawnSideLabels(points: readonly Pt[]): string[] {
+  const n = points.length;
+  if (n !== 4) return points.map((_, i) => String(i + 1));
+  const lens = edgeLengths(points);
+  let start = 0;
+  for (let i = 1; i < 4; i++) if (lens[i]! > lens[start]! + 1e-9) start = i;
+  const labels = new Array<string>(4);
+  for (let k = 0; k < 4; k++) labels[(start + k) % 4] = EDGE_SIDES[k]!;
+  return labels;
+}
+
+/**
  * Turn a drawn outline into the section fields the estimator needs. `edgeOptions[i]` applies to
  * edge i as drawn (before any start rotation); absent = an inert edge, like a fresh typed section.
  */
