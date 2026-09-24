@@ -5033,6 +5033,25 @@ function EstimatePage() {
                         </Table>
                       </div>
                     )}
+                    {(bidPulls ?? []).length > 0 && (
+                      <div className="mt-3 space-y-1 text-xs">
+                        <p className="font-medium">Taken from inventory for this bid</p>
+                        <ul className="space-y-0.5 text-muted-foreground">
+                          {(bidPulls ?? []).map((m) => (
+                            <li key={m.id}>
+                              {new Date(m.created_at).toLocaleDateString()} ·{" "}
+                              {m.created_by_name ?? "someone"} ·{" "}
+                              <span className={m.qty < 0 ? "" : "text-green-700"}>
+                                {m.qty < 0 ? "took" : "returned"} {Math.abs(m.qty)} {m.unit}
+                              </span>{" "}
+                              {m.row_label}
+                              {m.price_col !== "price" ? ` · ${m.price_col}` : ""}
+                              {m.note ? ` — ${m.note}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </CardContent>
                 </CollapsibleContent>
               </Card>

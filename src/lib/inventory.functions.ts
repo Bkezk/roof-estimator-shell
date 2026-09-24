@@ -228,13 +228,12 @@ export const addMovement = createServerFn({ method: "POST" })
         .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", data.screen_id).maybeSingle(),
     ]);
-    // Inventory access records leftovers; Estimate access (or admin) records anything.
+    // Inventory access records leftovers and what a crew takes for a job; Estimate access (or
+    // admin) records anything (adjustments, write-offs, returns).
     if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
       throw new Error("Forbidden: Inventory access required");
-    if (!canAccess(me, "estimate") && data.reason !== "leftover")
-      throw new Error(
-        "Inventory-only logins record leftovers only — ask an estimator for adjustments",
-      );
+    if (!canAccess(me, "estimate") && data.reason !== "leftover" && data.reason !== "consumed")
+      throw new Error("Only an estimator can adjust counts or write stock off");
     if (error) throw new Error(error.message);
     if (!screen) throw new Error("Catalog screen not found");
     const d = screen.data as {
@@ -279,7 +278,7 @@ export const addMovement = createServerFn({ method: "POST" })
     if (data.reason === "adjustment") qty = counted;
     if (qty === 0) throw new Error("Quantity cannot be zero");
     if ((data.reason === "consumed" || data.reason === "released") && !data.bid_id)
-      throw new Error("Pulling from or returning to stock needs a saved bid");
+      throw new Error("Pick the job this material is for");
     if (data.reason === "consumed") {
       // Never pull more than the shelf holds (on hand = the sum of the cell's entries).
       const { data: prior, error: pErr } = await sb
@@ -291,7 +290,7 @@ export const addMovement = createServerFn({ method: "POST" })
       if (pErr) throw new Error(pErr.message);
       const onHand = (prior ?? []).reduce((n, r) => n + Number(r.qty), 0);
       if (-qty > onHand + 1e-9)
-        throw new Error(`Only ${Math.round(onHand * 1000) / 1000} ${unit} on hand`);
+        throw new Error(`Only ${Math.round(onHand * 1000) / 1000} ${unit} on the shelf`);
     }
     let bidName: string | null = null;
     if (data.bid_id) {
