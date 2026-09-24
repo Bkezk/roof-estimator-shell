@@ -3,7 +3,7 @@
  * from a machine that can reach the state server (GitHub Actions monthly, or a laptop):
  *
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
- *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/3]
+ *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--shard 1/2]
  *
  * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
  * secrets; never in the repo). The project URL and public key are read from the committed .env. Per county: footprints of the size floor → every 911 address point → match
@@ -41,7 +41,7 @@ const all = args.includes("--all");
 const only = flag("--county");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
-// --shard 2/3: this run takes every 3rd county starting at the 2nd (GitHub runs shards in
+// --shard 2/2: this run takes every other county starting at the 2nd (GitHub runs shards in
 // parallel so the whole state fits inside one job's time limit).
 const shard = (() => {
   const m = /^(\d+)\/(\d+)$/.exec(flag("--shard") ?? "");
@@ -406,13 +406,28 @@ async function loadCounty(county: string) {
   );
 }
 
+/**
+ * Sign in as the loader login. supabase-js refreshes an expired token only on the next request,
+ * and outside a browser it never starts the proactive refresh ticker on its own — run 6 lost its
+ * session an hour in, after which every insert was rejected by row-level security as anonymous.
+ * So: start the ticker, and re-sign in whenever a county fails on an auth / RLS error.
+ */
+async function signIn(): Promise<void> {
+  if (serviceKey) return;
+  const { error } = await sb.auth.signInWithPassword({ email: email!, password: password! });
+  if (error) throw new Error(`Could not sign in as ${email}: ${error.message}`);
+  await sb.auth.startAutoRefresh();
+}
+
+const isAuthError = (msg: string) =>
+  /row-level security|jwt|token|401|not authenticated|expired/i.test(msg);
+
 async function main() {
-  if (!serviceKey) {
-    const { error } = await sb.auth.signInWithPassword({ email: email!, password: password! });
-    if (error) {
-      console.error(`Could not sign in as ${email}: ${error.message}`);
-      process.exit(2);
-    }
+  try {
+    await signIn();
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(2);
   }
   let counties = only ? [only] : all ? [...KY_COUNTIES] : [];
   if (shard && !only) counties = counties.filter((_, idx) => idx % shard.n === shard.i);
@@ -425,8 +440,22 @@ async function main() {
     try {
       await loadCounty(c);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (isAuthError(msg)) {
+        // Session lost: sign in again and give the county one more go.
+        console.error(`[${c}] session lost (${msg}); signing in again`);
+        try {
+          await signIn();
+          await loadCounty(c);
+          continue;
+        } catch (e2) {
+          failed.push(c);
+          console.error(`[${c}] FAILED: ${e2 instanceof Error ? e2.message : String(e2)}`);
+          continue;
+        }
+      }
       failed.push(c);
-      console.error(`[${c}] FAILED: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(`[${c}] FAILED: ${msg}`);
     }
   }
   if (failed.length > 0) {
