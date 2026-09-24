@@ -122,7 +122,7 @@ interface RefTables {
       sheetSizes: Map<number, string>;
     }
   >;
-  boardById: Map<number, { name: string; subtype: number; groupId: number }>;
+  boardById: Map<number, { name: string; subtype: number; groupId: number; needQuote: boolean }>;
   terminationById: Map<number, string>;
   tearOffById: Map<number, string>;
   warrantyById: Map<number, { name: string; isHighWind: boolean; termYears: number }>;
@@ -272,6 +272,8 @@ function buildRefTables(management: XNode | undefined): RefTables {
       name: u.attrs["name"] ?? "",
       subtype: attrNum(u, "subtype"),
       groupId: attrNum(u, "adhesivegroupid"),
+      // Legacy "needquote" boards (Flute Filler, tapered…) are always priced by a custom quote.
+      needQuote: /^true$/i.test(u.attrs["needquote"] ?? ""),
     });
   for (const x of children(child(m, "terminations"), "termination"))
     t.terminationById.set(id(x), x.attrs["description"] ?? "");
@@ -557,7 +559,9 @@ export function convertBax(doc: XNode, opts: ConvertOptions): BaxConversion {
   // Board names the app knows (for spelling), keyed loosely.
   const boardKeyToName = new Map<string, string>();
   for (const n of opts.boardNames ?? []) boardKeyToName.set(nameKey(n), n);
-  const boardName = (legacyId: number): string => {
+  // `quoted`: the layer carries a custom quote (Flute Filler, tapered, ISO-rigid quote), so it
+  // is priced from the file's lump sum and the live price list is irrelevant — no warning.
+  const boardName = (legacyId: number, quoted = false): string => {
     const b = ref.boardById.get(legacyId);
     if (!b) {
       warn(`Unknown underlayment board id ${legacyId} — layer imported without a board name.`);
@@ -566,7 +570,7 @@ export function convertBax(doc: XNode, opts: ConvertOptions): BaxConversion {
     const norm = normalizeLegacyName(b.name);
     const known = boardKeyToName.get(nameKey(norm));
     if (known) return known;
-    if (opts.boardNames?.length)
+    if (opts.boardNames?.length && !quoted && !b.needQuote)
       warn(`Board "${norm}" is not in the current underlayment price list — check its price.`);
     return norm;
   };
@@ -716,14 +720,14 @@ export function convertBax(doc: XNode, opts: ConvertOptions): BaxConversion {
           adhesiveName = adh.longName;
         } else warn(`${where} layer ${i + 1}: unknown attachment "${short}"; read as none.`);
       }
+      const qid = num(u, "quoteid", -1);
       const layer: UnderlaymentLayer = {
-        board: boardName(boardId),
+        board: boardName(boardId, qid >= 0),
         attachment,
         fastenersPerBoard: 0,
         adhesiveName,
         substrate: "",
       };
-      const qid = num(u, "quoteid", -1);
       if (qid >= 0) {
         const q = quotes.get(qid);
         if (q) layer.quote = { ...q };

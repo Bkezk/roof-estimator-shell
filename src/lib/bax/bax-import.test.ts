@@ -389,6 +389,8 @@ describe("Monticello and Broad Head .bax", () => {
     const a = s.sections[0]!;
     expect(a.layers![0]).toMatchObject({ board: "Flute Filler", attachment: "none" });
     expect(a.layers![0]!.quote).toMatchObject({ lumpSum: 46230, laborAmount: 200 });
+    // A quoted layer is priced from the file's lump sum; the live price list does not apply.
+    expect(r.warnings.filter((w) => w.includes("Flute Filler"))).toEqual([]);
     expect(a.layers![1]).toMatchObject({ board: '1" ISO', attachment: "mechanical" });
     expect(a.layers![2]).toMatchObject({ board: '1/4" DensDeck Prime', attachment: "adhesive" });
     expect(a.edges![0]).toMatchObject({
