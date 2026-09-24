@@ -683,7 +683,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 href="https://github.com/Bkezk/roof-estimator-shell/actions/workflows/refresh-kentucky.yml"
                 target="_blank"
                 rel="noreferrer"
-                title="Runs on the 1st of each month; open to refresh a county now"
+                title="Runs at 1 am Eastern on the 1st of each month; start a by-hand refresh at night, it slows the app"
               >
                 <ExternalLink className="mr-1 h-4 w-4" /> Refresh data
               </a>

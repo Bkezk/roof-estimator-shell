@@ -282,7 +282,7 @@ The database is the source; the Buildings page never queries the state server. T
 
 - **A county from the browser:** Buildings → Load county data → Load. Same steps as below.
 - **All 120 counties, and the monthly refresh:** `scripts/load-kentucky.ts`, run by the
-  GitHub workflow `Refresh Kentucky data` (07:00 UTC on the 1st; also by hand from the Actions
+  GitHub workflow `Refresh Kentucky data` (05:00 UTC on the 1st = 1 am Eastern, so it never overlaps a working day; also by hand from the Actions
   tab with an optional county and "Load footprints too"). It signs in as a Bid-O-Matic user:
   make a login in Users & access with Prospecting access and store its email and password as
   the repository secrets `LOADER_EMAIL` and `LOADER_PASSWORD`. The project URL and public key

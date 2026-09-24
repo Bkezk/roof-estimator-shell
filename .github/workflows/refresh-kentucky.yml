@@ -1,14 +1,17 @@
 # Monthly refresh of the prospecting data from Kentucky's free GIS (docs/roofing-ops-portal-brief.md).
 # Footprints are a one-time survey, so the monthly run refreshes addresses, named businesses and
 # facilities; run it by hand with "Load footprints too" for the first statewide load or when the
-# state republishes footprints. Secrets (repository settings → Secrets and variables → Actions):
+# state republishes footprints. The database is a small instance that cannot serve the loader
+# and the app at once (run 10 starved it and bids would not open), so the schedule is the
+# middle of the night and a by-hand run should be started at night too.
+# Secrets (repository settings → Secrets and variables → Actions):
 # LOADER_EMAIL and LOADER_PASSWORD, a Bid-O-Matic login with Prospecting access made in Users &
 # access. The project URL and public key come from the committed .env.
 name: Refresh Kentucky data
 
 on:
   schedule:
-    - cron: "0 7 1 * *" # 07:00 UTC on the 1st = 3 am Eastern
+    - cron: "0 5 1 * *" # 05:00 UTC on the 1st = 1 am Eastern / midnight Central; a full pass takes ~3 h
   workflow_dispatch:
     inputs:
       county:
