@@ -19,7 +19,9 @@ import { parseXml } from "./xml";
 import type { EngineAdminData } from "@/lib/engine/adapters";
 import type { AccessoriesState } from "@/lib/engine/accessories";
 import type { NonDlState } from "@/lib/engine/nondl";
-import type { WarrantyData } from "@/lib/proposal-bid";
+import { buildBidInput, type WarrantyData } from "@/lib/proposal-bid";
+import { buildEstimateInputs } from "@/lib/engine/bid-builder";
+import { computeEstimate } from "@/lib/engine/estimate";
 
 const fixture = (name: string) =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`./__fixtures__/${name}`, import.meta.url))));
@@ -463,4 +465,40 @@ describe("pricing overlay", () => {
     expect(warranty.warranties[0]!.pricePerSqFt).toBe(0.08);
     expect(warranty.highWind[0]).toMatchObject({ mechPerSqFt: 0.13, adheredPerSqFt: 0.14 });
   });
+});
+
+describe("engine smoke run", () => {
+  const admin: EngineAdminData = {
+    deckOrder: [],
+    priceMatrix: {},
+    labor: {},
+    settings: {
+      hoursPerDay: 9,
+      masterEliteCont: true,
+      salesTax: 0.0625,
+      taxMaterialOnly: false,
+      shippingMode: "stepped",
+      shippingPercent: 0,
+    },
+    adhesivePrices: {},
+    familyMembranePrices: {},
+  };
+  const files = [
+    "summit-project.bax",
+    "monticello-banking-2026.bax",
+    "knox-county-fiscal-court.bax",
+    "broad-head-elementary.bax",
+  ];
+  for (const f of files) {
+    it(`computes a total for ${f} without throwing`, async () => {
+      const doc = await load(f);
+      const c = convertBax(doc, { fileName: f, boardNames: BOARDS });
+      const { admin: snap } = applyLegacyPricing(admin, doc);
+      const payload = { ...c.saved, adminSnapshot: snap, pricingAsOf: c.lastSavedAt ?? "" };
+      const build = buildEstimateInputs(buildBidInput(payload, null), snap);
+      const r = computeEstimate(build.inputs);
+      expect(Number.isFinite(r.money.grandTotal)).toBe(true);
+      expect(r.money.grandTotal).toBeGreaterThan(0);
+    });
+  }
 });
