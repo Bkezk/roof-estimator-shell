@@ -20,6 +20,9 @@ import {
 import type { MovementRow, StockRow } from "@/lib/inventory.functions";
 import { plural, stockUnitFor, type PieceDef } from "@/lib/stock-units";
 
+/** Escape a catalog string for use inside a RegExp. */
+const escapeRegExp = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export interface OrderCell {
   screen_id: string;
   row_label: string;
@@ -162,7 +165,9 @@ export function matchAccessoryCell(
       if (t.price_cols.length > 1) {
         const hit = t.price_cols.find((c) => {
           const colour = c.replace(/\s*price$/i, "").trim();
-          return colour && new RegExp(`\\b${colour.toLowerCase()}\\b`).test(name);
+          // Column names are catalog text ("+ for Color Price" exists): escape them, or a
+          // leading "+" throws "Nothing to repeat" and the whole order list fails to build.
+          return colour && new RegExp(`\\b${escapeRegExp(colour.toLowerCase())}\\b`).test(name);
         });
         if (hit) col = hit;
       }

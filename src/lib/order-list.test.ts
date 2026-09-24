@@ -129,6 +129,25 @@ describe("order list — matching engine lines to stock cells", () => {
     expect(matchAccessoryCell({ screen: "Unknown", name: "x" }, targets)).toBeUndefined();
   });
 
+  it('a price column named "+ for Color" (Drain Boots) is not a colour and must not throw', () => {
+    const drainTargets: PriceTarget[] = [
+      {
+        screen_id: "duro_last:drain_boots",
+        category: "Drain Boots",
+        rows: ['4" Drain Boot'],
+        price_cols: ["Price", "+ for Color"],
+        values: {},
+      },
+    ];
+    expect(
+      matchAccessoryCell({ screen: "Roof Drains & Boots", name: '4" Drain Boot' }, drainTargets),
+    ).toEqual({
+      screen_id: "duro_last:drain_boots",
+      row_label: '4" Drain Boot',
+      price_col: "Price",
+    });
+  });
+
   it("labels accessory lines in the unit the engine bills them", () => {
     expect(accessoryLineUnit("Term Bar", "Termination Bars White")).toBe("ft");
     expect(accessoryLineUnit("Sealants", "Duro-Caulk Plus - White")).toBe("tube");
