@@ -847,14 +847,14 @@ function RecordDialog(props: {
       const noteOrNull = note.trim() || null;
       let saved: { id: number; message: string };
       if (purpose.kind === "shop") {
-        // Loading a vehicle from the shop's stock.
+        // Taking off a vehicle back to the shop, or putting on a vehicle from the shop's stock.
         const r = await moveFn({
           data: {
             screen_id: ref.screen_id,
             row_label: ref.row_label,
             price_col: ref.price_col,
-            from_location_id: SHOP_LOCATION_ID,
-            to_location_id: location.id,
+            from_location_id: consumed ? location.id : SHOP_LOCATION_ID,
+            to_location_id: consumed ? SHOP_LOCATION_ID : location.id,
             qty: n,
             ...pieces,
             note: noteOrNull,
@@ -862,7 +862,9 @@ function RecordDialog(props: {
         });
         saved = {
           id: r.ids[0] ?? 0,
-          message: `${describeStock(r.moved, r.unit, piece)} of ${product} moved from the shop to ${locName}`,
+          message: consumed
+            ? `${describeStock(r.moved, r.unit, piece)} of ${product} moved from ${locName} back to the shop`
+            : `${describeStock(r.moved, r.unit, piece)} of ${product} moved from the shop to ${locName}`,
         };
       } else if (purpose.kind === "vehicle" && vehicle) {
         // Shop → vehicle (loading) or vehicle → shop (returning; the rest is used on it).
@@ -936,7 +938,9 @@ function RecordDialog(props: {
         ? "Take from inventory"
         : "Put in inventory"
       : purpose.kind === "shop"
-        ? `Move from the shop to ${locName}`
+        ? consumed
+          ? "Move to the shop"
+          : `Move from the shop to ${locName}`
         : purpose.kind === "vehicle"
           ? consumed
             ? `Load onto ${vehicle?.name ?? "the vehicle"}`
@@ -965,7 +969,7 @@ function RecordDialog(props: {
           <DialogTitle>{consumed ? "Take from inventory" : "Put in inventory"}</DialogTitle>
           <DialogDescription>
             {consumed
-              ? "Takes material from the shop or a service vehicle — for a job, to load a vehicle, or written off as used on a vehicle."
+              ? "Takes material from the shop or a service vehicle — for a job, to load a vehicle, or to bring it back to the shop."
               : `Puts material in the shop or on a service vehicle — leftovers from a job (or a purchase), stock moved from the shop, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
           </DialogDescription>
         </DialogHeader>
@@ -1086,9 +1090,10 @@ function RecordDialog(props: {
                 {consumed && location.kind === "vehicle" && (
                   <li>
                     {choice(
-                      `Used on ${location.name} (service call)`,
-                      purpose?.kind === "used",
-                      () => setPurpose({ kind: "used" }),
+                      "The shop (moves it back to the shop's list)",
+                      purpose?.kind === "shop",
+                      () => setPurpose({ kind: "shop" }),
+                      <Warehouse className="h-4 w-4 text-muted-foreground" />,
                     )}
                   </li>
                 )}
