@@ -44,12 +44,15 @@ interface Props {
   onTapEmpty?: (lng: number, lat: number) => void;
   /** Draw the state's outlines for every building (zoomed in). Off shows the roofs plainly. */
   showOutlines?: boolean;
+  /** City labels: the eight largest cities in view, fading out as the zoom gets close. */
+  showCities?: boolean;
   className?: string;
 }
 
 /**
- * Kentucky's 25 largest cities (approximate centres) as orientation labels; they fade out as
- * the map zooms in so they never sit on a roof.
+ * Kentucky cities in rough population order (approximate centres). The map shows the eight
+ * largest inside the current view — the state's big eight zoomed out, the local eight when
+ * zoomed into a corner — and fades them out as the zoom gets close enough to look at roofs.
  */
 const KY_CITIES: [string, number, number][] = [
   ["Louisville", -85.7585, 38.2527],
@@ -64,9 +67,9 @@ const KY_CITIES: [string, number, number][] = [
   ["Nicholasville", -84.573, 37.8806],
   ["Hopkinsville", -87.4886, 36.8656],
   ["Frankfort", -84.8733, 38.2009],
+  ["Independence", -84.5441, 38.9431],
   ["Henderson", -87.59, 37.8361],
   ["Paducah", -88.6, 37.0834],
-  ["Independence", -84.5441, 38.9431],
   ["Radcliff", -85.9491, 37.8403],
   ["Ashland", -82.6379, 38.4784],
   ["Madisonville", -87.4989, 37.3281],
@@ -77,7 +80,60 @@ const KY_CITIES: [string, number, number][] = [
   ["Shelbyville", -85.2236, 38.212],
   ["Glasgow", -85.9119, 36.9959],
   ["Somerset", -84.6041, 37.092],
+  ["Berea", -84.2963, 37.5687],
+  ["Newport", -84.4958, 39.0914],
+  ["Shepherdsville", -85.7158, 37.9884],
+  ["Bardstown", -85.4669, 37.8092],
+  ["Mount Washington", -85.5458, 38.0501],
+  ["Campbellsville", -85.3419, 37.3434],
+  ["Lawrenceburg", -84.8967, 38.0373],
+  ["Paris", -84.253, 38.2098],
+  ["Middlesboro", -83.716, 36.6084],
+  ["Mayfield", -88.6367, 36.7417],
+  ["Morehead", -83.4327, 38.184],
+  ["Versailles", -84.73, 38.0526],
+  ["Harrodsburg", -84.8433, 37.7623],
+  ["London", -84.0833, 37.1289],
+  ["Maysville", -83.7444, 38.6412],
+  ["Corbin", -84.0966, 36.9487],
+  ["Franklin", -86.5772, 36.7223],
+  ["Central City", -87.1233, 37.2939],
+  ["Russellville", -86.8872, 36.8453],
+  ["Pikeville", -82.5187, 37.4793],
+  ["Hazard", -83.1932, 37.2495],
+  ["Harlan", -83.3219, 36.8431],
+  ["Williamsburg", -84.1597, 36.7434],
+  ["Barbourville", -83.8888, 36.8665],
+  ["Prestonsburg", -82.7715, 37.6656],
+  ["Paintsville", -82.8071, 37.8145],
+  ["Whitesburg", -82.8268, 37.1184],
+  ["Jackson", -83.3832, 37.5531],
+  ["Cynthiana", -84.2941, 38.3903],
+  ["Princeton", -87.8817, 37.1092],
+  ["Leitchfield", -86.2939, 37.4801],
+  ["Morganfield", -87.9167, 37.6834],
+  ["Greenville", -87.1789, 37.2012],
+  ["Manchester", -83.7638, 37.1537],
+  ["Monticello", -84.8494, 36.8298],
+  ["Columbia", -85.3066, 37.1028],
+  ["Mount Sterling", -83.9433, 38.0565],
+  ["Grayson", -82.9485, 38.3326],
+  ["Louisa", -82.6032, 38.1142],
+  ["Cadiz", -87.8353, 36.8653],
+  ["Marion", -88.0811, 37.3323],
+  ["Brandenburg", -86.1694, 37.9984],
+  ["Carrollton", -85.1794, 38.6809],
+  ["La Grange", -85.3788, 38.4073],
+  ["Lebanon", -85.253, 37.5698],
+  ["Stanford", -84.6619, 37.5312],
+  ["Albany", -85.1347, 36.6903],
+  ["Scottsville", -86.1905, 36.7534],
+  ["Benton", -88.3503, 36.8573],
+  ["Beaver Dam", -86.8758, 37.4017],
+  ["Fulton", -88.8742, 36.5042],
+  ["Hodgenville", -85.74, 37.574],
 ];
+const CITIES_SHOWN = 8;
 /** Label opacity by zoom: solid to zoom 9, gone by zoom 13. */
 const cityOpacity = (zoom: number) => Math.max(0, Math.min(1, (13 - zoom) / 4));
 
@@ -98,8 +154,13 @@ export default function ProspectMap({
   onSelect,
   onTapEmpty,
   showOutlines = true,
+  showCities = true,
   className,
 }: Props) {
+  const cityMarkers = useRef<Marker[]>([]);
+  const placeCitiesRef = useRef<(() => void) | null>(null);
+  const citiesOn = useRef(showCities);
+  citiesOn.current = showCities;
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<MlMap | null>(null);
   const ready = useRef(false);
@@ -150,21 +211,35 @@ export default function ProspectMap({
     });
     m.addControl(new NavigationControl({ visualizePitch: false }), "top-right");
     m.addControl(new ScaleControl({ unit: "imperial" }));
-    // City labels as HTML markers (no font glyphs needed); fade with zoom.
-    const labels = KY_CITIES.map(([name, lng, lat]) => {
+    // City labels as HTML markers (no font glyphs needed): the eight largest in view, fading
+    // with zoom, hidden when the toggle is off.
+    cityMarkers.current = KY_CITIES.map(([name, lng, lat]) => {
       const el = document.createElement("div");
       el.textContent = name;
       el.className =
         "pointer-events-none select-none rounded bg-black/55 px-1.5 py-0.5 text-[11px] font-semibold text-white shadow";
       el.style.transition = "opacity 150ms";
+      el.style.display = "none";
       return new Marker({ element: el, anchor: "center" }).setLngLat([lng, lat]).addTo(m);
     });
-    const fade = () => {
+    const placeCities = () => {
+      const bounds = m.getBounds();
       const o = String(cityOpacity(m.getZoom()));
-      for (const l of labels) l.getElement().style.opacity = o;
+      let shown = 0;
+      cityMarkers.current.forEach((marker, i) => {
+        const [, lng, lat] = KY_CITIES[i]!;
+        const show = citiesOn.current && shown < CITIES_SHOWN && bounds.contains([lng, lat]);
+        if (show) shown++;
+        const el = marker.getElement();
+        el.style.display = show ? "" : "none";
+        el.style.opacity = o;
+      });
     };
-    fade();
-    m.on("zoom", fade);
+    placeCities();
+    m.on("move", placeCities);
+    m.on("zoom", placeCities);
+    placeCitiesRef.current = placeCities;
+
     m.on("load", () => {
       m.addSource("footprints", {
         type: "geojson",
@@ -225,6 +300,10 @@ export default function ProspectMap({
       ready.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    placeCitiesRef.current?.();
+  }, [showCities]);
 
   useEffect(() => {
     const m = map.current;

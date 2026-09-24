@@ -354,6 +354,22 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       return false;
     }
   });
+  const [showCities, setShowCities] = useState(() => {
+    try {
+      return localStorage.getItem("bid-o-matic:prospect-cities") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const toggleCities = () =>
+    setShowCities((o) => {
+      try {
+        localStorage.setItem("bid-o-matic:prospect-cities", o ? "off" : "on");
+      } catch {
+        /* private window */
+      }
+      return !o;
+    });
   const toggleOutlines = () =>
     setShowOutlines((o) => {
       try {
@@ -706,6 +722,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               {showOutlines ? "Outlines on" : "Outlines off"}
             </Button>
           )}
+          {showMap && (
+            <Button
+              size="sm"
+              variant={showCities ? "secondary" : "outline"}
+              onClick={toggleCities}
+              title="Name the eight largest cities in view; they fade out as you zoom in"
+            >
+              {showCities ? "Cities on" : "Cities off"}
+            </Button>
+          )}
           {canWrite && (
             <Button size="sm" variant="outline" onClick={() => setImportOpen((o) => !o)}>
               <DownloadCloud className="mr-1 h-4 w-4" /> Load county data
@@ -740,6 +766,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
             selectedId={selectedId}
             onSelect={setSelectedId}
             showOutlines={showOutlines}
+            showCities={showCities}
             {...(canWrite
               ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
               : {})}
