@@ -1368,21 +1368,30 @@ function EstimatePage() {
     queryFn: () => movesFn({ data: { bid_id: bidId!, limit: 1000 } }),
     enabled: authed && STEPS[step]?.key === "review" && !!bidId,
   });
-  const orderList: OrderLine[] = useMemo(() => {
-    if (!result || !admin || !priceTargets) return [];
+  // The list is built from the bid's own lines; the catalog targets and stock only add the
+  // "on hand" column, so a slow or failed catalog read must not blank the list. A builder
+  // error is shown, not swallowed (it used to read as "Nothing to order yet").
+  const { list: orderList, error: orderListError } = useMemo((): {
+    list: OrderLine[];
+    error: string | null;
+  } => {
+    if (!result || !admin) return { list: [], error: null };
     try {
-      return buildOrderList({
-        admin,
-        roofSystem,
-        attachment,
-        sections,
-        build: result.build,
-        targets: priceTargets,
-        stock: stockRows ?? [],
-        pulls: bidPulls ?? [],
-      });
-    } catch {
-      return [];
+      return {
+        list: buildOrderList({
+          admin,
+          roofSystem,
+          attachment,
+          sections,
+          build: result.build,
+          targets: priceTargets ?? [],
+          stock: stockRows ?? [],
+          pulls: bidPulls ?? [],
+        }),
+        error: null,
+      };
+    } catch (e) {
+      return { list: [], error: e instanceof Error ? e.message : String(e) };
     }
   }, [result, admin, priceTargets, stockRows, bidPulls, roofSystem, attachment, sections]);
   const [orderOpen, setOrderOpen] = useState(false);
@@ -4881,10 +4890,14 @@ function EstimatePage() {
                 </CardHeader>
                 <CollapsibleContent>
                   <CardContent className="space-y-2 text-sm">
-                    {!priceTargets ? (
-                      <p className="text-xs text-muted-foreground">Loading…</p>
+                    {orderListError ? (
+                      <p className="text-xs text-destructive">
+                        The order list could not be built: {orderListError}
+                      </p>
                     ) : orderList.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">Nothing to order yet.</p>
+                      <p className="text-xs text-muted-foreground">
+                        {!result ? "Loading…" : "Nothing to order yet."}
+                      </p>
                     ) : (
                       <div className="overflow-x-auto">
                         <Table>

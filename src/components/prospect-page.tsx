@@ -47,6 +47,7 @@ import {
   saveRoof,
   saveTask,
   setTaskDone,
+  type BuildingDetail,
   type BuildingInput,
   type BuildingRow,
   type RoofInput,
@@ -378,8 +379,18 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       toast.success(
         v.stage ? `${rowTitle(row)} — ${PROSPECT_STAGE_LABELS[v.stage]}` : "Taken off the list",
       );
-      invalidate();
-      void qc.invalidateQueries({ queryKey: ["building", v.id] });
+      // Patch the caches in place: refetching the 500-row search and the county counts for a
+      // one-row flag is what made the star feel slow.
+      const patch = (b: BuildingRow) => (b.id === row.id ? { ...b, ...row } : b);
+      qc.setQueriesData<BuildingRow[]>({ queryKey: ["buildings"] }, (list) => list?.map(patch));
+      qc.setQueryData<BuildingRow[]>(["prospects"], (list) => {
+        const rest = (list ?? []).filter((b) => b.id !== row.id);
+        return row.prospect_stage ? [row, ...rest] : rest;
+      });
+      qc.setQueryData<BuildingDetail>(["building", v.id], (d) =>
+        d ? { ...d, building: { ...d.building, ...row } } : d,
+      );
+      void qc.invalidateQueries({ queryKey: ["prospects"] });
     },
     onError: fail,
   });
