@@ -357,6 +357,9 @@ export type Database = {
           address1: string;
           address2: string | null;
           address_checked_at: string | null;
+          prospect_owner_name: string | null;
+          prospect_stage: string | null;
+          prospected_at: string | null;
           building_sqft: number | null;
           centroid_lat: number | null;
           centroid_lng: number | null;
@@ -396,6 +399,9 @@ export type Database = {
           address1?: string;
           address2?: string | null;
           address_checked_at?: string | null;
+          prospect_owner_name?: string | null;
+          prospect_stage?: string | null;
+          prospected_at?: string | null;
           building_sqft?: number | null;
           centroid_lat?: number | null;
           centroid_lng?: number | null;
@@ -435,6 +441,9 @@ export type Database = {
           address1?: string;
           address2?: string | null;
           address_checked_at?: string | null;
+          prospect_owner_name?: string | null;
+          prospect_stage?: string | null;
+          prospected_at?: string | null;
           building_sqft?: number | null;
           centroid_lat?: number | null;
           centroid_lng?: number | null;

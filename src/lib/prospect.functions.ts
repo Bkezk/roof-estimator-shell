@@ -56,6 +56,17 @@ const isoDate = z
   .nullable()
   .default(null);
 
+/** Where a prospect stands (owner's short pipeline); null = a building nobody is working. */
+export const PROSPECT_STAGES = ["prospect", "contacted", "quoted", "won", "dead"] as const;
+export type ProspectStage = (typeof PROSPECT_STAGES)[number];
+export const PROSPECT_STAGE_LABELS: Record<ProspectStage, string> = {
+  prospect: "Prospect",
+  contacted: "Contacted",
+  quoted: "Quoted",
+  won: "Won",
+  dead: "Dead",
+};
+
 export const buildingSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().max(200).default(""),
@@ -271,11 +282,65 @@ export const saveBuilding = createServerFn({ method: "POST" })
         source: "manual",
         created_by: context.userId,
         created_by_name: await meName(context),
+        // A building someone typed in is a prospect from the start.
+        prospect_stage: "prospect",
+        prospected_at: new Date().toISOString(),
+        prospect_owner_name: await meName(context),
       })
       .select()
       .single();
     if (error) throw new Error(error.message);
     return row;
+  });
+
+/**
+ * Flag a building as a prospect (or move it along the pipeline; null takes it off the list).
+ * The first flag stamps when and by whom; later stage changes keep that.
+ */
+export const setProspectStage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), stage: z.enum(PROSPECT_STAGES).nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<BuildingRow> => {
+    await assertPageAccess(context.supabase, context.userId, "prospect");
+    const { data: cur, error: cErr } = await context.supabase
+      .from("buildings")
+      .select("prospected_at, prospect_owner_name")
+      .eq("id", data.id)
+      .single();
+    if (cErr) throw new Error(cErr.message);
+    const patch = data.stage
+      ? {
+          prospect_stage: data.stage,
+          prospected_at: cur.prospected_at ?? new Date().toISOString(),
+          prospect_owner_name: cur.prospect_owner_name ?? (await meName(context)),
+        }
+      : { prospect_stage: null, prospected_at: null, prospect_owner_name: null };
+    const { data: row, error } = await context.supabase
+      .from("buildings")
+      .update(patch)
+      .eq("id", data.id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
+  });
+
+/** The working list: every flagged building, newest flag first. */
+export const listProspects = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<BuildingRow[]> => {
+    await readAccess(context);
+    const { data, error } = await context.supabase
+      .from("buildings")
+      .select("*")
+      .is("deleted_at", null)
+      .not("prospect_stage", "is", null)
+      .order("prospected_at", { ascending: false })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return data ?? [];
   });
 
 /** Soft delete: the row keeps its history and its links; admins can purge later. */
@@ -1128,6 +1193,19 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
         .eq("source_key", `ornl:${hit.buildId}`)
         .maybeSingle();
       if (rErr) throw new Error(rErr.message);
+      // Tapping an outline means "this is a prospect".
+      if (row?.id) {
+        const { error: pErr } = await context.supabase
+          .from("buildings")
+          .update({
+            prospect_stage: "prospect",
+            prospected_at: new Date().toISOString(),
+            prospect_owner_name: who,
+          })
+          .eq("id", row.id)
+          .is("prospect_stage", null);
+        if (pErr) throw new Error(pErr.message);
+      }
       return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false };
     },
   );

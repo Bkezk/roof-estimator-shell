@@ -17,6 +17,11 @@ the bottom with the commit that closed them.
    gaps; drip edge / gravel stop / fascia bar accessory entries are not read yet (the four
    samples had none); underlayment $/sqft is not in the file, so those price from the live
    list.
+   1b. **Importer: drip edge, gravel stop and fascia bar entries.** The four sample files had
+   none, so the estimate-level XML shape of those accessory entries is unknown and they are
+   skipped with a note in the import preview (a bid that used them imports short by those
+   lines). Owner is finding an old .bax that used one; then add all three to
+   `src/lib/bax/bax-import.ts`.
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and

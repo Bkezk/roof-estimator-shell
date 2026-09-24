@@ -16,8 +16,11 @@ import {
   DownloadCloud,
   FilePlus2,
   Map as MapIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   ShieldCheck,
+  Star,
   Trash2,
 } from "lucide-react";
 
@@ -31,6 +34,11 @@ import {
   fillFootprintAddresses,
   importLayer,
   listBuildings,
+  listProspects,
+  setProspectStage,
+  PROSPECT_STAGES,
+  PROSPECT_STAGE_LABELS,
+  type ProspectStage,
   listCounties,
   listOpenTasks,
   listRefreshes,
@@ -290,6 +298,8 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const saveTaskFn = useServerFn(saveTask);
   const doneFn = useServerFn(setTaskDone);
   const openTasksFn = useServerFn(listOpenTasks);
+  const prospectsFn = useServerFn(listProspects);
+  const stageFn = useServerFn(setProspectStage);
   const leadsFn = useServerFn(listWarrantyLeads);
   const promoteFn = useServerFn(promoteCommercialPoints);
   const addAtPointFn = useServerFn(addBuildingAtPoint);
@@ -415,6 +425,10 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     enabled: !!selectedId,
   });
   const openTasks = useQuery({ queryKey: ["open-tasks"], queryFn: () => openTasksFn() });
+  // The working list: flagged buildings, newest first (listProspects).
+  const prospects = useQuery({ queryKey: ["prospects"], queryFn: () => prospectsFn() });
+  // The search panel over the map can be tucked away to see the whole map.
+  const [showSearch, setShowSearch] = useState(true);
   const leads = useQuery({
     queryKey: ["warranty-leads"],
     queryFn: () => leadsFn(),
@@ -431,8 +445,20 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     void qc.invalidateQueries({ queryKey: ["building-counties"] });
     void qc.invalidateQueries({ queryKey: ["building", selectedId] });
     void qc.invalidateQueries({ queryKey: ["open-tasks"] });
+    void qc.invalidateQueries({ queryKey: ["prospects"] });
   };
   const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e));
+  const stage = useMutation({
+    mutationFn: (v: { id: string; stage: ProspectStage | null }) => stageFn({ data: v }),
+    onSuccess: (row, v) => {
+      toast.success(
+        v.stage ? `${rowTitle(row)} — ${PROSPECT_STAGE_LABELS[v.stage]}` : "Taken off the list",
+      );
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ["building", v.id] });
+    },
+    onError: fail,
+  });
 
   const save = useMutation({
     mutationFn: (b: BuildingInput) => saveFn({ data: b }),
@@ -727,13 +753,124 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     </div>
   );
 
+  // The find-buildings panel: search, filters and results. Over the map's left side when the
+  // map is on (it can be tucked away); a plain card in the left column when the map is off.
+  const searchCard = (
+    <Card className="flex max-h-full flex-col">
+      <CardHeader className="space-y-2 pb-2">
+        <Input
+          placeholder="Search name, address, owner, parcel…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <div className="flex items-center gap-2">
+          <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
+            <SelectTrigger className="h-8 flex-1">
+              <SelectValue placeholder="All counties" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All counties</SelectItem>
+              {(counties.data ?? []).map((c) => (
+                <SelectItem key={c.county} value={c.county}>
+                  {c.county} ({c.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <Select value={minAge} onValueChange={setMinAge}>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any roof age</SelectItem>
+              <SelectItem value="10">Roof 10+ yrs</SelectItem>
+              <SelectItem value="15">Roof 15+ yrs</SelectItem>
+              <SelectItem value="20">Roof 20+ yrs</SelectItem>
+              <SelectItem value="25">Roof 25+ yrs</SelectItem>
+              <SelectItem value="unknown">Age unknown</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={minSize} onValueChange={setMinSize}>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any size</SelectItem>
+              <SelectItem value="5000">5,000+ sq ft</SelectItem>
+              <SelectItem value="10000">10,000+ sq ft</SelectItem>
+              <SelectItem value="20000">20,000+ sq ft</SelectItem>
+              <SelectItem value="50000">50,000+ sq ft</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
+            <SelectTrigger className="h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="recent">Recent first</SelectItem>
+              <SelectItem value="biggest">Biggest roof</SelectItem>
+              <SelectItem value="oldest">Oldest roof</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </CardHeader>
+      <CardContent className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+        {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
+        {buildings.data?.length === 0 && (
+          <p className="p-2 text-xs text-muted-foreground">
+            No buildings match. Change the filters, or load the county's data.
+          </p>
+        )}
+        {(buildings.data ?? []).map((b) => (
+          <div
+            key={b.id}
+            className={`flex items-start gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-muted ${
+              selectedId === b.id ? "bg-primary/15" : ""
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedId(b.id)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="truncate font-medium">{rowTitle(b)}</span>
+                {b.prospect_stage && (
+                  <span className="rounded-full bg-primary/15 px-1.5 text-[10px] font-medium">
+                    {PROSPECT_STAGE_LABELS[b.prospect_stage as ProspectStage] ?? b.prospect_stage}
+                  </span>
+                )}
+              </div>
+              <div className="pl-6 text-xs text-muted-foreground">{rowDetail(b)}</div>
+            </button>
+            {canWrite && !b.prospect_stage && (
+              <button
+                type="button"
+                className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-primary/15 hover:text-foreground"
+                title="Add to my prospects"
+                aria-label={`Add ${rowTitle(b)} to my prospects`}
+                disabled={stage.isPending}
+                onClick={() => stage.mutate({ id: b.id, stage: "prospect" })}
+              >
+                <Star className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">Buildings</h1>
           <p className="text-sm text-muted-foreground">
-            Prospects: the roofs we want to win, who owns them, and what to do next.
+            Your prospects, and every commercial building in Kentucky to find the next one.
             {(refreshes.data?.length ?? 0) > 0 && (
               <span className="ml-1 text-xs">
                 Data refreshed:{" "}
@@ -791,18 +928,43 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
 
       {showMap && (
         <Suspense fallback={<div className="h-[420px] w-full rounded-md border bg-muted/30" />}>
-          <ProspectMap
-            buildings={mapBuildings}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            showOutlines={showOutlines}
-            showCities={showCities}
-            {...(canWrite
-              ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
-              : {})}
-          />
+          <div className="relative">
+            <ProspectMap
+              buildings={mapBuildings}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              showOutlines={showOutlines}
+              showCities={showCities}
+              {...(canWrite
+                ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
+                : {})}
+            />
+            {/* Find-buildings panel over the map's left side (owner, Sep 24): search, filters
+                and results sit on the map so the space below is the prospects list. */}
+            <div className="pointer-events-none absolute inset-y-3 left-3 z-10 flex w-[min(360px,calc(100%-24px))] flex-col gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                className="pointer-events-auto w-fit shadow"
+                onClick={() => setShowSearch((o) => !o)}
+                title={showSearch ? "Hide the search panel" : "Search the state's buildings"}
+              >
+                {showSearch ? (
+                  <PanelLeftClose className="mr-1 h-4 w-4" />
+                ) : (
+                  <PanelLeftOpen className="mr-1 h-4 w-4" />
+                )}
+                {showSearch ? "Hide search" : "Find buildings"}
+              </Button>
+              {showSearch && (
+                <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-lg shadow-lg [&>div]:h-full [&>div]:bg-background/95 [&>div]:backdrop-blur">
+                  {searchCard}
+                </div>
+              )}
+            </div>
+          </div>
           <p className="-mt-2 text-xs text-muted-foreground">
-            Blue outlines are your prospects.
+            Blue outlines are the buildings in the search results.
             {showOutlines
               ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to add it as a prospect with its size and address" : ""}.`
               : " Turn “Outlines on” to see every building in the state and tap one to add it."}
@@ -1038,95 +1200,83 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
       )}
 
       <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
-        {/* ── List ── */}
-        <Card>
-          <CardHeader className="space-y-2 pb-2">
-            <Input
-              placeholder="Search name, address, owner, parcel…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <div className="flex items-center gap-2">
-              <Select
-                value={county || "all"}
-                onValueChange={(v) => setCounty(v === "all" ? "" : v)}
-              >
-                <SelectTrigger className="h-8 flex-1">
-                  <SelectValue placeholder="All counties" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All counties</SelectItem>
-                  {(counties.data ?? []).map((c) => (
-                    <SelectItem key={c.county} value={c.county}>
-                      {c.county} ({c.count})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <Select value={minAge} onValueChange={setMinAge}>
-                <SelectTrigger className="h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Any roof age</SelectItem>
-                  <SelectItem value="10">Roof 10+ yrs</SelectItem>
-                  <SelectItem value="15">Roof 15+ yrs</SelectItem>
-                  <SelectItem value="20">Roof 20+ yrs</SelectItem>
-                  <SelectItem value="25">Roof 25+ yrs</SelectItem>
-                  <SelectItem value="unknown">Age unknown</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={minSize} onValueChange={setMinSize}>
-                <SelectTrigger className="h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="any">Any size</SelectItem>
-                  <SelectItem value="5000">5,000+ sq ft</SelectItem>
-                  <SelectItem value="10000">10,000+ sq ft</SelectItem>
-                  <SelectItem value="20000">20,000+ sq ft</SelectItem>
-                  <SelectItem value="50000">50,000+ sq ft</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
-                <SelectTrigger className="h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="recent">Recent first</SelectItem>
-                  <SelectItem value="biggest">Biggest roof</SelectItem>
-                  <SelectItem value="oldest">Oldest roof</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardHeader>
-          <CardContent className="max-h-[70vh] space-y-1 overflow-y-auto p-2">
-            {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
-            {buildings.data?.length === 0 && (
-              <p className="p-2 text-xs text-muted-foreground">
-                No prospects yet. Add a building, or pick one from the warranty leads.
-              </p>
-            )}
-            {(buildings.data ?? []).map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => setSelectedId(b.id)}
-                className={`block w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted ${
-                  selectedId === b.id ? "bg-primary/15" : ""
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate font-medium">{rowTitle(b)}</span>
+        {/* ── Left column: the working list (and the search card when the map is hidden) ── */}
+        <div className="space-y-4">
+          {!showMap && searchCard}
+          {/* ── My prospects: the working list ── */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Star className="h-4 w-4" /> My prospects
+                <span className="text-xs font-normal text-muted-foreground">
+                  {prospects.data?.length ?? 0}
+                </span>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Buildings someone flagged. Find more on the map (the star on a result), tap an
+                outline, or add one by hand.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="max-h-[60vh] space-y-1 overflow-y-auto p-2">
+              {prospects.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
+              {prospects.data?.length === 0 && (
+                <p className="p-2 text-xs text-muted-foreground">
+                  Nothing flagged yet. Search the map above and press the star on a building.
+                </p>
+              )}
+              {(prospects.data ?? []).map((b) => (
+                <div
+                  key={b.id}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1.5 text-sm hover:bg-muted ${
+                    selectedId === b.id ? "bg-primary/15" : ""
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(b.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-medium">{rowTitle(b)}</span>
+                    </div>
+                    <div className="pl-6 text-xs text-muted-foreground">
+                      {rowDetail(b)}
+                      {b.prospect_owner_name ? ` · ${b.prospect_owner_name}` : ""}
+                    </div>
+                  </button>
+                  {canWrite ? (
+                    <Select
+                      value={b.prospect_stage ?? "prospect"}
+                      onValueChange={(v) =>
+                        stage.mutate({
+                          id: b.id,
+                          stage: v === "remove" ? null : (v as ProspectStage),
+                        })
+                      }
+                    >
+                      <SelectTrigger className="h-7 w-[112px] text-xs" aria-label="Prospect stage">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROSPECT_STAGES.map((st) => (
+                          <SelectItem key={st} value={st}>
+                            {PROSPECT_STAGE_LABELS[st]}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="remove">Remove from list</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {PROSPECT_STAGE_LABELS[b.prospect_stage as ProspectStage] ?? b.prospect_stage}
+                    </span>
+                  )}
                 </div>
-                <div className="pl-6 text-xs text-muted-foreground">{rowDetail(b)}</div>
-              </button>
-            ))}
-          </CardContent>
-        </Card>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
 
         {/* ── Detail ── */}
         <div className="space-y-4">
@@ -1249,6 +1399,32 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                           <FilePlus2 className="mr-1 h-4 w-4" /> New bid from this building
                         </Link>
                       </Button>
+                    )}
+                    {form.id && canWrite && (
+                      <Select
+                        value={detail.data?.building.prospect_stage ?? "none"}
+                        onValueChange={(v) =>
+                          stage.mutate({
+                            id: form.id!,
+                            stage: v === "none" ? null : (v as ProspectStage),
+                          })
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-8 w-[150px] text-xs"
+                          aria-label="Prospect stage"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Not a prospect</SelectItem>
+                          {PROSPECT_STAGES.map((st) => (
+                            <SelectItem key={st} value={st}>
+                              {PROSPECT_STAGE_LABELS[st]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                     <Button
                       size="sm"
