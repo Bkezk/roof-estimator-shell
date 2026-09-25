@@ -136,6 +136,16 @@ the bottom with the commit that closed them.
    Needs: the per-year KYAPED ImageServers at kyraster.ky.gov and the NAIP service URL; a
    small year slider on the map. Later, the same comparison can flag likely re-roofs
    automatically.
+   9b. **PlanSwift bridge (owner, Sep 25).** Two template sets for PlanSwift 11: quantities-only
+   (`docs/planswift-mapping.md`, what Bid-O-Matic imports) and a costing version generated from
+   the live tables (`docs/planswift-costing.md`). Build: (a) the job-export importer
+   (`src/lib/planswift/`, waits on one sample job export to learn whether digitizer points are
+   in the file); (b) an "Export PlanSwift feed" button on Estimate Pricing that writes the same
+   JSON the one-off feed carried (`bid-o-matic-feed.json`: pricing_catalog, rdl_combos,
+   accessory_labor, parapet / curb / setup / inspection tables, fastener lookups, adhesive
+   coverage, shipping, settings, markup) so the costing templates can be regenerated after
+   every price import; (c) confirm the per-foot vs per-stick units for fascia, gravel stop and
+   drip edge, and the pipe-stack base hours, which the costing sheet marks "confirm".
 10. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
     zero-item column pick, prefill the new-product dialog.
 
