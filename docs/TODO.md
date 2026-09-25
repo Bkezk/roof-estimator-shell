@@ -102,6 +102,16 @@ the bottom with the commit that closed them.
    plate). Admins edit `inventory_locations` (name / order / active) in the database for now;
    an admin screen for vehicles is a small follow-up. Next: a standard load (par list) per
    vehicle with "restock to par".
+   3c. **Drivers for service vehicles (owner, Sep 25).** Each service vehicle gets an assigned
+   driver (a user, changeable over time with an effective date, so history stays right), so
+   inventory taken off a vehicle can be tied to the job that driver was on. Pieces:
+   `inventory_locations.driver_id` (or a `vehicle_drivers` history table: vehicle, user, from,
+   to), the admin vehicles screen from 3b to set it, the "Take from vehicle" pop-up defaulting
+   the vehicle to the signed-in user's own vehicle and the job to that driver's open service
+   job (once service jobs exist — TODO 0 step 2), the Inventory ledger and history showing the
+   driver on vehicle movements, and a per-driver view of what came off their vehicle and
+   which job it went to. Depends on service jobs for the job link; the driver assignment and
+   the pop-up default can land first.
 4. **Verify in the browser:** aerial imagery tiles show on the map; the state outline layer
    draws when zoomed in; tap-to-add works on a small shop. Both depend on the state server
    allowing cross-origin tile fetches, which cannot be checked from the build container.
