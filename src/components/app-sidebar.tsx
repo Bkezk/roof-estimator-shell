@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   Users,
@@ -10,9 +10,12 @@ import {
   Package,
   FileSpreadsheet,
   Layers,
+  ChevronDown,
   ChevronRight,
   Building2,
   Ruler,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -32,14 +35,18 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
 
 // New bids start from the Bids page's "New Bid" button (owner: one entry point, not two).
-const estimatorItems = [{ title: "Bids", url: "/bids", icon: FileText }];
+const estimatorItems = [
+  // Takeoff sits above Bids (owner, Sep 25): measure first, then bid.
+  { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
+  { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
+];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
-const takeoffItems = [{ title: "Takeoffs", url: "/takeoff", icon: Ruler }];
 // Admin (role) only: who can sign in and which pages each person may open.
 const adminOnlyItems = [{ title: "Users & access", url: "/admin/users", icon: Users }];
 
@@ -157,8 +164,72 @@ const adminItems: {
   },
 ];
 
+/** Which menu groups the user folded up, remembered per browser. */
+const NAV_KEY = "bid-o-matic:nav-collapsed";
+const readNavCollapsed = (): string[] => {
+  try {
+    if (typeof window === "undefined") return [];
+    const raw: unknown = JSON.parse(window.localStorage.getItem(NAV_KEY) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+};
+const writeNavCollapsed = (ids: string[]) => {
+  try {
+    window.localStorage.setItem(NAV_KEY, JSON.stringify(ids));
+  } catch {
+    // Storage unavailable — folding still works this visit.
+  }
+};
+
+/**
+ * A menu group whose label folds its items away (chevron), remembered per browser. In the
+ * icon-only sidebar the labels are hidden, so every group shows its icons regardless.
+ */
+function NavGroup({
+  label,
+  id,
+  iconMode,
+  children,
+}: {
+  label: string;
+  id: string;
+  iconMode: boolean;
+  children: ReactNode;
+}) {
+  const [folded, setFolded] = useState<boolean>(() => readNavCollapsed().includes(id));
+  const open = iconMode || !folded;
+  const setOpen = (o: boolean) => {
+    setFolded(!o);
+    const cur = readNavCollapsed().filter((x) => x !== id);
+    writeNavCollapsed(o ? cur : [...cur, id]);
+  };
+  return (
+    <SidebarGroup>
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <SidebarGroupLabel
+            className="cursor-pointer select-none justify-between hover:text-foreground"
+            title={open ? `Fold ${label}` : `Unfold ${label}`}
+          >
+            <span>{label}</span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 transition-transform ${open ? "" : "-rotate-90"}`}
+              aria-hidden
+            />
+          </SidebarGroupLabel>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <SidebarGroupContent>{children}</SidebarGroupContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </SidebarGroup>
+  );
+}
+
 export function AppSidebar() {
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const navigate = useNavigate();
   const { profile, role, can, signOut } = useAuth();
@@ -192,12 +263,12 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
-        {can("estimate") && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Estimate</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {estimatorItems.map((item) => (
+        {(can("estimate") || can("takeoff")) && (
+          <NavGroup label="Estimate" id="estimate" iconMode={collapsed}>
+            <SidebarMenu>
+              {estimatorItems
+                .filter((item) => can(item.page))
+                .map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                       <Link to={item.url}>
@@ -207,175 +278,138 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+            </SidebarMenu>
+          </NavGroup>
         )}
 
         {can("pricing") && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Estimate Pricing</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {adminItems.map((item) =>
-                  item.sub && !collapsed ? (
-                    <Collapsible
-                      key={item.title}
-                      asChild
-                      open={
-                        openMenus[item.title] ??
-                        (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
-                      }
-                      onOpenChange={(open) =>
-                        setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
-                      }
-                    >
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive(item.url)}
-                          tooltip={item.title}
-                        >
-                          <Link to={item.url}>
-                            <item.icon className="h-4 w-4" />
-                            <span>{item.title}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                        <CollapsibleTrigger asChild>
-                          <SidebarMenuAction className="transition-transform data-[state=open]:rotate-90">
-                            <ChevronRight className="h-4 w-4" />
-                            <span className="sr-only">Toggle {item.title}</span>
-                          </SidebarMenuAction>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <SidebarMenuSub>
-                            {item.sub.map((sub) => {
-                              const active = sub.url
-                                ? isActive(sub.url)
-                                : isActive(item.url) &&
-                                  (sub.cat
-                                    ? searchCat === sub.cat
-                                    : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
-                              // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
-                              const search = sub.cat
-                                ? item.url === "/admin/duro-last"
-                                  ? { tab: "catalog" as const, cat: sub.cat }
-                                  : { cat: sub.cat }
-                                : { tab: sub.tab! };
-                              return (
-                                <SidebarMenuSubItem key={sub.title}>
-                                  <SidebarMenuSubButton asChild isActive={active}>
-                                    {sub.url ? (
-                                      <Link to={sub.url}>
-                                        <span>{sub.title}</span>
-                                      </Link>
-                                    ) : (
-                                      <Link to={item.url} search={search}>
-                                        <span>{sub.title}</span>
-                                      </Link>
-                                    )}
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              );
-                            })}
-                          </SidebarMenuSub>
-                        </CollapsibleContent>
-                      </SidebarMenuItem>
-                    </Collapsible>
-                  ) : (
-                    <SidebarMenuItem key={item.title}>
+          <NavGroup label="Estimate Pricing" id="estimate-pricing" iconMode={collapsed}>
+            <SidebarMenu>
+              {adminItems.map((item) =>
+                item.sub && !collapsed ? (
+                  <Collapsible
+                    key={item.title}
+                    asChild
+                    open={
+                      openMenus[item.title] ??
+                      (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
+                    }
+                    onOpenChange={(open) =>
+                      setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
+                    }
+                  >
+                    <SidebarMenuItem>
                       <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                         <Link to={item.url}>
                           <item.icon className="h-4 w-4" />
-                          {!collapsed && <span>{item.title}</span>}
+                          <span>{item.title}</span>
                         </Link>
                       </SidebarMenuButton>
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuAction className="transition-transform data-[state=open]:rotate-90">
+                          <ChevronRight className="h-4 w-4" />
+                          <span className="sr-only">Toggle {item.title}</span>
+                        </SidebarMenuAction>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {item.sub.map((sub) => {
+                            const active = sub.url
+                              ? isActive(sub.url)
+                              : isActive(item.url) &&
+                                (sub.cat
+                                  ? searchCat === sub.cat
+                                  : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
+                            // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
+                            const search = sub.cat
+                              ? item.url === "/admin/duro-last"
+                                ? { tab: "catalog" as const, cat: sub.cat }
+                                : { cat: sub.cat }
+                              : { tab: sub.tab! };
+                            return (
+                              <SidebarMenuSubItem key={sub.title}>
+                                <SidebarMenuSubButton asChild isActive={active}>
+                                  {sub.url ? (
+                                    <Link to={sub.url}>
+                                      <span>{sub.title}</span>
+                                    </Link>
+                                  ) : (
+                                    <Link to={item.url} search={search}>
+                                      <span>{sub.title}</span>
+                                    </Link>
+                                  )}
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            );
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
                     </SidebarMenuItem>
-                  ),
-                )}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+                  </Collapsible>
+                ) : (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ),
+              )}
+            </SidebarMenu>
+          </NavGroup>
         )}
 
         {can("prospect") && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Prospecting</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {prospectItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        )}
-
-        {can("takeoff") && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Takeoff</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {takeoffItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <NavGroup label="Prospecting" id="prospecting" iconMode={collapsed}>
+            <SidebarMenu>
+              {prospectItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </NavGroup>
         )}
 
         {can("inventory") && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Inventory</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {inventoryItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <NavGroup label="Inventory" id="inventory" iconMode={collapsed}>
+            <SidebarMenu>
+              {inventoryItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </NavGroup>
         )}
 
         {role === "admin" && (
-          <SidebarGroup>
-            <SidebarGroupLabel>Admin</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {adminOnlyItems.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          <NavGroup label="Admin" id="admin" iconMode={collapsed}>
+            <SidebarMenu>
+              {adminOnlyItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </NavGroup>
         )}
       </SidebarContent>
 
@@ -407,8 +441,24 @@ export function AppSidebar() {
               {!collapsed && <span>Sign out</span>}
             </SidebarMenuButton>
           </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              onClick={toggleSidebar}
+              tooltip={collapsed ? "Expand menu" : "Collapse menu"}
+              title="Ctrl+B / Cmd+B also toggles the menu"
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+              {!collapsed && <span>Collapse menu</span>}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
+      {/* The thin rail on the sidebar's edge: click it to collapse or expand. */}
+      <SidebarRail />
     </Sidebar>
   );
 }
