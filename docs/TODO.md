@@ -82,9 +82,15 @@ the bottom with the commit that closed them.
 3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` (matching in
    the loader's memory; only linked / business points reach the database) and the
    `Refresh Kentucky data` workflow (1st of each month, one shard). Secrets LOADER_EMAIL and
-   LOADER_PASSWORD are set. State after run 10 (Sep 24, after the owner truncated the 2.1 M
-   junk address points): footprints for all 120 counties; addresses and businesses matched
-   for 58 counties (Adair … Johnson, plus Knott/Knox/Larue/Laurel partly). Run 10 went well
+   LOADER_PASSWORD are set. **Statewide load complete (Sep 25, 03:20 UTC): all 120 counties
+   have footprints, addresses and businesses (168,094 buildings).** The night pass (run 11,
+   02:01–02:38 UTC, on the Small instance) did the remaining 62 counties in 37 minutes with no
+   statement timeouts; Perry alone failed on a raw control character in the state's
+   address-point JSON and went in after the parser fix (`src/lib/loose-json.ts`). The monthly
+   cron (1st, 05:00 UTC, `skip_fresh_days` unset = full refresh) takes over; the one-off night
+   routine was deleted. History: run 10 (Sep 24, after the owner truncated the 2.1 M junk
+   address points) reached 58 counties (Adair … Johnson, plus Knott/Knox/Larue/Laurel partly)
+   before the Tiny instance starved. Run 10 went well
    for 25 minutes and then the small instance starved: every 200-row `apply_building_addresses`
    call hit the 30 s statement timeout, even `select 1` was cancelled, and the owner could not
    open a bid — so it was cancelled at 13:26 UTC. The write itself is an index lookup per row
