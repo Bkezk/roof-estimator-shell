@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { pointerCloseAutoFocus } from "./focus";
 import type { DrainKey, DrainPicks } from "./shapes";
 
 /** The admin data query (same key as the Setup tab and the estimator, so it is shared). */
@@ -59,7 +60,7 @@ function PickList(props: {
         <SelectTrigger id={props.id} className="h-8 text-sm">
           <SelectValue placeholder={list.length ? "Choose…" : "No options loaded"} />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
           {props.value && (
             <SelectItem value={NONE} className="text-muted-foreground">
               Not picked

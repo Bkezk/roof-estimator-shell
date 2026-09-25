@@ -62,7 +62,9 @@ export interface ObjectsLayerProps {
   selectedId: string | null;
   /** Objects take clicks only in Select mode. */
   interactive: boolean;
+  /** Pressing an area's inside or a line: select it (drag moves it once selected). */
   onObjectDown: (id: string, e: ReactPointerEvent<SVGElement>) => void;
+  /** Pressing a corner handle or a count pin: drag that one point. */
   onVertexDown: (id: string, index: number, e: ReactPointerEvent<SVGElement>) => void;
 }
 
@@ -93,7 +95,10 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                 strokeWidth={sw}
                 vectorEffect="non-scaling-stroke"
                 strokeLinejoin="round"
-                style={{ pointerEvents: pe, cursor: props.interactive ? "pointer" : undefined }}
+                style={{
+                  pointerEvents: pe,
+                  cursor: props.interactive ? (sel ? "move" : "pointer") : undefined,
+                }}
                 onPointerDown={down}
               />
               {cut.map((c, i) => (
@@ -144,7 +149,10 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                 stroke="transparent"
                 strokeWidth={12}
                 vectorEffect="non-scaling-stroke"
-                style={{ pointerEvents: pe, cursor: props.interactive ? "pointer" : undefined }}
+                style={{
+                  pointerEvents: pe,
+                  cursor: props.interactive ? (sel ? "move" : "pointer") : undefined,
+                }}
                 onPointerDown={down}
               />
               <polyline
@@ -177,8 +185,8 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                   stroke={sel ? "#111827" : "#ffffff"}
                   strokeWidth={sel ? 2 : 1.5}
                   vectorEffect="non-scaling-stroke"
-                  style={{ pointerEvents: pe, cursor: props.interactive ? "pointer" : undefined }}
-                  onPointerDown={down}
+                  style={{ pointerEvents: pe, cursor: props.interactive ? "move" : undefined }}
+                  onPointerDown={(e) => props.onVertexDown(o.id, i, e)}
                 />
                 <text
                   x={x}
@@ -220,6 +228,24 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
     </g>
   );
 });
+
+/** The small square shown where the cursor has snapped to an existing point. */
+export function SnapMarker(props: { at: PagePoint; zoom: number }) {
+  const h = 6 / props.zoom;
+  return (
+    <rect
+      x={props.at[0] - h}
+      y={props.at[1] - h}
+      width={2 * h}
+      height={2 * h}
+      fill="none"
+      stroke="#d946ef"
+      strokeWidth={2}
+      vectorEffect="non-scaling-stroke"
+      style={{ pointerEvents: "none" }}
+    />
+  );
+}
 
 /** The page's calibration line with its real length. */
 export function ScaleLine(props: { scale: PageScale; zoom: number }) {

@@ -1,15 +1,28 @@
 /**
  * The takeoff viewer: the page underlay on a <canvas> with an SVG overlay of the same size,
  * both scaled by one zoom factor and moved by one pan offset. Wheel zooms about the cursor;
- * the middle mouse button or Space + drag pans. The drawing tools (PlanSwift's Area / Linear /
- * Count, plus Scale, Dimension and Cut-out) all place points in page px at zoom 1.
+ * the middle mouse button or Space + drag pans; + / − / 0 (or Home) zoom from the keyboard.
+ * The drawing tools (PlanSwift's Area / Linear / Count, plus Scale, Dimension and Cut-out) all
+ * place points in page px at zoom 1.
+ *
+ * Fewer clicks (owner, Sep 25): right-click finishes the shape (PlanSwift "Stop"); the cursor
+ * snaps to other objects' corners and the scale line's ends (Shift = free, no snap, no ortho);
+ * on a scaled page a typed length + Enter places the next point that far along; Delete removes
+ * the selected object; in Select mode a selected area / line drags as a whole and a count pin
+ * drags on its own; role chips (keys 1–6) pick the next count / linear's role.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
 import {
+  COUNT_ROLES,
+  COUNT_ROLE_LABELS,
+  LINEAR_ROLES,
+  LINEAR_ROLE_LABELS,
   feetPerPx,
+  type CountRole,
+  type LinearRole,
   type ObjectKind,
   type PagePoint,
   type PageScale,
@@ -17,15 +30,23 @@ import {
   type TakeoffPage,
 } from "@/lib/takeoff/model";
 
-import { DraftShape, MeasureLine, ObjectsLayer, ScaleLine } from "./overlay";
+import { DraftShape, MeasureLine, ObjectsLayer, ScaleLine, SnapMarker, SvgLabel } from "./overlay";
 import { ScaleDialog } from "./scale-dialog";
 import {
   DRAFT_COLOR,
   HINTS,
   KEY_TOOLS,
+  feetInches,
+  isLengthKey,
   isTypingTarget,
   lengthLabel,
   orthoSnap,
+  parseFeetInches,
+  snapCandidates,
+  snapTo,
+  translateObject,
+  typedPoint,
+  type NewObjectRoles,
   type Tool,
 } from "./shapes";
 import { ViewerToolbar } from "./toolbar";
@@ -38,6 +59,9 @@ const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 const CLOSE_PX = 9;
 /** Screen px: a second click this close to the last point finishes (a double-click). */
 const DOUBLE_PX = 4;
+/** Screen px: the cursor snaps to another object's corner this close. */
+const SNAP_PX = 8;
+const ZOOM_STEP = 1.25;
 
 export interface ViewerProps {
   source: UnderlaySource | null;
@@ -47,11 +71,23 @@ export interface ViewerProps {
   objects: readonly TakeoffObject[];
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  /** Create an object from drawn points; returns its id (the editor names, colours, selects it). */
-  onCreate: (kind: ObjectKind, points: PagePoint[]) => string;
+  /**
+   * Create an object from drawn points; returns its id (the editor names, colours, selects it).
+   * A linear / count takes the role picked on the toolbar's role chips.
+   */
+  onCreate: (kind: ObjectKind, points: PagePoint[], roles: NewObjectRoles) => string;
   onChangePoints: (id: string, points: PagePoint[]) => void;
+  /** Move a whole object (its cut-outs too) by (dx, dy) page px. */
+  onMoveObject: (id: string, dx: number, dy: number) => void;
+  onDelete: (id: string) => void;
   onAddCutout: (areaId: string, ring: PagePoint[]) => void;
-  onSetScale: (scale: PageScale) => void;
+  /** Set this page's scale; `applyToAll` also gives it to every other page with no scale. */
+  onSetScale: (scale: PageScale, applyToAll: boolean) => void;
+  /** Pages in this file, and how many OTHER pages have no scale yet (for the Scale dialog). */
+  pageCount: number;
+  unscaledOtherPages: number;
+  /** The tool to start with (Scale on a brand-new takeoff). */
+  initialTool?: Tool;
   /** The page's displayed size at zoom 1 once rendered (with the rotation it was rendered at). */
   onPageSize: (pageIndex: number, rotation: number, width: number, height: number) => void;
 }
@@ -61,7 +97,7 @@ export function TakeoffViewer(props: ViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [tool, setTool] = useState<Tool>("select");
+  const [tool, setTool] = useState<Tool>(props.initialTool ?? "select");
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [renderZoom, setRenderZoom] = useState(1);
   const [rendered, setRendered] = useState<{ key: string; w: number; h: number } | null>(null);
@@ -79,6 +115,14 @@ export function TakeoffViewer(props: ViewerProps) {
     points: PagePoint[];
     moved: boolean;
   } | null>(null);
+  /** Select mode: a whole selected area / line being dragged. */
+  const [move, setMove] = useState<{ id: string; start: PagePoint; dx: number; dy: number } | null>(
+    null,
+  );
+  /** A length typed on the keyboard while drawing (placed with Enter). */
+  const [typed, setTyped] = useState("");
+  const [countRole, setCountRole] = useState<CountRole>("drain");
+  const [linearRole, setLinearRole] = useState<LinearRole>("parapet");
   const [scalePick, setScalePick] = useState<{ a: PagePoint; b: PagePoint } | null>(null);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const [panning, setPanning] = useState(false);
@@ -105,6 +149,8 @@ export function TakeoffViewer(props: ViewerProps) {
     setCountSession(null);
     setScalePick(null);
     setDrag(null);
+    setMove(null);
+    setTyped("");
     const c = canvasRef.current;
     if (c) c.width = 0;
   }, [pageKey]);
@@ -207,8 +253,48 @@ export function TakeoffViewer(props: ViewerProps) {
     draft.length >= 3 &&
     !!cursor &&
     Math.hypot(cursor[0] - draft[0]![0], cursor[1] - draft[0]![1]) * zoom <= CLOSE_PX;
-  const snapped: PagePoint | null =
-    nearFirst && draft[0] ? draft[0] : cursor && last && !shift ? orthoSnap(last, cursor) : cursor;
+
+  // Snap targets: every corner / pin of the other objects on this page and the scale line's
+  // ends (not the object being dragged, nor the count being clicked).
+  const snapExcept = drag?.id ?? countSession;
+  const candidates = useMemo(
+    () => snapCandidates(objects, snapExcept, page.scale),
+    [objects, snapExcept, page.scale],
+  );
+  const snapOf = (p: PagePoint | null): PagePoint | null =>
+    p && !shift ? snapTo(p, candidates, zoom, SNAP_PX) : null;
+
+  // Typed lengths: on a scaled page, with a point placed, for the outline tools.
+  const typingTool = tool === "area" || tool === "linear" || tool === "cutout";
+  const canType = typingTool && draft.length > 0 && fpp !== null;
+  const typedFeet = canType && typed ? parseFeetInches(typed) : null;
+  /** Where Enter would put the typed length: toward the cursor, else along the last side. */
+  const typedTarget = (): PagePoint | null => {
+    if (!last || typedFeet === null) return null;
+    const prev = draft[draft.length - 2];
+    const toward =
+      cursor && Math.hypot(cursor[0] - last[0], cursor[1] - last[1]) > 1e-6
+        ? cursor
+        : prev
+          ? ([2 * last[0] - prev[0], 2 * last[1] - prev[1]] as PagePoint)
+          : null;
+    return toward ? typedPoint(last, toward, typedFeet, fpp, shift) : null;
+  };
+
+  /** The point a click at `raw` places: close, typed, snapped, ortho, or as is. */
+  const resolve = (raw: PagePoint): { p: PagePoint; snap: PagePoint | null } => {
+    if (nearFirst && draft[0]) return { p: draft[0], snap: null };
+    const t = typedTarget();
+    if (t) return { p: t, snap: null };
+    const s = snapOf(raw);
+    if (s) return { p: s, snap: s };
+    return { p: last && !shift ? orthoSnap(last, raw) : raw, snap: null };
+  };
+  const drawing = tool !== "select";
+  const live = drawing && cursor ? resolve(cursor) : null;
+  const snapped: PagePoint | null = live?.p ?? null;
+  const dragSnap = drag && cursor ? snapOf(cursor) : null;
+  const snapMark = drawing ? (live?.snap ?? null) : dragSnap;
 
   const changeTool = (t: Tool) => {
     if (t === "cutout" && !selectedArea) {
@@ -217,25 +303,69 @@ export function TakeoffViewer(props: ViewerProps) {
     }
     setTool(t);
     setDraft([]);
+    setTyped("");
     setDimension(null);
     setCountSession(null);
   };
 
-  const finish = () => {
-    if (tool === "area" && draft.length >= 3) props.onCreate("area", draft);
-    else if (tool === "linear" && draft.length >= 2) props.onCreate("linear", draft);
-    else if (tool === "cutout" && draft.length >= 3 && selectedArea)
-      props.onAddCutout(selectedArea.id, draft);
-    else if (tool === "count") setCountSession(null);
-    else return;
-    setDraft([]);
+  const roles: NewObjectRoles = { count: countRole, linear: linearRole };
+  const pickCountRole = (r: CountRole) => {
+    setCountRole(r);
+    setCountSession(null); // the next click starts a new count with this role
   };
 
-  const cancel = () => {
-    if (draft.length) setDraft([]);
+  /** Finish the shape in progress; false when there is nothing (or not enough) to finish. */
+  const finish = (): boolean => {
+    if (tool === "area" && draft.length >= 3) props.onCreate("area", draft, roles);
+    else if (tool === "linear" && draft.length >= 2) props.onCreate("linear", draft, roles);
+    else if (tool === "cutout" && draft.length >= 3 && selectedArea)
+      props.onAddCutout(selectedArea.id, draft);
+    else if (tool === "count" && countSession) setCountSession(null);
+    else return false;
+    setDraft([]);
+    setTyped("");
+    return true;
+  };
+
+  /** Right-click: PlanSwift's "Stop" — finish what is being drawn. */
+  const stop = () => {
+    if (finish()) return;
+    if (tool === "scale" || tool === "dimension") {
+      setDraft([]);
+      return;
+    }
+    if (draft.length > 0 && typingTool)
+      toast.info(
+        tool === "linear"
+          ? "A line needs at least 2 points."
+          : "An area needs at least 3 points — keep clicking corners, or press Esc to cancel.",
+      );
+  };
+
+  const cancel = (): boolean => {
+    if (typed) setTyped("");
+    else if (draft.length) setDraft([]);
     else if (dimension) setDimension(null);
     else if (countSession) setCountSession(null);
-    else if (tool === "select") props.onSelect(null);
+    else if (tool === "select" && selectedId) props.onSelect(null);
+    else return false;
+    return true;
+  };
+
+  /** Enter with a typed length: place the next point that far along. */
+  const placeTyped = (): boolean => {
+    if (typedFeet === null) {
+      toast.info(`Type a length like 24, 24.5 or 24'6" and press Enter.`);
+      return true;
+    }
+    const t = typedTarget();
+    if (!t) {
+      toast.info("Point the cursor the way the next side goes, then press Enter.");
+      return true;
+    }
+    setDraft((d) => [...d, t]);
+    setTyped("");
+    return true;
   };
 
   const place = (raw: PagePoint) => {
@@ -243,12 +373,12 @@ export function TakeoffViewer(props: ViewerProps) {
       props.onSelect(null);
       return;
     }
-    const p: PagePoint =
-      nearFirst && draft[0] ? draft[0] : last && !shift ? orthoSnap(last, raw) : raw;
+    const { p } = resolve(raw);
+    setTyped("");
     if (tool === "count") {
       const cur = countSession ? objects.find((o) => o.id === countSession) : undefined;
       if (cur) props.onChangePoints(cur.id, [...cur.points, p]);
-      else setCountSession(props.onCreate("count", [p]));
+      else setCountSession(props.onCreate("count", [p], roles));
       return;
     }
     if (tool === "scale" || tool === "dimension") {
@@ -278,7 +408,88 @@ export function TakeoffViewer(props: ViewerProps) {
     setDraft((d) => [...d, p]);
   };
 
-  // Keyboard: tool keys, Esc / Backspace / Enter, Shift (free angle), Space (pan).
+  /** Backspace / Delete: typed text first, then the last point, then the selected object. */
+  const backspace = (): boolean => {
+    if (typed) {
+      setTyped((t) => t.slice(0, -1));
+      return true;
+    }
+    if (draft.length) {
+      setDraft((d) => d.slice(0, -1));
+      return true;
+    }
+    if (countSession) {
+      const cur = objects.find((o) => o.id === countSession);
+      if (cur && cur.points.length > 1) props.onChangePoints(cur.id, cur.points.slice(0, -1));
+      else if (cur) {
+        props.onDelete(cur.id);
+        setCountSession(null);
+      }
+      return true;
+    }
+    if (dimension) {
+      setDimension(null);
+      return true;
+    }
+    if (selectedId && objects.some((o) => o.id === selectedId)) {
+      props.onDelete(selectedId);
+      return true;
+    }
+    return false;
+  };
+
+  /** One key press; true when it was used (its default is then prevented). */
+  const onKey = (e: KeyboardEvent): boolean => {
+    const k = e.key;
+    if (canType && isLengthKey(k) && !(k === " " && typed === "")) {
+      setTyped((t) => (t + k).slice(0, 16));
+      return true;
+    }
+    if (e.code === "Space") {
+      setSpaceDown(true);
+      return true;
+    }
+    switch (k) {
+      case "Escape":
+        return cancel();
+      case "Backspace":
+      case "Delete":
+        return backspace();
+      case "Enter":
+        return typed ? placeTyped() : finish();
+      case "+":
+      case "=":
+        zoomCenter(ZOOM_STEP);
+        return true;
+      case "-":
+      case "_":
+        zoomCenter(1 / ZOOM_STEP);
+        return true;
+      case "0":
+      case "Home":
+        fit();
+        return true;
+    }
+    if (/^[1-6]$/.test(k)) {
+      const n = Number(k) - 1;
+      if (tool === "count" && COUNT_ROLES[n]) {
+        pickCountRole(COUNT_ROLES[n]);
+        return true;
+      }
+      if (tool === "linear" && LINEAR_ROLES[n]) {
+        setLinearRole(LINEAR_ROLES[n]);
+        return true;
+      }
+      return false;
+    }
+    const t = KEY_TOOLS[k.toLowerCase()];
+    if (!t) return false;
+    changeTool(t);
+    return true;
+  };
+
+  // Keyboard: tool keys, Esc / Backspace / Delete / Enter, typed lengths, role keys, zoom keys,
+  // Shift (free angle, no snap), Space (pan). Keys in a text field are left alone.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (scalePick || isTypingTarget(e.target)) return;
@@ -287,20 +498,7 @@ export function TakeoffViewer(props: ViewerProps) {
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        setSpaceDown(true);
-        return;
-      }
-      if (e.key === "Escape") cancel();
-      else if (e.key === "Backspace") setDraft((d) => d.slice(0, -1));
-      else if (e.key === "Enter") finish();
-      else {
-        const t = KEY_TOOLS[e.key.toLowerCase()];
-        if (!t) return;
-        changeTool(t);
-      }
-      e.preventDefault();
+      if (onKey(e)) e.preventDefault();
     };
     const onUp = (e: KeyboardEvent) => {
       if (e.key === "Shift") setShift(false);
@@ -332,12 +530,16 @@ export function TakeoffViewer(props: ViewerProps) {
     const p = toPage(e);
     setShift(e.shiftKey);
     setCursor(p);
-    if (drag)
+    if (drag) {
+      const q = (!e.shiftKey && snapTo(p, candidates, zoom, SNAP_PX)) || p;
       setDrag({
         ...drag,
         moved: true,
-        points: drag.points.map((q, i) => (i === drag.index ? p : q)),
+        points: drag.points.map((x, i) => (i === drag.index ? q : x)),
       });
+    } else if (move) {
+      setMove({ ...move, dx: p[0] - move.start[0], dy: p[1] - move.start[1] });
+    }
   };
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
     if (panRef.current) {
@@ -351,26 +553,45 @@ export function TakeoffViewer(props: ViewerProps) {
       if (drag.moved) props.onChangePoints(drag.id, drag.points);
       setDrag(null);
     }
+    if (move) {
+      if (Math.hypot(move.dx, move.dy) * zoom >= 1) props.onMoveObject(move.id, move.dx, move.dy);
+      setMove(null);
+    }
   };
 
+  // Select mode: a click selects; pressing on the selected area / line drags it as a whole.
   const onObjectDown = useCallback(
     (id: string, e: PointerEvent<SVGElement>) => {
       if (e.button !== 0) return;
       e.stopPropagation();
-      onSelect(id);
+      if (id !== selectedId) {
+        onSelect(id);
+        return;
+      }
+      const r = svgRef.current?.getBoundingClientRect();
+      if (!r) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setMove({
+        id,
+        start: [(e.clientX - r.left) / zoom, (e.clientY - r.top) / zoom],
+        dx: 0,
+        dy: 0,
+      });
     },
-    [onSelect],
+    [onSelect, selectedId, zoom],
   );
+  // A corner handle of the selected area / line, or any count pin: drag that one point.
   const onVertexDown = useCallback(
     (id: string, index: number, e: PointerEvent<SVGElement>) => {
       if (e.button !== 0) return;
       e.stopPropagation();
       const o = objects.find((x) => x.id === id);
       if (!o) return;
+      if (id !== selectedId) onSelect(id);
       e.currentTarget.setPointerCapture(e.pointerId);
       setDrag({ id, index, points: o.points.map((p) => [p[0], p[1]]), moved: false });
     },
-    [objects],
+    [objects, onSelect, selectedId],
   );
 
   const shown = useMemo(
@@ -379,17 +600,36 @@ export function TakeoffViewer(props: ViewerProps) {
         ? objects.map((o) =>
             o.id === drag.id ? ({ ...o, points: drag.points } as TakeoffObject) : o,
           )
-        : objects,
-    [objects, drag],
+        : move && (move.dx || move.dy)
+          ? objects.map((o) => (o.id === move.id ? translateObject(o, move.dx, move.dy) : o))
+          : objects,
+    [objects, drag, move],
   );
 
   const cursorStyle = panning
     ? "grabbing"
     : spaceDown
       ? "grab"
-      : tool === "select"
-        ? "default"
-        : "crosshair";
+      : move
+        ? "move"
+        : tool === "select"
+          ? "default"
+          : "crosshair";
+
+  const roleChips =
+    tool === "count"
+      ? {
+          options: COUNT_ROLES.map((r) => ({ value: r, label: COUNT_ROLE_LABELS[r] })),
+          value: countRole,
+          onChange: (v: string) => pickCountRole(v as CountRole),
+        }
+      : tool === "linear"
+        ? {
+            options: LINEAR_ROLES.map((r) => ({ value: r, label: LINEAR_ROLE_LABELS[r] })),
+            value: linearRole,
+            onChange: (v: string) => setLinearRole(v as LinearRole),
+          }
+        : null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -397,9 +637,10 @@ export function TakeoffViewer(props: ViewerProps) {
         tool={tool}
         zoom={zoom}
         onTool={changeTool}
-        onZoomIn={() => zoomCenter(1.25)}
-        onZoomOut={() => zoomCenter(1 / 1.25)}
+        onZoomIn={() => zoomCenter(ZOOM_STEP)}
+        onZoomOut={() => zoomCenter(1 / ZOOM_STEP)}
         onFit={fit}
+        roles={roleChips}
       />
 
       <div
@@ -415,7 +656,8 @@ export function TakeoffViewer(props: ViewerProps) {
           if (e.button === 1) e.preventDefault();
         }}
         onContextMenu={(e) => {
-          if (draft.length) e.preventDefault();
+          // Right-click is "Stop" while a drawing tool is active: no browser menu.
+          if (drawing || draft.length) e.preventDefault();
         }}
       >
         <div
@@ -435,6 +677,13 @@ export function TakeoffViewer(props: ViewerProps) {
               height={sizeH * zoom}
               viewBox={`0 0 ${sizeW} ${sizeH}`}
               onPointerDown={(e) => {
+                if (e.button === 2) {
+                  if (drawing) {
+                    e.preventDefault();
+                    stop();
+                  }
+                  return;
+                }
                 if (e.button !== 0) return;
                 place(toPage(e));
               }}
@@ -480,6 +729,22 @@ export function TakeoffViewer(props: ViewerProps) {
                   nearFirst={nearFirst}
                 />
               )}
+              {snapMark && <SnapMarker at={snapMark} zoom={zoom} />}
+              {typed && (cursor ?? last) && (
+                <SvgLabel
+                  x={(cursor ?? last)![0] + 14 / zoom}
+                  y={(cursor ?? last)![1] - 14 / zoom}
+                  zoom={zoom}
+                  anchor="start"
+                  size={13}
+                  bold
+                  color={typedFeet === null ? "#b91c1c" : "#1d4ed8"}
+                >
+                  {typedFeet === null
+                    ? `${typed} ?`
+                    : `${typed} → ${feetInches(typedFeet)} · Enter`}
+                </SvgLabel>
+              )}
             </svg>
           )}
         </div>
@@ -500,10 +765,15 @@ export function TakeoffViewer(props: ViewerProps) {
             {HINTS[tool]}
             {tool !== "select" && tool !== "count" && (
               <span className="ml-1">
-                Ortho {shift ? "off (Shift held)" : "on — hold Shift for any angle"}.
+                Ortho and snap {shift ? "off (Shift held)" : "on — hold Shift for any angle"}.
+              </span>
+            )}
+            {typingTool && fpp !== null && (
+              <span className="ml-1">
+                After the first point, type a length (24'6) and press Enter to place the next.
               </span>
             )}{" "}
-            Wheel zooms; middle-drag or Space + drag pans.
+            Wheel or + / − zooms, 0 fits; middle-drag or Space + drag pans.
           </div>
           {!page.scale && (
             <div className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 shadow dark:bg-amber-900/60 dark:text-amber-100">
@@ -515,24 +785,34 @@ export function TakeoffViewer(props: ViewerProps) {
 
       <ScaleDialog
         open={!!scalePick}
+        pageCount={props.pageCount}
+        unscaledOtherPages={props.unscaledOtherPages}
         pixels={
           scalePick
             ? Math.hypot(scalePick.b[0] - scalePick.a[0], scalePick.b[1] - scalePick.a[1])
             : 0
         }
         onCancel={() => setScalePick(null)}
-        onSave={(feet) => {
+        onSave={(feet, applyToAll) => {
           if (!scalePick) return;
-          props.onSetScale({
-            ax: scalePick.a[0],
-            ay: scalePick.a[1],
-            bx: scalePick.b[0],
-            by: scalePick.b[1],
-            feet,
-          });
+          props.onSetScale(
+            {
+              ax: scalePick.a[0],
+              ay: scalePick.a[1],
+              bx: scalePick.b[0],
+              by: scalePick.b[1],
+              feet,
+            },
+            applyToAll,
+          );
           setScalePick(null);
           setTool("select");
-          toast.success("Scale set for this page.");
+          const n = applyToAll ? props.unscaledOtherPages : 0;
+          toast.success(
+            n > 0
+              ? `Scale set for this page and ${n} other page${n === 1 ? "" : "s"}.`
+              : "Scale set for this page.",
+          );
         }}
       />
     </div>

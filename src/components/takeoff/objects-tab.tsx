@@ -33,11 +33,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { pointerCloseAutoFocus } from "./focus";
 import { DrainFields } from "./drain-fields";
 import {
   COUNT_BASE_NAMES,
   LINEAR_BASE_NAMES,
   drainDefaults,
+  defaultEdgeOptions,
   edgeLengthsFt,
   fmtFt,
   fmtNum,
@@ -110,7 +112,11 @@ export function ObjectsTab(props: ObjectsTabProps) {
               <button
                 key={o.id}
                 type="button"
-                onClick={() => props.onSelect(o.id)}
+                onClick={(e) => {
+                  props.onSelect(o.id);
+                  // Mouse click: hand the keys back to the drawing (Delete, tool keys…).
+                  if (e.detail > 0) e.currentTarget.blur();
+                }}
                 className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm hover:bg-muted ${
                   o.id === props.selectedId ? "bg-primary/10 ring-1 ring-primary/40" : ""
                 }`}
@@ -205,7 +211,7 @@ function SelectedEditor(props: {
           No scale on this page — set one with the Scale tool to get real sizes.
         </p>
       )}
-      {o.kind === "area" && <AreaEditor object={o} fpp={fpp} update={update} />}
+      {o.kind === "area" && <AreaEditor object={o} fpp={fpp} setup={props.setup} update={update} />}
       {o.kind === "linear" && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
@@ -228,7 +234,7 @@ function SelectedEditor(props: {
               <SelectTrigger className="h-8">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                 {LINEAR_ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
                     {LINEAR_ROLE_LABELS[r]}
@@ -286,7 +292,7 @@ function SelectedEditor(props: {
               <SelectTrigger className="h-8">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                 {COUNT_ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
                     {COUNT_ROLE_LABELS[r]}
@@ -371,9 +377,18 @@ function SelectedEditor(props: {
   );
 }
 
+/** One value when every side agrees, else undefined ("Mixed"). */
+function common<T>(xs: readonly T[]): T | undefined {
+  return xs.length && xs.every((x) => x === xs[0]) ? xs[0] : undefined;
+}
+/** A checkbox state over all sides: on, off, or mixed. */
+const triState = (xs: readonly boolean[]): boolean | "indeterminate" =>
+  xs.every(Boolean) ? true : xs.some(Boolean) ? "indeterminate" : false;
+
 function AreaEditor(props: {
   object: Extract<TakeoffObject, { kind: "area" }>;
   fpp: number | null;
+  setup: TakeoffSetup;
   update: (fn: (o: TakeoffObject) => TakeoffObject) => void;
 }) {
   const o = props.object;
@@ -396,6 +411,30 @@ function AreaEditor(props: {
       cur[i] = withAttr(cur[i]!, k, v);
       return { ...x, attrs: { ...x.attrs, edges: cur } };
     });
+  // "All sides": one change applied to every side (value per side, e.g. blocking = its length).
+  const setAll = <K extends keyof OutlineEdgeOptions>(
+    k: K,
+    v: (i: number) => OutlineEdgeOptions[K] | undefined,
+  ) =>
+    props.update((x) => {
+      if (x.kind !== "area") return x;
+      const cur = x.points.map((_, j) => withAttr(x.attrs.edges?.[j] ?? {}, k, v(j)));
+      return { ...x, attrs: { ...x.attrs, edges: cur } };
+    });
+  // Re-apply the Setup tab's edge defaults to every side (tall-wall marks are kept).
+  const resetToSetup = () =>
+    props.update((x) => {
+      if (x.kind !== "area") return x;
+      const defaults = defaultEdgeOptions(x.points, props.setup, fpp);
+      const cur = defaults.map((d, j) =>
+        x.attrs.edges?.[j]?.hasTallWall ? { ...d, hasTallWall: true } : d,
+      );
+      return { ...x, attrs: { ...x.attrs, edges: cur } };
+    });
+  const allPerimeter = triState(edges.map((e) => e.isPerimeter ?? false));
+  const allBlocking = triState(edges.map((e) => (e.blockingFt ?? 0) > 0));
+  const allTermination = common(edges.map((e) => e.termination ?? "No Termination"));
+  const allArp = common(edges.map((e) => e.arpSizeIn ?? 0));
 
   return (
     <div className="space-y-3">
@@ -426,6 +465,78 @@ function AreaEditor(props: {
             </tr>
           </thead>
           <tbody>
+            <tr className="border-t bg-muted/40" title="Change every side at once">
+              <td className="py-1 pr-1 font-semibold" colSpan={2}>
+                All sides
+              </td>
+              <td className="pr-1">
+                <Checkbox
+                  checked={allPerimeter}
+                  onCheckedChange={(c) => setAll("isPerimeter", () => c === true)}
+                  aria-label="All sides perimeter"
+                />
+              </td>
+              <td className="pr-1">
+                <Select
+                  value={allTermination ?? ""}
+                  onValueChange={(v) => setAll("termination", () => v)}
+                >
+                  <SelectTrigger
+                    className="h-7 w-[118px] px-2 text-xs"
+                    aria-label="All sides termination"
+                  >
+                    <SelectValue placeholder="Mixed" />
+                  </SelectTrigger>
+                  <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
+                    {TERMINATION_OPTIONS.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </td>
+              <td className="pr-1">
+                <label
+                  className="flex items-center gap-1"
+                  title={
+                    fpp === null
+                      ? "Set the page scale first: blocking uses each side's length"
+                      : "On: each side's own length in feet; off: none"
+                  }
+                >
+                  <Checkbox
+                    checked={allBlocking}
+                    disabled={fpp === null}
+                    onCheckedChange={(c) =>
+                      setAll("blockingFt", (i) =>
+                        c === true ? Math.round((lens[i] ?? 0) * 100) / 100 : 0,
+                      )
+                    }
+                    aria-label="All sides blocking"
+                  />
+                  <span className="text-muted-foreground">full</span>
+                </label>
+              </td>
+              <td className="pr-1">
+                <Select
+                  value={allArp === undefined ? "" : String(allArp)}
+                  onValueChange={(v) => setAll("arpSizeIn", () => Number(v))}
+                >
+                  <SelectTrigger className="h-7 w-[64px] px-2 text-xs" aria-label="All sides ARP">
+                    <SelectValue placeholder="Mixed" />
+                  </SelectTrigger>
+                  <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
+                    {ARP_SIZE_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n === 0 ? "None" : `${n} in`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </td>
+              <td />
+            </tr>
             {edges.map((e, i) => (
               <tr key={i} className="border-t">
                 <td className="py-1 pr-1 font-medium">{sideLabels[i]}</td>
@@ -447,7 +558,7 @@ function AreaEditor(props: {
                     <SelectTrigger className="h-7 w-[118px] px-2 text-xs">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                       {TERMINATION_OPTIONS.map((t) => (
                         <SelectItem key={t} value={t}>
                           {t}
@@ -471,7 +582,7 @@ function AreaEditor(props: {
                     <SelectTrigger className="h-7 w-[64px] px-2 text-xs">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                       {ARP_SIZE_OPTIONS.map((n) => (
                         <SelectItem key={n} value={String(n)}>
                           {n === 0 ? "None" : `${n} in`}
@@ -494,6 +605,17 @@ function AreaEditor(props: {
           </tbody>
         </table>
       </div>
+      <button
+        type="button"
+        className="text-xs text-primary underline-offset-2 hover:underline"
+        title="Re-apply the Setup tab's edge defaults (perimeter, termination, blocking, ARP) to every side"
+        onClick={(e) => {
+          resetToSetup();
+          if (e.detail > 0) e.currentTarget.blur();
+        }}
+      >
+        Reset to setup defaults
+      </button>
       <div className="space-y-1">
         <h4 className="text-xs font-semibold text-muted-foreground">Cut-outs</h4>
         {cutouts.length === 0 && (

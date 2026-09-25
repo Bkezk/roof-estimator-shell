@@ -5,6 +5,8 @@
  * lists when that data is not available. Nothing is prefilled with made-up values.
  */
 import { useMemo } from "react";
+import { toast } from "sonner";
+import { Copy } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
@@ -14,7 +16,9 @@ import { attachedWithOptions, STANDARD_DECK_ORDER } from "@/lib/engine/adapters"
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { DESIGN_TABLE_OPTIONS, LEGACY_ROOF_SYSTEM_IDS } from "@/lib/engine/fastener-spacing";
 import type { Attachment } from "@/lib/engine/estimate";
+import { listTakeoffs, takeoffDoc } from "@/lib/takeoff.functions";
 import type { TakeoffSetup } from "@/lib/takeoff/model";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
@@ -28,6 +32,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+import { pointerCloseAutoFocus } from "./focus";
 import { DrainFields } from "./drain-fields";
 import { withDrainPick } from "./shapes";
 
@@ -68,7 +73,7 @@ function Pick(props: {
       <SelectTrigger className="h-8 text-sm">
         <SelectValue placeholder={props.placeholder ?? "Choose…"} />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
         {list.map((o) => (
           <SelectItem key={o.value} value={o.value}>
             {o.label}
@@ -90,6 +95,8 @@ function Group(props: { title: string; note?: string; children: React.ReactNode 
 }
 
 export function SetupTab(props: {
+  /** This takeoff (left out when looking for a setup to copy). */
+  takeoffId: string;
   setup: TakeoffSetup;
   onChange: (next: TakeoffSetup) => void;
   isNew: boolean;
@@ -103,6 +110,31 @@ export function SetupTab(props: {
     enabled: !!session,
     staleTime: 5 * 60_000,
   });
+
+  // "Use the setup from …": the most recently updated OTHER takeoff with any setup answers
+  // (the list comes newest first).
+  const listFn = useServerFn(listTakeoffs);
+  const { data: others } = useQuery({
+    queryKey: ["takeoffs"],
+    queryFn: () => listFn(),
+    enabled: !!session,
+  });
+  const source = useMemo(() => {
+    for (const t of others ?? []) {
+      if (t.id === props.takeoffId) continue;
+      const s = takeoffDoc(t).setup;
+      if (Object.keys(s).length > 0) return { name: t.name, setup: s };
+    }
+    return null;
+  }, [others, props.takeoffId]);
+  const copyFrom = () => {
+    if (!source) return;
+    const before = setup;
+    onChange(structuredClone(source.setup));
+    toast.success(`Setup copied from “${source.name}”`, {
+      action: { label: "Undo", onClick: () => onChange(before) },
+    });
+  };
 
   const systems = useMemo(() => {
     const fromAdmin = admin
@@ -170,6 +202,24 @@ export function SetupTab(props: {
           ? "Start here: answer the material questions for this roof, then draw. Each new area's sides take the edge defaults below (you can still change any side)."
           : "The material answers for this takeoff. Changes apply to areas you draw from now on; existing sides keep their own settings."}
       </p>
+      {source && (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-auto w-full justify-start whitespace-normal py-1.5 text-left"
+          title="Replace these answers with that takeoff's Setup (roof, deck, edges, parapets, drains, notes)"
+          onClick={(e) => {
+            copyFrom();
+            if (e.detail > 0) e.currentTarget.blur();
+          }}
+        >
+          <Copy className="mr-2 h-4 w-4 shrink-0" />
+          <span className="min-w-0">
+            Use the setup from <span className="font-semibold">“{source.name}”</span>
+          </span>
+        </Button>
+      )}
 
       <Group title="Roof membrane">
         <Field label="Roofing system">

@@ -3,7 +3,7 @@
  * Objects / Quantities on the right. Local state is authoritative and autosaves 800 ms after
  * any change to the name, pages, setup or objects.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -14,9 +14,11 @@ import {
   Check,
   FilePlus2,
   Loader2,
+  Redo2,
   RefreshCw,
   RotateCw,
   Ruler,
+  Undo2,
 } from "lucide-react";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -53,11 +55,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { pointerCloseAutoFocus } from "./focus";
 import { BidStatusBadge } from "./bid-status-badge";
 import { ObjectsTab } from "./objects-tab";
 import { QuantitiesTab } from "./quantities-tab";
 import { SetupTab } from "./setup-tab";
-import { buildObject, newId } from "./shapes";
+import {
+  buildObject,
+  isTypingTarget,
+  newId,
+  translateObject,
+  type NewObjectRoles,
+  type Tool,
+} from "./shapes";
 import { closePdf, openPdf, type UnderlaySource } from "./underlay";
 import { useAutosave, type SaveState } from "./use-autosave";
 import { TakeoffViewer } from "./viewer";
@@ -104,6 +114,10 @@ export function TakeoffEditor({ id }: { id: string }) {
 type TakeoffStatus = "draft" | "done";
 const NO_AREA_TIP = "Draw at least one roof area on a scaled page first";
 
+/** Undo steps kept for the objects list, and how close attribute edits merge into one step. */
+const HISTORY_LIMIT = 50;
+const MERGE_MS = 1000;
+
 const SAVE_LABEL: Record<SaveState, string> = {
   idle: "Saved",
   saving: "Saving…",
@@ -134,10 +148,56 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     initial.pages.length ? initial.pages : [{ index: 0, name: "Page 1", rotation: 0, scale: null }],
   );
   const [setup, setSetup] = useState<TakeoffSetup>(initial.setup);
-  const [objects, setObjects] = useState<TakeoffObject[]>(initial.objects);
+  // The objects list with undo / redo (Ctrl+Z / Ctrl+Y): every change goes through `commit`,
+  // which keeps the previous list (up to HISTORY_LIMIT). Quick successive edits of one object's
+  // attributes (typing a name) merge into one step. Autosave is not undone — only the document.
+  const [objects, setObjectsState] = useState<TakeoffObject[]>(initial.objects);
+  const objectsRef = useRef(objects);
+  const history = useRef<{
+    past: TakeoffObject[][];
+    future: TakeoffObject[][];
+    mergeKey: string | null;
+    at: number;
+  }>({ past: [], future: [], mergeKey: null, at: 0 });
+  const [historySize, setHistorySize] = useState({ past: 0, future: 0 });
+  const syncHistory = () =>
+    setHistorySize({ past: history.current.past.length, future: history.current.future.length });
+  const commit = (fn: (os: TakeoffObject[]) => TakeoffObject[], mergeKey?: string) => {
+    const prev = objectsRef.current;
+    const next = fn(prev);
+    if (next === prev) return;
+    const h = history.current;
+    const now = Date.now();
+    if (!(mergeKey && h.mergeKey === mergeKey && now - h.at < MERGE_MS)) {
+      h.past.push(prev);
+      if (h.past.length > HISTORY_LIMIT) h.past.shift();
+    }
+    h.mergeKey = mergeKey ?? null;
+    h.at = now;
+    h.future = [];
+    objectsRef.current = next;
+    setObjectsState(next);
+    syncHistory();
+  };
+  const travel = (from: "past" | "future") => {
+    const h = history.current;
+    const target = h[from].pop();
+    if (!target) return;
+    (from === "past" ? h.future : h.past).push(objectsRef.current);
+    h.mergeKey = null;
+    objectsRef.current = target;
+    setObjectsState(target);
+    syncHistory();
+  };
+  const undo = () => travel("past");
+  const redo = () => travel("future");
   const [pageIdx, setPageIdx] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const isNew = initial.objects.length === 0 && Object.keys(initial.setup).length === 0;
+  // A brand-new drawing (nothing drawn, no page scaled) opens on the Scale tool.
+  const [startTool] = useState<Tool>(() =>
+    initial.objects.length === 0 && !initial.pages.some((p) => p.scale) ? "scale" : "select",
+  );
   const [tab, setTab] = useState(isNew ? "setup" : "objects");
 
   // Autosave (name / pages / setup / objects).
@@ -270,19 +330,22 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           : x,
       ),
     );
-    setObjects((os) =>
-      os.map((o) => {
-        if (o.page !== p.index) return o;
-        const points = rotatePoints(o.points, W, H, 1);
-        if (o.kind === "area" && o.attrs.cutouts?.length)
-          return {
-            ...o,
-            points,
-            attrs: { ...o.attrs, cutouts: o.attrs.cutouts.map((c) => rotatePoints(c, W, H, 1)) },
-          };
-        return { ...o, points };
-      }),
-    );
+    // Rotating re-frames every point on the page, so older undo steps no longer line up.
+    history.current = { past: [], future: [], mergeKey: null, at: 0 };
+    syncHistory();
+    const rotated = objectsRef.current.map((o) => {
+      if (o.page !== p.index) return o;
+      const points = rotatePoints(o.points, W, H, 1);
+      if (o.kind === "area" && o.attrs.cutouts?.length)
+        return {
+          ...o,
+          points,
+          attrs: { ...o.attrs, cutouts: o.attrs.cutouts.map((c) => rotatePoints(c, W, H, 1)) },
+        };
+      return { ...o, points };
+    });
+    objectsRef.current = rotated;
+    setObjectsState(rotated);
   };
 
   const select = useCallback((id: string | null) => {
@@ -290,33 +353,68 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     if (id) setTab("objects");
   }, []);
 
-  const createObject = (kind: ObjectKind, points: PagePoint[]): string => {
+  const createObject = (kind: ObjectKind, points: PagePoint[], roles: NewObjectRoles): string => {
     const id = newId();
-    setObjects((prev) => [
+    commit((prev) => [
       ...prev,
-      buildObject(kind, id, page.index, points, prev, setup, page.scale),
+      buildObject(kind, id, page.index, points, prev, setup, page.scale, roles),
     ]);
     select(id);
     return id;
   };
   const changePoints = (id: string, points: PagePoint[]) =>
-    setObjects((os) => os.map((o) => (o.id === id ? { ...o, points } : o)));
+    commit((os) => os.map((o) => (o.id === id ? { ...o, points } : o)));
+  const moveObject = (id: string, dx: number, dy: number) =>
+    commit((os) => os.map((o) => (o.id === id ? translateObject(o, dx, dy) : o)));
   const addCutout = (areaId: string, ring: PagePoint[]) =>
-    setObjects((os) =>
+    commit((os) =>
       os.map((o) =>
         o.id === areaId && o.kind === "area"
           ? { ...o, attrs: { ...o.attrs, cutouts: [...(o.attrs.cutouts ?? []), ring] } }
           : o,
       ),
     );
-  const setScale = (scale: PageScale) =>
-    setPages((ps) => ps.map((x) => (x.index === page.index ? { ...x, scale } : x)));
+  // Set this page's scale; with `applyToAll`, pages that have none take the same one (turned
+  // to their own rotation when it differs). Pages with a scale keep it.
+  const setScale = (scale: PageScale, applyToAll: boolean) =>
+    setPages((ps) =>
+      ps.map((x) => {
+        if (x.index === page.index) return { ...x, scale };
+        if (!applyToAll || x.scale) return x;
+        const turns = (x.rotation - page.rotation + 4) % 4;
+        const W = page.width;
+        const H = page.height;
+        return { ...x, scale: turns && W && H ? rotateScale(scale, W, H, turns) : { ...scale } };
+      }),
+    );
+  const unscaledOtherPages = pages.filter((x) => x.index !== page.index && !x.scale).length;
   const updateObject = (id: string, fn: (o: TakeoffObject) => TakeoffObject) =>
-    setObjects((os) => os.map((o) => (o.id === id ? fn(o) : o)));
+    commit((os) => os.map((o) => (o.id === id ? fn(o) : o)), `update:${id}`);
   const deleteObject = (id: string) => {
-    setObjects((os) => os.filter((o) => o.id !== id));
+    commit((os) => os.filter((o) => o.id !== id));
     if (selectedId === id) setSelectedId(null);
   };
+
+  // An undo that removes the selected object clears the selection.
+  useEffect(() => {
+    if (selectedId && !objects.some((o) => o.id === selectedId)) setSelectedId(null);
+  }, [objects, selectedId]);
+
+  // Ctrl+Z / Ctrl+Y (Cmd on a Mac; Ctrl+Shift+Z redoes too). A text field keeps its own undo.
+  const undoRef = useRef({ undo, redo });
+  undoRef.current = { undo, redo };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || isTypingTarget(e.target)) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) undoRef.current.undo();
+      else if (k === "y" || (k === "z" && e.shiftKey)) undoRef.current.redo();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const selectFromList = (id: string) => {
     const o = objects.find((x) => x.id === id);
     if (o) {
@@ -347,6 +445,36 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           </span>
         )}
         <SaveIndicator state={saveState} />
+        <div className="flex items-center">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            disabled={historySize.past === 0}
+            onClick={(e) => {
+              undo();
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+          >
+            <Undo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            disabled={historySize.future === 0}
+            onClick={(e) => {
+              redo();
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+            title="Redo (Ctrl+Y)"
+            aria-label="Redo"
+          >
+            <Redo2 className="h-4 w-4" />
+          </Button>
+        </div>
         <Select value={status} onValueChange={(v) => saveStatus.mutate(v as TakeoffStatus)}>
           <SelectTrigger
             className="h-8 w-[100px] text-xs"
@@ -356,7 +484,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           >
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
             <SelectItem value="draft">Draft</SelectItem>
             <SelectItem value="done">Done</SelectItem>
           </SelectContent>
@@ -453,9 +581,11 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                   <button
                     type="button"
                     className="min-w-0 flex-1 text-left"
-                    onClick={() => {
+                    onClick={(e) => {
                       setPageIdx(i);
                       setSelectedId(null);
+                      // Mouse click: hand the keys back to the drawing.
+                      if (e.detail > 0) e.currentTarget.blur();
                     }}
                   >
                     <div className="truncate text-sm font-medium">{p.name}</div>
@@ -496,8 +626,13 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             onSelect={select}
             onCreate={createObject}
             onChangePoints={changePoints}
+            onMoveObject={moveObject}
+            onDelete={deleteObject}
             onAddCutout={addCutout}
             onSetScale={setScale}
+            pageCount={pages.length}
+            unscaledOtherPages={unscaledOtherPages}
+            initialTool={startTool}
             onPageSize={onPageSize}
           />
         </div>
@@ -511,7 +646,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             </TabsList>
             <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
               <TabsContent value="setup" className="mt-0">
-                <SetupTab setup={setup} onChange={setSetup} isNew={isNew} />
+                <SetupTab takeoffId={row.id} setup={setup} onChange={setSetup} isNew={isNew} />
               </TabsContent>
               <TabsContent value="objects" className="mt-0">
                 <ObjectsTab

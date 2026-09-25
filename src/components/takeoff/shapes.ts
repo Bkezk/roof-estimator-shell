@@ -37,14 +37,14 @@ export const KEY_TOOLS: Record<string, Tool> = Object.fromEntries(
 /** The viewer's hint line per tool. */
 export const HINTS: Record<Tool, string> = {
   select:
-    "Click an object to select it; drag the corner squares of a selected area or line to adjust it.",
+    "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a count pin to move that pin. Delete removes it; Ctrl+Z undoes.",
   scale:
     "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
-  area: "Click each corner. Click the first point, double-click or press Enter to close. Backspace removes the last point, Esc cancels.",
+  area: "Click each corner. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
   linear:
-    "Click points along the line; double-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
+    "Click points along the line; double-click, right-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
   count:
-    "Click each item. Clicks add to the same count until you press Enter or Esc; the next click then starts a new count.",
+    "Click each item. Clicks add to the same count until you right-click or press Enter or Esc; the next click then starts a new count. Keys 1–6 pick the role.",
   dimension: "Click two points to measure a distance (not saved).",
   cutout:
     "Draw a well or penthouse inside the selected area; close it like an area. It is subtracted from that area.",
@@ -60,12 +60,137 @@ export const DRAFT_COLOR: Record<Tool, string> = {
   cutout: "#dc2626",
 };
 
-/** Keys typed into a field or a dialog are not drawing shortcuts. */
+/** <input> types that take no typed text (a key pressed on one is still a drawing shortcut). */
+const NON_TEXT_INPUTS = new Set([
+  "checkbox",
+  "radio",
+  "button",
+  "submit",
+  "reset",
+  "range",
+  "color",
+  "file",
+  "image",
+]);
+
+/**
+ * Keys typed into a real text field (input, textarea, native select, contenteditable) are not
+ * drawing shortcuts; neither are keys inside an open dialog, list box or menu, or on a focused
+ * select trigger (typeahead). A focused button, tab or checkbox in the side panel does NOT
+ * block them, so shortcuts keep working after clicking in the right panel.
+ */
 export function isTypingTarget(t: EventTarget | null): boolean {
   if (!(t instanceof HTMLElement)) return false;
   if (t.isContentEditable) return true;
-  if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return true;
-  return !!t.closest('[role="dialog"],[role="listbox"],[role="menu"],[role="combobox"]');
+  if (t instanceof HTMLInputElement) return !NON_TEXT_INPUTS.has(t.type);
+  if (t.tagName === "TEXTAREA" || t.tagName === "SELECT") return true;
+  // A focused select trigger (role combobox) takes letters as typeahead, so it counts as a
+  // typing target; after a mouse pick focus does not stay on it (see ./focus.ts).
+  return !!t.closest(
+    '[role="dialog"],[role="alertdialog"],[role="listbox"],[role="menu"],[role="combobox"]',
+  );
+}
+
+/**
+ * A typed length in feet: "24", "24.5", "24'", "24'6", "24' 6\"", "24'6.5\"", "6\"" (inches
+ * only). Returns null for anything else or a length that is not positive.
+ */
+export function parseFeetInches(text: string): number | null {
+  const s = text.trim();
+  if (!s) return null;
+  const m = /^(?:(\d+(?:\.\d*)?|\.\d+)\s*(')?)?\s*(?:(\d+(?:\.\d*)?|\.\d+)\s*"?)?$/.exec(s);
+  if (!m) return null;
+  const [, a, tick, b] = m;
+  let feet: number;
+  if (a !== undefined && tick === undefined && b !== undefined) return null; // "24 6": ambiguous
+  if (a !== undefined && tick === undefined) {
+    // No foot mark: a bare number is feet, unless it carries an inch mark ('6"').
+    feet = s.endsWith('"') ? Number(a) / 12 : Number(a);
+  } else {
+    feet = Number(a ?? 0) + Number(b ?? 0) / 12;
+  }
+  return Number.isFinite(feet) && feet > 0 ? feet : null;
+}
+
+/** Keys that may appear in a typed length. */
+export const isLengthKey = (key: string): boolean => /^[0-9.'" ]$/.test(key);
+
+/**
+ * The point `feet` away from `from`, heading toward `toward`: along the ortho axis nearest the
+ * cursor direction, or straight at the cursor when `free` (Shift held). Null when the cursor
+ * sits on the last point (no direction) or the page has no scale.
+ */
+export function typedPoint(
+  from: PagePoint,
+  toward: PagePoint,
+  feet: number,
+  fpp: number | null,
+  free: boolean,
+): PagePoint | null {
+  if (fpp === null || !(fpp > 0)) return null;
+  const px = feet / fpp;
+  const dx = toward[0] - from[0];
+  const dy = toward[1] - from[1];
+  if (free) {
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) return null;
+    return [from[0] + (dx / len) * px, from[1] + (dy / len) * px];
+  }
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return null;
+  return Math.abs(dx) >= Math.abs(dy)
+    ? [from[0] + Math.sign(dx) * px, from[1]]
+    : [from[0], from[1] + Math.sign(dy) * px];
+}
+
+/** The nearest candidate within `maxPx` screen px of `p` (page px × zoom), or null. */
+export function snapTo(
+  p: PagePoint,
+  candidates: readonly PagePoint[],
+  zoom: number,
+  maxPx = 8,
+): PagePoint | null {
+  let best: PagePoint | null = null;
+  let bestD = maxPx;
+  for (const c of candidates) {
+    const d = Math.hypot(c[0] - p[0], c[1] - p[1]) * zoom;
+    if (d <= bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** Every vertex (outline, cut-outs, count pins) of `objects` except `exceptId`'s own. */
+export function snapCandidates(
+  objects: readonly TakeoffObject[],
+  exceptId: string | null,
+  scale: PageScale | null,
+): PagePoint[] {
+  const out: PagePoint[] = [];
+  for (const o of objects) {
+    if (o.id === exceptId) continue;
+    out.push(...o.points);
+    if (o.kind === "area") for (const c of o.attrs.cutouts ?? []) out.push(...c);
+  }
+  if (scale) out.push([scale.ax, scale.ay], [scale.bx, scale.by]);
+  return out;
+}
+
+/** Move points by (dx, dy). */
+export const translatePoints = (points: readonly PagePoint[], dx: number, dy: number) =>
+  points.map(([x, y]): PagePoint => [x + dx, y + dy]);
+
+/** A whole object moved by (dx, dy), cut-outs included. */
+export function translateObject(o: TakeoffObject, dx: number, dy: number): TakeoffObject {
+  const points = translatePoints(o.points, dx, dy);
+  if (o.kind === "area" && o.attrs.cutouts?.length)
+    return {
+      ...o,
+      points,
+      attrs: { ...o.attrs, cutouts: o.attrs.cutouts.map((c) => translatePoints(c, dx, dy)) },
+    };
+  return { ...o, points } as TakeoffObject;
 }
 
 /** Default object names per role ("Roof 1", "Wall 1", "Drain 1"). */
@@ -226,7 +351,17 @@ export function defaultEdgeOptions(
   });
 }
 
-/** Build a new object of `kind` from drawn points with its default name, colour and attrs. */
+/** The role a new linear / count takes (the toolbar's role chips). */
+export interface NewObjectRoles {
+  linear?: LinearRole;
+  count?: CountRole;
+}
+
+/**
+ * Build a new object of `kind` from drawn points with its default name, colour and attrs. A
+ * linear / count takes `roles`' role (default Parapet / Drain) and that role's default name; a
+ * drain also takes the setup's drain picks.
+ */
 export function buildObject(
   kind: ObjectKind,
   id: string,
@@ -235,8 +370,11 @@ export function buildObject(
   existing: readonly TakeoffObject[],
   setup: TakeoffSetup,
   scale: PageScale | null,
+  roles: NewObjectRoles = {},
 ): TakeoffObject {
   const color = nextColor(kind, existing);
+  const linearRole = roles.linear ?? "parapet";
+  const countRole = roles.count ?? "drain";
   if (kind === "area") {
     return {
       id,
@@ -257,7 +395,7 @@ export function buildObject(
       page,
       points,
       color,
-      attrs: { name: uniqueName(LINEAR_BASE_NAMES.parapet, existing), role: "parapet" },
+      attrs: { name: uniqueName(LINEAR_BASE_NAMES[linearRole], existing), role: linearRole },
     };
   }
   return {
@@ -267,9 +405,9 @@ export function buildObject(
     points,
     color,
     attrs: {
-      name: uniqueName(COUNT_BASE_NAMES.drain, existing),
-      role: "drain",
-      ...drainDefaults(setup),
+      name: uniqueName(COUNT_BASE_NAMES[countRole], existing),
+      role: countRole,
+      ...(countRole === "drain" ? drainDefaults(setup) : {}),
     },
   };
 }
