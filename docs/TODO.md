@@ -148,6 +148,13 @@ the bottom with the commit that closed them.
    coverage, shipping, settings, markup) so the costing templates can be regenerated after
    every price import; (c) done: the edge-metal units, pipe-stack hours and underlayment layout labor are settled
    from the engine and written into Part B.
+   9c. **Price list gaps the PlanSwift build surfaced (Sep 25).** Fixed live + migration
+   `20260925150000`: Duro-Tuff 50 Gray / Dark Gray 129 → 1.29 and the 13" pipe stack Dark Gray
+   2435 → 24.35 (decimal slips, proven by their neighbours). Owner to decide: Duro-Fleece 60 mil
+   Plus is 226 $/sq ft (50 mil Plus is 2, non-Plus 1.46 / 1.55 — 2.26 likely, not proven); the
+   four automatic Roof Edge Blocking rows (½", ¾", 5/4", 2" Wood Blocking) are $0 per foot so
+   blocking material bills nothing; Non-DL TPO and EPDM membrane rows and Duro-Bond 40 have no
+   prices. All editable on Estimate Pricing.
 10. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
     zero-item column pick, prefill the new-product dialog.
 
