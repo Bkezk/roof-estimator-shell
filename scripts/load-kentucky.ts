@@ -91,6 +91,8 @@ const sb = createClient<Database>(url, serviceKey ?? publicKey!, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
 
+import { parseLooseJson } from "../src/lib/loose-json";
+
 async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<unknown> {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -104,7 +106,7 @@ async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<
         signal: AbortSignal.timeout(90_000),
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const json = (await res.json()) as { error?: { message?: string } };
+      const json = parseLooseJson(await res.text()) as { error?: { message?: string } };
       if (json && typeof json === "object" && json.error) {
         throw new Error(json.error.message ?? "ArcGIS error");
       }

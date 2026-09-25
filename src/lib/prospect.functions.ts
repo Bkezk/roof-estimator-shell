@@ -11,6 +11,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import { parseLooseJson } from "@/lib/loose-json";
 import {
   countyFromServiceUrl,
   guessFieldMap,
@@ -503,7 +504,7 @@ const fetchJson = async (url: string, body?: URLSearchParams): Promise<unknown> 
     );
   }
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} from ${new URL(url).host}`);
-  const json = (await res.json()) as { error?: { message?: string } };
+  const json = parseLooseJson(await res.text()) as { error?: { message?: string } };
   if (json && typeof json === "object" && json.error) {
     throw new Error(json.error.message ?? "ArcGIS error");
   }
