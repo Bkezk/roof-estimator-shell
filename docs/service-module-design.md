@@ -411,10 +411,9 @@ to add things to truck / job / shop, forgetting to log, and partial tubes**.
 What that changes in the proposal: because the truck is at the shop nightly, the count can be a
 short **end-of-day checklist on the phone** of only the fast movers (caulk, tape, primer,
 screws by weight) rather than a full restock count, and restock-to-par becomes "top up what the
-checklist says is low". Opened containers: count an opened tube / pail as **one opened** on the
-truck; the job that opened it gets charged the whole one (that is what the customer signed
-for), later jobs that use from the same opened one are charged nothing for it until it is
-empty and a new one is opened. The truck shows "1 opened + N full"; the reconciliation
-only cares about full ones and the opened count. Forgetting to log is reduced by the close-out
+checklist says is low". Opened containers (owner, Sep 26): **an opened tube / pail counts as one used**. The job
+that opens it is charged the whole one and it leaves the truck's stock then; nothing is
+tracked for the partial remainder. Simple, and it matches what the customer signed for.
+Forgetting to log is reduced by the close-out
 asking "anything off the truck?" before Complete and by the per-template usual-usage prefill
 (§12.5).
