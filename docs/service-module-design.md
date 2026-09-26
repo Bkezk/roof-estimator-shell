@@ -299,3 +299,29 @@ Trimmed from report §11 to what changes the build:
 - **Sub Contractors / Vendors / Service Agreements** — 2 vendors, 1 agreement.
 - **Notifications by email per stage** — CenterPoint sends stage emails; here the only outbound
   email is the invoice (and, if wanted later, "tech en route"). Texting stays outside.
+
+## 10. Owner additions, Sep 26 — the app is the CRM hub (recorded, not yet designed)
+
+Stated by the owner after reading §1–9; the design above is to be revised once the questions
+under "To confirm" are answered. Nothing here is built.
+
+- **Customer profiles are the hub.** Bids and/or takeoffs link to a customer profile; repairs
+  (later) and repair tickets link there too, and new opportunities (potential new customers) are
+  customer profiles as well.
+- **Assignment + follow-up timer.** A repair, a repair ticket or an opportunity is assigned to a
+  user. Assigning starts a follow-up timer with reminders that keep firing until the user logs it
+  closed (or another status). The reminder lengths are set in admin. Opportunities also carry an
+  expected time frame.
+- **Typeahead both ways.** Starting a bid and typing the job name shows matching CRM names in a
+  dropdown; picking one links the bid to that profile. From a customer profile, an existing job
+  (bid) can be associated the same way.
+- **Prospecting is NOT the CRM.** `buildings` / the map / locations stay separate; the only tie is
+  an optional "import this prospect into the CRM" that creates a customer profile from it. (This
+  supersedes the §2 mapping of properties onto `buildings`; the CRM keeps its own customer +
+  site records, with an optional `building_id` when one was imported.)
+- **Vehicles and drivers.** Users are assigned to service vehicles. When such a user is assigned
+  to a repair and reports the inventory they used, it is taken off their vehicle automatically,
+  tied to that job, and every step is logged.
+
+To confirm with the owner (asked Sep 26): see the chat questions of that day; the answers get
+folded into §2–§6 and the questions list replaced by the decisions.
