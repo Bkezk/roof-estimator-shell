@@ -34,10 +34,7 @@ the bottom with the commit that closed them.
    subagent task once the table shape is settled.
    The bigger goal (owner, Sep 24): the company runs four products today — Bid-Advantage,
    PlanSwift, CenterPoint and Sage — and the target is **this web app + Sage only**.
-   Bid-Advantage → Estimator (built; importer for old bids built). PlanSwift → Takeoff on
-   plans + aerial screenshots (started Sep 24: engine, table, bucket, model, server functions,
-   bid seed and the estimator side are in; the page UI is being built — see
-   `docs/planswift-research.md` §4.8 for status). CenterPoint → service jobs, customers, scheduling, invoicing
+   Bid-Advantage → Estimator (built; importer for old bids built). PlanSwift → owner keeps measuring and pricing in PlanSwift (item 10 A) and imports the finished job into Bids (item 10 B); Bid-O-Matic's own Takeoff page is built and stays available. CenterPoint → service jobs, customers, scheduling, invoicing
    here. Sage stays for accounting and payments; a live Sage integration is OPTIONAL — the app
    only has to hand Sage clean invoice / payment numbers (an export the bookkeeper imports is
    enough). Order: CenterPoint replacement first (daily use), then takeoff, then history
@@ -62,11 +59,16 @@ the bottom with the commit that closed them.
    / Fleece, adhesives, accessories, freight, setup and inspection bands, warranties, high
    wind) become the bid's frozen snapshot, dated at the legacy last save, so "Update pricing &
    labor" shows the catalog moved on. Legacy statuses fold to the four (In Progress /
-   Finished / Review / Final → Draft; Submitted; Accepted → Won; Denied → Lost). Still to do:
-   owner compares the imported Summit and Knox bids with the hand-keyed ones and reports the
-   gaps; drip edge / gravel stop / fascia bar accessory entries are not read yet (the four
-   samples had none); underlayment $/sqft is not in the file, so those price from the live
-   list.
+   Finished / Review / Final → Draft; Submitted; Accepted → Won; Denied → Lost). **NOT FINISHED (owner, Sep 26) — still to do:**
+   (a) owner compares imported bids with the same bids in Bid-Advantage and reports every
+   difference (Monticello, Combined Bid and Broad Head were checked Sep 24: differences were
+   importer bugs — zip64, tax mode, underlayment / fastener / pipe-stack prices, tab spacing —
+   all fixed; the only residual was the live vent price and rounding); (b) drip edge, gravel
+   stop and fascia bar accessory entries are not read yet (1b); (c) items the importer warns
+   about and does not bring over: a legacy discount, the tear-off adjust, unknown membrane
+   accessories, two-piece metals of an unknown size, term-bar extra feet in an unknown colour;
+   (d) the file carries no labor time tables, so labor times are the live ones. Underlayment
+   $/sq ft, fastener box prices and pipe-stack prices ARE read from the file (Sep 24).
    1b. **Importer: drip edge, gravel stop and fascia bar entries.** The four sample files had
    none, so the estimate-level XML shape of those accessory entries is unknown and they are
    skipped with a note in the import preview (a bid that used them imports short by those
@@ -136,48 +138,50 @@ the bottom with the commit that closed them.
    Needs: the per-year KYAPED ImageServers at kyraster.ky.gov and the NAIP service URL; a
    small year slider on the map. Later, the same comparison can flag likely re-roofs
    automatically.
-   9a. **RESUME HERE — PlanSwift bridge (paused Sep 26, owner out of usage until the next day).**
-   State: the one hand-off doc is `docs/planswift-bridge.md` (Part A quantities set, Part B
-   costing rules, Part C data). The PlanSwift build chat produced both template sets
-   (`Bid-O-Matic.SwiftTemplates`, `Bid-O-Matic Costing.SwiftTemplates`) and its generator,
-   now in `scripts/planswift/` with `feed_to_partc.py` (verified row-for-row against its
-   parsed tables). A fresh `partC.json` built after the Sep 25 price fixes was sent to the
-   owner to hand back to that chat. Next, in order:
-   1. Owner: import the costing `.SwiftTemplates` in PlanSwift 11, draw one `BOM Roof Section`
-      on a scaled page, open its properties and screenshot `BOM SysID`, `BOM MWO`,
-      `BOM Memb $/SF`, `BOM InstallHrs`. Zero or an error = the two unverified PlanSwift
-      behaviours (string compare inside `[!if()]`; a formula length limit — the adhesive
-      coverage lookup is ~13 KB).
-   2. Owner: send a PlanSwift **job** export with that one section (tells whether digitizer
-      points are in the file) and upload the owner's `templets.SwiftTemplates` here so the
-      generators can run from this repo (`scripts/planswift/sample/XMLData.XML`).
-   3. Tell the PlanSwift chat: field fastener spacing must come from the pull-test lookup
-      (15 in at the estimator defaults, not a fixed 12); lumber blocking rows are per 12 ft
-      piece; rerun `build_costing.py` with the new `partC.json`.
-   4. Owner: set the Duro-Fleece 60 mil Plus price (226 in the catalog, 2.26 likely) and
-      per-foot prices for the four automatic Roof Edge Blocking rows (TODO 9c).
-   5. Build the job importer (`src/lib/planswift/`, TODO 9b (a)) and the Export PlanSwift
-      feed button (9b (b)).
-      9b. **PlanSwift bridge (owner, Sep 25).** Two template sets for PlanSwift 11 in one hand-off document,
-      `docs/planswift-bridge.md`: Part A quantities-only (what Bid-O-Matic imports), Part B the
-      costing version, Part C the live price and labor tables it reads The generators live in `scripts/planswift/` (README there): the feed
-      export → `feed_to_partc.py` → the two `.SwiftTemplates`; the owner's PlanSwift sample export
-      (`sample/XMLData.XML`) is needed to run the builds and is not in git. Build: (a) the job-export importer
-      (`src/lib/planswift/`, waits on one sample job export to learn whether digitizer points are
-      in the file); (b) an "Export PlanSwift feed" button on Estimate Pricing that writes the same
-      JSON the one-off feed carried (`bid-o-matic-feed.json`: pricing_catalog, rdl_combos,
-      accessory_labor, parapet / curb / setup / inspection tables, fastener lookups, adhesive
-      coverage, shipping, settings, markup) so the costing templates can be regenerated after
-      every price import; (c) done: the edge-metal units, pipe-stack hours and underlayment layout labor are settled
-      from the engine and written into Part B.
-      9c. **Price list gaps the PlanSwift build surfaced (Sep 25).** Fixed live + migration
-      `20260925150000`: Duro-Tuff 50 Gray / Dark Gray 129 → 1.29 and the 13" pipe stack Dark Gray
-      2435 → 24.35 (decimal slips, proven by their neighbours). Owner to decide: Duro-Fleece 60 mil
-      Plus is 226 $/sq ft (50 mil Plus is 2, non-Plus 1.46 / 1.55 — 2.26 likely, not proven); the
-   four automatic Roof Edge Blocking rows (½", ¾", 5/4", 2" Wood Blocking) are $0 per foot so
-      blocking material bills nothing; Non-DL TPO and EPDM membrane rows and Duro-Bond 40 have no
-      prices. All editable on Estimate Pricing.
-10. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
+10. **PlanSwift → Bid-O-Matic bids (owner, Sep 25–26). RESUME HERE.** Two separate pieces:
+    - **A. Pricing inside PlanSwift — a project somewhat outside Bid-O-Matic.** PlanSwift 11
+      template sets that let a PlanSwift job price itself (quantities, material, labor, tax,
+      shipping, markup) so PlanSwift alone can produce a bid number. Spec:
+      `docs/planswift-bridge.md` (Part A quantities set, Part B costing rules marked exact /
+      near / rough, Part C the live price and labor tables). Built by the PlanSwift chat:
+      `Bid-O-Matic.SwiftTemplates` and `Bid-O-Matic Costing.SwiftTemplates`. Generator in
+      `scripts/planswift/` (README); `feed_to_partc.py` turns Bid-O-Matic's table export into
+      the data the generator reads (verified row-for-row). Regenerate after every price import.
+    - **B. Import the finished PlanSwift job into Bid-O-Matic's Bids (the estimator), NOT into
+      Takeoff.** The owner measures and prices in PlanSwift, then drops the PlanSwift job file
+      into Bid-O-Matic, which creates a priced bid on the Bids page the way "Import old bids"
+      does for .bax: sections (area, perimeter, edge options), parapets, curbs, drains, pipe
+      stacks, walk pads, the job setup answers as the bid's defaults, and whatever cannot be
+      placed listed in a notice with its numbers. Bid-O-Matic re-prices it with its own engine;
+      the PlanSwift total is shown beside it for comparison. Code home: `src/lib/planswift/`
+      plus an "Import PlanSwift job" button next to "Import old bids" on Saved Bids. Section
+      geometry: `sectionFromOutline` (`src/lib/takeoff/geometry.ts`) if the job file carries the
+      drawn points; otherwise the equivalent rectangle from Area and Perimeter.
+      Next, in order:
+    1. Owner: import `Bid-O-Matic Costing.SwiftTemplates` in PlanSwift 11, draw one
+       `BOM Roof Section` on a scaled page, screenshot its properties (`BOM SysID`, `BOM MWO`,
+       `BOM Memb $/SF`, `BOM InstallHrs`). Zero or an error = one of the two unverified PlanSwift
+       behaviours (a text compare inside `[!if()]`; a formula length limit — the adhesive
+       coverage lookup is ~13 KB).
+    2. Owner: send one PlanSwift **job** export with that section (the file the importer reads;
+       shows whether the drawn points are in it), and upload the owner's own
+       `templets.SwiftTemplates` so the generators can run here
+       (`scripts/planswift/sample/XMLData.XML`).
+    3. Pass to the PlanSwift chat: field fastener spacing from the pull-test lookup (15 in at
+       the estimator defaults, not a fixed 12); lumber blocking rows are per 12 ft piece; rebuild
+       with the fresh `partC.json` sent Sep 25.
+    4. Owner: set the Duro-Fleece 60 mil Plus price (226 $/sq ft in the catalog, 2.26 likely)
+       and per-foot prices for the four automatic Roof Edge Blocking rows (below).
+    5. Build piece B (the job importer into Bids) against the real job file, with a test on it.
+    6. An "Export PlanSwift feed" button on Estimate Pricing that writes the table export
+       `feed_to_partc.py` reads, so piece A can be regenerated without a developer.
+       Price list gaps the PlanSwift build surfaced: fixed live + migration `20260925150000`
+       (Duro-Tuff 50 Gray / Dark Gray 129 → 1.29; 13" pipe stack Dark Gray 2435 → 24.35). Still
+       open for the owner: Duro-Fleece 60 mil Plus 226; the four automatic Roof Edge Blocking
+       rows (½", ¾", 5/4", 2" Wood Blocking) are $0 per foot, so blocking material bills nothing
+       in both PlanSwift and the estimator; Non-DL TPO, EPDM and Duro-Bond 40 have no membrane
+       prices. All editable on Estimate Pricing.
+11. **Price List Import polish:** Accept-all / Confirm-all, remember "Not this", explain a
     zero-item column pick, prefill the new-product dialog.
 
 ## Done
