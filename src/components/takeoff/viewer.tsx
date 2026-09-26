@@ -195,13 +195,44 @@ export function TakeoffViewer(props: ViewerProps) {
     };
   }, [source, page.index, page.rotation, renderScale]);
 
+  // True while the page is shown "fitted" (after Fit / on open); a manual zoom or pan clears it.
+  // When the drawing area changes size (menu or side panels collapsed, window resized) a fitted
+  // page re-fits so it grows with the space; a zoomed-in view keeps its zoom and stays centred.
+  const fittedRef = useRef(true);
   const fit = useCallback(() => {
     const el = containerRef.current;
     if (!el || !sizeW || !sizeH) return;
     const r = el.getBoundingClientRect();
     const z = clampZoom(Math.min((r.width - 32) / sizeW, (r.height - 32) / sizeH));
+    fittedRef.current = true;
     setView({ zoom: z, x: (r.width - sizeW * z) / 2, y: (r.height - sizeH * z) / 2 });
   }, [sizeW, sizeH]);
+  const fitRef = useRef(fit);
+  fitRef.current = fit;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let last = { w: el.clientWidth, h: el.clientHeight };
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        const dw = w - last.w;
+        const dh = h - last.h;
+        last = { w, h };
+        if (!dw && !dh) return;
+        if (fittedRef.current) fitRef.current();
+        else setView((v) => ({ ...v, x: v.x + dw / 2, y: v.y + dh / 2 }));
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
 
   // Fit each page the first time its size is known.
   const fittedKey = useRef<string | null>(null);
@@ -213,6 +244,7 @@ export function TakeoffViewer(props: ViewerProps) {
   }, [pageKey, sizeW, sizeH, fit]);
 
   const zoomAt = useCallback((factor: number, cx: number, cy: number) => {
+    fittedRef.current = false;
     setView((v) => {
       const z = clampZoom(v.zoom * factor);
       const px = (cx - v.x) / v.zoom;
@@ -524,6 +556,7 @@ export function TakeoffViewer(props: ViewerProps) {
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     const pan = panRef.current;
     if (pan) {
+      fittedRef.current = false;
       setView((v) => ({ ...v, x: pan.x + e.clientX - pan.sx, y: pan.y + e.clientY - pan.sy }));
       return;
     }

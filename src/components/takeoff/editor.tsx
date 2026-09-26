@@ -14,6 +14,12 @@ import {
   Check,
   FilePlus2,
   Loader2,
+  Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Redo2,
   RefreshCw,
   RotateCw,
@@ -54,6 +60,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSidebar } from "@/components/ui/sidebar";
 
 import { pointerCloseAutoFocus } from "./focus";
 import { BidStatusBadge } from "./bid-status-badge";
@@ -424,8 +431,37 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     select(id);
   };
 
+  // Drawing-area size (owner, Sep 26: "we want that to be large"). The pages column and the
+  // Setup / Objects / Quantities panel fold away; Focus folds both plus the app menu. The
+  // viewer re-fits whenever its box changes size, so the page grows with the space.
+  const { open: navOpen, setOpen: setNavOpen, isMobile } = useSidebar();
+  const [pagesOpen, setPagesOpen] = useState(() => readPanel("pages", true));
+  const [panelOpen, setPanelOpen] = useState(() => readPanel("panel", true));
+  const togglePages = () =>
+    setPagesOpen((o) => {
+      writePanel("pages", !o);
+      return !o;
+    });
+  const togglePanel = () =>
+    setPanelOpen((o) => {
+      writePanel("panel", !o);
+      return !o;
+    });
+  const focused = !pagesOpen && !panelOpen && (isMobile || !navOpen);
+  const toggleFocus = () => {
+    const next = !focused;
+    setPagesOpen(!next);
+    setPanelOpen(!next);
+    writePanel("pages", !next);
+    writePanel("panel", !next);
+    if (!isMobile) setNavOpen(!next);
+  };
+  const gridCols = `${pagesOpen ? "150px " : ""}minmax(0,1fr)${panelOpen ? " 380px" : ""}`;
+
   return (
-    <div className="flex h-[calc(100svh-6.5rem)] min-h-[560px] flex-col gap-3">
+    // -m-4 reclaims most of the page padding around the editor; the height is the viewport minus
+    // the 3.5rem app header and the 0.5rem gap left above and below.
+    <div className="-m-4 flex h-[calc(100svh-4.5rem)] min-h-[560px] flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild variant="ghost" size="sm" className="px-2">
           <Link to="/takeoff">
@@ -490,6 +526,55 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           </SelectContent>
         </Select>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <div className="flex items-center rounded-md border">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              onClick={togglePages}
+              title={pagesOpen ? "Hide the pages list" : "Show the pages list"}
+              aria-pressed={pagesOpen}
+            >
+              {pagesOpen ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2"
+              onClick={togglePanel}
+              title={
+                panelOpen
+                  ? "Hide the Setup / Objects / Quantities panel"
+                  : "Show the Setup / Objects / Quantities panel"
+              }
+              aria-pressed={panelOpen}
+            >
+              {panelOpen ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1 px-2"
+              onClick={toggleFocus}
+              title={
+                focused
+                  ? "Show the menu and side panels again"
+                  : "Hide the menu and side panels to give the drawing the whole screen"
+              }
+              aria-pressed={focused}
+            >
+              {focused ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              <span className="text-xs">{focused ? "Exit focus" : "Focus"}</span>
+            </Button>
+          </div>
           {linkedBid ? (
             <>
               <span className="flex items-center gap-1.5 text-xs">
@@ -562,59 +647,61 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[160px_minmax(0,1fr)_400px] gap-3">
-        <Card className="min-h-0 overflow-y-auto">
-          <CardContent className="space-y-1 p-2">
-            <p className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Pages ({pages.length})
-            </p>
-            {pages.map((p, i) => {
-              const n = objects.filter((o) => o.page === p.index).length;
-              const active = i === pageIdx;
-              return (
-                <div
-                  key={p.index}
-                  className={`flex items-start gap-1 rounded px-1.5 py-1 ${
-                    active ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 text-left"
-                    onClick={(e) => {
-                      setPageIdx(i);
-                      setSelectedId(null);
-                      // Mouse click: hand the keys back to the drawing.
-                      if (e.detail > 0) e.currentTarget.blur();
-                    }}
+      <div className="grid min-h-0 flex-1 gap-2" style={{ gridTemplateColumns: gridCols }}>
+        {pagesOpen && (
+          <Card className="min-h-0 overflow-y-auto">
+            <CardContent className="space-y-1 p-2">
+              <p className="px-1 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Pages ({pages.length})
+              </p>
+              {pages.map((p, i) => {
+                const n = objects.filter((o) => o.page === p.index).length;
+                const active = i === pageIdx;
+                return (
+                  <div
+                    key={p.index}
+                    className={`flex items-start gap-1 rounded px-1.5 py-1 ${
+                      active ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted"
+                    }`}
                   >
-                    <div className="truncate text-sm font-medium">{p.name}</div>
-                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                      {p.scale ? (
-                        <span className="flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400">
-                          <Ruler className="h-3 w-3" /> scaled
-                        </span>
-                      ) : (
-                        <span className="text-amber-700 dark:text-amber-400">no scale</span>
-                      )}
-                      {n > 0 && <span>· {n}</span>}
-                    </div>
-                  </button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6 shrink-0"
-                    title="Rotate clockwise"
-                    aria-label={`Rotate ${p.name} clockwise`}
-                    onClick={() => rotatePage(i)}
-                  >
-                    <RotateCw className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              );
-            })}
-          </CardContent>
-        </Card>
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 text-left"
+                      onClick={(e) => {
+                        setPageIdx(i);
+                        setSelectedId(null);
+                        // Mouse click: hand the keys back to the drawing.
+                        if (e.detail > 0) e.currentTarget.blur();
+                      }}
+                    >
+                      <div className="truncate text-sm font-medium">{p.name}</div>
+                      <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        {p.scale ? (
+                          <span className="flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400">
+                            <Ruler className="h-3 w-3" /> scaled
+                          </span>
+                        ) : (
+                          <span className="text-amber-700 dark:text-amber-400">no scale</span>
+                        )}
+                        {n > 0 && <span>· {n}</span>}
+                      </div>
+                    </button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-6 w-6 shrink-0"
+                      title="Rotate clockwise"
+                      aria-label={`Rotate ${p.name} clockwise`}
+                      onClick={() => rotatePage(i)}
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="min-h-0 overflow-hidden rounded-lg border bg-background">
           <TakeoffViewer
@@ -637,36 +724,60 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           />
         </div>
 
-        <Card className="flex min-h-0 flex-col overflow-hidden">
-          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-            <TabsList className="m-2 grid grid-cols-3">
-              <TabsTrigger value="setup">Setup</TabsTrigger>
-              <TabsTrigger value="objects">Objects</TabsTrigger>
-              <TabsTrigger value="quantities">Quantities</TabsTrigger>
-            </TabsList>
-            <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-              <TabsContent value="setup" className="mt-0">
-                <SetupTab takeoffId={row.id} setup={setup} onChange={setSetup} isNew={isNew} />
-              </TabsContent>
-              <TabsContent value="objects" className="mt-0">
-                <ObjectsTab
-                  objects={objects}
-                  pages={pages}
-                  quantities={quantities}
-                  setup={setup}
-                  selectedId={selectedId}
-                  onSelect={selectFromList}
-                  onUpdate={updateObject}
-                  onDelete={deleteObject}
-                />
-              </TabsContent>
-              <TabsContent value="quantities" className="mt-0">
-                <QuantitiesTab name={name} pages={pages} quantities={quantities} />
-              </TabsContent>
-            </div>
-          </Tabs>
-        </Card>
+        {panelOpen && (
+          <Card className="flex min-h-0 flex-col overflow-hidden">
+            <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
+              <TabsList className="m-2 grid grid-cols-3">
+                <TabsTrigger value="setup">Setup</TabsTrigger>
+                <TabsTrigger value="objects">Objects</TabsTrigger>
+                <TabsTrigger value="quantities">Quantities</TabsTrigger>
+              </TabsList>
+              <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+                <TabsContent value="setup" className="mt-0">
+                  <SetupTab takeoffId={row.id} setup={setup} onChange={setSetup} isNew={isNew} />
+                </TabsContent>
+                <TabsContent value="objects" className="mt-0">
+                  <ObjectsTab
+                    objects={objects}
+                    pages={pages}
+                    quantities={quantities}
+                    setup={setup}
+                    selectedId={selectedId}
+                    onSelect={selectFromList}
+                    onUpdate={updateObject}
+                    onDelete={deleteObject}
+                  />
+                </TabsContent>
+                <TabsContent value="quantities" className="mt-0">
+                  <QuantitiesTab name={name} pages={pages} quantities={quantities} />
+                </TabsContent>
+              </div>
+            </Tabs>
+          </Card>
+        )}
       </div>
     </div>
   );
+}
+
+/** Which Takeoff side panels are open, remembered per browser (every read / write guarded). */
+const PANEL_KEY = "bid-o-matic:takeoff-panels";
+function readPanel(which: "pages" | "panel", fallback: boolean): boolean {
+  try {
+    if (typeof window === "undefined") return fallback;
+    const raw: unknown = JSON.parse(window.localStorage.getItem(PANEL_KEY) ?? "{}");
+    const v = raw && typeof raw === "object" ? (raw as Record<string, unknown>)[which] : undefined;
+    return typeof v === "boolean" ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writePanel(which: "pages" | "panel", open: boolean) {
+  try {
+    const raw: unknown = JSON.parse(window.localStorage.getItem(PANEL_KEY) ?? "{}");
+    const cur = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    window.localStorage.setItem(PANEL_KEY, JSON.stringify({ ...cur, [which]: open }));
+  } catch {
+    // Storage unavailable — the panels still fold for this visit.
+  }
 }
