@@ -6,7 +6,11 @@ the bottom with the commit that closed them.
 ## Open
 
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
-   first in a new session. Context: new-roof work is estimated and sold in this app; repair
+   first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
+   County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
+   `docs/service-module-design.md` (data model, minimal-click office / tech / invoice flows,
+   Sage hand-off, phases A–D, the eight decisions the owner still has to make). Build from that
+   doc; the text below is the original brief. Context: new-roof work is estimated and sold in this app; repair
    work, invoices and customer records live in **CenterPoint Connect** (the company's CRM).
    Inventory now sits at the shop or on a service vehicle (`inventory_locations`); the four
    movements are shop→job, shop→vehicle, vehicle→job, vehicle→shop, all through the two

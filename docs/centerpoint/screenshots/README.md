@@ -1,0 +1,7 @@
+# CenterPoint Connect screenshots — JBK, Inc. Roofing Division (captured 2026-09-24)
+Full-resolution (1568x772) captures of the live app, read-only session, for layout matching in the Bid-O-Matic replacement.
+Numbering follows the report sections: 01–03 areas/dispatch, 04–15 a repair's life (ticket → tech close-out → invoice → PDF),
+16–24 customers/properties/contacts, 25–32 forms and opportunities, 33–37 scheduling/calendar/timekeeping, 38–45 reports, 46–47 history & notifications.
+Not captured: Settings (menu item does nothing for this login), the tech mobile app, and the Service Map tiles (map did not render in the background tab).
+48–62 (added on request): Tasks calendar filters, New Task form, a sold repairs opportunity (4510) end to end — stages, site bid repairs, Bid Status checklists, estimate panels, Build a Bid — the signed lump-sum Site Bid document, a quoted-not-sold replacement opportunity (5233), a multi-page Roof Proposal document, the New Opportunity form, Bid Report and Inventoried Repairs.
+63–77 (Bell County projects): project 5123 page (sections, job-progress/billed bars, stages, 59-day work log, a day's detail with photos, change orders, billing instructions), project 5210, Production Board (project queue Gantt, schedule labor), Production Budget report, project 4506 with budgets and a project invoice, the property's 24-section list and its Inspection Report cover.
