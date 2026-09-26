@@ -67,13 +67,45 @@ the bottom with the commit that closed them.
    stop and fascia bar accessory entries are not read yet (1b); (c) items the importer warns
    about and does not bring over: a legacy discount, the tear-off adjust, unknown membrane
    accessories, two-piece metals of an unknown size, term-bar extra feet in an unknown colour;
-   (d) the file carries no labor time tables, so labor times are the live ones. Underlayment
-   $/sq ft, fastener box prices and pipe-stack prices ARE read from the file (Sep 24).
+   (d) the file DOES carry the labor tables Bid-Advantage used for that bid (tear-off rates,
+   adhesive hours per 1,000 sq ft, sheet-size and roll-width labor multipliers, underlayment
+   layout, each as default + custom), but the importer reads only the underlayment layout
+   overrides; everything else prices at today's live labor tables (1c-1). Checked Sep 26: all
+   five sample files carry identical labor tables, their tear-off table equals the live one row
+   for row, and their only custom labor values are seven underlayment layout overrides the
+   importer already applies — so these five import with the same hours; Monticello matched
+   Bid-Advantage within $34 (live vent price + rounding). Underlayment $/sq ft, fastener box
+   prices and pipe-stack prices ARE read from the file (Sep 24).
    1b. **Importer: drip edge, gravel stop and fascia bar entries.** The four sample files had
    none, so the estimate-level XML shape of those accessory entries is unknown and they are
    skipped with a note in the import preview (a bid that used them imports short by those
    lines). Owner is finding an old .bax that used one; then add all three to
    `src/lib/bax/bax-import.ts`.
+   1c. **Close the .bax cost gaps (owner, Sep 26), so an imported bid always reprices to what
+   Bid-Advantage showed.** Each piece gets a test on a sample file.
+   1. **Freeze the file's labor tables into the bid's snapshot**, the same way its prices
+      already freeze: read `lookuptearofflabor` (tear-off rate per sq ft by type × deck), the
+      adhesive `hoursperksqft` and `allowedunderlayments` coverage (default / custom), the
+      sheet-size labor multipliers (`mechrsmulti` and the adhered equivalents), the roll-good
+      width `laborvalue`s, and any other `default`/`custom` labor pairs, into the bid's frozen
+      admin snapshot (custom when > 0, else default — the existing `smartValue` rule). Then an
+      old bid reprices with its own labor even after the live tables change, and "Update
+      pricing & labor" is how the estimator moves it to today's. Also correct the import
+      preview note in `src/lib/bax/bax-import.ts` ("Not in the file: the labor time tables…"),
+      which says the opposite of what the file holds.
+   2. **Apply the legacy discount and the tear-off adjust instead of skipping them.** Find in
+      the legacy IL how Bid-Advantage applies `<discount>` (where in the money chain, % or $)
+      and `<tearoffadjust>` (a multiplier on tear-off hours; 1 = none), add the matching bid
+      fields in the engine with a parity test, and import them. Today both only warn.
+   3. **Import the remaining skipped items**: membrane accessories and two-piece metals with
+      ids the app does not know yet, and term-bar extra feet in an unmapped colour — map them
+      from the file's own catalog like the other accessories instead of warning.
+   4. **Drip edge, gravel stop and fascia bar entries** (1b) — needs one old .bax that used
+      them.
+   5. **Proof run**: import every old .bax the owner has, compare each total with Bid-
+      Advantage's Estimate Review, and list any bid that differs by more than rounding with
+      the reason. Done when every difference is explained by a price the owner changed on
+      purpose.
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and
