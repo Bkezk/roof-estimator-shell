@@ -16,6 +16,8 @@ import {
   Ruler,
   PanelLeftClose,
   PanelLeftOpen,
+  Wrench,
+  Contact,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -44,6 +46,11 @@ const estimatorItems = [
   // Takeoff sits above Bids (owner, Sep 25): measure first, then bid.
   { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
+];
+// Service (phase A): repair tickets and the customer hub they link to.
+const serviceItems = [
+  { title: "Tickets", url: "/service", icon: Wrench, page: "service" as const },
+  { title: "Customers", url: "/customers", icon: Contact, page: "customers" as const },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
@@ -267,6 +274,25 @@ export function AppSidebar() {
           <NavGroup label="Estimate" id="estimate" iconMode={collapsed}>
             <SidebarMenu>
               {estimatorItems
+                .filter((item) => can(item.page))
+                .map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+            </SidebarMenu>
+          </NavGroup>
+        )}
+
+        {(can("service") || can("customers")) && (
+          <NavGroup label="Service" id="service" iconMode={collapsed}>
+            <SidebarMenu>
+              {serviceItems
                 .filter((item) => can(item.page))
                 .map((item) => (
                   <SidebarMenuItem key={item.title}>

@@ -14,20 +14,23 @@ export interface UserProfile {
   full_name: string | null;
   role: Role;
   access: Page[];
+  technician: boolean;
   created_at?: string;
 }
-const PROFILE_COLS = "id, email, full_name, role, access, created_at";
+const PROFILE_COLS = "id, email, full_name, role, access, technician, created_at";
 const toProfile = (row: {
   id: string;
   email: string;
   full_name: string | null;
   role: string;
   access: unknown;
+  technician?: boolean | null;
   created_at?: string;
 }): UserProfile => ({
   ...row,
   role: row.role === "admin" ? "admin" : "user",
   access: normalizeAccess(row.access),
+  technician: row.technician === true,
 });
 
 /** Admin or a user granted the page — the server-side twin of RLS `has_access(page)`. */
@@ -113,6 +116,7 @@ const createUserSchema = z.object({
   full_name: z.string().trim().max(200).optional(),
   role: z.enum(["admin", "user"]),
   access: z.array(z.enum(PAGES)).default([]),
+  technician: z.boolean().default(false),
 });
 
 // Admin-only account creation. There is no public sign-up anywhere in the app;
@@ -142,6 +146,7 @@ export const createUser = createServerFn({ method: "POST" })
         full_name: data.full_name ?? null,
         role: data.role,
         access: data.role === "admin" ? [] : data.access,
+        technician: data.technician,
       })
       .select(PROFILE_COLS)
       .single();
@@ -158,6 +163,7 @@ const updateAccessSchema = z.object({
   id: z.string().uuid(),
   role: z.enum(["admin", "user"]),
   access: z.array(z.enum(PAGES)).default([]),
+  technician: z.boolean().optional(),
 });
 
 /** Set a user's role (admin / user) and, for a user, the pages they may open. */
@@ -182,7 +188,11 @@ export const updateUserAccess = createServerFn({ method: "POST" })
 
     const { data: profile, error } = await sb
       .from("profiles")
-      .update({ role: data.role, access: data.role === "admin" ? [] : data.access })
+      .update({
+        role: data.role,
+        access: data.role === "admin" ? [] : data.access,
+        ...(data.technician === undefined ? {} : { technician: data.technician }),
+      })
       .eq("id", data.id)
       .select(PROFILE_COLS)
       .single();
@@ -217,4 +227,28 @@ export const deleteUser = createServerFn({ method: "POST" })
     const { error } = await supabaseAdmin.auth.admin.deleteUser(data.id);
     if (error) throw new Error(error.message);
     return { id: data.id };
+  });
+
+/** A technician (or anyone with Service access) a ticket can be assigned to. */
+export interface TechnicianOption {
+  id: string;
+  name: string;
+  technician: boolean;
+}
+
+/**
+ * The people a ticket can be assigned to: profiles marked technician, plus admins and office
+ * users with Service access (they sometimes take a call themselves). Any Service user may read
+ * it; `technician_options()` is SECURITY DEFINER because profiles RLS hides other rows.
+ */
+export const listTechnicians = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<TechnicianOption[]> => {
+    const { data, error } = await context.supabase.rpc("technician_options");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => ({
+      id: r.id,
+      name: (r.full_name ?? "").trim() || r.email,
+      technician: r.technician,
+    }));
   });

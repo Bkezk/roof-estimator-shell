@@ -38,6 +38,15 @@ describe("per-page access", () => {
     expect(homeFor(field)).toBe("/inventory");
     expect(homeFor(pricingOnly)).toBe("/admin/settings");
     expect(homeFor({ role: "user", access: [] })).toBe("/account");
+    // Service phase A: a technician lands on their tickets; an office user with Service +
+    // Estimate still lands on Bids; Customers alone lands on the CRM.
+    expect(homeFor({ role: "user", access: ["service"], technician: true })).toBe("/service");
+    expect(homeFor({ role: "user", access: ["estimate", "service"], technician: false })).toBe(
+      "/bids",
+    );
+    expect(homeFor({ role: "user", access: ["customers"] })).toBe("/customers");
+    expect(pageForPath("/service")).toBe("service");
+    expect(pageForPath("/customers")).toBe("customers");
   });
 
   it("normalizes a stored access list", () => {

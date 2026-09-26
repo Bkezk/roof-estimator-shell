@@ -246,6 +246,7 @@ export type Database = {
       };
       bids: {
         Row: {
+          account_id: string | null;
           building_id: string | null;
           created_at: string;
           created_by: string | null;
@@ -257,12 +258,14 @@ export type Database = {
           name: string;
           opportunity_id: string | null;
           roof_id: string | null;
+          site_id: string | null;
           status: string;
           takeoff_id: string | null;
           updated_at: string;
           updated_by_name: string | null;
         };
         Insert: {
+          account_id?: string | null;
           building_id?: string | null;
           created_at?: string;
           created_by?: string | null;
@@ -274,12 +277,14 @@ export type Database = {
           name: string;
           opportunity_id?: string | null;
           roof_id?: string | null;
+          site_id?: string | null;
           status?: string;
           takeoff_id?: string | null;
           updated_at?: string;
           updated_by_name?: string | null;
         };
         Update: {
+          account_id?: string | null;
           building_id?: string | null;
           created_at?: string;
           created_by?: string | null;
@@ -291,6 +296,7 @@ export type Database = {
           name?: string;
           opportunity_id?: string | null;
           roof_id?: string | null;
+          site_id?: string | null;
           status?: string;
           takeoff_id?: string | null;
           updated_at?: string;
@@ -309,6 +315,137 @@ export type Database = {
             columns: ["roof_id"];
             isOneToOne: false;
             referencedRelation: "roofs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      crm_accounts: {
+        Row: {
+          address1: string | null;
+          address2: string | null;
+          billing_instructions: string | null;
+          centerpoint_company_id: string | null;
+          city: string | null;
+          contact_name: string | null;
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          email: string | null;
+          external_id: string | null;
+          id: string;
+          kind: string;
+          name: string;
+          notes: string | null;
+          phone: string | null;
+          source: string;
+          state: string | null;
+          updated_at: string;
+          updated_by_name: string | null;
+          zip: string | null;
+        };
+        Insert: {
+          address1?: string | null;
+          address2?: string | null;
+          billing_instructions?: string | null;
+          centerpoint_company_id?: string | null;
+          city?: string | null;
+          contact_name?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          email?: string | null;
+          external_id?: string | null;
+          id?: string;
+          kind?: string;
+          name: string;
+          notes?: string | null;
+          phone?: string | null;
+          source?: string;
+          state?: string | null;
+          updated_at?: string;
+          updated_by_name?: string | null;
+          zip?: string | null;
+        };
+        Update: {
+          address1?: string | null;
+          address2?: string | null;
+          billing_instructions?: string | null;
+          centerpoint_company_id?: string | null;
+          city?: string | null;
+          contact_name?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          email?: string | null;
+          external_id?: string | null;
+          id?: string;
+          kind?: string;
+          name?: string;
+          notes?: string | null;
+          phone?: string | null;
+          source?: string;
+          state?: string | null;
+          updated_at?: string;
+          updated_by_name?: string | null;
+          zip?: string | null;
+        };
+        Relationships: [];
+      };
+      crm_sites: {
+        Row: {
+          account_id: string;
+          address1: string | null;
+          address2: string | null;
+          centerpoint_property_id: string | null;
+          city: string | null;
+          created_at: string;
+          deleted_at: string | null;
+          id: string;
+          name: string;
+          notes: string | null;
+          state: string | null;
+          technician_instructions: string | null;
+          updated_at: string;
+          zip: string | null;
+        };
+        Insert: {
+          account_id: string;
+          address1?: string | null;
+          address2?: string | null;
+          centerpoint_property_id?: string | null;
+          city?: string | null;
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name: string;
+          notes?: string | null;
+          state?: string | null;
+          technician_instructions?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Update: {
+          account_id?: string;
+          address1?: string | null;
+          address2?: string | null;
+          centerpoint_property_id?: string | null;
+          city?: string | null;
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name?: string;
+          notes?: string | null;
+          state?: string | null;
+          technician_instructions?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_sites_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
             referencedColumns: ["id"];
           },
         ];
@@ -654,6 +791,8 @@ export type Database = {
           reason: string;
           row_label: string;
           screen_id: string;
+          service_job_id: string | null;
+          service_job_name: string | null;
           unit: string;
         };
         Insert: {
@@ -673,6 +812,8 @@ export type Database = {
           reason: string;
           row_label: string;
           screen_id: string;
+          service_job_id?: string | null;
+          service_job_name?: string | null;
           unit: string;
         };
         Update: {
@@ -692,6 +833,8 @@ export type Database = {
           reason?: string;
           row_label?: string;
           screen_id?: string;
+          service_job_id?: string | null;
+          service_job_name?: string | null;
           unit?: string;
         };
         Relationships: [
@@ -1228,6 +1371,7 @@ export type Database = {
           full_name: string | null;
           id: string;
           role: string;
+          technician: boolean;
           updated_at: string;
         };
         Insert: {
@@ -1238,6 +1382,7 @@ export type Database = {
           full_name?: string | null;
           id: string;
           role?: string;
+          technician?: boolean;
           updated_at?: string;
         };
         Update: {
@@ -1248,6 +1393,7 @@ export type Database = {
           full_name?: string | null;
           id?: string;
           role?: string;
+          technician?: boolean;
           updated_at?: string;
         };
         Relationships: [];
@@ -1413,6 +1559,103 @@ export type Database = {
             columns: ["building_id"];
             isOneToOne: false;
             referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      service_jobs: {
+        Row: {
+          account_id: string | null;
+          centerpoint_invoice: string | null;
+          centerpoint_ticket: string | null;
+          created_at: string;
+          created_by: string | null;
+          customer_name: string;
+          deleted_at: string | null;
+          description: string;
+          helper_count: number;
+          id: string;
+          notes: string | null;
+          number: number;
+          po_number: string | null;
+          scheduled_date: string | null;
+          service_type: string;
+          site_address: string | null;
+          site_id: string | null;
+          site_name: string | null;
+          stage: string;
+          technician_id: string | null;
+          updated_at: string;
+          updated_by_name: string | null;
+        };
+        Insert: {
+          account_id?: string | null;
+          centerpoint_invoice?: string | null;
+          centerpoint_ticket?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          customer_name?: string;
+          deleted_at?: string | null;
+          description?: string;
+          helper_count?: number;
+          id?: string;
+          notes?: string | null;
+          number?: number;
+          po_number?: string | null;
+          scheduled_date?: string | null;
+          service_type?: string;
+          site_address?: string | null;
+          site_id?: string | null;
+          site_name?: string | null;
+          stage?: string;
+          technician_id?: string | null;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Update: {
+          account_id?: string | null;
+          centerpoint_invoice?: string | null;
+          centerpoint_ticket?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          customer_name?: string;
+          deleted_at?: string | null;
+          description?: string;
+          helper_count?: number;
+          id?: string;
+          notes?: string | null;
+          number?: number;
+          po_number?: string | null;
+          scheduled_date?: string | null;
+          service_type?: string;
+          site_address?: string | null;
+          site_id?: string | null;
+          site_name?: string | null;
+          stage?: string;
+          technician_id?: string | null;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_jobs_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_jobs_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_sites";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_jobs_technician_id_fkey";
+            columns: ["technician_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
         ];
@@ -1625,6 +1868,51 @@ export type Database = {
         };
         Relationships: [];
       };
+      vehicle_drivers: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          from_date: string;
+          id: number;
+          location_id: string;
+          to_date: string | null;
+          user_id: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          from_date?: string;
+          id?: number;
+          location_id: string;
+          to_date?: string | null;
+          user_id: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          from_date?: string;
+          id?: number;
+          location_id?: string;
+          to_date?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_drivers_location_id_fkey";
+            columns: ["location_id"];
+            isOneToOne: false;
+            referencedRelation: "inventory_locations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vehicle_drivers_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       warranties: {
         Row: {
           id: string;
@@ -1718,7 +2006,27 @@ export type Database = {
           updated_at: string;
         }[];
       };
+      inventory_job_options: {
+        Args: never;
+        Returns: {
+          id: string;
+          kind: string;
+          name: string;
+          status: string;
+          updated_at: string;
+        }[];
+      };
       is_admin: { Args: never; Returns: boolean };
+      is_technician: { Args: never; Returns: boolean };
+      technician_options: {
+        Args: never;
+        Returns: {
+          email: string;
+          full_name: string | null;
+          id: string;
+          technician: boolean;
+        }[];
+      };
       release_bid_lock: {
         Args: { p_bid: string; p_session: string };
         Returns: undefined;

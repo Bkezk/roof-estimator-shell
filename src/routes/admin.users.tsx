@@ -33,13 +33,20 @@ export const Route = createFileRoute("/admin/users")({
   component: UsersPage,
 });
 
-/** Admin checkbox + one checkbox per page; admin implies every page (shown ticked, disabled). */
+const TECHNICIAN_HELP =
+  "Appears on the service board, can be assigned tickets and vehicles; edits only their own tickets";
+
+/**
+ * Admin checkbox + one checkbox per page; admin implies every page (shown ticked, disabled).
+ * Technician is a separate flag beside the pages (it is not a page; an admin can be one too).
+ */
 function AccessPicker(props: {
   role: Role;
   access: Page[];
+  technician: boolean;
   disabled?: boolean;
   compact?: boolean;
-  onChange: (role: Role, access: Page[]) => void;
+  onChange: (role: Role, access: Page[], technician: boolean) => void;
 }) {
   const isAdmin = props.role === "admin";
   return (
@@ -50,7 +57,9 @@ function AccessPicker(props: {
           className="h-4 w-4"
           checked={isAdmin}
           disabled={props.disabled}
-          onChange={(e) => props.onChange(e.target.checked ? "admin" : "user", props.access)}
+          onChange={(e) =>
+            props.onChange(e.target.checked ? "admin" : "user", props.access, props.technician)
+          }
         />
         <span className="font-medium">Admin</span>
       </label>
@@ -71,12 +80,24 @@ function AccessPicker(props: {
                 e.target.checked
                   ? [...props.access.filter((x) => x !== p), p]
                   : props.access.filter((x) => x !== p),
+                props.technician,
               )
             }
           />
           {PAGE_LABELS[p]}
         </label>
       ))}
+      <label className="flex items-center gap-1.5 text-sm" title={TECHNICIAN_HELP}>
+        <input
+          type="checkbox"
+          className="h-4 w-4"
+          checked={props.technician}
+          disabled={props.disabled}
+          onChange={(e) => props.onChange(props.role, props.access, e.target.checked)}
+        />
+        <span className="font-medium">Technician</span>
+      </label>
+      {!props.compact && <p className="text-xs text-muted-foreground">{TECHNICIAN_HELP}</p>}
     </div>
   );
 }
@@ -99,6 +120,7 @@ function UsersPage() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("user");
   const [access, setAccess] = useState<Page[]>(["estimate"]);
+  const [technician, setTechnician] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["users"] });
 
@@ -109,6 +131,7 @@ function UsersPage() {
       full_name?: string;
       role: Role;
       access: Page[];
+      technician: boolean;
     }) => createUserFn({ data: input }),
     onSuccess: () => {
       toast.success("User created");
@@ -117,13 +140,14 @@ function UsersPage() {
       setPassword("");
       setRole("user");
       setAccess(["estimate"]);
+      setTechnician(false);
       invalidate();
     },
     onError: (e: Error) => toast.error(e.message || "Could not create user"),
   });
 
   const accessMut = useMutation({
-    mutationFn: (input: { id: string; role: Role; access: Page[] }) =>
+    mutationFn: (input: { id: string; role: Role; access: Page[]; technician: boolean }) =>
       updateAccessFn({ data: input }),
     onSuccess: (_r, input) => {
       toast.success("Access updated");
@@ -158,6 +182,7 @@ function UsersPage() {
       password,
       role,
       access,
+      technician,
       ...(trimmedName ? { full_name: trimmedName } : {}),
     });
   };
@@ -219,9 +244,11 @@ function UsersPage() {
               <AccessPicker
                 role={role}
                 access={access}
-                onChange={(r, a) => {
+                technician={technician}
+                onChange={(r, a, t) => {
                   setRole(r);
                   setAccess(a);
+                  setTechnician(t);
                 }}
               />
             </div>
@@ -273,8 +300,11 @@ function UsersPage() {
                           compact
                           role={u.role}
                           access={u.access}
+                          technician={u.technician}
                           disabled={accessMut.isPending}
-                          onChange={(r, a) => accessMut.mutate({ id: u.id, role: r, access: a })}
+                          onChange={(r, a, t) =>
+                            accessMut.mutate({ id: u.id, role: r, access: a, technician: t })
+                          }
                         />
                       </TableCell>
                       <TableCell className="text-right">

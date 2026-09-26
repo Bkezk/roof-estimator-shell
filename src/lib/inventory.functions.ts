@@ -129,6 +129,9 @@ export interface MovementRow {
   reason: MovementReason;
   bid_id: string | null;
   bid_name: string | null;
+  /** Set when the material was used on a service job (repair ticket) instead of a bid. */
+  service_job_id: string | null;
+  service_job_name: string | null;
   counted_note: string | null;
   note: string | null;
   created_by_name: string | null;
@@ -249,6 +252,8 @@ export const listMovements = createServerFn({ method: "GET" })
       reason: r.reason as MovementReason,
       bid_id: r.bid_id,
       bid_name: r.bid_name,
+      service_job_id: r.service_job_id,
+      service_job_name: r.service_job_name,
       counted_note: r.counted_note,
       note: r.note,
       created_by_name: r.created_by_name,
@@ -267,13 +272,15 @@ const addSchema = cellSchema.extend({
   /** Ignored if sent: the unit is the product screen's stock unit (STOCK_UNIT_BY_SCREEN). */
   unit: z.string().max(20).optional(),
   /**
-   * consumed = pulled from stock for a bid (subtracts); released = put back (adds). Both need
-   * bid_id. vehicle_used = written off a service vehicle (subtracts, no bid).
+   * consumed = pulled from stock for a job (subtracts); released = put back (adds). Both name
+   * the job: a bid (bid_id) or a service job (service_job_id). The old vehicle write-off is gone
+   * (owner, Sep 26): material off a truck is always against a job.
    */
-  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released", "vehicle_used"]),
+  reason: z.enum(["leftover", "adjustment", "damaged", "consumed", "released"]),
   /** Where: "shop" (default) or a service vehicle's inventory_locations.id. */
   location_id: z.string().min(1).max(60).optional(),
   bid_id: z.string().uuid().nullable().optional(),
+  service_job_id: z.string().uuid().nullable().optional(),
   counted_note: z.string().max(300).nullable().optional(),
   note: z.string().max(1000).nullable().optional(),
 });
@@ -296,23 +303,20 @@ export const addMovement = createServerFn({ method: "POST" })
         .maybeSingle(),
       sb.from("pricing_catalog").select("data").eq("id", data.screen_id).maybeSingle(),
     ]);
-    // Inventory access records leftovers and what a crew takes for a job; Estimate access (or
-    // admin) records anything (adjustments, write-offs, returns).
-    if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
-      throw new Error("Forbidden: Inventory access required");
+    // Inventory or Service access records leftovers and what a crew takes for a job; Estimate
+    // access (or admin) records anything (adjustments, write-offs, returns).
     if (
-      !canAccess(me, "estimate") &&
-      data.reason !== "leftover" &&
-      data.reason !== "consumed" &&
-      data.reason !== "vehicle_used"
+      !me ||
+      !(canAccess(me, "inventory") || canAccess(me, "estimate") || canAccess(me, "service"))
     )
+      throw new Error("Forbidden: Inventory access required");
+    if (!canAccess(me, "estimate") && data.reason !== "leftover" && data.reason !== "consumed")
       throw new Error("Only an estimator can adjust counts or write stock off");
     if (error) throw new Error(error.message);
     if (!screen) throw new Error("Catalog screen not found");
     const locationId = data.location_id ?? SHOP_LOCATION_ID;
     const location = await locationOf(sb, locationId);
-    if (data.reason === "vehicle_used" && location.kind !== "vehicle")
-      throw new Error("Pick the service vehicle the material was used from");
+    if (data.bid_id && data.service_job_id) throw new Error("Pick one job, not both");
     const d = screen.data as {
       kind?: string;
       columns?: string[];
@@ -351,13 +355,16 @@ export const addMovement = createServerFn({ method: "POST" })
       counted = packsFromPieces(data.qty, piece);
     }
     let qty = Math.abs(counted);
-    if (data.reason === "damaged" || data.reason === "consumed" || data.reason === "vehicle_used")
-      qty = -qty;
+    if (data.reason === "damaged" || data.reason === "consumed") qty = -qty;
     if (data.reason === "adjustment") qty = counted;
     if (qty === 0) throw new Error("Quantity cannot be zero");
-    if ((data.reason === "consumed" || data.reason === "released") && !data.bid_id)
+    if (
+      (data.reason === "consumed" || data.reason === "released") &&
+      !data.bid_id &&
+      !data.service_job_id
+    )
       throw new Error("Pick the job this material is for");
-    if (data.reason === "consumed" || data.reason === "vehicle_used") {
+    if (data.reason === "consumed") {
       // Never take more than the location holds (on hand = the sum of the cell's entries there).
       const onHand = await onHandAt(sb, locationId, data);
       if (-qty > onHand + 1e-9)
@@ -366,12 +373,19 @@ export const addMovement = createServerFn({ method: "POST" })
         );
     }
     let bidName: string | null = null;
-    if (data.bid_id) {
-      const { data: opts, error: bErr } = await sb.rpc("inventory_bid_options");
+    let jobName: string | null = null;
+    if (data.bid_id || data.service_job_id) {
+      const { data: opts, error: bErr } = await sb.rpc("inventory_job_options");
       if (bErr) throw new Error(bErr.message);
-      const b = (opts ?? []).find((o) => o.id === data.bid_id);
-      if (!b) throw new Error("Bid not found");
-      bidName = b.name;
+      if (data.bid_id) {
+        const b = (opts ?? []).find((o) => o.kind === "bid" && o.id === data.bid_id);
+        if (!b) throw new Error("Bid not found");
+        bidName = b.name;
+      } else {
+        const j = (opts ?? []).find((o) => o.kind === "service" && o.id === data.service_job_id);
+        if (!j) throw new Error("Service job not found");
+        jobName = j.name;
+      }
     }
     const { data: itemRows } = await sb
       .from("catalog_item_numbers")
@@ -394,6 +408,8 @@ export const addMovement = createServerFn({ method: "POST" })
         reason: data.reason,
         bid_id: data.bid_id ?? null,
         bid_name: bidName,
+        service_job_id: data.service_job_id ?? null,
+        service_job_name: jobName,
         counted_note:
           data.counted_note ??
           (data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null),
@@ -490,19 +506,14 @@ const transferSchema = cellSchema.extend({
   /** Positive, as counted (pieces when in_pieces; else whole packs). */
   qty: z.number().finite().min(0),
   in_pieces: z.boolean().optional(),
-  /**
-   * On a return to the shop: how much of what was on the vehicle did NOT come back and is
-   * written off as used on the vehicle (same counting unit as qty). Optional.
-   */
-  used_qty: z.number().finite().min(0).optional(),
   note: z.string().max(1000).nullable().optional(),
 });
 
 /**
  * Move stock between locations: a pair of entries sharing pair_id (−qty where it left, +qty
- * where it arrived). Loading a service vehicle is shop → vehicle; a return is vehicle → shop,
- * where `used_qty` writes off what did not come back as used on the vehicle. Never moves more
- * than the source location holds. Inventory access is enough (RLS matches).
+ * where it arrived). Loading a service vehicle is shop → vehicle; a return is vehicle → shop.
+ * What a truck used goes against a service job (addMovement, consumed), never a write-off.
+ * Never moves more than the source location holds. Inventory or Service access is enough.
  */
 export const transferStock = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -514,7 +525,10 @@ export const transferStock = createServerFn({ method: "POST" })
       .select("role, access, full_name, email")
       .eq("id", context.userId)
       .maybeSingle();
-    if (!me || !(canAccess(me, "inventory") || canAccess(me, "estimate")))
+    if (
+      !me ||
+      !(canAccess(me, "inventory") || canAccess(me, "estimate") || canAccess(me, "service"))
+    )
       throw new Error("Forbidden: Inventory access required");
     if (data.from_location_id === data.to_location_id)
       throw new Error("Pick two different locations");
@@ -530,10 +544,9 @@ export const transferStock = createServerFn({ method: "POST" })
       return packsFromPieces(n, piece);
     };
     const moved = toPacks(data.qty);
-    const used = toPacks(data.used_qty ?? 0);
-    if (moved <= 0 && used <= 0) throw new Error("Quantity cannot be zero");
+    if (moved <= 0) throw new Error("Quantity cannot be zero");
     const onHand = await onHandAt(sb, from.id, data);
-    if (moved + used > onHand + 1e-9)
+    if (moved > onHand + 1e-9)
       throw new Error(
         `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${from.kind === "shop" ? "on the shelf" : `on ${from.name}`}`,
       );
@@ -556,46 +569,30 @@ export const transferStock = createServerFn({ method: "POST" })
     };
     const pairId = crypto.randomUUID();
     const counted = data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null;
-    const rows: Database["public"]["Tables"]["inventory_movements"]["Insert"][] = [];
-    if (moved > 0) {
-      rows.push({
+    const rows: Database["public"]["Tables"]["inventory_movements"]["Insert"][] = [
+      {
         ...base,
         location_id: from.id,
         qty: -moved,
         reason: "transfer_out",
         pair_id: pairId,
         counted_note: counted ? `${counted} → ${to.name}` : `→ ${to.name}`,
-      });
-      rows.push({
+      },
+      {
         ...base,
         location_id: to.id,
         qty: moved,
         reason: "transfer_in",
         pair_id: pairId,
         counted_note: counted ? `${counted} ← ${from.name}` : `← ${from.name}`,
-      });
-    }
-    if (used > 0) {
-      if (from.kind !== "vehicle")
-        throw new Error("Only a service vehicle can write off what it used");
-      rows.push({
-        ...base,
-        location_id: from.id,
-        qty: -used,
-        reason: "vehicle_used",
-        pair_id: moved > 0 ? pairId : null,
-        counted_note:
-          data.in_pieces && piece
-            ? `${data.used_qty ?? 0} ${plural(data.used_qty ?? 0, piece.name)} not returned`
-            : "not returned",
-      });
-    }
+      },
+    ];
     const { data: inserted, error: insErr } = await sb
       .from("inventory_movements")
       .insert(rows)
       .select("id");
     if (insErr) throw new Error(insErr.message);
-    return { ok: true, ids: (inserted ?? []).map((r) => r.id), moved, used, unit, pair_id: pairId };
+    return { ok: true, ids: (inserted ?? []).map((r) => r.id), moved, unit, pair_id: pairId };
   });
 
 /**
@@ -640,6 +637,154 @@ export const listBidOptions = createServerFn({ method: "GET" })
     const { data, error } = await context.supabase.rpc("inventory_bid_options");
     if (error) throw new Error(error.message);
     return data ?? [];
+  });
+
+/** A job material can be logged against: a bid or a service job (repair ticket). */
+export interface JobOption {
+  kind: "bid" | "service";
+  id: string;
+  name: string;
+  status: string;
+  updated_at: string;
+}
+/** Bids and service jobs together, newest first (SECURITY DEFINER: a field login reads neither). */
+export const listJobOptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<JobOption[]> => {
+    const { data, error } = await context.supabase.rpc("inventory_job_options");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => ({
+      kind: r.kind === "service" ? "service" : "bid",
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      updated_at: r.updated_at,
+    }));
+  });
+
+/**
+ * Vehicle drivers (owner, Sep 26): up to two users per vehicle, a user may be on two vehicles,
+ * admins change it, history is kept (a closed row has to_date). Current = to_date is null.
+ */
+export interface VehicleDriverRow {
+  id: number;
+  location_id: string;
+  user_id: string;
+  user_name: string;
+  from_date: string;
+  to_date: string | null;
+}
+export const listVehicleDrivers = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ history: z.boolean().optional() }).parse(d ?? {}))
+  .handler(async ({ data, context }): Promise<VehicleDriverRow[]> => {
+    const sb = context.supabase;
+    let q = sb
+      .from("vehicle_drivers")
+      .select("id, location_id, user_id, from_date, to_date")
+      .order("from_date", { ascending: false });
+    if (!data.history) q = q.is("to_date", null);
+    const [{ data: rows, error }, { data: techs }] = await Promise.all([
+      q,
+      sb.rpc("technician_options"),
+    ]);
+    if (error) throw new Error(error.message);
+    const names = new Map<string, string>();
+    for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+    return (rows ?? []).map((r) => ({
+      ...r,
+      user_name: names.get(r.user_id) ?? "(no longer a user)",
+    }));
+  });
+
+/** Admin: set who drives a vehicle from today. Closes anyone no longer listed, keeps history. */
+export const setVehicleDrivers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) =>
+    z
+      .object({
+        location_id: z.string().min(1).max(60),
+        user_ids: z.array(z.string().uuid()).max(2),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const sb = context.supabase;
+    const { data: me } = await sb
+      .from("profiles")
+      .select("role")
+      .eq("id", context.userId)
+      .maybeSingle();
+    if (me?.role !== "admin") throw new Error("Forbidden: admin access required");
+    const location = await locationOf(sb, data.location_id);
+    if (location.kind !== "vehicle") throw new Error("Drivers are set on service vehicles only");
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: current, error } = await sb
+      .from("vehicle_drivers")
+      .select("id, user_id")
+      .eq("location_id", location.id)
+      .is("to_date", null);
+    if (error) throw new Error(error.message);
+    const keep = new Set(data.user_ids);
+    const closeIds = (current ?? []).filter((r) => !keep.has(r.user_id)).map((r) => r.id);
+    const have = new Set((current ?? []).map((r) => r.user_id));
+    const add = data.user_ids.filter((u) => !have.has(u));
+    if (closeIds.length) {
+      const { error: cErr } = await sb
+        .from("vehicle_drivers")
+        .update({ to_date: today })
+        .in("id", closeIds);
+      if (cErr) throw new Error(cErr.message);
+    }
+    if (add.length) {
+      const { error: aErr } = await sb.from("vehicle_drivers").insert(
+        add.map((user_id) => ({
+          location_id: location.id,
+          user_id,
+          from_date: today,
+          created_by: context.userId,
+        })),
+      );
+      if (aErr) throw new Error(aErr.message);
+    }
+    return { ok: true, closed: closeIds.length, added: add.length };
+  });
+
+/**
+ * What the signed-in user's "Take from my vehicle" defaults to: the vehicles they drive today
+ * and their service jobs that are still open, so material used on a call is two taps.
+ */
+export interface MyServiceDefaults {
+  vehicle_ids: string[];
+  jobs: { id: string; name: string; stage: string }[];
+}
+export const myServiceDefaults = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<MyServiceDefaults> => {
+    const sb = context.supabase;
+    const [{ data: drives }, { data: jobs }] = await Promise.all([
+      sb
+        .from("vehicle_drivers")
+        .select("location_id")
+        .eq("user_id", context.userId)
+        .is("to_date", null),
+      sb
+        .from("service_jobs")
+        .select("id, number, customer_name, description, stage")
+        .eq("technician_id", context.userId)
+        .is("deleted_at", null)
+        .in("stage", ["open", "scheduled", "done"])
+        .order("scheduled_date", { ascending: false })
+        .limit(50),
+    ]);
+    return {
+      vehicle_ids: [...new Set((drives ?? []).map((d) => d.location_id))],
+      jobs: (jobs ?? []).map((j) => ({
+        id: j.id,
+        name: `#${j.number} ${j.customer_name}${j.description ? ` — ${j.description}` : ""}`,
+        stage: j.stage,
+      })),
+    };
   });
 
 export type OpenedBoxRule = "half" | "full" | "ignore";

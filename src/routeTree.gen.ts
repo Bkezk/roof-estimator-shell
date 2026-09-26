@@ -12,11 +12,13 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
+import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
+import { Route as ServiceRouteImport } from './routes/service'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
@@ -38,6 +40,11 @@ const AccountRoute = AccountRouteImport.update({
 const BidsRoute = BidsRouteImport.update({
   id: '/bids',
   path: '/bids',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CustomersRoute = CustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EstimateRoute = EstimateRouteImport.update({
@@ -63,6 +70,11 @@ const ProposalRoute = ProposalRouteImport.update({
 const ProspectRoute = ProspectRouteImport.update({
   id: '/prospect',
   path: '/prospect',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ServiceRoute = ServiceRouteImport.update({
+  id: '/service',
+  path: '/service',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TakeoffRoute = TakeoffRouteImport.update({
@@ -105,11 +117,13 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/service': typeof ServiceRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -122,11 +136,13 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/service': typeof ServiceRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -140,11 +156,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/account': typeof AccountRoute
   '/bids': typeof BidsRoute
+  '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
+  '/service': typeof ServiceRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -159,11 +177,13 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/customers'
     | '/estimate'
     | '/inventory'
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/service'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -176,11 +196,13 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/customers'
     | '/estimate'
     | '/inventory'
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/service'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -193,11 +215,13 @@ export interface FileRouteTypes {
     | '/'
     | '/account'
     | '/bids'
+    | '/customers'
     | '/estimate'
     | '/inventory'
     | '/login'
     | '/proposal'
     | '/prospect'
+    | '/service'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -211,11 +235,13 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountRoute: typeof AccountRoute
   BidsRoute: typeof BidsRoute
+  CustomersRoute: typeof CustomersRoute
   EstimateRoute: typeof EstimateRoute
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
+  ServiceRoute: typeof ServiceRoute
   TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
@@ -246,6 +272,13 @@ declare module '@tanstack/react-router' {
       path: '/bids'
       fullPath: '/bids'
       preLoaderRoute: typeof BidsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/customers': {
+      id: '/customers'
+      path: '/customers'
+      fullPath: '/customers'
+      preLoaderRoute: typeof CustomersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/estimate': {
@@ -281,6 +314,13 @@ declare module '@tanstack/react-router' {
       path: '/prospect'
       fullPath: '/prospect'
       preLoaderRoute: typeof ProspectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/service': {
+      id: '/service'
+      path: '/service'
+      fullPath: '/service'
+      preLoaderRoute: typeof ServiceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/takeoff': {
@@ -339,11 +379,13 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   BidsRoute: BidsRoute,
+  CustomersRoute: CustomersRoute,
   EstimateRoute: EstimateRoute,
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
+  ServiceRoute: ServiceRoute,
   TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,

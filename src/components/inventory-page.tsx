@@ -1,15 +1,19 @@
 /**
- * Inventory — one screen (owner rule, MODULES.md §7: a non-technical crew lead or salesperson
- * uses this, often on a phone). Stock on hand is the page; every row has "Take from inventory"
- * and "Put in inventory"; the form is a dialog that asks WHERE first (the shop or a service
- * vehicle — owner, Sep 24), then the product, the amount and the job, which remembers the
- * last job used on this phone. Loading a service vehicle is "Take from inventory" with the
- * vehicle as the destination; a return is "Put in inventory" with the vehicle as the source,
- * and what does not come back is written off as used on the vehicle (two buttons, owner, Sep
- * 24). Adjustments and write-offs are not offered here — the server still accepts them from
- * estimators.
+ * Inventory — one screen (owner rule, MODULES.md §7: a non-technical crew lead, salesperson or
+ * service tech uses this, often on a phone). Stock on hand is the page; every row has "Take from
+ * inventory" and "Put in inventory"; the form is a dialog that asks WHERE first (the shop or a
+ * service vehicle — owner, Sep 24), then the product, the amount and the job — a service ticket
+ * or a bid — which remembers the last job used on this phone. Loading a service vehicle is
+ * "Take from inventory" with the vehicle as the destination; a return is "Put in inventory"
+ * with the vehicle as the source (or "Take from" the vehicle back to the shop) and moves only
+ * what came back. There is no vehicle write-off (owner, Sep 26): material used off a truck is
+ * always "Take from inventory" against a job. For a tech, "Take from" starts on the vehicle they
+ * drive and their open ticket (service design §6 A, §11); the ticket page's "Log material" link
+ * lands here with ?job=<ticket>, the estimator's leftovers link with ?bid=<bid>. Adjustments and
+ * write-offs are not offered here — the server still accepts them from estimators. Admins set
+ * the opened-box rule and who drives each vehicle at the bottom of the page.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -31,10 +35,11 @@ import {
   addMovement,
   deleteMovement,
   getInventorySettings,
-  listBidOptions,
+  listJobOptions,
   listLocations,
   listMovements,
   listStock,
+  myServiceDefaults,
   OPENED_BOX_LABELS,
   REASON_LABELS,
   setOpenedBoxRule,
@@ -44,10 +49,12 @@ import {
   priceColLabel,
   stockUnitFor,
   type InventoryLocation,
+  type JobOption,
   type MovementReason,
   type OpenedBoxRule,
   type StockRow,
 } from "@/lib/inventory.functions";
+import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import type { TargetRef } from "@/lib/item-number-targets";
 import {
   describeStock,
@@ -83,33 +90,41 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
+import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
 
 const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 const fmtWhen = (iso: string) =>
   new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+/**
+ * A job is a service ticket or a bid; the pickers and the remembered last job carry both as one
+ * key: "service:<id>" / "bid:<id>".
+ */
+const jobKey = (j: { kind: JobOption["kind"]; id: string }) => `${j.kind}:${j.id}`;
+const jobStatus = (j: JobOption) =>
+  j.kind === "service"
+    ? (STAGE_LABELS[j.status as ServiceStage] ?? j.status)
+    : STATUS_LABELS[asBidStatus(j.status)];
+/** "ticket #6001 Smith — leak" / the bid's name, for the confirmation. */
+const jobTitle = (j: JobOption) => (j.kind === "service" ? `ticket ${j.name}` : j.name);
 const LAST_JOB_KEY = "bid-o-matic:inventory-last-job";
 const readLastJob = (): string => {
   try {
-    return localStorage.getItem(LAST_JOB_KEY) ?? "";
+    const v = localStorage.getItem(LAST_JOB_KEY) ?? "";
+    // Before tickets existed this phone stored a bare bid id.
+    return v && !v.includes(":") ? `bid:${v}` : v;
   } catch {
     return "";
   }
 };
-const writeLastJob = (id: string) => {
+const writeLastJob = (key: string) => {
   try {
-    if (id) localStorage.setItem(LAST_JOB_KEY, id);
+    if (key) localStorage.setItem(LAST_JOB_KEY, key);
   } catch {
     /* private window */
   }
 };
 
 type Mode = "consumed" | "leftover";
-interface JobOption {
-  id: string;
-  name: string;
-  status: string;
-  updated_at: string;
-}
 
 /** Every product the catalog prices, flattened for one search box. */
 interface ProductOption {
@@ -149,14 +164,18 @@ function productOptions(targets: PriceTarget[], itemNumbers: ItemNumberRow[]): P
 const productLabel = (o: { name: string; variant: string }) =>
   o.variant ? `${o.name} · ${o.variant}` : o.name;
 
-export function InventoryPage(props: { initialBidId?: string | undefined }) {
-  const { role } = useAuth();
+export function InventoryPage(props: {
+  initialBidId?: string | undefined;
+  initialServiceJobId?: string | undefined;
+}) {
+  const { role, profile } = useAuth();
   const qc = useQueryClient();
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
   const targetsFn = useServerFn(listPriceTargets);
   const itemNosFn = useServerFn(listItemNumbers);
-  const bidsFn = useServerFn(listBidOptions);
+  const jobsFn = useServerFn(listJobOptions);
+  const defaultsFn = useServerFn(myServiceDefaults);
   const settingsFn = useServerFn(getInventorySettings);
   const locationsFn = useServerFn(listLocations);
   const undoFn = useServerFn(undoMovement);
@@ -171,7 +190,12 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   });
   const targetsQ = useQuery({ queryKey: ["price-targets"], queryFn: () => targetsFn() });
   const itemNosQ = useQuery({ queryKey: ["item-numbers"], queryFn: () => itemNosFn() });
-  const bidsQ = useQuery({ queryKey: ["inventory-bids"], queryFn: () => bidsFn() });
+  const jobsQ = useQuery({ queryKey: ["inventory-jobs"], queryFn: () => jobsFn() });
+  // The vehicle(s) I drive today and my open tickets: what "Take from" starts on.
+  const defaultsQ = useQuery({
+    queryKey: ["inventory-my-defaults", profile?.id ?? ""],
+    queryFn: () => defaultsFn(),
+  });
   const settingsQ = useQuery({ queryKey: ["inventory-settings"], queryFn: () => settingsFn() });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
@@ -187,6 +211,14 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const rule = settingsQ.data?.opened_box_rule ?? "half";
   const locations = useMemo(() => locationsQ.data ?? [], [locationsQ.data]);
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
+  const jobs = useMemo(() => jobsQ.data ?? [], [jobsQ.data]);
+  const myJobs = useMemo(() => defaultsQ.data?.jobs ?? [], [defaultsQ.data]);
+  const myVehicleIds = (defaultsQ.data?.vehicle_ids ?? []).filter((id) =>
+    locations.some((l) => l.id === id && l.kind === "vehicle"),
+  );
+  // Only one vehicle is unambiguous; a driver on two picks each time.
+  const myVehicle = myVehicleIds.length === 1 ? myVehicleIds[0] : undefined;
+  const defaultsReady = defaultsQ.isFetched && locationsQ.isFetched;
 
   const [q, setQ] = useState("");
   const [zeros, setZeros] = useState(false);
@@ -196,12 +228,40 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
     mode: Mode;
     ref: TargetRef | null;
     location: string | null;
+    purpose: Purpose | null;
+    /** A job key ("service:<id>" / "bid:<id>"), "__pick__" to show the picker, else last used. */
+    job: string | null;
   } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  // A tech who drives one vehicle sees it first; "Everywhere" stays one tap away.
+  useEffect(() => {
+    if (myVehicle) setWhere((w) => (w === "all" ? myVehicle : w));
+  }, [myVehicle]);
   useEffect(() => {
     // "Record leftovers for this bid" on the estimate lands here with ?bid=: open the form.
-    if (props.initialBidId) setDialog({ mode: "leftover", ref: null, location: null });
+    if (props.initialBidId)
+      setDialog({
+        mode: "leftover",
+        ref: null,
+        location: null,
+        purpose: { kind: "job" },
+        job: `bid:${props.initialBidId}`,
+      });
   }, [props.initialBidId]);
+  const jobLinkOpened = useRef(false);
+  useEffect(() => {
+    // A ticket's "Log material" link lands here with ?job=: take material for that ticket, off
+    // the vehicle this tech drives (known once my defaults have loaded).
+    if (!props.initialServiceJobId || jobLinkOpened.current || !defaultsReady) return;
+    jobLinkOpened.current = true;
+    setDialog({
+      mode: "consumed",
+      ref: null,
+      location: myVehicle ?? null,
+      purpose: { kind: "job" },
+      job: `service:${props.initialServiceJobId}`,
+    });
+  }, [props.initialServiceJobId, defaultsReady, myVehicle]);
 
   const filter = q.trim().toLowerCase();
   const rows = stock.filter((r) => {
@@ -218,13 +278,20 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
   const shown = where === "all" ? stock : stock.filter((r) => r.location_id === where);
   const inStock = shown.filter((r) => Math.abs(r.on_hand) >= 0.0005).length;
 
-  const open = (mode: Mode, r?: StockRow) =>
+  const open = (mode: Mode, r?: StockRow) => {
+    // Fewest taps for a tech taking material (Sep 26): start on the vehicle they drive and on
+    // their open ticket — one ticket is chosen, several are listed first in the job picker.
+    const take = mode === "consumed";
+    const onlyTicket = take && myJobs.length === 1 ? `service:${myJobs[0]!.id}` : null;
     setDialog({
       mode,
       ref: r ? { screen_id: r.screen_id, row_label: r.row_label, price_col: r.price_col } : null,
-      // A row already says where it is; the header buttons ask first.
-      location: r ? r.location_id : null,
+      // A row already says where it is; the header buttons ask first (or start on my vehicle).
+      location: r ? r.location_id : take && myVehicle ? myVehicle : null,
+      purpose: take && myJobs.length > 0 ? { kind: "job" } : null,
+      job: onlyTicket ?? (take && myJobs.length > 1 ? "__pick__" : null),
     });
+  };
 
   return (
     <div className="space-y-4">
@@ -266,6 +333,7 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
                   {locations.map((l) => (
                     <SelectItem key={l.id} value={l.id}>
                       {l.name}
+                      {l.id === myVehicle ? " (my vehicle)" : ""}
                     </SelectItem>
                   ))}
                   <SelectItem value="all">Everywhere</SelectItem>
@@ -457,18 +525,22 @@ export function InventoryPage(props: { initialBidId?: string | undefined }) {
       </Card>
 
       {role === "admin" && <SettingsCard rule={rule} />}
+      {role === "admin" && <VehicleDriversCard locations={locations} />}
 
       {dialog && (
         <RecordDialog
           mode={dialog.mode}
           initialRef={dialog.ref}
           initialLocation={dialog.location}
+          initialPurpose={dialog.purpose}
+          initialJob={dialog.job}
           locations={locations}
           products={products}
           targets={targets}
           stock={stock}
-          bids={bidsQ.data ?? []}
-          initialBidId={props.initialBidId}
+          jobs={jobs}
+          jobsLoaded={jobsQ.isFetched}
+          myJobIds={myJobs.map((j) => j.id)}
           rule={rule}
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
@@ -609,25 +681,69 @@ function ProductPicker(props: {
   );
 }
 
-/** Text search over the jobs; the last job used on this phone is offered first. */
+/** "ticket" / "bid" beside a job's name. */
+function JobKindTag(props: { kind: JobOption["kind"] }) {
+  return (
+    <span
+      className={`mr-1.5 rounded px-1 text-[10px] uppercase ${props.kind === "service" ? "bg-primary/15" : "bg-muted text-muted-foreground"}`}
+    >
+      {props.kind === "service" ? "ticket" : "bid"}
+    </span>
+  );
+}
+
+/**
+ * Text search over the jobs — service tickets (mine first) and bids; the last job used on this
+ * phone is offered first. The value is a job key ("service:<id>" / "bid:<id>").
+ */
 function JobPicker(props: {
-  bids: JobOption[];
+  jobs: JobOption[];
+  /** My open tickets (service job ids). */
+  mine: string[];
   value: string;
   required: boolean;
-  onChange: (id: string) => void;
+  onChange: (key: string) => void;
 }) {
   const [text, setText] = useState("");
-  const chosen = props.bids.find((b) => b.id === props.value);
+  const chosen = props.jobs.find((j) => jobKey(j) === props.value);
   const f = text.trim().toLowerCase();
-  const last = readLastJob();
-  const matches = (
-    f ? props.bids.filter((b) => b.name.toLowerCase().includes(f)) : props.bids
-  ).slice(0, 8);
-  const label = (b: JobOption) => `${b.name} · ${STATUS_LABELS[asBidStatus(b.status)]}`;
+  const lastKey = readLastJob();
+  const last = f ? undefined : props.jobs.find((j) => jobKey(j) === lastKey);
+  const hit = (j: JobOption) => !f || j.name.toLowerCase().includes(f);
+  const mine = new Set(props.mine);
+  const isMine = (j: JobOption) => j.kind === "service" && mine.has(j.id);
+  const tickets = [
+    ...props.jobs.filter((j) => isMine(j) && hit(j)),
+    ...props.jobs.filter((j) => j.kind === "service" && !isMine(j) && hit(j)).slice(0, 8),
+  ];
+  const bids = props.jobs.filter((j) => j.kind === "bid" && hit(j)).slice(0, 8);
+  const label = (j: JobOption) => `${j.name} · ${jobStatus(j)}`;
+  const row = (j: JobOption, tag?: string) => (
+    <li key={`${tag ?? ""}|${jobKey(j)}`}>
+      <button
+        type="button"
+        className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
+        onClick={() => props.onChange(jobKey(j))}
+      >
+        {tag && (
+          <span className="mr-2 rounded bg-primary/15 px-1 text-[10px] uppercase">{tag}</span>
+        )}
+        {label(j)}
+      </button>
+    </li>
+  );
+  const group = (title: string) => (
+    <li className="bg-muted/50 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      {title}
+    </li>
+  );
   if (chosen) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
-        <p className="font-medium">{label(chosen)}</p>
+        <p className="font-medium">
+          <JobKindTag kind={chosen.kind} />
+          {label(chosen)}
+        </p>
         <div className="flex gap-1">
           {!props.required && (
             <Button size="sm" variant="ghost" onClick={() => props.onChange("")}>
@@ -645,37 +761,17 @@ function JobPicker(props: {
     <div className="space-y-2">
       <Input
         className="h-10"
-        placeholder="Type part of the job name…"
+        placeholder="Type a ticket #, customer or job name…"
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
-      <ul className="max-h-48 divide-y overflow-y-auto rounded-md border">
-        {!f && last && props.bids.some((b) => b.id === last) && (
-          <li>
-            <button
-              type="button"
-              className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
-              onClick={() => props.onChange(last)}
-            >
-              <span className="mr-2 rounded bg-primary/15 px-1 text-[10px] uppercase">
-                last used
-              </span>
-              {label(props.bids.find((b) => b.id === last)!)}
-            </button>
-          </li>
-        )}
-        {matches.map((b) => (
-          <li key={b.id}>
-            <button
-              type="button"
-              className="w-full px-3 py-2 text-left text-sm hover:bg-muted"
-              onClick={() => props.onChange(b.id)}
-            >
-              {label(b)}
-            </button>
-          </li>
-        ))}
-        {matches.length === 0 && (
+      <ul className="max-h-64 divide-y overflow-y-auto rounded-md border">
+        {last && row(last, "last used")}
+        {tickets.length > 0 && group("Tickets")}
+        {tickets.map((j) => row(j, isMine(j) ? "mine" : undefined))}
+        {bids.length > 0 && group("Bids")}
+        {bids.map((j) => row(j))}
+        {tickets.length === 0 && bids.length === 0 && (
           <li className="px-3 py-2 text-sm text-muted-foreground">No job matches.</li>
         )}
         {!props.required && (
@@ -749,19 +845,23 @@ function LocationPicker(props: {
 }
 
 /** What the material is for (taking) or where it came from (putting in). */
-type Purpose =
-  { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "shop" } | { kind: "used" };
+type Purpose = { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "shop" };
 
 function RecordDialog(props: {
   mode: Mode;
   initialRef: TargetRef | null;
   initialLocation: string | null;
+  initialPurpose: Purpose | null;
+  /** A job key, "__pick__" to open the picker, or null for the last job used on this phone. */
+  initialJob: string | null;
   locations: InventoryLocation[];
   products: ProductOption[];
   targets: PriceTarget[];
   stock: StockRow[];
-  bids: JobOption[];
-  initialBidId?: string | undefined;
+  jobs: JobOption[];
+  jobsLoaded: boolean;
+  /** My open tickets (service job ids), listed first. */
+  myJobIds: string[];
   rule: OpenedBoxRule;
   onClose: () => void;
   onSaved: (saved: { id: number; message: string }) => void;
@@ -774,21 +874,21 @@ function RecordDialog(props: {
   const [ref, setRef] = useState<TargetRef | null>(props.initialRef);
   const [qty, setQty] = useState("");
   const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
-  const [purpose, setPurpose] = useState<Purpose | null>(
-    props.initialBidId ? { kind: "job" } : null,
-  );
-  const [restUsed, setRestUsed] = useState(true);
+  const [purpose, setPurpose] = useState<Purpose | null>(props.initialPurpose);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-  // The job: the estimator's link (?bid=), else the last job used on this phone.
-  const [jobId, setJobId] = useState<string>(() => props.initialBidId ?? readLastJob());
+  // The job ("service:<id>" / "bid:<id>"): the link (?job= / ?bid=) or my only open ticket,
+  // else the last job used on this phone.
+  const [jobId, setJobId] = useState<string>(() => props.initialJob ?? readLastJob());
   const pickingJob = jobId === "__pick__";
+  const job = pickingJob ? undefined : props.jobs.find((j) => jobKey(j) === jobId);
   useEffect(() => {
-    // A remembered job that no longer exists falls back to picking.
-    if (jobId && jobId !== "__pick__" && !props.bids.some((b) => b.id === jobId)) {
-      setJobId(props.bids.length ? "__pick__" : "");
+    // A remembered job that no longer exists falls back to picking (once the list is in).
+    if (!props.jobsLoaded) return;
+    if (jobId && jobId !== "__pick__" && !props.jobs.some((j) => jobKey(j) === jobId)) {
+      setJobId(props.jobs.length ? "__pick__" : "");
     }
-  }, [jobId, props.bids]);
+  }, [jobId, props.jobs, props.jobsLoaded]);
 
   const location = props.locations.find((l) => l.id === locationId);
   const locName = location?.name ?? "";
@@ -817,29 +917,20 @@ function RecordDialog(props: {
     : 0;
   const onHandCounted = inPieces && piece ? onHand * piece.perPack : onHand;
   const n = qty.trim() === "" ? NaN : Number(qty);
-  // A vehicle → shop move, from either side of the dialog: what does not come back can be
-  // written off as used on the vehicle.
+  // A vehicle → shop move, from either side of the dialog: moves only what came back (what a
+  // truck used is taken for its job instead — there is no vehicle write-off).
   const isReturn =
     (!consumed && purpose?.kind === "vehicle") ||
     (consumed && purpose?.kind === "shop" && location?.kind === "vehicle");
-  const returnVehicle = consumed ? location : vehicle;
-  const amountOk = Number.isFinite(n) && n >= 0 && (isReturn || n > 0);
+  const amountOk = Number.isFinite(n) && n > 0;
   const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
   // Taking, returning off a vehicle, or loading from the shop never exceeds what that place holds.
   const limited = consumed || isReturn || fromShop;
   const tooMany = limited && Number.isFinite(packs) && packs > onHand + 1e-9;
-  const rest = isReturn && Number.isFinite(n) ? Math.max(0, onHandCounted - n) : 0;
-  const usedCounted = isReturn && restUsed ? rest : 0;
-  const jobOk = purpose?.kind === "job" ? !!jobId && !pickingJob : true;
-  const canSave =
-    !!location &&
-    !!ref &&
-    amountOk &&
-    !!purpose &&
-    jobOk &&
-    !tooMany &&
-    !saving &&
-    (!isReturn || n > 0 || usedCounted > 0);
+  // Taking for a job needs the job; a leftover's job is optional ("Not from a job" = a purchase).
+  const jobOk =
+    purpose?.kind === "job" ? (consumed ? !!job : !pickingJob && (!jobId || !!job)) : true;
+  const canSave = !!location && !!ref && amountOk && !!purpose && jobOk && !tooMany && !saving;
   const fmtCounted = (v: number) =>
     inPieces && piece ? `${fmtQty(v)} ${plural(v, piece.name)}` : `${fmtQty(v)} ${unit}`;
 
@@ -862,19 +953,18 @@ function RecordDialog(props: {
             to_location_id: consumed ? SHOP_LOCATION_ID : location.id,
             qty: n,
             ...pieces,
-            ...(usedCounted > 0 ? { used_qty: usedCounted } : {}),
             note: noteOrNull,
           },
         });
-        const used = r.used > 0 ? describeStock(r.used, r.unit, piece) : "";
+        const moved = describeStock(r.moved, r.unit, piece);
         saved = {
           id: r.ids[0] ?? 0,
           message: consumed
-            ? `${r.moved > 0 ? `${describeStock(r.moved, r.unit, piece)} of ${product} moved from ${locName} back to the shop` : `Nothing of ${product} moved to the shop`}${used ? `; ${used} used on ${locName}` : ""}`
-            : `${describeStock(r.moved, r.unit, piece)} of ${product} moved from the shop to ${locName}`,
+            ? `${moved} of ${product} moved from ${locName} back to the shop`
+            : `${moved} of ${product} moved from the shop to ${locName}`,
         };
       } else if (purpose.kind === "vehicle" && vehicle) {
-        // Shop → vehicle (loading) or vehicle → shop (returning; the rest is used on it).
+        // Shop → vehicle (loading) or vehicle → shop (returning what came back).
         const r = await moveFn({
           data: {
             screen_id: ref.screen_id,
@@ -884,25 +974,20 @@ function RecordDialog(props: {
             to_location_id: consumed ? vehicle.id : location.id,
             qty: n,
             ...pieces,
-            ...(usedCounted > 0 ? { used_qty: usedCounted } : {}),
             note: noteOrNull,
           },
         });
         const moved = describeStock(r.moved, r.unit, piece);
-        const used = r.used > 0 ? describeStock(r.used, r.unit, piece) : "";
         saved = {
           id: r.ids[0] ?? 0,
           message: consumed
             ? `${moved} of ${product} loaded onto ${vehicle.name}`
-            : `${r.moved > 0 ? `${moved} of ${product} put back in ${locName}` : `Nothing of ${product} came back`}${used ? `; ${used} used on ${vehicle.name}` : ""}`,
+            : `${moved} of ${product} put back in ${locName} off ${vehicle.name}`,
         };
       } else {
-        const reason = consumed
-          ? purpose.kind === "used"
-            ? "vehicle_used"
-            : "consumed"
-          : "leftover";
-        const bid = purpose.kind === "job" && jobId && !pickingJob ? jobId : null;
+        const reason = consumed ? "consumed" : "leftover";
+        // A ticket goes as service_job_id, a bid as bid_id — never both.
+        const forJob = purpose.kind === "job" ? job : undefined;
         const r = await addFn({
           data: {
             screen_id: ref.screen_id,
@@ -913,20 +998,18 @@ function RecordDialog(props: {
             unit,
             reason,
             location_id: location.id,
-            bid_id: bid,
+            bid_id: forJob?.kind === "bid" ? forJob.id : null,
+            service_job_id: forJob?.kind === "service" ? forJob.id : null,
             note: noteOrNull,
           },
         });
-        if (bid) writeLastJob(bid);
-        const job = props.bids.find((b) => b.id === bid);
+        if (forJob) writeLastJob(jobKey(forJob));
         const amount = describeStock(Math.abs(r.qty), r.unit, piece);
         saved = {
           id: r.id,
           message: consumed
-            ? purpose.kind === "used"
-              ? `${amount} of ${product} written off as used on ${locName}`
-              : `${amount} of ${product} taken from ${locName} for ${job?.name ?? "the job"}`
-            : `${amount} of ${product} put in ${locName}${job ? ` (left over from ${job.name})` : ""}`,
+            ? `${amount} of ${product} taken from ${locName} for ${forJob ? jobTitle(forJob) : "the job"}`
+            : `${amount} of ${product} put in ${locName}${forJob ? ` (left over from ${jobTitle(forJob)})` : ""}`,
         };
       }
       props.onSaved(saved);
@@ -952,11 +1035,9 @@ function RecordDialog(props: {
           ? consumed
             ? `Load onto ${vehicle?.name ?? "the vehicle"}`
             : `Put back in ${locName}`
-          : purpose.kind === "used"
-            ? "Write off as used"
-            : consumed
-              ? `Take from ${locName}`
-              : `Put in ${locName}`;
+          : consumed
+            ? `Take from ${locName}`
+            : `Put in ${locName}`;
 
   const choice = (label: string, active: boolean, onClick: () => void, icon?: React.ReactNode) => (
     <button
@@ -991,7 +1072,7 @@ function RecordDialog(props: {
                 // Stock differs per location: pick the product and purpose again.
                 setRef(null);
                 setQty("");
-                setPurpose(props.initialBidId ? { kind: "job" } : null);
+                setPurpose(props.initialPurpose);
               }}
             />
           </div>
@@ -1131,26 +1212,13 @@ function RecordDialog(props: {
                 {consumed ? "Which job" : "Which job (optional — leave blank for a purchase)"}
               </Label>
               <JobPicker
-                bids={props.bids}
+                jobs={props.jobs}
+                mine={props.myJobIds}
                 value={pickingJob ? "" : jobId}
                 required={consumed}
                 onChange={setJobId}
               />
             </div>
-          )}
-          {isReturn && returnVehicle && ref && amountOk && rest > 0 && (
-            <label className="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-1"
-                checked={restUsed}
-                onChange={(e) => setRestUsed(e.target.checked)}
-              />
-              <span>
-                The remaining <b>{fmtCounted(rest)}</b> were used on {returnVehicle.name}. Take them
-                off the vehicle&apos;s list. Untick this to leave them on the vehicle.
-              </span>
-            </label>
           )}
           {location && ref && purpose && (
             <div className="space-y-1">
@@ -1210,6 +1278,7 @@ function LedgerTable(props: {
       r.category.toLowerCase().includes(f) ||
       locName(r.location_id).toLowerCase().includes(f) ||
       (r.bid_name ?? "").toLowerCase().includes(f) ||
+      (r.service_job_name ?? "").toLowerCase().includes(f) ||
       (r.created_by_name ?? "").toLowerCase().includes(f) ||
       REASON_LABELS[r.reason as MovementReason]?.toLowerCase().includes(f),
   );
@@ -1263,7 +1332,21 @@ function LedgerTable(props: {
                     {describeStock(r.qty, r.unit, props.pieceOf(r.screen_id, r.row_label))}
                   </TableCell>
                   <TableCell className="text-xs">{REASON_LABELS[r.reason]}</TableCell>
-                  <TableCell className="text-xs">{r.bid_name ?? ""}</TableCell>
+                  <TableCell className="text-xs">
+                    {r.service_job_name || r.service_job_id ? (
+                      <>
+                        <JobKindTag kind="service" />
+                        {r.service_job_name ?? "(ticket)"}
+                      </>
+                    ) : r.bid_name || r.bid_id ? (
+                      <>
+                        <JobKindTag kind="bid" />
+                        {r.bid_name ?? "(bid)"}
+                      </>
+                    ) : (
+                      ""
+                    )}
+                  </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {r.counted_note}
                     {r.counted_note && r.note ? " — " : ""}
