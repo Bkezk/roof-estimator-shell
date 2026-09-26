@@ -127,6 +127,19 @@ import { UpdateBidDialog, type UpdateBidOptions } from "@/components/update-bid-
 import { CURRENT_FORMULAS_VERSION } from "@/lib/engine/version";
 import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
+import { AccountPicker } from "@/components/crm/account-picker";
+import { LinkedAccountChip } from "@/components/crm/linked-account-chip";
+import { getAccount, saveAccount, type AccountHit } from "@/lib/crm.functions";
+import {
+  FILL_LABELS,
+  accountFromBid,
+  applyProfileFill,
+  fillConflicts,
+  profileDifferences,
+  profileFill,
+  type FillKey,
+  type ProfileFill,
+} from "@/lib/bid-account-link";
 import { buildReviewRows, toCsv } from "@/lib/review-export";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -379,7 +392,7 @@ function EstimatePage() {
   const { bid: bidParam, combine: combineParam, takeoff: takeoffParam } = search;
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
-  const { session, profile } = useAuth();
+  const { session, profile, can } = useAuth();
   const authed = !!session;
 
   // Estimator roster (admin General → Estimators) for the Setup "Estimator's Name" dropdown.
@@ -736,6 +749,127 @@ function EstimatePage() {
   // The building this bid was started from (or linked to): bids.building_id, a nullable spine
   // column. The estimator only stores the id; it never reads or edits the building.
   const [linkedBuildingId, setLinkedBuildingId] = useState<string | null>(null);
+
+  // The customer profile this bid is linked to: bids.account_id / site_id (docs
+  // service-module-design §11, "Linking a bid"). Picking a profile in Setup › Customer Name fills
+  // the bid's client / job-site fields once; after that the bid's own fields are the source of
+  // truth for the proposal. Nothing here reads or changes pricing.
+  const [linkedAccountId, setLinkedAccountId] = useState<string | null>(null);
+  const [linkedSiteId, setLinkedSiteId] = useState<string | null>(null);
+  // "Account · Site" from the pick, shown until the profile itself has loaded.
+  const [linkedAccountLabel, setLinkedAccountLabel] = useState("");
+  const getAccountFn = useServerFn(getAccount);
+  const saveAccountFn = useServerFn(saveAccount);
+  const linkedAccount = useQuery({
+    // Same key as the Customers page, so both read one cached profile.
+    queryKey: ["account", linkedAccountId],
+    queryFn: () => getAccountFn({ data: { id: linkedAccountId! } }),
+    enabled: authed && !!linkedAccountId,
+    staleTime: 30_000,
+  });
+  const linkedDetail =
+    linkedAccount.data && linkedAccount.data.account.id === linkedAccountId
+      ? linkedAccount.data
+      : null;
+  const linkedSite =
+    linkedDetail && linkedSiteId ? linkedDetail.sites.find((x) => x.id === linkedSiteId) : null;
+  const linkedLabel = linkedDetail
+    ? [linkedDetail.account.name, linkedSite?.name].filter(Boolean).join(" · ")
+    : linkedAccountLabel;
+  // Cheap: nine trimmed string compares against the profile kept in the query cache.
+  const profileDiffs = linkedDetail ? profileDifferences(customer, linkedDetail.account) : null;
+  // Bumped by every pick / unlink / load, so a slow profile fetch never fills a stale pick.
+  const pickSeq = useRef(0);
+  const unlinkAccount = () => {
+    pickSeq.current++;
+    setLinkedAccountId(null);
+    setLinkedSiteId(null);
+    setLinkedAccountLabel("");
+  };
+  // The latest customer fields, for a pick that resolves after its profile fetch.
+  const customerRef = useRef(customer);
+  customerRef.current = customer;
+  // A pick whose profile would overwrite text the bid already has waits here for "Replace?".
+  const [pendingFill, setPendingFill] = useState<{ fill: ProfileFill; fields: FillKey[] } | null>(
+    null,
+  );
+  const pendingFillRef = useRef(pendingFill);
+  const resolvePendingFill = (replace: boolean) => {
+    const p = pendingFillRef.current;
+    if (!p) return;
+    pendingFillRef.current = null;
+    setPendingFill(null);
+    setCustomer((c) => applyProfileFill(c, p.fill, replace));
+  };
+  const pickAccount = async (hit: AccountHit | null) => {
+    if (!hit) {
+      unlinkAccount();
+      return;
+    }
+    const seq = ++pickSeq.current;
+    setLinkedAccountId(hit.account_id);
+    setLinkedSiteId(hit.site_id);
+    setLinkedAccountLabel([hit.account_name, hit.site_name].filter(Boolean).join(" · "));
+    try {
+      const detail = await qc.fetchQuery({
+        queryKey: ["account", hit.account_id],
+        queryFn: () => getAccountFn({ data: { id: hit.account_id } }),
+      });
+      if (seq !== pickSeq.current) return; // picked again (or unlinked) meanwhile
+      const site = hit.site_id ? (detail.sites.find((x) => x.id === hit.site_id) ?? null) : null;
+      const fill = profileFill(detail.account, site);
+      const fields = fillConflicts(customerRef.current, fill);
+      if (fields.length) {
+        pendingFillRef.current = { fill, fields };
+        setPendingFill({ fill, fields });
+      } else {
+        setCustomer((c) => applyProfileFill(c, fill, false));
+      }
+    } catch (e) {
+      toast.error(
+        `Linked, but the profile could not be read to fill the bid: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
+  const [updatingProfile, setUpdatingProfile] = useState(false);
+  const updateProfile = async () => {
+    if (!linkedDetail) return;
+    if (!customer.name.trim()) {
+      toast.error("The customer name is blank; the profile needs a name.");
+      return;
+    }
+    setUpdatingProfile(true);
+    try {
+      await saveAccountFn({ data: accountFromBid(customer, linkedDetail.account) });
+      toast.success(`Profile updated: ${customer.name.trim()}`);
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["account-search"] });
+      await qc.invalidateQueries({ queryKey: ["account", linkedDetail.account.id] });
+    } catch (e) {
+      toast.error(`Could not update the profile: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUpdatingProfile(false);
+    }
+  };
+  const accountChip = linkedAccountId ? (
+    <LinkedAccountChip
+      accountId={linkedAccountId}
+      label={linkedLabel}
+      differences={profileDiffs}
+      error={
+        linkedAccount.error
+          ? linkedAccount.error instanceof Error
+            ? linkedAccount.error.message
+            : String(linkedAccount.error)
+          : null
+      }
+      canUpdate={can("customers") || can("service")}
+      canOpen={can("customers")}
+      updating={updatingProfile}
+      onUnlink={unlinkAccount}
+      onUpdateProfile={() => void updateProfile()}
+    />
+  ) : null;
   // Generic prefill of a NEW bid from URL values (see EstimateSearch), applied once.
   const prefillApplied = useRef(false);
   useEffect(() => {
@@ -898,6 +1032,11 @@ function EstimatePage() {
       });
       setLinkedBuildingId(loadedBid.building_id ?? null);
     }
+    // The profile link is on the row, not in `data`: read it even for an empty payload.
+    pickSeq.current++;
+    setLinkedAccountId(loadedBid.account_id ?? null);
+    setLinkedSiteId(loadedBid.site_id ?? null);
+    setLinkedAccountLabel("");
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
@@ -940,6 +1079,7 @@ function EstimatePage() {
       const { saved: merged } = combineSavedBids(sources, saved);
       hydrateSaved(merged, {});
       setBidId(undefined);
+      unlinkAccount(); // a new bid; link it from Setup › Customer Name
       // Named after the bids it came from, e.g. "Summit + Knox County Fiscal Court".
       setBidName(sources.map((b) => b.name.trim() || "Untitled").join(" + "));
       setBidStatus("draft");
@@ -1047,6 +1187,7 @@ function EstimatePage() {
       };
       hydrateSaved(merged, {});
       setBidId(undefined);
+      unlinkAccount(); // a bid made from a takeoff starts unlinked
       setBidName(takeoffRow.name.trim() || "Untitled bid");
       setBidStatus("draft");
       setLostReason(null);
@@ -1291,7 +1432,8 @@ function EstimatePage() {
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
   // in `saved`, so nothing is lost on save; leaving the page with edits pending asks first.
-  const savedJson = JSON.stringify(saved);
+  // The profile link lives on the row, not in `saved`; it counts as an edit all the same.
+  const savedJson = `${JSON.stringify(saved)}|${linkedAccountId ?? ""}|${linkedSiteId ?? ""}`;
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
@@ -1683,6 +1825,9 @@ function EstimatePage() {
           lostReason: bidStatus === "lost" ? lostReason : null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
+          // Always sent: null unlinks.
+          accountId: linkedAccountId,
+          siteId: linkedAccountId ? linkedSiteId : null,
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
@@ -1977,11 +2122,55 @@ function EstimatePage() {
                   <LegacyGroup title="1. General Info">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Field label="Customer Name">
-                        <Input
-                          value={customer.name}
-                          onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
+                        {/* Typing sets the name as before; picking a profile links the bid. */}
+                        <AccountPicker
+                          allowFreeText
+                          value={null}
+                          text={customer.name}
+                          onText={(v) => setCustomer((c) => ({ ...c, name: v }))}
+                          onChange={(hit) => void pickAccount(hit)}
                         />
+                        {accountChip}
                       </Field>
+                      {/* Portalled: takes no grid cell. Closing it any other way keeps the bid's text. */}
+                      <AlertDialog
+                        open={!!pendingFill}
+                        onOpenChange={(o) => {
+                          if (!o) resolvePendingFill(false);
+                        }}
+                      >
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>
+                              Replace the client and job-site fields with the profile&apos;s?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              The bid is linked either way. These fields already hold different
+                              text; &ldquo;Keep mine&rdquo; leaves them and fills only the blank
+                              ones.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <ul className="space-y-1 text-sm">
+                            {(pendingFill?.fields ?? []).map((k) => (
+                              <li key={k}>
+                                <span className="text-muted-foreground">{FILL_LABELS[k]}:</span>{" "}
+                                <span className="line-through decoration-muted-foreground/60">
+                                  {String(customer[k] ?? "")}
+                                </span>{" "}
+                                &rarr; <span className="font-medium">{pendingFill?.fill[k]}</span>
+                              </li>
+                            ))}
+                          </ul>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel onClick={() => resolvePendingFill(false)}>
+                              Keep mine
+                            </AlertDialogCancel>
+                            <AlertDialogAction onClick={() => resolvePendingFill(true)}>
+                              Yes
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                       <Field label="Job Name">
                         <Input
                           value={bidName}
@@ -2188,6 +2377,7 @@ function EstimatePage() {
                           value={customer.name}
                           onChange={(e) => setCustomer((c) => ({ ...c, name: e.target.value }))}
                         />
+                        {accountChip}
                       </Field>
                       <Field label="Contact Person">
                         <Input

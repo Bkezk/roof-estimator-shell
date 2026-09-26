@@ -3,6 +3,11 @@
  * and their sites. Picking a site row sets account + site in one click; the last row adds the
  * typed name as a new customer through a small inline dialog (quickCreateAccount) and selects it.
  * Used by the service ticket form and the Customers page's "New customer".
+ *
+ * `allowFreeText` (the estimator's Setup › Customer Name): the input is a plain text field whose
+ * value the parent owns (`text` / `onText`); the dropdown only offers profiles to link, nothing
+ * is highlighted until the arrow keys move, so typing a name and moving on never links anything,
+ * and there is no quick-add row.
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,7 +44,14 @@ export function AccountPicker(props: {
   autoFocus?: boolean;
   disabled?: boolean;
   id?: string;
+  /** Free-text mode: the typed text is the field's value (see the header comment). */
+  allowFreeText?: boolean;
+  /** Free-text mode: the field's value. */
+  text?: string;
+  /** Free-text mode: called on every keystroke with the typed text. */
+  onText?: (text: string) => void;
 }) {
+  const free = !!props.allowFreeText;
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   // null = not typing: the input shows the picked value's label.
@@ -49,7 +61,7 @@ export function AccountPicker(props: {
   const [debounced, setDebounced] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
 
-  const typed = text ?? "";
+  const typed = free ? (props.text ?? "") : (text ?? "");
   useEffect(() => {
     const t = setTimeout(() => setDebounced(typed.trim()), 200);
     return () => clearTimeout(t);
@@ -63,11 +75,12 @@ export function AccountPicker(props: {
     staleTime: 30_000,
   });
   const hits = search.data ?? [];
-  const addLabel = typed.trim();
+  const addLabel = free ? "" : typed.trim();
   // Rows: the hits, then (when something is typed) the "add as new customer" row.
   const rowCount = hits.length + (addLabel ? 1 : 0);
 
-  useEffect(() => setActive(0), [debounced]);
+  // Free text: no row is highlighted until the arrow keys pick one, so Enter never links by itself.
+  useEffect(() => setActive(free ? -1 : 0), [debounced, free]);
 
   const pick = (hit: AccountHit) => {
     props.onChange(hit);
@@ -82,7 +95,7 @@ export function AccountPicker(props: {
     }
   };
 
-  const shown = text ?? props.value?.label ?? "";
+  const shown = free ? typed : (text ?? props.value?.label ?? "");
 
   return (
     <div className="relative">
@@ -93,24 +106,27 @@ export function AccountPicker(props: {
           value={shown}
           autoFocus={props.autoFocus}
           disabled={props.disabled}
-          placeholder={props.placeholder ?? "Search customers and sites…"}
+          placeholder={props.placeholder ?? (free ? undefined : "Search customers and sites…")}
           autoComplete="off"
           role="combobox"
           aria-expanded={open}
           aria-controls={listId}
           aria-autocomplete="list"
-          className="pr-8"
+          className={free ? undefined : "pr-8"}
           onFocus={(e) => {
+            // Free text opens the list on typing, not on every click into the field.
+            if (free) return;
             e.currentTarget.select();
             setOpen(true);
           }}
           onBlur={() => {
             // Give a row's mousedown a chance first (it prevents default, so blur follows).
             setOpen(false);
-            setText(null);
+            if (!free) setText(null);
           }}
           onChange={(e) => {
-            setText(e.target.value);
+            if (free) props.onText?.(e.target.value);
+            else setText(e.target.value);
             setOpen(true);
           }}
           onKeyDown={(e) => {
@@ -121,13 +137,14 @@ export function AccountPicker(props: {
             } else if (e.key === "ArrowUp") {
               e.preventDefault();
               setOpen(true);
-              setActive((a) => (rowCount ? (a - 1 + rowCount) % rowCount : 0));
+              setActive((a) => (rowCount ? (a <= 0 ? rowCount : a) - 1 : 0));
             } else if (e.key === "Enter") {
               // Never submit a surrounding form from the search box.
               e.preventDefault();
-              if (open && rowCount) choose(Math.min(active, rowCount - 1));
+              if (open && rowCount && active >= 0) choose(Math.min(active, rowCount - 1));
+              else if (free) setOpen(false);
             } else if (e.key === "Escape") {
-              if (open || text !== null) {
+              if (open || (!free && text !== null)) {
                 e.preventDefault();
                 e.stopPropagation();
               }
@@ -136,7 +153,7 @@ export function AccountPicker(props: {
             }
           }}
         />
-        {props.value && !props.disabled && (
+        {props.value && !props.disabled && !free && (
           <button
             type="button"
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground"
@@ -166,6 +183,14 @@ export function AccountPicker(props: {
           ) : search.isLoading ? (
             <p className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+            </p>
+          ) : free && hits.length === 0 ? (
+            <p className="px-2 py-1.5 text-sm text-muted-foreground">
+              No saved customer matches. The name stays as typed.
+            </p>
+          ) : free ? (
+            <p className="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">
+              Pick one to link this bid to the customer&apos;s profile.
             </p>
           ) : hits.length === 0 && !addLabel ? (
             <p className="px-2 py-1.5 text-sm text-muted-foreground">

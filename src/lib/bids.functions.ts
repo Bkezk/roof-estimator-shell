@@ -51,6 +51,10 @@ const saveBidSchema = z.object({
   buildingId: z.string().uuid().nullable().optional(),
   /** Takeoff link (nullable spine column); absent = leave as is. */
   takeoffId: z.string().uuid().nullable().optional(),
+  /** Customer profile link (crm_accounts, docs §11); absent = leave as is, null = unlink. */
+  accountId: z.string().uuid().nullable().optional(),
+  /** The profile's site the bid is for (crm_sites); absent = leave as is, null = none. */
+  siteId: z.string().uuid().nullable().optional(),
   id: z.string().uuid().optional(),
   name: z.string().min(1).max(200),
   data: z.record(z.string(), z.unknown()),
@@ -87,6 +91,8 @@ export const saveBid = createServerFn({ method: "POST" })
           : {}),
       ...(data.buildingId !== undefined ? { building_id: data.buildingId } : {}),
       ...(data.takeoffId !== undefined ? { takeoff_id: data.takeoffId } : {}),
+      ...(data.accountId !== undefined ? { account_id: data.accountId } : {}),
+      ...(data.siteId !== undefined ? { site_id: data.siteId } : {}),
     };
     if (data.id) {
       const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);
