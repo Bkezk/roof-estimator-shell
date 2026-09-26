@@ -35,21 +35,21 @@ Production Board.
 The rule: one record per real-world thing, and the service module links to it instead of
 copying it.
 
-| CenterPoint object           | Bid-O-Matic home                                                                                                                                                                                                                                                                                |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Property (site)              | `buildings` (already: address, parcel, footprint, own-book flag, `roofs` sections, won-bid link). Gains `company_id` (owner/bill-to default), `technician_instructions`, `centerpoint_property_id`. A CenterPoint property that is not in the parcel data is inserted with `source = 'import'`. |
-| Company (bill-to)            | New `companies` table: name, billing address, billing instructions, `external_id` (the 6-digit id, likely the Sage customer number — report §11 q2), account manager, `centerpoint_company_id`.                                                                                                 |
-| Contact                      | New `contacts` (name, email, mobile, office phone, position, `is_billing`) + `contact_links` (contact ↔ company or building) so a contact can sit on a company and on specific sites.                                                                                                           |
-| Technician                   | `profiles` (existing users). A `technician` flag / access page `service` decides who appears on the board.                                                                                                                                                                                      |
-| Truck                        | `inventory_locations` of kind `vehicle` (already) + `vehicle_drivers` (TODO 3c) so "my truck" is known from the login.                                                                                                                                                                          |
-| Material catalog (142 items) | `pricing_catalog` rows already carry cost for most of them (membrane, term bar, screws, caulk). Items with no catalog cell (Splice Wash, Cleaning Supplies, Quick Prime) go in a small `service_materials` catalog with unit + cost. A ticket's material line references one or the other.      |
-| Material used on a ticket    | `inventory_movements` with `reason = 'consumed'` and a new `service_job_id` (the "A job" picker lists bids **and** service jobs). The vehicle write-off tick box goes away: material off a truck is always against a job.                                                                       |
-| Repair template (475)        | New `repair_templates`: name ("Drainage — Clogged Scupper/Drain"), category, unit (EA/LF/SF), description text, work-completed text, unit price for quoting, favourite flag, usage count. Imported from CenterPoint once.                                                                       |
-| Ticket                       | New `service_jobs` (§3). Invoice number = ticket number, as today.                                                                                                                                                                                                                              |
-| Invoice                      | New `invoices` + `invoice_lines`, generated from the ticket (§5).                                                                                                                                                                                                                               |
-| Opportunity / site bid       | A **bid** in the Estimator (already the sales tool). Repair quoting from templates is a later, optional "quick repair quote" on a service job, not a second estimator.                                                                                                                          |
-| Warranty                     | `roofs.warranty_type / warranty_expires` (already). The 47 records import onto their roofs.                                                                                                                                                                                                     |
-| Project (re-roof)            | The won bid. A later "job log" on a won bid (daily sqft, photos, note — exactly the Bell County log) is a small add-on, not part of this module.                                                                                                                                                |
+| CenterPoint object           | Bid-O-Matic home                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Property (site)              | `crm_sites` (owner, Sep 26: the CRM keeps its own site records; prospecting's `buildings` are NOT the CRM). A site has address, technician instructions, notes, and shows the aerial clip for its address looked up from the prospecting data when one exists. No link back to prospecting is needed; "Import into CRM" only prefills the account form. |
+| Company (bill-to)            | `crm_accounts` — the customer profile: a company / group **or an individual** (owner, Sep 26), billing address, billing instructions, `external_id` (the 6-digit id, likely the Sage customer number — report §11 q2), account manager, `centerpoint_company_id`. Bids, takeoffs (through their bid), tickets and opportunities all hang off it (§11).  |
+| Contact                      | `crm_contacts` (name, email, mobile, office phone, position, `is_billing`) + `crm_contact_links` (contact ↔ account or site) so a contact can sit on the account and on specific sites.                                                                                                                                                                 |
+| Technician                   | `profiles` (existing users). A `technician` flag / access page `service` decides who appears on the board.                                                                                                                                                                                                                                              |
+| Truck                        | `inventory_locations` of kind `vehicle` (already) + `vehicle_drivers` (TODO 3c) so "my truck" is known from the login.                                                                                                                                                                                                                                  |
+| Material catalog (142 items) | `pricing_catalog` rows already carry cost for most of them (membrane, term bar, screws, caulk). Items with no catalog cell (Splice Wash, Cleaning Supplies, Quick Prime) go in a small `service_materials` catalog with unit + cost. A ticket's material line references one or the other.                                                              |
+| Material used on a ticket    | `inventory_movements` with `reason = 'consumed'` and a new `service_job_id` (the "A job" picker lists bids **and** service jobs). The vehicle write-off tick box goes away: material off a truck is always against a job.                                                                                                                               |
+| Repair template (475)        | New `repair_templates`: name ("Drainage — Clogged Scupper/Drain"), category, unit (EA/LF/SF), description text, work-completed text, unit price for quoting, favourite flag, usage count. Imported from CenterPoint once.                                                                                                                               |
+| Ticket                       | New `service_jobs` (§3). Invoice number = ticket number, as today.                                                                                                                                                                                                                                                                                      |
+| Invoice                      | New `invoices` + `invoice_lines`, generated from the ticket (§5).                                                                                                                                                                                                                                                                                       |
+| Opportunity / site bid       | A **bid** in the Estimator (already the sales tool). Repair quoting from templates is a later, optional "quick repair quote" on a service job, not a second estimator.                                                                                                                                                                                  |
+| Warranty                     | `roofs.warranty_type / warranty_expires` (already). The 47 records import onto their roofs.                                                                                                                                                                                                                                                             |
+| Project (re-roof)            | The won bid. A later "job log" on a won bid (daily sqft, photos, note — exactly the Bell County log) is a small add-on, not part of this module.                                                                                                                                                                                                        |
 
 Ties to the other modules that fall out for free once the links exist:
 
@@ -323,5 +323,85 @@ under "To confirm" are answered. Nothing here is built.
   to a repair and reports the inventory they used, it is taken off their vehicle automatically,
   tied to that job, and every step is logged.
 
-To confirm with the owner (asked Sep 26): see the chat questions of that day; the answers get
-folded into §2–§6 and the questions list replaced by the decisions.
+Answered the same day; the decisions are in §11 and the one open area (truck inventory truth) in §12.
+
+## 11. CRM hub — decided design (owner's answers, Sep 26)
+
+**Customer profile = account.** `crm_accounts` is one record per paying customer: a company /
+group (Bell County BOE) **or** an individual. It holds contacts, one or more sites
+(`crm_sites`, e.g. Yellow Creek Elementary) and the links: bids, tickets, opportunities. A site
+shows the aerial picture for its address from the prospecting data when the address matches;
+otherwise no picture. Prospecting is otherwise unrelated: "Import into CRM" on a prospect only
+prefills a new account + site from the building's owner and address.
+
+**Linking a bid (Setup › Customer name).** The Customer name field gets a typeahead over accounts
+and their sites. Picking one links the bid (`bids.account_id`, `bids.site_id`) and fills
+customer, contact, billing address and job-site address from the profile. Later hand edits stay
+on the bid; a small "differs from profile" note offers a one-click push back to the profile.
+From an account page, "Link a bid" searches the saved bids the same way (the reverse
+direction). Takeoffs link through the bid they create, not directly.
+
+**Opportunity = a potential new customer.** An `crm_opportunities` row on an account (the account
+is created at the same time when new): assigned user, expected close = created + the admin
+default "opportunities should close within N days" (editable per opportunity), status Open /
+Contacted / Quoted / Won / Lost / No response. Won or Lost or No response stops the follow-ups.
+
+**Assignment and follow-up timers.** One mechanism for opportunities and tickets
+(`crm_followups`): assigning an item to a user starts a timer; reminders fire at the admin
+lengths for that type (per type: first reminder after N days, then every M days) until the
+item reaches a closing status. Ticket statuses: Open / Scheduled / Done / Invoiced / Closed
+(Closed stops it). Reminders go by **email and text** to the assignee; on assignment the
+assigner is told too; admins see every timer and overdue item on one screen. Text needs an SMS
+provider account (Twilio or similar: a company number, per-message cost, and the provider's
+credentials kept in Lovable Cloud secrets, never in the repo); email goes through the app's
+existing mail path. A phone app is expected eventually; the first version is the web app
+installed to the home screen (PWA) so the tech pages open full-screen and can queue work
+offline — decide native later only if the PWA falls short.
+
+**Admin settings (`crm_settings`)**: opportunity close-within days; reminder lengths per type
+(opportunity, ticket); the reminder channels on/off per user; the vehicle ↔ driver table.
+
+**Vehicles and drivers.** `vehicle_drivers` (vehicle location id, user id, from, to): up to two
+users per vehicle and a user may be on two vehicles; admins change it and history is kept.
+When an assigned tech reports material used on a ticket it is taken off that tech's vehicle
+automatically (if the tech is on two vehicles the close-out asks which, remembering the last
+answer), tied to the ticket, and logged as ordinary `consumed` movements with the user, time and
+ticket. Everything is undoable through the existing movement undo.
+
+**Sidebar**: a **Customers** group (Accounts, Opportunities, Follow-ups) beside Service; the
+Bids page and the account page both show the link.
+
+## 12. Truck inventory truth — to dive into (owner, Sep 26: techs often do not count accurately)
+
+The problem: what a tech reports at close-out is usually incomplete, so the vehicle's on-hand
+drifts and the job's material cost is understated. Any design has to accept that the close-out
+number is an estimate and put the truth somewhere it can actually be measured.
+
+Proposal (draft, for discussion): the close-out report is **provisional**; the **physical count
+at restock** is the truth; the difference is **reconciled onto the jobs since the last count**.
+
+1. Each vehicle has a **par list** (standard load: item, unit, par qty — TODO 3b). Restocking
+   means counting what is on the truck (a phone checklist, one number per par item, opened
+   packs allowed) and topping up to par from the shop; the count writes an `adjustment` per
+   line and the top-up is the existing transfer.
+2. Between two counts the app knows: on-hand at last count + transfers − reported usage. The
+   count reveals the **variance** per item (what was used but not reported, or over-reported).
+3. The variance is spread over the tickets the truck worked since the last count — by default
+   proportionally to the hours on each ticket, with a screen that lets the office move it to a
+   specific ticket (or to a "shrink / unknown" bucket for the vehicle when nothing fits). Each
+   spread line is a `consumed` movement flagged `reconciled`, so ticket cost is reported +
+   reconciled and the ledger shows both.
+4. Invoicing bills only what was **reported** by default (the customer signed for that work);
+   the office can pull a reconciled line onto the invoice before it is finalised.
+5. Nudges to make reporting better without counting: the close-out's "From my truck" list shows
+   the par items with big +/- steppers, remembers what this tech usually uses for each repair
+   template ("last time on a clogged drain you used 1 tube of caulk, 2 LF tape") and prefills
+   it, and a truck whose variance keeps growing shows a red badge to admins.
+6. If counting a whole truck each restock is too much, count only the **fast movers** (caulk,
+   tape, primer, screws, membrane roll) and leave slow items to a monthly count.
+
+Questions this needs answered before it is built (asked in chat, Sep 26): how often a truck
+comes back to the shop and who restocks it; whether a standard load per truck exists on paper
+today; whether reconciled material should ever change the invoice or only job cost; how many
+distinct items live on a truck; whether opened pails / partial rolls should count as fractions
+or "1 opened"; and what the Inventory tab does wrong today from the owner's point of view.
