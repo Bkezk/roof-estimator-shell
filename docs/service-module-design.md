@@ -364,8 +364,8 @@ offline — decide native later only if the PWA falls short.
 **Vehicles and drivers.** `vehicle_drivers` (vehicle location id, user id, from, to): up to two
 users per vehicle and a user may be on two vehicles; admins change it and history is kept.
 When an assigned tech reports material used on a ticket it is taken off that tech's vehicle
-automatically (if the tech is on two vehicles the close-out asks which, remembering the last
-answer), tied to the ticket, and logged as ordinary `consumed` movements with the user, time and
+automatically (if the tech is on two vehicles, or two techs are on the ticket, each material line lets
+the tech pick which truck it came off, defaulting to the last answer — owner, Sep 26), tied to the ticket, and logged as ordinary `consumed` movements with the user, time and
 ticket. Everything is undoable through the existing movement undo.
 
 **Sidebar**: a **Customers** group (Accounts, Opportunities, Follow-ups) beside Service; the
