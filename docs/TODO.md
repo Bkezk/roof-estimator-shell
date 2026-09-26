@@ -10,7 +10,16 @@ the bottom with the commit that closed them.
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
    `docs/service-module-design.md` (data model, minimal-click office / tech / invoice flows,
    Sage hand-off, phases A–D, the eight decisions the owner still has to make). Build from that
-   doc; the text below is the original brief. Context: new-roof work is estimated and sold in this app; repair
+   doc; the text below is the original brief. **Phase A started Sep 26** (migration
+   `20260926120000_service_phase_a.sql`, applied live): access pages `service` + `customers`,
+   `profiles.technician`, `crm_accounts` / `crm_sites` (the CRM hub — NOT prospecting's
+   buildings), `vehicle_drivers` (≤2 per vehicle, history kept, admin sets), `service_jobs`
+   (numbers from 6000 so they never collide with CenterPoint's), `bids.account_id / site_id`,
+   `inventory_movements.service_job_id`, the vehicle write-off removed; server functions in
+   `src/lib/crm.functions.ts`, `service.functions.ts`, `inventory.functions.ts`. Still open in
+   phase A: the Setup › Customer name typeahead on a bid (design §11), the tech phone flow
+   (phase B), invoicing (C), history import (D), the truck reconciliation (design §12).
+   Context: new-roof work is estimated and sold in this app; repair
    work, invoices and customer records live in **CenterPoint Connect** (the company's CRM).
    Inventory now sits at the shop or on a service vehicle (`inventory_locations`); the four
    movements are shop→job, shop→vehicle, vehicle→job, vehicle→shop, all through the two

@@ -400,8 +400,21 @@ at restock** is the truth; the difference is **reconciled onto the jobs since th
 6. If counting a whole truck each restock is too much, count only the **fast movers** (caulk,
    tape, primer, screws, membrane roll) and leave slow items to a monthly count.
 
-Questions this needs answered before it is built (asked in chat, Sep 26): how often a truck
-comes back to the shop and who restocks it; whether a standard load per truck exists on paper
-today; whether reconciled material should ever change the invoice or only job cost; how many
-distinct items live on a truck; whether opened pails / partial rolls should count as fractions
-or "1 opened"; and what the Inventory tab does wrong today from the owner's point of view.
+Owner's answers (Sep 26): trucks come back to the shop **every day** and the **tech restocks
+at will** (no office step); whether a standard load exists on paper and how many items live on
+a truck are unknown yet (owner will ask); the customer is charged for what was used plus
+labor plus markup, so reconciled material is a job-cost and stock correction, not a billing
+change unless the office decides so; screws can be counted **by weight in a bucket**; partial
+tubes of caulk are the open problem; the bad counts come from **the people counting, forgetting
+to add things to truck / job / shop, forgetting to log, and partial tubes**.
+
+What that changes in the proposal: because the truck is at the shop nightly, the count can be a
+short **end-of-day checklist on the phone** of only the fast movers (caulk, tape, primer,
+screws by weight) rather than a full restock count, and restock-to-par becomes "top up what the
+checklist says is low". Opened containers: count an opened tube / pail as **one opened** on the
+truck; the job that opened it gets charged the whole one (that is what the customer signed
+for), later jobs that use from the same opened one are charged nothing for it until it is
+empty and a new one is opened. The truck shows "1 opened + N full"; the reconciliation
+only cares about full ones and the opened count. Forgetting to log is reduced by the close-out
+asking "anything off the truck?" before Complete and by the per-template usual-usage prefill
+(§12.5).
