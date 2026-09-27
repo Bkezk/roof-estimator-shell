@@ -40,6 +40,18 @@ async function office(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
+/** Re-read the ticket after a stage change and run the stage automation (ticket-events). */
+async function stageEvent(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  prevStage: string | null,
+  actor: { id: string; name: string | null },
+) {
+  const { data: row } = await sb.from("service_jobs").select("*").eq("id", jobId).maybeSingle();
+  if (!row) return;
+  const { afterTicketStage } = await import("@/lib/ticket-events.server");
+  await afterTicketStage(row, prevStage, actor, sb);
+}
 
 export interface InvoiceWithLines {
   invoice: InvoiceRow;
@@ -334,6 +346,10 @@ export const finalizeInvoice = createServerFn({ method: "POST" })
       .from("service_jobs")
       .update({ stage: "invoiced", invoice_id: updated.id, updated_by_name: nameOf(p) })
       .eq("id", b.invoice.service_job_id);
+    await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
+      id: context.userId,
+      name: nameOf(p),
+    });
     const { syncFollowup } = await import("@/lib/followups.server");
     await syncFollowup(
       {
@@ -386,6 +402,10 @@ export const sendInvoice = createServerFn({ method: "POST" })
         .from("service_jobs")
         .update({ stage: "invoiced", invoice_id: b.invoice.id })
         .eq("id", b.invoice.service_job_id);
+      await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
+        id: context.userId,
+        name: nameOf(p),
+      });
       b = await loadBundle(sb, data.id);
     }
     if (b.invoice.status === "void") throw new Error("This invoice is void");
@@ -452,6 +472,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .from("service_jobs")
       .update({ stage: "closed", updated_by_name: nameOf(p) })
       .eq("id", inv.service_job_id);
+    await stageEvent(sb, inv.service_job_id, null, { id: context.userId, name: nameOf(p) });
     return withLines(sb, inv);
   });
 
@@ -484,6 +505,7 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .from("service_jobs")
       .update({ stage: "done", invoice_id: null, updated_by_name: nameOf(p) })
       .eq("id", inv.service_job_id);
+    await stageEvent(sb, inv.service_job_id, "invoiced", { id: context.userId, name: nameOf(p) });
   });
 
 export interface InvoiceListRow extends InvoiceRow {

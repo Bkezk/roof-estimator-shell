@@ -191,3 +191,8 @@ returns void language sql security definer set search_path = public as $$
 $$;
 revoke all on function public.stamp_dispatch() from public;
 grant execute on function public.stamp_dispatch() to authenticated;
+
+-- Owner, Sep 27 (automation): a ticket reaching Done opens an "Invoice ticket #" follow-up for
+-- the office (kind 'invoice') and tells office users; it closes when the invoice goes out.
+alter table public.crm_followups drop constraint if exists crm_followups_kind_check;
+alter table public.crm_followups add constraint crm_followups_kind_check check (kind in ('ticket','opportunity','invoice'));

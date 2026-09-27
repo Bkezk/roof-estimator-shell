@@ -248,6 +248,8 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
     if (row.stage !== job.stage) {
+      const { afterTicketStage } = await import("@/lib/ticket-events.server");
+      await afterTicketStage(row, job.stage, { id: context.userId, name: who }, context.supabase);
       const { syncFollowup } = await import("@/lib/followups.server");
       await syncFollowup(
         {

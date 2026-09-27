@@ -96,6 +96,7 @@ const serviceItems: ServiceItem[] = [
     page: "service",
     office: true,
   },
+  followupsItem,
 ];
 const customerItems: ServiceItem[] = [
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
@@ -365,12 +366,6 @@ export function AppSidebar() {
         )}
 
         {profile && (
-          <SidebarGroup>
-            <SidebarMenu>{renderItems([followupsItem])}</SidebarMenu>
-          </SidebarGroup>
-        )}
-
-        {can("service") && (
           <NavGroup label="Service" id="service" iconMode={collapsed}>
             <SidebarMenu>{renderItems(serviceItems)}</SidebarMenu>
           </NavGroup>

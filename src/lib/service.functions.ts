@@ -215,18 +215,16 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       updated_by_name: nameOf(p),
     };
     if (id) {
+      const { data: cur } = await sb
+        .from("service_jobs")
+        .select("technician_id, stage")
+        .eq("id", id)
+        .maybeSingle();
       // A technician edits only their own ticket (RLS says the same; this gives a clear message).
-      if (p.technician && p.role !== "admin") {
-        const { data: cur } = await sb
-          .from("service_jobs")
-          .select("technician_id")
-          .eq("id", id)
-          .maybeSingle();
-        if (cur && cur.technician_id !== context.userId)
-          throw new Error(
-            "Only the assigned technician, the office or an admin can edit this ticket",
-          );
-      }
+      if (p.technician && p.role !== "admin" && cur && cur.technician_id !== context.userId)
+        throw new Error(
+          "Only the assigned technician, the office or an admin can edit this ticket",
+        );
       const { data: row, error } = await sb
         .from("service_jobs")
         .update(patch)
@@ -234,7 +232,12 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
-      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
+      await syncTicketFollowup(
+        row,
+        { id: context.userId, name: nameOf(p) },
+        sb,
+        cur?.stage ?? null,
+      );
       return withTechName(sb, row);
     }
     const { data: row, error } = await sb
@@ -243,7 +246,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, null);
     return withTechName(sb, row);
   });
 
@@ -259,8 +262,11 @@ async function syncTicketFollowup(
   row: ServiceJobRow,
   actor: { id: string; name: string | null },
   sb: SupabaseClient<Database>,
+  prevStage: string | null,
 ): Promise<void> {
   const { syncFollowup } = await import("@/lib/followups.server");
+  const { afterTicketStage } = await import("@/lib/ticket-events.server");
+  await afterTicketStage(row, prevStage, actor, sb);
   await syncFollowup(
     {
       kind: "ticket",
@@ -289,6 +295,11 @@ export const setServiceStage = createServerFn({ method: "POST" })
     const p = await serviceWrite(context);
     if (techMayNotSet(p, data.stage))
       throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
+    const { data: prev } = await context.supabase
+      .from("service_jobs")
+      .select("stage")
+      .eq("id", data.id)
+      .maybeSingle();
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ stage: data.stage, updated_by_name: nameOf(p) })
@@ -300,7 +311,12 @@ export const setServiceStage = createServerFn({ method: "POST" })
       throw new Error(
         "Only the assigned technician, the office or an admin can change this ticket",
       );
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, context.supabase);
+    await syncTicketFollowup(
+      row,
+      { id: context.userId, name: nameOf(p) },
+      context.supabase,
+      prev?.stage ?? null,
+    );
   });
 
 /**
@@ -350,7 +366,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
     return withTechName(sb, row);
   });
 
@@ -369,7 +385,12 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (row)
-      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, context.supabase);
+      await syncTicketFollowup(
+        row,
+        { id: context.userId, name: nameOf(p) },
+        context.supabase,
+        row.stage,
+      );
   });
 
 export const restoreServiceJob = createServerFn({ method: "POST" })

@@ -370,7 +370,13 @@ function FollowupListRow(props: {
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-medium">
-            {f.kind === "ticket" ? "Ticket" : f.kind === "opportunity" ? "Opportunity" : f.kind}
+            {f.kind === "ticket"
+              ? "Ticket"
+              : f.kind === "opportunity"
+                ? "Opportunity"
+                : f.kind === "invoice"
+                  ? "To invoice"
+                  : f.kind}
           </Badge>
           <ItemLink url={f.url}>{f.title}</ItemLink>
           {!open && (

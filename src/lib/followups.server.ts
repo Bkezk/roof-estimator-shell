@@ -38,7 +38,7 @@ const days = (n: number) => n * 86400000;
 const dateAtNoonUtc = (ymd: string) => new Date(`${ymd}T12:00:00Z`);
 
 interface SyncArgs {
-  kind: "ticket" | "opportunity";
+  kind: "ticket" | "opportunity" | "invoice";
   itemId: string;
   accountId: string | null;
   assigneeId: string | null;
@@ -85,15 +85,15 @@ export async function syncFollowup(
     return "closed";
   }
   const s = await crmSettings(admin);
-  const first = a.kind === "ticket" ? s.ticket_first_days : s.opportunity_first_days;
-  const every = a.kind === "ticket" ? s.ticket_every_days : s.opportunity_every_days;
+  const first = a.kind === "opportunity" ? s.opportunity_first_days : s.ticket_first_days;
+  const every = a.kind === "opportunity" ? s.opportunity_every_days : s.ticket_every_days;
   const due = a.dueDate
     ? dateAtNoonUtc(a.dueDate)
-    : new Date(now.getTime() + days(a.kind === "ticket" ? first : s.opportunity_close_days));
+    : new Date(now.getTime() + days(a.kind === "opportunity" ? s.opportunity_close_days : first));
   // Ticket: remind on the due day (the scheduled day) unless it is already past, then now.
   // Opportunity: first reminder after first_days, never later than the due date.
   const firstRemind =
-    a.kind === "ticket"
+    a.kind !== "opportunity"
       ? new Date(Math.max(due.getTime(), now.getTime()))
       : new Date(Math.min(now.getTime() + days(first), due.getTime()));
   if (open && open.assignee_id === a.assigneeId) {
@@ -131,7 +131,7 @@ export async function syncFollowup(
       [a.assigneeId],
       {
         kind: "assigned",
-        title: `${a.kind === "ticket" ? "Ticket" : "Opportunity"} assigned to you: ${a.title}`,
+        title: `${a.kind === "opportunity" ? "Opportunity" : a.kind === "invoice" ? "To invoice" : "Ticket"} assigned to you: ${a.title}`,
         body: `${a.actorName ?? "The office"} assigned this to you. Due ${due.toLocaleDateString("en-US")}; reminders every ${every} day${every === 1 ? "" : "s"} until it is closed.`,
         url: a.url,
         followup_id: created.id,
