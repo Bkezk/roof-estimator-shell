@@ -5,6 +5,21 @@ the bottom with the commit that closed them.
 
 ## Open
 
+**Owner actions (keys and secrets, Sep 27)** — nothing here goes in the repo or in chat:
+
+- Lovable Cloud › Secrets: `RESEND_API_KEY` (from a Resend account with the flatroofonline.com
+  domain verified), `NOTIFY_FROM_EMAIL` (e.g. `Bid-O-Matic <notifications@flatroofonline.com>`),
+  `APP_URL` (the app's public address, used for links in emails and push). Until set, email
+  reminders show as failed on Admin › Settings › Reminders; in-app and push still work.
+- GitHub repository secrets: `APP_URL` (same value) and `CRON_SECRET` (the value of
+  `LOVABLE_CRON_SECRET` shown in Lovable Cloud) so `.github/workflows/reminders.yml` fires
+  reminders every 30 minutes in office hours. Without them, reminders go out only when an office
+  user opens the app.
+- Each user: open `/account` on their phone and turn push on (iPhone: add to Home Screen first).
+- For phase D: CenterPoint CSV exports of Companies, Properties, Contacts, Tickets and Invoices
+  (⋮ › Download All to CSV / Email CSV on each list), and if reachable the 475 repair templates
+  and 142 materials.
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
