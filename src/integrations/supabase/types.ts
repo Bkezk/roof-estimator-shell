@@ -29,6 +29,24 @@ export type Database = {
         };
         Relationships: [];
       };
+      app_secrets: {
+        Row: {
+          key: string;
+          updated_at: string;
+          value: string;
+        };
+        Insert: {
+          key: string;
+          updated_at?: string;
+          value: string;
+        };
+        Update: {
+          key?: string;
+          updated_at?: string;
+          value?: string;
+        };
+        Relationships: [];
+      };
       address_points: {
         Row: {
           address: string;
@@ -391,6 +409,163 @@ export type Database = {
         };
         Relationships: [];
       };
+      crm_followups: {
+        Row: {
+          account_id: string | null;
+          assignee_id: string;
+          closed_at: string | null;
+          closed_reason: string | null;
+          created_at: string;
+          created_by: string | null;
+          due_at: string;
+          every_days: number;
+          id: string;
+          item_id: string;
+          kind: string;
+          last_reminded_at: string | null;
+          next_remind_at: string;
+          reminders_sent: number;
+          status: string;
+          title: string;
+          updated_at: string;
+          url: string;
+        };
+        Insert: {
+          account_id?: string | null;
+          assignee_id: string;
+          closed_at?: string | null;
+          closed_reason?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          due_at: string;
+          every_days?: number;
+          id?: string;
+          item_id: string;
+          kind: string;
+          last_reminded_at?: string | null;
+          next_remind_at: string;
+          reminders_sent?: number;
+          status?: string;
+          title: string;
+          updated_at?: string;
+          url: string;
+        };
+        Update: {
+          account_id?: string | null;
+          assignee_id?: string;
+          closed_at?: string | null;
+          closed_reason?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          due_at?: string;
+          every_days?: number;
+          id?: string;
+          item_id?: string;
+          kind?: string;
+          last_reminded_at?: string | null;
+          next_remind_at?: string;
+          reminders_sent?: number;
+          status?: string;
+          title?: string;
+          updated_at?: string;
+          url?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_followups_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_followups_assignee_id_fkey";
+            columns: ["assignee_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      crm_opportunities: {
+        Row: {
+          account_id: string | null;
+          assignee_id: string | null;
+          bid_id: string | null;
+          created_at: string;
+          created_by: string | null;
+          deleted_at: string | null;
+          description: string | null;
+          est_value: number | null;
+          expected_close: string | null;
+          id: string;
+          lead_source: string | null;
+          notes: string | null;
+          status: string;
+          title: string;
+          updated_at: string;
+          updated_by_name: string | null;
+        };
+        Insert: {
+          account_id?: string | null;
+          assignee_id?: string | null;
+          bid_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          description?: string | null;
+          est_value?: number | null;
+          expected_close?: string | null;
+          id?: string;
+          lead_source?: string | null;
+          notes?: string | null;
+          status?: string;
+          title: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Update: {
+          account_id?: string | null;
+          assignee_id?: string | null;
+          bid_id?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          deleted_at?: string | null;
+          description?: string | null;
+          est_value?: number | null;
+          expected_close?: string | null;
+          id?: string;
+          lead_source?: string | null;
+          notes?: string | null;
+          status?: string;
+          title?: string;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_opportunities_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_opportunities_assignee_id_fkey";
+            columns: ["assignee_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_opportunities_bid_id_fkey";
+            columns: ["bid_id"];
+            isOneToOne: false;
+            referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       crm_sites: {
         Row: {
           account_id: string;
@@ -449,6 +624,39 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      crm_settings: {
+        Row: {
+          id: number;
+          last_dispatch_at: string | null;
+          opportunity_close_days: number;
+          opportunity_every_days: number;
+          opportunity_first_days: number;
+          ticket_every_days: number;
+          ticket_first_days: number;
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          last_dispatch_at?: string | null;
+          opportunity_close_days?: number;
+          opportunity_every_days?: number;
+          opportunity_first_days?: number;
+          ticket_every_days?: number;
+          ticket_first_days?: number;
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          last_dispatch_at?: string | null;
+          opportunity_close_days?: number;
+          opportunity_every_days?: number;
+          opportunity_first_days?: number;
+          ticket_every_days?: number;
+          ticket_first_days?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       data_refreshes: {
         Row: {
@@ -1252,6 +1460,69 @@ export type Database = {
         };
         Relationships: [];
       };
+      notifications: {
+        Row: {
+          body: string | null;
+          created_at: string;
+          email_error: string | null;
+          email_sent_at: string | null;
+          followup_id: string | null;
+          id: number;
+          kind: string;
+          push_error: string | null;
+          push_sent_at: string | null;
+          read_at: string | null;
+          title: string;
+          url: string | null;
+          user_id: string;
+        };
+        Insert: {
+          body?: string | null;
+          created_at?: string;
+          email_error?: string | null;
+          email_sent_at?: string | null;
+          followup_id?: string | null;
+          id?: number;
+          kind: string;
+          push_error?: string | null;
+          push_sent_at?: string | null;
+          read_at?: string | null;
+          title: string;
+          url?: string | null;
+          user_id: string;
+        };
+        Update: {
+          body?: string | null;
+          created_at?: string;
+          email_error?: string | null;
+          email_sent_at?: string | null;
+          followup_id?: string | null;
+          id?: number;
+          kind?: string;
+          push_error?: string | null;
+          push_sent_at?: string | null;
+          read_at?: string | null;
+          title?: string;
+          url?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "notifications_followup_id_fkey";
+            columns: ["followup_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_followups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "notifications_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       price_import_changes: {
         Row: {
           id: number;
@@ -1370,6 +1641,8 @@ export type Database = {
           email: string;
           full_name: string | null;
           id: string;
+          notify_email: boolean;
+          notify_push: boolean;
           role: string;
           technician: boolean;
           updated_at: string;
@@ -1381,6 +1654,8 @@ export type Database = {
           email: string;
           full_name?: string | null;
           id: string;
+          notify_email?: boolean;
+          notify_push?: boolean;
           role?: string;
           technician?: boolean;
           updated_at?: string;
@@ -1392,11 +1667,57 @@ export type Database = {
           email?: string;
           full_name?: string | null;
           id?: string;
+          notify_email?: boolean;
+          notify_push?: boolean;
           role?: string;
           technician?: boolean;
           updated_at?: string;
         };
         Relationships: [];
+      };
+      push_subscriptions: {
+        Row: {
+          auth: string;
+          created_at: string;
+          endpoint: string;
+          failed_at: string | null;
+          id: number;
+          last_used_at: string | null;
+          p256dh: string;
+          user_agent: string | null;
+          user_id: string;
+        };
+        Insert: {
+          auth: string;
+          created_at?: string;
+          endpoint: string;
+          failed_at?: string | null;
+          id?: number;
+          last_used_at?: string | null;
+          p256dh: string;
+          user_agent?: string | null;
+          user_id: string;
+        };
+        Update: {
+          auth?: string;
+          created_at?: string;
+          endpoint?: string;
+          failed_at?: string | null;
+          id?: number;
+          last_used_at?: string | null;
+          p256dh?: string;
+          user_agent?: string | null;
+          user_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       rdl_adhered_sheet_multi: {
         Row: {
@@ -2018,6 +2339,16 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
+      notify_recipients: {
+        Args: { ids: string[] };
+        Returns: {
+          email: string;
+          full_name: string | null;
+          id: string;
+          notify_email: boolean;
+          notify_push: boolean;
+        }[];
+      };
       technician_options: {
         Args: never;
         Returns: {

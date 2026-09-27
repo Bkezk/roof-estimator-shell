@@ -228,6 +228,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
       return withTechName(sb, row);
     }
     const { data: row, error } = await sb
@@ -236,6 +237,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
     return withTechName(sb, row);
   });
 
@@ -243,6 +245,29 @@ export const saveServiceJob = createServerFn({ method: "POST" })
 export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
 const techMayNotSet = (p: { technician: boolean; role: string }, stage: ServiceStage) =>
   p.technician && p.role !== "admin" && !TECH_STAGES.includes(stage);
+
+/** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
+const TICKET_CLOSING: readonly ServiceStage[] = ["done", "invoiced", "closed"];
+/** Keep the ticket's follow-up timer in step with its technician and stage (design §11). */
+async function syncTicketFollowup(
+  row: ServiceJobRow,
+  actor: { id: string; name: string | null },
+): Promise<void> {
+  const { syncFollowup } = await import("@/lib/followups.server");
+  await syncFollowup({
+    kind: "ticket",
+    itemId: row.id,
+    accountId: row.account_id,
+    assigneeId: row.technician_id,
+    title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
+    url: `/service?id=${row.id}`,
+    closing: TICKET_CLOSING.includes(row.stage as ServiceStage) || !!row.deleted_at,
+    closeReason: row.deleted_at ? "deleted" : `stage ${row.stage}`,
+    dueDate: row.scheduled_date,
+    actorId: actor.id,
+    actorName: actor.name,
+  });
+}
 
 /** Stage-only change (the header select and the tech's buttons). */
 export const setServiceStage = createServerFn({ method: "POST" })
@@ -254,15 +279,18 @@ export const setServiceStage = createServerFn({ method: "POST" })
     const p = await serviceWrite(context);
     if (techMayNotSet(p, data.stage))
       throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
-    const { error, count } = await context.supabase
+    const { data: row, error } = await context.supabase
       .from("service_jobs")
-      .update({ stage: data.stage, updated_by_name: nameOf(p) }, { count: "exact" })
-      .eq("id", data.id);
+      .update({ stage: data.stage, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .select("*")
+      .maybeSingle();
     if (error) throw new Error(error.message);
-    if (!count)
+    if (!row)
       throw new Error(
         "Only the assigned technician, the office or an admin can change this ticket",
       );
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
   });
 
 /** Soft delete (office / admin). A technician cannot delete tickets. */
@@ -272,11 +300,14 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
     if (p.technician && p.role !== "admin") throw new Error("Ask the office to delete a ticket");
-    const { error } = await context.supabase
+    const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("*")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (row) await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
   });
 
 export const restoreServiceJob = createServerFn({ method: "POST" })
