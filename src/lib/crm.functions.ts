@@ -13,6 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { namesLookAlike } from "@/lib/name-match";
 
 export type AccountRow = Database["public"]["Tables"]["crm_accounts"]["Row"];
 export type SiteRow = Database["public"]["Tables"]["crm_sites"]["Row"];
@@ -478,7 +479,7 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
       .select("name")
       .eq("id", data.account_id)
       .maybeSingle();
-    const name = (account?.name ?? "").trim().toLowerCase();
+    const name = (account?.name ?? "").trim();
     if (name.length < 3) return [];
     const { data: rows, error } = await sb
       .from("bids")
@@ -492,11 +493,10 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
     for (const r of (rows ?? []) as unknown as (LinkedBidRow & {
       customer_name?: string | null;
     })[]) {
-      const bidName = r.name.toLowerCase();
-      const cust = (r.customer_name ?? "").trim().toLowerCase();
-      const hit =
-        bidName.includes(name) ||
-        (cust.length >= 3 && (cust.includes(name) || name.includes(cust)));
+      // Word-by-word with typo tolerance (name-match.ts): "broad head elementry" finds the
+      // "Broad Head Elementary" bid.
+      const cust = (r.customer_name ?? "").trim();
+      const hit = namesLookAlike(name, r.name) || (cust.length >= 3 && namesLookAlike(name, cust));
       if (hit)
         out.push({
           id: r.id,
