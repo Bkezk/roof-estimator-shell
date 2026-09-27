@@ -296,6 +296,57 @@ export const setServiceStage = createServerFn({ method: "POST" })
     await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
   });
 
+/**
+ * The Tech Board's drop: assign (or unassign) a technician and a day in one call. Stage moves
+ * Open ↔ Scheduled with it; Done and later are left alone. Office / admin only.
+ */
+export const assignServiceJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        technician_id: z.string().uuid().nullable(),
+        scheduled_date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
+    const p = await serviceWrite(context);
+    if (p.technician && p.role !== "admin") throw new Error("Only the office can dispatch tickets");
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("service_jobs")
+      .select("stage")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Ticket not found");
+    const stage =
+      cur.stage === "open" || cur.stage === "scheduled"
+        ? data.technician_id && data.scheduled_date
+          ? "scheduled"
+          : "open"
+        : cur.stage;
+    const { data: row, error } = await sb
+      .from("service_jobs")
+      .update({
+        technician_id: data.technician_id,
+        scheduled_date: data.scheduled_date,
+        stage,
+        updated_by_name: nameOf(p),
+      })
+      .eq("id", data.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+    return withTechName(sb, row);
+  });
+
 /** Soft delete (office / admin). A technician cannot delete tickets. */
 export const deleteServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
