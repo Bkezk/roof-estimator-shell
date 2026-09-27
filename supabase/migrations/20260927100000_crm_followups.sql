@@ -176,3 +176,18 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.notify_recipients(uuid[]) from public;
 grant execute on function public.notify_recipients(uuid[]) to authenticated;
+
+-- The reminder pass may run as an office user (the preview has no service-role key; the
+-- published app does): it marks other users' notification rows and stamps the last pass
+-- through a SECURITY DEFINER function, settings themselves stay admin-only.
+drop policy if exists notifications_update on public.notifications;
+create policy notifications_update on public.notifications for update to authenticated
+  using (user_id = auth.uid() or public.is_admin() or public.has_access('customers') or public.has_access('service') or public.has_access('estimate'))
+  with check (user_id = auth.uid() or public.is_admin() or public.has_access('customers') or public.has_access('service') or public.has_access('estimate'));
+create or replace function public.stamp_dispatch()
+returns void language sql security definer set search_path = public as $$
+  update public.crm_settings set last_dispatch_at = now() where id = 1
+    and (public.has_access('customers') or public.has_access('service') or public.has_access('estimate'));
+$$;
+revoke all on function public.stamp_dispatch() from public;
+grant execute on function public.stamp_dispatch() to authenticated;

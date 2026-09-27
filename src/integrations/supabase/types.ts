@@ -357,6 +357,7 @@ export type Database = {
           phone: string | null;
           source: string;
           state: string | null;
+          tax_exempt: boolean;
           updated_at: string;
           updated_by_name: string | null;
           zip: string | null;
@@ -380,6 +381,7 @@ export type Database = {
           phone?: string | null;
           source?: string;
           state?: string | null;
+          tax_exempt?: boolean;
           updated_at?: string;
           updated_by_name?: string | null;
           zip?: string | null;
@@ -403,6 +405,7 @@ export type Database = {
           phone?: string | null;
           source?: string;
           state?: string | null;
+          tax_exempt?: boolean;
           updated_at?: string;
           updated_by_name?: string | null;
           zip?: string | null;
@@ -1042,6 +1045,172 @@ export type Database = {
           wind_band?: string;
         };
         Relationships: [];
+      };
+      invoice_lines: {
+        Row: {
+          cost_rate: number;
+          cost_total: number;
+          description: string;
+          id: number;
+          invoice_id: string;
+          kind: string;
+          on_date: string | null;
+          qty: number;
+          rate: number;
+          sort: number;
+          source: string | null;
+          taxable: boolean;
+          total: number;
+          unit: string;
+        };
+        Insert: {
+          cost_rate?: number;
+          cost_total?: number;
+          description: string;
+          id?: number;
+          invoice_id: string;
+          kind: string;
+          on_date?: string | null;
+          qty?: number;
+          rate?: number;
+          sort?: number;
+          source?: string | null;
+          taxable?: boolean;
+          total?: number;
+          unit?: string;
+        };
+        Update: {
+          cost_rate?: number;
+          cost_total?: number;
+          description?: string;
+          id?: number;
+          invoice_id?: string;
+          kind?: string;
+          on_date?: string | null;
+          qty?: number;
+          rate?: number;
+          sort?: number;
+          source?: string | null;
+          taxable?: boolean;
+          total?: number;
+          unit?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "invoice_lines_invoice_id_fkey";
+            columns: ["invoice_id"];
+            isOneToOne: false;
+            referencedRelation: "invoices";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      invoices: {
+        Row: {
+          bill_to: Json;
+          cost_total: number;
+          created_at: string;
+          created_by: string | null;
+          description: string | null;
+          due_date: string | null;
+          finalized_at: string | null;
+          id: string;
+          invoice_date: string;
+          job_code: string | null;
+          number: number;
+          paid_amount: number;
+          paid_method: string | null;
+          paid_on: string | null;
+          paid_ref: string | null;
+          payment_terms: string | null;
+          pdf_path: string | null;
+          po_number: string | null;
+          property: Json;
+          sage_exported_at: string | null;
+          sent_at: string | null;
+          sent_to: Json | null;
+          service_job_id: string;
+          status: string;
+          subtotal: number;
+          tax_amount: number;
+          tax_rate: number;
+          total: number;
+          updated_at: string;
+          updated_by_name: string | null;
+        };
+        Insert: {
+          bill_to?: Json;
+          cost_total?: number;
+          created_at?: string;
+          created_by?: string | null;
+          description?: string | null;
+          due_date?: string | null;
+          finalized_at?: string | null;
+          id?: string;
+          invoice_date?: string;
+          job_code?: string | null;
+          number: number;
+          paid_amount?: number;
+          paid_method?: string | null;
+          paid_on?: string | null;
+          paid_ref?: string | null;
+          payment_terms?: string | null;
+          pdf_path?: string | null;
+          po_number?: string | null;
+          property?: Json;
+          sage_exported_at?: string | null;
+          sent_at?: string | null;
+          sent_to?: Json | null;
+          service_job_id: string;
+          status?: string;
+          subtotal?: number;
+          tax_amount?: number;
+          tax_rate?: number;
+          total?: number;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Update: {
+          bill_to?: Json;
+          cost_total?: number;
+          created_at?: string;
+          created_by?: string | null;
+          description?: string | null;
+          due_date?: string | null;
+          finalized_at?: string | null;
+          id?: string;
+          invoice_date?: string;
+          job_code?: string | null;
+          number?: number;
+          paid_amount?: number;
+          paid_method?: string | null;
+          paid_on?: string | null;
+          paid_ref?: string | null;
+          payment_terms?: string | null;
+          pdf_path?: string | null;
+          po_number?: string | null;
+          property?: Json;
+          sage_exported_at?: string | null;
+          sent_at?: string | null;
+          sent_to?: Json | null;
+          service_job_id?: string;
+          status?: string;
+          subtotal?: number;
+          tax_amount?: number;
+          tax_rate?: number;
+          total?: number;
+          updated_at?: string;
+          updated_by_name?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "invoices_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       inventory_locations: {
         Row: {
@@ -2210,6 +2379,8 @@ export type Database = {
           field_status: string | null;
           helper_count: number;
           id: string;
+          invoice_id: string | null;
+          labor_rate_kind: string;
           notes: string | null;
           number: number;
           on_site_at: string | null;
@@ -2246,6 +2417,8 @@ export type Database = {
           field_status?: string | null;
           helper_count?: number;
           id?: string;
+          invoice_id?: string | null;
+          labor_rate_kind?: string;
           notes?: string | null;
           number?: number;
           on_site_at?: string | null;
@@ -2282,6 +2455,8 @@ export type Database = {
           field_status?: string | null;
           helper_count?: number;
           id?: string;
+          invoice_id?: string | null;
+          labor_rate_kind?: string;
           notes?: string | null;
           number?: number;
           on_site_at?: string | null;
@@ -2330,6 +2505,69 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      service_rates: {
+        Row: {
+          bill_rate: number;
+          cost_rate: number;
+          id: number;
+          rate_kind: string;
+          role: string;
+          time_kind: string;
+          updated_at: string;
+        };
+        Insert: {
+          bill_rate?: number;
+          cost_rate?: number;
+          id?: number;
+          rate_kind: string;
+          role: string;
+          time_kind: string;
+          updated_at?: string;
+        };
+        Update: {
+          bill_rate?: number;
+          cost_rate?: number;
+          id?: number;
+          rate_kind?: string;
+          role?: string;
+          time_kind?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      service_settings: {
+        Row: {
+          email_message: string;
+          email_subject: string;
+          id: number;
+          invoice_contact: string | null;
+          material_markup: number;
+          payment_terms: string;
+          tax_rate: number;
+          updated_at: string;
+        };
+        Insert: {
+          email_message?: string;
+          email_subject?: string;
+          id?: number;
+          invoice_contact?: string | null;
+          material_markup?: number;
+          payment_terms?: string;
+          tax_rate?: number;
+          updated_at?: string;
+        };
+        Update: {
+          email_message?: string;
+          email_subject?: string;
+          id?: number;
+          invoice_contact?: string | null;
+          material_markup?: number;
+          payment_terms?: string;
+          tax_rate?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       service_time_entries: {
         Row: {
@@ -2755,6 +2993,7 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
+      stamp_dispatch: { Args: never; Returns: undefined };
       notify_recipients: {
         Args: { ids: string[] };
         Returns: {

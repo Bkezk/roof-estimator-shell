@@ -231,7 +231,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
-      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
       return withTechName(sb, row);
     }
     const { data: row, error } = await sb
@@ -240,7 +240,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
     return withTechName(sb, row);
   });
 
@@ -255,21 +255,25 @@ const TICKET_CLOSING: readonly ServiceStage[] = ["done", "invoiced", "closed"];
 async function syncTicketFollowup(
   row: ServiceJobRow,
   actor: { id: string; name: string | null },
+  sb: SupabaseClient<Database>,
 ): Promise<void> {
   const { syncFollowup } = await import("@/lib/followups.server");
-  await syncFollowup({
-    kind: "ticket",
-    itemId: row.id,
-    accountId: row.account_id,
-    assigneeId: row.technician_id,
-    title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
-    url: `/service?id=${row.id}`,
-    closing: TICKET_CLOSING.includes(row.stage as ServiceStage) || !!row.deleted_at,
-    closeReason: row.deleted_at ? "deleted" : `stage ${row.stage}`,
-    dueDate: row.scheduled_date,
-    actorId: actor.id,
-    actorName: actor.name,
-  });
+  await syncFollowup(
+    {
+      kind: "ticket",
+      itemId: row.id,
+      accountId: row.account_id,
+      assigneeId: row.technician_id,
+      title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
+      url: `/service?id=${row.id}`,
+      closing: TICKET_CLOSING.includes(row.stage as ServiceStage) || !!row.deleted_at,
+      closeReason: row.deleted_at ? "deleted" : `stage ${row.stage}`,
+      dueDate: row.scheduled_date,
+      actorId: actor.id,
+      actorName: actor.name,
+    },
+    sb,
+  );
 }
 
 /** Stage-only change (the header select and the tech's buttons). */
@@ -293,7 +297,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
       throw new Error(
         "Only the assigned technician, the office or an admin can change this ticket",
       );
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, context.supabase);
   });
 
 /**
@@ -343,7 +347,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb);
     return withTechName(sb, row);
   });
 
@@ -361,7 +365,8 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .maybeSingle();
     if (error) throw new Error(error.message);
-    if (row) await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) });
+    if (row)
+      await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, context.supabase);
   });
 
 export const restoreServiceJob = createServerFn({ method: "POST" })

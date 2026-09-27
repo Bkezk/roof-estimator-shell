@@ -249,19 +249,22 @@ export const setFieldStatus = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (row.stage !== job.stage) {
       const { syncFollowup } = await import("@/lib/followups.server");
-      await syncFollowup({
-        kind: "ticket",
-        itemId: row.id,
-        accountId: row.account_id,
-        assigneeId: row.technician_id,
-        title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
-        url: `/service?id=${row.id}`,
-        closing: row.stage === "done" || row.stage === "invoiced" || row.stage === "closed",
-        closeReason: `stage ${row.stage}`,
-        dueDate: row.scheduled_date,
-        actorId: context.userId,
-        actorName: who,
-      });
+      await syncFollowup(
+        {
+          kind: "ticket",
+          itemId: row.id,
+          accountId: row.account_id,
+          assigneeId: row.technician_id,
+          title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
+          url: `/service?id=${row.id}`,
+          closing: row.stage === "done" || row.stage === "invoiced" || row.stage === "closed",
+          closeReason: `stage ${row.stage}`,
+          dueDate: row.scheduled_date,
+          actorId: context.userId,
+          actorName: who,
+        },
+        context.supabase,
+      );
     }
     return row;
   });

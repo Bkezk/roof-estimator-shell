@@ -172,19 +172,22 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       row = r;
     }
     const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup({
-      kind: "opportunity",
-      itemId: row.id,
-      accountId: row.account_id,
-      assigneeId: row.assignee_id,
-      title: row.title,
-      url: `/opportunities?id=${row.id}`,
-      closing: OPP_CLOSING.includes(row.status as OppStatus),
-      closeReason: `status ${row.status}`,
-      dueDate: row.expected_close,
-      actorId: context.userId,
-      actorName: nameOf(p),
-    });
+    await syncFollowup(
+      {
+        kind: "opportunity",
+        itemId: row.id,
+        accountId: row.account_id,
+        assigneeId: row.assignee_id,
+        title: row.title,
+        url: `/opportunities?id=${row.id}`,
+        closing: OPP_CLOSING.includes(row.status as OppStatus),
+        closeReason: `status ${row.status}`,
+        dueDate: row.expected_close,
+        actorId: context.userId,
+        actorName: nameOf(p),
+      },
+      context.supabase,
+    );
     const [r] = await withNames(sb, [row]);
     return r as OpportunityWithNames;
   });
@@ -205,19 +208,22 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Opportunity not found, or not yours to change");
     const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup({
-      kind: "opportunity",
-      itemId: row.id,
-      accountId: row.account_id,
-      assigneeId: row.assignee_id,
-      title: row.title,
-      url: `/opportunities?id=${row.id}`,
-      closing: OPP_CLOSING.includes(row.status as OppStatus),
-      closeReason: `status ${row.status}`,
-      dueDate: row.expected_close,
-      actorId: context.userId,
-      actorName: nameOf(p),
-    });
+    await syncFollowup(
+      {
+        kind: "opportunity",
+        itemId: row.id,
+        accountId: row.account_id,
+        assigneeId: row.assignee_id,
+        title: row.title,
+        url: `/opportunities?id=${row.id}`,
+        closing: OPP_CLOSING.includes(row.status as OppStatus),
+        closeReason: `status ${row.status}`,
+        dueDate: row.expected_close,
+        actorId: context.userId,
+        actorName: nameOf(p),
+      },
+      context.supabase,
+    );
   });
 
 export const deleteOpportunity = createServerFn({ method: "POST" })
@@ -232,17 +238,20 @@ export const deleteOpportunity = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error(error.message);
     const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup({
-      kind: "opportunity",
-      itemId: data.id,
-      accountId: null,
-      assigneeId: null,
-      title: "",
-      url: "",
-      closing: true,
-      closeReason: "deleted",
-      dueDate: null,
-      actorId: context.userId,
-      actorName: null,
-    });
+    await syncFollowup(
+      {
+        kind: "opportunity",
+        itemId: data.id,
+        accountId: null,
+        assigneeId: null,
+        title: "",
+        url: "",
+        closing: true,
+        closeReason: "deleted",
+        dueDate: null,
+        actorId: context.userId,
+        actorName: null,
+      },
+      context.supabase,
+    );
   });

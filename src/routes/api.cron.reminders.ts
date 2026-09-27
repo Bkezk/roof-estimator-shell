@@ -12,8 +12,14 @@ async function run(request: Request): Promise<Response> {
   const denied = await authenticateCronRequest(request);
   if (denied) return denied;
   try {
-    const { dispatchDueReminders } = await import("@/lib/notify.server");
-    const r = await dispatchDueReminders();
+    const { dispatchDueReminders, hasServiceRole } = await import("@/lib/notify.server");
+    if (!hasServiceRole())
+      return Response.json(
+        { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY is not set on this server" },
+        { status: 500 },
+      );
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const r = await dispatchDueReminders(supabaseAdmin);
     return Response.json({ ok: true, ...r, at: new Date().toISOString() });
   } catch (e) {
     return Response.json(

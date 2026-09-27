@@ -10,10 +10,7 @@
  * Won / Lost / No response.
  */
 import type { Database } from "@/integrations/supabase/types";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { notify } from "@/lib/notify.server";
-
-type Admin = typeof supabaseAdmin;
+import { notify, serverClient, type Client } from "@/lib/notify.server";
 type Settings = {
   opportunity_close_days: number;
   opportunity_first_days: number;
@@ -22,7 +19,7 @@ type Settings = {
   ticket_every_days: number;
 };
 
-export async function crmSettings(admin: Admin = supabaseAdmin): Promise<Settings> {
+export async function crmSettings(admin: Client): Promise<Settings> {
   const { data, error } = await admin.from("crm_settings").select("*").eq("id", 1).maybeSingle();
   if (error) throw new Error(error.message);
   return (
@@ -63,8 +60,9 @@ interface SyncArgs {
  */
 export async function syncFollowup(
   a: SyncArgs,
-  admin: Admin = supabaseAdmin,
+  sb: Client,
 ): Promise<"started" | "reassigned" | "closed" | "unchanged"> {
+  const admin = await serverClient(sb);
   const { data: open, error } = await admin
     .from("crm_followups")
     .select("*")

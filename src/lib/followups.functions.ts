@@ -209,12 +209,16 @@ export const sendTestNotification = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<{ email_configured: boolean; app_url: string }> => {
     const { notify, emailConfigured, appUrl } = await import("@/lib/notify.server");
-    await notify([context.userId], {
-      kind: "test",
-      title: "Bid-O-Matic test notification",
-      body: "If you can read this, reminders will reach you here.",
-      url: "/account",
-    });
+    await notify(
+      [context.userId],
+      {
+        kind: "test",
+        title: "Bid-O-Matic test notification",
+        body: "If you can read this, reminders will reach you here.",
+        url: "/account",
+      },
+      context.supabase,
+    );
     return { email_configured: emailConfigured(), app_url: appUrl() };
   });
 
@@ -267,9 +271,15 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
       .maybeSingle();
     const last = s?.last_dispatch_at ? Date.parse(s.last_dispatch_at) : 0;
     if (Date.now() - last < 10 * 60 * 1000) return { ran: false, reminded: 0 };
-    const { dispatchDueReminders } = await import("@/lib/notify.server");
-    const r = await dispatchDueReminders();
-    return { ran: true, reminded: r.reminded };
+    try {
+      const { dispatchDueReminders } = await import("@/lib/notify.server");
+      const r = await dispatchDueReminders(context.supabase);
+      return { ran: true, reminded: r.reminded };
+    } catch (e) {
+      // Never take the app down over a reminder pass; the Reminders settings page shows it.
+      console.error("Reminder dispatch failed", e);
+      return { ran: false, reminded: 0 };
+    }
   });
 
 /** Admin: delivery health — the last pass, the email key, recent failures. */

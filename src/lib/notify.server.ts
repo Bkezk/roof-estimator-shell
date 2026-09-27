@@ -8,11 +8,28 @@
  * generated once and kept in app_secrets, a table no client can read.
  */
 import webpush from "web-push";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
-type Admin = typeof supabaseAdmin;
+/**
+ * Which client writes: the service-role client when Lovable Cloud provides its key (the
+ * published app), else the signed-in user's own client under RLS (the preview has no service
+ * key — owner's Sep 27 blank-screen report). Everything here works either way; only the push
+ * signing keys need the service role (they live in app_secrets, which no user can read).
+ */
+export type Client = SupabaseClient<Database>;
+export const hasServiceRole = () => !!process.env["SUPABASE_SERVICE_ROLE_KEY"];
+export async function serverClient(fallback: Client): Promise<Client> {
+  if (!hasServiceRole()) return fallback;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin as unknown as Client;
+}
+async function adminOrNull(): Promise<Client | null> {
+  if (!hasServiceRole()) return null;
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  return supabaseAdmin as unknown as Client;
+}
 export type PushSubRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];
 
 export interface Outgoing {
@@ -64,10 +81,15 @@ export async function sendEmail(input: {
 }
 
 /** The VAPID pair, generated on first use and kept in app_secrets. */
-export async function vapidKeys(admin: Admin = supabaseAdmin): Promise<{
+export async function vapidKeys(): Promise<{
   publicKey: string;
   privateKey: string;
 }> {
+  const admin = await adminOrNull();
+  if (!admin)
+    throw new Error(
+      "Push needs the server key (SUPABASE_SERVICE_ROLE_KEY); it is set on the published app, not the preview",
+    );
   const { data, error } = await admin
     .from("app_secrets")
     .select("key, value")
@@ -88,10 +110,9 @@ export async function vapidKeys(admin: Admin = supabaseAdmin): Promise<{
 export async function sendPush(
   sub: Pick<PushSubRow, "endpoint" | "p256dh" | "auth">,
   payload: { title: string; body?: string | null; url?: string | null; tag?: string },
-  admin: Admin = supabaseAdmin,
 ): Promise<{ ok: true } | { ok: false; gone: boolean; error: string }> {
   try {
-    const keys = await vapidKeys(admin);
+    const keys = await vapidKeys();
     webpush.setVapidDetails(contactSubject(), keys.publicKey, keys.privateKey);
     await webpush.sendNotification(
       { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
@@ -119,32 +140,37 @@ export async function sendPush(
  * user's channels. Never throws for a delivery failure: the row records the error and the
  * admin screen shows it. Returns how many rows were written.
  */
-export async function notify(
-  userIds: string[],
-  msg: Outgoing,
-  admin: Admin = supabaseAdmin,
-): Promise<number> {
+export async function notify(userIds: string[], msg: Outgoing, sb: Client): Promise<number> {
   const ids = [...new Set(userIds.filter(Boolean))];
   if (!ids.length) return 0;
-  const { data: people, error } = await admin
-    .from("profiles")
-    .select("id, email, full_name, notify_email, notify_push")
-    .in("id", ids);
+  const admin = await serverClient(sb);
+  // Recipients' channels: a SECURITY DEFINER read (profiles RLS hides other users' rows).
+  const { data: people, error } = await admin.rpc("notify_recipients", { ids });
   if (error) throw new Error(error.message);
-  const { data: rows, error: insErr } = await admin
-    .from("notifications")
-    .insert(
-      (people ?? []).map((p) => ({
-        user_id: p.id,
-        kind: msg.kind,
-        title: msg.title,
-        body: msg.body ?? null,
-        url: msg.url ?? null,
-        followup_id: msg.followup_id ?? null,
-      })),
-    )
-    .select("id, user_id");
-  if (insErr) throw new Error(insErr.message);
+  const inserts = (people ?? []).map((p) => ({
+    user_id: p.id,
+    kind: msg.kind,
+    title: msg.title,
+    body: msg.body ?? null,
+    url: msg.url ?? null,
+    followup_id: msg.followup_id ?? null,
+  }));
+  if (!inserts.length) return 0;
+  // Under RLS a user may insert another user's row but not read it back, so the ids come back
+  // only with the service role; the delivery marks are skipped otherwise.
+  let rows: { id: number; user_id: string }[] = [];
+  if (hasServiceRole()) {
+    const { data, error: insErr } = await admin
+      .from("notifications")
+      .insert(inserts)
+      .select("id, user_id");
+    if (insErr) throw new Error(insErr.message);
+    rows = data ?? [];
+  } else {
+    const { error: insErr } = await admin.from("notifications").insert(inserts);
+    if (insErr) throw new Error(insErr.message);
+    rows = inserts.map((r) => ({ id: 0, user_id: r.user_id }));
+  }
   const { data: subs } = await admin
     .from("push_subscriptions")
     .select("id, user_id, endpoint, p256dh, auth")
@@ -166,11 +192,11 @@ export async function notify(
       if (!mine.length) patch.push_error = "no device has push turned on";
       let sent = 0;
       for (const s of mine) {
-        const r = await sendPush(
-          s,
-          { title: msg.title, body: msg.body ?? null, url: msg.url ?? null },
-          admin,
-        );
+        const r = await sendPush(s, {
+          title: msg.title,
+          body: msg.body ?? null,
+          url: msg.url ?? null,
+        });
         if (r.ok) {
           sent++;
           await admin
@@ -190,9 +216,10 @@ export async function notify(
         patch.push_error = null;
       }
     }
-    if (Object.keys(patch).length) await admin.from("notifications").update(patch).eq("id", row.id);
+    if (Object.keys(patch).length && row.id)
+      await admin.from("notifications").update(patch).eq("id", row.id);
   }
-  return rows?.length ?? 0;
+  return rows.length;
 }
 
 /**
@@ -201,8 +228,9 @@ export async function notify(
  * route and, throttled, from the app (followups.functions.ts). Returns what it did.
  */
 export async function dispatchDueReminders(
-  admin: Admin = supabaseAdmin,
+  sb: Client,
 ): Promise<{ reminded: number; checked: number }> {
+  const admin = await serverClient(sb);
   const now = new Date();
   const { data: due, error } = await admin
     .from("crm_followups")
@@ -244,6 +272,7 @@ export async function dispatchDueReminders(
       .eq("id", f.id);
     reminded++;
   }
-  await admin.from("crm_settings").update({ last_dispatch_at: now.toISOString() }).eq("id", 1);
+  // SECURITY DEFINER stamp: the pass may run as an office user who cannot edit settings.
+  await admin.rpc("stamp_dispatch");
   return { reminded, checked: due?.length ?? 0 };
 }
