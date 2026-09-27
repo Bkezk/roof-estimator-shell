@@ -130,6 +130,8 @@ const jobSchema = z.object({
   site_id: z.string().uuid().nullable().optional(),
   /** The site contact (crm_contacts of the account). */
   contact_id: z.string().uuid().nullable().optional(),
+  /** Labor rate kind for the invoice (service_rates): standard | urgent | emergency. */
+  labor_rate_kind: z.enum(["standard", "urgent", "emergency"]).optional(),
   /** Used only when no account is linked (a one-off caller). */
   customer_name: z.string().trim().max(200).optional(),
   description: z.string().trim().max(500).default(""),
@@ -196,6 +198,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
       contact_id: fields.account_id ? (fields.contact_id ?? null) : null,
+      ...(fields.labor_rate_kind ? { labor_rate_kind: fields.labor_rate_kind } : {}),
       customer_name,
       site_name,
       site_address,
