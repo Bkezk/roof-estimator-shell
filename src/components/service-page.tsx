@@ -16,8 +16,14 @@
  *
  * Invoicing (§5.4): once a ticket is Done the office sees its invoice on the ticket
  * (components/service/invoice-block.tsx); the ticket's Labor rate picks the hourly rates.
+ *
+ * Fewer clicks (owner, Sep 27): the office sets technician + day with one click on a week grid
+ * (components/service/assign-grid.tsx); the list header links the Done tickets waiting to be
+ * invoiced ("N to invoice"); `?new=1&from=<ticket id>` starts a ticket with an earlier ticket's
+ * customer side ("New ticket for this site") and `?new=1&account=<id>&site=<id>` with a
+ * customer picked (the Customers page).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -29,6 +35,7 @@ import {
   ChevronRight,
   CircleHelp,
   ClipboardCheck,
+  CopyPlus,
   Loader2,
   Lock,
   MapPin,
@@ -36,6 +43,7 @@ import {
   Package,
   Phone,
   Plus,
+  Receipt,
   RotateCcw,
   Save,
   Trash2,
@@ -66,6 +74,7 @@ import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.function
 import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
+import { AssignGrid } from "@/components/service/assign-grid";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
@@ -142,13 +151,26 @@ export function ServicePage({
   id,
   isNew,
   closeout,
+  from,
+  account,
+  site,
 }: {
   id?: string | undefined;
   isNew?: boolean;
   closeout?: boolean | undefined;
+  /** New ticket: copy the customer side of this ticket ("New ticket for this site"). */
+  from?: string | undefined;
+  /** New ticket: start with this customer (and site) picked (from the Customers page). */
+  account?: string | undefined;
+  site?: string | undefined;
 }) {
   if (id) return <TicketLoader id={id} closeout={!!closeout} />;
-  if (isNew) return <TicketEditor job={null} />;
+  if (isNew) {
+    if (from) return <NewFromTicket key={from} from={from} />;
+    if (account)
+      return <NewForAccount key={`${account}|${site ?? ""}`} accountId={account} siteId={site} />;
+    return <TicketEditor job={null} />;
+  }
   return <ServiceList />;
 }
 
@@ -301,14 +323,31 @@ function ServiceList() {
     setMineOverride(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
+  // Done = waiting to be invoiced (finalising moves a ticket to Invoiced).
+  const toInvoiceCount = jobs.filter((j) => asStage(j.stage) === "done").length;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Wrench className="h-6 w-6" /> Service tickets
-          </h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+              <Wrench className="h-6 w-6" /> Service tickets
+            </h1>
+            {officeOrAdmin && toInvoiceCount > 0 && (
+              <Link
+                to="/service/invoices"
+                search={{ tab: "to-invoice" }}
+                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                title="Done tickets waiting to be invoiced"
+              >
+                <Badge className="gap-1 px-2 py-0.5 text-xs hover:bg-primary/80">
+                  <Receipt className="h-3.5 w-3.5" aria-hidden />
+                  {toInvoiceCount} to invoice
+                </Badge>
+              </Link>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground">
             Repair calls: who, where, which technician and when. A Done ticket is invoiced from the
             ticket itself.
@@ -646,6 +685,103 @@ function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
   return <TicketEditor key={job.data.id} job={job.data} />;
 }
 
+/** A new ticket starting from another ticket's customer side (see seedFromTicket). */
+function NewFromTicket({ from }: { from: string }) {
+  const { session } = useAuth();
+  const getFn = useServerFn(getServiceJob);
+  const src = useQuery({
+    queryKey: ["service-job", from],
+    queryFn: () => getFn({ data: { id: from } }),
+    enabled: !!session,
+  });
+  useEffect(() => {
+    if (src.error)
+      toast.error(`Could not copy the earlier ticket: ${errText(src.error)}`, { duration: 10_000 });
+  }, [src.error]);
+  if (src.error)
+    return (
+      <TicketEditor
+        job={null}
+        seed={{
+          draft: {},
+          tone: "error",
+          note: `Could not copy the earlier ticket (${errText(src.error)}). Fill this one in by hand.`,
+        }}
+      />
+    );
+  if (!src.data)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Copying the earlier ticket…
+      </p>
+    );
+  return <TicketEditor job={null} seed={seedFromTicket(src.data)} />;
+}
+
+/** A new ticket with a customer (and site) already picked, from the Customers page. */
+function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: string | undefined }) {
+  const { session } = useAuth();
+  const getFn = useServerFn(getAccount);
+  const detail = useQuery({
+    queryKey: ["account", accountId],
+    queryFn: () => getFn({ data: { id: accountId } }),
+    enabled: !!session,
+  });
+  const siteMissing = !!siteId && !!detail.data && !detail.data.sites.some((x) => x.id === siteId);
+  useEffect(() => {
+    if (detail.error)
+      toast.error(`Could not load the customer: ${errText(detail.error)}`, { duration: 10_000 });
+  }, [detail.error]);
+  useEffect(() => {
+    if (siteMissing)
+      toast.error("That site is no longer on file for this customer — pick the site", {
+        duration: 10_000,
+      });
+  }, [siteMissing]);
+  if (detail.error)
+    return (
+      <TicketEditor
+        job={null}
+        seed={{
+          draft: {},
+          tone: "error",
+          note: `Could not load the customer (${errText(detail.error)}). Pick the customer here.`,
+        }}
+      />
+    );
+  if (!detail.data)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading the customer…
+      </p>
+    );
+  const a = detail.data.account;
+  const site = siteId ? detail.data.sites.find((x) => x.id === siteId) : undefined;
+  const seed: Seed = {
+    draft: {
+      customer: {
+        account_id: a.id,
+        site_id: site?.id ?? null,
+        label: site ? `${site.name} — ${a.name}` : a.name,
+      },
+      hit: {
+        account_id: a.id,
+        account_name: a.name,
+        kind: a.kind === "individual" ? "individual" : "company",
+        site_id: site?.id ?? null,
+        site_name: site?.name ?? null,
+        site_address: site ? siteAddressLine(site) : "",
+        contact_name: a.contact_name,
+        phone: a.phone,
+      },
+    },
+    ...(siteMissing
+      ? { tone: "error" as const, note: "That site is no longer on file; pick the site." }
+      : {}),
+  };
+  return <TicketEditor job={null} seed={seed} />;
+}
+
 function BackToList() {
   return (
     <Button asChild variant="ghost" size="sm" className="-ml-2">
@@ -714,6 +850,50 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         centerpoint_invoice: "",
         notes: "",
       };
+/** A new ticket's starting values beyond the defaults, with a line saying where they came from. */
+interface Seed {
+  draft: Partial<Draft>;
+  note?: string;
+  tone?: "info" | "error";
+}
+
+/**
+ * "New ticket for this site": the customer side of an earlier ticket (customer, site, contact,
+ * PO #, labor rate, type); the description, technician and day start fresh.
+ */
+const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
+  draft: {
+    customer: j.account_id
+      ? {
+          account_id: j.account_id,
+          site_id: j.site_id,
+          label: j.site_name ? `${j.site_name} — ${j.customer_name}` : j.customer_name,
+        }
+      : null,
+    // Shown in the customer card until the account itself has loaded.
+    hit: j.account_id
+      ? {
+          account_id: j.account_id,
+          account_name: j.customer_name,
+          kind: "company",
+          site_id: j.site_id,
+          site_name: j.site_name,
+          site_address: j.site_address ?? "",
+          contact_name: null,
+          phone: null,
+        }
+      : null,
+    contact_id: j.account_id ? (j.contact_id ?? "") : "",
+    po_number: j.po_number ?? "",
+    labor_rate_kind: asRateKind(j.labor_rate_kind),
+    service_type: asType(j.service_type),
+  },
+  tone: "info",
+  note: j.account_id
+    ? `Copied from ticket #${j.number}: customer, site, contact, PO #, labor rate and type. Add the description, then the technician and day.`
+    : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, labor rate and type are copied.`,
+});
+
 /** The fields that decide "unsaved changes" (the card's hit is display only). */
 const draftKey = (d: Draft) =>
   JSON.stringify({
@@ -722,7 +902,7 @@ const draftKey = (d: Draft) =>
     customer: d.customer && [d.customer.account_id, d.customer.site_id],
   });
 
-function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
+function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Seed }) {
   const { session, profile, can } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -749,6 +929,7 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
     if (job) return d;
     return {
       ...d,
+      ...seed?.draft,
       technician_id: prefill.tech ?? d.technician_id,
       scheduled_date: prefill.date ?? d.scheduled_date,
     };
@@ -863,6 +1044,99 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
   const ro = !canEdit;
   // Close-out: the office and the assigned technician (not once the office has invoiced).
   const canCloseOut = !!job && canEdit;
+  // Repeat work: once a ticket is Done (or later) the office opens the next one at the same site.
+  const repeatable = jobStage === "done" || jobStage === "invoiced" || jobStage === "closed";
+
+  // Section 4's controls, shared by the office layout (under the grid) and the technician's.
+  const techSelect = (triggerClass?: string) => (
+    <Select
+      value={draft.technician_id || "none"}
+      disabled={ro}
+      onValueChange={(v) => set("technician_id", v === "none" ? "" : v)}
+    >
+      <SelectTrigger id="ticket-tech" className={triggerClass}>
+        <SelectValue placeholder="Unassigned" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="none">Unassigned</SelectItem>
+        {techOptions.some((t) => t.technician) && (
+          <SelectGroup>
+            <SelectLabel>Technicians</SelectLabel>
+            {techOptions
+              .filter((t) => t.technician)
+              .map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                  {t.id === profile?.id ? " (me)" : ""}
+                </SelectItem>
+              ))}
+          </SelectGroup>
+        )}
+        {techOptions.some((t) => !t.technician) && (
+          <SelectGroup>
+            <SelectLabel>Office</SelectLabel>
+            {techOptions
+              .filter((t) => !t.technician)
+              .map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                  {t.id === profile?.id ? " (me)" : ""}
+                </SelectItem>
+              ))}
+          </SelectGroup>
+        )}
+      </SelectContent>
+    </Select>
+  );
+  const techError = techs.error ? (
+    <p className="text-xs text-destructive">Could not load technicians: {errText(techs.error)}</p>
+  ) : null;
+  const helpers = (
+    <div className="flex items-center gap-1">
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className="h-9 w-9"
+        disabled={ro || draft.helper_count <= 0}
+        aria-label="One helper fewer"
+        onClick={() => set("helper_count", Math.max(0, draft.helper_count - 1))}
+      >
+        <Minus className="h-4 w-4" />
+      </Button>
+      <div className="w-14" id="ticket-helpers">
+        <NumberField
+          value={draft.helper_count}
+          min={0}
+          max={9}
+          inputMode="numeric"
+          disabled={ro}
+          className="text-center"
+          onChange={(v) => set("helper_count", Math.min(9, Math.max(0, Math.round(v))))}
+        />
+      </div>
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className="h-9 w-9"
+        disabled={ro || draft.helper_count >= 9}
+        aria-label="One helper more"
+        onClick={() => set("helper_count", Math.min(9, draft.helper_count + 1))}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+  const dateInput = (
+    <Input
+      id="ticket-date"
+      type="date"
+      value={draft.scheduled_date}
+      disabled={ro}
+      onChange={(e) => set("scheduled_date", e.target.value)}
+    />
+  );
 
   return (
     <div className="space-y-6">
@@ -906,6 +1180,14 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
                   ))}
                 </SelectContent>
               </Select>
+              {officeOrAdmin && repeatable && (
+                <Button asChild variant="outline">
+                  <Link to="/service" search={{ new: 1, from: job.id }}>
+                    <CopyPlus className="mr-1 h-4 w-4" />
+                    {job.site_id ? "New ticket for this site" : "New ticket for this customer"}
+                  </Link>
+                </Button>
+              )}
               {officeOrAdmin && (
                 <Button
                   variant="outline"
@@ -922,6 +1204,17 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
           <p className="text-xs text-muted-foreground">
             Updated {when(job.updated_at)}
             {job.updated_by_name ? ` by ${job.updated_by_name}` : ""}
+          </p>
+        )}
+        {!job && seed?.note && (
+          <p
+            className={
+              seed.tone === "error"
+                ? "rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                : "text-sm text-muted-foreground"
+            }
+          >
+            {seed.note}
           </p>
         )}
         {isTech && jobStage === "done" && (
@@ -1087,103 +1380,64 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
           )}
         </div>
 
-        {/* 4. Technician, helpers and day */}
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-[1fr_auto_200px]">
-          <div className="space-y-1">
-            <Label htmlFor="ticket-tech">Technician</Label>
-            <Select
-              value={draft.technician_id || "none"}
-              disabled={ro}
-              onValueChange={(v) => set("technician_id", v === "none" ? "" : v)}
-            >
-              <SelectTrigger id="ticket-tech">
-                <SelectValue placeholder="Unassigned" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {techOptions.some((t) => t.technician) && (
-                  <SelectGroup>
-                    <SelectLabel>Technicians</SelectLabel>
-                    {techOptions
-                      .filter((t) => t.technician)
-                      .map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name}
-                          {t.id === profile?.id ? " (me)" : ""}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                )}
-                {techOptions.some((t) => !t.technician) && (
-                  <SelectGroup>
-                    <SelectLabel>Office</SelectLabel>
-                    {techOptions
-                      .filter((t) => !t.technician)
-                      .map((t) => (
-                        <SelectItem key={t.id} value={t.id}>
-                          {t.name}
-                          {t.id === profile?.id ? " (me)" : ""}
-                        </SelectItem>
-                      ))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-            {techs.error && (
-              <p className="text-xs text-destructive">
-                Could not load technicians: {errText(techs.error)}
-              </p>
-            )}
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="ticket-helpers">Helpers</Label>
-            <div className="flex items-center gap-1">
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className="h-9 w-9"
-                disabled={ro || draft.helper_count <= 0}
-                aria-label="One helper fewer"
-                onClick={() => set("helper_count", Math.max(0, draft.helper_count - 1))}
-              >
-                <Minus className="h-4 w-4" />
-              </Button>
-              <div className="w-14" id="ticket-helpers">
-                <NumberField
-                  value={draft.helper_count}
-                  min={0}
-                  max={9}
-                  inputMode="numeric"
-                  disabled={ro}
-                  className="text-center"
-                  onChange={(v) => set("helper_count", Math.min(9, Math.max(0, Math.round(v))))}
-                />
+        {/* 4. Technician, helpers and day. The office picks both in one click on the grid; a
+            technician (who can only assign themselves) keeps the plain fields. */}
+        {officeOrAdmin ? (
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium leading-none">Technician and day</p>
+              <AssignGrid
+                jobId={job?.id ?? null}
+                techs={techOptions}
+                techsLoading={techs.isLoading}
+                technicianId={draft.technician_id}
+                date={draft.scheduled_date}
+                meId={profile?.id ?? null}
+                disabled={ro}
+                onPick={(technician_id, scheduled_date) =>
+                  setDraft((d) => ({ ...d, technician_id, scheduled_date }))
+                }
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,260px)_auto_170px]">
+              <div className="space-y-1">
+                <Label htmlFor="ticket-tech" className="text-xs">
+                  Technician
+                </Label>
+                {techSelect("h-9")}
+                {techError}
               </div>
-              <Button
-                type="button"
-                size="icon"
-                variant="outline"
-                className="h-9 w-9"
-                disabled={ro || draft.helper_count >= 9}
-                aria-label="One helper more"
-                onClick={() => set("helper_count", Math.min(9, draft.helper_count + 1))}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
+              <div className="space-y-1">
+                <Label htmlFor="ticket-helpers" className="text-xs">
+                  Helpers
+                </Label>
+                {helpers}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ticket-date" className="text-xs">
+                  Date (any day)
+                </Label>
+                {dateInput}
+              </div>
             </div>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="ticket-date">Scheduled date</Label>
-            <Input
-              id="ticket-date"
-              type="date"
-              value={draft.scheduled_date}
-              disabled={ro}
-              onChange={(e) => set("scheduled_date", e.target.value)}
-            />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-[1fr_auto_200px]">
+            <div className="space-y-1">
+              <Label htmlFor="ticket-tech">Technician</Label>
+              {techSelect()}
+              {techError}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="ticket-helpers">Helpers</Label>
+              {helpers}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="ticket-date">Scheduled date</Label>
+              {dateInput}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* 5. CenterPoint numbers (until invoicing moves here) */}
         <div className="space-y-1">

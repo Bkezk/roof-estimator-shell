@@ -360,6 +360,7 @@ function AccountBlock({ account, onDelete }: { account: AccountRow; onDelete: ()
 }
 
 function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDelete: () => void }) {
+  const { can } = useAuth();
   const a = props.account;
   const street = [a.address1, a.address2].filter((x) => x && x.trim()).join(", ");
   const cityLine = [a.city, [a.state, a.zip].filter((x) => x && x.trim()).join(" ")]
@@ -387,7 +388,14 @@ function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDele
             {a.updated_by_name ? ` by ${a.updated_by_name}` : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {can("service") && (
+            <Button asChild size="sm">
+              <Link to="/service" search={{ new: 1, account: a.id }}>
+                <Plus className="mr-1 h-4 w-4" /> New ticket
+              </Link>
+            </Button>
+          )}
           <Button type="button" variant="outline" size="sm" onClick={props.onEdit}>
             <Pencil className="mr-1 h-4 w-4" /> Edit
           </Button>
@@ -1039,6 +1047,7 @@ function ContactForm(props: {
 }
 
 function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
+  const { can } = useAuth();
   const qc = useQueryClient();
   const deleteFn = useServerFn(deleteSite);
   // "new" = the add form is open; an id = that site is being edited.
@@ -1107,6 +1116,18 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
                 )}
               </div>
               <div className="flex items-center gap-1">
+                {can("service") && (
+                  <Button
+                    asChild
+                    size="sm"
+                    variant="outline"
+                    title="New service ticket at this site"
+                  >
+                    <Link to="/service" search={{ new: 1, account: accountId, site: s.id }}>
+                      <Wrench className="mr-1 h-4 w-4" /> New ticket
+                    </Link>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"

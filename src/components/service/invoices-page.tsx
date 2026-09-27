@@ -4,6 +4,10 @@
  * the invoice is edited). **Export to Sage** writes the bookkeeper's CSV for a date range
  * (final, sent and paid invoices) and stamps them exported.
  *
+ * The first chip, **To invoice** (`?tab=to-invoice`), is the queue before that: the tickets at
+ * stage Done, which is exactly "waiting to be invoiced" (finalising moves a ticket to
+ * Invoiced), longest waiting first; a row opens the ticket, where its invoice block is.
+ *
  * Office users and admins only: technicians never see money (the server refuses them too).
  */
 import { useState } from "react";
@@ -14,6 +18,8 @@ import { toast } from "sonner";
 import { FileDown, Loader2, Receipt } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
+import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
 import {
   exportSageCsv,
   INVOICE_STATUSES,
@@ -44,7 +50,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function InvoicesPage() {
+export function InvoicesPage({ toInvoice = false }: { toInvoice?: boolean }) {
   const { profile } = useAuth();
   if (profile?.technician && profile.role !== "admin")
     return (
@@ -56,7 +62,7 @@ export function InvoicesPage() {
         </Button>
       </div>
     );
-  return <InvoiceList />;
+  return <InvoiceList toInvoice={toInvoice} />;
 }
 
 type StatusFilter = "all" | InvoiceStatus;
@@ -76,11 +82,20 @@ function Chip(props: { active: boolean; onClick: () => void; children: React.Rea
   );
 }
 
-function InvoiceList() {
+function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listInvoices);
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const jobsFn = useServerFn(listServiceJobs);
+  // The invoice status chips; the To invoice chip is the URL's (?tab=to-invoice) so the
+  // Tickets list's "N to invoice" badge lands on it.
+  const [status, setStatusState] = useState<StatusFilter>("all");
+  const setStatus = (s: StatusFilter) => {
+    setStatusState(s);
+    if (toInvoice) void navigate({ to: "/service/invoices", search: {}, replace: true });
+  };
+  const showToInvoice = () =>
+    void navigate({ to: "/service/invoices", search: { tab: "to-invoice" }, replace: true });
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
@@ -95,8 +110,15 @@ function InvoiceList() {
           ...(to ? { to } : {}),
         },
       }),
+    enabled: !!session && !toInvoice,
+  });
+  // The same cache as the Tickets list and the Board.
+  const jobsQ = useQuery({
+    queryKey: ["service-jobs"],
+    queryFn: () => jobsFn(),
     enabled: !!session,
   });
+  const waiting = toInvoiceRows(jobsQ.data ?? []);
   const rows = list.data ?? [];
   // Void invoices are not money owed; they stay out of the footer sums.
   const live = rows.filter((r) => r.status !== "void");
@@ -126,56 +148,78 @@ function InvoiceList() {
 
       <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Chip active={status === "all"} onClick={() => setStatus("all")}>
+          <Chip active={toInvoice} onClick={toInvoice ? () => setStatus("all") : showToInvoice}>
+            To invoice{jobsQ.data ? ` (${waiting.length})` : ""}
+          </Chip>
+          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+          <Chip active={!toInvoice && status === "all"} onClick={() => setStatus("all")}>
             All
           </Chip>
           {INVOICE_STATUSES.map((s) => (
-            <Chip key={s} active={status === s} onClick={() => setStatus(status === s ? "all" : s)}>
+            <Chip
+              key={s}
+              active={!toInvoice && status === s}
+              onClick={() => setStatus(!toInvoice && status === s ? "all" : s)}
+            >
               {STATUS_LABELS[s]}
             </Chip>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            Invoice date from
-            <Input
-              type="date"
-              value={from}
-              className="w-[160px] bg-background"
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            to
-            <Input
-              type="date"
-              value={to}
-              className="w-[160px] bg-background"
-              onChange={(e) => setTo(e.target.value)}
-            />
-          </label>
-          {anyFilter && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setStatus("all");
-                setFrom("");
-                setTo("");
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
-          {list.data && (
-            <span className="ml-auto text-xs text-muted-foreground">
-              {rows.length} invoice{rows.length === 1 ? "" : "s"}
-            </span>
-          )}
-        </div>
+        {toInvoice ? (
+          <p className="text-xs text-muted-foreground">
+            Done tickets waiting for their invoice, longest waiting first. Open one to review and
+            finalise its invoice.
+          </p>
+        ) : (
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              Invoice date from
+              <Input
+                type="date"
+                value={from}
+                className="w-[160px] bg-background"
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              to
+              <Input
+                type="date"
+                value={to}
+                className="w-[160px] bg-background"
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </label>
+            {anyFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setStatus("all");
+                  setFrom("");
+                  setTo("");
+                }}
+              >
+                Clear filters
+              </Button>
+            )}
+            {list.data && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {rows.length} invoice{rows.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      {list.error ? (
+      {toInvoice ? (
+        <ToInvoiceTable
+          rows={waiting}
+          loading={jobsQ.isLoading || !jobsQ.data}
+          error={jobsQ.error}
+          onOpen={open}
+        />
+      ) : list.error ? (
         <p className="text-sm text-destructive">
           Could not load invoices ({errText(list.error)}). Try refreshing, or sign in again.
         </p>
@@ -273,6 +317,95 @@ function InvoiceList() {
       )}
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
+    </div>
+  );
+}
+
+/** The To invoice queue: Done tickets, longest waiting first; a row opens its ticket. */
+function ToInvoiceTable(props: {
+  rows: ServiceJobWithTech[];
+  loading: boolean;
+  error: Error | null;
+  onOpen: (serviceJobId: string) => void;
+}) {
+  if (props.error)
+    return (
+      <p className="text-sm text-destructive">
+        Could not load the tickets ({errText(props.error)}). Try refreshing, or sign in again.
+      </p>
+    );
+  if (props.loading)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading tickets…
+      </p>
+    );
+  if (props.rows.length === 0)
+    return (
+      <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+        Nothing waiting: every Done ticket has been invoiced.
+      </div>
+    );
+  const now = new Date();
+  return (
+    <div className="overflow-x-auto rounded-lg border">
+      <table className="w-full min-w-[720px] text-sm">
+        <thead>
+          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+            <th className="px-3 py-2 font-medium">Ticket</th>
+            <th className="px-3 py-2 font-medium">Customer</th>
+            <th className="px-3 py-2 font-medium">Site</th>
+            <th className="px-3 py-2 font-medium">Technician</th>
+            <th className="px-3 py-2 font-medium">Done</th>
+            <th className="px-3 py-2 text-right font-medium">Waiting</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.rows.map((j) => {
+            const done = doneAt(j);
+            const days = daysSince(done, now);
+            return (
+              <tr
+                key={j.id}
+                className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40"
+                onClick={() => props.onOpen(j.id)}
+              >
+                <td className="px-3 py-2 font-medium tabular-nums">
+                  <Link
+                    to="/service"
+                    search={{ id: j.id }}
+                    className="underline-offset-2 hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    #{j.number}
+                  </Link>
+                </td>
+                <td className="px-3 py-2">{j.customer_name || "—"}</td>
+                <td className="px-3 py-2">
+                  {j.site_name || "—"}
+                  {j.site_address ? (
+                    <span className="block text-xs text-muted-foreground">{j.site_address}</span>
+                  ) : null}
+                </td>
+                <td className="px-3 py-2">{j.technician_name ?? "Unassigned"}</td>
+                <td className="whitespace-nowrap px-3 py-2">{stampDay(done)}</td>
+                <td
+                  className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${days >= 7 ? "font-medium text-amber-700 dark:text-amber-400" : ""}`}
+                >
+                  {days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"}`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-t bg-muted/40 text-sm font-medium">
+            <td className="px-3 py-2" colSpan={6}>
+              {props.rows.length} ticket{props.rows.length === 1 ? "" : "s"} to invoice
+            </td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
