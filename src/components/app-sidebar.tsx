@@ -69,8 +69,17 @@ const todayItem: ServiceItem = {
   icon: CalendarCheck,
   page: "service",
 };
+// Owner, Sep 27: three homes instead of one crowded group — Follow-ups on its own at the top
+// (every signed-in user has some), Service = the repair side (Today, Board, Tickets), and
+// Customers = the CRM hub (Customers, Opportunities).
+const followupsItem: ServiceItem = {
+  title: "Follow-ups",
+  url: "/followups",
+  icon: BellRing,
+  page: null,
+};
 const serviceItems: ServiceItem[] = [
-  { title: "Tickets", url: "/service", icon: Wrench, page: "service", exact: true },
+  todayItem,
   {
     title: "Board",
     url: "/service/board",
@@ -78,10 +87,11 @@ const serviceItems: ServiceItem[] = [
     page: "service",
     office: true,
   },
-  todayItem,
+  { title: "Tickets", url: "/service", icon: Wrench, page: "service", exact: true },
+];
+const customerItems: ServiceItem[] = [
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
-  { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
@@ -303,6 +313,25 @@ export function AppSidebar() {
     navigate({ to: "/login" });
   };
 
+  const renderItems = (items: ServiceItem[]) =>
+    items
+      .filter((item) => item.page === null || can(item.page))
+      .filter((item) => !(item.office && isTech))
+      .map((item) => (
+        <SidebarMenuItem key={item.title}>
+          <SidebarMenuButton
+            asChild
+            isActive={item.exact ? pathname === item.url : isActive(item.url)}
+            tooltip={item.title}
+          >
+            <Link to={item.url}>
+              <item.icon className="h-4 w-4" />
+              {!collapsed && <span>{item.title}</span>}
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ));
+
   return (
     <Sidebar collapsible="icon">
       <SidebarContent>
@@ -326,29 +355,20 @@ export function AppSidebar() {
         )}
 
         {profile && (
+          <SidebarGroup>
+            <SidebarMenu>{renderItems([followupsItem])}</SidebarMenu>
+          </SidebarGroup>
+        )}
+
+        {can("service") && (
           <NavGroup label="Service" id="service" iconMode={collapsed}>
-            <SidebarMenu>
-              {(profile.technician
-                ? [todayItem, ...serviceItems.filter((i) => i !== todayItem)]
-                : serviceItems
-              )
-                .filter((item) => item.page === null || can(item.page))
-                .filter((item) => !(item.office && isTech))
-                .map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={item.exact ? pathname === item.url : isActive(item.url)}
-                      tooltip={item.title}
-                    >
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
-            </SidebarMenu>
+            <SidebarMenu>{renderItems(serviceItems)}</SidebarMenu>
+          </NavGroup>
+        )}
+
+        {can("customers") && (
+          <NavGroup label="Customers" id="customers" iconMode={collapsed}>
+            <SidebarMenu>{renderItems(customerItems)}</SidebarMenu>
           </NavGroup>
         )}
 
