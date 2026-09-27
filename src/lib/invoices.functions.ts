@@ -55,8 +55,10 @@ async function withLines(
     .eq("invoice_id", invoice.id)
     .order("sort");
   if (error) throw new Error(error.message);
-  return { invoice, lines: lines ?? [] };
+  return { invoice: shown(invoice), lines: lines ?? [] };
 }
+/** A voided invoice keeps its number as a negative; the screens show the original. */
+const shown = (inv: InvoiceRow): InvoiceRow => ({ ...inv, number: Math.abs(inv.number) });
 
 /** The ticket's invoice, created as a draft from its time and materials on first call. */
 export const getOrCreateInvoice = createServerFn({ method: "POST" })
@@ -69,6 +71,7 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
       .from("invoices")
       .select("*")
       .eq("service_job_id", data.job_id)
+      .neq("status", "void") // a voided invoice has released the ticket and its number
       .maybeSingle();
     if (existing) return withLines(sb, existing);
     const { data: job, error } = await sb
@@ -469,11 +472,13 @@ export const voidInvoice = createServerFn({ method: "POST" })
     if (inv.status === "draft") {
       await sb.from("invoices").delete().eq("id", inv.id);
     } else {
+      // Release the ticket and the number (kept as a negative for history); a fresh draft takes
+      // the ticket number again. If this one was already exported to Sage, the bookkeeper needs
+      // a credit there — the list shows the void row with its export stamp.
       await sb
         .from("invoices")
-        .update({ status: "void", updated_by_name: nameOf(p) })
+        .update({ status: "void", number: -Math.abs(inv.number), updated_by_name: nameOf(p) })
         .eq("id", inv.id);
-      // A voided number is gone; the ticket gets a fresh draft under a new number next time.
     }
     await sb
       .from("service_jobs")
@@ -512,7 +517,7 @@ export const listInvoices = createServerFn({ method: "GET" })
     return (rows ?? []).map((r) => {
       const bt = (r.bill_to ?? {}) as { name?: string };
       const pr = (r.property ?? {}) as { name?: string };
-      return { ...r, customer_name: bt.name ?? "", site_name: pr.name ?? null };
+      return { ...shown(r), customer_name: bt.name ?? "", site_name: pr.name ?? null };
     });
   });
 

@@ -128,3 +128,8 @@ create policy invoice_lines_office on public.invoice_lines for all to authentica
 
 -- Storage: the invoice PDFs live in the "service" bucket under invoices/<number>.pdf (the
 -- bucket's policies already follow the Service page).
+
+-- A voided invoice releases its ticket so a fresh draft can be made (its number goes negative
+-- as history; the new draft takes the ticket number again). One live invoice per ticket.
+alter table public.invoices drop constraint if exists invoices_service_job_id_key;
+create unique index if not exists invoices_live_job_idx on public.invoices (service_job_id) where status <> 'void';

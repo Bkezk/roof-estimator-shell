@@ -22,6 +22,7 @@ import {
   BellRing,
   CalendarCheck,
   CalendarDays,
+  Receipt,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -70,8 +71,8 @@ const todayItem: ServiceItem = {
   page: "service",
 };
 // Owner, Sep 27: three homes instead of one crowded group — Follow-ups on its own at the top
-// (every signed-in user has some), Service = the repair side (Today, Board, Tickets), and
-// Customers = the CRM hub (Customers, Opportunities).
+// (every signed-in user has some), Service = the repair side (Today, Board, Tickets, and the
+// office's Invoices), and Customers = the CRM hub (Customers, Opportunities).
 const followupsItem: ServiceItem = {
   title: "Follow-ups",
   url: "/followups",
@@ -88,6 +89,13 @@ const serviceItems: ServiceItem[] = [
     office: true,
   },
   { title: "Tickets", url: "/service", icon: Wrench, page: "service", exact: true },
+  {
+    title: "Invoices",
+    url: "/service/invoices",
+    icon: Receipt,
+    page: "service",
+    office: true,
+  },
 ];
 const customerItems: ServiceItem[] = [
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
@@ -109,6 +117,7 @@ type AdminTab =
   | "markup"
   | "warranties"
   | "reminders"
+  | "servicerates"
   | "setup"
   | "inspection"
   | "templates"
@@ -148,6 +157,7 @@ const adminItems: {
       { title: "Labor & Markup Options", tab: "markup" },
       { title: "Warranties", tab: "warranties" },
       { title: "Reminders", tab: "reminders", adminOnly: true },
+      { title: "Service Rates", tab: "servicerates" },
     ],
   },
   {

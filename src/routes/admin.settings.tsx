@@ -20,6 +20,7 @@ import {
 } from "@/lib/admin-settings.functions";
 import { useAuth } from "@/lib/auth-store";
 import { RemindersSettings } from "@/components/reminders-settings";
+import { ServiceRatesSettings } from "@/components/service-rates-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,6 +52,7 @@ const SETTINGS_TABS = [
   "markup",
   "warranties",
   "reminders",
+  "servicerates",
 ] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -105,6 +107,7 @@ function SettingsPage() {
           <TabsTrigger value="markup">Labor &amp; Markup Options</TabsTrigger>
           <TabsTrigger value="warranties">Warranties</TabsTrigger>
           {isAdmin && <TabsTrigger value="reminders">Reminders</TabsTrigger>}
+          <TabsTrigger value="servicerates">Service Rates</TabsTrigger>
         </TabsList>
 
         <TabsContent value="contractor">
@@ -153,6 +156,10 @@ function SettingsPage() {
               Only an admin can change the reminder settings.
             </p>
           )}
+        </TabsContent>
+        <TabsContent value="servicerates">
+          {/* Admins and Estimate Pricing users: the same people who reach this page. */}
+          <ServiceRatesSettings />
         </TabsContent>
       </Tabs>
     </div>

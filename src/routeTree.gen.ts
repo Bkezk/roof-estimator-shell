@@ -29,6 +29,7 @@ import { Route as AdminPriceImportRouteImport } from './routes/admin.price-impor
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
+import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
 
@@ -132,6 +133,11 @@ const ServiceBoardRoute = ServiceBoardRouteImport.update({
   path: '/board',
   getParentRoute: () => ServiceRoute,
 } as any)
+const ServiceInvoicesRoute = ServiceInvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => ServiceRoute,
+} as any)
 const ServiceTodayRoute = ServiceTodayRouteImport.update({
   id: '/today',
   path: '/today',
@@ -164,6 +170,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
+  '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
@@ -188,6 +195,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
+  '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
@@ -213,6 +221,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
+  '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
@@ -239,6 +248,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
+    | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
   fileRoutesByTo: FileRoutesByTo
@@ -263,6 +273,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
+    | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
   id:
@@ -287,6 +298,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
+    | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
   fileRoutesById: FileRoutesById
@@ -456,6 +468,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServiceBoardRouteImport
       parentRoute: typeof ServiceRoute
     }
+    '/service/invoices': {
+      id: '/service/invoices'
+      path: '/invoices'
+      fullPath: '/service/invoices'
+      preLoaderRoute: typeof ServiceInvoicesRouteImport
+      parentRoute: typeof ServiceRoute
+    }
     '/service/today': {
       id: '/service/today'
       path: '/today'
@@ -475,11 +494,13 @@ declare module '@tanstack/react-router' {
 
 interface ServiceRouteChildren {
   ServiceBoardRoute: typeof ServiceBoardRoute
+  ServiceInvoicesRoute: typeof ServiceInvoicesRoute
   ServiceTodayRoute: typeof ServiceTodayRoute
 }
 
 const ServiceRouteChildren: ServiceRouteChildren = {
   ServiceBoardRoute: ServiceBoardRoute,
+  ServiceInvoicesRoute: ServiceInvoicesRoute,
   ServiceTodayRoute: ServiceTodayRoute,
 }
 

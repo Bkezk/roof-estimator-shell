@@ -13,6 +13,9 @@
  * The field side (§5.3): `?id=<uuid>&closeout=1` opens the ticket's close-out
  * (components/service/closeout.tsx); the ticket shows its site contact, the repairs, time,
  * signature and timeline the technician recorded (components/service/ticket-field-sections.tsx).
+ *
+ * Invoicing (§5.4): once a ticket is Done the office sees its invoice on the ticket
+ * (components/service/invoice-block.tsx); the ticket's Labor rate picks the hourly rates.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -62,7 +65,9 @@ import {
 import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
+import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { CloseoutScreen } from "@/components/service/closeout";
+import { InvoiceBlock } from "@/components/service/invoice-block";
 import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
 import {
   AlertDialog,
@@ -118,6 +123,9 @@ const asStage = (s: string): ServiceStage =>
 const asType = (s: string): ServiceType =>
   (SERVICE_TYPES as readonly string[]).includes(s) ? (s as ServiceType) : "other";
 const typeLabel = (s: string) => TYPE_LABELS[asType(s)];
+type RateKind = (typeof RATE_KINDS)[number];
+const asRateKind = (s: string | null | undefined): RateKind =>
+  (RATE_KINDS as readonly string[]).includes(s ?? "") ? (s as RateKind) : "standard";
 /** Inventory location ids ("shop", "veh-n2x384") read as names without importing Inventory. */
 const locationLabel = (id: string) =>
   id === "shop" ? "Shop" : id.startsWith("veh-") ? `Vehicle ${id.slice(4).toUpperCase()}` : id;
@@ -302,8 +310,8 @@ function ServiceList() {
             <Wrench className="h-6 w-6" /> Service tickets
           </h1>
           <p className="text-sm text-muted-foreground">
-            Repair calls: who, where, which technician and when. CenterPoint still invoices; keep
-            its ticket number on the ticket.
+            Repair calls: who, where, which technician and when. A Done ticket is invoiced from the
+            ticket itself.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -656,6 +664,8 @@ interface Draft {
   contact_id: string;
   description: string;
   service_type: ServiceType;
+  /** Which hourly rates the invoice uses (service_rates). */
+  labor_rate_kind: RateKind;
   po_number: string;
   /** "" = unassigned. */
   technician_id: string;
@@ -680,6 +690,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         contact_id: job.contact_id ?? "",
         description: job.description,
         service_type: asType(job.service_type),
+        labor_rate_kind: asRateKind(job.labor_rate_kind),
         po_number: job.po_number ?? "",
         technician_id: job.technician_id ?? "",
         helper_count: job.helper_count,
@@ -694,6 +705,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         contact_id: "",
         description: "",
         service_type: "leak",
+        labor_rate_kind: "standard",
         po_number: "",
         technician_id: meId ?? "",
         helper_count: 0,
@@ -778,6 +790,8 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
         ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
         description: draft.description,
         service_type: draft.service_type,
+        // The rate is the office's call; a technician's save leaves it as it is.
+        ...(officeOrAdmin ? { labor_rate_kind: draft.labor_rate_kind } : {}),
         po_number: draft.po_number,
         technician_id: draft.technician_id || null,
         helper_count: draft.helper_count,
@@ -1046,6 +1060,31 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
             />
             <BillingNote accountId={draft.customer?.account_id ?? null} />
           </div>
+          {officeOrAdmin && (
+            <div className="space-y-1">
+              <Label htmlFor="ticket-rate">Labor rate</Label>
+              <Select
+                value={draft.labor_rate_kind}
+                disabled={ro}
+                onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
+              >
+                <SelectTrigger id="ticket-rate" className="sm:max-w-[220px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RATE_KINDS.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {RATE_KIND_LABELS[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Sets the hourly rates on the invoice
+                {job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* 4. Technician, helpers and day */}
@@ -1210,6 +1249,8 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
           </div>
         )}
       </form>
+
+      {job && officeOrAdmin && <InvoiceBlock job={job} />}
 
       {job && <MaterialsUsed jobId={job.id} canLog={can("inventory")} />}
 
