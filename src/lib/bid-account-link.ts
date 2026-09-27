@@ -117,9 +117,12 @@ export function applyProfileFill(
 
 /** Labels of the client fields where the bid no longer matches the profile (empty = same). */
 export function profileDifferences(customer: CustomerInfo, account: AccountLike): string[] {
-  return CLIENT_FIELDS.filter((f) => read(customer, f.key) !== t(account[f.column])).map(
-    (f) => f.label,
-  );
+  // A blank bid field is "not entered", not a different value (owner, Sep 27): the bid may
+  // simply not carry that detail, and Update profile never wipes the profile with a blank.
+  return CLIENT_FIELDS.filter((f) => {
+    const cur = read(customer, f.key);
+    return cur !== "" && cur !== t(account[f.column]);
+  }).map((f) => f.label);
 }
 
 /**
@@ -132,18 +135,20 @@ export function accountFromBid(
   account: AccountLike &
     Pick<AccountRow, "id" | "kind" | "billing_instructions" | "external_id" | "notes">,
 ): AccountInput {
+  // A blank bid field keeps the profile's value (see profileDifferences).
+  const keep = (bid: string | undefined, profile: string | null) => t(bid) || t(profile);
   return {
     id: account.id,
-    name: t(customer.name),
+    name: keep(customer.name, account.name),
     kind: account.kind === "individual" ? "individual" : "company",
-    contact_name: t(customer.contact),
-    phone: t(customer.phone),
-    email: t(customer.email),
-    address1: t(customer.clientAddress),
-    address2: t(customer.clientAddress2),
-    city: t(customer.clientCity),
-    state: t(customer.clientState),
-    zip: t(customer.clientZip),
+    contact_name: keep(customer.contact, account.contact_name),
+    phone: keep(customer.phone, account.phone),
+    email: keep(customer.email, account.email),
+    address1: keep(customer.clientAddress, account.address1),
+    address2: keep(customer.clientAddress2, account.address2),
+    city: keep(customer.clientCity, account.city),
+    state: keep(customer.clientState, account.state),
+    zip: keep(customer.clientZip, account.zip),
     billing_instructions: account.billing_instructions,
     external_id: account.external_id,
     notes: account.notes,

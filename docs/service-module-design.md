@@ -368,6 +368,17 @@ automatically (if the tech is on two vehicles, or two techs are on the ticket, e
 the tech pick which truck it came off, defaulting to the last answer — owner, Sep 26), tied to the ticket, and logged as ordinary `consumed` movements with the user, time and
 ticket. Everything is undoable through the existing movement undo.
 
+**Technicians (owner, Sep 27).** A technician sees only the tickets assigned to them, plus
+Inventory when granted. They can move a ticket to Done at most; Invoiced and Closed are the
+office's (RLS and the server both enforce it). Ticket numbers start at 6000 so they never
+collide with CenterPoint's while both run.
+
+**Customer page.** Details open read-only with an Edit button. A new customer (from the
+Customers page or the quick-add on a ticket) is offered any unlinked bids whose name looks
+like the customer's, in a "Link these bids?" dialog; the same suggestions sit on the
+customer page. Job Name on a bid also finds customers as you type, since some estimators put
+the customer there.
+
 **Sidebar**: a **Customers** group (Accounts, Opportunities, Follow-ups) beside Service; the
 Bids page and the account page both show the link.
 

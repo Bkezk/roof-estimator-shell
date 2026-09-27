@@ -209,3 +209,31 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function public.technician_options() from public;
 grant execute on function public.technician_options() to authenticated;
+
+-- Owner, Sep 27: a technician sees only tickets assigned to them and can move a ticket only as
+-- far as Done; Invoiced and Closed are the office's. Office users and admins are unchanged.
+drop policy if exists service_jobs_read on public.service_jobs;
+create policy service_jobs_read on public.service_jobs for select to authenticated
+  using (
+    public.has_access('customers')
+    or (public.has_access('service')
+        and (not public.is_technician() or public.is_admin() or technician_id = auth.uid()))
+  );
+drop policy if exists service_jobs_insert on public.service_jobs;
+create policy service_jobs_insert on public.service_jobs for insert to authenticated
+  with check (
+    public.has_access('service')
+    and (not public.is_technician() or public.is_admin()
+         or (technician_id = auth.uid() and stage in ('open','scheduled','done')))
+  );
+drop policy if exists service_jobs_update on public.service_jobs;
+create policy service_jobs_update on public.service_jobs for update to authenticated
+  using (
+    public.has_access('service')
+    and (not public.is_technician() or public.is_admin() or technician_id = auth.uid())
+  )
+  with check (
+    public.has_access('service')
+    and (not public.is_technician() or public.is_admin()
+         or (technician_id = auth.uid() and stage in ('open','scheduled','done')))
+  );

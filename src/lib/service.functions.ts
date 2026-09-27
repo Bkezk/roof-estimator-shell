@@ -84,6 +84,7 @@ async function withTechNames(
   }));
 }
 
+/** Every ticket for the office; a technician's own tickets only (RLS filters the rows). */
 export const listServiceJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<ServiceJobWithTech[]> => {
@@ -187,6 +188,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (!customer_name.trim()) throw new Error("Pick or add the customer");
     const stage =
       fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
+    if (techMayNotSet(p, stage))
+      throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
     const patch = {
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
@@ -236,6 +239,11 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     return withTechName(sb, row);
   });
 
+/** The stages a technician may set; Invoiced and Closed belong to the office (owner, Sep 27). */
+export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
+const techMayNotSet = (p: { technician: boolean; role: string }, stage: ServiceStage) =>
+  p.technician && p.role !== "admin" && !TECH_STAGES.includes(stage);
+
 /** Stage-only change (the header select and the tech's buttons). */
 export const setServiceStage = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -244,6 +252,8 @@ export const setServiceStage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
+    if (techMayNotSet(p, data.stage))
+      throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
     const { error, count } = await context.supabase
       .from("service_jobs")
       .update({ stage: data.stage, updated_by_name: nameOf(p) }, { count: "exact" })

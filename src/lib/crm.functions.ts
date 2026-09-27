@@ -350,11 +350,12 @@ export const quickCreateAccount = createServerFn({ method: "POST" })
         contact_name: data.contact_name ?? null,
         phone: data.phone ?? null,
         email: data.email ?? null,
-        // An individual's billing address is where they live; a company's is asked later.
-        address1: data.kind === "individual" ? (data.address1 ?? null) : null,
-        city: data.kind === "individual" ? (data.city ?? null) : null,
-        state: data.kind === "individual" ? (data.state ?? null) : null,
-        zip: data.kind === "individual" ? (data.zip ?? null) : null,
+        // The billing address starts as the first site's address (an individual's is where
+        // they live); a company's separate billing address is edited on the Customers page.
+        address1: data.address1 ?? null,
+        city: data.city ?? null,
+        state: data.state ?? null,
+        zip: data.zip ?? null,
         source: data.source ?? "manual",
         created_by: context.userId,
         updated_by_name: nameOf(p),
@@ -457,4 +458,54 @@ export const listUnlinkedBids = createServerFn({ method: "GET" })
       .limit(20);
     if (error) throw new Error(error.message);
     return (rows ?? []) as LinkedBidRow[];
+  });
+
+/**
+ * Saved bids that look like they belong to an account but are not linked to any (owner, Sep
+ * 27: "a new Knox County customer should be offered the Knox County bid"). A bid matches when
+ * its name or its saved customer name contains the account name, or the account name contains
+ * the bid's customer name. Empty for readers without Estimate access.
+ */
+export const suggestBidsForAccount = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ account_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<LinkedBidRow[]> => {
+    const p = await me(context);
+    if (!p || !canAccess(p, "estimate")) return [];
+    const sb = context.supabase;
+    const { data: account } = await sb
+      .from("crm_accounts")
+      .select("name")
+      .eq("id", data.account_id)
+      .maybeSingle();
+    const name = (account?.name ?? "").trim().toLowerCase();
+    if (name.length < 3) return [];
+    const { data: rows, error } = await sb
+      .from("bids")
+      .select("id, name, status, grand_total, updated_at, customer_name:data->customer->>name")
+      .is("deleted_at", null)
+      .is("account_id", null)
+      .order("updated_at", { ascending: false })
+      .limit(1000);
+    if (error) throw new Error(error.message);
+    const out: LinkedBidRow[] = [];
+    for (const r of (rows ?? []) as unknown as (LinkedBidRow & {
+      customer_name?: string | null;
+    })[]) {
+      const bidName = r.name.toLowerCase();
+      const cust = (r.customer_name ?? "").trim().toLowerCase();
+      const hit =
+        bidName.includes(name) ||
+        (cust.length >= 3 && (cust.includes(name) || name.includes(cust)));
+      if (hit)
+        out.push({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          grand_total: r.grand_total,
+          updated_at: r.updated_at,
+        });
+      if (out.length >= 20) break;
+    }
+    return out;
   });
