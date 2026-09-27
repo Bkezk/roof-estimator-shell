@@ -128,6 +128,8 @@ const jobSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid().nullable().optional(),
   site_id: z.string().uuid().nullable().optional(),
+  /** The site contact (crm_contacts of the account). */
+  contact_id: z.string().uuid().nullable().optional(),
   /** Used only when no account is linked (a one-off caller). */
   customer_name: z.string().trim().max(200).optional(),
   description: z.string().trim().max(500).default(""),
@@ -193,6 +195,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     const patch = {
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
+      contact_id: fields.account_id ? (fields.contact_id ?? null) : null,
       customer_name,
       site_name,
       site_address,

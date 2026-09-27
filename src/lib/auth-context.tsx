@@ -80,6 +80,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     can: (page) => canAccess(profile, page),
     loading,
     signOut: async () => {
+      // A shared phone must not keep receiving the previous user's reminders (push is per
+      // device); best effort, before the session goes.
+      try {
+        const { disablePushHere } = await import("@/lib/push-client");
+        await disablePushHere();
+      } catch {
+        /* no push on this device */
+      }
       await supabase.auth.signOut();
       setProfile(null);
     },

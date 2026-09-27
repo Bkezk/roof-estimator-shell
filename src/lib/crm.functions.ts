@@ -509,3 +509,96 @@ export const suggestBidsForAccount = createServerFn({ method: "GET" })
     }
     return out;
   });
+
+// ---------------------------------------------------------------------------------------------
+// Contacts (phase B): people at an account, optionally tied to specific sites.
+export type ContactRow = Database["public"]["Tables"]["crm_contacts"]["Row"];
+export interface ContactWithSites extends ContactRow {
+  site_ids: string[];
+}
+
+export const listContacts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ account_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<ContactWithSites[]> => {
+    await readAccess(context);
+    const sb = context.supabase;
+    const { data: rows, error } = await sb
+      .from("crm_contacts")
+      .select("*")
+      .eq("account_id", data.account_id)
+      .is("deleted_at", null)
+      .order("is_billing", { ascending: false })
+      .order("name");
+    if (error) throw new Error(error.message);
+    const ids = (rows ?? []).map((r) => r.id);
+    const { data: links } = ids.length
+      ? await sb.from("crm_site_contacts").select("site_id, contact_id").in("contact_id", ids)
+      : { data: [] as { site_id: string; contact_id: string }[] };
+    return (rows ?? []).map((r) => ({
+      ...r,
+      site_ids: (links ?? []).filter((l) => l.contact_id === r.id).map((l) => l.site_id),
+    }));
+  });
+
+const contactSchema = z.object({
+  id: z.string().uuid().optional(),
+  account_id: z.string().uuid(),
+  name: z.string().trim().min(1, "Name is required").max(200),
+  position: optText(200),
+  email: optText(200),
+  mobile: optText(60),
+  office_phone: optText(60),
+  is_billing: z.boolean().optional(),
+  notes: optText(2000),
+  /** Sites this contact belongs to (empty = the whole account). */
+  site_ids: z.array(z.string().uuid()).max(200).optional(),
+});
+export type ContactInput = z.input<typeof contactSchema>;
+
+export const saveContact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => contactSchema.parse(d))
+  .handler(async ({ data, context }): Promise<ContactWithSites> => {
+    await writeAccess(context);
+    const sb = context.supabase;
+    const { id, site_ids, ...fields } = data;
+    const row = { ...fields, is_billing: fields.is_billing ?? false };
+    let saved: ContactRow;
+    if (id) {
+      const { data: r, error } = await sb
+        .from("crm_contacts")
+        .update(row)
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (error) throw new Error(error.message);
+      saved = r;
+    } else {
+      const { data: r, error } = await sb.from("crm_contacts").insert(row).select("*").single();
+      if (error) throw new Error(error.message);
+      saved = r;
+    }
+    if (site_ids) {
+      await sb.from("crm_site_contacts").delete().eq("contact_id", saved.id);
+      if (site_ids.length) {
+        const { error: lErr } = await sb
+          .from("crm_site_contacts")
+          .insert(site_ids.map((site_id) => ({ site_id, contact_id: saved.id })));
+        if (lErr) throw new Error(lErr.message);
+      }
+    }
+    return { ...saved, site_ids: site_ids ?? [] };
+  });
+
+export const deleteContact = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<void> => {
+    await writeAccess(context);
+    const { error } = await context.supabase
+      .from("crm_contacts")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", data.id);
+    if (error) throw new Error(error.message);
+  });

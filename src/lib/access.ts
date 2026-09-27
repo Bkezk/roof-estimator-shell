@@ -57,6 +57,8 @@ export const isAdmin = (p: AccessLike | null | undefined): boolean => p?.role ==
 /** The page a route belongs to; null for routes every signed-in user may open (/account). */
 export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname === "/account" || pathname === "/login") return null;
+  // Follow-ups: every signed-in user (the server returns only what they may see).
+  if (pathname.startsWith("/followups")) return null;
   if (pathname.startsWith("/admin/users")) return "admin";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
@@ -64,6 +66,7 @@ export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname.startsWith("/takeoff")) return "takeoff";
   if (pathname.startsWith("/service")) return "service";
   if (pathname.startsWith("/customers")) return "customers";
+  if (pathname.startsWith("/opportunities")) return "customers";
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||

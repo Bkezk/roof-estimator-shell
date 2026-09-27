@@ -14,8 +14,10 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as BidsRouteImport } from './routes/bids'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as EstimateRouteImport } from './routes/estimate'
+import { Route as FollowupsRouteImport } from './routes/followups'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
 import { Route as ServiceRouteImport } from './routes/service'
@@ -53,6 +55,11 @@ const EstimateRoute = EstimateRouteImport.update({
   path: '/estimate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FollowupsRoute = FollowupsRouteImport.update({
+  id: '/followups',
+  path: '/followups',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InventoryRoute = InventoryRouteImport.update({
   id: '/inventory',
   path: '/inventory',
@@ -61,6 +68,11 @@ const InventoryRoute = InventoryRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OpportunitiesRoute = OpportunitiesRouteImport.update({
+  id: '/opportunities',
+  path: '/opportunities',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProposalRoute = ProposalRouteImport.update({
@@ -125,8 +137,10 @@ export interface FileRoutesByFullPath {
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
+  '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRoute
@@ -145,8 +159,10 @@ export interface FileRoutesByTo {
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
+  '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRoute
@@ -166,8 +182,10 @@ export interface FileRoutesById {
   '/bids': typeof BidsRoute
   '/customers': typeof CustomersRoute
   '/estimate': typeof EstimateRoute
+  '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRoute
@@ -188,8 +206,10 @@ export interface FileRouteTypes {
     | '/bids'
     | '/customers'
     | '/estimate'
+    | '/followups'
     | '/inventory'
     | '/login'
+    | '/opportunities'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -208,8 +228,10 @@ export interface FileRouteTypes {
     | '/bids'
     | '/customers'
     | '/estimate'
+    | '/followups'
     | '/inventory'
     | '/login'
+    | '/opportunities'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -228,8 +250,10 @@ export interface FileRouteTypes {
     | '/bids'
     | '/customers'
     | '/estimate'
+    | '/followups'
     | '/inventory'
     | '/login'
+    | '/opportunities'
     | '/proposal'
     | '/prospect'
     | '/service'
@@ -249,8 +273,10 @@ export interface RootRouteChildren {
   BidsRoute: typeof BidsRoute
   CustomersRoute: typeof CustomersRoute
   EstimateRoute: typeof EstimateRoute
+  FollowupsRoute: typeof FollowupsRoute
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
+  OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
   ServiceRoute: typeof ServiceRoute
@@ -301,6 +327,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EstimateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/followups': {
+      id: '/followups'
+      path: '/followups'
+      fullPath: '/followups'
+      preLoaderRoute: typeof FollowupsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inventory': {
       id: '/inventory'
       path: '/inventory'
@@ -313,6 +346,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/opportunities': {
+      id: '/opportunities'
+      path: '/opportunities'
+      fullPath: '/opportunities'
+      preLoaderRoute: typeof OpportunitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/proposal': {
@@ -401,8 +441,10 @@ const rootRouteChildren: RootRouteChildren = {
   BidsRoute: BidsRoute,
   CustomersRoute: CustomersRoute,
   EstimateRoute: EstimateRoute,
+  FollowupsRoute: FollowupsRoute,
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
+  OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
   ServiceRoute: ServiceRoute,

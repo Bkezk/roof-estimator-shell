@@ -409,6 +409,62 @@ export type Database = {
         };
         Relationships: [];
       };
+      crm_contacts: {
+        Row: {
+          account_id: string;
+          centerpoint_contact_id: string | null;
+          created_at: string;
+          deleted_at: string | null;
+          email: string | null;
+          id: string;
+          is_billing: boolean;
+          mobile: string | null;
+          name: string;
+          notes: string | null;
+          office_phone: string | null;
+          position: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          account_id: string;
+          centerpoint_contact_id?: string | null;
+          created_at?: string;
+          deleted_at?: string | null;
+          email?: string | null;
+          id?: string;
+          is_billing?: boolean;
+          mobile?: string | null;
+          name: string;
+          notes?: string | null;
+          office_phone?: string | null;
+          position?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          account_id?: string;
+          centerpoint_contact_id?: string | null;
+          created_at?: string;
+          deleted_at?: string | null;
+          email?: string | null;
+          id?: string;
+          is_billing?: boolean;
+          mobile?: string | null;
+          name?: string;
+          notes?: string | null;
+          office_phone?: string | null;
+          position?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_contacts_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       crm_followups: {
         Row: {
           account_id: string | null;
@@ -562,6 +618,36 @@ export type Database = {
             columns: ["bid_id"];
             isOneToOne: false;
             referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      crm_site_contacts: {
+        Row: {
+          contact_id: string;
+          site_id: string;
+        };
+        Insert: {
+          contact_id: string;
+          site_id: string;
+        };
+        Update: {
+          contact_id?: string;
+          site_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_site_contacts_contact_id_fkey";
+            columns: ["contact_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_contacts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_site_contacts_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_sites";
             referencedColumns: ["id"];
           },
         ];
@@ -1812,6 +1898,54 @@ export type Database = {
         };
         Relationships: [];
       };
+      repair_templates: {
+        Row: {
+          active: boolean;
+          category: string | null;
+          centerpoint_template_id: string | null;
+          created_at: string;
+          description: string | null;
+          favorite: boolean;
+          id: string;
+          name: string;
+          unit: string;
+          unit_price: number | null;
+          updated_at: string;
+          usage_count: number;
+          work_completed: string | null;
+        };
+        Insert: {
+          active?: boolean;
+          category?: string | null;
+          centerpoint_template_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          favorite?: boolean;
+          id?: string;
+          name: string;
+          unit?: string;
+          unit_price?: number | null;
+          updated_at?: string;
+          usage_count?: number;
+          work_completed?: string | null;
+        };
+        Update: {
+          active?: boolean;
+          category?: string | null;
+          centerpoint_template_id?: string | null;
+          created_at?: string;
+          description?: string | null;
+          favorite?: boolean;
+          id?: string;
+          name?: string;
+          unit?: string;
+          unit_price?: number | null;
+          updated_at?: string;
+          usage_count?: number;
+          work_completed?: string | null;
+        };
+        Relationships: [];
+      };
       roofs: {
         Row: {
           area_sqft: number | null;
@@ -1884,23 +2018,208 @@ export type Database = {
           },
         ];
       };
+      service_job_events: {
+        Row: {
+          at: string;
+          by_name: string | null;
+          by_user: string | null;
+          field_status: string | null;
+          id: number;
+          kind: string;
+          meta: Json | null;
+          note: string | null;
+          service_job_id: string;
+          stage: string | null;
+        };
+        Insert: {
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          field_status?: string | null;
+          id?: number;
+          kind: string;
+          meta?: Json | null;
+          note?: string | null;
+          service_job_id: string;
+          stage?: string | null;
+        };
+        Update: {
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          field_status?: string | null;
+          id?: number;
+          kind?: string;
+          meta?: Json | null;
+          note?: string | null;
+          service_job_id?: string;
+          stage?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_events_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      service_job_photos: {
+        Row: {
+          by_user: string | null;
+          created_at: string;
+          file_name: string | null;
+          file_size: number | null;
+          id: string;
+          lat: number | null;
+          lng: number | null;
+          repair_id: string | null;
+          role: string;
+          service_job_id: string;
+          storage_path: string;
+          taken_at: string | null;
+        };
+        Insert: {
+          by_user?: string | null;
+          created_at?: string;
+          file_name?: string | null;
+          file_size?: number | null;
+          id?: string;
+          lat?: number | null;
+          lng?: number | null;
+          repair_id?: string | null;
+          role?: string;
+          service_job_id: string;
+          storage_path: string;
+          taken_at?: string | null;
+        };
+        Update: {
+          by_user?: string | null;
+          created_at?: string;
+          file_name?: string | null;
+          file_size?: number | null;
+          id?: string;
+          lat?: number | null;
+          lng?: number | null;
+          repair_id?: string | null;
+          role?: string;
+          service_job_id?: string;
+          storage_path?: string;
+          taken_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_photos_repair_id_fkey";
+            columns: ["repair_id"];
+            isOneToOne: false;
+            referencedRelation: "service_job_repairs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_photos_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      service_job_repairs: {
+        Row: {
+          completed_on: string;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          name: string;
+          print_on_invoice: boolean;
+          problem_text: string | null;
+          quantity: number;
+          repair_template_id: string | null;
+          resolution_text: string | null;
+          service_job_id: string;
+          sort: number;
+          unit: string;
+          updated_at: string;
+        };
+        Insert: {
+          completed_on?: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          name: string;
+          print_on_invoice?: boolean;
+          problem_text?: string | null;
+          quantity?: number;
+          repair_template_id?: string | null;
+          resolution_text?: string | null;
+          service_job_id: string;
+          sort?: number;
+          unit?: string;
+          updated_at?: string;
+        };
+        Update: {
+          completed_on?: string;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          name?: string;
+          print_on_invoice?: boolean;
+          problem_text?: string | null;
+          quantity?: number;
+          repair_template_id?: string | null;
+          resolution_text?: string | null;
+          service_job_id?: string;
+          sort?: number;
+          unit?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_repairs_repair_template_id_fkey";
+            columns: ["repair_template_id"];
+            isOneToOne: false;
+            referencedRelation: "repair_templates";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_repairs_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       service_jobs: {
         Row: {
           account_id: string | null;
           centerpoint_invoice: string | null;
           centerpoint_ticket: string | null;
+          checked_in_with: string | null;
+          checked_out_with: string | null;
+          closing_notes: string | null;
+          completed_at: string | null;
+          contact_id: string | null;
           created_at: string;
           created_by: string | null;
           customer_name: string;
           deleted_at: string | null;
           description: string;
+          en_route_at: string | null;
+          field_status: string | null;
           helper_count: number;
           id: string;
           notes: string | null;
           number: number;
+          on_site_at: string | null;
           po_number: string | null;
+          recommend_new_roof: boolean;
           scheduled_date: string | null;
           service_type: string;
+          signature_path: string | null;
+          signed_at: string | null;
+          signed_by: string | null;
           site_address: string | null;
           site_id: string | null;
           site_name: string | null;
@@ -1913,18 +2232,30 @@ export type Database = {
           account_id?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
+          checked_in_with?: string | null;
+          checked_out_with?: string | null;
+          closing_notes?: string | null;
+          completed_at?: string | null;
+          contact_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           customer_name?: string;
           deleted_at?: string | null;
           description?: string;
+          en_route_at?: string | null;
+          field_status?: string | null;
           helper_count?: number;
           id?: string;
           notes?: string | null;
           number?: number;
+          on_site_at?: string | null;
           po_number?: string | null;
+          recommend_new_roof?: boolean;
           scheduled_date?: string | null;
           service_type?: string;
+          signature_path?: string | null;
+          signed_at?: string | null;
+          signed_by?: string | null;
           site_address?: string | null;
           site_id?: string | null;
           site_name?: string | null;
@@ -1937,18 +2268,30 @@ export type Database = {
           account_id?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
+          checked_in_with?: string | null;
+          checked_out_with?: string | null;
+          closing_notes?: string | null;
+          completed_at?: string | null;
+          contact_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           customer_name?: string;
           deleted_at?: string | null;
           description?: string;
+          en_route_at?: string | null;
+          field_status?: string | null;
           helper_count?: number;
           id?: string;
           notes?: string | null;
           number?: number;
+          on_site_at?: string | null;
           po_number?: string | null;
+          recommend_new_roof?: boolean;
           scheduled_date?: string | null;
           service_type?: string;
+          signature_path?: string | null;
+          signed_at?: string | null;
+          signed_by?: string | null;
           site_address?: string | null;
           site_id?: string | null;
           site_name?: string | null;
@@ -1958,6 +2301,13 @@ export type Database = {
           updated_by_name?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "service_jobs_contact_id_fkey";
+            columns: ["contact_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_contacts";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "service_jobs_account_id_fkey";
             columns: ["account_id"];
@@ -1974,6 +2324,72 @@ export type Database = {
           },
           {
             foreignKeyName: "service_jobs_technician_id_fkey";
+            columns: ["technician_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      service_time_entries: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          ended_at: string | null;
+          helper_count: number;
+          hours: number;
+          id: number;
+          kind: string;
+          note: string | null;
+          on_date: string;
+          service_job_id: string;
+          source: string;
+          started_at: string | null;
+          technician_id: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          ended_at?: string | null;
+          helper_count?: number;
+          hours: number;
+          id?: number;
+          kind: string;
+          note?: string | null;
+          on_date?: string;
+          service_job_id: string;
+          source?: string;
+          started_at?: string | null;
+          technician_id?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          ended_at?: string | null;
+          helper_count?: number;
+          hours?: number;
+          id?: number;
+          kind?: string;
+          note?: string | null;
+          on_date?: string;
+          service_job_id?: string;
+          source?: string;
+          started_at?: string | null;
+          technician_id?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_time_entries_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_time_entries_technician_id_fkey";
             columns: ["technician_id"];
             isOneToOne: false;
             referencedRelation: "profiles";

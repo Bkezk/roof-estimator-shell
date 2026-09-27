@@ -428,3 +428,35 @@ tracked for the partial remainder. Simple, and it matches what the customer sign
 Forgetting to log is reduced by the close-out
 asking "anything off the truck?" before Complete and by the per-template usual-usage prefill
 (§12.5).
+
+## 13. Phase B as built (Sep 27) and what the owner sets up
+
+**Reminders: email + push** (owner, Sep 27; no SMS). Assigning a ticket or an opportunity
+starts a follow-up timer (`crm_followups`); the dispatcher writes an inbox row per reminder and
+sends it by email (Resend) and web push (VAPID keys generated once into `app_secrets`) per the
+user's channel toggles on `/account`. Reminder lengths per type and the opportunity
+close-within days are on Admin › Settings › Reminders. Admins see every timer on
+`/followups`; others see their own.
+
+**Owner setup, once:**
+
+1. **Email**: create a Resend account, verify the sending domain (flatroofonline.com) and add
+   in Lovable Cloud › Secrets: `RESEND_API_KEY`, `NOTIFY_FROM_EMAIL` (e.g.
+   `Bid-O-Matic <notifications@flatroofonline.com>`), `APP_URL` (the app's public address,
+   used for links in emails and push). Until then emails are recorded as failed on the
+   Reminders settings page; in-app and push still work.
+2. **Push**: each person opens `/account` on their phone and turns notifications on. iPhone
+   needs the app added to the Home Screen first (Share → Add to Home Screen) and opened from
+   there.
+3. **Cron**: reminders also go out whenever an office user opens the app (throttled to every
+   ten minutes). For reminders on a quiet day, set the GitHub repository secrets `APP_URL` and
+   `CRON_SECRET` (the value of `LOVABLE_CRON_SECRET` in Lovable Cloud); the workflow
+   `.github/workflows/reminders.yml` then calls `POST /api/cron/reminders` every 30 minutes
+   in office hours.
+
+**Tech phone flow (tables live, screens next):** `service_job_events` (timeline),
+`service_time_entries` (travel / labor to the quarter hour from the En route → On site → Done
+buttons, editable by hand), `repair_templates`, `service_job_repairs`, `service_job_photos`
+(bucket `service`, before / after / signature), close-out fields on the ticket, contacts
+(`crm_contacts`, `crm_site_contacts`) and the ticket's site contact. Server functions in
+`src/lib/service-field.functions.ts`. An opened tube of caulk counts as one used (§12).

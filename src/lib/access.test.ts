@@ -47,6 +47,8 @@ describe("per-page access", () => {
     expect(homeFor({ role: "user", access: ["customers"] })).toBe("/customers");
     expect(pageForPath("/service")).toBe("service");
     expect(pageForPath("/customers")).toBe("customers");
+    expect(pageForPath("/opportunities")).toBe("customers");
+    expect(pageForPath("/followups")).toBeNull();
   });
 
   it("normalizes a stored access list", () => {

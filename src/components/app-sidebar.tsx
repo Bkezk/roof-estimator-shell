@@ -18,10 +18,12 @@ import {
   PanelLeftOpen,
   Wrench,
   Contact,
+  Target,
+  BellRing,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { PAGE_LABELS } from "@/lib/access";
+import { PAGE_LABELS, type Page } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -47,10 +49,13 @@ const estimatorItems = [
   { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
-// Service (phase A): repair tickets and the customer hub they link to.
-const serviceItems = [
-  { title: "Tickets", url: "/service", icon: Wrench, page: "service" as const },
-  { title: "Customers", url: "/customers", icon: Contact, page: "customers" as const },
+// Service: repair tickets, the customer hub they link to, opportunities, and the follow-ups
+// every signed-in user has (page null = shown to everyone).
+const serviceItems: { title: string; url: string; icon: typeof Wrench; page: Page | null }[] = [
+  { title: "Tickets", url: "/service", icon: Wrench, page: "service" },
+  { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
+  { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
+  { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
@@ -67,6 +72,7 @@ type AdminTab =
   | "basiclabor"
   | "markup"
   | "warranties"
+  | "reminders"
   | "setup"
   | "inspection"
   | "templates"
@@ -80,8 +86,9 @@ type AdminTab =
   | "metals";
 
 // A sub links to a tab on the parent page (`tab`), a catalog category on it
-// (`cat`, matched by name), or its own page (`url` — e.g. Estimators).
-type AdminSub = { title: string; tab?: AdminTab; cat?: string; url?: string };
+// (`cat`, matched by name), or its own page (`url` — e.g. Estimators). `adminOnly` subs are
+// hidden from pricing users who are not admins.
+type AdminSub = { title: string; tab?: AdminTab; cat?: string; url?: string; adminOnly?: boolean };
 
 // Mirrors the legacy Bid-Advantage admin tree (labels and order), flattened to
 // one submenu level. Category names must match the seeded pricing_catalog rows.
@@ -104,6 +111,7 @@ const adminItems: {
       { title: "Basic Labor Settings", tab: "basiclabor" },
       { title: "Labor & Markup Options", tab: "markup" },
       { title: "Warranties", tab: "warranties" },
+      { title: "Reminders", tab: "reminders", adminOnly: true },
     ],
   },
   {
@@ -289,11 +297,11 @@ export function AppSidebar() {
           </NavGroup>
         )}
 
-        {(can("service") || can("customers")) && (
+        {profile && (
           <NavGroup label="Service" id="service" iconMode={collapsed}>
             <SidebarMenu>
               {serviceItems
-                .filter((item) => can(item.page))
+                .filter((item) => item.page === null || can(item.page))
                 .map((item) => (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
@@ -339,35 +347,37 @@ export function AppSidebar() {
                       </CollapsibleTrigger>
                       <CollapsibleContent>
                         <SidebarMenuSub>
-                          {item.sub.map((sub) => {
-                            const active = sub.url
-                              ? isActive(sub.url)
-                              : isActive(item.url) &&
-                                (sub.cat
-                                  ? searchCat === sub.cat
-                                  : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
-                            // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
-                            const search = sub.cat
-                              ? item.url === "/admin/duro-last"
-                                ? { tab: "catalog" as const, cat: sub.cat }
-                                : { cat: sub.cat }
-                              : { tab: sub.tab! };
-                            return (
-                              <SidebarMenuSubItem key={sub.title}>
-                                <SidebarMenuSubButton asChild isActive={active}>
-                                  {sub.url ? (
-                                    <Link to={sub.url}>
-                                      <span>{sub.title}</span>
-                                    </Link>
-                                  ) : (
-                                    <Link to={item.url} search={search}>
-                                      <span>{sub.title}</span>
-                                    </Link>
-                                  )}
-                                </SidebarMenuSubButton>
-                              </SidebarMenuSubItem>
-                            );
-                          })}
+                          {item.sub
+                            .filter((sub) => !sub.adminOnly || role === "admin")
+                            .map((sub) => {
+                              const active = sub.url
+                                ? isActive(sub.url)
+                                : isActive(item.url) &&
+                                  (sub.cat
+                                    ? searchCat === sub.cat
+                                    : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
+                              // Duro-Last categories live on the Catalog tab; Non-DL has no tabs.
+                              const search = sub.cat
+                                ? item.url === "/admin/duro-last"
+                                  ? { tab: "catalog" as const, cat: sub.cat }
+                                  : { cat: sub.cat }
+                                : { tab: sub.tab! };
+                              return (
+                                <SidebarMenuSubItem key={sub.title}>
+                                  <SidebarMenuSubButton asChild isActive={active}>
+                                    {sub.url ? (
+                                      <Link to={sub.url}>
+                                        <span>{sub.title}</span>
+                                      </Link>
+                                    ) : (
+                                      <Link to={item.url} search={search}>
+                                        <span>{sub.title}</span>
+                                      </Link>
+                                    )}
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              );
+                            })}
                         </SidebarMenuSub>
                       </CollapsibleContent>
                     </SidebarMenuItem>

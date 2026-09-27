@@ -4,7 +4,9 @@ import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { canAccess, homeFor, isAdmin, pageForPath } from "@/lib/access";
+import { dispatchRemindersIfDue } from "@/lib/followups.functions";
 import { AppSidebar } from "@/components/app-sidebar";
+import { NotificationsBell } from "@/components/notifications-bell";
 import { Button } from "@/components/ui/button";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 
@@ -60,7 +62,31 @@ function Waiting() {
   );
 }
 
+// Users the lazy reminder dispatcher already ran for in this page load.
+const dispatchedFor = new Set<string>();
+
+/**
+ * The lazy reminder dispatcher: once per page load, an office user's app asks the server to fire
+ * any due follow-up reminders (the server itself skips it when the last pass was under ten
+ * minutes ago). Fire and forget; failures only reach the console.
+ */
+function useLazyReminderDispatch() {
+  const { profile } = useAuth();
+  const officeLike =
+    !!profile &&
+    (canAccess(profile, "customers") ||
+      canAccess(profile, "service") ||
+      canAccess(profile, "estimate"));
+  const userId = profile?.id;
+  useEffect(() => {
+    if (!officeLike || !userId || dispatchedFor.has(userId)) return;
+    dispatchedFor.add(userId);
+    dispatchRemindersIfDue().catch((e: unknown) => console.error("Reminder dispatch failed", e));
+  }, [officeLike, userId]);
+}
+
 function AuthedShell({ children }: { children: ReactNode }) {
+  useLazyReminderDispatch();
   return (
     <SidebarProvider>
       <div className="flex min-h-svh w-full">
@@ -69,6 +95,9 @@ function AuthedShell({ children }: { children: ReactNode }) {
           <header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
             <span className="font-semibold">Bid-O-Matic</span>
+            <div className="ml-auto flex items-center gap-1">
+              <NotificationsBell />
+            </div>
           </header>
           <SidebarInset className="p-6">{children}</SidebarInset>
         </div>

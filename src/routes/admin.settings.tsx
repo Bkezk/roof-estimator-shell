@@ -18,6 +18,8 @@ import {
   type Warranty,
   type HighWindUpcharge,
 } from "@/lib/admin-settings.functions";
+import { useAuth } from "@/lib/auth-store";
+import { RemindersSettings } from "@/components/reminders-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,6 +50,7 @@ const SETTINGS_TABS = [
   "basiclabor",
   "markup",
   "warranties",
+  "reminders",
 ] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -65,6 +68,9 @@ const num = (v: string) => (v === "" || v === "-" ? 0 : Number(v)) || 0;
 function SettingsPage() {
   const { tab } = Route.useSearch();
   const navigate = Route.useNavigate();
+  // Reminders (crm_settings) are admin-only; a pricing user without admin never sees the tab.
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const qc = useQueryClient();
   const getFn = useServerFn(getGeneralSettings);
   const { data, isLoading } = useQuery({
@@ -98,6 +104,7 @@ function SettingsPage() {
           <TabsTrigger value="basiclabor">Basic Labor Settings</TabsTrigger>
           <TabsTrigger value="markup">Labor &amp; Markup Options</TabsTrigger>
           <TabsTrigger value="warranties">Warranties</TabsTrigger>
+          {isAdmin && <TabsTrigger value="reminders">Reminders</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="contractor">
@@ -137,6 +144,15 @@ function SettingsPage() {
             initialWind={data.highWind}
             onSaved={() => qc.invalidateQueries({ queryKey: ["general-settings"] })}
           />
+        </TabsContent>
+        <TabsContent value="reminders">
+          {isAdmin ? (
+            <RemindersSettings />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Only an admin can change the reminder settings.
+            </p>
+          )}
         </TabsContent>
       </Tabs>
     </div>
