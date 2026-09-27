@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  Link2,
   Lock,
 } from "lucide-react";
 
@@ -134,6 +135,8 @@ import {
   FILL_LABELS,
   accountFromBid,
   applyProfileFill,
+  blankFieldsOnly,
+  clientAddressForJobSite,
   fillConflicts,
   profileDifferences,
   profileFill,
@@ -780,12 +783,36 @@ function EstimatePage() {
   const profileDiffs = linkedDetail ? profileDifferences(customer, linkedDetail.account) : null;
   // Bumped by every pick / unlink / load, so a slow profile fetch never fills a stale pick.
   const pickSeq = useRef(0);
-  const unlinkAccount = () => {
+  // The link was changed in THIS editor session (a pick or an Unlink) and not saved yet. Only
+  // then does a save send accountId / siteId; otherwise the columns are left as they are, so a
+  // bid (un)linked on the Customers page is not undone by a save from a tab that still shows the
+  // old link. Set by setLink(…, true) (pickAccount / unlinkAccount); cleared by setLink(…, false)
+  // on load / new bid and by a successful save (handleSave).
+  const linkDirty = useRef(false);
+  // A loaded bid that arrived linked fills its blank fields once from the profile (the effect
+  // after the unsaved-changes baseline); this holds that load's link and pickSeq until the fill
+  // is done or superseded by a pick / unlink / another load.
+  const loadFill = useRef<{
+    seq: number;
+    accountId: string;
+    siteId: string | null;
+    baselined: boolean;
+  } | null>(null);
+  const setLink = (
+    accountId: string | null,
+    siteId: string | null,
+    label: string,
+    changed: boolean,
+  ) => {
     pickSeq.current++;
-    setLinkedAccountId(null);
-    setLinkedSiteId(null);
-    setLinkedAccountLabel("");
+    loadFill.current = null;
+    linkDirty.current = changed;
+    setLinkedAccountId(accountId);
+    setLinkedSiteId(accountId ? siteId : null);
+    setLinkedAccountLabel(label);
+    return pickSeq.current;
   };
+  const unlinkAccount = () => void setLink(null, null, "", true);
   // The latest customer fields, for a pick that resolves after its profile fetch.
   const customerRef = useRef(customer);
   customerRef.current = customer;
@@ -806,10 +833,12 @@ function EstimatePage() {
       unlinkAccount();
       return;
     }
-    const seq = ++pickSeq.current;
-    setLinkedAccountId(hit.account_id);
-    setLinkedSiteId(hit.site_id);
-    setLinkedAccountLabel([hit.account_name, hit.site_name].filter(Boolean).join(" · "));
+    const seq = setLink(
+      hit.account_id,
+      hit.site_id,
+      [hit.account_name, hit.site_name].filter(Boolean).join(" · "),
+      true,
+    );
     try {
       const detail = await qc.fetchQuery({
         queryKey: ["account", hit.account_id],
@@ -1032,11 +1061,16 @@ function EstimatePage() {
       });
       setLinkedBuildingId(loadedBid.building_id ?? null);
     }
-    // The profile link is on the row, not in `data`: read it even for an empty payload.
-    pickSeq.current++;
-    setLinkedAccountId(loadedBid.account_id ?? null);
-    setLinkedSiteId(loadedBid.site_id ?? null);
-    setLinkedAccountLabel("");
+    // The profile link is on the row, not in `data`: read it even for an empty payload. As
+    // loaded it is not a change (linkDirty off); its profile fills the bid's blanks once.
+    const seq = setLink(loadedBid.account_id ?? null, loadedBid.site_id ?? null, "", false);
+    if (loadedBid.account_id)
+      loadFill.current = {
+        seq,
+        accountId: loadedBid.account_id,
+        siteId: loadedBid.site_id ?? null,
+        baselined: false,
+      };
     setBidId(loadedBid.id);
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
@@ -1079,7 +1113,7 @@ function EstimatePage() {
       const { saved: merged } = combineSavedBids(sources, saved);
       hydrateSaved(merged, {});
       setBidId(undefined);
-      unlinkAccount(); // a new bid; link it from Setup › Customer Name
+      setLink(null, null, "", false); // a new bid; link it from Setup › Customer Name
       // Named after the bids it came from, e.g. "Summit + Knox County Fiscal Court".
       setBidName(sources.map((b) => b.name.trim() || "Untitled").join(" + "));
       setBidStatus("draft");
@@ -1187,7 +1221,7 @@ function EstimatePage() {
       };
       hydrateSaved(merged, {});
       setBidId(undefined);
-      unlinkAccount(); // a bid made from a takeoff starts unlinked
+      setLink(null, null, "", false); // a bid made from a takeoff starts unlinked
       setBidName(takeoffRow.name.trim() || "Untitled bid");
       setBidStatus("draft");
       setLostReason(null);
@@ -1437,8 +1471,26 @@ function EstimatePage() {
   const lastSavedJson = useRef<string | null>(null);
   useEffect(() => {
     lastSavedJson.current = savedJson;
+    if (loadFill.current) loadFill.current.baselined = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline only at mount / hydration
   }, [hydrationStamp]);
+  // A bid loaded already linked (from the Customers page) fills its BLANK client fields — and
+  // blank job-site fields when a site is linked — from the profile once it has loaded: no
+  // prompt, typed text is never replaced. Once per load (loadFill), so a field cleared by hand
+  // later is not refilled. Not a link change (linkDirty stays off), but the bid turns unsaved
+  // like any field edit: it waits for the baseline above to take the hydrated state first
+  // (`baselined`). Waits while read-only; taking over the lock re-hydrates anyway.
+  useEffect(() => {
+    const target = loadFill.current;
+    if (!target || !target.baselined || target.seq !== pickSeq.current || readOnly) return;
+    if (!linkedDetail || linkedDetail.account.id !== target.accountId) return;
+    loadFill.current = null;
+    const site = target.siteId
+      ? (linkedDetail.sites.find((x) => x.id === target.siteId) ?? null)
+      : null;
+    const fill = profileFill(linkedDetail.account, site);
+    setCustomer((c) => applyProfileFill(c, blankFieldsOnly(c, fill), false));
+  }, [linkedDetail, readOnly, hydrationStamp]);
   const dirty = lastSavedJson.current !== null && savedJson !== lastSavedJson.current;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
@@ -1795,6 +1847,10 @@ function EstimatePage() {
       return false;
     }
     setSaving(true);
+    // Send the link only when it changed here (see linkDirty). Cleared now so a pick made while
+    // this save is in flight marks it again; restored if the save fails.
+    const sendLink = linkDirty.current;
+    linkDirty.current = false;
     try {
       const grandTotal = result?.r.money.grandTotal ?? 0;
       // First save freezes the current pricing & labor into the bid; later saves keep the
@@ -1825,9 +1881,10 @@ function EstimatePage() {
           lostReason: bidStatus === "lost" ? lostReason : null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
-          // Always sent: null unlinks.
-          accountId: linkedAccountId,
-          siteId: linkedAccountId ? linkedSiteId : null,
+          // Only a link changed in this session is sent (null unlinks); absent = left as is.
+          ...(sendLink
+            ? { accountId: linkedAccountId, siteId: linkedAccountId ? linkedSiteId : null }
+            : {}),
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
@@ -1845,6 +1902,7 @@ function EstimatePage() {
       }
       return true;
     } catch (e) {
+      if (sendLink) linkDirty.current = true;
       toast.error(e instanceof Error ? e.message : "Save failed");
       return false;
     } finally {
@@ -2172,9 +2230,15 @@ function EstimatePage() {
                         </AlertDialogContent>
                       </AlertDialog>
                       <Field label="Job Name">
-                        <Input
-                          value={bidName}
-                          onChange={(e) => setBidName(e.target.value)}
+                        {/* Some estimators type the customer here: picking a profile links it and
+                            fills the customer fields like Customer Name; the job name stays as
+                            typed. The chip lives under Customer Name; this is only a hint. */}
+                        <AccountPicker
+                          allowFreeText
+                          value={null}
+                          text={bidName}
+                          onText={setBidName}
+                          onChange={(hit) => void pickAccount(hit)}
                           onBlur={() => {
                             // Legacy txtEstimateTitle_LostFocus: "Bid Title cannot be left blank."
                             if (bidName.trim() === "") {
@@ -2183,6 +2247,15 @@ function EstimatePage() {
                             }
                           }}
                         />
+                        {linkedAccountId && (
+                          <p
+                            className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+                            title="Linked to a customer profile; see Customer Name"
+                          >
+                            <Link2 className="h-3 w-3 shrink-0" />
+                            <span className="truncate">linked: {linkedLabel || "customer"}</span>
+                          </p>
+                        )}
                       </Field>
                       <Field label="Estimator's Name">
                         <PickOne
@@ -2468,16 +2541,9 @@ function EstimatePage() {
                     size="sm"
                     className="h-6 px-2 text-xs"
                     onClick={() =>
-                      // Legacy llbCopyClient: Address 1/2, City, State, Zip from the client.
-                      setCustomer((c) => ({
-                        ...c,
-                        projectAddress: c.clientAddress ?? "",
-                        projectAddress2: c.clientAddress2 ?? "",
-                        jobCity: c.clientCity ?? "",
-                        jobState: c.clientState ?? "",
-                        jobZip: c.clientZip ?? "",
-                        jobCityStZip: cityStZip(c.clientCity, c.clientState, c.clientZip),
-                      }))
+                      // Legacy llbCopyClient: Address 1/2, City, State, Zip from the client —
+                      // split out of a one-box address when City / State / Zip are blank.
+                      setCustomer((c) => ({ ...c, ...clientAddressForJobSite(c) }))
                     }
                   >
                     <Copy className="mr-1 h-3 w-3" /> Copy Client Address

@@ -115,6 +115,19 @@ export function applyProfileFill(
   return next;
 }
 
+/**
+ * The part of `fill` that lands only on the bid's blank fields — for a bid that arrives already
+ * linked (from the Customers page): it fills what is missing, never replaces typed text, and so
+ * asks nothing. The combined job-site line is kept out when the bid already has one.
+ */
+export function blankFieldsOnly(customer: CustomerInfo, fill: ProfileFill): ProfileFill {
+  const out: ProfileFill = {};
+  for (const [k, v] of Object.entries(fill) as [FillKey, string][]) {
+    if (!read(customer, k)) out[k] = v;
+  }
+  return out;
+}
+
 /** Labels of the client fields where the bid no longer matches the profile (empty = same). */
 export function profileDifferences(customer: CustomerInfo, account: AccountLike): string[] {
   // A blank bid field is "not entered", not a different value (owner, Sep 27): the bid may
@@ -173,3 +186,68 @@ export const FILL_LABELS: Record<FillKey, string> = {
   jobZip: "Job-site zip",
   jobCityStZip: "Job-site city, state zip",
 };
+
+/** A trailing "City, ST 12345" split off an address. `rest` is what precedes it (may be ""). */
+export interface AddressTail {
+  rest: string;
+  city: string;
+  state: string;
+  zip: string;
+}
+
+// [rest (comma | newline)] city (comma | spaces) ST[.] (comma | spaces) 12345[-6789]
+const TAIL_RE =
+  /^(?:([\s\S]*?)\s*[,\n]\s*)?([^,\n]*[^,\s])\s*(?:,\s*|\s+)([A-Za-z]{2})\.?(?:\s*,\s*|\s+)(\d{5}(?:-\d{4})?)$/;
+
+/**
+ * Split a trailing "City, ST 12345" (state = two letters, zip 5 or 5+4) off a one-box address
+ * such as "123 Main St, Corbin, KY 40701" or "123 Main St\nCorbin KY 40701". Null when the text
+ * does not end that way. Several lines before the city are joined with ", ".
+ */
+export function parseAddressTail(text: string | null | undefined): AddressTail | null {
+  const m = TAIL_RE.exec(t(text));
+  if (!m) return null;
+  const rest = (m[1] ?? "")
+    .split(/\s*\n\s*/)
+    .map((x) => x.trim().replace(/,+$/, "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return { rest, city: m[2]!.trim(), state: m[3]!.toUpperCase(), zip: m[4]! };
+}
+
+type AddressKey =
+  "projectAddress" | "projectAddress2" | "jobCity" | "jobState" | "jobZip" | "jobCityStZip";
+
+/**
+ * Job Site › "Copy Client Address" (legacy llbCopyClient): the client's Address 1/2, City, State
+ * and Zip onto the job site. Older and imported bids often hold the whole billing address in
+ * Address 1 (or the city line in Address 2) with City / State / Zip blank; then the trailing
+ * "City, ST 12345" is split out so the job site gets its parts and Address 1 only the street.
+ */
+export function clientAddressForJobSite(c: CustomerInfo): Pick<CustomerInfo, AddressKey> {
+  const a1 = t(c.clientAddress);
+  const a2 = t(c.clientAddress2);
+  const partsBlank = !t(c.clientCity) && !t(c.clientState) && !t(c.clientZip);
+  const put = (street: string, street2: string, city: string, state: string, zip: string) => ({
+    projectAddress: street,
+    projectAddress2: street2,
+    jobCity: city,
+    jobState: state,
+    jobZip: zip,
+    jobCityStZip: cityStZip(city, state, zip),
+  });
+  if (partsBlank) {
+    // Address 1 must keep a street in front of the city line; Address 2 may be the city line.
+    const p1 = parseAddressTail(a1);
+    if (p1 && p1.rest) return put(p1.rest, c.clientAddress2 ?? "", p1.city, p1.state, p1.zip);
+    const p2 = parseAddressTail(a2);
+    if (p2) return put(c.clientAddress ?? "", p2.rest, p2.city, p2.state, p2.zip);
+  }
+  return put(
+    c.clientAddress ?? "",
+    c.clientAddress2 ?? "",
+    c.clientCity ?? "",
+    c.clientState ?? "",
+    c.clientZip ?? "",
+  );
+}
