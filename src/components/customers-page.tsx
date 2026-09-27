@@ -4,6 +4,10 @@
  * it. Left: the searchable list; right (`?id=<uuid>`): the account's fields, its sites, its
  * tickets and (with Estimate access) its bids. On a phone the two panes stack: the list, or
  * the open customer with a way back.
+ *
+ * The account and its sites open read-only; Edit switches a block to its form, Cancel puts it
+ * back (owner, Sep 27). A new customer is offered the saved bids that look like it
+ * (LinkBidsDialog), and the account keeps offering them in "Bids that look like this customer".
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,10 +24,12 @@ import {
   Pencil,
   Plus,
   Save,
+  Sparkles,
   Trash2,
   Unlink,
   User,
   Wrench,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -37,6 +43,7 @@ import {
   saveAccount,
   saveSite,
   siteAddressLine,
+  suggestBidsForAccount,
   type AccountDetail,
   type AccountRow,
   type LinkedBidRow,
@@ -44,6 +51,7 @@ import {
 } from "@/lib/crm.functions";
 import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
+import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -82,6 +90,8 @@ const stageLabel = (s: string) =>
 export function CustomersPage({ id }: { id?: string | undefined }) {
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
+  // A customer just added, offered the saved bids that look like it.
+  const [offerFor, setOfferFor] = useState<OfferAccount | null>(null);
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -120,8 +130,10 @@ export function CustomersPage({ id }: { id?: string | undefined }) {
         onCreated={(hit) => {
           setAdding(false);
           void navigate({ to: "/customers", search: { id: hit.account_id } });
+          setOfferFor({ id: hit.account_id, name: hit.account_name });
         }}
       />
+      <OfferBidLinks account={offerFor} onDone={() => setOfferFor(null)} />
     </div>
   );
 }
@@ -261,7 +273,7 @@ function AccountDetailPane({ id }: { id: string }) {
   return (
     <div className="space-y-6">
       {back}
-      <AccountForm account={d.account} onDelete={() => setConfirmDelete(true)} />
+      <AccountBlock account={d.account} onDelete={() => setConfirmDelete(true)} />
       <SitesSection accountId={id} sites={d.sites} />
       <TicketsSection jobs={d.jobs} />
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} />}
@@ -330,12 +342,106 @@ const accountFields = (a: AccountRow): AccountFields => ({
   notes: a.notes ?? "",
 });
 
-function AccountForm({ account, onDelete }: { account: AccountRow; onDelete: () => void }) {
+/** The account's fields: a read-only summary, or (after Edit) the form. */
+function AccountBlock({ account, onDelete }: { account: AccountRow; onDelete: () => void }) {
+  const [editing, setEditing] = useState(false);
+  if (editing) return <AccountForm account={account} onDone={() => setEditing(false)} />;
+  return <AccountSummary account={account} onEdit={() => setEditing(true)} onDelete={onDelete} />;
+}
+
+function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDelete: () => void }) {
+  const a = props.account;
+  const street = [a.address1, a.address2].filter((x) => x && x.trim()).join(", ");
+  const cityLine = [a.city, [a.state, a.zip].filter((x) => x && x.trim()).join(" ")]
+    .filter((x) => x && x.trim())
+    .join(", ");
+  const none = <span className="text-muted-foreground">—</span>;
+  const row = (label: string, value: React.ReactNode, wide?: boolean) => (
+    <div className={wide ? "sm:col-span-2" : undefined}>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm">{value ?? none}</dd>
+    </div>
+  );
+  return (
+    <section className="space-y-4 rounded-lg border p-4" aria-label="Customer">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold">
+            <span className="min-w-0 truncate">{a.name}</span>
+            <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-normal">
+              {a.kind === "individual" ? "Individual" : "Company"}
+            </Badge>
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Updated {shortDate(a.updated_at)}
+            {a.updated_by_name ? ` by ${a.updated_by_name}` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={props.onEdit}>
+            <Pencil className="mr-1 h-4 w-4" /> Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={props.onDelete}
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> Delete customer
+          </Button>
+        </div>
+      </div>
+      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        {row("Contact", a.contact_name)}
+        {row(
+          "Phone",
+          a.phone ? (
+            <a href={`tel:${a.phone}`} className="underline-offset-2 hover:underline">
+              {a.phone}
+            </a>
+          ) : null,
+        )}
+        {row(
+          "Email",
+          a.email ? (
+            <a href={`mailto:${a.email}`} className="break-all underline-offset-2 hover:underline">
+              {a.email}
+            </a>
+          ) : null,
+        )}
+        {row(
+          "Billing address",
+          street || cityLine ? (
+            <>
+              {street && <span className="block">{street}</span>}
+              {cityLine && <span className="block">{cityLine}</span>}
+            </>
+          ) : null,
+        )}
+        {row(
+          "Billing instructions",
+          a.billing_instructions ? (
+            <span className="whitespace-pre-line">{a.billing_instructions}</span>
+          ) : null,
+          true,
+        )}
+        {row("Sage / CenterPoint customer #", a.external_id)}
+        {row(
+          "Notes",
+          a.notes ? <span className="whitespace-pre-line">{a.notes}</span> : null,
+          true,
+        )}
+      </dl>
+    </section>
+  );
+}
+
+function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => void }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveAccount);
   const [f, setF] = useState<AccountFields>(() => accountFields(account));
-  const [saved, setSaved] = useState(() => JSON.stringify(accountFields(account)));
-  const dirty = JSON.stringify(f) !== saved;
+  const dirty = JSON.stringify(f) !== JSON.stringify(accountFields(account));
   const set = <K extends keyof AccountFields>(k: K, v: AccountFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 
@@ -343,14 +449,14 @@ function AccountForm({ account, onDelete }: { account: AccountRow; onDelete: () 
     mutationFn: () => saveFn({ data: { id: account.id, ...f } }),
     onSuccess: (row) => {
       toast.success("Customer saved");
-      const next = accountFields(row);
-      setF(next);
-      setSaved(JSON.stringify(next));
       qc.setQueryData<AccountDetail>(["account", row.id], (old) =>
         old ? { ...old, account: row } : old,
       );
       void qc.invalidateQueries({ queryKey: ["accounts"] });
       void qc.invalidateQueries({ queryKey: ["account-search"] });
+      // A new name may match other saved bids.
+      void qc.invalidateQueries({ queryKey: ["bid-suggestions", row.id] });
+      onDone();
     },
     onError: (e) => toast.error(`Could not save the customer: ${errText(e)}`),
   });
@@ -369,7 +475,8 @@ function AccountForm({ account, onDelete }: { account: AccountRow; onDelete: () 
 
   return (
     <form
-      className="space-y-4 rounded-lg border p-4"
+      className="space-y-4 rounded-lg border border-primary/40 p-4"
+      aria-label="Edit customer"
       onSubmit={(e) => {
         e.preventDefault();
         if (!f.name.trim()) {
@@ -381,25 +488,24 @@ function AccountForm({ account, onDelete }: { account: AccountRow; onDelete: () 
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-xl font-semibold">{account.name}</h2>
+          <h2 className="truncate text-xl font-semibold">Edit {account.name}</h2>
           <p className="text-xs text-muted-foreground">
             Updated {shortDate(account.updated_at)}
             {account.updated_by_name ? ` by ${account.updated_by_name}` : ""}
           </p>
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="text-destructive hover:text-destructive"
-          onClick={onDelete}
-        >
-          <Trash2 className="mr-1 h-4 w-4" /> Delete customer
-        </Button>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-        {field("name", "Name")}
+        <div className="space-y-1">
+          <Label htmlFor="acct-name">Name</Label>
+          <Input
+            id="acct-name"
+            autoFocus
+            value={f.name}
+            onChange={(e) => set("name", e.target.value)}
+          />
+        </div>
         <div className="space-y-1">
           <Label>Kind</Label>
           <ToggleGroup
@@ -489,6 +595,10 @@ function AccountForm({ account, onDelete }: { account: AccountRow; onDelete: () 
             <Save className="mr-2 h-4 w-4" />
           )}
           Save
+        </Button>
+        <Button type="button" variant="outline" disabled={save.isPending} onClick={onDone}>
+          <X className="mr-2 h-4 w-4" />
+          Cancel
         </Button>
         {dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
       </div>
@@ -804,6 +914,7 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
   const qc = useQueryClient();
   const linkFn = useServerFn(linkBidToAccount);
   const unlinkedFn = useServerFn(listUnlinkedBids);
+  const suggestFn = useServerFn(suggestBidsForAccount);
   const [linking, setLinking] = useState(false);
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -816,6 +927,12 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
     queryFn: () => unlinkedFn({ data: { q: debounced } }),
     enabled: !!session && linking,
   });
+  // Unlinked saved bids whose name or customer name looks like this account's.
+  const suggested = useQuery({
+    queryKey: ["bid-suggestions", accountId],
+    queryFn: () => suggestFn({ data: { account_id: accountId } }),
+    enabled: !!session,
+  });
   const link = useMutation({
     mutationFn: (v: { bid: LinkedBidRow; accountId: string | null }) =>
       linkFn({ data: { bid_id: v.bid.id, account_id: v.accountId, site_id: null } }),
@@ -823,6 +940,8 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
       toast.success(v.accountId ? `Linked “${v.bid.name}”` : `Unlinked “${v.bid.name}”`);
       void qc.invalidateQueries({ queryKey: ["account", accountId] });
       void qc.invalidateQueries({ queryKey: ["unlinked-bids"] });
+      void qc.invalidateQueries({ queryKey: ["bid-suggestions"] });
+      void qc.invalidateQueries({ queryKey: ["bids"] });
     },
     onError: (e) => toast.error(`Could not change the bid link: ${errText(e)}`),
   });
@@ -840,6 +959,43 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
           </Button>
         )}
       </div>
+      {!!suggested.data?.length && (
+        <div
+          className="space-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-800 dark:bg-amber-950/40"
+          aria-label="Bids that look like this customer"
+        >
+          <p className="flex items-center gap-2 text-sm font-medium">
+            <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+            Bids that look like this customer
+          </p>
+          <div className="divide-y rounded-md border bg-background">
+            {suggested.data.map((b) => (
+              <div key={b.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+                <Link
+                  to="/estimate"
+                  search={{ bid: b.id }}
+                  className="min-w-0 flex-1 truncate text-sm font-medium underline-offset-2 hover:underline"
+                  title="Open this bid"
+                >
+                  {b.name}
+                </Link>
+                <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
+                  {b.status}
+                </Badge>
+                <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={link.isPending}
+                  onClick={() => link.mutate({ bid: b, accountId })}
+                >
+                  <Link2 className="mr-1 h-4 w-4" /> Link
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {bids.length === 0 ? (
         <p className="text-sm text-muted-foreground">No bids linked to this customer.</p>
       ) : (

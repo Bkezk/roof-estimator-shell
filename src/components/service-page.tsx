@@ -5,8 +5,10 @@
  * one, both on one screen in the order of §5.1. CenterPoint still dispatches and invoices; the
  * ticket carries its CenterPoint ticket / invoice numbers until invoicing moves here.
  *
- * A technician (profiles.technician, not admin) edits only tickets assigned to them and never
- * deletes; the server and RLS enforce the same, this only hides what would be refused.
+ * A technician (profiles.technician, not admin) receives only their own tickets (RLS), edits
+ * them, sets the stage Open / Scheduled / Done only (TECH_STAGES; the office invoices and
+ * closes) and never deletes; the server and RLS enforce the same, this only hides what would be
+ * refused.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +19,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   Loader2,
   Lock,
   MapPin,
@@ -43,6 +46,7 @@ import {
   SERVICE_TYPES,
   setServiceStage,
   STAGE_LABELS,
+  TECH_STAGES,
   TYPE_LABELS,
   type ServiceJobInput,
   type ServiceJobWithTech,
@@ -67,6 +71,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -184,13 +189,16 @@ function ServiceList() {
     void qc.invalidateQueries({ queryKey: ["service-jobs-deleted"] });
   };
 
-  const officeOrAdmin = !profile?.technician || profile.role === "admin";
+  // A technician (not admin) receives only their own tickets from the server.
+  const isTech = !!profile?.technician && profile.role !== "admin";
+  const officeOrAdmin = !isTech;
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<StageFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  // "Mine" defaults on for a technician; null = not touched yet (follow the profile).
+  // "Mine" defaults on for a technician admin; null = not touched yet (follow the profile). A
+  // plain technician has no Mine filter: the list is already only theirs.
   const [mineOverride, setMineOverride] = useState<boolean | null>(null);
-  const mine = mineOverride ?? !!profile?.technician;
+  const mine = !isTech && (mineOverride ?? !!profile?.technician);
   const [showDeleted, setShowDeleted] = useState(false);
   const [toDelete, setToDelete] = useState<ServiceJobWithTech | null>(null);
   const [collapsed, setCollapsed] = useState<ServiceStage[]>(readCollapsed);
@@ -254,6 +262,13 @@ function ServiceList() {
       rows.sort((a, b) => (a.scheduled_date ?? "9999").localeCompare(b.scheduled_date ?? "9999"));
     return { stage, rows };
   }).filter((g) => g.rows.length > 0);
+  // A technician's stage chips: the stages they set, plus Invoiced / Closed only when the office
+  // has put one of their tickets there.
+  const stageChips = isTech
+    ? SERVICE_STAGES.filter(
+        (s) => TECH_STAGES.includes(s) || jobs.some((j) => asStage(j.stage) === s),
+      )
+    : SERVICE_STAGES;
   const anyFilter = q !== "" || stageFilter !== "all" || typeFilter !== "all" || mine;
   const clearFilters = () => {
     setSearch("");
@@ -324,7 +339,7 @@ function ServiceList() {
                 <Chip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
                   All stages
                 </Chip>
-                {SERVICE_STAGES.map((s) => (
+                {stageChips.map((s) => (
                   <Chip
                     key={s}
                     active={stageFilter === s}
@@ -333,10 +348,14 @@ function ServiceList() {
                     {STAGE_LABELS[s]}
                   </Chip>
                 ))}
-                <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-                <Chip active={mine} onClick={() => setMineOverride(!mine)}>
-                  Mine
-                </Chip>
+                {!isTech && (
+                  <>
+                    <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+                    <Chip active={mine} onClick={() => setMineOverride(!mine)}>
+                      Mine
+                    </Chip>
+                  </>
+                )}
                 {anyFilter && (
                   <Button variant="ghost" size="sm" className="h-7" onClick={clearFilters}>
                     Clear filters
@@ -351,7 +370,9 @@ function ServiceList() {
 
           {jobs.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
-              <p className="text-muted-foreground">No tickets yet.</p>
+              <p className="text-muted-foreground">
+                {isTech ? "No tickets assigned to you yet." : "No tickets yet."}
+              </p>
               <Button variant="outline" className="mt-4" onClick={newTicket}>
                 Open the first ticket
               </Button>
@@ -672,7 +693,14 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
 
   const isTech = !!profile?.technician && profile.role !== "admin";
   const officeOrAdmin = !isTech;
-  const canEdit = !job || officeOrAdmin || job.technician_id === profile?.id;
+  const jobStage = job ? asStage(job.stage) : null;
+  // Invoiced / Closed are the office's; a technician's ticket there is read-only for them (the
+  // server refuses a technician's save of those stages).
+  const officeStage = isTech && !!jobStage && !TECH_STAGES.includes(jobStage);
+  const canEdit = !job || officeOrAdmin || (job.technician_id === profile?.id && !officeStage);
+  const stageOptions: readonly ServiceStage[] = isTech
+    ? SERVICE_STAGES.filter((s) => TECH_STAGES.includes(s) || s === jobStage)
+    : SERVICE_STAGES;
 
   const [draft, setDraft] = useState<Draft>(() =>
     draftFrom(job, !job && profile?.technician ? profile.id : null),
@@ -781,7 +809,6 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
     save.mutate();
   };
 
-  const title = job ? `#${job.number} · ${job.customer_name}` : "New ticket";
   const ro = !canEdit;
 
   return (
@@ -791,7 +818,15 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight">
             <Wrench className="h-6 w-6 shrink-0" />
-            <span className="truncate">{title}</span>
+            {job ? (
+              <>
+                <span className="shrink-0">#{job.number}</span>
+                <TicketNumberHelp />
+                <span className="truncate">· {job.customer_name}</span>
+              </>
+            ) : (
+              <span className="truncate">New ticket</span>
+            )}
           </h1>
           {job && (
             <div className="flex items-center gap-2">
@@ -804,7 +839,7 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SERVICE_STAGES.map((s) => (
+                  {stageOptions.map((s) => (
                     <SelectItem key={s} value={s}>
                       {STAGE_LABELS[s]}
                     </SelectItem>
@@ -829,13 +864,17 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
             {job.updated_by_name ? ` by ${job.updated_by_name}` : ""}
           </p>
         )}
+        {isTech && jobStage === "done" && (
+          <p className="text-sm text-muted-foreground">Done — the office invoices and closes it.</p>
+        )}
       </div>
 
       {ro && (
         <p className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
           <Lock className="h-4 w-4 shrink-0" />
-          This ticket is assigned to {job?.technician_name ?? "someone else"}. You can read it; only
-          the assigned technician, the office or an admin can change it.
+          {officeStage && jobStage
+            ? `The office has marked this ticket ${STAGE_LABELS[jobStage]}. You can read it; ask the office if something needs changing.`
+            : `This ticket is assigned to ${job?.technician_name ?? "someone else"}. You can read it; only the assigned technician, the office or an admin can change it.`}
         </p>
       )}
 
@@ -1146,6 +1185,28 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
         </AlertDialog>
       )}
     </div>
+  );
+}
+
+/** Why ticket numbers start at 6000 (owner, Sep 27). A popover, so a tap works on a phone. */
+function TicketNumberHelp() {
+  const text = "Bid-O-Matic numbers start at 6000 so they never collide with CenterPoint's";
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="shrink-0 rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={text}
+          aria-label="Why does the ticket number start at 6000?"
+        >
+          <CircleHelp className="h-4 w-4" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-64 text-sm font-normal" align="start">
+        {text}
+      </PopoverContent>
+    </Popover>
   );
 }
 

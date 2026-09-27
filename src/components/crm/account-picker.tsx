@@ -1,13 +1,15 @@
 /**
  * The customer typeahead (docs/service-module-design.md §5.1, §11): one search box over accounts
  * and their sites. Picking a site row sets account + site in one click; the last row adds the
- * typed name as a new customer through a small inline dialog (quickCreateAccount) and selects it.
+ * typed name as a new customer through a small inline dialog (quickCreateAccount) and selects it,
+ * then offers to link saved bids that look like the new customer (LinkBidsDialog) — after the
+ * pick, so the surrounding form (a ticket) keeps its state.
  * Used by the service ticket form and the Customers page's "New customer".
  *
- * `allowFreeText` (the estimator's Setup › Customer Name): the input is a plain text field whose
- * value the parent owns (`text` / `onText`); the dropdown only offers profiles to link, nothing
- * is highlighted until the arrow keys move, so typing a name and moving on never links anything,
- * and there is no quick-add row.
+ * `allowFreeText` (the estimator's Setup › Customer Name and Job Name): the input is a plain text
+ * field whose value the parent owns (`text` / `onText`); the dropdown only offers profiles to
+ * link, nothing is highlighted until the arrow keys move, so typing a name and moving on never
+ * links anything, and there is no quick-add row.
  */
 import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,6 +18,7 @@ import { toast } from "sonner";
 import { Building2, Loader2, MapPin, Plus, User, X } from "lucide-react";
 
 import { quickCreateAccount, searchAccounts, type AccountHit } from "@/lib/crm.functions";
+import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -50,6 +53,8 @@ export function AccountPicker(props: {
   text?: string;
   /** Free-text mode: called on every keystroke with the typed text. */
   onText?: (text: string) => void;
+  /** The input lost focus (not when a row is clicked: the row keeps the focus). */
+  onBlur?: () => void;
 }) {
   const free = !!props.allowFreeText;
   const listId = useId();
@@ -60,6 +65,8 @@ export function AccountPicker(props: {
   const [active, setActive] = useState(0);
   const [debounced, setDebounced] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
+  // A customer just added here, offered the saved bids that look like it.
+  const [offerFor, setOfferFor] = useState<OfferAccount | null>(null);
 
   const typed = free ? (props.text ?? "") : (text ?? "");
   useEffect(() => {
@@ -123,6 +130,7 @@ export function AccountPicker(props: {
             // Give a row's mousedown a chance first (it prevents default, so blur follows).
             setOpen(false);
             if (!free) setText(null);
+            props.onBlur?.();
           }}
           onChange={(e) => {
             if (free) props.onText?.(e.target.value);
@@ -263,8 +271,10 @@ export function AccountPicker(props: {
         onCreated={(hit) => {
           setAdding(null);
           pick(hit);
+          setOfferFor({ id: hit.account_id, name: hit.account_name });
         }}
       />
+      <OfferBidLinks account={offerFor} onDone={() => setOfferFor(null)} />
     </div>
   );
 }
