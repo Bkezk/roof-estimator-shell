@@ -1,6 +1,7 @@
 /**
  * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3):
- * helpers, repairs from the template chips with before / after photos, materials off the truck,
+ * helpers, repairs from the template chips with before / after photos, materials off the truck
+ * (one tap per piece, materials-section.tsx),
  * closing notes, time (fix a forgotten button press), the customer's signature, then Complete.
  *
  * Repairs, photos, time and the signature save as they are made. The text fields save with
@@ -25,7 +26,6 @@ import {
   Lock,
   MapPin,
   Minus,
-  Package,
   PenLine,
   Plus,
   Save,
@@ -37,7 +37,6 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import {
-  listServiceJobMaterials,
   TECH_STAGES,
   type ServiceJobRow,
   type ServiceJobWithTech,
@@ -67,6 +66,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
 import { PhotoThumb, TimeEntries } from "@/components/service/field-shared";
+import { MaterialsSection } from "@/components/service/materials-section";
 import {
   clock,
   errText,
@@ -241,7 +241,6 @@ function Section({
 }
 
 function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
-  const { can } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const saveFn = useServerFn(saveCloseout);
@@ -363,7 +362,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       <RepairsSection jobId={job.id} />
 
       {/* (c) Materials */}
-      <MaterialsSection jobId={job.id} canLog={can("inventory")} />
+      <MaterialsSection jobId={job.id} />
 
       {/* (d) Notes */}
       <Section title="Notes" icon={ClipboardList}>
@@ -990,65 +989,6 @@ function RepairCard({
         )}
       </div>
     </article>
-  );
-}
-
-// ---------------------------------------------------------------------------------------------
-// (c) Materials
-
-function MaterialsSection({ jobId, canLog }: { jobId: string; canLog: boolean }) {
-  const { session } = useAuth();
-  const navigate = useNavigate();
-  const listFn = useServerFn(listServiceJobMaterials);
-  const rows = useQuery({
-    queryKey: fieldKeys.materials(jobId),
-    queryFn: () => listFn({ data: { id: jobId } }),
-    enabled: !!session,
-  });
-  const list = rows.data ?? [];
-  return (
-    <Section title="Materials" icon={Package}>
-      {canLog ? (
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12 w-full text-base"
-          // Inventory reads ?job=<id> and opens "Take from inventory" for this ticket.
-          onClick={() => void navigate({ href: `/inventory?job=${jobId}` })}
-        >
-          <Package className="mr-2 h-5 w-5" /> Log material off my truck
-        </Button>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Logging material needs Inventory access; ask the office.
-        </p>
-      )}
-      {rows.error ? (
-        <p className="text-sm text-destructive">Could not load materials: {errText(rows.error)}</p>
-      ) : rows.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : list.length === 0 ? (
-        <p className="font-medium text-amber-700 dark:text-amber-400">Anything off the truck?</p>
-      ) : (
-        <ul className="divide-y rounded-md border text-sm">
-          {list.map((m) => {
-            // consumed is stored negative (it leaves stock); a return positive.
-            const used = -m.qty;
-            return (
-              <li key={m.id} className="flex justify-between gap-3 px-3 py-2">
-                <span className="min-w-0">
-                  {m.row_label}
-                  {m.price_col && m.price_col !== "price" ? ` (${m.price_col})` : ""}
-                </span>
-                <span className="shrink-0 tabular-nums">
-                  {used < 0 ? `returned ${-used}` : used} {m.unit}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </Section>
   );
 }
 

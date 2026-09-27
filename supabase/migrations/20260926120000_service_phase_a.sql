@@ -237,3 +237,15 @@ create policy service_jobs_update on public.service_jobs for update to authentic
     and (not public.is_technician() or public.is_admin()
          or (technician_id = auth.uid() and stage in ('open','scheduled','done')))
   );
+
+-- Owner, Sep 27: a technician may put a piece back on the truck against a ticket ("released"
+-- with a service_job_id); the server caps it at what the ticket took.
+drop policy if exists inventory_movements_insert on public.inventory_movements;
+create policy inventory_movements_insert on public.inventory_movements
+  for insert to authenticated
+  with check (
+    public.has_access('estimate')
+    or ((public.has_access('inventory') or public.has_access('service'))
+        and (reason in ('leftover','consumed','transfer_out','transfer_in')
+             or (reason = 'released' and service_job_id is not null)))
+  );

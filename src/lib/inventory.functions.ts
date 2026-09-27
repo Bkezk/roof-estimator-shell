@@ -310,7 +310,15 @@ export const addMovement = createServerFn({ method: "POST" })
       !(canAccess(me, "inventory") || canAccess(me, "estimate") || canAccess(me, "service"))
     )
       throw new Error("Forbidden: Inventory access required");
-    if (!canAccess(me, "estimate") && data.reason !== "leftover" && data.reason !== "consumed")
+    // A service job's "released" (a tech putting a piece back on the truck) is allowed for
+    // everyone who may log material; it may never exceed what that ticket took from the cell.
+    const jobRelease = data.reason === "released" && !!data.service_job_id;
+    if (
+      !canAccess(me, "estimate") &&
+      data.reason !== "leftover" &&
+      data.reason !== "consumed" &&
+      !jobRelease
+    )
       throw new Error("Only an estimator can adjust counts or write stock off");
     if (error) throw new Error(error.message);
     if (!screen) throw new Error("Catalog screen not found");
@@ -364,6 +372,22 @@ export const addMovement = createServerFn({ method: "POST" })
       !data.service_job_id
     )
       throw new Error("Pick the job this material is for");
+    if (jobRelease) {
+      const { data: taken } = await sb
+        .from("inventory_movements")
+        .select("qty")
+        .eq("service_job_id", data.service_job_id!)
+        .eq("location_id", locationId)
+        .eq("screen_id", data.screen_id)
+        .eq("row_label", data.row_label)
+        .eq("price_col", data.price_col)
+        .in("reason", ["consumed", "released"]);
+      const net = (taken ?? []).reduce((n, r) => n - Number(r.qty), 0);
+      if (qty > net + 1e-9)
+        throw new Error(
+          `This ticket only took ${Math.round(net * 1000) / 1000} ${unit} from ${location.name}`,
+        );
+    }
     if (data.reason === "consumed") {
       // Never take more than the location holds (on hand = the sum of the cell's entries there).
       const onHand = await onHandAt(sb, locationId, data);
