@@ -28,6 +28,8 @@ import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as ServiceBoardRouteImport } from './routes/service.board'
+import { Route as ServiceTodayRouteImport } from './routes/service.today'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
 
 const IndexRoute = IndexRouteImport.update({
@@ -125,6 +127,16 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ServiceBoardRoute = ServiceBoardRouteImport.update({
+  id: '/board',
+  path: '/board',
+  getParentRoute: () => ServiceRoute,
+} as any)
+const ServiceTodayRoute = ServiceTodayRouteImport.update({
+  id: '/today',
+  path: '/today',
+  getParentRoute: () => ServiceRoute,
+} as any)
 const ApiCronRemindersRoute = ApiCronRemindersRouteImport.update({
   id: '/api/cron/reminders',
   path: '/api/cron/reminders',
@@ -143,7 +155,7 @@ export interface FileRoutesByFullPath {
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
-  '/service': typeof ServiceRoute
+  '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -151,6 +163,8 @@ export interface FileRoutesByFullPath {
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/service/board': typeof ServiceBoardRoute
+  '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
 export interface FileRoutesByTo {
@@ -165,7 +179,7 @@ export interface FileRoutesByTo {
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
-  '/service': typeof ServiceRoute
+  '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -173,6 +187,8 @@ export interface FileRoutesByTo {
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/service/board': typeof ServiceBoardRoute
+  '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
 export interface FileRoutesById {
@@ -188,7 +204,7 @@ export interface FileRoutesById {
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
-  '/service': typeof ServiceRoute
+  '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -196,6 +212,8 @@ export interface FileRoutesById {
   '/admin/price-import': typeof AdminPriceImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/service/board': typeof ServiceBoardRoute
+  '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
 }
 export interface FileRouteTypes {
@@ -220,6 +238,8 @@ export interface FileRouteTypes {
     | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
+    | '/service/board'
+    | '/service/today'
     | '/api/cron/reminders'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -242,6 +262,8 @@ export interface FileRouteTypes {
     | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
+    | '/service/board'
+    | '/service/today'
     | '/api/cron/reminders'
   id:
     | '__root__'
@@ -264,6 +286,8 @@ export interface FileRouteTypes {
     | '/admin/price-import'
     | '/admin/settings'
     | '/admin/users'
+    | '/service/board'
+    | '/service/today'
     | '/api/cron/reminders'
   fileRoutesById: FileRoutesById
 }
@@ -279,7 +303,7 @@ export interface RootRouteChildren {
   OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
-  ServiceRoute: typeof ServiceRoute
+  ServiceRoute: typeof ServiceRouteWithChildren
   TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
@@ -425,6 +449,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/service/board': {
+      id: '/service/board'
+      path: '/board'
+      fullPath: '/service/board'
+      preLoaderRoute: typeof ServiceBoardRouteImport
+      parentRoute: typeof ServiceRoute
+    }
+    '/service/today': {
+      id: '/service/today'
+      path: '/today'
+      fullPath: '/service/today'
+      preLoaderRoute: typeof ServiceTodayRouteImport
+      parentRoute: typeof ServiceRoute
+    }
     '/api/cron/reminders': {
       id: '/api/cron/reminders'
       path: '/api/cron/reminders'
@@ -434,6 +472,19 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ServiceRouteChildren {
+  ServiceBoardRoute: typeof ServiceBoardRoute
+  ServiceTodayRoute: typeof ServiceTodayRoute
+}
+
+const ServiceRouteChildren: ServiceRouteChildren = {
+  ServiceBoardRoute: ServiceBoardRoute,
+  ServiceTodayRoute: ServiceTodayRoute,
+}
+
+const ServiceRouteWithChildren =
+  ServiceRoute._addFileChildren(ServiceRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -447,7 +498,7 @@ const rootRouteChildren: RootRouteChildren = {
   OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
-  ServiceRoute: ServiceRoute,
+  ServiceRoute: ServiceRouteWithChildren,
   TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,

@@ -9,17 +9,23 @@
  * them, sets the stage Open / Scheduled / Done only (TECH_STAGES; the office invoices and
  * closes) and never deletes; the server and RLS enforce the same, this only hides what would be
  * refused.
+ *
+ * The field side (§5.3): `?id=<uuid>&closeout=1` opens the ticket's close-out
+ * (components/service/closeout.tsx); the ticket shows its site contact, the repairs, time,
+ * signature and timeline the technician recorded (components/service/ticket-field-sections.tsx).
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  CalendarDays,
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  ClipboardCheck,
   Loader2,
   Lock,
   MapPin,
@@ -56,6 +62,8 @@ import {
 import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
+import { CloseoutScreen } from "@/components/service/closeout";
+import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -122,8 +130,16 @@ const STAGE_BADGE: Record<ServiceStage, "default" | "secondary" | "outline"> = {
   closed: "outline",
 };
 
-export function ServicePage({ id, isNew }: { id?: string | undefined; isNew?: boolean }) {
-  if (id) return <TicketLoader id={id} />;
+export function ServicePage({
+  id,
+  isNew,
+  closeout,
+}: {
+  id?: string | undefined;
+  isNew?: boolean;
+  closeout?: boolean | undefined;
+}) {
+  if (id) return <TicketLoader id={id} closeout={!!closeout} />;
   if (isNew) return <TicketEditor job={null} />;
   return <ServiceList />;
 }
@@ -290,9 +306,16 @@ function ServiceList() {
             its ticket number on the ticket.
           </p>
         </div>
-        <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
-          <Plus className="mr-2 h-5 w-5" /> New ticket
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild size="lg" variant="outline" className="text-base">
+            <Link to="/service/today">
+              <CalendarDays className="mr-2 h-5 w-5" /> My day
+            </Link>
+          </Button>
+          <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
+            <Plus className="mr-2 h-5 w-5" /> New ticket
+          </Button>
+        </div>
       </div>
 
       {list.error ? (
@@ -590,7 +613,7 @@ function TicketListRow({
   );
 }
 
-function TicketLoader({ id }: { id: string }) {
+function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
   const { session } = useAuth();
   const getFn = useServerFn(getServiceJob);
   const job = useQuery({
@@ -611,6 +634,7 @@ function TicketLoader({ id }: { id: string }) {
         <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
       </p>
     );
+  if (closeout) return <CloseoutScreen key={job.data.id} job={job.data} />;
   return <TicketEditor key={job.data.id} job={job.data} />;
 }
 
@@ -628,6 +652,8 @@ interface Draft {
   customer: AccountPickerValue | null;
   /** The picked hit, shown in the card until the account itself has loaded. */
   hit: AccountHit | null;
+  /** The site contact (crm_contacts); "" = none. */
+  contact_id: string;
   description: string;
   service_type: ServiceType;
   po_number: string;
@@ -651,6 +677,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
             }
           : null,
         hit: null,
+        contact_id: job.contact_id ?? "",
         description: job.description,
         service_type: asType(job.service_type),
         po_number: job.po_number ?? "",
@@ -664,6 +691,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
     : {
         customer: null,
         hit: null,
+        contact_id: "",
         description: "",
         service_type: "leak",
         po_number: "",
@@ -702,9 +730,17 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
     ? SERVICE_STAGES.filter((s) => TECH_STAGES.includes(s) || s === jobStage)
     : SERVICE_STAGES;
 
-  const [draft, setDraft] = useState<Draft>(() =>
-    draftFrom(job, !job && profile?.technician ? profile.id : null),
-  );
+  // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD.
+  const prefill: { tech?: string; date?: string } = useSearch({ strict: false });
+  const [draft, setDraft] = useState<Draft>(() => {
+    const d = draftFrom(job, !job && profile?.technician ? profile.id : null);
+    if (job) return d;
+    return {
+      ...d,
+      technician_id: prefill.tech ?? d.technician_id,
+      scheduled_date: prefill.date ?? d.scheduled_date,
+    };
+  });
   const [savedKey, setSavedKey] = useState(() => draftKey(draft));
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
@@ -737,6 +773,7 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
         ...(job ? { id: job.id } : {}),
         account_id: draft.customer?.account_id ?? null,
         site_id: draft.customer?.site_id ?? null,
+        contact_id: draft.customer ? draft.contact_id || null : null,
         // A ticket from before customer profiles keeps its typed name until one is picked.
         ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
         description: draft.description,
@@ -810,6 +847,8 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
   };
 
   const ro = !canEdit;
+  // Close-out: the office and the assigned technician (not once the office has invoiced).
+  const canCloseOut = !!job && canEdit;
 
   return (
     <div className="space-y-6">
@@ -829,7 +868,14 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
             )}
           </h1>
           {job && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {canCloseOut && (
+                <Button asChild>
+                  <Link to="/service" search={{ id: job.id, closeout: 1 }}>
+                    <ClipboardCheck className="mr-1 h-4 w-4" /> Close out
+                  </Link>
+                </Button>
+              )}
               <Select
                 value={asStage(job.stage)}
                 disabled={ro || stageMut.isPending}
@@ -899,6 +945,11 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
                 setDraft((d) => ({
                   ...d,
                   hit,
+                  // Another customer's contacts do not apply.
+                  contact_id:
+                    hit && d.customer && hit.account_id === d.customer.account_id
+                      ? d.contact_id
+                      : "",
                   customer: hit
                     ? {
                         account_id: hit.account_id,
@@ -917,24 +968,35 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
               </p>
             )}
           </div>
-          <CustomerCard
-            accountId={draft.customer?.account_id ?? null}
-            siteId={draft.customer?.site_id ?? null}
-            hit={draft.hit}
-            disabled={ro}
-            onPickSite={(site, accountName) =>
-              setDraft((d) => ({
-                ...d,
-                customer: d.customer
-                  ? {
-                      account_id: d.customer.account_id,
-                      site_id: site.id,
-                      label: `${site.name} — ${accountName}`,
-                    }
-                  : d.customer,
-              }))
-            }
-          />
+          <div className="space-y-3">
+            <CustomerCard
+              accountId={draft.customer?.account_id ?? null}
+              siteId={draft.customer?.site_id ?? null}
+              hit={draft.hit}
+              disabled={ro}
+              onPickSite={(site, accountName) =>
+                setDraft((d) => ({
+                  ...d,
+                  customer: d.customer
+                    ? {
+                        account_id: d.customer.account_id,
+                        site_id: site.id,
+                        label: `${site.name} — ${accountName}`,
+                      }
+                    : d.customer,
+                }))
+              }
+            />
+            {draft.customer && (
+              <ContactSelect
+                accountId={draft.customer.account_id}
+                siteId={draft.customer.site_id}
+                value={draft.contact_id}
+                disabled={ro}
+                onChange={(v) => set("contact_id", v)}
+              />
+            )}
+          </div>
         </div>
 
         {/* 2. Description and type */}
@@ -1150,6 +1212,8 @@ function TicketEditor({ job }: { job: ServiceJobWithTech | null }) {
       </form>
 
       {job && <MaterialsUsed jobId={job.id} canLog={can("inventory")} />}
+
+      {job && <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />}
 
       {job && (
         <AlertDialog

@@ -20,14 +20,17 @@ import {
   Contact,
   Link2,
   Loader2,
+  Mail,
   MapPin,
   Pencil,
+  Phone,
   Plus,
   Save,
   Sparkles,
   Trash2,
   Unlink,
   User,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
@@ -35,17 +38,21 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import {
   deleteAccount,
+  deleteContact,
   deleteSite,
   getAccount,
   linkBidToAccount,
   listAccounts,
+  listContacts,
   listUnlinkedBids,
   saveAccount,
+  saveContact,
   saveSite,
   siteAddressLine,
   suggestBidsForAccount,
   type AccountDetail,
   type AccountRow,
+  type ContactWithSites,
   type LinkedBidRow,
   type SiteRow,
 } from "@/lib/crm.functions";
@@ -64,8 +71,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -274,6 +283,7 @@ function AccountDetailPane({ id }: { id: string }) {
     <div className="space-y-6">
       {back}
       <AccountBlock account={d.account} onDelete={() => setConfirmDelete(true)} />
+      <ContactsSection accountId={id} sites={d.sites} />
       <SitesSection accountId={id} sites={d.sites} />
       <TicketsSection jobs={d.jobs} />
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} />}
@@ -624,6 +634,409 @@ const siteFields = (s: SiteRow | null): SiteFields => ({
   zip: s?.zip ?? "",
   technician_instructions: s?.technician_instructions ?? "",
 });
+
+// ---- Contacts ----------------------------------------------------------------------------------
+// People at the account (phase B). A contact belongs to the whole account ("All sites") or to
+// the sites ticked; Billing marks who gets the invoices. The ticket's site contact is picked from
+// these.
+
+type ContactFields = {
+  name: string;
+  position: string;
+  email: string;
+  mobile: string;
+  office_phone: string;
+  is_billing: boolean;
+  notes: string;
+  site_ids: string[];
+};
+const contactFields = (c: ContactWithSites | null): ContactFields => ({
+  name: c?.name ?? "",
+  position: c?.position ?? "",
+  email: c?.email ?? "",
+  mobile: c?.mobile ?? "",
+  office_phone: c?.office_phone ?? "",
+  is_billing: c?.is_billing ?? false,
+  notes: c?.notes ?? "",
+  site_ids: c?.site_ids ?? [],
+});
+/** "tel:" wants the digits (and a leading +), not the formatting. */
+const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
+
+function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
+  const { session } = useAuth();
+  const qc = useQueryClient();
+  const listFn = useServerFn(listContacts);
+  const deleteFn = useServerFn(deleteContact);
+  const contacts = useQuery({
+    queryKey: ["contacts", accountId],
+    queryFn: () => listFn({ data: { account_id: accountId } }),
+    enabled: !!session,
+  });
+  // "new" = the add form is open; an id = that contact is being edited.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [toDelete, setToDelete] = useState<ContactWithSites | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["contacts", accountId] });
+    void qc.invalidateQueries({ queryKey: ["account", accountId] });
+    void qc.invalidateQueries({ queryKey: ["account-search"] });
+  };
+  const remove = useMutation({
+    mutationFn: (id: string) => deleteFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Contact deleted");
+      setToDelete(null);
+      refresh();
+    },
+    onError: (e) => toast.error(`Could not delete the contact: ${errText(e)}`),
+  });
+  const siteName = new Map(sites.map((s) => [s.id, s.name]));
+  const siteList = (ids: string[]) => {
+    if (ids.length === 0) return "All sites";
+    const names = ids.flatMap((sid) => siteName.get(sid) ?? []);
+    return names.length ? names.join(", ") : "A deleted site";
+  };
+  const rows = contacts.data ?? [];
+
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Contacts">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <Users className="h-4 w-4" /> Contacts
+          {contacts.data && (
+            <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
+          )}
+        </h2>
+        {editing !== "new" && (
+          <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+            <Plus className="mr-1 h-4 w-4" /> Add contact
+          </Button>
+        )}
+      </div>
+      {contacts.error ? (
+        <p className="text-sm text-destructive">
+          Could not load the contacts: {errText(contacts.error)}
+        </p>
+      ) : contacts.isLoading ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading contacts…
+        </p>
+      ) : (
+        rows.length === 0 &&
+        editing !== "new" && (
+          <p className="text-sm text-muted-foreground">
+            No contacts yet. Add the people you call: the site contact, who approves work, who gets
+            the invoice.
+          </p>
+        )
+      )}
+      <div className="space-y-2">
+        {rows.map((c) =>
+          editing === c.id ? (
+            <ContactForm
+              key={c.id}
+              accountId={accountId}
+              contact={c}
+              sites={sites}
+              onDone={(changed) => {
+                setEditing(null);
+                if (changed) refresh();
+              }}
+            />
+          ) : (
+            <div
+              key={c.id}
+              className="flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2"
+            >
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{c.name}</span>
+                  {c.position && (
+                    <span className="text-sm text-muted-foreground">{c.position}</span>
+                  )}
+                  {c.is_billing && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[11px]">
+                      Billing
+                    </Badge>
+                  )}
+                </p>
+                {(c.mobile || c.office_phone || c.email) && (
+                  <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-sm">
+                    {c.mobile && (
+                      <a
+                        href={telHref(c.mobile)}
+                        className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                      >
+                        <Phone className="h-3.5 w-3.5" /> {c.mobile}
+                        <span className="text-xs text-muted-foreground">mobile</span>
+                      </a>
+                    )}
+                    {c.office_phone && (
+                      <a
+                        href={telHref(c.office_phone)}
+                        className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+                      >
+                        <Phone className="h-3.5 w-3.5" /> {c.office_phone}
+                        <span className="text-xs text-muted-foreground">office</span>
+                      </a>
+                    )}
+                    {c.email && (
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="inline-flex min-w-0 items-center gap-1 break-all text-primary underline-offset-2 hover:underline"
+                      >
+                        <Mail className="h-3.5 w-3.5 shrink-0" /> {c.email}
+                      </a>
+                    )}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  <MapPin className="mr-1 inline h-3 w-3" />
+                  {siteList(c.site_ids)}
+                </p>
+                {c.notes && <p className="whitespace-pre-line text-xs">{c.notes}</p>}
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="Edit this contact"
+                  aria-label={`Edit ${c.name}`}
+                  onClick={() => setEditing(c.id)}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  title="Delete this contact"
+                  aria-label={`Delete ${c.name}`}
+                  onClick={() => setToDelete(c)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ),
+        )}
+        {editing === "new" && (
+          <ContactForm
+            accountId={accountId}
+            contact={null}
+            sites={sites}
+            onDone={(changed) => {
+              setEditing(null);
+              if (changed) refresh();
+            }}
+          />
+        )}
+      </div>
+
+      <AlertDialog
+        open={!!toDelete}
+        onOpenChange={(o) => {
+          if (!o && !remove.isPending) setToDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete the contact “{toDelete?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              They disappear from this customer and from the site contact choices on tickets.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={remove.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={remove.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (toDelete) remove.mutate(toDelete.id);
+              }}
+            >
+              {remove.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
+  );
+}
+
+function ContactForm(props: {
+  accountId: string;
+  contact: ContactWithSites | null;
+  sites: SiteRow[];
+  onDone: (changed: boolean) => void;
+}) {
+  const saveFn = useServerFn(saveContact);
+  const [f, setF] = useState<ContactFields>(() => contactFields(props.contact));
+  const set = <K extends keyof ContactFields>(k: K, v: ContactFields[K]) =>
+    setF((p) => ({ ...p, [k]: v }));
+  const toggleSite = (id: string, on: boolean) =>
+    setF((p) => ({
+      ...p,
+      site_ids: on
+        ? [...p.site_ids.filter((x) => x !== id), id]
+        : p.site_ids.filter((x) => x !== id),
+    }));
+  const save = useMutation({
+    mutationFn: () =>
+      saveFn({
+        data: {
+          ...(props.contact ? { id: props.contact.id } : {}),
+          account_id: props.accountId,
+          name: f.name,
+          position: f.position,
+          email: f.email,
+          mobile: f.mobile,
+          office_phone: f.office_phone,
+          is_billing: f.is_billing,
+          notes: f.notes,
+          // Only sites that still exist on the account (a deleted site's link is dropped).
+          site_ids: f.site_ids.filter((id) => props.sites.some((s) => s.id === id)),
+        },
+      }),
+    onSuccess: () => {
+      toast.success(props.contact ? "Contact saved" : "Contact added");
+      props.onDone(true);
+    },
+    onError: (e) => toast.error(`Could not save the contact: ${errText(e)}`),
+  });
+  const idp = props.contact?.id ?? "new";
+  return (
+    <form
+      className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!f.name.trim()) {
+          toast.error("The contact needs a name");
+          return;
+        }
+        save.mutate();
+      }}
+    >
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`contact-${idp}-name`}>Name</Label>
+          <Input
+            id={`contact-${idp}-name`}
+            autoFocus
+            value={f.name}
+            placeholder="e.g. Pat Miller"
+            onChange={(e) => set("name", e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`contact-${idp}-position`}>Position</Label>
+          <Input
+            id={`contact-${idp}-position`}
+            value={f.position}
+            placeholder="e.g. Facilities manager"
+            onChange={(e) => set("position", e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="space-y-1">
+          <Label htmlFor={`contact-${idp}-mobile`}>Mobile</Label>
+          <Input
+            id={`contact-${idp}-mobile`}
+            type="tel"
+            inputMode="tel"
+            value={f.mobile}
+            onChange={(e) => set("mobile", e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`contact-${idp}-office`}>Office phone</Label>
+          <Input
+            id={`contact-${idp}-office`}
+            type="tel"
+            inputMode="tel"
+            value={f.office_phone}
+            onChange={(e) => set("office_phone", e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`contact-${idp}-email`}>Email</Label>
+          <Input
+            id={`contact-${idp}-email`}
+            type="email"
+            inputMode="email"
+            value={f.email}
+            onChange={(e) => set("email", e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch
+          id={`contact-${idp}-billing`}
+          checked={f.is_billing}
+          onCheckedChange={(v) => set("is_billing", v)}
+        />
+        <Label htmlFor={`contact-${idp}-billing`} className="font-normal">
+          Billing contact (gets the invoices)
+        </Label>
+      </div>
+      <fieldset className="space-y-1">
+        <legend className="text-sm font-medium">Sites</legend>
+        {props.sites.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            This customer has no sites yet; the contact covers the whole account.
+          </p>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Tick the sites they are the contact for; none ticked = all sites.
+            </p>
+            <div className="grid gap-1 sm:grid-cols-2">
+              {props.sites.map((s) => (
+                <label
+                  key={s.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-sm hover:bg-muted"
+                >
+                  <Checkbox
+                    checked={f.site_ids.includes(s.id)}
+                    onCheckedChange={(v) => toggleSite(s.id, v === true)}
+                  />
+                  <span className="truncate">{s.name}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+      </fieldset>
+      <div className="space-y-1">
+        <Label htmlFor={`contact-${idp}-notes`}>Notes</Label>
+        <Textarea
+          id={`contact-${idp}-notes`}
+          rows={2}
+          value={f.notes}
+          placeholder="e.g. Text before calling; off Fridays"
+          onChange={(e) => set("notes", e.target.value)}
+        />
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" size="sm" disabled={save.isPending}>
+          {save.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+          {props.contact ? "Save contact" : "Add contact"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={save.isPending}
+          onClick={() => props.onDone(false)}
+        >
+          Cancel
+        </Button>
+      </div>
+    </form>
+  );
+}
 
 function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
   const qc = useQueryClient();

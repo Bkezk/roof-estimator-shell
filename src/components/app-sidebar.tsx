@@ -20,6 +20,8 @@ import {
   Contact,
   Target,
   BellRing,
+  CalendarCheck,
+  CalendarDays,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -49,10 +51,34 @@ const estimatorItems = [
   { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
-// Service: repair tickets, the customer hub they link to, opportunities, and the follow-ups
-// every signed-in user has (page null = shown to everyone).
-const serviceItems: { title: string; url: string; icon: typeof Wrench; page: Page | null }[] = [
-  { title: "Tickets", url: "/service", icon: Wrench, page: "service" },
+// Service: the technician's Today, repair tickets, the Tech Board (office only), the customer
+// hub they link to, opportunities, and the follow-ups every signed-in user has (page null =
+// shown to everyone). `exact`: active only on that path (Tickets is not active on the board).
+type ServiceItem = {
+  title: string;
+  url: string;
+  icon: typeof Wrench;
+  page: Page | null;
+  exact?: boolean;
+  /** Hidden for a technician who is not an admin (dispatching is the office's). */
+  office?: boolean;
+};
+const todayItem: ServiceItem = {
+  title: "Today",
+  url: "/service/today",
+  icon: CalendarCheck,
+  page: "service",
+};
+const serviceItems: ServiceItem[] = [
+  { title: "Tickets", url: "/service", icon: Wrench, page: "service", exact: true },
+  {
+    title: "Board",
+    url: "/service/board",
+    icon: CalendarDays,
+    page: "service",
+    office: true,
+  },
+  todayItem,
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
   { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
@@ -264,6 +290,8 @@ export function AppSidebar() {
       return typeof s["cat"] === "string" ? s["cat"] : undefined;
     },
   });
+  // A technician who is not an admin: Today first, no Board.
+  const isTech = !!profile?.technician && profile.role !== "admin";
   const isActive = (path: string) =>
     pathname === path || (path !== "/" && pathname.startsWith(path));
 
@@ -300,11 +328,19 @@ export function AppSidebar() {
         {profile && (
           <NavGroup label="Service" id="service" iconMode={collapsed}>
             <SidebarMenu>
-              {serviceItems
+              {(profile.technician
+                ? [todayItem, ...serviceItems.filter((i) => i !== todayItem)]
+                : serviceItems
+              )
                 .filter((item) => item.page === null || can(item.page))
+                .filter((item) => !(item.office && isTech))
                 .map((item) => (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={item.exact ? pathname === item.url : isActive(item.url)}
+                      tooltip={item.title}
+                    >
                       <Link to={item.url}>
                         <item.icon className="h-4 w-4" />
                         {!collapsed && <span>{item.title}</span>}
