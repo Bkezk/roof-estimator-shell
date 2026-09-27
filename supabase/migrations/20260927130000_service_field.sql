@@ -225,3 +225,26 @@ end; $$;
 drop trigger if exists service_job_repairs_usage on public.service_job_repairs;
 create trigger service_job_repairs_usage after insert on public.service_job_repairs
   for each row execute function public.bump_repair_template_usage();
+
+-- A starter set of repair templates from the CenterPoint report (names and the one price seen;
+-- the full 475 come with the CenterPoint import). Only when the table is empty.
+insert into public.repair_templates (name, category, unit, description, work_completed, unit_price, favorite)
+select * from (values
+ ('Drainage – Clogged Scupper/Drain','Drainage','EA','The existing drain / scupper is clogged and water is backing up.','Cleared the drain / scupper of debris and water tested it.',250::numeric,true),
+ ('Drainage – Drain Flashing Failure','Drainage','EA','The drain flashing has failed and is letting water in.','Removed the failed flashing, cleaned and primed the area, installed new drain flashing and sealed it.',null,true),
+ ('Membrane – Holes','Membrane','EA','Holes / punctures found in the roof membrane.','Cleaned and primed the area and installed a membrane patch over each hole.',null,true),
+ ('Membrane – Open Seams','Membrane','LF','Open / failing seams in the roof membrane.','Cleaned the seam, primed and re-sealed it with seam tape / lap sealant.',null,true),
+ ('Membrane – Blisters','Membrane','EA','Blisters in the membrane.','Cut, dried and patched the blistered area.',null,false),
+ ('Flashing – Wall Flashing Failure','Flashing','LF','Base / wall flashing is failing and letting water in.','Re-secured and re-sealed the wall flashing; installed new termination where needed.',null,true),
+ ('Flashing – Curb / Unit Flashing','Flashing','EA','Flashing at a curb or rooftop unit is failing.','Repaired and re-sealed the curb flashing.',null,false),
+ ('Penetration – Pipe Boot / Pipe Flashing','Penetrations','EA','A pipe boot / pipe flashing is failing.','Installed / re-sealed the pipe boot and clamped it.',null,true),
+ ('Penetration – Pitch Pocket','Penetrations','EA','A pitch pocket has dried out / cracked.','Cleaned out and refilled the pitch pocket with pourable sealer.',null,false),
+ ('Metal – Coping / Edge Metal','Sheet metal','LF','Coping or edge metal is loose or open at the joints.','Re-secured the metal and sealed the joints.',null,false),
+ ('Metal – Screws Backing Out (metal roof)','Sheet metal','EA','Screws backing out on the metal roof allowing water in.','Replaced the screws with oversized / rivet fasteners and sealed the heads.',null,false),
+ ('A/C – Condensate Drains on Roof','HVAC','EA','Condensate lines draining onto the roof.','Extended / redirected the condensate lines to a drain.',250,false),
+ ('Previous Repair Failure','General','EA','A previous repair has failed.','Removed the failed repair and re-did it properly.',null,true),
+ ('Debris Removal / Cleaning','General','EA','Debris on the roof and in the drains.','Removed debris and cleaned the drains / gutters.',null,false),
+ ('Leak Investigation / Water Test','General','EA','Leak reported; source not visible.','Inspected the area and water tested until the source was found.',null,true),
+ ('Other Repair','General','EA',null,null,null,false)
+) as v(name, category, unit, description, work_completed, unit_price, favorite)
+where not exists (select 1 from public.repair_templates);

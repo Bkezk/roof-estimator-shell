@@ -17,7 +17,14 @@ the bottom with the commit that closed them.
    (numbers from 6000 so they never collide with CenterPoint's), `bids.account_id / site_id`,
    `inventory_movements.service_job_id`, the vehicle write-off removed; server functions in
    `src/lib/crm.functions.ts`, `service.functions.ts`, `inventory.functions.ts`. The Setup ›
-   Customer name typeahead links a bid to a profile (built Sep 26). Still open: the tech phone flow
+   Customer name typeahead links a bid to a profile (built Sep 26). **Phase B (Sep 27):**
+   follow-up timers with reminders by email (Resend) + push, opportunities, admin reminder
+   settings, the installable app, contacts, the tech phone flow tables and functions, the
+   Tech Board's assign call; screens for Today / close-out / Board / contacts in progress.
+   Owner setup for reminders is design §13 (RESEND_API_KEY, NOTIFY_FROM_EMAIL, APP_URL in
+   Lovable Cloud; APP_URL + CRON_SECRET GitHub secrets). Still open: the CenterPoint CSV
+   import (needs the owner's exports of Companies, Properties, Contacts, repair templates,
+   materials), the tech phone flow's offline photo queue
    (phase B), invoicing (C), history import (D), the truck reconciliation (design §12).
    Context: new-roof work is estimated and sold in this app; repair
    work, invoices and customer records live in **CenterPoint Connect** (the company's CRM).
