@@ -845,3 +845,87 @@ export const deleteMovement = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     return { ok: true };
   });
+
+/**
+ * The signed-in technician's truck stock for the close-out (owner, Sep 27: log material with
+ * one tap, no Inventory screen). One row per cell on each vehicle they drive, with the piece
+ * definition so the tap counts tubes / cartridges / fasteners, not packs.
+ */
+export interface TruckStockRow extends StockRow {
+  location_name: string;
+  piece: PieceDef | null;
+  /** Catalog item number when there is exactly one for the cell. */
+  item_no: string | null;
+}
+export const myTruckStock = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => z.object({ location_id: z.string().max(60).optional() }).parse(d ?? {}))
+  .handler(async ({ data, context }): Promise<TruckStockRow[]> => {
+    const sb = context.supabase;
+    const { data: drives } = await sb
+      .from("vehicle_drivers")
+      .select("location_id")
+      .eq("user_id", context.userId)
+      .is("to_date", null);
+    let vehicles = [...new Set((drives ?? []).map((d) => d.location_id))];
+    if (data.location_id) vehicles = [data.location_id];
+    if (!vehicles.length) return [];
+    const { data: locs } = await sb
+      .from("inventory_locations")
+      .select("id, name")
+      .in("id", vehicles);
+    const names = new Map((locs ?? []).map((l) => [l.id, l.name]));
+    const [{ data: moves, error }, cats] = await Promise.all([
+      sb
+        .from("inventory_movements")
+        .select("location_id, screen_id, row_label, price_col, qty, unit, created_at, item_no")
+        .in("location_id", vehicles),
+      categories(sb),
+    ]);
+    if (error) throw new Error(error.message);
+    const byCell = new Map<string, TruckStockRow>();
+    for (const m of moves ?? []) {
+      const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
+      let row = byCell.get(key);
+      if (!row) {
+        row = {
+          location_id: m.location_id,
+          location_name: names.get(m.location_id) ?? m.location_id,
+          screen_id: m.screen_id,
+          category: cats.get(m.screen_id) ?? m.screen_id,
+          row_label: m.row_label,
+          price_col: m.price_col,
+          unit: m.unit,
+          on_hand: 0,
+          last_at: null,
+          item_nos: [],
+          item_no: m.item_no,
+          piece: null,
+        };
+        byCell.set(key, row);
+      }
+      row.on_hand += Number(m.qty);
+      row.last_at = m.created_at;
+    }
+    const rows = [...byCell.values()].filter((r) => r.on_hand > 1e-9);
+    // Piece definitions per distinct cell (a handful of catalog reads).
+    const pieceCache = new Map<string, PieceDef | null>();
+    for (const r of rows) {
+      const k = `${r.screen_id}\u0000${r.row_label}\u0000${r.price_col}`;
+      if (!pieceCache.has(k)) {
+        try {
+          pieceCache.set(k, (await cellUnit(sb, r)).piece);
+        } catch {
+          pieceCache.set(k, null);
+        }
+      }
+      r.piece = pieceCache.get(k) ?? null;
+      r.on_hand = Math.round(r.on_hand * 1000) / 1000;
+    }
+    return rows.sort(
+      (a, b) =>
+        a.location_name.localeCompare(b.location_name) ||
+        a.category.localeCompare(b.category) ||
+        a.row_label.localeCompare(b.row_label),
+    );
+  });

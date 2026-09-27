@@ -696,3 +696,71 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
     const order = new Map(seen.map((id, i) => [id, i]));
     return (templates ?? []).sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
   });
+
+/**
+ * What a tech usually uses on a repair template (owner, Sep 27): the materials logged on
+ * earlier tickets that carried this template, averaged per ticket, so the close-out can
+ * prefill them. Cells with the tech's own history first.
+ */
+export interface UsualMaterial {
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+  unit: string;
+  /** Average quantity per ticket, in the stock unit (packs). */
+  avg_qty: number;
+  tickets: number;
+}
+export const usualMaterialsForTemplate = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ template_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<UsualMaterial[]> => {
+    await me(context);
+    const sb = context.supabase;
+    const { data: reps } = await sb
+      .from("service_job_repairs")
+      .select("service_job_id")
+      .eq("repair_template_id", data.template_id)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const jobIds = [...new Set((reps ?? []).map((r) => r.service_job_id))];
+    if (!jobIds.length) return [];
+    const { data: moves } = await sb
+      .from("inventory_movements")
+      .select("service_job_id, screen_id, row_label, price_col, qty, unit")
+      .in("service_job_id", jobIds)
+      .in("reason", ["consumed", "released"]);
+    const perJob = new Map<string, Map<string, { qty: number; unit: string }>>();
+    for (const m of moves ?? []) {
+      if (!m.service_job_id) continue;
+      const cell = `${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
+      const j = perJob.get(m.service_job_id) ?? new Map();
+      const cur = j.get(cell) ?? { qty: 0, unit: m.unit };
+      cur.qty += -Number(m.qty);
+      j.set(cell, cur);
+      perJob.set(m.service_job_id, j);
+    }
+    const agg = new Map<string, { sum: number; n: number; unit: string }>();
+    for (const j of perJob.values())
+      for (const [cell, v] of j) {
+        if (!(v.qty > 0)) continue;
+        const a = agg.get(cell) ?? { sum: 0, n: 0, unit: v.unit };
+        a.sum += v.qty;
+        a.n += 1;
+        agg.set(cell, a);
+      }
+    return [...agg.entries()]
+      .map(([cell, a]) => {
+        const [screen_id, row_label, price_col] = cell.split("\u0000") as [string, string, string];
+        return {
+          screen_id,
+          row_label,
+          price_col,
+          unit: a.unit,
+          avg_qty: Math.round((a.sum / a.n) * 100) / 100,
+          tickets: a.n,
+        };
+      })
+      .sort((x, y) => y.tickets - x.tickets)
+      .slice(0, 12);
+  });
