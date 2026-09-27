@@ -460,3 +460,25 @@ buttons, editable by hand), `repair_templates`, `service_job_repairs`, `service_
 (bucket `service`, before / after / signature), close-out fields on the ticket, contacts
 (`crm_contacts`, `crm_site_contacts`) and the ticket's site contact. Server functions in
 `src/lib/service-field.functions.ts`. An opened tube of caulk counts as one used (§12).
+
+## 14. Phase C as built (Sep 27): invoicing here, Sage by CSV
+
+- **Rates** (`service_rates`): per rate kind (Standard / Urgent / Emergency, chosen on the ticket)
+  × role (tech / helper) × time (travel / labor), bill and cost. Seeded from the two CenterPoint
+  invoices in the report; the office confirms them on Admin › Settings › Service rates, with the
+  material markup (0.75), tax rate (0) and payment terms (`service_settings`).
+- **Invoice** (`invoices`, `invoice_lines`): one per ticket, number = ticket number. Created as a
+  draft from the ticket's time entries (one line per person, a Helper line per extra tech) and
+  materials (catalog cost × (1 + markup)); tax on taxable lines unless the customer is tax
+  exempt. Editable while draft; Rebuild re-reads the ticket. Finalise stores the PDF in the
+  `service` bucket and sets the ticket Invoiced; Send emails it (Resend, attachment) to the
+  billing contacts; Mark paid records date / amount / method / reference and closes the ticket;
+  Void returns the ticket to Done.
+- **PDF** (`invoices.server.ts`, pdf-lib): page 1 as CenterPoint's (company block, Invoice #,
+  PO, date, Job #, Send To, Property, lines, totals, terms, contact, narrative), then one Work
+  Completed page per printed repair (name, completed date, quantity, description, work
+  completed, before / after photos, check in / out with, signature).
+- **Sage**: `Export to Sage` on the Invoices list writes a CSV for a date range (an INVOICE row
+  and LINE rows per invoice, with the customer's external id) and stamps `sage_exported_at`.
+  Reshape the columns once the Sage product is known (report §11 q1).
+- Technicians never see invoices (RLS).
