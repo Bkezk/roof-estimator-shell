@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { formatDistanceToNow } from "date-fns";
-import { CloudLightning, Loader2, RefreshCw, Settings2 } from "lucide-react";
+import { Info, Loader2, RefreshCw, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -184,6 +184,18 @@ export function StormPanel(props: {
             </>
           )}
         </div>
+        <span
+          className="inline-flex h-7 w-7 shrink-0 cursor-help items-center justify-center text-muted-foreground"
+          tabIndex={0}
+          aria-label="What Storm hits means"
+          title={`NOAA hail, wind and tornado reports, last ${days} days. A building is a call point when a report landed within a few miles of it; the miles on a row are the distance to the report, not damage at that roof.${
+            s?.last_fetch_at
+              ? ` Checked ${formatDistanceToNow(Date.parse(s.last_fetch_at), { addSuffix: true })}.`
+              : ""
+          }`}
+        >
+          <Info className="h-3.5 w-3.5" />
+        </span>
         {props.canWrite && (
           <Button
             size="icon"
@@ -214,15 +226,6 @@ export function StormPanel(props: {
           </Button>
         )}
       </div>
-      <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-        <CloudLightning className="h-3 w-3 shrink-0" />
-        NOAA hail, wind and tornado reports, last {days} days. A building is a call point when a
-        report landed within a few miles; the miles on a row are the distance to the report, not
-        damage at that roof.
-        {s?.last_fetch_at
-          ? ` Checked ${formatDistanceToNow(Date.parse(s.last_fetch_at), { addSuffix: true })}.`
-          : ""}
-      </p>
 
       {props.isAdmin && draft && (
         <div className="space-y-2 rounded-md border p-2">
