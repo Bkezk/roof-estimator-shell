@@ -165,6 +165,26 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
       county), Storm hit filter and sort, row badge, nearby reports on the building. Proof Sep 28:
       the four real Kentucky reports of Sep 21 flagged 182 buildings. NASA EONET was checked and
       rejected (only tropical-cyclone tracks and wildfires for Kentucky).
+      **Construction leads (built Sep 28; owner: "data on new builds before they're built, giving
+      us time to submit a bid").** Two public feeds, both fetched live that day: the State of KY
+      online planroom (https://www.stateofkyplanroom.com/ — every state-funded project in bid
+      phase; 98 jobs, 13 roof; plain HTML rows with job id, name, town, agency, type, pre-bid and
+      bid dates in Eastern time) and Louisville Metro's active construction permits (LOJIC ArcGIS
+      feature service `active_construction_permits`; Commercial New / Addition ≥ 5,000 sq ft in
+      the last 90 days → 14). `leads` table keyed by (source, external_id), team status kept
+      across refreshes, rows that drop off the source marked gone; `is_roof` from
+      `lead_settings.roof_keywords` (any Commercial New/Addition permit counts). Nightly
+      `.github/workflows/leads.yml` → `/api/cron/leads`, plus a six-hour throttled pass when the
+      Leads page opens; new roof leads notify Prospecting users (`/prospect/leads?roof=1`). The
+      Leads page (sidebar › Prospecting) filters roof-only / source / status, counts down to bid
+      day, hides closed bids by default, and adds a lead to My prospects as a by-hand building.
+      Sources checked and NOT used: DHBC's statewide plan review log (exists, no public feed —
+      see docs/dhbc-open-records-request.md, an open records request each month); Lexington's
+      data hub (no commercial permit dataset found); ConstructConnect ($129–$199/mo) and Dodge
+      (paid; planning-stage projects); Builders Exchange of Kentucky (site blocked the fetch, no
+      pricing seen); Cabinet for Economic Development news releases (earliest signal on
+      industrial builds, prose only — a candidate third feed); Kentucky Press Association Smart
+      Search (free keyword email alerts on legal notices, set up by hand).
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
