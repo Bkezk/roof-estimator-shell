@@ -17,8 +17,17 @@ import {
   type LngLatBoundsLike,
   type MapGeoJSONFeature,
   type MapMouseEvent,
+  setWorkerUrl,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+// MapLibre 6 runs its tile work (every GeoJSON layer: the roofs, the footprints, the storm
+// areas) in a web worker it loads from a file beside its own module. Bundled, that file does
+// not exist, the worker dies on the 404 page and the layers never draw (proven Sep 28 with a
+// headless render: sources held the data, nothing rendered). Vite bundles the worker with
+// its imports under ?worker&url and hands back the real URL.
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+if (typeof window !== "undefined") setWorkerUrl(maplibreWorkerUrl);
 
 import {
   KY_FOOTPRINTS_LAYER,
