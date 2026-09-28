@@ -20,6 +20,18 @@ the bottom with the commit that closed them.
   (⋮ › Download All to CSV / Email CSV on each list), and if reachable the 475 repair templates
   and 142 materials.
 
+**Building age on Prospecting (owner asked Sep 28; checked with proof).** `buildings.year_built`
+exists and the Buildings page already shows "built 1998, roof N yrs if original"; nothing fills
+it. No free source carries it: the state ORNL footprints and 911 points have no age, the state
+Webster PVA parcel layer's `YEAR` is the tax year, and the Louisville (LOJIC OpenDataPVA) and
+Lexington (LFUCG Parcel) open parcel layers list no year-built field (field lists fetched Sep
+28). Regrid's parcel data has `yearbuilt` from the county PVAs; its store pages show the
+"Structure Year Built" fill per core county: Jefferson 87%, Fayette 95%, Kenton 73%, Boone 82%,
+Warren 67%, Daviess 80%, Hardin 81%, McCracken 42%, Campbell 80%, Madison 6%. Pricing is by
+county (parcels@regrid.com) or the Property API (self-serve up to 10,000 records/month; 30-day
+free sandbox). Decision for the owner: buy the core counties from Regrid (then a one-time join by
+parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
