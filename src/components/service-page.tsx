@@ -3,7 +3,7 @@
  * page lists tickets grouped by stage (Open → Closed), filterable, with a Recently deleted bin,
  * like the Bids / Takeoffs pages; `?new=1` opens a blank ticket and `?id=<uuid>` an existing
  * one, both on one screen in the order of §5.1. CenterPoint still dispatches and invoices; the
- * ticket carries its CenterPoint ticket / invoice numbers until invoicing moves here.
+ * ticket carries its CenterPoint ticket / invoice numbers from the legacy system (folded away unless set).
  *
  * A technician (profiles.technician, not admin) receives only their own tickets (RLS), edits
  * them, sets the stage Open / Scheduled / Done only (TECH_STAGES; the office invoices and
@@ -80,9 +80,10 @@ import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { AssignGrid } from "@/components/service/assign-grid";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
 import {
-  ContactLogList,
+  LatestContact,
   LogContactButtons,
   NeedsActionStrip,
   UntouchedBadge,
@@ -1013,6 +1014,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // A ticket that already has its technician and day keeps the week grid folded away (the plain
+  // fields below it still show both); a new or unassigned one opens it. Not remembered.
+  const hasSlot = !!job?.technician_id && !!job.scheduled_date;
+  const [gridOpen, setGridOpen] = useState(() => !hasSlot);
 
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -1257,9 +1262,15 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               </Select>
               {officeOrAdmin && repeatable && (
                 <Button asChild variant="outline">
-                  <Link to="/service" search={{ new: 1, from: job.id }}>
+                  <Link
+                    to="/service"
+                    search={{ new: 1, from: job.id }}
+                    title={
+                      job.site_id ? "New ticket for this site" : "New ticket for this customer"
+                    }
+                  >
                     <CopyPlus className="mr-1 h-4 w-4" />
-                    {job.site_id ? "New ticket for this site" : "New ticket for this customer"}
+                    Repeat
                   </Link>
                 </Button>
               )}
@@ -1389,7 +1400,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Customer contact
                 </p>
                 <LogContactButtons kind="ticket" itemId={job.id} />
-                <ContactLogList kind="ticket" itemId={job.id} />
+                <LatestContact kind="ticket" itemId={job.id} />
               </section>
             )}
           </div>
@@ -1450,7 +1461,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                 disabled={ro}
                 onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
               >
-                <SelectTrigger id="ticket-rate" className="sm:max-w-[220px]">
+                <SelectTrigger
+                  id="ticket-rate"
+                  className="sm:max-w-[220px]"
+                  title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -1461,10 +1476,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">
-                Sets the hourly rates on the invoice
-                {job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.
-              </p>
             </div>
           )}
         </div>
@@ -1474,19 +1485,41 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         {officeOrAdmin ? (
           <div className="space-y-3">
             <div className="space-y-1">
-              <p className="text-sm font-medium leading-none">Technician and day</p>
-              <AssignGrid
-                jobId={job?.id ?? null}
-                techs={techOptions}
-                techsLoading={techs.isLoading}
-                technicianId={draft.technician_id}
-                date={draft.scheduled_date}
-                meId={profile?.id ?? null}
-                disabled={ro}
-                onPick={(technician_id, scheduled_date) =>
-                  setDraft((d) => ({ ...d, technician_id, scheduled_date }))
-                }
-              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-medium leading-none">Technician and day</p>
+                {hasSlot && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    aria-expanded={gridOpen}
+                    aria-controls="ticket-assign-grid"
+                    onClick={() => setGridOpen((v) => !v)}
+                  >
+                    <ChevronRight
+                      className={`mr-1 h-3.5 w-3.5 transition-transform ${gridOpen ? "rotate-90" : ""}`}
+                    />
+                    {gridOpen ? "Hide the week grid" : "Change on the week grid"}
+                  </Button>
+                )}
+              </div>
+              {gridOpen && (
+                <div id="ticket-assign-grid">
+                  <AssignGrid
+                    jobId={job?.id ?? null}
+                    techs={techOptions}
+                    techsLoading={techs.isLoading}
+                    technicianId={draft.technician_id}
+                    date={draft.scheduled_date}
+                    meId={profile?.id ?? null}
+                    disabled={ro}
+                    onPick={(technician_id, scheduled_date) =>
+                      setDraft((d) => ({ ...d, technician_id, scheduled_date }))
+                    }
+                  />
+                </div>
+              )}
             </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,260px)_auto_170px]">
               <div className="space-y-1">
@@ -1528,9 +1561,23 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </div>
         )}
 
-        {/* 5. CenterPoint numbers (until invoicing moves here) */}
-        <div className="space-y-1">
-          <div className="grid max-w-md grid-cols-2 gap-3">
+        {/* 5. CenterPoint numbers: folded away unless the ticket carries one */}
+        <Collapsible
+          defaultOpen={!!(draft.centerpoint_ticket || draft.centerpoint_invoice)}
+          className="space-y-2"
+        >
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="group -ml-2 h-8 px-2 text-sm font-medium"
+            >
+              <ChevronRight className="mr-1 h-4 w-4 transition-transform group-data-[state=open]:rotate-90" />
+              CenterPoint numbers
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="grid max-w-md grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label htmlFor="ticket-cp-ticket" className="text-xs">
                 CenterPoint ticket #
@@ -1557,9 +1604,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                 onChange={(e) => set("centerpoint_invoice", e.target.value)}
               />
             </div>
-          </div>
-          <p className="text-xs text-muted-foreground">until invoicing moves here</p>
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
 
         {/* 6. Notes */}
         <div className="space-y-1">
@@ -1593,17 +1639,27 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         )}
       </form>
 
-      {job && officeOrAdmin && <InvoiceBlock job={job} />}
+      {job && (
+        // Owner, Sep 28 ("so much crap on it"): the sections below the form fold away with a
+        // one-line summary each; the open state is remembered per section.
+        <div className="space-y-4">
+          {officeOrAdmin && <InvoiceBlock job={job} />}
 
-      {job &&
-        (can("service") || can("inventory") || can("estimate") ? (
-          // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
-          <MaterialsSection jobId={job.id} />
-        ) : (
-          <MaterialsUsed jobId={job.id} canLog={false} />
-        ))}
+          {can("service") || can("inventory") || can("estimate") ? (
+            // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
+            // Open for a technician on an Open / Scheduled ticket (they log here), else folded.
+            <MaterialsSection
+              jobId={job.id}
+              collapsible
+              defaultOpen={isTech && (jobStage === "open" || jobStage === "scheduled")}
+            />
+          ) : (
+            <MaterialsUsed jobId={job.id} canLog={false} />
+          )}
 
-      {job && <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />}
+          <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+        </div>
+      )}
 
       {job && (
         <AlertDialog

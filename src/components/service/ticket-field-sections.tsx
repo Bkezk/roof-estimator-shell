@@ -30,6 +30,7 @@ import {
   listJobEvents,
   listJobPhotos,
   listJobRepairs,
+  listTimeEntries,
   type JobEventRow,
 } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
@@ -41,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { PhotoThumb, TimeEntries } from "@/components/service/field-shared";
+import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
 import {
   errText,
   fieldKeys,
@@ -131,26 +132,10 @@ export function ContactSelect({
 }
 
 // ---------------------------------------------------------------------------------------------
-// Read-only field sections
+// Read-only field sections. Each is collapsible with a one-line summary (owner, Sep 28: the
+// ticket page had too much open at once); the open state is remembered per section.
 
-function Box({
-  title,
-  icon: Icon,
-  children,
-}: {
-  title: string;
-  icon: typeof Wrench;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label={title}>
-      <h2 className="flex items-center gap-2 font-semibold">
-        <Icon className="h-4 w-4" /> {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
+const hoursText = (h: number) => `${Number(h.toFixed(2))} h`;
 
 /** Repairs, close-out, time and timeline of a ticket, below its Materials used. */
 export function TicketFieldSections({
@@ -164,16 +149,49 @@ export function TicketFieldSections({
     <>
       <RepairsReadOnly jobId={job.id} />
       <CloseoutSummary job={job} />
-      <Box title="Time" icon={Clock}>
-        <TimeEntries
-          jobId={job.id}
-          editable={officeOrAdmin}
-          defaultHelpers={job.helper_count}
-          compact
-        />
-      </Box>
+      <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
       <Timeline jobId={job.id} />
     </>
+  );
+}
+
+/** Time, collapsed by default; the header shows travel + labor hours. */
+function TimeSection({ job, officeOrAdmin }: { job: ServiceJobWithTech; officeOrAdmin: boolean }) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listTimeEntries);
+  // The same query (and key) TimeEntries reads, so the list below shares the cache.
+  const q = useQuery({
+    queryKey: fieldKeys.time(job.id),
+    queryFn: () => listFn({ data: { id: job.id } }),
+    enabled: !!session,
+  });
+  const rows = q.data ?? [];
+  const total = rows
+    .filter((r) => r.kind === "travel" || r.kind === "labor")
+    .reduce((s, r) => s + Number(r.hours), 0);
+  const summary = q.error ? (
+    <span className="text-destructive">could not load</span>
+  ) : q.isLoading ? null : rows.length === 0 ? (
+    "no time yet"
+  ) : (
+    hoursText(total)
+  );
+  return (
+    <Box
+      title="Time"
+      icon={Clock}
+      collapsible
+      defaultOpen={false}
+      storageKey="time"
+      summary={summary}
+    >
+      <TimeEntries
+        jobId={job.id}
+        editable={officeOrAdmin}
+        defaultHelpers={job.helper_count}
+        compact
+      />
+    </Box>
   );
 }
 
@@ -194,8 +212,19 @@ function RepairsReadOnly({ jobId }: { jobId: string }) {
   const rows = repairs.data ?? [];
   const pics = (photos.data ?? []).filter((p) => p.role !== "signature");
   const loose = pics.filter((p) => !p.repair_id || !rows.some((r) => r.id === p.repair_id));
+  // Nothing recorded (and nothing wrong): no section at all. Also nothing while loading, so a
+  // ticket without repairs does not flash an empty box.
+  if (!repairs.error && repairs.isLoading) return null;
+  if (!repairs.error && !photos.error && rows.length === 0 && loose.length === 0) return null;
+  const summary = repairs.error ? (
+    <span className="text-destructive">could not load</span>
+  ) : rows.length > 0 ? (
+    `${rows.length} ${rows.length === 1 ? "repair" : "repairs"}`
+  ) : (
+    `${loose.length} ${loose.length === 1 ? "photo" : "photos"}`
+  );
   return (
-    <Box title="Repairs" icon={Wrench}>
+    <Box title="Repairs" icon={Wrench} collapsible storageKey="repairs" summary={summary}>
       {repairs.error ? (
         <p className="text-sm text-destructive">
           Could not load the repairs: {errText(repairs.error)}
@@ -270,8 +299,20 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
     job.recommend_new_roof ||
     job.signature_path ||
     job.completed_at;
+  const summary = job.completed_at
+    ? `Done ${whenShort(job.completed_at)}`
+    : any
+      ? "in progress"
+      : "not closed out yet";
   return (
-    <Box title="Close-out" icon={CheckCircle2}>
+    <Box
+      title="Close-out"
+      icon={CheckCircle2}
+      collapsible
+      defaultOpen={!!any}
+      storageKey="closeout"
+      summary={summary}
+    >
       {!any ? (
         <p className="text-sm text-muted-foreground">Not closed out yet.</p>
       ) : (
@@ -378,6 +419,11 @@ function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
   }
 }
 
+/** An event as one line (the first line of its text), for the Timeline header. */
+function eventSummary(e: JobEventRow) {
+  return eventText(e).text.split("\n")[0] || "Note";
+}
+
 function Timeline({ jobId }: { jobId: string }) {
   const { session } = useAuth();
   const qc = useQueryClient();
@@ -399,8 +445,24 @@ function Timeline({ jobId }: { jobId: string }) {
     onError: (e) => loudError("Could not add the note", e),
   });
   const rows = q.data ?? [];
+  // The server returns newest first.
+  const latest = rows[0];
+  const summary = q.error ? (
+    <span className="text-destructive">could not load</span>
+  ) : latest ? (
+    `${eventSummary(latest)} · ${whenShort(latest.at)}`
+  ) : q.isLoading ? null : (
+    "nothing yet"
+  );
   return (
-    <Box title="Timeline" icon={History}>
+    <Box
+      title="Timeline"
+      icon={History}
+      collapsible
+      defaultOpen={false}
+      storageKey="timeline"
+      summary={summary}
+    >
       <form
         className="space-y-2"
         onSubmit={(e) => {

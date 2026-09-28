@@ -48,6 +48,7 @@ import { listJobRepairs, usualMaterialsForTemplate } from "@/lib/service-field.f
 import { plural, type PieceDef } from "@/lib/stock-units";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Box } from "@/components/service/field-shared";
 import { errText, fieldKeys, loudError } from "@/components/service/field-utils";
 import {
   EPS,
@@ -100,7 +101,17 @@ interface ListRow extends LocatedCell {
   location_name: string;
 }
 
-export function MaterialsSection({ jobId }: { jobId: string }) {
+export function MaterialsSection({
+  jobId,
+  collapsible,
+  defaultOpen,
+}: {
+  jobId: string;
+  /** The office ticket page: a collapsible section with "N lines" in the header. */
+  collapsible?: boolean | undefined;
+  /** Its first open state (the remembered one wins once toggled). */
+  defaultOpen?: boolean | undefined;
+}) {
   const { session, profile, can } = useAuth();
   const qc = useQueryClient();
   const userId = profile?.id ?? "";
@@ -429,18 +440,15 @@ export function MaterialsSection({ jobId }: { jobId: string }) {
   }, [ledger, vehicleId]);
   const itemsOnTicket = rows.filter((r) => usedUnits(r) > EPS).length + elsewhere.length;
 
-  return (
-    <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="Materials">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Package className="h-5 w-5 text-muted-foreground" /> Materials
-        </h2>
-        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-          {busy > 0 && <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />}
-          {itemsOnTicket > 0 && `${itemsOnTicket} ${itemsOnTicket === 1 ? "item" : "items"}`}
-        </span>
-      </div>
+  // Lines on the ticket: the cells with something used (or returned) net of take-backs.
+  const lineCount = useMemo(() => {
+    const byCell = new Map<string, number>();
+    for (const m of ledger) byCell.set(cellKey(m), (byCell.get(cellKey(m)) ?? 0) + Number(m.qty));
+    return [...byCell.values()].filter((v) => Math.abs(v) > EPS).length;
+  }, [ledger]);
 
+  const body = (
+    <>
       {materials.error && (
         <p className="text-sm text-destructive">
           Could not load this ticket's materials: {errText(materials.error)}
@@ -671,6 +679,46 @@ export function MaterialsSection({ jobId }: { jobId: string }) {
           </Link>
         </Button>
       )}
+    </>
+  );
+
+  if (collapsible)
+    return (
+      <Box
+        title="Materials"
+        icon={Package}
+        collapsible
+        defaultOpen={defaultOpen ?? true}
+        storageKey="materials"
+        summary={
+          <span className="flex items-center gap-2">
+            {busy > 0 && <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />}
+            {materials.error ? (
+              <span className="text-destructive">could not load</span>
+            ) : materials.isLoading ? null : lineCount > 0 ? (
+              `${lineCount} ${lineCount === 1 ? "line" : "lines"}`
+            ) : (
+              "nothing logged"
+            )}
+          </span>
+        }
+      >
+        {body}
+      </Box>
+    );
+
+  return (
+    <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="Materials">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <Package className="h-5 w-5 text-muted-foreground" /> Materials
+        </h2>
+        <span className="flex items-center gap-2 text-sm text-muted-foreground">
+          {busy > 0 && <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />}
+          {itemsOnTicket > 0 && `${itemsOnTicket} ${itemsOnTicket === 1 ? "item" : "items"}`}
+        </span>
+      </div>
+      {body}
     </section>
   );
 }

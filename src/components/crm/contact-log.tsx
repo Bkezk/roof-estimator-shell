@@ -8,6 +8,7 @@
  *   optional note). The database stamps the item, moves an Open opportunity to Contacted and
  *   writes the ticket timeline entry, so every list that shows the item is refreshed after it.
  * - ContactLogList: the item's past contacts, newest first.
+ * - LatestContact: only the most recent contact on one line, with "Show all (N)" for the list.
  * - UntouchedBadge: muted before the admin limit, red at or past it.
  * - NeedsActionStrip: what has sat past the admin limit with no contact and not started (owner,
  *   Sep 28: not on day one — the row badge is the quiet hint until then).
@@ -216,6 +217,68 @@ export function ContactLogList({ kind, itemId }: { kind: ContactKind; itemId: st
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The most recent contact on one line ("Last: Called · Sep 28, 2:10 PM · Braden Keck") and a
+ * "Show all (N)" toggle that opens the full ContactLogList. Same query as the list, so the two
+ * share the cache. Every button is type="button" (it sits inside the ticket's form).
+ */
+export function LatestContact({ kind, itemId }: { kind: ContactKind; itemId: string }) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listContactLog);
+  const q = useQuery({
+    queryKey: ["contact-log", kind, itemId],
+    queryFn: () => listFn({ data: { kind, item_id: itemId } }),
+    enabled: !!session,
+  });
+  const [showAll, setShowAll] = useState(false);
+  if (q.error)
+    return (
+      <p className="text-xs text-destructive">Could not load the contact log: {errText(q.error)}</p>
+    );
+  if (q.isLoading || !q.data)
+    return (
+      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the contact log…
+      </p>
+    );
+  // The server returns newest first.
+  const [last] = q.data;
+  if (!last) return <p className="text-xs text-muted-foreground">No contact logged yet</p>;
+  const Chevron = showAll ? ChevronDown : ChevronRight;
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+        {!showAll && (
+          <p className="min-w-0 truncate text-xs" title={last.note ?? undefined}>
+            <span className="text-muted-foreground">Last: </span>
+            <span className="font-medium">{CONTACT_METHOD_LABELS[asMethod(last.method)]}</span>
+            <span className="text-muted-foreground">
+              {" "}
+              · {whenShort(last.at)}
+              {last.by_name ? ` · ${last.by_name}` : ""}
+            </span>
+            {last.note ? <span> — {last.note}</span> : null}
+          </p>
+        )}
+        {(q.data.length > 1 || !!last.note) && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            aria-expanded={showAll}
+            onClick={() => setShowAll((v) => !v)}
+          >
+            <Chevron className="mr-1 h-3.5 w-3.5" />
+            {showAll ? "Show less" : `Show all (${q.data.length})`}
+          </Button>
+        )}
+      </div>
+      {showAll && <ContactLogList kind={kind} itemId={itemId} />}
+    </div>
   );
 }
 

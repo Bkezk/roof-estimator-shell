@@ -1,12 +1,13 @@
 /**
  * Components shared by the technician's phone flow (closeout) and the office ticket page
- * (docs/service-module-design.md §5.3): photo thumbnails and the time-entry editor.
+ * (docs/service-module-design.md §5.3): photo thumbnails, the time-entry editor and the ticket
+ * page's section box (optionally collapsible, its open state remembered per section).
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, X, type LucideIcon } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import {
@@ -35,6 +36,113 @@ import {
   shortDay,
   useSignedUrl,
 } from "@/components/service/field-utils";
+
+// ---------------------------------------------------------------------------------------------
+// Section box: a bordered section with a title. Collapsible sections (owner, Sep 28: the ticket
+// page had too much open at once) show a one-line summary in the header and remember, per
+// section, whether the user left them open.
+
+const SECTIONS_KEY = "bid-o-matic:ticket-sections";
+
+function readSections(): Record<string, boolean> {
+  try {
+    if (typeof window === "undefined") return {};
+    const raw = window.localStorage.getItem(SECTIONS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, boolean>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+function writeSection(key: string, open: boolean) {
+  try {
+    window.localStorage.setItem(SECTIONS_KEY, JSON.stringify({ ...readSections(), [key]: open }));
+  } catch {
+    // Storage blocked (private mode, blocked site data): the toggle still works this visit.
+  }
+}
+function initialOpen(storageKey: string | undefined, fallback: boolean) {
+  if (!storageKey) return fallback;
+  const v = readSections()[storageKey];
+  return typeof v === "boolean" ? v : fallback;
+}
+
+export function Box({
+  title,
+  icon: Icon,
+  children,
+  collapsible,
+  defaultOpen = true,
+  summary,
+  storageKey,
+}: {
+  title: string;
+  icon: LucideIcon;
+  children: React.ReactNode;
+  /** The header becomes a toggle; the body shows only while open. */
+  collapsible?: boolean | undefined;
+  /** The first open state, until the user toggles (then the remembered one wins). */
+  defaultOpen?: boolean | undefined;
+  /** Shown muted on the right of the header, open or closed. */
+  summary?: React.ReactNode;
+  /** Remembers the open state under this key (localStorage). */
+  storageKey?: string | undefined;
+}) {
+  const [open, setOpen] = useState(() => initialOpen(storageKey, defaultOpen));
+  const hasSummary = summary !== undefined && summary !== null && summary !== false;
+
+  if (!collapsible)
+    return (
+      <section className="space-y-3 rounded-lg border p-4" aria-label={title}>
+        {hasSummary ? (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 font-semibold">
+              <Icon className="h-4 w-4" /> {title}
+            </h2>
+            <span className="text-sm text-muted-foreground">{summary}</span>
+          </div>
+        ) : (
+          <h2 className="flex items-center gap-2 font-semibold">
+            <Icon className="h-4 w-4" /> {title}
+          </h2>
+        )}
+        {children}
+      </section>
+    );
+
+  const Chevron = open ? ChevronDown : ChevronRight;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (storageKey) writeSection(storageKey, next);
+  };
+  return (
+    <section className="rounded-lg border" aria-label={title}>
+      <h2>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 rounded-lg p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={open}
+          onClick={toggle}
+        >
+          <span className="flex shrink-0 items-center gap-2 font-semibold">
+            <Icon className="h-4 w-4" /> {title}
+          </span>
+          <span className="flex min-w-0 items-center gap-2 text-sm font-normal text-muted-foreground">
+            {hasSummary && <span className="min-w-0 truncate">{summary}</span>}
+            <Chevron className="h-4 w-4 shrink-0" aria-hidden />
+          </span>
+        </button>
+      </h2>
+      {open && <div className="space-y-3 px-4 pb-4">{children}</div>}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Photos
 
 const ROLE_LABEL: Record<string, string> = {
   before: "Before",
