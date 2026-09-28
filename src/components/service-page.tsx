@@ -658,24 +658,34 @@ function TicketListRow({
   untouched?: UntouchedRow | undefined;
   onDelete?: (() => void) | undefined;
 }) {
+  const navigate = useNavigate();
   const stage = asStage(j.stage);
   const meta = [
     j.technician_name ?? "Unassigned",
     j.scheduled_date ? day(j.scheduled_date) : "No date",
     j.centerpoint_ticket ? `CenterPoint #${j.centerpoint_ticket}` : null,
   ].filter(Boolean);
+  // Owner, Sep 28: the whole card opens the ticket, as on Bids (no Open button).
+  const open = () => void navigate({ to: "/service", search: { id: j.id } });
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-colors duration-150 hover:border-primary/40 hover:bg-muted/40">
+    <div
+      role="link"
+      tabIndex={0}
+      title="Open this ticket"
+      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.01] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+    >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/service"
-            search={{ id: j.id }}
-            className="font-medium underline-offset-2 hover:underline"
-            title="Open this ticket"
-          >
+          <span className="font-medium">
             #{j.number} {j.customer_name}
-          </Link>
+          </span>
           <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-medium">
             {typeLabel(j.service_type)}
           </Badge>
@@ -704,11 +714,6 @@ function TicketListRow({
         </p>
       </div>
       <div className="flex items-center gap-1">
-        <Button asChild size="sm" variant="outline">
-          <Link to="/service" search={{ id: j.id }}>
-            Open
-          </Link>
-        </Button>
         {onDelete && (
           <Button
             size="sm"
@@ -716,7 +721,11 @@ function TicketListRow({
             className="text-destructive hover:text-destructive"
             title="Delete this ticket"
             aria-label={`Delete ticket ${j.number}`}
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
           >
             <Trash2 className="h-4 w-4" />
           </Button>

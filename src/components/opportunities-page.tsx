@@ -364,6 +364,7 @@ function OppListRow({
   /** Assigned with no contact logged and still Open (listUntouched). */
   untouched?: UntouchedRow | undefined;
 }) {
+  const navigate = useNavigate();
   const status = asStatus(o.status);
   const meta = [
     o.assignee_name ?? "Unassigned",
@@ -371,18 +372,25 @@ function OppListRow({
     o.est_value != null ? money(o.est_value) : null,
     o.lead_source,
   ].filter(Boolean);
+  // Owner, Sep 28: the whole card opens the opportunity, as on Bids (no Open button).
+  const open = () => void navigate({ to: "/opportunities", search: { id: o.id } });
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-colors duration-150 hover:border-primary/40 hover:bg-muted/40">
+    <div
+      role="link"
+      tabIndex={0}
+      title="Open this opportunity"
+      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.01] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+    >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/opportunities"
-            search={{ id: o.id }}
-            className="font-medium underline-offset-2 hover:underline"
-            title="Open this opportunity"
-          >
-            {o.title}
-          </Link>
+          <span className="font-medium">{o.title}</span>
           <Badge variant={STATUS_BADGE[status]} className="px-1.5 py-0 text-[11px]">
             {OPP_STATUS_LABELS[status]}
           </Badge>
@@ -406,11 +414,6 @@ function OppListRow({
           {o.updated_by_name ? ` by ${o.updated_by_name}` : ""}
         </p>
       </div>
-      <Button asChild size="sm" variant="outline">
-        <Link to="/opportunities" search={{ id: o.id }}>
-          Open
-        </Link>
-      </Button>
     </div>
   );
 }
