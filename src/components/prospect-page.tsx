@@ -603,31 +603,54 @@ export function ProspectPage(props: {
     return `A NOAA storm report was made within ${r != null ? `${r} miles` : "a few miles"} of this building in the last ${days} days; the miles are the distance to where it was reported.${wind}`;
   };
 
-  // Storm call points: its own one-line strip above the search card (owner, Sep 28), open
-  // when the notification link brought the user here.
-  const stormStrip = (
-    <StormPanel
-      canWrite={canWrite}
-      isAdmin={isAdmin(profile)}
-      onPickCounty={pickStormCounty}
-      onRefreshed={invalidateStorms}
-      defaultOpen={!!props.initialStorm}
-    />
-  );
-
   // The find-buildings panel: search, filters and results. Over the map's left side when the
   // map is on (it can be tucked away); a plain card in the left column when the map is off.
   const searchCard = (
     <Card className="flex max-h-full flex-col">
       <CardHeader className="space-y-2 pb-2">
+        {/* Owner, Sep 28: two tabs instead of a toggle plus a strip — Buildings is the plain
+            search; Storm hits is the same search over the buildings a NOAA report flagged. */}
+        <div className="grid grid-cols-2 rounded-md bg-muted p-0.5" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!stormHit}
+            className={`rounded px-2 py-1 text-sm ${!stormHit ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setStormFilter(false)}
+          >
+            Buildings
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={stormHit}
+            className={`flex items-center justify-center gap-1 rounded px-2 py-1 text-sm ${stormHit ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setStormFilter(true)}
+            title="Buildings near a NOAA hail, wind or tornado report in the storm window"
+          >
+            <CloudLightning
+              className={`h-3.5 w-3.5 ${storms.data?.buildings_flagged ? "text-destructive" : ""}`}
+            />
+            Storm hits
+            {storms.data ? ` · ${storms.data.buildings_flagged.toLocaleString()}` : ""}
+          </button>
+        </div>
         <Input
           placeholder="Search name, address, owner, parcel…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className="flex items-center gap-2">
+        {stormHit ? (
+          <StormPanel
+            canWrite={canWrite}
+            isAdmin={isAdmin(profile)}
+            county={county}
+            onPickCounty={pickStormCounty}
+            onRefreshed={invalidateStorms}
+          />
+        ) : (
           <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
-            <SelectTrigger className="h-8 flex-1">
+            <SelectTrigger className="h-8">
               <SelectValue placeholder="All counties" />
             </SelectTrigger>
             <SelectContent>
@@ -639,17 +662,7 @@ export function ProspectPage(props: {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            size="sm"
-            variant={stormHit ? "destructive" : "outline"}
-            className="h-8 shrink-0"
-            aria-pressed={stormHit}
-            title="Only buildings near a NOAA hail, wind or tornado report in the storm window"
-            onClick={() => setStormFilter(!stormHit)}
-          >
-            <CloudLightning className="mr-1 h-4 w-4" /> Storm hit
-          </Button>
-        </div>
+        )}
         {/* Owner, Sep 28: no roof-age filter or sort — year built is paid data we are not
             buying; own-book roofs still show their age on the row. */}
         <div className="grid grid-cols-2 gap-2">
@@ -670,9 +683,12 @@ export function ProspectPage(props: {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="recent">Recent first</SelectItem>
+              {stormHit ? (
+                <SelectItem value="storm">Newest storm first</SelectItem>
+              ) : (
+                <SelectItem value="recent">Recent first</SelectItem>
+              )}
               <SelectItem value="biggest">Biggest roof</SelectItem>
-              <SelectItem value="storm">Storm hit</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -694,7 +710,7 @@ export function ProspectPage(props: {
         {buildings.data?.length === 0 && (
           <p className="p-2 text-xs text-muted-foreground">
             {stormHit
-              ? "No buildings near a storm report match. Turn off Storm hit or change the filters."
+              ? "No storm-hit buildings match. Pick another county or clear the search."
               : "No buildings match. Change the filters, or load the county's data."}
           </p>
         )}
@@ -838,12 +854,9 @@ export function ProspectPage(props: {
                 {showSearch ? "Hide search" : "Find buildings"}
               </Button>
               {showSearch && (
-                <>
-                  <div className="pointer-events-auto">{stormStrip}</div>
-                  <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-lg shadow-lg [&>div]:h-full [&>div]:bg-background/95 [&>div]:backdrop-blur">
-                    {searchCard}
-                  </div>
-                </>
+                <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-lg shadow-lg [&>div]:h-full [&>div]:bg-background/95 [&>div]:backdrop-blur">
+                  {searchCard}
+                </div>
               )}
             </div>
           </div>
@@ -859,12 +872,7 @@ export function ProspectPage(props: {
       <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
         {/* ── Left column: the working list (and the search card when the map is hidden) ── */}
         <div className="space-y-4">
-          {!showMap && (
-            <div className="space-y-2">
-              {stormStrip}
-              {searchCard}
-            </div>
-          )}
+          {!showMap && searchCard}
           {/* ── My prospects: the working list ── */}
           <Card>
             <CardHeader className="pb-2">
