@@ -1324,42 +1324,116 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           submit();
         }}
       >
-        {/* 1. Customer, with the site / contact card beside it */}
+        {/* 1. Customer, description, PO and rate on the left; the customer's card, site
+            contact and contact log on the right (owner, Sep 28: no empty left column). */}
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-1">
-            <Label htmlFor="ticket-customer">Customer</Label>
-            <AccountPicker
-              id="ticket-customer"
-              value={draft.customer}
-              autoFocus={!job}
-              disabled={ro}
-              placeholder="Search a customer or site (e.g. yellow creek)…"
-              onChange={(hit) =>
-                setDraft((d) => ({
-                  ...d,
-                  hit,
-                  // Another customer's contacts do not apply.
-                  contact_id:
-                    hit && d.customer && hit.account_id === d.customer.account_id
-                      ? d.contact_id
-                      : "",
-                  customer: hit
-                    ? {
-                        account_id: hit.account_id,
-                        site_id: hit.site_id,
-                        label: hit.site_name
-                          ? `${hit.site_name} — ${hit.account_name}`
-                          : hit.account_name,
-                      }
-                    : null,
-                }))
-              }
-            />
-            {!draft.customer && job?.customer_name && (
-              <p className="text-xs text-muted-foreground">
-                Not linked to a customer profile: “{job.customer_name}”. Pick or add one to link it.
-              </p>
-            )}
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label htmlFor="ticket-customer">Customer</Label>
+              <AccountPicker
+                id="ticket-customer"
+                value={draft.customer}
+                autoFocus={!job}
+                disabled={ro}
+                placeholder="Search a customer or site (e.g. yellow creek)…"
+                onChange={(hit) =>
+                  setDraft((d) => ({
+                    ...d,
+                    hit,
+                    // Another customer's contacts do not apply.
+                    contact_id:
+                      hit && d.customer && hit.account_id === d.customer.account_id
+                        ? d.contact_id
+                        : "",
+                    customer: hit
+                      ? {
+                          account_id: hit.account_id,
+                          site_id: hit.site_id,
+                          label: hit.site_name
+                            ? `${hit.site_name} — ${hit.account_name}`
+                            : hit.account_name,
+                        }
+                      : null,
+                  }))
+                }
+              />
+              {!draft.customer && job?.customer_name && (
+                <p className="text-xs text-muted-foreground">
+                  Not linked to a customer profile: “{job.customer_name}”. Pick or add one to link
+                  it.
+                </p>
+              )}
+            </div>
+            <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
+              <div className="space-y-1">
+                <Label htmlFor="ticket-description">Description</Label>
+                <Input
+                  id="ticket-description"
+                  value={draft.description}
+                  disabled={ro}
+                  maxLength={500}
+                  placeholder="e.g. Leak over the gym, north wall"
+                  onChange={(e) => set("description", e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="ticket-type">Type</Label>
+                <Select
+                  value={draft.service_type}
+                  disabled={ro}
+                  onValueChange={(v) => set("service_type", v as ServiceType)}
+                >
+                  <SelectTrigger id="ticket-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SERVICE_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {TYPE_LABELS[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="ticket-po">PO #</Label>
+                <Input
+                  id="ticket-po"
+                  value={draft.po_number}
+                  disabled={ro}
+                  maxLength={60}
+                  onChange={(e) => set("po_number", e.target.value)}
+                />
+                <BillingNote accountId={draft.customer?.account_id ?? null} />
+              </div>
+              {officeOrAdmin && (
+                <div className="space-y-1">
+                  <Label htmlFor="ticket-rate">Labor rate</Label>
+                  <Select
+                    value={draft.labor_rate_kind}
+                    disabled={ro}
+                    onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
+                  >
+                    <SelectTrigger
+                      id="ticket-rate"
+                      className="sm:max-w-[220px]"
+                      title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RATE_KINDS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {RATE_KIND_LABELS[k]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
           </div>
           <div className="space-y-3">
             <CustomerCard
@@ -1404,80 +1478,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               </section>
             )}
           </div>
-        </div>
-
-        {/* 2. Description and type */}
-        <div className="grid gap-4 md:grid-cols-[1fr_180px]">
-          <div className="space-y-1">
-            <Label htmlFor="ticket-description">Description</Label>
-            <Input
-              id="ticket-description"
-              value={draft.description}
-              disabled={ro}
-              maxLength={500}
-              placeholder="e.g. Leak over the gym, north wall"
-              onChange={(e) => set("description", e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="ticket-type">Type</Label>
-            <Select
-              value={draft.service_type}
-              disabled={ro}
-              onValueChange={(v) => set("service_type", v as ServiceType)}
-            >
-              <SelectTrigger id="ticket-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SERVICE_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {TYPE_LABELS[t]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* 3. PO # with the customer's billing instruction */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-1">
-            <Label htmlFor="ticket-po">PO #</Label>
-            <Input
-              id="ticket-po"
-              value={draft.po_number}
-              disabled={ro}
-              maxLength={60}
-              onChange={(e) => set("po_number", e.target.value)}
-            />
-            <BillingNote accountId={draft.customer?.account_id ?? null} />
-          </div>
-          {officeOrAdmin && (
-            <div className="space-y-1">
-              <Label htmlFor="ticket-rate">Labor rate</Label>
-              <Select
-                value={draft.labor_rate_kind}
-                disabled={ro}
-                onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
-              >
-                <SelectTrigger
-                  id="ticket-rate"
-                  className="sm:max-w-[220px]"
-                  title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {RATE_KINDS.map((k) => (
-                    <SelectItem key={k} value={k}>
-                      {RATE_KIND_LABELS[k]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
         </div>
 
         {/* 4. Technician, helpers and day. The office picks both in one click on the grid; a
