@@ -299,15 +299,28 @@ export default function ProspectMap({
         source: "storm-areas",
         paint: { "line-color": STORM_COLOR as never, "line-width": 1.5, "line-dasharray": [3, 2] },
       });
+      // Zoomed out, a 3-mile circle is a few pixels: a soft halo and a bigger dot mark each
+      // report until the zoom is close enough for the shaded radius to speak for itself.
+      m.addLayer({
+        id: "storm-halo",
+        type: "circle",
+        source: "storm-centers",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 22, 9, 26, 12, 0] as never,
+          "circle-color": STORM_COLOR as never,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.35, 11, 0.2, 12, 0] as never,
+          "circle-blur": 0.6,
+        },
+      });
       m.addLayer({
         id: "storm-centers",
         type: "circle",
         source: "storm-centers",
         paint: {
-          "circle-radius": 5,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 9, 10, 7, 14, 5] as never,
           "circle-color": STORM_COLOR as never,
           "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-stroke-width": 2,
         },
       });
       m.addSource("footprints", {
@@ -343,6 +356,18 @@ export default function ProspectMap({
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5,
         },
+      });
+      m.on(
+        "mouseenter",
+        "storm-centers",
+        (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
+          m.getCanvas().style.cursor = "help";
+          m.getCanvas().title = String(e.features?.[0]?.properties?.["label"] ?? "");
+        },
+      );
+      m.on("mouseleave", "storm-centers", () => {
+        m.getCanvas().style.cursor = "";
+        m.getCanvas().title = "";
       });
       for (const layer of ["footprints-fill", "points"]) {
         m.on("click", layer, (e: MapMouseEvent & { features?: MapGeoJSONFeature[] }) => {
@@ -387,7 +412,7 @@ export default function ProspectMap({
     const m = map.current;
     if (!m) return;
     const apply = () => {
-      for (const id of ["storm-fill", "storm-line", "storm-centers"])
+      for (const id of ["storm-fill", "storm-line", "storm-halo", "storm-centers"])
         m.setLayoutProperty(id, "visibility", showStormAreas ? "visible" : "none");
     };
     if (ready.current) apply();
