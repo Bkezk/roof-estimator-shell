@@ -20,6 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -634,9 +635,7 @@ export async function emailInvoice(input: {
         to: input.to,
         subject: input.subject,
         text: input.text,
-        attachments: [
-          { filename: input.fileName, content: Buffer.from(input.pdf).toString("base64") },
-        ],
+        attachments: [{ filename: input.fileName, content: toBase64(input.pdf) }],
       }),
     });
     if (!res.ok)

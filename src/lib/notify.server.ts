@@ -7,10 +7,10 @@
  * set; web push when the user has enabled it on a device. The push signing keys (VAPID) are
  * generated once and kept in app_secrets, a table no client can read.
  */
-import webpush from "web-push";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import { generateVapidKeys, sendWebPush } from "@/lib/webpush";
 
 /**
  * Which client writes: the service-role client when Lovable Cloud provides its key (the
@@ -98,7 +98,7 @@ export async function vapidKeys(): Promise<{
   const pub = data?.find((r) => r.key === "vapid_public")?.value;
   const priv = data?.find((r) => r.key === "vapid_private")?.value;
   if (pub && priv) return { publicKey: pub, privateKey: priv };
-  const fresh = webpush.generateVAPIDKeys();
+  const fresh = await generateVapidKeys();
   const { error: upErr } = await admin.from("app_secrets").upsert([
     { key: "vapid_public", value: fresh.publicKey },
     { key: "vapid_private", value: fresh.privateKey },
@@ -113,25 +113,20 @@ export async function sendPush(
 ): Promise<{ ok: true } | { ok: false; gone: boolean; error: string }> {
   try {
     const keys = await vapidKeys();
-    webpush.setVapidDetails(contactSubject(), keys.publicKey, keys.privateKey);
-    await webpush.sendNotification(
-      { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+    const r = await sendWebPush(
+      { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
       JSON.stringify({
         title: payload.title,
         body: payload.body ?? "",
         url: payload.url ? `${appUrl()}${payload.url}` : appUrl() || "/",
         tag: payload.tag ?? "bid-o-matic",
       }),
-      { TTL: 60 * 60 * 24 },
+      { keys, subject: contactSubject(), ttlSeconds: 60 * 60 * 24 },
     );
-    return { ok: true };
+    if (r.ok) return { ok: true };
+    return { ok: false, gone: r.gone, error: r.error ?? `push service answered ${r.status}` };
   } catch (e) {
-    const status = (e as { statusCode?: number }).statusCode;
-    return {
-      ok: false,
-      gone: status === 404 || status === 410,
-      error: e instanceof Error ? e.message : String(e),
-    };
+    return { ok: false, gone: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 

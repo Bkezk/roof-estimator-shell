@@ -12,6 +12,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
 import { siteAddressLine } from "@/lib/crm.functions";
+import { toBase64 } from "@/lib/webpush";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
@@ -308,7 +309,7 @@ export const renderInvoice = createServerFn({ method: "POST" })
     const b = await loadBundle(context.supabase, data.id);
     const pdf = await renderInvoicePdf(context.supabase, b);
     return {
-      base64: Buffer.from(pdf).toString("base64"),
+      base64: toBase64(pdf),
       file_name: `Invoice-${b.invoice.number}.pdf`,
     };
   });
