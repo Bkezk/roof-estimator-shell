@@ -5,7 +5,7 @@
  * copied here — they show as a warranty-expiry LEAD LIST read from accepted bids on demand. The
  * map and the parcel ingest come next; this page is what they populate.
  */
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link } from "@tanstack/react-router";
@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import {
   Building2,
   CheckSquare,
+  CloudLightning,
   ExternalLink,
   FilePlus2,
   Map as MapIcon,
@@ -53,9 +54,18 @@ import {
   type RoofInput,
   type RoofRow,
 } from "@/lib/prospect.functions";
+import {
+  buildingStormHits,
+  refreshStormsIfDue,
+  stormLabel,
+  stormSummary,
+} from "@/lib/storms.functions";
 const ProspectMap = lazy(() => import("@/components/prospect-map"));
+import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel";
+import { stormDay, stormRadius } from "@/components/prospect/storm-format";
 
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -237,7 +247,11 @@ const CONDITION_LABELS: Record<string, string> = {
   unknown: "Unknown",
 };
 
-export function ProspectPage(props: { initialBuildingId?: string | undefined }) {
+export function ProspectPage(props: {
+  initialBuildingId?: string | undefined;
+  /** ?storm=1: open with the Storm hit filter on (the new-call-points notification). */
+  initialStorm?: boolean | undefined;
+}) {
   const { can, profile } = useAuth();
   const canWrite = can("prospect");
   const canBid = can("estimate");
@@ -259,12 +273,24 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   const addAtPointFn = useServerFn(addBuildingAtPoint);
   const refreshesFn = useServerFn(listRefreshes);
   const refreshes = useQuery({ queryKey: ["data-refreshes"], queryFn: () => refreshesFn() });
+  const stormRefreshFn = useServerFn(refreshStormsIfDue);
+  const stormSummaryFn = useServerFn(stormSummary);
+  const stormHitsFn = useServerFn(buildingStormHits);
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
   const [minAge, setMinAge] = useState("any"); // any | 10 | 15 | 20 | 25 | unknown
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
-  const [sort, setSort] = useState<"recent" | "biggest" | "oldest">("recent");
+  const [sort, setSort] = useState<"recent" | "biggest" | "oldest" | "storm">(
+    props.initialStorm ? "storm" : "recent",
+  );
+  // Storm call points (owner, Sep 28): only buildings near a NOAA report in the window.
+  const [stormHit, setStormHit] = useState(!!props.initialStorm);
+  const setStormFilter = (on: boolean) => {
+    setStormHit(on);
+    if (on) setSort("storm");
+    else setSort((s) => (s === "storm" ? "recent" : s));
+  };
   const [selectedId, setSelectedId] = useState<string | null>(props.initialBuildingId ?? null);
   const [form, setForm] = useState<BuildingInput | null>(null);
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
@@ -325,9 +351,15 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
   useEffect(() => {
     if (props.initialBuildingId) setSelectedId(props.initialBuildingId);
   }, [props.initialBuildingId]);
+  useEffect(() => {
+    if (props.initialStorm) {
+      setStormHit(true);
+      setSort("storm");
+    }
+  }, [props.initialStorm]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county, minAge, minSize, sort],
+    queryKey: ["buildings", q, county, minAge, minSize, sort, stormHit],
     queryFn: () =>
       listFn({
         data: {
@@ -339,6 +371,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               ? { minAge: Number(minAge) }
               : {}),
           ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
+          ...(stormHit ? { stormHit: true } : {}),
           sort,
         },
       }),
@@ -359,6 +392,44 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     queryFn: () => leadsFn(),
     enabled: canWrite,
   });
+
+  // The storm window and radii (the row badge's tooltip); the panel shares this query.
+  const storms = useQuery({ queryKey: STORM_SUMMARY_KEY, queryFn: () => stormSummaryFn() });
+  const stormSettings = storms.data?.settings;
+  const selectedStormAt = detail.data?.building.last_storm_at ?? null;
+  const stormHits = useQuery({
+    queryKey: ["building-storm-hits", selectedId],
+    queryFn: () => stormHitsFn({ data: { building_id: selectedId! } }),
+    enabled: !!selectedId && !!selectedStormAt,
+  });
+  const invalidateStorms = () => {
+    void qc.invalidateQueries({ queryKey: STORM_SUMMARY_KEY });
+    void qc.invalidateQueries({ queryKey: ["buildings"] });
+    void qc.invalidateQueries({ queryKey: ["building"] });
+    void qc.invalidateQueries({ queryKey: ["building-storm-hits"] });
+  };
+  // The lazy pass: a Prospecting user's visit pulls NOAA if the last pull is over six hours
+  // old (the server throttles). Once per page load; silent unless it fails.
+  const stormRefreshStarted = useRef(false);
+  useEffect(() => {
+    if (!canWrite || stormRefreshStarted.current) return;
+    stormRefreshStarted.current = true;
+    stormRefreshFn({ data: {} })
+      .then((r) => {
+        if (r.error) toast.error(`Storm reports: ${r.error}`);
+        if (r.ran) invalidateStorms();
+      })
+      .catch((e: unknown) =>
+        toast.error(`Storm reports: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page load
+  }, [canWrite]);
+  const pickStormCounty = (name: string) => {
+    // NOAA names the county the way the buildings do, but match loosely just in case.
+    const match = (counties.data ?? []).find((c) => c.county.toLowerCase() === name.toLowerCase());
+    setCounty(match?.county ?? name);
+    setStormFilter(true);
+  };
 
   // The detail form follows the selected building; edits are local until Save.
   useEffect(() => {
@@ -513,11 +584,37 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
     </div>
   );
 
+  /** "Hail 1″ · Sep 21 · 2.4 mi" for a flagged building. */
+  const stormBadge = (b: {
+    last_storm_at: string | null;
+    last_storm_kind: string | null;
+    last_storm_magnitude: number | null;
+    last_storm_miles: number | null;
+  }) =>
+    [
+      stormLabel(b.last_storm_kind, b.last_storm_magnitude) || "Storm",
+      stormDay(b.last_storm_at),
+      b.last_storm_miles != null ? `${Number(b.last_storm_miles).toFixed(1)} mi` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  const stormTooltip = (kind: string | null) => {
+    const r = stormRadius(stormSettings, kind);
+    const days = stormSettings?.window_days ?? 7;
+    return `A NOAA storm report within ${r != null ? `${r} miles` : "a few miles"} in the last ${days} days`;
+  };
+
   // The find-buildings panel: search, filters and results. Over the map's left side when the
   // map is on (it can be tucked away); a plain card in the left column when the map is off.
   const searchCard = (
     <Card className="flex max-h-full flex-col">
       <CardHeader className="space-y-2 pb-2">
+        <StormPanel
+          canWrite={canWrite}
+          isAdmin={isAdmin(profile)}
+          onPickCounty={pickStormCounty}
+          onRefreshed={invalidateStorms}
+        />
         <Input
           placeholder="Search name, address, owner, parcel…"
           value={q}
@@ -537,6 +634,16 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               ))}
             </SelectContent>
           </Select>
+          <Button
+            size="sm"
+            variant={stormHit ? "destructive" : "outline"}
+            className="h-8 shrink-0"
+            aria-pressed={stormHit}
+            title="Only buildings near a NOAA hail, wind or tornado report in the storm window"
+            onClick={() => setStormFilter(!stormHit)}
+          >
+            <CloudLightning className="mr-1 h-4 w-4" /> Storm hit
+          </Button>
         </div>
         <div className="grid grid-cols-3 gap-2">
           <Select value={minAge} onValueChange={setMinAge}>
@@ -572,6 +679,7 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
               <SelectItem value="recent">Recent first</SelectItem>
               <SelectItem value="biggest">Biggest roof</SelectItem>
               <SelectItem value="oldest">Oldest roof</SelectItem>
+              <SelectItem value="storm">Storm hit</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -592,7 +700,9 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
         {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
         {buildings.data?.length === 0 && (
           <p className="p-2 text-xs text-muted-foreground">
-            No buildings match. Change the filters, or load the county's data.
+            {stormHit
+              ? "No buildings near a storm report match. Turn off Storm hit or change the filters."
+              : "No buildings match. Change the filters, or load the county's data."}
           </p>
         )}
         {(buildings.data ?? []).map((b) => (
@@ -617,6 +727,18 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                 )}
               </div>
               <div className="pl-6 text-xs text-muted-foreground">{rowDetail(b)}</div>
+              {b.last_storm_at && (
+                <div className="pl-6 pt-0.5">
+                  <Badge
+                    variant="destructive"
+                    className="px-1.5 py-0 text-[10px] font-medium"
+                    title={stormTooltip(b.last_storm_kind)}
+                  >
+                    <CloudLightning className="mr-1 h-3 w-3" />
+                    {stormBadge(b)}
+                  </Badge>
+                </div>
+              )}
             </button>
             {canWrite && !b.prospect_stage && (
               <button
@@ -1013,6 +1135,50 @@ export function ProspectPage(props: { initialBuildingId?: string | undefined }) 
                   </div>
                 </CardHeader>
                 <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {form.id && selectedStormAt && (
+                    <div className="rounded-lg border border-destructive/40 p-3 text-sm sm:col-span-2 lg:col-span-4">
+                      <p className="mb-1 flex items-center gap-1 font-medium">
+                        <CloudLightning className="h-4 w-4 text-destructive" /> Storm reports nearby
+                        <span className="text-xs font-normal text-muted-foreground">
+                          last {stormSettings?.window_days ?? 7} days
+                        </span>
+                      </p>
+                      {stormHits.isLoading && (
+                        <p className="text-xs text-muted-foreground">Loading…</p>
+                      )}
+                      {stormHits.error && (
+                        <p className="text-xs text-destructive">
+                          Could not load the storm reports:{" "}
+                          {stormHits.error instanceof Error
+                            ? stormHits.error.message
+                            : String(stormHits.error)}
+                        </p>
+                      )}
+                      {stormHits.data?.length === 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          No reports on file for this building any more.
+                        </p>
+                      )}
+                      {(stormHits.data?.length ?? 0) > 0 && (
+                        <ul className="space-y-0.5 text-xs">
+                          {stormHits.data!.map((h) => (
+                            <li key={h.id} className="flex flex-wrap gap-x-2">
+                              <span className="font-medium">{stormLabel(h.kind, h.magnitude)}</span>
+                              <span>{stormDay(h.report_date)}</span>
+                              <span className="text-muted-foreground">
+                                {[h.location, h.county && `${h.county} Co.`]
+                                  .filter(Boolean)
+                                  .join(", ") || "location not given"}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {h.distance_mi.toFixed(1)} mi away
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                   {text("name", "Building / business name", "sm:col-span-2")}
                   {text("owner_name", "Owner of record", "sm:col-span-2")}
                   {text("address1", "Address", "sm:col-span-2")}
