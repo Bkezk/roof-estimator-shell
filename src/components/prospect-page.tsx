@@ -150,7 +150,7 @@ const summaryLine = (
         }`
       : "roof size unknown",
     b.address1?.trim() ? [b.address1, b.city].filter(Boolean).join(", ") : "no address yet",
-    roofAge(b) ?? "roof age unknown",
+    roofAge(b),
     b.county && `${b.county} County`,
   ]
     .filter(Boolean)
@@ -279,9 +279,8 @@ export function ProspectPage(props: {
 
   const [q, setQ] = useState("");
   const [county, setCounty] = useState("");
-  const [minAge, setMinAge] = useState("any"); // any | 10 | 15 | 20 | 25 | unknown
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
-  const [sort, setSort] = useState<"recent" | "biggest" | "oldest" | "storm">(
+  const [sort, setSort] = useState<"recent" | "biggest" | "storm">(
     props.initialStorm ? "storm" : "recent",
   );
   // Storm call points (owner, Sep 28): only buildings near a NOAA report in the window.
@@ -359,17 +358,12 @@ export function ProspectPage(props: {
   }, [props.initialStorm]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county, minAge, minSize, sort, stormHit],
+    queryKey: ["buildings", q, county, minSize, sort, stormHit],
     queryFn: () =>
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
           ...(county ? { county } : {}),
-          ...(minAge === "unknown"
-            ? { ageUnknown: true }
-            : minAge !== "any"
-              ? { minAge: Number(minAge) }
-              : {}),
           ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
           ...(stormHit ? { stormHit: true } : {}),
           sort,
@@ -656,20 +650,9 @@ export function ProspectPage(props: {
             <CloudLightning className="mr-1 h-4 w-4" /> Storm hit
           </Button>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          <Select value={minAge} onValueChange={setMinAge}>
-            <SelectTrigger className="h-8">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="any">Any roof age</SelectItem>
-              <SelectItem value="10">Roof 10+ yrs</SelectItem>
-              <SelectItem value="15">Roof 15+ yrs</SelectItem>
-              <SelectItem value="20">Roof 20+ yrs</SelectItem>
-              <SelectItem value="25">Roof 25+ yrs</SelectItem>
-              <SelectItem value="unknown">Age unknown</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Owner, Sep 28: no roof-age filter or sort — year built is paid data we are not
+            buying; own-book roofs still show their age on the row. */}
+        <div className="grid grid-cols-2 gap-2">
           <Select value={minSize} onValueChange={setMinSize}>
             <SelectTrigger className="h-8">
               <SelectValue />
@@ -689,7 +672,6 @@ export function ProspectPage(props: {
             <SelectContent>
               <SelectItem value="recent">Recent first</SelectItem>
               <SelectItem value="biggest">Biggest roof</SelectItem>
-              <SelectItem value="oldest">Oldest roof</SelectItem>
               <SelectItem value="storm">Storm hit</SelectItem>
             </SelectContent>
           </Select>
