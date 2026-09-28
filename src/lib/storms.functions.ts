@@ -40,12 +40,16 @@ export const KIND_LABELS: Record<string, string> = {
   tornado: "Tornado",
 };
 
-/** "Hail 1.75″", "Wind 70 mph", "Tornado EF2", "Wind (speed unknown)". */
+/**
+ * "Hail 1.75″", "Wind 70 mph", "Tornado EF2". NOAA marks a wind report UNK when damage was
+ * reported (trees, lines down) with no measured gust, so that reads "Wind (damage reported)".
+ */
 export function stormLabel(kind: string | null, magnitude: number | null): string {
   if (!kind) return "";
   if (kind === "hail")
     return magnitude != null ? `Hail ${magnitude.toFixed(2).replace(/\.?0+$/, "")}″` : "Hail";
-  if (kind === "wind") return magnitude != null ? `Wind ${magnitude} mph` : "Wind (speed unknown)";
+  if (kind === "wind")
+    return magnitude != null ? `Wind ${magnitude} mph` : "Wind (damage reported)";
   return magnitude != null ? `Tornado EF${magnitude}` : "Tornado";
 }
 

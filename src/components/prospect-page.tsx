@@ -584,7 +584,8 @@ export function ProspectPage(props: {
     </div>
   );
 
-  /** "Hail 1″ · Sep 21 · 2.4 mi" for a flagged building. */
+  /** "Hail 1″ · Sep 21 · 2.4 mi away" for a flagged building (the miles are the distance
+   *  from the building to where the report was made). */
   const stormBadge = (b: {
     last_storm_at: string | null;
     last_storm_kind: string | null;
@@ -594,14 +595,18 @@ export function ProspectPage(props: {
     [
       stormLabel(b.last_storm_kind, b.last_storm_magnitude) || "Storm",
       stormDay(b.last_storm_at),
-      b.last_storm_miles != null ? `${Number(b.last_storm_miles).toFixed(1)} mi` : null,
+      b.last_storm_miles != null ? `${Number(b.last_storm_miles).toFixed(1)} mi away` : null,
     ]
       .filter(Boolean)
       .join(" · ");
   const stormTooltip = (kind: string | null) => {
     const r = stormRadius(stormSettings, kind);
     const days = stormSettings?.window_days ?? 7;
-    return `A NOAA storm report within ${r != null ? `${r} miles` : "a few miles"} in the last ${days} days`;
+    const wind =
+      kind === "wind"
+        ? " Wind reports without a speed are damage reports (trees or lines down) with no measured gust."
+        : "";
+    return `A NOAA storm report was made within ${r != null ? `${r} miles` : "a few miles"} of this building in the last ${days} days; the miles are the distance to where it was reported.${wind}`;
   };
 
   // The find-buildings panel: search, filters and results. Over the map's left side when the
