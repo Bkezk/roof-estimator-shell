@@ -9,7 +9,8 @@
  *   writes the ticket timeline entry, so every list that shows the item is refreshed after it.
  * - ContactLogList: the item's past contacts, newest first.
  * - UntouchedBadge: muted before the admin limit, red at or past it.
- * - NeedsActionStrip: everything assigned and neither started nor contacted, past-limit first.
+ * - NeedsActionStrip: what has sat past the admin limit with no contact and not started (owner,
+ *   Sep 28: not on day one — the row badge is the quiet hint until then).
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -310,14 +311,10 @@ export function NeedsActionStrip({
   const rows = useMemo(() => {
     const now = new Date();
     const wanted = kinds ?? ["ticket", "opportunity"];
+    // Only past the limit: an item assigned this morning is not "needs action" yet.
     return (q.data ?? [])
-      .filter((r) => (wanted as string[]).includes(r.kind))
-      .map((r) => ({ r, late: isPastLimit(r, now) }))
-      .sort(
-        (a, b) =>
-          Number(b.late) - Number(a.late) ||
-          (a.r.assigned_at ?? "9999").localeCompare(b.r.assigned_at ?? "9999"),
-      );
+      .filter((r) => (wanted as string[]).includes(r.kind) && isPastLimit(r, now))
+      .sort((a, b) => (a.assigned_at ?? "9999").localeCompare(b.assigned_at ?? "9999"));
   }, [q.data, kinds]);
 
   if (q.error)
@@ -327,15 +324,11 @@ export function NeedsActionStrip({
       </p>
     );
   if (rows.length === 0) return null;
-  const late = rows.filter((x) => x.late).length;
   const Chevron = open ? ChevronDown : ChevronRight;
   const showKind = (kinds ?? ["ticket", "opportunity"]).length > 1;
 
   return (
-    <section
-      className={`rounded-lg border ${late ? "border-destructive/50" : ""}`}
-      aria-label="Needs action"
-    >
+    <section className="rounded-lg border border-destructive/50" aria-label="Needs action">
       <button
         type="button"
         className="flex w-full items-center justify-between gap-2 px-4 py-2 text-left font-semibold"
@@ -343,13 +336,8 @@ export function NeedsActionStrip({
         onClick={toggle}
       >
         <span className="flex items-center gap-2">
-          <AlertTriangle
-            className={`h-4 w-4 ${late ? "text-destructive" : "text-muted-foreground"}`}
-          />
-          {title ?? "Needs action"} · {rows.length} untouched
-          {late > 0 && (
-            <span className="text-sm font-normal text-destructive">({late} past the limit)</span>
-          )}
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+          {title ?? "Needs action"} · {rows.length} untouched past the limit
         </span>
         <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
           {open ? "Hide" : "Show"}
@@ -359,11 +347,11 @@ export function NeedsActionStrip({
       {open && (
         <div className="space-y-2 border-t p-3">
           <p className="text-xs text-muted-foreground">
-            Assigned, but no contact logged and not started. Open it and log the call, text, email
-            or visit.
+            Assigned longer than the limit with no contact logged and not started. Open it and log
+            the call, text, email or visit, or schedule it.
           </p>
           <ul className="divide-y">
-            {rows.map(({ r }) => (
+            {rows.map((r) => (
               <li
                 key={untouchedKey(r.kind, r.item_id)}
                 className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1.5 text-sm"

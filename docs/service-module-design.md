@@ -501,9 +501,10 @@ applied live.
   once in `crm_untouched()` (SECURITY DEFINER with the item tables' read rules repeated, so a
   technician gets their own, the office everyone's, and the cron's service role all).
 - **Limits** (`crm_settings.ticket_untouched_days` 2, `opportunity_untouched_days` 3, Admin ›
-  Settings › Reminders): before the limit a row says "No contact · assigned 1d ago"; at the limit
-  it turns red ("Untouched 4d"). A Needs Action strip lists them first on Service, Opportunities
-  and Follow-ups; Follow-ups has an admin By-person table (assigned / untouched / overdue).
+  Settings › Reminders): before the limit a row says "No contact · assigned 1d ago" (a quiet
+  hint, nothing else); at the limit it turns red ("Untouched 4d") and only then appears in the
+  Needs Action strip on Service, Opportunities and Follow-ups and counts in the admin By-person
+  table (assigned / untouched / overdue). Owner, Sep 28: not on day one.
 - **Escalation**: when the follow-up reminder of a red item fires, the same reminder pass also
   notifies `escalation_recipients()` — every admin when `escalate_to_admins` is on, plus
   `escalate_user_ids` — minus the assignee, on the follow-up's own cadence, until someone logs a

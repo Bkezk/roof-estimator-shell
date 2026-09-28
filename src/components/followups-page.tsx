@@ -16,7 +16,7 @@ import { AlarmClockOff, BellRing, CheckCircle2, Loader2, Users } from "lucide-re
 
 import { useAuth } from "@/lib/auth-store";
 import { listFollowups, type FollowupWithName } from "@/lib/followups.functions";
-import { listUntouched } from "@/lib/contact-log.functions";
+import { isPastLimit, listUntouched } from "@/lib/contact-log.functions";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
 import { NeedsActionStrip } from "@/components/crm/contact-log";
 import { Badge } from "@/components/ui/badge";
@@ -264,8 +264,10 @@ export function FollowupsPage() {
       r.assigned += 1;
       if (new Date(f.due_at).getTime() < now) r.overdue += 1;
     }
+    // Untouched = past the limit (the strip's rule); inside the limit it is not a mark yet.
+    const nowDate = new Date(now);
     for (const u of untouchedRows) {
-      if (!u.assignee_id) continue;
+      if (!u.assignee_id || !isPastLimit(u, nowDate)) continue;
       row(u.assignee_id, u.assignee_name ?? "(user)").untouched += 1;
     }
     return [...m.values()].sort(
