@@ -105,6 +105,13 @@ interface Assign {
   scheduled_date: string | null;
 }
 
+/** The board inside the Service page (owner, Sep 28: it will not grow, so it sits above the
+ * list). The week lives in local state instead of the URL and the page chrome is left out. */
+export function EmbeddedBoard() {
+  const [week, setWeek] = useState<string | undefined>(undefined);
+  return <Board week={week} embedded onWeek={setWeek} />;
+}
+
 export function BoardPage({ week }: { week?: string | undefined }) {
   const { profile } = useAuth();
   if (profile?.technician && profile.role !== "admin")
@@ -120,7 +127,15 @@ export function BoardPage({ week }: { week?: string | undefined }) {
   return <Board week={week} />;
 }
 
-function Board({ week }: { week?: string | undefined }) {
+function Board({
+  week,
+  embedded = false,
+  onWeek,
+}: {
+  week?: string | undefined;
+  embedded?: boolean;
+  onWeek?: (week: string | undefined) => void;
+}) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -143,12 +158,17 @@ function Board({ week }: { week?: string | undefined }) {
   const today = toYmd(new Date());
   const monday = mondayOf(week ? fromYmd(week) : new Date());
   const days = Array.from({ length: 7 }, (_, i) => toYmd(addDays(monday, i)));
-  const goWeek = (d: Date | null) =>
+  const goWeek = (d: Date | null) => {
+    if (embedded) {
+      onWeek?.(d ? toYmd(mondayOf(d)) : undefined);
+      return;
+    }
     void navigate({
       to: "/service/board",
       search: d ? { week: toYmd(mondayOf(d)) } : {},
       replace: true,
     });
+  };
 
   const [search, setSearch] = useState("");
   const [showOthers, setShowOthers] = useState(false);
@@ -301,32 +321,34 @@ function Board({ week }: { week?: string | undefined }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <CalendarDays className="h-6 w-6" /> Tech Board
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
-            unassign. Click a ticket to open it.
-          </p>
-          <div className="mt-2">
-            <ServiceTabs />
+      {!embedded && (
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+              <CalendarDays className="h-6 w-6" /> Tech Board
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
+              unassign. Click a ticket to open it.
+            </p>
+            <div className="mt-2">
+              <ServiceTabs />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline">
+              <Link to="/service">
+                <List className="mr-1 h-4 w-4" /> List
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link to="/service" search={{ new: 1 }}>
+                <Plus className="mr-1 h-4 w-4" /> New ticket
+              </Link>
+            </Button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline">
-            <Link to="/service">
-              <List className="mr-1 h-4 w-4" /> List
-            </Link>
-          </Button>
-          <Button asChild>
-            <Link to="/service" search={{ new: 1 }}>
-              <Plus className="mr-1 h-4 w-4" /> New ticket
-            </Link>
-          </Button>
-        </div>
-      </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <Button

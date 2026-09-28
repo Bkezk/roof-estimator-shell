@@ -4,14 +4,13 @@
  * technician sees Tickets only (the board and money are the office's).
  */
 import { Link, useRouterState } from "@tanstack/react-router";
-import { CalendarDays, Receipt, Wrench } from "lucide-react";
+import { Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { cn } from "@/lib/utils";
 
 const TABS = [
   { title: "Tickets", to: "/service", icon: Wrench, office: false },
-  { title: "Board", to: "/service/board", icon: CalendarDays, office: true },
   { title: "Invoices", to: "/service/invoices", icon: Receipt, office: true },
 ] as const;
 
