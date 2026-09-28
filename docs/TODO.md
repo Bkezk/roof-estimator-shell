@@ -154,6 +154,18 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
       Advantage's Estimate Review, and list any bid that differs by more than rounding with
       the reason. Done when every difference is explained by a price the owner changed on
       purpose.
+      **Storm call points (built Sep 28; owner: "just if there's been a major weather event in the
+      past week").** NOAA Storm Prediction Center daily CSVs (hail / wind / tornado, one file per
+      day) → `storm_reports`; `match_storm_reports()` flags every building within the radius of a
+      qualifying report in the window (`storm_settings`: 7 days, hail ≥ 1", wind ≥ 58 mph or UNK,
+      tornado any; 3 / 3 / 5 miles) into `buildings.last_storm_*`, prunes after 30 days, and notifies
+      Prospecting users when new buildings are flagged. Runs nightly from
+      `.github/workflows/storms.yml` (same APP_URL + CRON_SECRET secrets as reminders) and, throttled
+      to six hours, whenever a Prospecting user opens Buildings. Buildings page: Storms panel (by
+      county), Storm hit filter and sort, row badge, nearby reports on the building. Proof Sep 28:
+      the four real Kentucky reports of Sep 21 flagged 182 buildings. NASA EONET was checked and
+      rejected (only tropical-cyclone tracks and wildfires for Kentucky).
+
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and

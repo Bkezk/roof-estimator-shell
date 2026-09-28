@@ -1,0 +1,27 @@
+# Pulls the last week of NOAA Storm Prediction Center reports and flags the buildings under
+# them as call points, by calling the app's cron endpoint. Uses the same two repository secrets
+# as reminders.yml: APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable Cloud). Without
+# them the job skips; the app still refreshes, throttled, whenever a Prospecting user opens
+# the Buildings page.
+name: Storm call points
+
+on:
+  schedule:
+    - cron: "15 10 * * *" # 6:15am Eastern, after NOAA has posted yesterday's reports
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the storms endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL / CRON_SECRET not set; skipping"; exit 0
+          fi
+          curl -sS -f -X POST "$APP_URL/api/cron/storms" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" | tee out.json

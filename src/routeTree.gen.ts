@@ -34,6 +34,7 @@ import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
+import { Route as ApiCronStormsRouteImport } from './routes/api.cron.storms'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -160,6 +161,11 @@ const ApiCronRemindersRoute = ApiCronRemindersRouteImport.update({
   path: '/api/cron/reminders',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronStormsRoute = ApiCronStormsRouteImport.update({
+  id: '/api/cron/storms',
+  path: '/api/cron/storms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -187,6 +193,7 @@ export interface FileRoutesByFullPath {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
+  '/api/cron/storms': typeof ApiCronStormsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -214,6 +221,7 @@ export interface FileRoutesByTo {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
+  '/api/cron/storms': typeof ApiCronStormsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -242,6 +250,7 @@ export interface FileRoutesById {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
+  '/api/cron/storms': typeof ApiCronStormsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -271,6 +280,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
+    | '/api/cron/storms'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -298,6 +308,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
+    | '/api/cron/storms'
   id:
     | '__root__'
     | '/'
@@ -325,6 +336,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/reminders'
+    | '/api/cron/storms'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -350,6 +362,7 @@ export interface RootRouteChildren {
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
+  ApiCronStormsRoute: typeof ApiCronStormsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -529,6 +542,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronRemindersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/storms': {
+      id: '/api/cron/storms'
+      path: '/api/cron/storms'
+      fullPath: '/api/cron/storms'
+      preLoaderRoute: typeof ApiCronStormsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -570,6 +590,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,
+  ApiCronStormsRoute: ApiCronStormsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -837,6 +837,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      building_storm_hits: {
+        Row: { building_id: string; distance_mi: number; report_id: number };
+        Insert: { building_id: string; distance_mi: number; report_id: number };
+        Update: { building_id?: string; distance_mi?: number; report_id?: number };
+        Relationships: [
+          {
+            foreignKeyName: "building_storm_hits_building_id_fkey";
+            columns: ["building_id"];
+            isOneToOne: false;
+            referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "building_storm_hits_report_id_fkey";
+            columns: ["report_id"];
+            isOneToOne: false;
+            referencedRelation: "storm_reports";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       buildings: {
         Row: {
           address1: string;
@@ -878,6 +899,10 @@ export type Database = {
           updated_at: string;
           roof_year: number | null;
           year_built: number | null;
+          last_storm_at: string | null;
+          last_storm_kind: string | null;
+          last_storm_magnitude: number | null;
+          last_storm_miles: number | null;
           zip: string | null;
         };
         Insert: {
@@ -920,6 +945,10 @@ export type Database = {
           updated_at?: string;
           roof_year?: number | null;
           year_built?: number | null;
+          last_storm_at?: string | null;
+          last_storm_kind?: string | null;
+          last_storm_magnitude?: number | null;
+          last_storm_miles?: number | null;
           zip?: string | null;
         };
         Update: {
@@ -962,6 +991,10 @@ export type Database = {
           updated_at?: string;
           roof_year?: number | null;
           year_built?: number | null;
+          last_storm_at?: string | null;
+          last_storm_kind?: string | null;
+          last_storm_magnitude?: number | null;
+          last_storm_miles?: number | null;
           zip?: string | null;
         };
         Relationships: [];
@@ -2713,6 +2746,93 @@ export type Database = {
         };
         Relationships: [];
       };
+      storm_reports: {
+        Row: {
+          comments: string | null;
+          county: string | null;
+          fetched_at: string;
+          id: number;
+          kind: string;
+          lat: number;
+          lng: number;
+          location: string | null;
+          magnitude: number | null;
+          report_date: string;
+          report_time: string;
+          state: string;
+        };
+        Insert: {
+          comments?: string | null;
+          county?: string | null;
+          fetched_at?: string;
+          id?: number;
+          kind: string;
+          lat: number;
+          lng: number;
+          location?: string | null;
+          magnitude?: number | null;
+          report_date: string;
+          report_time?: string;
+          state: string;
+        };
+        Update: {
+          comments?: string | null;
+          county?: string | null;
+          fetched_at?: string;
+          id?: number;
+          kind?: string;
+          lat?: number;
+          lng?: number;
+          location?: string | null;
+          magnitude?: number | null;
+          report_date?: string;
+          report_time?: string;
+          state?: string;
+        };
+        Relationships: [];
+      };
+      storm_settings: {
+        Row: {
+          hail_radius_mi: number;
+          id: number;
+          last_fetch_at: string | null;
+          last_fetch_note: string | null;
+          min_hail_in: number;
+          min_wind_mph: number;
+          states: string[];
+          tornado_radius_mi: number;
+          updated_at: string;
+          wind_radius_mi: number;
+          window_days: number;
+        };
+        Insert: {
+          hail_radius_mi?: number;
+          id?: number;
+          last_fetch_at?: string | null;
+          last_fetch_note?: string | null;
+          min_hail_in?: number;
+          min_wind_mph?: number;
+          states?: string[];
+          tornado_radius_mi?: number;
+          updated_at?: string;
+          wind_radius_mi?: number;
+          window_days?: number;
+        };
+        Update: {
+          hail_radius_mi?: number;
+          id?: number;
+          last_fetch_at?: string | null;
+          last_fetch_note?: string | null;
+          min_hail_in?: number;
+          min_wind_mph?: number;
+          states?: string[];
+          tornado_radius_mi?: number;
+          updated_at?: string;
+          wind_radius_mi?: number;
+          window_days?: number;
+        };
+        Relationships: [];
+      };
       takeoffs: {
         Row: {
           bid_id: string | null;
@@ -3051,6 +3171,17 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
       stamp_dispatch: { Args: never; Returns: undefined };
+      building_county_counts_storm: { Args: never; Returns: { county: string; n: number }[] };
+      match_storm_reports: {
+        Args: never;
+        Returns: { reports_in_window: number; new_hits: number; buildings_flagged: number }[];
+      };
+      miles_between: {
+        Args: { lat1: number; lng1: number; lat2: number; lng2: number };
+        Returns: number;
+      };
+      prospect_user_ids: { Args: never; Returns: string[] };
+      stamp_storm_fetch: { Args: { note: string }; Returns: undefined };
       crm_untouched: {
         Args: never;
         Returns: {

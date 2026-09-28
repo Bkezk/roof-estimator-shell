@@ -156,14 +156,22 @@ export const listBuildings = createServerFn({ method: "GET" })
         /** Only buildings whose roof age nobody knows yet. */
         ageUnknown: z.boolean().optional(),
         minSqFt: z.number().int().min(0).optional(),
-        sort: z.enum(["recent", "biggest", "oldest"]).optional(),
+        /** Only buildings hit by a storm report in the window (owner, Sep 28: call points). */
+        stormHit: z.boolean().optional(),
+        sort: z.enum(["recent", "biggest", "oldest", "storm"]).optional(),
       })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }): Promise<BuildingRow[]> => {
     await readAccess(context);
     let q = context.supabase.from("buildings").select("*").is("deleted_at", null).limit(500);
-    if (data.sort === "biggest") {
+    if (data.stormHit) q = q.not("last_storm_at", "is", null);
+    if (data.sort === "storm") {
+      q = q
+        .order("last_storm_at", { ascending: false, nullsFirst: false })
+        .order("last_storm_magnitude", { ascending: false, nullsFirst: false })
+        .order("last_storm_miles", { ascending: true, nullsFirst: false });
+    } else if (data.sort === "biggest") {
       q = q.order("roof_sqft", { ascending: false, nullsFirst: false });
     } else if (data.sort === "oldest") {
       q = q
