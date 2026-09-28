@@ -27,6 +27,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { ServiceTabs } from "@/components/service/service-tabs";
+import { MaterialsSection } from "@/components/service/materials-section";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -334,24 +336,14 @@ function ServiceList() {
             <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
               <Wrench className="h-6 w-6" /> Service tickets
             </h1>
-            {officeOrAdmin && toInvoiceCount > 0 && (
-              <Link
-                to="/service/invoices"
-                search={{ tab: "to-invoice" }}
-                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                title="Done tickets waiting to be invoiced"
-              >
-                <Badge className="gap-1 px-2 py-0.5 text-xs hover:bg-primary/80">
-                  <Receipt className="h-3.5 w-3.5" aria-hidden />
-                  {toInvoiceCount} to invoice
-                </Badge>
-              </Link>
-            )}
           </div>
           <p className="text-sm text-muted-foreground">
             Repair calls: who, where, which technician and when. A Done ticket is invoiced from the
             ticket itself.
           </p>
+          <div className="mt-2">
+            <ServiceTabs toInvoice={officeOrAdmin ? toInvoiceCount : 0} />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild size="lg" variant="outline" className="text-base">
@@ -1506,7 +1498,13 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
       {job && officeOrAdmin && <InvoiceBlock job={job} />}
 
-      {job && <MaterialsUsed jobId={job.id} canLog={can("inventory")} />}
+      {job &&
+        (can("service") || can("inventory") || can("estimate") ? (
+          // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
+          <MaterialsSection jobId={job.id} />
+        ) : (
+          <MaterialsUsed jobId={job.id} canLog={false} />
+        ))}
 
       {job && <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />}
 

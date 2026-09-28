@@ -16,6 +16,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { FileDown, Loader2, Receipt } from "lucide-react";
+import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
 import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
@@ -140,6 +141,9 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
           <p className="text-sm text-muted-foreground">
             One per ticket; open a row to edit, send or mark it paid on its ticket.
           </p>
+          <div className="mt-2">
+            <ServiceTabs />
+          </div>
         </div>
         <Button size="lg" variant="outline" onClick={() => setExportOpen(true)}>
           <FileDown className="mr-2 h-5 w-5" /> Export to Sage

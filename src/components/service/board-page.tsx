@@ -13,6 +13,7 @@ import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ServiceTabs } from "@/components/service/service-tabs";
 import { toast } from "sonner";
 import {
   CalendarDays,
@@ -309,6 +310,9 @@ function Board({ week }: { week?: string | undefined }) {
             Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
             unassign. Click a ticket to open it.
           </p>
+          <div className="mt-2">
+            <ServiceTabs />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline">

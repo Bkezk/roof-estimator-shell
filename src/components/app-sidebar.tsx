@@ -63,6 +63,8 @@ type ServiceItem = {
   exact?: boolean;
   /** Hidden for a technician who is not an admin (dispatching is the office's). */
   office?: boolean;
+  /** Paths under `url` that belong to another item (Today has its own entry). */
+  except?: string[];
 };
 const todayItem: ServiceItem = {
   title: "Today",
@@ -79,23 +81,10 @@ const followupsItem: ServiceItem = {
   icon: BellRing,
   page: null,
 };
+// Owner, Sep 28: Board and Invoices are tabs on the Service page, not menu entries.
 const serviceItems: ServiceItem[] = [
   todayItem,
-  {
-    title: "Board",
-    url: "/service/board",
-    icon: CalendarDays,
-    page: "service",
-    office: true,
-  },
-  { title: "Tickets", url: "/service", icon: Wrench, page: "service", exact: true },
-  {
-    title: "Invoices",
-    url: "/service/invoices",
-    icon: Receipt,
-    page: "service",
-    office: true,
-  },
+  { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
   followupsItem,
 ];
 const customerItems: ServiceItem[] = [
@@ -332,7 +321,11 @@ export function AppSidebar() {
         <SidebarMenuItem key={item.title}>
           <SidebarMenuButton
             asChild
-            isActive={item.exact ? pathname === item.url : isActive(item.url)}
+            isActive={
+              item.exact
+                ? pathname === item.url
+                : isActive(item.url) && !(item.except ?? []).some((p) => pathname.startsWith(p))
+            }
             tooltip={item.title}
           >
             <Link to={item.url}>
