@@ -795,6 +795,33 @@ describe("§12.9 corrections", () => {
   });
 });
 
+describe("parapet wall-tab fasteners by system (legacy Parapet.EdgeFasteners, §8.5)", () => {
+  type ParapetInput = import("./bid-builder").ParapetInput;
+  // The owner's Sep 28 wall: 80 ft, one piece, 6" skirt + 36" vertical (42" girth).
+  const wall: ParapetInput = {
+    id: "p1",
+    name: "Parapet 1",
+    lengthFt: 80,
+    pieces: 1,
+    heightBand: "",
+    deckType: "Steel",
+    predrill: false,
+    canted: false,
+    girthInches: 42,
+    skirtInches: 6,
+    cantInches: 0,
+    verticalInches: 36,
+    wallTopInches: 0,
+    dropInches: 0,
+  };
+  it('Duro-Last mechanical: one tab row at 36" → one fastener per adjusted foot = 82 (matches Bid-Advantage)', () => {
+    expect(parapetEdgeFastenersCount([wall], "Duro-Last", "mechanical")).toBe(82);
+  });
+  it("Duro-Bond: AdjustedHeight is feet — Round(82 / 1.5 × 3.5 / 2) = 96, not the 1,148 the inch port drew", () => {
+    expect(parapetEdgeFastenersCount([wall], "Duro-Bond", "mechanical")).toBe(96);
+  });
+});
+
 describe("parapet Height after tabs (legacy frmParapets.Recalculate RemainingHeight, §19)", () => {
   type ParapetInput = import("./bid-builder").ParapetInput;
   const wall = (over: Partial<ParapetInput>): ParapetInput => ({

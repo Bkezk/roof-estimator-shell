@@ -9,7 +9,7 @@ export const PER_DIEM_ITEMS = [
   "Supervision",
   "Boom truck",
   "Fork lift",
-  "Equipment",
+  "Equipter",
   "Rental equipment",
   "Fuel",
   "Dumpsters / trash",
@@ -41,7 +41,10 @@ export const emptyPerDiemChart = (): PerDiemChart => ({
   items: PER_DIEM_ITEMS.map((label) => ({ label, checked: false, price: 0 })),
 });
 
-/** Older saved charts get any heading added since; unknown headings are kept. */
+/** Headings renamed since bids were saved with them (owner, Sep 28: the Equipter trailer). */
+const RENAMED_ITEMS: Record<string, string> = { Equipment: "Equipter" };
+
+/** Older saved charts get any heading added since (renamed ones migrate); unknown headings are kept. */
 export function normalizePerDiemChart(raw: unknown): PerDiemChart {
   const c = emptyPerDiemChart();
   if (!raw || typeof raw !== "object") return c;
@@ -54,7 +57,8 @@ export function normalizePerDiemChart(raw: unknown): PerDiemChart {
   for (const it of saved) {
     if (it && typeof it === "object" && typeof (it as PerDiemChartItem).label === "string") {
       const x = it as PerDiemChartItem;
-      byLabel.set(x.label, { label: x.label, checked: !!x.checked, price: num(x.price) });
+      const label = RENAMED_ITEMS[x.label] ?? x.label;
+      byLabel.set(label, { label, checked: !!x.checked, price: num(x.price) });
     }
   }
   c.items = c.items.map((it) => byLabel.get(it.label) ?? it);

@@ -432,7 +432,7 @@ const PER_DIEM_KEYWORDS: Array<[RegExp, (typeof PER_DIEM_ITEMS)[number]]> = [
   [/boom/i, "Boom truck"],
   [/fork/i, "Fork lift"],
   [/rental/i, "Rental equipment"],
-  [/equip|deliver/i, "Equipment"],
+  [/equip/i, "Equipter"],
   [/fuel/i, "Fuel"],
   [/trash|dumpster|dispos/i, "Dumpsters / trash"],
   [/bond/i, "Security bond"],

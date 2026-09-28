@@ -641,7 +641,11 @@ export function parapetEdgeFasteners(
           ? bankersRound((Math.ceil(adjHeight / 24) * adjLen) / in2Ft(15), 0)
           : bankersRound(((Math.floor(cant + vertical) / 60) * adjLen) / in2Ft(15), 0);
     } else if (roofSystem === "Duro-Bond") {
-      total += bankersRound((adjLen / 1.5) * (adjHeight / 2), 0);
+      // Legacy AdjustedHeight is the ceiled girth IN FEET (rva 0x420ac, In2Ft(Ceil(girth)) — the
+      // same value the membrane sq ft uses): a plate every 18" along the wall in rows two feet
+      // apart. Ported in inches until Sep 28, which drew a row every 2" (1,148 on an 80 ft ×
+      // 42" wall instead of 96).
+      total += bankersRound((adjLen / 1.5) * (in2Ft(adjHeight) / 2), 0);
     } else if (roofSystem === "Duro-Fleece") {
       total += bankersRound((((cant + vertical) / 60) * adjLen) / in2Ft(15), 0);
     }

@@ -27,6 +27,20 @@ describe("per diem chart", () => {
     expect(checkedPerDiemItems(c).map((i) => i.label)).toEqual(["Mobilization"]);
     expect(perDiemChartTotal(c)).toBe(500);
   });
+  it("migrates a chart saved under the old Equipment heading to Equipter, without a duplicate", () => {
+    const c = normalizePerDiemChart({
+      men: 2,
+      days: 2,
+      items: [{ label: "Equipment", checked: true, price: 350 }],
+    });
+    expect(c.items.filter((i) => i.label === "Equipment")).toHaveLength(0);
+    expect(c.items.find((i) => i.label === "Equipter")).toEqual({
+      label: "Equipter",
+      checked: true,
+      price: 350,
+    });
+    expect(c.items.map((i) => i.label)).toEqual([...PER_DIEM_ITEMS]);
+  });
   it("normalizes an older saved chart: keeps its values, adds new headings, drops junk", () => {
     const c = normalizePerDiemChart({
       men: 4,

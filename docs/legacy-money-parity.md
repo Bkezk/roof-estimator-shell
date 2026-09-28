@@ -3649,3 +3649,18 @@ on those decks unless the contractor enters a custom value; the web does the sam
 inline under the Labor link, naming the deck / type / section and pointing at Estimate Pricing
 → Tearoff Times. Disposal units are separate: they come from the entered Thickness (in), so a
 0" thickness gives 0 units.
+
+### 22.54 Duro-Bond parapet wall-tab fasteners: AdjustedHeight is feet (2026-09-28)
+
+Owner's bid (80 ft wall, 1 piece, 6" skirt + 36" vertical, Duro-Bond plates) showed **1,148**
+Fasteners Needed against Bid-Advantage's 82 on the same wall set to Duro-Last fasteners. The 82
+is the §8.5 durolast tab rule (one row at 36", one fastener per adjusted foot) and the web port
+reproduces it. The 1,148 was a port bug: `parapetEdgeFasteners` built `AdjustedHeight` in
+inches (42) where the legacy routine (rva 0x420ac, §8.1) is `In2Ft(Ceil(girth))` = 3.5 ft — the
+same value the membrane sq ft uses (3.5 × 82 = 287.00 on both apps' screens). The durobond rule
+`Round(AdjustedLength / 1.5 × AdjustedHeight / 2)` is therefore a plate every 18" in rows two
+feet apart (Duro-Bond manual, Parapet Fastening options 1 and 3: 18" o.c., rows 24" o.c.), =
+**96** for this wall, not a row every 2". Fixed in the engine with a test pinning 82 / 96.
+Open: the durotuff branch `Ceil(AdjustedHeight/24)` is recorded without an Ft2In step; with a
+feet-valued AdjustedHeight that is one row for any wall under 24 ft. Left as ported (inches)
+until re-read against the binary.
