@@ -1,0 +1,26 @@
+# Pulls the State of KY planroom and Louisville's commercial permits into the Leads page, by
+# calling the app's cron endpoint. Uses the same two repository secrets as reminders.yml:
+# APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable Cloud). Without them the job
+# skips; the app still refreshes, throttled, whenever a Prospecting user opens Leads.
+name: Construction leads
+
+on:
+  schedule:
+    - cron: "45 10 * * *" # 6:45am Eastern
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the leads endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL / CRON_SECRET not set; skipping"; exit 0
+          fi
+          curl -sS -f -X POST "$APP_URL/api/cron/leads" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" | tee out.json

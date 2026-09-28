@@ -30,9 +30,11 @@ import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as ProspectLeadsRouteImport } from './routes/prospect.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
+import { Route as ApiCronLeadsRouteImport } from './routes/api.cron.leads'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
 import { Route as ApiCronStormsRouteImport } from './routes/api.cron.storms'
 
@@ -141,6 +143,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProspectLeadsRoute = ProspectLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => ProspectRoute,
+} as any)
 const ServiceBoardRoute = ServiceBoardRouteImport.update({
   id: '/board',
   path: '/board',
@@ -155,6 +162,11 @@ const ServiceTodayRoute = ServiceTodayRouteImport.update({
   id: '/today',
   path: '/today',
   getParentRoute: () => ServiceRoute,
+} as any)
+const ApiCronLeadsRoute = ApiCronLeadsRouteImport.update({
+  id: '/api/cron/leads',
+  path: '/api/cron/leads',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiCronRemindersRoute = ApiCronRemindersRouteImport.update({
   id: '/api/cron/reminders',
@@ -178,7 +190,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRoute
+  '/prospect': typeof ProspectRouteWithChildren
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -189,9 +201,11 @@ export interface FileRoutesByFullPath {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -206,7 +220,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRoute
+  '/prospect': typeof ProspectRouteWithChildren
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -217,9 +231,11 @@ export interface FileRoutesByTo {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -235,7 +251,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRoute
+  '/prospect': typeof ProspectRouteWithChildren
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -246,9 +262,11 @@ export interface FileRoutesById {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
+  '/api/cron/leads': typeof ApiCronLeadsRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -276,9 +294,11 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/api/cron/leads'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   fileRoutesByTo: FileRoutesByTo
@@ -304,9 +324,11 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/api/cron/leads'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   id:
@@ -332,9 +354,11 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
+    | '/api/cron/leads'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   fileRoutesById: FileRoutesById
@@ -350,7 +374,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
-  ProspectRoute: typeof ProspectRoute
+  ProspectRoute: typeof ProspectRouteWithChildren
   ServiceRoute: typeof ServiceRouteWithChildren
   TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
@@ -361,6 +385,7 @@ export interface RootRouteChildren {
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  ApiCronLeadsRoute: typeof ApiCronLeadsRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
   ApiCronStormsRoute: typeof ApiCronStormsRoute
 }
@@ -514,6 +539,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/prospect/leads': {
+      id: '/prospect/leads'
+      path: '/leads'
+      fullPath: '/prospect/leads'
+      preLoaderRoute: typeof ProspectLeadsRouteImport
+      parentRoute: typeof ProspectRoute
+    }
     '/service/board': {
       id: '/service/board'
       path: '/board'
@@ -535,6 +567,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServiceTodayRouteImport
       parentRoute: typeof ServiceRoute
     }
+    '/api/cron/leads': {
+      id: '/api/cron/leads'
+      path: '/api/cron/leads'
+      fullPath: '/api/cron/leads'
+      preLoaderRoute: typeof ApiCronLeadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cron/reminders': {
       id: '/api/cron/reminders'
       path: '/api/cron/reminders'
@@ -551,6 +590,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ProspectRouteChildren {
+  ProspectLeadsRoute: typeof ProspectLeadsRoute
+}
+
+const ProspectRouteChildren: ProspectRouteChildren = {
+  ProspectLeadsRoute: ProspectLeadsRoute,
+}
+
+const ProspectRouteWithChildren = ProspectRoute._addFileChildren(
+  ProspectRouteChildren,
+)
 
 interface ServiceRouteChildren {
   ServiceBoardRoute: typeof ServiceBoardRoute
@@ -578,7 +629,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
-  ProspectRoute: ProspectRoute,
+  ProspectRoute: ProspectRouteWithChildren,
   ServiceRoute: ServiceRouteWithChildren,
   TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
@@ -589,6 +640,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminServiceRatesRoute: AdminServiceRatesRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
+  ApiCronLeadsRoute: ApiCronLeadsRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,
   ApiCronStormsRoute: ApiCronStormsRoute,
 }

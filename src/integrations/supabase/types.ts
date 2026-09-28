@@ -2746,6 +2746,143 @@ export type Database = {
         };
         Relationships: [];
       };
+      lead_settings: {
+        Row: {
+          id: number;
+          last_fetch_at: string | null;
+          last_fetch_note: string | null;
+          louisville_days: number;
+          louisville_min_sqft: number;
+          louisville_types: string[];
+          roof_keywords: string[];
+          updated_at: string;
+        };
+        Insert: {
+          id?: number;
+          last_fetch_at?: string | null;
+          last_fetch_note?: string | null;
+          louisville_days?: number;
+          louisville_min_sqft?: number;
+          louisville_types?: string[];
+          roof_keywords?: string[];
+          updated_at?: string;
+        };
+        Update: {
+          id?: number;
+          last_fetch_at?: string | null;
+          last_fetch_note?: string | null;
+          louisville_days?: number;
+          louisville_min_sqft?: number;
+          louisville_types?: string[];
+          roof_keywords?: string[];
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      leads: {
+        Row: {
+          address: string | null;
+          agency: string | null;
+          bid_at: string | null;
+          building_id: string | null;
+          city: string | null;
+          contractor: string | null;
+          county: string | null;
+          external_id: string;
+          first_seen_at: string;
+          gone_at: string | null;
+          id: string;
+          is_roof: boolean;
+          issued_on: string | null;
+          last_seen_at: string;
+          lat: number | null;
+          lng: number | null;
+          location: string | null;
+          note: string | null;
+          prebid_at: string | null;
+          project_cost: number | null;
+          project_type: string | null;
+          raw: Json | null;
+          source: string;
+          sqft: number | null;
+          status: string;
+          status_at: string | null;
+          status_by_name: string | null;
+          title: string;
+          url: string | null;
+        };
+        Insert: {
+          address?: string | null;
+          agency?: string | null;
+          bid_at?: string | null;
+          building_id?: string | null;
+          city?: string | null;
+          contractor?: string | null;
+          county?: string | null;
+          external_id: string;
+          first_seen_at?: string;
+          gone_at?: string | null;
+          id?: string;
+          is_roof?: boolean;
+          issued_on?: string | null;
+          last_seen_at?: string;
+          lat?: number | null;
+          lng?: number | null;
+          location?: string | null;
+          note?: string | null;
+          prebid_at?: string | null;
+          project_cost?: number | null;
+          project_type?: string | null;
+          raw?: Json | null;
+          source: string;
+          sqft?: number | null;
+          status?: string;
+          status_at?: string | null;
+          status_by_name?: string | null;
+          title: string;
+          url?: string | null;
+        };
+        Update: {
+          address?: string | null;
+          agency?: string | null;
+          bid_at?: string | null;
+          building_id?: string | null;
+          city?: string | null;
+          contractor?: string | null;
+          county?: string | null;
+          external_id?: string;
+          first_seen_at?: string;
+          gone_at?: string | null;
+          id?: string;
+          is_roof?: boolean;
+          issued_on?: string | null;
+          last_seen_at?: string;
+          lat?: number | null;
+          lng?: number | null;
+          location?: string | null;
+          note?: string | null;
+          prebid_at?: string | null;
+          project_cost?: number | null;
+          project_type?: string | null;
+          raw?: Json | null;
+          source?: string;
+          sqft?: number | null;
+          status?: string;
+          status_at?: string | null;
+          status_by_name?: string | null;
+          title?: string;
+          url?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "leads_building_id_fkey";
+            columns: ["building_id"];
+            isOneToOne: false;
+            referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       storm_reports: {
         Row: {
           comments: string | null;
@@ -3182,6 +3319,7 @@ export type Database = {
       };
       prospect_user_ids: { Args: never; Returns: string[] };
       stamp_storm_fetch: { Args: { note: string }; Returns: undefined };
+      stamp_lead_fetch: { Args: { note: string }; Returns: undefined };
       crm_untouched: {
         Args: never;
         Returns: {

@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Building2,
+  Radar,
   Ruler,
   PanelLeftClose,
   PanelLeftOpen,
@@ -79,7 +80,11 @@ const customerItems: ServiceItem[] = [
   { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
-const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
+const prospectItems = [
+  { title: "Buildings", url: "/prospect", icon: Building2 },
+  // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
+  { title: "Leads", url: "/prospect/leads", icon: Radar },
+];
 // Admin (role) only: who can sign in and which pages each person may open, the reminder and
 // untouched-work rules, and the service labor rates (owner, Sep 28: their own pages under
 // Admin, not tabs of Estimate Pricing › General).
