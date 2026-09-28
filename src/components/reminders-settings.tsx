@@ -4,7 +4,7 @@
  * now" button (the same lazy dispatcher the app calls on load; it skips a pass when the last one
  * ran under ten minutes ago). Admin only — the server refuses everyone else.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -17,11 +17,13 @@ import {
   setCrmSettings,
   type CrmSettingsInput,
 } from "@/lib/followups.functions";
+import { listTechnicians } from "@/lib/auth.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -41,17 +43,49 @@ const whenTime = (iso: string) =>
     minute: "2-digit",
   });
 
-type Key = keyof CrmSettingsInput;
-const FIELDS: { key: Key; label: string; min: number }[] = [
-  { key: "opportunity_close_days", label: "Opportunities should close within N days", min: 1 },
-  { key: "opportunity_first_days", label: "First opportunity reminder after N days", min: 0 },
-  { key: "opportunity_every_days", label: "Then every N days", min: 1 },
+/** The settings that are a number of days (the escalation ones are not). */
+type NumericKey = {
+  [K in keyof CrmSettingsInput]-?: CrmSettingsInput[K] extends number ? K : never;
+}[keyof CrmSettingsInput];
+type Field = {
+  key: NumericKey;
+  label: string;
+  min: number;
+  group: "opportunity" | "ticket" | "untouched";
+};
+const FIELDS: Field[] = [
+  {
+    key: "opportunity_close_days",
+    label: "Opportunities should close within N days",
+    min: 1,
+    group: "opportunity",
+  },
+  {
+    key: "opportunity_first_days",
+    label: "First opportunity reminder after N days",
+    min: 0,
+    group: "opportunity",
+  },
+  { key: "opportunity_every_days", label: "Then every N days", min: 1, group: "opportunity" },
   {
     key: "ticket_first_days",
     label: "First ticket reminder after N days (unscheduled tickets)",
     min: 0,
+    group: "ticket",
   },
-  { key: "ticket_every_days", label: "Then every N days", min: 1 },
+  { key: "ticket_every_days", label: "Then every N days", min: 1, group: "ticket" },
+  {
+    key: "ticket_untouched_days",
+    label: "Ticket counts as untouched after N days with no contact",
+    min: 0,
+    group: "untouched",
+  },
+  {
+    key: "opportunity_untouched_days",
+    label: "Opportunity counts as untouched after N days",
+    min: 0,
+    group: "untouched",
+  },
 ];
 const EMPTY: CrmSettingsInput = {
   opportunity_close_days: 0,
@@ -59,6 +93,10 @@ const EMPTY: CrmSettingsInput = {
   opportunity_every_days: 0,
   ticket_first_days: 0,
   ticket_every_days: 0,
+  ticket_untouched_days: 0,
+  opportunity_untouched_days: 0,
+  escalate_to_admins: false,
+  escalate_user_ids: [],
 };
 
 export function RemindersSettings() {
@@ -67,9 +105,17 @@ export function RemindersSettings() {
   const setFn = useServerFn(setCrmSettings);
   const healthFn = useServerFn(notificationHealth);
   const runFn = useServerFn(dispatchRemindersIfDue);
+  const techFn = useServerFn(listTechnicians);
 
   const settings = useQuery({ queryKey: ["crm-settings"], queryFn: () => getFn() });
   const health = useQuery({ queryKey: ["notification-health"], queryFn: () => healthFn() });
+  // The people untouched items can escalate to (technician_options, same list as the assignee
+  // pickers).
+  const users = useQuery({
+    queryKey: ["technicians"],
+    queryFn: () => techFn(),
+    staleTime: 5 * 60_000,
+  });
 
   const [draft, setDraft] = useState<CrmSettingsInput>(EMPTY);
   useEffect(() => {
@@ -81,8 +127,26 @@ export function RemindersSettings() {
         opportunity_every_days: s.opportunity_every_days,
         ticket_first_days: s.ticket_first_days,
         ticket_every_days: s.ticket_every_days,
+        ticket_untouched_days: s.ticket_untouched_days,
+        opportunity_untouched_days: s.opportunity_untouched_days,
+        escalate_to_admins: s.escalate_to_admins,
+        escalate_user_ids: s.escalate_user_ids ?? [],
       });
   }, [settings.data]);
+  const toggleEscalate = (id: string) =>
+    setDraft((d) => ({
+      ...d,
+      escalate_user_ids: d.escalate_user_ids.includes(id)
+        ? d.escalate_user_ids.filter((x) => x !== id)
+        : [...d.escalate_user_ids, id],
+    }));
+  const userOptions = useMemo(() => {
+    const all = [...(users.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    // Keep someone already picked listed (and removable) even if they left the roster.
+    for (const id of draft.escalate_user_ids)
+      if (!all.some((u) => u.id === id)) all.push({ id, name: "Former user", technician: false });
+    return all;
+  }, [users.data, draft.escalate_user_ids]);
   const invalid = FIELDS.filter((f) => !Number.isInteger(draft[f.key]) || draft[f.key] < f.min);
 
   const save = useMutation({
@@ -104,6 +168,17 @@ export function RemindersSettings() {
     },
     onError: (e) => toast.error(`Could not run the reminders: ${errText(e)}`),
   });
+
+  const daysFields = (group: Field["group"]) =>
+    FIELDS.filter((f) => f.group === group).map((f) => (
+      <DaysField
+        key={f.key}
+        field={f}
+        value={draft[f.key]}
+        invalid={invalid.includes(f)}
+        onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+      />
+    ));
 
   const submit = () => {
     if (invalid.length) {
@@ -144,29 +219,64 @@ export function RemindersSettings() {
             >
               <div className="grid gap-4 sm:grid-cols-2">
                 <p className="text-sm font-semibold sm:col-span-2">Opportunities</p>
-                {FIELDS.slice(0, 3).map((f) => (
-                  <DaysField
-                    key={f.key}
-                    field={f}
-                    value={draft[f.key]}
-                    invalid={invalid.includes(f)}
-                    onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
-                  />
-                ))}
+                {daysFields("opportunity")}
                 <p className="pt-2 text-sm font-semibold sm:col-span-2">Tickets</p>
-                {FIELDS.slice(3).map((f) => (
-                  <DaysField
-                    key={f.key}
-                    field={f}
-                    value={draft[f.key]}
-                    invalid={invalid.includes(f)}
-                    onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
-                  />
-                ))}
+                {daysFields("ticket")}
               </div>
               <p className="text-xs text-muted-foreground">
                 A scheduled ticket is due on its scheduled day and reminds from then.
               </p>
+
+              <div className="space-y-4 rounded-lg border p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Untouched work</p>
+                  <p className="text-sm text-muted-foreground">
+                    Untouched = assigned but no contact logged and not started. Past the limit the
+                    item turns red in the lists and its reminder also goes to the people below.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">{daysFields("untouched")}</div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Switch
+                    checked={draft.escalate_to_admins}
+                    onCheckedChange={(v) => setDraft((d) => ({ ...d, escalate_to_admins: v }))}
+                  />
+                  Escalate untouched items to every admin
+                </label>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">Also escalate to</p>
+                  {users.error ? (
+                    <p className="text-xs text-destructive">
+                      Could not load the users: {errText(users.error)}
+                    </p>
+                  ) : !users.data ? (
+                    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the users…
+                    </p>
+                  ) : userOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No users to pick.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {userOptions.map((u) => {
+                        const on = draft.escalate_user_ids.includes(u.id);
+                        return (
+                          <Button
+                            key={u.id}
+                            type="button"
+                            size="sm"
+                            variant={on ? "default" : "outline"}
+                            className="h-7 rounded-full px-3 text-xs"
+                            aria-pressed={on}
+                            onClick={() => toggleEscalate(u.id)}
+                          >
+                            {u.name}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
               <Button type="submit" disabled={save.isPending}>
                 {save.isPending ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -283,7 +393,7 @@ export function RemindersSettings() {
 }
 
 function DaysField(props: {
-  field: { key: Key; label: string; min: number };
+  field: Field;
   value: number;
   invalid: boolean;
   onChange: (v: number) => void;

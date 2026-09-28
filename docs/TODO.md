@@ -37,7 +37,7 @@ the bottom with the commit that closed them.
    settings, the installable app, contacts, the tech phone flow tables and functions, the
    Tech Board's assign call; screens for Today / close-out / Board / contacts in progress.
    Owner setup for reminders is design §13 (RESEND_API_KEY, NOTIFY_FROM_EMAIL, APP_URL in
-   Lovable Cloud; APP_URL + CRON_SECRET GitHub secrets). **Phase C (Sep 27):** invoices from tickets, PDF, send, mark paid, Sage CSV, rates admin
+   Lovable Cloud; APP_URL + CRON_SECRET GitHub secrets). **Phase C (Sep 27):** invoices from tickets, PDF, send, mark paid, Sage CSV, rates admin. **Untouched work (Sep 28, design §15):** contact log, assignment dates, Needs Action strip, By-person table, escalation to admins
    (design §14). Still open: the CenterPoint CSV
    import (needs the owner's exports of Companies, Properties, Contacts, repair templates,
    materials), the tech phone flow's offline photo queue

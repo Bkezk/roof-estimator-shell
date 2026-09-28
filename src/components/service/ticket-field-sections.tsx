@@ -16,6 +16,7 @@ import {
   MessageSquare,
   PenLine,
   Phone,
+  PhoneCall,
   Truck,
   Wrench,
 } from "lucide-react";
@@ -335,9 +336,17 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
 }
 
 const FIELD_LABEL: Record<string, string> = { en_route: "En route", on_site: "On site" };
+/** A logged contact (crm_contact_log → timeline, meta.method). */
+const CONTACT_TEXT: Record<string, string> = {
+  called: "Called the customer",
+  texted: "Texted the customer",
+  emailed: "Emailed the customer",
+  visited: "Visited the customer",
+  other: "Contacted the customer",
+};
 
 function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
-  const meta = (e.meta ?? {}) as { role?: string };
+  const meta = (e.meta ?? {}) as { role?: string; method?: string };
   switch (e.kind) {
     case "stage":
       return {
@@ -352,6 +361,11 @@ function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
       };
     case "note":
       return { icon: MessageSquare, text: e.note ?? "" };
+    case "contact": {
+      const what = CONTACT_TEXT[meta.method ?? ""] ?? "Contacted the customer";
+      // The note (if any) reads on its own line (the row renders pre-line).
+      return { icon: PhoneCall, text: e.note ? `${what}\n${e.note}` : what };
+    }
     case "photo":
       return {
         icon: Camera,
@@ -420,7 +434,13 @@ function Timeline({ jobId }: { jobId: string }) {
               <li key={e.id} className="flex gap-2 text-sm">
                 <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
-                  <p className={e.kind === "note" ? "whitespace-pre-line" : ""}>{text}</p>
+                  <p
+                    className={
+                      e.kind === "note" || e.kind === "contact" ? "whitespace-pre-line" : ""
+                    }
+                  >
+                    {text}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {whenShort(e.at)}
                     {e.by_name ? ` · ${e.by_name}` : ""}

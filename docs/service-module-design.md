@@ -483,3 +483,28 @@ buttons, editable by hand), `repair_templates`, `service_job_repairs`, `service_
   and LINE rows per invoice, with the customer's external id) and stamps `sage_exported_at`.
   Reshape the columns once the Sage product is known (report §11 q1).
 - Technicians never see invoices (RLS).
+
+## 15. Untouched work (owner, Sep 28): seeing that people were contacted and jobs started
+
+The problem: tickets and opportunities get assigned and then sit, and nothing showed whether the
+customer was ever reached or the job ever started. Migration `20260928120000_untouched.sql`,
+applied live.
+
+- **Contact log** (`crm_contact_log`): one tap on a ticket or an opportunity — Called / Texted /
+  Emailed / Visited, optional note. The trigger stamps the item's `contacted_at`, moves an Open
+  opportunity to Contacted, and writes a `contact` event on the ticket timeline. Whoever may see
+  the item may log on it (a technician on their own tickets).
+- **Assignment date** (`assigned_at` on both tables) is stamped by trigger on every hand-over and
+  cleared when unassigned; existing assignments were backfilled from their last change.
+- **Started** = a ticket with a scheduled day, or en route / on site, or past Open; an
+  opportunity past Open. **Untouched** = assigned and neither started nor contacted, defined
+  once in `crm_untouched()` (SECURITY DEFINER with the item tables' read rules repeated, so a
+  technician gets their own, the office everyone's, and the cron's service role all).
+- **Limits** (`crm_settings.ticket_untouched_days` 2, `opportunity_untouched_days` 3, Admin ›
+  Settings › Reminders): before the limit a row says "No contact · assigned 1d ago"; at the limit
+  it turns red ("Untouched 4d"). A Needs Action strip lists them first on Service, Opportunities
+  and Follow-ups; Follow-ups has an admin By-person table (assigned / untouched / overdue).
+- **Escalation**: when the follow-up reminder of a red item fires, the same reminder pass also
+  notifies `escalation_recipients()` — every admin when `escalate_to_admins` is on, plus
+  `escalate_user_ids` — minus the assignee, on the follow-up's own cadence, until someone logs a
+  contact or starts it (`dispatchDueReminders` in `notify.server.ts`).

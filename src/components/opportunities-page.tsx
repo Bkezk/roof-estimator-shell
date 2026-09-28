@@ -19,6 +19,7 @@ import {
   ChevronRight,
   FilePlus2,
   Loader2,
+  Phone,
   Plus,
   Save,
   Target,
@@ -44,6 +45,14 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { CloseFollowupDialog, SnoozeMenu } from "@/components/followups-page";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
+import {
+  ContactLogList,
+  LogContactButtons,
+  NeedsActionStrip,
+  UntouchedBadge,
+  untouchedKey,
+} from "@/components/crm/contact-log";
+import { listUntouched, type UntouchedRow } from "@/lib/contact-log.functions";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -159,6 +168,20 @@ function OppList() {
     enabled: !!session,
   });
 
+  // Assigned opportunities with no contact logged and still Open (query key ["untouched"]).
+  const untouchedFn = useServerFn(listUntouched);
+  const untouchedQ = useQuery({
+    queryKey: ["untouched"],
+    queryFn: () => untouchedFn(),
+    enabled: !!session,
+  });
+  const untouched = useMemo(() => {
+    const m = new Map<string, UntouchedRow>();
+    for (const r of untouchedQ.data ?? [])
+      if (r.kind === "opportunity") m.set(untouchedKey(r.kind, r.item_id), r);
+    return m;
+  }, [untouchedQ.data]);
+
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [mine, setMine] = useState(false);
@@ -216,6 +239,8 @@ function OppList() {
           <Plus className="mr-2 h-5 w-5" /> New opportunity
         </Button>
       </div>
+
+      <NeedsActionStrip kinds={["opportunity"]} />
 
       {list.error ? (
         <p className="text-sm text-destructive">
@@ -312,7 +337,11 @@ function OppList() {
                     {open && (
                       <div id={`opp-group-${status}`} className="grid gap-3">
                         {rows.map((o) => (
-                          <OppListRow key={o.id} row={o} />
+                          <OppListRow
+                            key={o.id}
+                            row={o}
+                            untouched={untouched.get(untouchedKey("opportunity", o.id))}
+                          />
                         ))}
                       </div>
                     )}
@@ -327,7 +356,14 @@ function OppList() {
   );
 }
 
-function OppListRow({ row: o }: { row: OpportunityWithNames }) {
+function OppListRow({
+  row: o,
+  untouched,
+}: {
+  row: OpportunityWithNames;
+  /** Assigned with no contact logged and still Open (listUntouched). */
+  untouched?: UntouchedRow | undefined;
+}) {
   const status = asStatus(o.status);
   const meta = [
     o.assignee_name ?? "Unassigned",
@@ -350,6 +386,9 @@ function OppListRow({ row: o }: { row: OpportunityWithNames }) {
           <Badge variant={STATUS_BADGE[status]} className="px-1.5 py-0 text-[11px]">
             {OPP_STATUS_LABELS[status]}
           </Badge>
+          {untouched && (
+            <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
+          )}
         </div>
         {(o.account_name || o.description) && (
           <p className="text-sm">
@@ -637,6 +676,22 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           </p>
         )}
         {opp && <FollowupStrip opp={opp} status={status} />}
+        {opp && (
+          // Owner, Sep 28: log each call / text / email / visit. The first one moves an Open
+          // opportunity to Contacted (server side); the buttons refetch this opportunity so the
+          // status select shows it.
+          <section className="space-y-2 rounded-md border px-3 py-2 text-sm" aria-label="Contact">
+            <p className="flex items-center gap-1.5 font-medium">
+              <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Contact
+            </p>
+            <LogContactButtons
+              kind="opportunity"
+              itemId={opp.id}
+              onLogged={() => invalidate(opp.id)}
+            />
+            <ContactLogList kind="opportunity" itemId={opp.id} />
+          </section>
+        )}
       </div>
 
       <form

@@ -240,6 +240,11 @@ const settingsSchema = z.object({
   opportunity_every_days: z.number().int().min(1).max(365),
   ticket_first_days: z.number().int().min(0).max(365),
   ticket_every_days: z.number().int().min(1).max(365),
+  // Untouched limits and escalation (owner, Sep 28).
+  ticket_untouched_days: z.number().int().min(0).max(365),
+  opportunity_untouched_days: z.number().int().min(0).max(365),
+  escalate_to_admins: z.boolean(),
+  escalate_user_ids: z.array(z.string().uuid()).max(50),
 });
 export type CrmSettingsInput = z.input<typeof settingsSchema>;
 export const setCrmSettings = createServerFn({ method: "POST" })
@@ -261,24 +266,24 @@ export const setCrmSettings = createServerFn({ method: "POST" })
  */
 export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ ran: boolean; reminded: number }> => {
+  .handler(async ({ context }): Promise<{ ran: boolean; reminded: number; escalated: number }> => {
     const p = await me(context);
-    if (!officeLike(p)) return { ran: false, reminded: 0 };
+    if (!officeLike(p)) return { ran: false, reminded: 0, escalated: 0 };
     const { data: s } = await context.supabase
       .from("crm_settings")
       .select("last_dispatch_at")
       .eq("id", 1)
       .maybeSingle();
     const last = s?.last_dispatch_at ? Date.parse(s.last_dispatch_at) : 0;
-    if (Date.now() - last < 10 * 60 * 1000) return { ran: false, reminded: 0 };
+    if (Date.now() - last < 10 * 60 * 1000) return { ran: false, reminded: 0, escalated: 0 };
     try {
       const { dispatchDueReminders } = await import("@/lib/notify.server");
       const r = await dispatchDueReminders(context.supabase);
-      return { ran: true, reminded: r.reminded };
+      return { ran: true, reminded: r.reminded, escalated: r.escalated };
     } catch (e) {
       // Never take the app down over a reminder pass; the Reminders settings page shows it.
       console.error("Reminder dispatch failed", e);
-      return { ran: false, reminded: 0 };
+      return { ran: false, reminded: 0, escalated: 0 };
     }
   });
 

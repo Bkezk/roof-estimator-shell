@@ -468,6 +468,39 @@ export type Database = {
           },
         ];
       };
+      crm_contact_log: {
+        Row: {
+          at: string;
+          by_name: string | null;
+          by_user: string | null;
+          id: number;
+          item_id: string;
+          kind: string;
+          method: string;
+          note: string | null;
+        };
+        Insert: {
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          id?: number;
+          item_id: string;
+          kind: string;
+          method: string;
+          note?: string | null;
+        };
+        Update: {
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          id?: number;
+          item_id?: string;
+          kind?: string;
+          method?: string;
+          note?: string | null;
+        };
+        Relationships: [];
+      };
       crm_followups: {
         Row: {
           account_id: string | null;
@@ -549,6 +582,8 @@ export type Database = {
       crm_opportunities: {
         Row: {
           account_id: string | null;
+          assigned_at: string | null;
+          contacted_at: string | null;
           assignee_id: string | null;
           bid_id: string | null;
           created_at: string;
@@ -567,6 +602,8 @@ export type Database = {
         };
         Insert: {
           account_id?: string | null;
+          assigned_at?: string | null;
+          contacted_at?: string | null;
           assignee_id?: string | null;
           bid_id?: string | null;
           created_at?: string;
@@ -585,6 +622,8 @@ export type Database = {
         };
         Update: {
           account_id?: string | null;
+          assigned_at?: string | null;
+          contacted_at?: string | null;
           assignee_id?: string | null;
           bid_id?: string | null;
           created_at?: string;
@@ -722,6 +761,10 @@ export type Database = {
           opportunity_every_days: number;
           opportunity_first_days: number;
           ticket_every_days: number;
+          ticket_untouched_days: number;
+          opportunity_untouched_days: number;
+          escalate_to_admins: boolean;
+          escalate_user_ids: string[];
           ticket_first_days: number;
           updated_at: string;
         };
@@ -732,6 +775,10 @@ export type Database = {
           opportunity_every_days?: number;
           opportunity_first_days?: number;
           ticket_every_days?: number;
+          ticket_untouched_days?: number;
+          opportunity_untouched_days?: number;
+          escalate_to_admins?: boolean;
+          escalate_user_ids?: string[];
           ticket_first_days?: number;
           updated_at?: string;
         };
@@ -742,6 +789,10 @@ export type Database = {
           opportunity_every_days?: number;
           opportunity_first_days?: number;
           ticket_every_days?: number;
+          ticket_untouched_days?: number;
+          opportunity_untouched_days?: number;
+          escalate_to_admins?: boolean;
+          escalate_user_ids?: string[];
           ticket_first_days?: number;
           updated_at?: string;
         };
@@ -2363,6 +2414,8 @@ export type Database = {
       service_jobs: {
         Row: {
           account_id: string | null;
+          assigned_at: string | null;
+          contacted_at: string | null;
           centerpoint_invoice: string | null;
           centerpoint_ticket: string | null;
           checked_in_with: string | null;
@@ -2401,6 +2454,8 @@ export type Database = {
         };
         Insert: {
           account_id?: string | null;
+          assigned_at?: string | null;
+          contacted_at?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
           checked_in_with?: string | null;
@@ -2439,6 +2494,8 @@ export type Database = {
         };
         Update: {
           account_id?: string | null;
+          assigned_at?: string | null;
+          contacted_at?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
           checked_in_with?: string | null;
@@ -2994,6 +3051,21 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
       stamp_dispatch: { Args: never; Returns: undefined };
+      crm_untouched: {
+        Args: never;
+        Returns: {
+          kind: string;
+          item_id: string;
+          title: string;
+          url: string;
+          account_name: string | null;
+          assignee_id: string | null;
+          assignee_name: string | null;
+          assigned_at: string | null;
+          limit_days: number;
+        }[];
+      };
+      escalation_recipients: { Args: never; Returns: string[] };
       notify_recipients: {
         Args: { ids: string[] };
         Returns: {

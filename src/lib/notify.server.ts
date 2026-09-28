@@ -224,7 +224,7 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
  */
 export async function dispatchDueReminders(
   sb: Client,
-): Promise<{ reminded: number; checked: number }> {
+): Promise<{ reminded: number; escalated: number; checked: number }> {
   const admin = await serverClient(sb);
   const now = new Date();
   const { data: due, error } = await admin
@@ -235,7 +235,23 @@ export async function dispatchDueReminders(
     .order("next_remind_at")
     .limit(200);
   if (error) throw new Error(error.message);
+  // Untouched past the limit (owner, Sep 28): assigned, never contacted, never started. When
+  // such an item's reminder fires, admins (and any named users) hear about it too, on the
+  // same cadence, until someone logs a contact or starts it. crm_untouched() applies the
+  // caller's read rules: the cron's service role and office users see everything.
+  const [{ data: untouched }, { data: escalateTo }] = await Promise.all([
+    admin.rpc("crm_untouched"),
+    admin.rpc("escalation_recipients"),
+  ]);
+  const untouchedByItem = new Map<string, NonNullable<typeof untouched>[number]>();
+  for (const u of untouched ?? []) {
+    const since = u.assigned_at
+      ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
+      : 0;
+    if (since >= u.limit_days) untouchedByItem.set(`${u.kind}:${u.item_id}`, u);
+  }
   let reminded = 0;
+  let escalated = 0;
   for (const f of due ?? []) {
     const dueDate = new Date(f.due_at);
     const overdueDays = Math.floor((now.getTime() - dueDate.getTime()) / 86400000);
@@ -256,6 +272,27 @@ export async function dispatchDueReminders(
       },
       admin,
     );
+    const u = untouchedByItem.get(`${f.kind}:${f.item_id}`);
+    if (u) {
+      const recipients = (escalateTo ?? []).filter((id) => id !== f.assignee_id);
+      const since = u.assigned_at
+        ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
+        : 0;
+      if (recipients.length) {
+        await notify(
+          recipients,
+          {
+            kind: "untouched",
+            title: `Untouched ${f.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
+            body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
+            url: f.url,
+            followup_id: f.id,
+          },
+          admin,
+        );
+        escalated++;
+      }
+    }
     const next = new Date(now.getTime() + f.every_days * 86400000);
     await admin
       .from("crm_followups")
@@ -269,5 +306,5 @@ export async function dispatchDueReminders(
   }
   // SECURITY DEFINER stamp: the pass may run as an office user who cannot edit settings.
   await admin.rpc("stamp_dispatch");
-  return { reminded, checked: due?.length ?? 0 };
+  return { reminded, escalated, checked: due?.length ?? 0 };
 }

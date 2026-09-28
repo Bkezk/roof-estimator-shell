@@ -12,11 +12,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlarmClockOff, BellRing, CheckCircle2, Loader2 } from "lucide-react";
+import { AlarmClockOff, BellRing, CheckCircle2, Loader2, Users } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listFollowups, type FollowupWithName } from "@/lib/followups.functions";
+import { listUntouched } from "@/lib/contact-log.functions";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
+import { NeedsActionStrip } from "@/components/crm/contact-log";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +46,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -212,12 +222,56 @@ export function FollowupsPage() {
     enabled: !!session,
   });
   const rows = useMemo(() => list.data ?? [], [list.data]);
+  // Assigned and neither contacted nor started (shared with the strip, query key ["untouched"]).
+  const untouchedFn = useServerFn(listUntouched);
+  const untouched = useQuery({
+    queryKey: ["untouched"],
+    queryFn: () => untouchedFn(),
+    enabled: !!session,
+  });
+  const untouchedRows = useMemo(() => untouched.data ?? [], [untouched.data]);
 
   const assignees = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of rows) m.set(f.assignee_id, f.assignee_name);
+    // An admin can pick someone from the By person card who only has untouched items.
+    if (isAdmin)
+      for (const u of untouchedRows)
+        if (u.assignee_id && !m.has(u.assignee_id))
+          m.set(u.assignee_id, u.assignee_name ?? "(user)");
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [rows]);
+  }, [rows, untouchedRows, isAdmin]);
+
+  // Admin: one line per person — open follow-ups, untouched items, overdue follow-ups.
+  const byPerson = useMemo(() => {
+    if (!isAdmin) return [];
+    const now = Date.now();
+    const m = new Map<
+      string,
+      { id: string; name: string; assigned: number; untouched: number; overdue: number }
+    >();
+    const row = (id: string, name: string) => {
+      let r = m.get(id);
+      if (!r) {
+        r = { id, name, assigned: 0, untouched: 0, overdue: 0 };
+        m.set(id, r);
+      }
+      return r;
+    };
+    for (const f of rows) {
+      if (f.status !== "open") continue;
+      const r = row(f.assignee_id, f.assignee_name);
+      r.assigned += 1;
+      if (new Date(f.due_at).getTime() < now) r.overdue += 1;
+    }
+    for (const u of untouchedRows) {
+      if (!u.assignee_id) continue;
+      row(u.assignee_id, u.assignee_name ?? "(user)").untouched += 1;
+    }
+    return [...m.values()].sort(
+      (a, b) => b.untouched - a.untouched || b.overdue - a.overdue || a.name.localeCompare(b.name),
+    );
+  }, [isAdmin, rows, untouchedRows]);
   const showAssigneeSelect = !mine && (isAdmin || assignees.length > 1);
 
   const filtered = rows.filter((f) => {
@@ -249,6 +303,8 @@ export function FollowupsPage() {
         </p>
       </div>
 
+      <NeedsActionStrip />
+
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-3">
         <Chip active={mine} onClick={() => setMineOverride(!mine)}>
           Mine
@@ -279,6 +335,61 @@ export function FollowupsPage() {
           </span>
         )}
       </div>
+
+      {isAdmin && byPerson.length > 0 && (
+        <section className="space-y-2 rounded-lg border p-4" aria-label="By person">
+          <h2 className="flex items-center gap-2 font-semibold">
+            <Users className="h-4 w-4" /> By person
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Assigned = open follow-ups; Untouched = assigned with no contact logged and not started;
+            Overdue = open follow-ups past their due date. Click a name to see only theirs.
+          </p>
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right">Assigned</TableHead>
+                  <TableHead className="text-right">Untouched</TableHead>
+                  <TableHead className="text-right">Overdue</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {byPerson.map((p) => (
+                  <TableRow key={p.id} data-state={assignee === p.id ? "selected" : undefined}>
+                    <TableCell>
+                      <button
+                        type="button"
+                        className="font-medium underline-offset-2 hover:underline"
+                        title={`Show only ${p.name}'s follow-ups`}
+                        onClick={() => {
+                          setMineOverride(false);
+                          setAssignee(p.id);
+                        }}
+                      >
+                        {p.name}
+                        {p.id === profile?.id ? " (me)" : ""}
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{p.assigned}</TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${p.untouched ? "font-medium text-destructive" : ""}`}
+                    >
+                      {p.untouched}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${p.overdue ? "font-medium text-destructive" : ""}`}
+                    >
+                      {p.overdue}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </section>
+      )}
 
       {list.error ? (
         <p className="text-sm text-destructive">

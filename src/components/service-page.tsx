@@ -82,6 +82,14 @@ import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
 import {
+  ContactLogList,
+  LogContactButtons,
+  NeedsActionStrip,
+  UntouchedBadge,
+  untouchedKey,
+} from "@/components/crm/contact-log";
+import { listUntouched, type UntouchedRow } from "@/lib/contact-log.functions";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -237,6 +245,19 @@ function ServiceList() {
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["service-jobs-deleted"] });
   };
+  // Assigned tickets with no contact logged and not started (query key ["untouched"]).
+  const untouchedFn = useServerFn(listUntouched);
+  const untouchedQ = useQuery({
+    queryKey: ["untouched"],
+    queryFn: () => untouchedFn(),
+    enabled: !!session,
+  });
+  const untouched = useMemo(() => {
+    const m = new Map<string, UntouchedRow>();
+    for (const r of untouchedQ.data ?? [])
+      if (r.kind === "ticket") m.set(untouchedKey(r.kind, r.item_id), r);
+    return m;
+  }, [untouchedQ.data]);
 
   // A technician (not admin) receives only their own tickets from the server.
   const isTech = !!profile?.technician && profile.role !== "admin";
@@ -377,6 +398,8 @@ function ServiceList() {
           </Button>
         </div>
       </div>
+
+      <NeedsActionStrip kinds={["ticket"]} />
 
       {officeOrAdmin && (
         // Owner, Sep 28: the board sits above the list (five techs by seven days never grows).
@@ -523,6 +546,7 @@ function ServiceList() {
                           <TicketListRow
                             key={j.id}
                             row={j}
+                            untouched={untouched.get(untouchedKey("ticket", j.id))}
                             onDelete={officeOrAdmin ? () => setToDelete(j) : undefined}
                           />
                         ))}
@@ -626,9 +650,12 @@ function ServiceList() {
 
 function TicketListRow({
   row: j,
+  untouched,
   onDelete,
 }: {
   row: ServiceJobWithTech;
+  /** Assigned with no contact logged and not started (listUntouched). */
+  untouched?: UntouchedRow | undefined;
   onDelete?: (() => void) | undefined;
 }) {
   const stage = asStage(j.stage);
@@ -655,6 +682,9 @@ function TicketListRow({
           <Badge variant={STAGE_BADGE[stage]} className="px-1.5 py-0 text-[11px]">
             {STAGE_LABELS[stage]}
           </Badge>
+          {untouched && (
+            <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
+          )}
         </div>
         {(j.site_name || j.description) && (
           <p className="text-sm">
@@ -1339,6 +1369,20 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                 onChange={(v) => set("contact_id", v)}
               />
             )}
+            {job && (
+              // Owner, Sep 28: log each call / text / email / visit so the office sees the
+              // customer has been reached (and the ticket leaves the untouched list).
+              <section
+                className="space-y-2 rounded-lg border p-3 text-sm"
+                aria-label="Customer contact"
+              >
+                <p className="flex items-center gap-1.5 font-medium">
+                  <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Customer contact
+                </p>
+                <LogContactButtons kind="ticket" itemId={job.id} />
+                <ContactLogList kind="ticket" itemId={job.id} />
+              </section>
+            )}
           </div>
         </div>
 
@@ -1591,7 +1635,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
 /** Why ticket numbers start at 6000 (owner, Sep 27). A popover, so a tap works on a phone. */
 function TicketNumberHelp() {
-  const text = "Bid-O-Matic numbers start at 6000 so they never collide with CenterPoint's";
+  const text = "JBK Portal numbers start at 6000 so they never collide with CenterPoint's";
   return (
     <Popover>
       <PopoverTrigger asChild>
