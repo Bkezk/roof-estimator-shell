@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
+import { PAGE_LABELS } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { getNotifyPrefs, sendTestNotification, setNotifyPrefs } from "@/lib/followups.functions";
 import {
@@ -58,9 +59,35 @@ function AccountPage() {
   return (
     <div className="mx-auto max-w-md space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Account</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My account</h1>
         <p className="text-sm text-muted-foreground">Signed in as {profile?.email}</p>
       </div>
+      {profile && (
+        <Card>
+          <CardHeader>
+            <CardTitle>{profile.full_name || profile.email}</CardTitle>
+            <CardDescription>
+              {profile.role === "admin" ? "Admin" : "User"}
+              {profile.technician ? " · Technician" : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p>
+              <span className="text-muted-foreground">Email: </span>
+              {profile.email}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Pages: </span>
+              {profile.role === "admin"
+                ? "all"
+                : profile.access.map((p) => PAGE_LABELS[p]).join(", ") || "none yet"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              An admin changes names, roles and pages under Admin › Users &amp; access.
+            </p>
+          </CardContent>
+        </Card>
+      )}
       <NotificationsCard />
       <Card>
         <CardHeader>

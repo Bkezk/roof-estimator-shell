@@ -5,7 +5,7 @@ import {
   FileText,
   Settings,
   LogOut,
-  KeyRound,
+  UserRound,
   SlidersHorizontal,
   Package,
   FileSpreadsheet,
@@ -498,26 +498,34 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <SidebarMenu>
-          {!collapsed && profile && (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-              <div className="truncate font-medium text-foreground">
-                {profile.full_name || profile.email}
-              </div>
-              <div className="truncate">
-                {profile.role === "admin"
-                  ? "Admin"
-                  : profile.access.map((p) => PAGE_LABELS[p]).join(" · ") || "No pages"}
-              </div>
-            </div>
+          {/* Owner, Sep 28: the name is the account link (info, password, notifications) so
+              the menu has one item fewer. */}
+          {profile && (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                asChild
+                isActive={isActive("/account")}
+                tooltip="My account"
+                className="h-auto py-1.5"
+              >
+                <Link to="/account" title="My account: info, password, notifications">
+                  <UserRound className="h-4 w-4 shrink-0" />
+                  {!collapsed && (
+                    <span className="min-w-0 text-xs leading-tight">
+                      <span className="block truncate font-medium text-foreground">
+                        {profile.full_name || profile.email}
+                      </span>
+                      <span className="block truncate text-muted-foreground">
+                        {profile.role === "admin"
+                          ? "Admin"
+                          : profile.access.map((p) => PAGE_LABELS[p]).join(" · ") || "No pages"}
+                      </span>
+                    </span>
+                  )}
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           )}
-          <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={isActive("/account")} tooltip="Change password">
-              <Link to="/account">
-                <KeyRound className="h-4 w-4" />
-                {!collapsed && <span>Change password</span>}
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton onClick={handleSignOut} tooltip="Sign out">
               <LogOut className="h-4 w-4" />
