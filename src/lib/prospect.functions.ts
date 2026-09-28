@@ -35,6 +35,7 @@ import {
   pointInFootprint,
   KY_FOOTPRINTS_LAYER,
   type LayerKind,
+  KY_IMAGERY_TILE_INDEX_LAYER,
 } from "@/lib/gis/ky-layers";
 import {
   sortWarrantyLeads,
@@ -198,6 +199,43 @@ export const listBuildings = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return rows ?? [];
   });
+
+/**
+ * The year the 3-inch imagery under a point was flown (KyFromAbove Phase 3; the state's tile
+ * index has it per 5k tile). Null when the tile has no Phase 3 flight yet.
+ */
+export const imageryYearAt = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d),
+  )
+  .handler(
+    async ({
+      data,
+      context,
+    }): Promise<{ year: string | null; resolution: string | null; tile: string | null }> => {
+      await readAccess(context);
+      const params = new URLSearchParams({
+        geometry: `${data.lng},${data.lat}`,
+        geometryType: "esriGeometryPoint",
+        inSR: "4326",
+        spatialRel: "esriSpatialRelIntersects",
+        outFields: "TileName,Phase3_Year,Phase3_Resolution",
+        returnGeometry: "false",
+        f: "json",
+      });
+      const json = (await fetchJson(`${KY_IMAGERY_TILE_INDEX_LAYER}/query?${params}`)) as {
+        features?: { attributes?: Record<string, unknown> }[];
+      };
+      const a = json.features?.[0]?.attributes ?? {};
+      const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+      return {
+        year: str(a["Phase3_Year"]),
+        resolution: str(a["Phase3_Resolution"]),
+        tile: str(a["TileName"]),
+      };
+    },
+  );
 
 /** Distinct counties with building counts (for the filter). */
 export const listCounties = createServerFn({ method: "GET" })

@@ -7,6 +7,7 @@
 import { useEffect, useRef } from "react";
 import type { Feature, FeatureCollection, Geometry } from "geojson";
 import {
+  AttributionControl,
   GeoJSONSource,
   LngLatBounds,
   Map as MlMap,
@@ -51,6 +52,13 @@ interface Props {
   /** Storm call points (owner, Sep 28): shade each report's radius under the buildings. */
   stormAreas?: StormArea[];
   showStormAreas?: boolean;
+  /** The flight year of the imagery under the view (shown in the attribution). */
+  imageryYear?: string | null | undefined;
+  /**
+   * The map settled (debounced): the centre when zoomed in enough for one imagery tile to
+   * fill the view, null when zoomed out over many tiles (and many flight years).
+   */
+  onViewCenter?: ((center: { lng: number; lat: number } | null) => void) | undefined;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** A tap on an outline that is not stored yet (zoomed in): add that building. */
@@ -174,10 +182,14 @@ function circlePolygon(lat: number, lng: number, radiusMi: number): number[][][]
 }
 const STORM_COLOR = ["match", ["get", "kind"], "hail", "#ef4444", "wind", "#f97316", "#a855f7"];
 
+const IMAGERY_CREDIT = "Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch)";
+
 export default function ProspectMap({
   buildings,
   stormAreas,
   showStormAreas = true,
+  imageryYear,
+  onViewCenter,
   selectedId,
   onSelect,
   onTapEmpty,
@@ -198,6 +210,9 @@ export default function ProspectMap({
   select.current = onSelect;
   const tapEmpty = useRef(onTapEmpty);
   tapEmpty.current = onTapEmpty;
+  const viewCenter = useRef(onViewCenter);
+  viewCenter.current = onViewCenter;
+  const attribution = useRef<AttributionControl | null>(null);
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -212,7 +227,6 @@ export default function ProspectMap({
             tileSize: 256,
             minzoom: 0,
             maxzoom: 21,
-            attribution: "Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch)",
           },
           // Every building outline in the state, drawn by the state server when zoomed in —
           // what is not stored yet. A tap on one adds it.
@@ -236,7 +250,21 @@ export default function ProspectMap({
         ],
       },
       bounds: KY_BOUNDS,
-      attributionControl: {},
+      // Our own control, so the flight year under the view can be swapped in.
+      attributionControl: false,
+    });
+    attribution.current = new AttributionControl({
+      compact: false,
+      customAttribution: IMAGERY_CREDIT,
+    });
+    m.addControl(attribution.current, "bottom-right");
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    m.on("moveend", () => {
+      clearTimeout(settle);
+      settle = setTimeout(() => {
+        const c = m.getCenter();
+        viewCenter.current?.(m.getZoom() >= 11 ? { lng: c.lng, lat: c.lat } : null);
+      }, 400);
     });
     m.addControl(new NavigationControl({ visualizePitch: false }), "top-right");
     m.addControl(new ScaleControl({ unit: "imperial" }));
@@ -398,6 +426,18 @@ export default function ProspectMap({
   useEffect(() => {
     placeCitiesRef.current?.();
   }, [showCities]);
+
+  // The attribution line carries the flight year of the imagery under the view.
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (attribution.current) m.removeControl(attribution.current);
+    attribution.current = new AttributionControl({
+      compact: false,
+      customAttribution: imageryYear ? `${IMAGERY_CREDIT}, flown ${imageryYear}` : IMAGERY_CREDIT,
+    });
+    m.addControl(attribution.current, "bottom-right");
+  }, [imageryYear]);
 
   useEffect(() => {
     const m = map.current;

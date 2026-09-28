@@ -53,6 +53,7 @@ import {
   type BuildingRow,
   type RoofInput,
   type RoofRow,
+  imageryYearAt,
 } from "@/lib/prospect.functions";
 import {
   buildingStormHits,
@@ -403,6 +404,18 @@ export function ProspectPage(props: {
     queryKey: ["warranty-leads"],
     queryFn: () => leadsFn(),
     enabled: canWrite,
+  });
+
+  // The imagery's flight year under the map's centre (owner, Sep 28), keyed to ~1 km so a
+  // pan across a tile asks once.
+  const imageryYearFn = useServerFn(imageryYearAt);
+  const [viewCenter, setViewCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const imageryYear = useQuery({
+    queryKey: ["imagery-year", viewCenter?.lat, viewCenter?.lng],
+    queryFn: () => imageryYearFn({ data: { lat: viewCenter!.lat, lng: viewCenter!.lng } }),
+    enabled: !!viewCenter,
+    staleTime: 24 * 60 * 60 * 1000,
+    retry: 1,
   });
 
   // The storm window and radii (the row badge's tooltip); the panel shares this query.
@@ -884,6 +897,14 @@ export function ProspectPage(props: {
               showCities={showCities}
               stormAreas={stormHit ? stormAreas : []}
               showStormAreas={showStormAreas}
+              imageryYear={imageryYear.data?.year ?? null}
+              onViewCenter={(c) =>
+                setViewCenter(
+                  c
+                    ? { lat: Math.round(c.lat * 100) / 100, lng: Math.round(c.lng * 100) / 100 }
+                    : null,
+                )
+              }
               {...(canWrite
                 ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
                 : {})}

@@ -35,6 +35,12 @@ export const KY_ADDRESS_POINTS_LAYER = `${KY_SERVICES}/Ky_911_Site_Structure_Add
 export const KY_SCHOOLS_LAYER = `${KY_SERVICES}/Ky_Schools_WGS84WM/MapServer/0`;
 export const KY_WEBSTER_PARCELS_LAYER = `${KY_SERVICES}/Ky_PVA_Webster_Parcels_WGS84WM/MapServer/1`;
 export const KY_IMAGERY_PHASE3_SERVICE = `${KY_SERVICES}/Ky_Imagery_Phase3_3IN_WGS84WM/MapServer`;
+/**
+ * One polygon per aerial tile with the year each KyFromAbove phase flew it (`Phase3_Year` is
+ * 2022–2024 or null where Phase 3 has not flown; checked Sep 28, 46,154 tiles). The map's
+ * attribution shows the year under the view.
+ */
+export const KY_IMAGERY_TILE_INDEX_LAYER = `${KY_SERVICES}/Ky_KYAPED_Aerial_Tile_Index_WGS84WM/MapServer/0`;
 
 /**
  * Kentucky's 120 counties by FIPS code (state 21; county codes are the odd numbers 001–239 in
