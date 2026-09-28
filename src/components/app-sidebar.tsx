@@ -81,12 +81,12 @@ const customerItems: ServiceItem[] = [
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
 // Admin (role) only: who can sign in and which pages each person may open, the reminder and
-// untouched-work rules, and the service labor rates (owner, Sep 28: these belong under Admin,
-// not under Estimate Pricing › General). `tab` deep-links to that settings tab.
-const adminOnlyItems: { title: string; url: string; icon: typeof Users; tab?: AdminTab }[] = [
+// untouched-work rules, and the service labor rates (owner, Sep 28: their own pages under
+// Admin, not tabs of Estimate Pricing › General).
+const adminOnlyItems = [
   { title: "Users & access", url: "/admin/users", icon: Users },
-  { title: "Reminders", url: "/admin/settings", icon: BellRing, tab: "reminders" },
-  { title: "Service Rates", url: "/admin/settings", icon: Receipt, tab: "servicerates" },
+  { title: "Reminders", url: "/admin/reminders", icon: BellRing },
+  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
@@ -99,8 +99,6 @@ type AdminTab =
   | "basiclabor"
   | "markup"
   | "warranties"
-  | "reminders"
-  | "servicerates"
   | "setup"
   | "inspection"
   | "templates"
@@ -295,10 +293,6 @@ export function AppSidebar() {
   const isTech = !!profile?.technician && profile.role !== "admin";
   const isActive = (path: string) =>
     pathname === path || (path !== "/" && pathname.startsWith(path));
-  // The settings page's Reminders and Service Rates tabs are Admin entries, not General's.
-  const pricingActive = (path: string) =>
-    isActive(path) &&
-    !(path === "/admin/settings" && (searchTab === "reminders" || searchTab === "servicerates"));
 
   // Manual open/close overrides; a section with the active page open by default.
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
@@ -398,18 +392,14 @@ export function AppSidebar() {
                     asChild
                     open={
                       openMenus[item.title] ??
-                      (pricingActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
+                      (isActive(item.url) || item.sub.some((s) => s.url && isActive(s.url)))
                     }
                     onOpenChange={(open) =>
                       setOpenMenus((prev) => ({ ...prev, [item.title]: open }))
                     }
                   >
                     <SidebarMenuItem>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={pricingActive(item.url)}
-                        tooltip={item.title}
-                      >
+                      <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                         <Link to={item.url}>
                           <item.icon className="h-4 w-4" />
                           <span>{item.title}</span>
@@ -428,7 +418,7 @@ export function AppSidebar() {
                             .map((sub) => {
                               const active = sub.url
                                 ? isActive(sub.url)
-                                : pricingActive(item.url) &&
+                                : isActive(item.url) &&
                                   (sub.cat
                                     ? searchCat === sub.cat
                                     : !searchCat && (searchTab ?? item.defaultTab) === sub.tab);
@@ -460,11 +450,7 @@ export function AppSidebar() {
                   </Collapsible>
                 ) : (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton
-                      asChild
-                      isActive={pricingActive(item.url)}
-                      tooltip={item.title}
-                    >
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                       <Link to={item.url}>
                         <item.icon className="h-4 w-4" />
                         {!collapsed && <span>{item.title}</span>}
@@ -499,22 +485,11 @@ export function AppSidebar() {
             <SidebarMenu>
               {adminOnlyItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={isActive(item.url) && (!item.tab || searchTab === item.tab)}
-                    tooltip={item.title}
-                  >
-                    {item.tab ? (
-                      <Link to={item.url} search={{ tab: item.tab }}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    ) : (
-                      <Link to={item.url}>
-                        <item.icon className="h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    )}
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}

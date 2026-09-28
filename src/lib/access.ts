@@ -59,7 +59,12 @@ export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname === "/account" || pathname === "/login") return null;
   // Follow-ups: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
-  if (pathname.startsWith("/admin/users")) return "admin";
+  if (
+    pathname.startsWith("/admin/users") ||
+    pathname.startsWith("/admin/reminders") ||
+    pathname.startsWith("/admin/service-rates")
+  )
+    return "admin";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";

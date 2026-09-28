@@ -10,7 +10,7 @@ the bottom with the commit that closed them.
 - Lovable Cloud › Secrets: `RESEND_API_KEY` (from a Resend account with the flatroofonline.com
   domain verified), `NOTIFY_FROM_EMAIL` (e.g. `Bid-O-Matic <notifications@flatroofonline.com>`),
   `APP_URL` (the app's public address, used for links in emails and push). Until set, email
-  reminders show as failed on Admin › Settings › Reminders; in-app and push still work.
+  reminders show as failed on Admin › Reminders; in-app and push still work.
 - GitHub repository secrets: `APP_URL` (same value) and `CRON_SECRET` (the value of
   `LOVABLE_CRON_SECRET` shown in Lovable Cloud) so `.github/workflows/reminders.yml` fires
   reminders every 30 minutes in office hours. Without them, reminders go out only when an office

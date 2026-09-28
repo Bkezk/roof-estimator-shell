@@ -26,6 +26,8 @@ import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
 import { Route as AdminNonDlRouteImport } from './routes/admin.non-dl'
 import { Route as AdminPriceImportRouteImport } from './routes/admin.price-import'
+import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
+import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
@@ -118,6 +120,16 @@ const AdminPriceImportRoute = AdminPriceImportRouteImport.update({
   path: '/admin/price-import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRemindersRoute = AdminRemindersRouteImport.update({
+  id: '/admin/reminders',
+  path: '/admin/reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminServiceRatesRoute = AdminServiceRatesRouteImport.update({
+  id: '/admin/service-rates',
+  path: '/admin/service-rates',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSettingsRoute = AdminSettingsRouteImport.update({
   id: '/admin/settings',
   path: '/admin/settings',
@@ -167,6 +179,8 @@ export interface FileRoutesByFullPath {
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/price-import': typeof AdminPriceImportRoute
+  '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
@@ -192,6 +206,8 @@ export interface FileRoutesByTo {
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/price-import': typeof AdminPriceImportRoute
+  '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
@@ -218,6 +234,8 @@ export interface FileRoutesById {
   '/admin/labor': typeof AdminLaborRoute
   '/admin/non-dl': typeof AdminNonDlRoute
   '/admin/price-import': typeof AdminPriceImportRoute
+  '/admin/reminders': typeof AdminRemindersRoute
+  '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/service/board': typeof ServiceBoardRoute
@@ -245,6 +263,8 @@ export interface FileRouteTypes {
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/price-import'
+    | '/admin/reminders'
+    | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
@@ -270,6 +290,8 @@ export interface FileRouteTypes {
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/price-import'
+    | '/admin/reminders'
+    | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
@@ -295,6 +317,8 @@ export interface FileRouteTypes {
     | '/admin/labor'
     | '/admin/non-dl'
     | '/admin/price-import'
+    | '/admin/reminders'
+    | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
     | '/service/board'
@@ -321,6 +345,8 @@ export interface RootRouteChildren {
   AdminLaborRoute: typeof AdminLaborRoute
   AdminNonDlRoute: typeof AdminNonDlRoute
   AdminPriceImportRoute: typeof AdminPriceImportRoute
+  AdminRemindersRoute: typeof AdminRemindersRoute
+  AdminServiceRatesRoute: typeof AdminServiceRatesRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
@@ -447,6 +473,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPriceImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/reminders': {
+      id: '/admin/reminders'
+      path: '/admin/reminders'
+      fullPath: '/admin/reminders'
+      preLoaderRoute: typeof AdminRemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/service-rates': {
+      id: '/admin/service-rates'
+      path: '/admin/service-rates'
+      fullPath: '/admin/service-rates'
+      preLoaderRoute: typeof AdminServiceRatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/settings': {
       id: '/admin/settings'
       path: '/admin/settings'
@@ -525,6 +565,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminLaborRoute: AdminLaborRoute,
   AdminNonDlRoute: AdminNonDlRoute,
   AdminPriceImportRoute: AdminPriceImportRoute,
+  AdminRemindersRoute: AdminRemindersRoute,
+  AdminServiceRatesRoute: AdminServiceRatesRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,

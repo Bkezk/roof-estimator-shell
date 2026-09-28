@@ -436,7 +436,7 @@ asking "anything off the truck?" before Complete and by the per-template usual-u
 starts a follow-up timer (`crm_followups`); the dispatcher writes an inbox row per reminder and
 sends it by email (Resend) and web push (VAPID keys generated once into `app_secrets`) per the
 user's channel toggles on `/account`. Reminder lengths per type and the opportunity
-close-within days are on Admin › Settings › Reminders. Admins see every timer on
+close-within days are on Admin › Reminders. Admins see every timer on
 `/followups`; others see their own.
 
 **Owner setup, once:**
@@ -466,7 +466,7 @@ buttons, editable by hand), `repair_templates`, `service_job_repairs`, `service_
 
 - **Rates** (`service_rates`): per rate kind (Standard / Urgent / Emergency, chosen on the ticket)
   × role (tech / helper) × time (travel / labor), bill and cost. Seeded from the two CenterPoint
-  invoices in the report; the office confirms them on Admin › Settings › Service rates, with the
+  invoices in the report; the office confirms them on Admin › Service Rates, with the
   material markup (0.75), tax rate (0) and payment terms (`service_settings`).
 - **Invoice** (`invoices`, `invoice_lines`): one per ticket, number = ticket number. Created as a
   draft from the ticket's time entries (one line per person, a Helper line per extra tech) and
