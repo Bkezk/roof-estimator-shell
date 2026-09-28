@@ -32,6 +32,7 @@ import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarHeader,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -325,7 +326,41 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
+      <SidebarHeader className={collapsed ? "items-center px-1 py-2" : "px-3 pt-3 pb-1"}>
+        <img
+          src="/jbk-logo.webp"
+          alt="JBK Commercial Roofing"
+          className={collapsed ? "h-6 w-auto" : "mx-auto h-auto w-full max-w-[180px]"}
+        />
+      </SidebarHeader>
       <SidebarContent>
+        {profile && (
+          <NavGroup
+            label={can("customers") ? "Customers" : "Service"}
+            id="customers"
+            iconMode={collapsed}
+          >
+            <SidebarMenu>{renderItems(customerItems)}</SidebarMenu>
+          </NavGroup>
+        )}
+
+        {can("prospect") && (
+          <NavGroup label="Prospecting" id="prospecting" iconMode={collapsed}>
+            <SidebarMenu>
+              {prospectItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link to={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      {!collapsed && <span>{item.title}</span>}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </NavGroup>
+        )}
+
         {(can("estimate") || can("takeoff")) && (
           <NavGroup label="Estimate" id="estimate" iconMode={collapsed}>
             <SidebarMenu>
@@ -342,16 +377,6 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 ))}
             </SidebarMenu>
-          </NavGroup>
-        )}
-
-        {profile && (
-          <NavGroup
-            label={can("customers") ? "Customers" : "Service"}
-            id="customers"
-            iconMode={collapsed}
-          >
-            <SidebarMenu>{renderItems(customerItems)}</SidebarMenu>
           </NavGroup>
         )}
 
@@ -432,23 +457,6 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 ),
               )}
-            </SidebarMenu>
-          </NavGroup>
-        )}
-
-        {can("prospect") && (
-          <NavGroup label="Prospecting" id="prospecting" iconMode={collapsed}>
-            <SidebarMenu>
-              {prospectItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                    <Link to={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
             </SidebarMenu>
           </NavGroup>
         )}
