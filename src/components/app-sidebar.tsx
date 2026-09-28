@@ -52,9 +52,11 @@ const estimatorItems = [
   { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
-// Service: the technician's Today, repair tickets, the Tech Board (office only), the customer
-// hub they link to, opportunities, and the follow-ups every signed-in user has (page null =
-// shown to everyone). `exact`: active only on that path (Tickets is not active on the board).
+// Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
+// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities, Follow-ups
+// (page null = every signed-in user has some). Today sits first, for technicians only: it is
+// the field day for the signed-in tech, so an office login never sees it. `exact`: active only
+// on that path.
 type ServiceItem = {
   title: string;
   url: string;
@@ -63,33 +65,17 @@ type ServiceItem = {
   exact?: boolean;
   /** Hidden for a technician who is not an admin (dispatching is the office's). */
   office?: boolean;
+  /** Shown only when the profile has the technician tick. */
+  techOnly?: boolean;
   /** Paths under `url` that belong to another item (Today has its own entry). */
   except?: string[];
 };
-const todayItem: ServiceItem = {
-  title: "Today",
-  url: "/service/today",
-  icon: CalendarCheck,
-  page: "service",
-};
-// Owner, Sep 27: three homes instead of one crowded group — Follow-ups on its own at the top
-// (every signed-in user has some), Service = the repair side (Today, Board, Tickets, and the
-// office's Invoices), and Customers = the CRM hub (Customers, Opportunities).
-const followupsItem: ServiceItem = {
-  title: "Follow-ups",
-  url: "/followups",
-  icon: BellRing,
-  page: null,
-};
-// Owner, Sep 28: Board and Invoices are tabs on the Service page, not menu entries.
-const serviceItems: ServiceItem[] = [
-  todayItem,
-  { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
-  followupsItem,
-];
 const customerItems: ServiceItem[] = [
+  { title: "Today", url: "/service/today", icon: CalendarCheck, page: "service", techOnly: true },
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
+  { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
   { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
+  { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [{ title: "Buildings", url: "/prospect", icon: Building2 }];
@@ -317,6 +303,7 @@ export function AppSidebar() {
     items
       .filter((item) => item.page === null || can(item.page))
       .filter((item) => !(item.office && isTech))
+      .filter((item) => !item.techOnly || !!profile?.technician)
       .map((item) => (
         <SidebarMenuItem key={item.title}>
           <SidebarMenuButton
@@ -359,13 +346,11 @@ export function AppSidebar() {
         )}
 
         {profile && (
-          <NavGroup label="Service" id="service" iconMode={collapsed}>
-            <SidebarMenu>{renderItems(serviceItems)}</SidebarMenu>
-          </NavGroup>
-        )}
-
-        {can("customers") && (
-          <NavGroup label="Customers" id="customers" iconMode={collapsed}>
+          <NavGroup
+            label={can("customers") ? "Customers" : "Service"}
+            id="customers"
+            iconMode={collapsed}
+          >
             <SidebarMenu>{renderItems(customerItems)}</SidebarMenu>
           </NavGroup>
         )}

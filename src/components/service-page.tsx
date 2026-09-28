@@ -365,11 +365,13 @@ function ServiceList() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild size="lg" variant="outline" className="text-base">
-            <Link to="/service/today">
-              <CalendarDays className="mr-2 h-5 w-5" /> My day
-            </Link>
-          </Button>
+          {profile?.technician && (
+            <Button asChild size="lg" variant="outline" className="text-base">
+              <Link to="/service/today">
+                <CalendarDays className="mr-2 h-5 w-5" /> My day
+              </Link>
+            </Button>
+          )}
           <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
             <Plus className="mr-2 h-5 w-5" /> New ticket
           </Button>

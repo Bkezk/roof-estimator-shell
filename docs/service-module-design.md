@@ -260,8 +260,9 @@ main; never rewrite history.
 - Building search = the prospecting map search over `buildings`.
 - Inventory movement dialog = the existing Take from / Put in inventory pop-up, with the job
   picker widened.
-- Access = `has_access('service')`, new PAGES entry, sidebar group **Service** (Today,
-  Board, Tickets, Invoices, Customers) under Estimate.
+- Access = `has_access('service')`, new PAGES entry. Sidebar (owner, Sep 28): one
+  **Customers** group under Estimate — Today (technicians only), Customers, Service (Board
+  above the tickets, Invoices as a tab), Opportunities, Follow-ups.
 
 ## 8. Decisions needed from the owner before phase B/C
 
@@ -379,8 +380,8 @@ like the customer's, in a "Link these bids?" dialog; the same suggestions sit on
 customer page. Job Name on a bid also finds customers as you type, since some estimators put
 the customer there.
 
-**Sidebar**: a **Customers** group (Accounts, Opportunities, Follow-ups) beside Service; the
-Bids page and the account page both show the link.
+**Sidebar**: one **Customers** group — Customers, Service, Opportunities, Follow-ups (owner,
+Sep 28; Today first for technicians); the Bids page and the account page both show the link.
 
 ## 12. Truck inventory truth — to dive into (owner, Sep 26: techs often do not count accurately)
 
