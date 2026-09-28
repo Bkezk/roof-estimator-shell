@@ -395,6 +395,14 @@ function GroupDialog(props: {
     laborTotal += result?.byGroup[g].laborCost ?? 0;
   }
   const ls2 = groups.some((g) => g === "services" || g === "subcontractors");
+  // Owner, Sep 28: the Top of Parapet Wall Blocking group (one program-driven row, the 2x4 +
+  // ISO) stays hidden until something feeds it — a parapet with "Use Wood Blocking" ticked
+  // fills its footage — or someone typed an Extra / added a row. Never hidden while it bills.
+  const shown = (g: NonDlGroup) =>
+    g !== "wallBlocking" ||
+    (result?.lines ?? []).some((l) => l.group === g && l.qty > 0) ||
+    Object.values(state.rows[g] ?? {}).some((r) => (r?.extra ?? 0) > 0) ||
+    (state.custom[g]?.length ?? 0) > 0;
 
   return (
     <Dialog open={props.open} onOpenChange={(o) => !o && props.onClose()}>
@@ -411,7 +419,7 @@ function GroupDialog(props: {
           </Button>
         </DialogHeader>
 
-        {groups.map((g) => (
+        {groups.filter(shown).map((g) => (
           <div key={g} className="space-y-1">
             {groups.length > 1 && <p className="text-sm font-medium">{GROUP_HEADING[g]}</p>}
             <GroupGrid
