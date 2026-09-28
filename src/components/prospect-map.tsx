@@ -36,8 +36,21 @@ export interface MapBuilding {
   roofSqFt: number | null;
 }
 
+/** One NOAA report's affected area: a circle of `radiusMi` around where it was made. */
+export interface StormArea {
+  id: string;
+  lat: number;
+  lng: number;
+  radiusMi: number;
+  kind: "hail" | "wind" | "tornado";
+  label: string;
+}
+
 interface Props {
   buildings: MapBuilding[];
+  /** Storm call points (owner, Sep 28): shade each report's radius under the buildings. */
+  stormAreas?: StormArea[];
+  showStormAreas?: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** A tap on an outline that is not stored yet (zoomed in): add that building. */
@@ -148,8 +161,23 @@ const asGeoJson = (b: MapBuilding) => {
   return null;
 };
 
+/** A 64-point circle around a point, radius in miles, as GeoJSON polygon coordinates. */
+function circlePolygon(lat: number, lng: number, radiusMi: number): number[][][] {
+  const dLat = radiusMi / 69;
+  const dLng = radiusMi / (69 * Math.cos((lat * Math.PI) / 180));
+  const ring: number[][] = [];
+  for (let i = 0; i <= 64; i++) {
+    const t = (i / 64) * 2 * Math.PI;
+    ring.push([lng + dLng * Math.cos(t), lat + dLat * Math.sin(t)]);
+  }
+  return [ring];
+}
+const STORM_COLOR = ["match", ["get", "kind"], "hail", "#ef4444", "wind", "#f97316", "#a855f7"];
+
 export default function ProspectMap({
   buildings,
+  stormAreas,
+  showStormAreas = true,
   selectedId,
   onSelect,
   onTapEmpty,
@@ -251,6 +279,37 @@ export default function ProspectMap({
     placeCitiesRef.current = placeCities;
 
     m.on("load", () => {
+      m.addSource("storm-areas", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      m.addSource("storm-centers", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+      m.addLayer({
+        id: "storm-fill",
+        type: "fill",
+        source: "storm-areas",
+        paint: { "fill-color": STORM_COLOR as never, "fill-opacity": 0.18 },
+      });
+      m.addLayer({
+        id: "storm-line",
+        type: "line",
+        source: "storm-areas",
+        paint: { "line-color": STORM_COLOR as never, "line-width": 1.5, "line-dasharray": [3, 2] },
+      });
+      m.addLayer({
+        id: "storm-centers",
+        type: "circle",
+        source: "storm-centers",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": STORM_COLOR as never,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        },
+      });
       m.addSource("footprints", {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] },
@@ -323,6 +382,46 @@ export default function ProspectMap({
     if (ready.current) apply();
     else m.once("load", apply);
   }, [showOutlines]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const apply = () => {
+      for (const id of ["storm-fill", "storm-line", "storm-centers"])
+        m.setLayoutProperty(id, "visibility", showStormAreas ? "visible" : "none");
+    };
+    if (ready.current) apply();
+    else m.once("load", apply);
+  }, [showStormAreas]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const apply = () => {
+      const areas = m.getSource("storm-areas") as GeoJSONSource | undefined;
+      const centers = m.getSource("storm-centers") as GeoJSONSource | undefined;
+      if (!areas || !centers) return;
+      const list = stormAreas ?? [];
+      areas.setData({
+        type: "FeatureCollection",
+        features: list.map<Feature>((a) => ({
+          type: "Feature",
+          properties: { id: a.id, kind: a.kind, label: a.label },
+          geometry: { type: "Polygon", coordinates: circlePolygon(a.lat, a.lng, a.radiusMi) },
+        })),
+      });
+      centers.setData({
+        type: "FeatureCollection",
+        features: list.map<Feature>((a) => ({
+          type: "Feature",
+          properties: { id: a.id, kind: a.kind, label: a.label },
+          geometry: { type: "Point", coordinates: [a.lng, a.lat] },
+        })),
+      });
+    };
+    if (ready.current) apply();
+    else m.once("load", apply);
+  }, [stormAreas]);
 
   // Push the buildings and the selection into the sources; frame the selection or everything.
   useEffect(() => {

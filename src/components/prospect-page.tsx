@@ -61,6 +61,7 @@ import {
   stormSummary,
 } from "@/lib/storms.functions";
 const ProspectMap = lazy(() => import("@/components/prospect-map"));
+import type { StormArea } from "@/components/prospect-map";
 import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel";
 import { stormDay, stormRadius } from "@/components/prospect/storm-format";
 
@@ -338,6 +339,23 @@ export function ProspectPage(props: {
       }
       return !o;
     });
+  // Storm view (owner, Sep 28): the shaded report areas replace the outlines toggle.
+  const [showStormAreas, setShowStormAreas] = useState(() => {
+    try {
+      return localStorage.getItem("bid-o-matic:prospect-storm-areas") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const toggleStormAreas = () =>
+    setShowStormAreas((o) => {
+      try {
+        localStorage.setItem("bid-o-matic:prospect-storm-areas", o ? "off" : "on");
+      } catch {
+        /* private window */
+      }
+      return !o;
+    });
   const toggleOutlines = () =>
     setShowOutlines((o) => {
       try {
@@ -603,6 +621,28 @@ export function ProspectPage(props: {
     return `A NOAA storm report was made within ${r != null ? `${r} miles` : "a few miles"} of this building in the last ${days} days; the miles are the distance to where it was reported.${wind}`;
   };
 
+  // The affected areas for the map: every report in the window that clears the thresholds,
+  // with its kind's radius (the same rule as match_storm_reports()).
+  const stormAreas = useMemo<StormArea[]>(() => {
+    const st = storms.data?.settings;
+    if (!st) return [];
+    return storms
+      .data!.reports.filter(
+        (r) =>
+          (r.kind === "hail" && r.magnitude != null && r.magnitude >= Number(st.min_hail_in)) ||
+          (r.kind === "wind" && (r.magnitude == null || r.magnitude >= Number(st.min_wind_mph))) ||
+          r.kind === "tornado",
+      )
+      .map((r) => ({
+        id: String(r.id),
+        lat: r.lat,
+        lng: r.lng,
+        radiusMi: Number(stormRadius(st, r.kind) ?? 3),
+        kind: (r.kind === "hail" || r.kind === "wind" ? r.kind : "tornado") as StormArea["kind"],
+        label: `${stormLabel(r.kind, r.magnitude)} · ${stormDay(r.report_date)} · ${r.location ?? ""}`,
+      }));
+  }, [storms.data]);
+
   // The find-buildings panel: search, filters and results. Over the map's left side when the
   // map is on (it can be tucked away); a plain card in the left column when the map is off.
   const searchCard = (
@@ -786,7 +826,17 @@ export function ProspectPage(props: {
           <Button size="sm" variant="outline" onClick={toggleMap}>
             <MapIcon className="mr-1 h-4 w-4" /> {showMap ? "Hide map" : "Show map"}
           </Button>
-          {showMap && (
+          {showMap && stormHit && (
+            <Button
+              size="sm"
+              variant={showStormAreas ? "secondary" : "outline"}
+              onClick={toggleStormAreas}
+              title="Shade the area around each NOAA report: red hail, orange wind, purple tornado"
+            >
+              {showStormAreas ? "Affected area on" : "Affected area off"}
+            </Button>
+          )}
+          {showMap && !stormHit && (
             <Button
               size="sm"
               variant={showOutlines ? "secondary" : "outline"}
@@ -830,8 +880,10 @@ export function ProspectPage(props: {
               buildings={mapBuildings}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              showOutlines={showOutlines}
+              showOutlines={stormHit ? false : showOutlines}
               showCities={showCities}
+              stormAreas={stormHit ? stormAreas : []}
+              showStormAreas={showStormAreas}
               {...(canWrite
                 ? { onTapEmpty: (lng: number, lat: number) => tapAdd.mutate({ lng, lat }) }
                 : {})}
@@ -861,10 +913,14 @@ export function ProspectPage(props: {
             </div>
           </div>
           <p className="-mt-2 text-xs text-muted-foreground">
-            Blue outlines are the buildings in the search results.
-            {showOutlines
-              ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to open it, then “Add to my prospects”" : ""}.`
-              : " Turn “Outlines on” to see every building in the state and tap one to open it."}
+            {stormHit
+              ? "Shaded circles are where NOAA reports landed (red hail, orange wind, purple tornado) with the flagging radius; the blue buildings inside are the call points."
+              : "Blue outlines are the buildings in the search results."}
+            {stormHit
+              ? ""
+              : showOutlines
+                ? ` Zoom in and every building outline in the state appears${canWrite ? "; tap one to open it, then “Add to my prospects”" : ""}.`
+                : " Turn “Outlines on” to see every building in the state and tap one to open it."}
           </p>
         </Suspense>
       )}
