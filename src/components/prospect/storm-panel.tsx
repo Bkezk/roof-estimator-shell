@@ -1,14 +1,22 @@
 /**
  * Storm call points on the Buildings page (owner, Sep 28: "just if there's been a major weather
  * event in the past week so that they are potential call points"). A compact card at the top of
- * the find-buildings panel: the window's NOAA hail / wind / tornado reports by county, how many
- * buildings they flagged, a by-hand refresh, and (admins) the thresholds.
+ * its own strip above the find-buildings card, one line until opened: the window's NOAA hail /
+ * wind / tornado reports by county, how many buildings they flagged, a by-hand refresh, and
+ * (admins) the thresholds.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { formatDistanceToNow } from "date-fns";
-import { CloudLightning, Loader2, RefreshCw, Settings2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  CloudLightning,
+  Loader2,
+  RefreshCw,
+  Settings2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -80,8 +88,12 @@ export function StormPanel(props: {
   onPickCounty: (county: string) => void;
   /** After a by-hand refresh ran: the building list and anything else storm-derived. */
   onRefreshed?: (() => void) | undefined;
+  /** Start expanded (the notification link lands here with the filter on). */
+  defaultOpen?: boolean | undefined;
 }) {
   const qc = useQueryClient();
+  // Owner, Sep 28: one line by default so the strip never crowds the search card.
+  const [open, setOpen] = useState(!!props.defaultOpen);
   const summaryFn = useServerFn(stormSummary);
   const refreshFn = useServerFn(refreshStormsIfDue);
   const saveFn = useServerFn(setStormSettings);
@@ -128,129 +140,158 @@ export function StormPanel(props: {
     save.mutate(draft);
   };
 
+  const counties = rows.length;
+  const flagged = summary.data?.buildings_flagged ?? 0;
+  const headline = summary.isLoading
+    ? "checking…"
+    : summary.error
+      ? "could not load"
+      : counties === 0
+        ? `no reports in the last ${days} days`
+        : `${counties} count${counties === 1 ? "y" : "ies"} · ${flagged.toLocaleString()} building${flagged === 1 ? "" : "s"}`;
+  const Chevron = open ? ChevronDown : ChevronRight;
+
   return (
-    <div className="rounded-lg border p-2 text-sm">
-      <div className="flex items-center gap-2">
-        <CloudLightning className="h-4 w-4 shrink-0 text-destructive" />
-        <span className="font-medium">Storms · last {days} days</span>
-        {summary.data && (
-          <span className="text-xs text-muted-foreground">
-            {summary.data.buildings_flagged.toLocaleString()} building
-            {summary.data.buildings_flagged === 1 ? "" : "s"} flagged
-          </span>
-        )}
-      </div>
-
-      {summary.isLoading && <p className="mt-1 text-xs text-muted-foreground">Loading…</p>}
-      {summary.error && (
-        <p className="mt-1 text-xs text-destructive">
-          Could not load storm reports: {errText(summary.error)}
-        </p>
-      )}
-      {summary.data && rows.length === 0 && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          No hail, wind or tornado reports in Kentucky in the last {days} days.
-        </p>
-      )}
-      {rows.length > 0 && (
-        <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto">
-          {rows.map((c) => (
-            <li key={c.county}>
-              <button
-                type="button"
-                className="w-full rounded px-1 py-0.5 text-left text-xs hover:bg-muted"
-                title={`Show the storm-hit buildings in ${c.county} County`}
-                onClick={() => props.onPickCounty(c.county)}
-              >
-                <span className="font-medium">{c.county}</span>
-                <span className="text-muted-foreground">
-                  {" · "}
-                  {c.buildings_hit.toLocaleString()} building{c.buildings_hit === 1 ? "" : "s"}
-                  {" · "}
-                  {countySummary(c)}
-                  {" · "}
-                  {stormDay(c.latest)}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-1 flex flex-wrap items-center gap-1">
-        <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-          {s?.last_fetch_at
-            ? `Checked ${formatDistanceToNow(Date.parse(s.last_fetch_at), { addSuffix: true })}`
-            : summary.data
-              ? "Not checked yet"
-              : ""}
-          {s?.last_fetch_note ? ` · ${s.last_fetch_note}` : ""}
-        </span>
+    <section
+      className="rounded-lg border bg-background/95 text-sm shadow backdrop-blur"
+      aria-label="Storm call points"
+    >
+      <div className="flex items-center gap-1 pr-1">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-muted/40"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          title={open ? "Hide the storm counties" : "Show the storm counties"}
+        >
+          <CloudLightning
+            className={`h-4 w-4 shrink-0 ${counties ? "text-destructive" : "text-muted-foreground"}`}
+          />
+          <span className="font-medium">Storms</span>
+          <span className="min-w-0 truncate text-xs text-muted-foreground">{headline}</span>
+          <Chevron className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        </button>
         {props.canWrite && (
           <Button
-            size="sm"
+            size="icon"
             variant="ghost"
-            className="h-7 px-2 text-xs"
+            className="h-7 w-7"
             disabled={refresh.isPending}
             onClick={() => refresh.mutate()}
-            title="Pull the latest NOAA storm reports now"
+            aria-label="Pull the latest NOAA storm reports now"
+            title={`Pull the latest NOAA storm reports now${s?.last_fetch_at ? ` (checked ${formatDistanceToNow(Date.parse(s.last_fetch_at), { addSuffix: true })})` : ""}`}
           >
             {refresh.isPending ? (
-              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <RefreshCw className="mr-1 h-3.5 w-3.5" />
+              <RefreshCw className="h-3.5 w-3.5" />
             )}
-            Refresh
           </Button>
         )}
         {props.isAdmin && s && (
           <Button
-            size="sm"
+            size="icon"
             variant={draft ? "secondary" : "ghost"}
-            className="h-7 px-2 text-xs"
-            onClick={() => setDraft((d) => (d ? null : draftFrom(s)))}
+            className="h-7 w-7"
+            aria-label="Storm thresholds and radii"
+            title="Storm thresholds and radii"
+            onClick={() => {
+              setDraft((d) => (d ? null : draftFrom(s)));
+              setOpen(true);
+            }}
           >
-            <Settings2 className="mr-1 h-3.5 w-3.5" /> Settings
+            <Settings2 className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
 
-      {props.isAdmin && draft && (
-        <div className="mt-2 space-y-2 rounded-md border p-2">
-          <div className="grid grid-cols-2 gap-2">
-            {FIELDS.map((f) => (
-              <div key={f.key}>
-                <Label className="text-xs text-muted-foreground">{f.label}</Label>
-                <NumberField
-                  className="h-8"
-                  value={draft[f.key]}
-                  min={0}
-                  max={f.max}
-                  step={f.step}
-                  inputMode={f.int ? "numeric" : "decimal"}
-                  invalid={invalid.includes(f)}
-                  onChange={(v) =>
-                    setDraft((d) => (d ? { ...d, [f.key]: f.int ? Math.round(v) : v } : d))
-                  }
-                />
+      {open && (
+        <div className="border-t px-3 py-2">
+          {summary.error && (
+            <p className="text-xs text-destructive">
+              Could not load storm reports: {errText(summary.error)}
+            </p>
+          )}
+          {summary.data && counties === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No hail, wind or tornado reports in Kentucky in the last {days} days.
+            </p>
+          )}
+          {counties > 0 && (
+            <div className="max-h-40 overflow-y-auto">
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-3 px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span>County</span>
+                <span className="text-right">Buildings</span>
+                <span className="text-right">Reports</span>
               </div>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            A building is flagged when a report at or above the minimum lands within the radius for
-            its kind.
+              {rows.map((c) => (
+                <button
+                  key={c.county}
+                  type="button"
+                  className="grid w-full grid-cols-[1fr_auto_auto] items-baseline gap-x-3 rounded px-1 py-1 text-left text-xs hover:bg-muted"
+                  title={`Show the storm-hit buildings in ${c.county} County`}
+                  onClick={() => props.onPickCounty(c.county)}
+                >
+                  <span className="min-w-0 truncate font-medium">
+                    {c.county}
+                    <span className="ml-1 font-normal text-muted-foreground">
+                      {stormDay(c.latest)}
+                    </span>
+                  </span>
+                  <span className="text-right tabular-nums">
+                    {c.buildings_hit.toLocaleString()}
+                  </span>
+                  <span className="text-right text-muted-foreground">{countySummary(c)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            A building is a call point when a NOAA report lands within a few miles of it. The miles
+            on a row are the distance to where the report was made, not damage at that roof.
+            {s?.last_fetch_at
+              ? ` Checked ${formatDistanceToNow(Date.parse(s.last_fetch_at), { addSuffix: true })}.`
+              : ""}
           </p>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={submit} disabled={save.isPending}>
-              {save.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
-              Save
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
-              Cancel
-            </Button>
-          </div>
+
+          {props.isAdmin && draft && (
+            <div className="mt-2 space-y-2 rounded-md border p-2">
+              <div className="grid grid-cols-2 gap-2">
+                {FIELDS.map((f) => (
+                  <div key={f.key}>
+                    <Label className="text-xs text-muted-foreground">{f.label}</Label>
+                    <NumberField
+                      className="h-8"
+                      value={draft[f.key]}
+                      min={0}
+                      max={f.max}
+                      step={f.step}
+                      inputMode={f.int ? "numeric" : "decimal"}
+                      invalid={invalid.includes(f)}
+                      onChange={(v) =>
+                        setDraft((d) => (d ? { ...d, [f.key]: f.int ? Math.round(v) : v } : d))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                A building is flagged when a report at or above the minimum lands within the radius
+                for its kind. Changes apply from the next refresh.
+              </p>
+              <div className="flex gap-2">
+                <Button size="sm" onClick={submit} disabled={save.isPending}>
+                  {save.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                  Save
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

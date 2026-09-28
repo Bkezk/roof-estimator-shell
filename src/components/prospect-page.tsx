@@ -609,17 +609,23 @@ export function ProspectPage(props: {
     return `A NOAA storm report was made within ${r != null ? `${r} miles` : "a few miles"} of this building in the last ${days} days; the miles are the distance to where it was reported.${wind}`;
   };
 
+  // Storm call points: its own one-line strip above the search card (owner, Sep 28), open
+  // when the notification link brought the user here.
+  const stormStrip = (
+    <StormPanel
+      canWrite={canWrite}
+      isAdmin={isAdmin(profile)}
+      onPickCounty={pickStormCounty}
+      onRefreshed={invalidateStorms}
+      defaultOpen={!!props.initialStorm}
+    />
+  );
+
   // The find-buildings panel: search, filters and results. Over the map's left side when the
   // map is on (it can be tucked away); a plain card in the left column when the map is off.
   const searchCard = (
     <Card className="flex max-h-full flex-col">
       <CardHeader className="space-y-2 pb-2">
-        <StormPanel
-          canWrite={canWrite}
-          isAdmin={isAdmin(profile)}
-          onPickCounty={pickStormCounty}
-          onRefreshed={invalidateStorms}
-        />
         <Input
           placeholder="Search name, address, owner, parcel…"
           value={q}
@@ -850,9 +856,12 @@ export function ProspectPage(props: {
                 {showSearch ? "Hide search" : "Find buildings"}
               </Button>
               {showSearch && (
-                <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-lg shadow-lg [&>div]:h-full [&>div]:bg-background/95 [&>div]:backdrop-blur">
-                  {searchCard}
-                </div>
+                <>
+                  <div className="pointer-events-auto">{stormStrip}</div>
+                  <div className="pointer-events-auto min-h-0 flex-1 overflow-hidden rounded-lg shadow-lg [&>div]:h-full [&>div]:bg-background/95 [&>div]:backdrop-blur">
+                    {searchCard}
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -868,7 +877,12 @@ export function ProspectPage(props: {
       <div className="grid items-start gap-4 xl:grid-cols-[380px_minmax(0,1fr)]">
         {/* ── Left column: the working list (and the search card when the map is hidden) ── */}
         <div className="space-y-4">
-          {!showMap && searchCard}
+          {!showMap && (
+            <div className="space-y-2">
+              {stormStrip}
+              {searchCard}
+            </div>
+          )}
           {/* ── My prospects: the working list ── */}
           <Card>
             <CardHeader className="pb-2">
