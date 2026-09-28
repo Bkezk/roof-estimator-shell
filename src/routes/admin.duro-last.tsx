@@ -15,7 +15,7 @@ export const Route = createFileRoute("/admin/duro-last")({
     ...(DL_TABS.includes(search["tab"] as DlTab) ? { tab: search["tab"] as DlTab } : {}),
     ...(typeof search["cat"] === "string" && search["cat"] ? { cat: search["cat"] } : {}),
   }),
-  head: () => ({ meta: [{ title: "Duro-Last Pricing — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Duro-Last Pricing — JBK Portal" }] }),
   component: DuroLastPage,
 });
 

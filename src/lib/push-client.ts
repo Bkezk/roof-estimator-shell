@@ -17,7 +17,7 @@ const SW_URL = "/sw.js";
 
 /** Shown on an iPhone / iPad that is not running the installed (Home Screen) app. */
 export const IOS_INSTALL_HINT =
-  "On iPhone, add Bid-O-Matic to your Home Screen (Share → Add to Home Screen) and open it from there to turn on notifications.";
+  "On iPhone, add JBK Portal to your Home Screen (Share → Add to Home Screen) and open it from there to turn on notifications.";
 
 const inBrowser = () => typeof window !== "undefined" && typeof navigator !== "undefined";
 

@@ -194,7 +194,7 @@ export interface EstimateSearch {
 }
 
 export const Route = createFileRoute("/estimate")({
-  head: () => ({ meta: [{ title: "Estimator — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Estimator — JBK Portal" }] }),
   validateSearch: (s: Record<string, unknown>): EstimateSearch => {
     const b = s["bid"];
     const c = s["combine"];

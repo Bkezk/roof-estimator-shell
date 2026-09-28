@@ -57,14 +57,14 @@ const importedFrom = (data: unknown): boolean =>
 export const Route = createFileRoute("/bids")({
   head: () => ({
     meta: [
-      { title: "Saved Bids — Bid-O-Matic" },
+      { title: "Saved Bids — JBK Portal" },
       {
         name: "description",
         content: "View and manage saved Duro-Last roofing estimates.",
       },
       {
         property: "og:title",
-        content: "Saved Bids — Bid-O-Matic",
+        content: "Saved Bids — JBK Portal",
       },
       {
         property: "og:description",

@@ -94,7 +94,7 @@ function AuthedShell({ children }: { children: ReactNode }) {
         <div className="flex flex-1 flex-col">
           <header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
-            <span className="font-semibold">Bid-O-Matic</span>
+            <span className="font-semibold">JBK Portal</span>
             <div className="ml-auto flex items-center gap-1">
               <NotificationsBell />
             </div>

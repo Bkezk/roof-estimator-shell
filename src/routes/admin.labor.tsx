@@ -46,7 +46,7 @@ type LaborTab = (typeof LABOR_TABS)[number];
 export const Route = createFileRoute("/admin/labor")({
   validateSearch: (search: Record<string, unknown>): { tab?: LaborTab } =>
     LABOR_TABS.includes(search["tab"] as LaborTab) ? { tab: search["tab"] as LaborTab } : {},
-  head: () => ({ meta: [{ title: "Advanced Labor — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Advanced Labor — JBK Portal" }] }),
   component: LaborPage,
 });
 

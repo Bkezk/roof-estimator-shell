@@ -29,7 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 export const Route = createFileRoute("/admin/users")({
-  head: () => ({ meta: [{ title: "Users & access — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Users & access — JBK Portal" }] }),
   component: UsersPage,
 });
 

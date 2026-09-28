@@ -1,5 +1,5 @@
 /*
- * Bid-O-Matic service worker — notifications only.
+ * JBK Portal service worker — notifications only.
  *
  * Deliberately minimal: no fetch handler and no caching, so it never changes how pages or data
  * load. It shows a push message ({ title, body, url, tag } JSON from notify.server.ts) and, on a
@@ -20,7 +20,7 @@ self.addEventListener("push", (event) => {
   } catch {
     data = { body: event.data ? event.data.text() : "" };
   }
-  const title = typeof data.title === "string" && data.title ? data.title : "Bid-O-Matic";
+  const title = typeof data.title === "string" && data.title ? data.title : "JBK Portal";
   const url = typeof data.url === "string" && data.url ? data.url : "/";
   const options = {
     body: typeof data.body === "string" ? data.body : "",

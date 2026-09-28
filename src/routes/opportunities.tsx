@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { OpportunitiesPage } from "@/components/opportunities-page";
 
 export const Route = createFileRoute("/opportunities")({
-  head: () => ({ meta: [{ title: "Opportunities — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Opportunities — JBK Portal" }] }),
   // ?id=<uuid> opens that opportunity; ?new=1 opens a blank one; without either the page lists
   // them. Access is the central gate's (pageForPath: /opportunities → Customers).
   validateSearch: (s: Record<string, unknown>): { id?: string; new?: 1 } => {

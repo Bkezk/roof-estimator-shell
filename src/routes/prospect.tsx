@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ProspectPage } from "@/components/prospect-page";
 
 export const Route = createFileRoute("/prospect")({
-  head: () => ({ meta: [{ title: "Buildings — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Buildings — JBK Portal" }] }),
   // ?building=<id> opens that building (links from a bid, a task, a report card).
   validateSearch: (s: Record<string, unknown>): { building?: string } => {
     const b = s["building"];

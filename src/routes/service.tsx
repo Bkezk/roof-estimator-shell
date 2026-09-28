@@ -7,7 +7,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidParam = (v: unknown) => (typeof v === "string" && UUID.test(v) ? v : undefined);
 
 export const Route = createFileRoute("/service")({
-  head: () => ({ meta: [{ title: "Service — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Service — JBK Portal" }] }),
   // ?id=<uuid> opens that ticket; ?new=1 opens a blank ticket, optionally prefilled with a
   // technician `tech=<uuid>` and a day `date=YYYY-MM-DD` (the Tech Board's "+"), with the
   // customer side of an earlier ticket `from=<ticket uuid>` ("New ticket for this site"), or

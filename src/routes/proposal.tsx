@@ -21,7 +21,7 @@ import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/proposal")({
-  head: () => ({ meta: [{ title: "Proposal — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Proposal — JBK Portal" }] }),
   validateSearch: (s: Record<string, unknown>): { bid?: string } => {
     const b = s["bid"];
     return typeof b === "string" ? { bid: b } : {};

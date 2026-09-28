@@ -80,13 +80,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Bid-O-Matic" },
+      { title: "JBK Portal" },
       {
         name: "description",
         content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
       },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Bid-O-Matic" },
+      { property: "og:title", content: "JBK Portal" },
       {
         property: "og:description",
         content: "Internal roofing estimating tool for Duro-Last commercial roofing systems.",
@@ -97,7 +97,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       // Installable web app (public/manifest.webmanifest); iOS reads the apple-* tags instead.
       { name: "theme-color", content: "#1b4a8a" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
-      { name: "apple-mobile-web-app-title", content: "Bid-O-Matic" },
+      { name: "apple-mobile-web-app-title", content: "JBK Portal" },
     ],
     links: [
       {

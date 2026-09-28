@@ -5,7 +5,7 @@ import { BoardPage } from "@/components/service/board-page";
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 export const Route = createFileRoute("/service/board")({
-  head: () => ({ meta: [{ title: "Tech Board — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Tech Board — JBK Portal" }] }),
   // The Tech Board (docs/service-module-design.md §5.2). ?week=YYYY-MM-DD shows the week that
   // holds that day (so Back from a ticket returns to the same week); without it, this week.
   // Access is the central gate's (pageForPath: /service/board → Service); the page itself

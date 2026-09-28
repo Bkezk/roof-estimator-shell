@@ -61,7 +61,7 @@ export const Route = createFileRoute("/admin/settings")({
     SETTINGS_TABS.includes(search["tab"] as SettingsTab)
       ? { tab: search["tab"] as SettingsTab }
       : {},
-  head: () => ({ meta: [{ title: "General — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "General — JBK Portal" }] }),
   component: SettingsPage,
 });
 

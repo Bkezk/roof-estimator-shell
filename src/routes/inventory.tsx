@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InventoryPage } from "@/components/inventory-page";
 
 export const Route = createFileRoute("/inventory")({
-  head: () => ({ meta: [{ title: "Inventory — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Inventory — JBK Portal" }] }),
   // ?bid=<id>: the estimator's "Record leftovers for this bid" link preselects the job.
   // ?job=<id>: a service ticket's "Log material" link opens "Take from inventory" for it.
   validateSearch: (s: Record<string, unknown>): { bid?: string; job?: string } => {

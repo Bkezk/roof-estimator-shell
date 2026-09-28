@@ -23,7 +23,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const Route = createFileRoute("/account")({
-  head: () => ({ meta: [{ title: "Account — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Account — JBK Portal" }] }),
   component: AccountPage,
 });
 

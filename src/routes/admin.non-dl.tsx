@@ -5,7 +5,7 @@ export const Route = createFileRoute("/admin/non-dl")({
   // `cat` deep-links to a category by name (from the sidebar submenu).
   validateSearch: (search: Record<string, unknown>): { cat?: string } =>
     typeof search["cat"] === "string" && search["cat"] ? { cat: search["cat"] } : {},
-  head: () => ({ meta: [{ title: "Non-DL Pricing — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Non-DL Pricing — JBK Portal" }] }),
   component: NonDlPage,
 });
 

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { TakeoffPage } from "@/components/takeoff-page";
 
 export const Route = createFileRoute("/takeoff")({
-  head: () => ({ meta: [{ title: "Takeoff — Bid-O-Matic" }] }),
+  head: () => ({ meta: [{ title: "Takeoff — JBK Portal" }] }),
   // ?id=<uuid> opens that takeoff in the editor; without it the page lists takeoffs.
   validateSearch: (s: Record<string, unknown>): { id?: string } => {
     const id = s["id"];
