@@ -563,19 +563,23 @@ export function ProspectPage(props: {
   });
   // Stable list for the map: a fresh array on every render would make the map re-frame the
   // view (and jump the zoom) whenever anything else on the page changed, such as a toggle.
-  const mapBuildings = useMemo(
-    () =>
-      (buildings.data ?? []).map((b) => ({
-        id: b.id,
-        name: b.name,
-        address1: b.address1,
-        lat: b.centroid_lat,
-        lng: b.centroid_lng,
-        footprint: b.footprint,
-        roofSqFt: b.roof_sqft,
-      })),
-    [buildings.data],
-  );
+  // Owner, Sep 28: the Buildings tab plots only the saved prospects (plus whatever is open),
+  // not every search result; Storm hits plots the call points, which are the point of that tab.
+  const mapBuildings = useMemo(() => {
+    const src = stormHit ? (buildings.data ?? []) : (prospects.data ?? []);
+    const rows = [...src];
+    const open = detail.data?.building;
+    if (open && !rows.some((b) => b.id === open.id)) rows.push(open);
+    return rows.map((b) => ({
+      id: b.id,
+      name: b.name,
+      address1: b.address1,
+      lat: b.centroid_lat,
+      lng: b.centroid_lng,
+      footprint: b.footprint,
+      roofSqFt: b.roof_sqft,
+    }));
+  }, [stormHit, buildings.data, prospects.data, detail.data?.building]);
   const rect = useMemo(() => {
     const b = detail.data?.building;
     if (!b) return null;
@@ -936,7 +940,7 @@ export function ProspectPage(props: {
           <p className="-mt-2 text-xs text-muted-foreground">
             {stormHit
               ? "Shaded circles are where NOAA reports landed (red hail, orange wind, purple tornado) with the flagging radius; the blue buildings inside are the call points."
-              : "Blue outlines are the buildings in the search results."}
+              : "Blue dots are your saved prospects, plus the building you have open."}
             {stormHit
               ? ""
               : showOutlines
