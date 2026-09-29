@@ -156,7 +156,8 @@ export const listLeads = createServerFn({ method: "GET" })
     if (data.roofOnly) q = q.eq("is_roof", true);
     if (data.source) q = q.eq("source", data.source);
     const st = data.status ?? "open";
-    if (st === "open") q = q.in("status", ["new", "watching"]);
+    // "added" rows (from the retired Add-to-prospects button) stay in the open list.
+    if (st === "open") q = q.in("status", ["new", "watching", "added"]);
     else if (st !== "all") q = q.eq("status", st);
     if (!data.includeGone) q = q.is("gone_at", null);
     const { data: rows, error } = await q
@@ -188,8 +189,8 @@ export const leadCounts = createServerFn({ method: "GET" })
     const base = () =>
       sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
     const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
-      count((q) => q.in("status", ["new", "watching"])),
-      count((q) => q.in("status", ["new", "watching"]).eq("is_roof", true)),
+      count((q) => q.in("status", ["new", "watching", "added"])),
+      count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true)),
       count((q) => q.eq("status", "new").eq("is_roof", true)),
       sb.from("lead_settings").select("*").eq("id", 1).single(),
     ]);

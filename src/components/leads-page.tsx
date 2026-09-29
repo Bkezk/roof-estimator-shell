@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useNavigate } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 import { Info, Loader2, RefreshCw, Search, Settings2 } from "lucide-react";
 import { toast } from "sonner";
@@ -17,7 +16,6 @@ import { useAuth } from "@/lib/auth-store";
 import { supabase } from "@/integrations/supabase/client";
 import { isAdmin } from "@/lib/access";
 import {
-  addLeadToProspects,
   LEAD_SOURCES,
   leadCounts,
   listLeads,
@@ -49,11 +47,11 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 type Source =
   "all" | "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
-type StatusTab = "open" | "watching" | "added" | "dismissed";
+// Owner (Sep 29): Open, Watching and Dismissed are enough; leads are not put on the map.
+type StatusTab = "open" | "watching" | "dismissed";
 const TABS: { value: StatusTab; label: string }[] = [
   { value: "open", label: "Open" },
   { value: "watching", label: "Watching" },
-  { value: "added", label: "Added" },
   { value: "dismissed", label: "Dismissed" },
 ];
 
@@ -83,13 +81,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const canWrite = can("prospect");
   const admin = isAdmin(profile);
   const qc = useQueryClient();
-  const navigate = useNavigate();
 
   const listFn = useServerFn(listLeads);
   const countsFn = useServerFn(leadCounts);
   const refreshFn = useServerFn(refreshLeadsIfDue);
   const statusFn = useServerFn(setLeadStatus);
-  const addFn = useServerFn(addLeadToProspects);
 
   // Roof leads are the page (owner, Sep 29: "we really only need roof bids"); the keyword
   // match is deliberately wide so no new roof, re-roof or roof repair slips past it, and
@@ -217,17 +213,6 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       invalidate();
     },
     onError: (e) => toast.error(`Could not update the lead: ${errText(e)}`),
-    onSettled: () => setBusyId(null),
-  });
-  const addToProspects = useMutation({
-    mutationFn: (id: string) => addFn({ data: { id } }),
-    onMutate: (id) => setBusyId(id),
-    onSuccess: (r) => {
-      invalidate();
-      toast.success(r.existed ? "Already in My prospects" : "Added to My prospects");
-      void navigate({ to: "/prospect", search: { building: r.building_id } });
-    },
-    onError: (e) => toast.error(`Could not add to prospects: ${errText(e)}`),
     onSettled: () => setBusyId(null),
   });
 
@@ -406,7 +391,6 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             onStatus={(status, note) =>
               setStatus.mutate({ id: l.id, status, ...(note !== undefined ? { note } : {}) })
             }
-            onAdd={() => addToProspects.mutate(l.id)}
           />
         ))}
       </div>

@@ -1,12 +1,12 @@
 /**
  * One construction lead on the Leads page (owner, Sep 28): a state planroom job with its bid
  * countdown, or a Louisville commercial permit with its size and cost. The whole card opens the
- * lead's own page on the source site; the buttons (Watch, Dismiss, Add to prospects, Note) do
- * their own thing and never trigger the card.
+ * lead's own page on the source site (a permit has none: owner, Sep 29, "we don't want these
+ * linked to the map, new builds just open a blank space"); the buttons (Watch, Dismiss, Note)
+ * do their own thing and never trigger the card.
  */
 import { useState, type ReactNode, type SyntheticEvent } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { Building2, Eye, EyeOff, Loader2, Plus, StickyNote, Undo2, X } from "lucide-react";
+import { Eye, EyeOff, Loader2, StickyNote, Undo2, X } from "lucide-react";
 
 import { SOURCE_LABELS, type LeadRow, type LeadStatus } from "@/lib/leads.functions";
 import { formatCost } from "@/components/prospect/lead-format";
@@ -104,8 +104,7 @@ export function LeadCard(props: {
   canWrite: boolean;
   /** Status or note change; the page runs the mutation and toasts. */
   onStatus: (status: LeadStatus, note?: string | null) => void;
-  onAdd: () => void;
-  /** A status change or an add is in flight for this lead. */
+  /** A status change is in flight for this lead. */
   busy: boolean;
 }) {
   const l = props.lead;
@@ -113,20 +112,14 @@ export function LeadCard(props: {
   const [note, setNote] = useState(l.note ?? "");
   const status = l.status as LeadStatus;
 
-  const navigate = useNavigate();
+  // Only a page on the source site is a link; a permit's in-app map address is not shown.
+  const href = l.url && !l.url.startsWith("/") ? l.url : null;
   const open = () => {
-    if (!l.url) return;
-    // A permit lead points into the app (/prospect?at=lat,lng): stay in the app. Anything
-    // else is the source site, in a new tab.
-    if (l.url.startsWith("/prospect?")) {
-      const params = new URLSearchParams(l.url.slice(l.url.indexOf("?")));
-      const at = params.get("at");
-      const q = params.get("q");
-      void navigate({ to: "/prospect", search: { ...(at ? { at } : {}), ...(q ? { q } : {}) } });
-      return;
-    }
-    window.open(l.url, "_blank", "noopener,noreferrer");
+    if (href) window.open(href, "_blank", "noopener,noreferrer");
   };
+  // "New" is a recent arrival nobody has acted on: first seen in the last three days and
+  // neither watched nor dismissed.
+  const isNew = status === "new" && Date.now() - Date.parse(l.first_seen_at) < 3 * DAY;
   const stop = (e: SyntheticEvent) => e.stopPropagation();
 
   const who = [
@@ -145,17 +138,11 @@ export function LeadCard(props: {
 
   return (
     <div
-      role={l.url ? "link" : undefined}
-      tabIndex={l.url ? 0 : undefined}
-      title={
-        l.url
-          ? l.url.startsWith("/")
-            ? "Open the site on the Buildings map"
-            : `Open on the ${SOURCE_LABELS[l.source] ?? l.source} site`
-          : undefined
-      }
+      role={href ? "link" : undefined}
+      tabIndex={href ? 0 : undefined}
+      title={href ? `Open on the ${SOURCE_LABELS[l.source] ?? l.source} site` : undefined}
       className={`space-y-2 rounded-lg border p-4 transition-all duration-150 ${
-        l.url
+        href
           ? "cursor-pointer hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           : ""
       } ${l.gone_at || status === "dismissed" ? "opacity-70" : ""}`}
@@ -170,8 +157,7 @@ export function LeadCard(props: {
     >
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline">{SOURCE_LABELS[l.source] ?? l.source}</Badge>
-        {l.is_roof && <Badge variant="destructive">Roof</Badge>}
-        {status === "new" && <Badge>New</Badge>}
+        {isNew && <Badge>New</Badge>}
         {status === "watching" && <Badge variant="secondary">Watching</Badge>}
         {l.gone_at && (
           <Badge variant="outline" className="text-muted-foreground">
@@ -234,8 +220,7 @@ export function LeadCard(props: {
         {props.canWrite && (
           <div className="flex flex-wrap gap-1.5" onClick={stop} onKeyDown={stop}>
             {props.busy && <Loader2 className="h-4 w-4 animate-spin self-center" />}
-            {status !== "added" &&
-              status !== "dismissed" &&
+            {status !== "dismissed" &&
               (status === "watching" ? (
                 <Button
                   size="sm"
@@ -265,16 +250,14 @@ export function LeadCard(props: {
                 <Undo2 className="mr-1 h-3.5 w-3.5" /> Restore
               </Button>
             ) : (
-              status !== "added" && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  disabled={props.busy}
-                  onClick={() => props.onStatus("dismissed")}
-                >
-                  <X className="mr-1 h-3.5 w-3.5" /> Dismiss
-                </Button>
-              )
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={props.busy}
+                onClick={() => props.onStatus("dismissed")}
+              >
+                <X className="mr-1 h-3.5 w-3.5" /> Dismiss
+              </Button>
             )}
             <Button
               size="sm"
@@ -290,25 +273,7 @@ export function LeadCard(props: {
               <StickyNote className="mr-1 h-3.5 w-3.5" />{" "}
               {noteOpen ? "Save note" : l.note ? "Edit note" : "Note"}
             </Button>
-            {l.building_id ? (
-              <Button asChild size="sm" variant="outline">
-                <Link to="/prospect" search={{ building: l.building_id }}>
-                  <Building2 className="mr-1 h-3.5 w-3.5" /> Open building
-                </Link>
-              </Button>
-            ) : (
-              <Button size="sm" disabled={props.busy} onClick={props.onAdd}>
-                <Plus className="mr-1 h-3.5 w-3.5" /> Add to prospects
-              </Button>
-            )}
           </div>
-        )}
-        {!props.canWrite && l.building_id && (
-          <Button asChild size="sm" variant="outline" onClick={stop}>
-            <Link to="/prospect" search={{ building: l.building_id }}>
-              <Building2 className="mr-1 h-3.5 w-3.5" /> Open building
-            </Link>
-          </Button>
         )}
       </div>
     </div>
