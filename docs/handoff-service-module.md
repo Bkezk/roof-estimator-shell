@@ -182,6 +182,36 @@ pricing seen); Cabinet for Economic Development news releases (earliest signal o
 industrial builds, prose only — a candidate third feed); Kentucky Press Association Smart
 Search (free keyword email alerts on legal notices, set up by hand).
 
+## Tennessee leads (Sep 29)
+
+**Tennessee leads (Sep 29; owner: "we actually cover TN as well, can we replicate what we have
+for leads for TN?").** Three new sources plus SAM.gov, all in the same list (a lead now has a
+`state` column, KY or TN; cards show ", TN"). Live pull from the sandbox Sep 29: **STREAM**
+(`tn_stream`, the state's construction bid list at tn.gov/generalservices/stream — 5 projects,
+1 roof: East Tennessee Intermediate Care Facility, roof replacement in the scope — plus the
+STREAM RFP page, 1 CM/GC RFP; the designer firm, contact, phone and e-mail are the contact line;
+pre-bid and bid opening in Central or Eastern time as the page says); **UT bids** (`ut_bids`,
+the "Invitations to Bid" on the seven UT campus pages — 14 today, none roof; the site refuses a
+bare request and answers a browser's headers); **Nashville permits** (`nashville_permits`, Metro
+Nashville's Building Permits Issued layer — Commercial New / Addition / Shell / Roofing
+≥ $100,000 in the Louisville window of 90 days: 74, all counted as roof like Louisville's new
+builds; types and cost floor in the gear panel); **SAM.gov** asks for KY and TN in its one daily
+slot. Migration `20260929220000_leads_tennessee.sql` (source list, `leads.state`,
+`lead_settings.nashville_types` / `nashville_min_cost`) is applied. Not verified / to watch:
+
+- SAM.gov Tennessee not pulled from the sandbox (no key here); first real pull is the next
+  daily run.
+- UT invitations stay on the page after they bid, often with no bid date on the page (it is
+  in the PDF). A lead closes when the page moves its bid date, or when the same title shows up
+  under Bid Results; otherwise it stays open until the owner dismisses it (today: 8 posted
+  before September, none roof, so the roof-only page hides them).
+- UT titles rarely say "roof": "UTM Storm Damage Repairs (24/25) (Subproject 2)" is not
+  flagged. Add keywords (e.g. "storm damage") in the gear if those should count.
+- Nashville: the permit `Contact` is the applicant (a GC, an architect or a permit expediter),
+  not always the builder; a Shell permit can be an interior white-box.
+- Not yet looked at: Knoxville, Chattanooga, Memphis/Shelby County permits; TN county and city
+  bid pages; TBR / community college bids; TDOT lettings (roads, not roofs).
+
 ## Item 3: statewide load, then monthly refresh
 
 3. **Statewide load, then monthly refresh.** Built: `scripts/load-kentucky.ts` (matching in
@@ -208,6 +238,23 @@ Search (free keyword email alerts on legal notices, set up by hand).
    Open: Ballard, Clark, Fulton and Martin keep almost no address points (Clark 0 of 16,695;
    Martin 19 of 6,169) — their 911 layer rows likely lack the number/street fields or
    coordinates the reader expects; paste a sample feature from one of them to fix the reader.
+
+## Tennessee buildings (Sep 29)
+
+**Tennessee buildings (owner, Sep 29: "whole state").** Loader, workflow and migration built
+(`scripts/load-tennessee.ts`, `.github/workflows/refresh-tennessee.yml`,
+`20260929210000_buildings_state_tn.sql`, applied live; details in `docs/tennessee-buildings.md`).
+Owner: run "Refresh Tennessee data" by hand once at night (about 102,000 rows); it then runs on
+the 2nd of each month. Tennessee is footprints only: the state publishes no statewide 911
+address points or schools service, so there is no address matching, no promoted named
+businesses and no schools; addresses are whatever the national layer carries. The map draws
+TDOT's 6-inch imagery under Tennessee (levels 6–19), Tennessee outlines from the national layer
+(5,000 sq ft and up, from zoom 15), and tap-to-add uses that layer with `state = 'TN'`. The 34
+county names both states use are kept apart ("Warren, KY" / "Warren, TN") in the county filter
+and search; the Buildings page counts "N of 215 counties"; the refresh log stores Tennessee
+counties as "Davidson, TN". A Kentucky / Tennessee / both filter sits on Buildings and Leads.
+Not yet verified in the signed-in app: the county list with Tennessee rows, saving a Tennessee
+building by tap, the imagery-year line.
 
 ## Item 3c: drivers for service vehicles
 

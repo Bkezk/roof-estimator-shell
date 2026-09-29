@@ -26,6 +26,8 @@ Spec: [`specs/2026-09-29-bid-validation-phase-0.md`](specs/2026-09-29-bid-valida
 
 **Building age on Prospecting (owner asked Sep 28; checked with proof).** Decision for the owner: buy the core counties from Regrid, or keep `year_built` hand-entered — [notes](handoff-service-module.md#building-age-on-prospecting-sep-28).
 
+**Tennessee buildings (owner, Sep 29: "whole state").** Loader, workflow, migration (applied) and map built; owner runs "Refresh Tennessee data" once at night — [notes](handoff-service-module.md#tennessee-buildings-sep-29).
+
 0. **Service module / CenterPoint replacement (owner, Sep 24)** — handoff and history in `docs/handoff-service-module.md`; build from `docs/service-module-design.md` — [notes](handoff-service-module.md#item-0-service-module-and-centerpoint); spec [`specs/2026-09-29-service-module.md`](specs/2026-09-29-service-module.md).
 1. **Import old bids (.bax).** Built; NOT FINISHED (owner, Sep 26): (a) owner compares imported bids with Bid-Advantage, (b) drip edge / gravel stop / fascia bar entries, (c) skipped items, (d) labor tables read from the file — [notes](handoff-service-module.md#item-1-import-old-bids-bax).
    1b. **Importer: drip edge, gravel stop and fascia bar entries.** The four sample files had
@@ -51,6 +53,7 @@ Spec: [`specs/2026-09-29-bid-validation-phase-0.md`](specs/2026-09-29-bid-valida
       purpose.
       **Storm call points (built Sep 28).** — [notes](handoff-service-module.md#storm-call-points-built-sep-28).
       **Construction leads (built Sep 28; sources added Sep 29).** — [notes](handoff-service-module.md#construction-leads-built-sep-28).
+      **Tennessee leads (Sep 29).** STREAM, UT bids, Nashville permits, SAM.gov TN; migration applied — [notes](handoff-service-module.md#tennessee-leads-sep-29).
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk

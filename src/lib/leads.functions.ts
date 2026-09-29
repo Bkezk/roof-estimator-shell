@@ -23,6 +23,10 @@ export const SOURCE_LABELS: Record<string, string> = {
   paducah_bids: "Paducah bids",
   campus_planrooms: "University & school planrooms",
   sam_gov: "Federal (SAM.gov)",
+  // Tennessee (owner, Sep 29: "we actually cover TN as well").
+  tn_stream: "TN state projects (STREAM)",
+  ut_bids: "UT bids",
+  nashville_permits: "Nashville permits",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -55,6 +59,12 @@ const meName = async (ctx: Ctx) => {
 };
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
+/**
+ * The floor between pulls, Refresh button included (owner, Sep 29: "make sure we don't pull
+ * too often from the sites even if we press the refresh button repeatedly"). A run stamps
+ * last_fetch_at when it starts, so a press inside this window answers from the last run.
+ */
+const MIN_GAP = 30 * 60 * 1000;
 
 /**
  * The lazy pass: the Leads page calls this on load; if the last pull is older than six hours
@@ -67,7 +77,13 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
     async ({
       data,
       context,
-    }): Promise<{ ran: boolean; note: string | null; error: string | null }> => {
+    }): Promise<{
+      ran: boolean;
+      note: string | null;
+      error: string | null;
+      /** Set when a press landed inside the 30-minute floor: what to tell the user. */
+      waited?: string;
+    }> => {
       await prospectAccess(context);
       const { data: s } = await context.supabase
         .from("lead_settings")
@@ -75,8 +91,18 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         .eq("id", 1)
         .maybeSingle();
       const last = s?.last_fetch_at ? Date.parse(s.last_fetch_at) : 0;
-      if (!data.force && Date.now() - last < SIX_HOURS)
+      const age = Date.now() - last;
+      if (!data.force && age < SIX_HOURS)
         return { ran: false, note: s?.last_fetch_note ?? null, error: null };
+      if (age < MIN_GAP) {
+        const wait = Math.ceil((MIN_GAP - age) / 60000);
+        return {
+          ran: false,
+          note: s?.last_fetch_note ?? null,
+          error: null,
+          waited: `Checked ${Math.max(1, Math.round(age / 60000))} min ago — the sites are pulled at most every 30 minutes; try again in ${wait} min`,
+        };
+      }
       try {
         // Stage stamps (owner, Sep 29: "refresh is still spinning"): the settings row shows how
         // far a run got even when the platform cuts the request off before it answers.
@@ -99,7 +125,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await Promise.race([refreshLeads(context.supabase), timeout]);
         return {
           ran: true,
-          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof)`,
+          note: r.note,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {
@@ -137,12 +163,17 @@ const listSchema = z.object({
       "paducah_bids",
       "campus_planrooms",
       "sam_gov",
+      "tn_stream",
+      "ut_bids",
+      "nashville_permits",
     ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
   status: z.enum(["open", "new", "watching", "dismissed", "added", "all"]).optional(),
   /** Include leads that dropped off their source. */
   includeGone: z.boolean().optional(),
+  /** One state only (owner, Sep 29: "a filter to just see KY or just see TN"). */
+  state: z.enum(["KY", "TN"]).optional(),
 });
 export type ListLeadsInput = z.input<typeof listSchema>;
 
@@ -155,8 +186,10 @@ export const listLeads = createServerFn({ method: "GET" })
     let q = context.supabase.from("leads").select("*").limit(500);
     if (data.roofOnly) q = q.eq("is_roof", true);
     if (data.source) q = q.eq("source", data.source);
+    if (data.state) q = q.eq("state", data.state);
     const st = data.status ?? "open";
-    if (st === "open") q = q.in("status", ["new", "watching"]);
+    // "added" rows (from the retired Add-to-prospects button) stay in the open list.
+    if (st === "open") q = q.in("status", ["new", "watching", "added"]);
     else if (st !== "all") q = q.eq("status", st);
     if (!data.includeGone) q = q.is("gone_at", null);
     const { data: rows, error } = await q
@@ -177,7 +210,8 @@ export interface LeadCounts {
 /** The tab counts and the fetch stamp. */
 export const leadCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<LeadCounts> => {
+  .validator((d: unknown) => z.object({ state: z.enum(["KY", "TN"]).optional() }).parse(d ?? {}))
+  .handler(async ({ data, context }): Promise<LeadCounts> => {
     await readAccess(context);
     const sb = context.supabase;
     const count = (f: (q: ReturnType<typeof base>) => ReturnType<typeof base>) =>
@@ -185,12 +219,17 @@ export const leadCounts = createServerFn({ method: "GET" })
         if (error) throw new Error(error.message);
         return n ?? 0;
       });
-    const base = () =>
-      sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
+    // Open counts what the Open tab shows: still listed, and the bid date (when there is one)
+    // not yet passed (owner, Sep 29: "it says 32 open but I only counted 16").
+    const stillOpen = `bid_at.is.null,bid_at.gt.${new Date().toISOString()}`;
+    const base = () => {
+      const q = sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
+      return data.state ? q.eq("state", data.state) : q;
+    };
     const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
-      count((q) => q.in("status", ["new", "watching"])),
-      count((q) => q.in("status", ["new", "watching"]).eq("is_roof", true)),
-      count((q) => q.eq("status", "new").eq("is_roof", true)),
+      count((q) => q.in("status", ["new", "watching", "added"]).or(stillOpen)),
+      count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true).or(stillOpen)),
+      count((q) => q.eq("status", "new").eq("is_roof", true).or(stillOpen)),
       sb.from("lead_settings").select("*").eq("id", 1).single(),
     ]);
     if (error) throw new Error(error.message);
@@ -253,10 +292,13 @@ export const addLeadToProspects = createServerFn({ method: "POST" })
       .from("buildings")
       .insert({
         source: "manual",
-        name: lead.source === "louisville_permits" ? (lead.project_type ?? lead.title) : lead.title,
+        name:
+          lead.source === "louisville_permits" || lead.source === "nashville_permits"
+            ? (lead.project_type ?? lead.title)
+            : lead.title,
         address1: lead.address ?? "",
         city: lead.city ?? lead.location ?? null,
-        state: "KY",
+        state: lead.state || "KY",
         county: lead.county,
         building_sqft: lead.sqft,
         centroid_lat: lead.lat,
@@ -297,6 +339,8 @@ const settingsSchema = z.object({
   louisville_types: z.array(z.string().trim().min(1).max(60)).max(20),
   louisville_min_sqft: z.number().min(0).max(1000000),
   louisville_days: z.number().int().min(7).max(365),
+  nashville_types: z.array(z.string().trim().min(1).max(60)).max(20),
+  nashville_min_cost: z.number().min(0).max(100_000_000),
 });
 export type LeadSettingsInput = z.input<typeof settingsSchema>;
 export const setLeadSettings = createServerFn({ method: "POST" })

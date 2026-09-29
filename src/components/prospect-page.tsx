@@ -28,9 +28,15 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
 import { KY_COUNTIES } from "@/lib/gis/ky-layers";
-import { buildingLine, equivalentRectangle } from "@/lib/prospect";
+import { TN_COUNTIES } from "@/lib/gis/tn-layers";
 import {
-  deleteBuilding,
+  buildingLine,
+  equivalentRectangle,
+  parseCountyKey,
+  stateCode,
+  stateForPoint,
+} from "@/lib/prospect";
+import {
   deleteRoof,
   getBuilding,
   listBuildings,
@@ -160,13 +166,13 @@ const summaryLine = (
 const num = (n: number | null | undefined) =>
   n === null || n === undefined ? "" : n.toLocaleString();
 
-/** A blank building form. */
-const emptyBuilding = (): BuildingInput => ({
+/** A blank building form; the state defaults from where the map is looking (else Kentucky). */
+const emptyBuilding = (at?: { lat: number; lng: number } | null): BuildingInput => ({
   name: "",
   address1: "",
   address2: null,
   city: null,
-  state: "KY",
+  state: at ? stateForPoint(at.lat, at.lng) : "KY",
   zip: null,
   county: null,
   parcel_id: null,
@@ -198,7 +204,8 @@ const buildingFromLead = (l: {
   owner_name: l.customerName,
   address1: l.address,
   city: l.city,
-  state: l.state ?? "KY",
+  // Bids spell it "TN" or "Tennessee"; the form takes the two-letter code.
+  state: stateCode(l.state) ?? "KY",
   zip: l.zip,
 });
 
@@ -267,7 +274,6 @@ export function ProspectPage(props: {
   const countiesFn = useServerFn(listCounties);
   const getFn = useServerFn(getBuilding);
   const saveFn = useServerFn(saveBuilding);
-  const deleteFn = useServerFn(deleteBuilding);
   const saveRoofFn = useServerFn(saveRoof);
   const deleteRoofFn = useServerFn(deleteRoof);
   const saveTaskFn = useServerFn(saveTask);
@@ -284,7 +290,13 @@ export function ProspectPage(props: {
   const stormHitsFn = useServerFn(buildingStormHits);
 
   const [q, setQ] = useState(props.initialQuery ?? "");
+  // The county filter's key: the county, or "Franklin|TN" for a name both states use.
   const [county, setCounty] = useState("");
+  const countyPick = parseCountyKey(county);
+  // Owner (Sep 29): "a filter to just see KY or just see TN". A county pick names its own state
+  // when the name exists in both; otherwise the state filter applies.
+  const [stateFilter, setStateFilter] = useState<"all" | "KY" | "TN">("all");
+  const stateArg = countyPick.state ?? (stateFilter === "all" ? null : stateFilter);
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
   const [sort, setSort] = useState<"recent" | "biggest" | "storm">(
     props.initialStorm ? "storm" : "recent",
@@ -391,12 +403,13 @@ export function ProspectPage(props: {
   }, [props.initialAt]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county, minSize, sort, stormHit],
+    queryKey: ["buildings", q, county, stateArg, minSize, sort, stormHit],
     queryFn: () =>
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
-          ...(county ? { county } : {}),
+          ...(countyPick.county ? { county: countyPick.county } : {}),
+          ...(stateArg ? { state: stateArg } : {}),
           ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
           ...(stormHit ? { stormHit: true } : {}),
           sort,
@@ -404,6 +417,13 @@ export function ProspectPage(props: {
       }),
   });
   const counties = useQuery({ queryKey: ["building-counties"], queryFn: () => countiesFn() });
+  // The county list narrowed to the state filter (a name unique to one state has no state key).
+  const countyChoices = (counties.data ?? []).filter((c) => {
+    if (stateFilter === "all") return true;
+    if (c.state) return c.state === stateFilter;
+    const list = stateFilter === "TN" ? TN_COUNTIES.map((t) => t.name) : KY_COUNTIES;
+    return list.some((n) => n.toLowerCase() === c.county.toLowerCase());
+  });
   const detail = useQuery({
     queryKey: ["building", selectedId],
     queryFn: () => getFn({ data: { id: selectedId! } }),
@@ -510,16 +530,6 @@ export function ProspectPage(props: {
     onSuccess: (row) => {
       toast.success("Building saved");
       setSelectedId(row.id);
-      invalidate();
-    },
-    onError: fail,
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
-    onSuccess: () => {
-      toast.success("Building removed");
-      setSelectedId(null);
-      setForm(null);
       invalidate();
     },
     onError: fail,
@@ -715,24 +725,46 @@ export function ProspectPage(props: {
           <StormPanel
             canWrite={canWrite}
             isAdmin={isAdmin(profile)}
-            county={county}
+            county={countyPick.county}
             onPickCounty={pickStormCounty}
             onRefreshed={invalidateStorms}
           />
         ) : (
-          <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="All counties" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All counties</SelectItem>
-              {(counties.data ?? []).map((c) => (
-                <SelectItem key={c.county} value={c.county}>
-                  {c.county} ({c.count})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
+            <Select
+              value={stateFilter}
+              onValueChange={(v) => {
+                setStateFilter(v as typeof stateFilter);
+                // A county from the other state no longer applies.
+                if (v !== "all" && county) {
+                  const pick = parseCountyKey(county);
+                  if (pick.state && pick.state !== v) setCounty("");
+                }
+              }}
+            >
+              <SelectTrigger className="h-8" aria-label="State">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Both states</SelectItem>
+                <SelectItem value="KY">Kentucky</SelectItem>
+                <SelectItem value="TN">Tennessee</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All counties" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All counties</SelectItem>
+                {countyChoices.map((c) => (
+                  <SelectItem key={c.key} value={c.key}>
+                    {c.label} ({c.count.toLocaleString()})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
         {/* Owner, Sep 28: no roof-age filter or sort — year built is paid data we are not
             buying; own-book roofs still show their age on the row. */}
@@ -769,7 +801,7 @@ export function ProspectPage(props: {
             className="text-left text-xs text-muted-foreground underline underline-offset-2"
             onClick={() => {
               setSelectedId(null);
-              setForm(emptyBuilding());
+              setForm(emptyBuilding(viewCenter));
             }}
           >
             <Plus className="mr-1 inline h-3 w-3" /> Not listed? Add a building by hand
@@ -844,11 +876,12 @@ export function ProspectPage(props: {
         <div>
           <h1 className="text-2xl font-semibold">Buildings</h1>
           <p className="text-sm text-muted-foreground">
-            Your prospects, and every commercial building in Kentucky to find the next one.
+            Your prospects, and every commercial building in Kentucky and Tennessee to find the next
+            one.
             {(refreshes.data?.length ?? 0) > 0 && (
               <span className="ml-1 text-xs">
                 Data refreshed {new Date(refreshes.data![0]!.ran_at).toLocaleDateString()} (
-                {refreshes.data!.length} of {KY_COUNTIES.length} counties)
+                {refreshes.data!.length} of {KY_COUNTIES.length + TN_COUNTIES.length} counties)
               </span>
             )}
           </p>
@@ -888,18 +921,31 @@ export function ProspectPage(props: {
             </Button>
           )}
           {isAdmin(profile) && (
-            /* The state's data is loaded by the monthly GitHub workflow (docs/TODO.md item 3);
-               this opens its page, where "Run workflow" refreshes one county or all of them. */
-            <Button asChild size="sm" variant="outline">
-              <a
-                href="https://github.com/Bkezk/roof-estimator-shell/actions/workflows/refresh-kentucky.yml"
-                target="_blank"
-                rel="noreferrer"
-                title="Runs at 1 am Eastern on the 1st of each month; start a by-hand refresh at night, it slows the app"
-              >
-                <ExternalLink className="mr-1 h-4 w-4" /> Refresh data
-              </a>
-            </Button>
+            /* Each state's data is loaded by its monthly GitHub workflow (docs/TODO.md item 3);
+               each link opens one, where "Run workflow" refreshes one county or all of them. */
+            <div
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs"
+              title="Runs monthly; start a by-hand refresh at night, it slows the app"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Refresh data:
+              {(
+                [
+                  ["KY", "refresh-kentucky.yml", "Kentucky"],
+                  ["TN", "refresh-tennessee.yml", "Tennessee"],
+                ] as const
+              ).map(([code, file, name]) => (
+                <a
+                  key={code}
+                  href={`https://github.com/Bkezk/roof-estimator-shell/actions/workflows/${file}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline underline-offset-2 hover:text-primary"
+                  title={`${name}'s refresh workflow`}
+                >
+                  {code}
+                </a>
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -914,6 +960,7 @@ export function ProspectPage(props: {
               showOutlines={stormHit ? false : showOutlines}
               showCities={showCities}
               focus={focus}
+              fitTo={stateFilter === "all" ? null : stateFilter}
               stormAreas={stormHit ? stormAreas : []}
               showStormAreas={showStormAreas}
               imageryYear={imageryYear.data?.year ?? null}
@@ -1218,23 +1265,6 @@ export function ProspectPage(props: {
                         disabled={save.isPending || (!form.name.trim() && !form.address1.trim())}
                       >
                         {form.id ? "Save" : "Save as prospect"}
-                      </Button>
-                    )}
-                    {form.id && canWrite && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              "Remove this building? Its roofs and tasks stay attached to it in history.",
-                            )
-                          )
-                            remove.mutate(form.id!);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>

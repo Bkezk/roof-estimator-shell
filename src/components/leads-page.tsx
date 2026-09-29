@@ -2,13 +2,13 @@
  * Construction leads (owner, Sep 28: "is there any way to get data on new builds before
  * they're built giving us time to submit a bid?"). Two public feeds, pulled nightly and when
  * this page loads (throttled to six hours on the server): every state-funded project out for bid
- * on the State of KY planroom, and Louisville Metro's large commercial building permits. A lead
- * can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
+ * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
+ * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits) from Sep 29,
+ * all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useNavigate } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 import { Info, Loader2, RefreshCw, Search, Settings2 } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +16,6 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
 import {
-  addLeadToProspects,
   LEAD_SOURCES,
   leadCounts,
   listLeads,
@@ -26,6 +25,7 @@ import {
   SOURCE_LABELS,
   type LeadRow,
   type LeadStatus,
+  type ListLeadsInput,
 } from "@/lib/leads.functions";
 import { LeadCard } from "@/components/prospect/lead-card";
 import { isClosedBid } from "@/components/prospect/lead-format";
@@ -46,30 +46,34 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-type Source =
-  "all" | "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
-type StatusTab = "open" | "watching" | "added" | "dismissed";
+type Source = "all" | NonNullable<ListLeadsInput["source"]>;
+// Owner (Sep 29): Open, Watching and Dismissed are enough; leads are not put on the map.
+type StatusTab = "open" | "watching" | "dismissed";
 const TABS: { value: StatusTab; label: string }[] = [
   { value: "open", label: "Open" },
   { value: "watching", label: "Watching" },
-  { value: "added", label: "Added" },
   { value: "dismissed", label: "Dismissed" },
 ];
+
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 const ABOUT =
   "State planroom: every state-funded Kentucky project in its bid phase, with pre-bid and bid dates. " +
   "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
   "Bowling Green and Paducah bids: those cities' own bid pages. " +
   "University & school planrooms: UK, WKU, NKU, EKU, UofL, Jefferson County Public Schools and KCTCS projects out for bid. " +
-  "Federal (SAM.gov): roofing-contractor opportunities with Kentucky as the place of performance. " +
+  "Federal (SAM.gov): roofing-contractor opportunities with Kentucky or Tennessee as the place of performance. " +
   "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
+  "Tennessee — TN state projects (STREAM): every state building project out for bid, with the designer to call; " +
+  "UT bids: the University of Tennessee campuses' invitations to bid; " +
+  "Nashville permits: Metro Nashville commercial new, addition, shell and roofing permits over the minimum cost; " +
   "The app checks them every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|[\w. ]+ planroom) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
@@ -80,13 +84,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const canWrite = can("prospect");
   const admin = isAdmin(profile);
   const qc = useQueryClient();
-  const navigate = useNavigate();
 
   const listFn = useServerFn(listLeads);
   const countsFn = useServerFn(leadCounts);
   const refreshFn = useServerFn(refreshLeadsIfDue);
   const statusFn = useServerFn(setLeadStatus);
-  const addFn = useServerFn(addLeadToProspects);
 
   // Roof leads are the page (owner, Sep 29: "we really only need roof bids"); the keyword
   // match is deliberately wide so no new roof, re-roof or roof repair slips past it, and
@@ -94,13 +96,16 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const roofOnly = true;
   void props.initialRoofOnly;
   const [source, setSource] = useState<Source>("all");
+  // Owner (Sep 29): "a filter to just see KY or just see TN".
+  const [state, setState] = useState<"all" | "KY" | "TN">("all");
+  const stateArg = state === "all" ? {} : { state };
   const [tab, setTab] = useState<StatusTab>("open");
   const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  const filters = { roofOnly, source, status: tab };
+  const filters = { roofOnly, source, status: tab, state };
   const leads = useQuery({
     queryKey: ["leads", filters],
     queryFn: () =>
@@ -109,10 +114,14 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
           roofOnly,
           status: tab,
           ...(source !== "all" ? { source } : {}),
+          ...stateArg,
         },
       }),
   });
-  const counts = useQuery({ queryKey: ["lead-counts"], queryFn: () => countsFn() });
+  const counts = useQuery({
+    queryKey: ["lead-counts", state],
+    queryFn: () => countsFn({ data: stateArg }),
+  });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["leads"] });
     void qc.invalidateQueries({ queryKey: ["lead-counts"] });
@@ -147,8 +156,8 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   };
   const refresh = useMutation({
     // The server answers within about a minute or reports why; past 90 s stop waiting.
-    mutationFn: (force: boolean) =>
-      Promise.race([
+    mutationFn: async (force: boolean) => {
+      return Promise.race([
         refreshFn({ data: { force } }),
         new Promise<never>((_, reject) =>
           setTimeout(
@@ -161,13 +170,15 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             90000,
           ),
         ),
-      ]),
+      ]);
+    },
     onSuccess: (r, force) => {
       setRefreshError(r.error);
       if (r.error) toast.error(`Lead refresh: ${r.error}`);
+      else if (r.waited) toast.info(r.waited);
       else if (force) toast.success(r.note ?? "Leads checked");
-      if (r.ran || force) invalidate();
-      if ((r.ran || force) && counts.data?.planroom_login) void readPages();
+      if (r.ran) invalidate();
+      if (r.ran && counts.data?.planroom_login) void readPages();
     },
     onError: (e) => {
       setRefreshError(errText(e));
@@ -175,14 +186,20 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     },
   });
   // The lazy pass: a Prospecting user's visit pulls the feeds if the last pull is over six
-  // hours old (the server throttles). Once per page load; silent unless it fails.
+  // hours old (the server throttles too). Decided here from the counts query so a page whose
+  // last check is recent makes no refresh call at all. Once per page load; silent unless it
+  // fails.
   const refreshStarted = useRef(false);
+  const lastFetchAt = counts.data?.settings?.last_fetch_at ?? null;
   useEffect(() => {
-    if (!canWrite || refreshStarted.current) return;
+    if (!canWrite || !counts.data || refreshStarted.current) return;
     refreshStarted.current = true;
-    refresh.mutate(false);
+    const due = !lastFetchAt || Date.now() - Date.parse(lastFetchAt) > SIX_HOURS_MS;
+    if (due) refresh.mutate(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page load
-  }, [canWrite]);
+  }, [canWrite, counts.data]);
+  /** A manual press is in flight (the on-load pass does not hold the button). */
+  const pressing = refresh.isPending && refresh.variables === true;
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const setStatus = useMutation({
@@ -194,17 +211,6 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       invalidate();
     },
     onError: (e) => toast.error(`Could not update the lead: ${errText(e)}`),
-    onSettled: () => setBusyId(null),
-  });
-  const addToProspects = useMutation({
-    mutationFn: (id: string) => addFn({ data: { id } }),
-    onMutate: (id) => setBusyId(id),
-    onSuccess: (r) => {
-      invalidate();
-      toast.success(r.existed ? "Already in My prospects" : "Added to My prospects");
-      void navigate({ to: "/prospect", search: { building: r.building_id } });
-    },
-    onError: (e) => toast.error(`Could not add to prospects: ${errText(e)}`),
     onSettled: () => setBusyId(null),
   });
 
@@ -260,11 +266,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={refresh.isPending || reading !== null}
+              disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
-              title="Pull the state planroom and Louisville permits now"
+              title="Pull every lead source (Kentucky and Tennessee) now"
             >
-              {refresh.isPending ? (
+              {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-1 h-4 w-4" />
@@ -312,6 +318,16 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             ))}
           </TabsList>
         </Tabs>
+        <Select value={state} onValueChange={(v) => setState(v as typeof state)}>
+          <SelectTrigger className="h-9 w-[130px]" aria-label="State">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Both states</SelectItem>
+            <SelectItem value="KY">Kentucky</SelectItem>
+            <SelectItem value="TN">Tennessee</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={source} onValueChange={(v) => setSource(v as Source)}>
           <SelectTrigger className="h-9 w-[180px]">
             <SelectValue />
@@ -383,7 +399,6 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             onStatus={(status, note) =>
               setStatus.mutate({ id: l.id, status, ...(note !== undefined ? { note } : {}) })
             }
-            onAdd={() => addToProspects.mutate(l.id)}
           />
         ))}
       </div>

@@ -1,0 +1,57 @@
+# Monthly refresh of the Tennessee buildings (docs/tennessee-buildings.md): every
+# non-residential building of 5,000 sq ft and up in the 95 counties, from the national
+# FEMA / ORNL "USA Structures" layer. Tennessee is footprints only (no statewide 911 address
+# points or schools service), so every run reloads the footprints; about 102,000 rows.
+# Runs the day after Kentucky's pass (refresh-kentucky.yml, the 1st) so the two never share
+# the small database instance; start a by-hand run at night too.
+# Needs supabase/migrations/20260929210000_buildings_state_tn.sql applied (the loader stops
+# otherwise). Secrets (repository settings → Secrets and variables → Actions), the same as
+# Kentucky's: LOADER_EMAIL and LOADER_PASSWORD, a Bid-O-Matic login with Prospecting access
+# made in Users & access. The project URL and public key come from the committed .env.
+name: Refresh Tennessee data
+
+on:
+  schedule:
+    - cron: "0 5 2 * *" # 05:00 UTC on the 2nd = 1 am Eastern / midnight Central
+  workflow_dispatch:
+    inputs:
+      county:
+        description: "One county, e.g. Davidson (blank = all 95)"
+        required: false
+        default: ""
+      shard:
+        description: "Only this share of the counties, e.g. 2/3 (blank = all)"
+        required: false
+        default: ""
+      skip_fresh_days:
+        description: "Skip counties refreshed in the last N days (resume a cancelled pass; blank = none)"
+        required: false
+        default: ""
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: Load
+        env:
+          LOADER_EMAIL: ${{ secrets.LOADER_EMAIL }}
+          LOADER_PASSWORD: ${{ secrets.LOADER_PASSWORD }}
+          COUNTY: ${{ github.event.inputs.county }}
+          SHARD: ${{ github.event.inputs.shard }}
+          SKIP_FRESH: ${{ github.event.inputs.skip_fresh_days }}
+        run: |
+          # An array, so a two-word county ("Van Buren") stays one argument.
+          if [ -n "$COUNTY" ]; then
+            ARGS=(--county "$COUNTY")
+          else
+            ARGS=(--all --shard "${SHARD:-1/1}")
+          fi
+          if [ -n "$SKIP_FRESH" ]; then ARGS+=(--skip-fresh "$SKIP_FRESH"); fi
+          echo "running: ${ARGS[*]}"
+          npx vite-node scripts/load-tennessee.ts "${ARGS[@]}"

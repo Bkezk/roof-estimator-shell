@@ -38,6 +38,15 @@ import {
   KY_IMAGERY_TILE_INDEX_LAYER,
 } from "@/lib/gis/ky-layers";
 import {
+  TN_IMAGERY_INDEX_LAYER,
+  USA_STRUCTURES_LAYER,
+  inTennesseeBox,
+  tnCountyFromFips,
+} from "@/lib/gis/tn-layers";
+import {
+  SHARED_COUNTY_NAMES,
+  countyOptions,
+  type CountyOption,
   sortWarrantyLeads,
   warrantyLeadFrom,
   type WarrantyLead,
@@ -152,6 +161,8 @@ export const listBuildings = createServerFn({ method: "GET" })
       .object({
         q: z.string().trim().max(200).optional(),
         county: z.string().trim().max(100).optional(),
+        /** With `county`: which state's county, for a name both states use (Franklin, …). */
+        state: z.enum(["KY", "TN"]).optional(),
         /** Roof at least this many years old: roof_year, else year_built (original roof). */
         minAge: z.number().int().min(0).max(200).optional(),
         /** Only buildings whose roof age nobody knows yet. */
@@ -182,6 +193,9 @@ export const listBuildings = createServerFn({ method: "GET" })
       q = q.order("updated_at", { ascending: false });
     }
     if (data.county) q = q.eq("county", data.county);
+    // Kentucky is everything not marked Tennessee (hand-typed rows default to KY).
+    if (data.state === "TN") q = q.eq("state", "TN");
+    else if (data.state === "KY") q = q.neq("state", "TN");
     if (data.minSqFt) q = q.gte("roof_sqft", data.minSqFt);
     if (data.ageUnknown) {
       q = q.is("roof_year", null).is("year_built", null);
@@ -200,56 +214,147 @@ export const listBuildings = createServerFn({ method: "GET" })
     return rows ?? [];
   });
 
+/** The Tennessee imagery index's county polygon under a point (null outside Tennessee). */
+async function tennesseeAt(
+  lat: number,
+  lng: number,
+): Promise<{ county: string; orthoYear: number | null; naipYear: number | null } | null> {
+  const params = new URLSearchParams({
+    geometry: `${lng},${lat}`,
+    geometryType: "esriGeometryPoint",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    outFields: "Cnty_Name,TN_Ortho_Year,NAIP_Year",
+    returnGeometry: "false",
+    f: "json",
+  });
+  const json = (await fetchJson(`${TN_IMAGERY_INDEX_LAYER}/query?${params}`)) as {
+    features?: { attributes?: Record<string, unknown> }[];
+  };
+  const a = json.features?.[0]?.attributes;
+  const county = typeof a?.["Cnty_Name"] === "string" ? a["Cnty_Name"].trim() : "";
+  if (!a || !county) return null;
+  const year = (v: unknown) => (typeof v === "number" && v > 1900 ? v : null);
+  return { county, orthoYear: year(a["TN_Ortho_Year"]), naipYear: year(a["NAIP_Year"]) };
+}
+
 /**
- * The year the 3-inch imagery under a point was flown (KyFromAbove Phase 3; the state's tile
- * index has it per 5k tile). Null when the tile has no Phase 3 flight yet.
+ * Is a point in Tennessee, and which county? The two states' boxes overlap along the line, so
+ * inside Tennessee's box the Tennessee imagery index (one polygon per county) decides.
+ */
+async function tennesseeCountyAt(lat: number, lng: number): Promise<string | null> {
+  if (!inTennesseeBox(lat, lng)) return null;
+  return (await tennesseeAt(lat, lng))?.county ?? null;
+}
+
+export interface ImageryYear {
+  /** "2023" (KyFromAbove Phase 3), "TDOT 2021" or "NAIP 2021" (Tennessee); null = unknown. */
+  year: string | null;
+  resolution: string | null;
+  tile: string | null;
+  state: "KY" | "TN" | null;
+  county: string | null;
+}
+
+/**
+ * The year the imagery under a point was flown: Tennessee's county index (TDOT's flight year,
+ * else the NAIP year) inside Tennessee's box, else Kentucky's 5k tile index (KyFromAbove
+ * Phase 3; null year where Phase 3 has not flown).
  */
 export const imageryYearAt = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }).parse(d),
   )
-  .handler(
-    async ({
-      data,
-      context,
-    }): Promise<{ year: string | null; resolution: string | null; tile: string | null }> => {
-      await readAccess(context);
-      const params = new URLSearchParams({
-        geometry: `${data.lng},${data.lat}`,
-        geometryType: "esriGeometryPoint",
-        inSR: "4326",
-        spatialRel: "esriSpatialRelIntersects",
-        outFields: "TileName,Phase3_Year,Phase3_Resolution",
-        returnGeometry: "false",
-        f: "json",
-      });
-      const json = (await fetchJson(`${KY_IMAGERY_TILE_INDEX_LAYER}/query?${params}`)) as {
-        features?: { attributes?: Record<string, unknown> }[];
-      };
-      const a = json.features?.[0]?.attributes ?? {};
-      const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
-      return {
-        year: str(a["Phase3_Year"]),
-        resolution: str(a["Phase3_Resolution"]),
-        tile: str(a["TileName"]),
-      };
-    },
-  );
+  .handler(async ({ data, context }): Promise<ImageryYear> => {
+    await readAccess(context);
+    // Along the line a Tennessee failure must not hide a Kentucky answer, nor the reverse.
+    let tnError: unknown = null;
+    if (inTennesseeBox(data.lat, data.lng)) {
+      try {
+        const tn = await tennesseeAt(data.lat, data.lng);
+        if (tn) {
+          return {
+            year: tn.orthoYear
+              ? `TDOT ${tn.orthoYear}`
+              : tn.naipYear
+                ? `NAIP ${tn.naipYear}`
+                : null,
+            resolution: null,
+            tile: null,
+            state: "TN",
+            county: tn.county,
+          };
+        }
+      } catch (e) {
+        tnError = e;
+      }
+    }
+    const params = new URLSearchParams({
+      geometry: `${data.lng},${data.lat}`,
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: "TileName,Phase3_Year,Phase3_Resolution",
+      returnGeometry: "false",
+      f: "json",
+    });
+    let json: { features?: { attributes?: Record<string, unknown> }[] };
+    try {
+      json = (await fetchJson(`${KY_IMAGERY_TILE_INDEX_LAYER}/query?${params}`)) as typeof json;
+    } catch (e) {
+      throw tnError ?? e;
+    }
+    const f = json.features?.[0];
+    if (!f && tnError) throw tnError;
+    const a = f?.attributes ?? {};
+    const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    return {
+      year: str(a["Phase3_Year"]),
+      resolution: str(a["Phase3_Resolution"]),
+      tile: str(a["TileName"]),
+      state: f ? "KY" : null,
+      county: null,
+    };
+  });
 
-/** Distinct counties with building counts (for the filter). */
+/**
+ * Distinct counties with building counts (for the filter). A name both states use (Franklin,
+ * Warren, Montgomery, …) comes back as two entries, "Franklin, KY" and "Franklin, TN".
+ */
 export const listCounties = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ county: string; count: number }[]> => {
+  .handler(async ({ context }): Promise<CountyOption[]> => {
     await readAccess(context);
     // Counted in SQL (building_county_counts): reading every row through the API stops at its
     // 1,000-row page, which showed one county once the whole state was loaded.
     const { data, error } = await context.supabase.rpc("building_county_counts");
     if (error) throw new Error(error.message);
+    const counts = (data ?? []).map((r) => ({ county: r.county, count: Number(r.n) }));
+    // The database groups by name only: count Tennessee's share of each shared name (none to
+    // count until Tennessee is loaded, which one head request tells).
+    const tnCounts = new Map<string, number>();
+    const tnCount = (county?: string) => {
+      let q = context.supabase
+        .from("buildings")
+        .select("id", { count: "exact", head: true })
+        .is("deleted_at", null)
+        .eq("state", "TN");
+      if (county) q = q.eq("county", county);
+      return q;
+    };
+    const anyTn = await tnCount();
+    if (anyTn.error) throw new Error(anyTn.error.message);
+    if ((anyTn.count ?? 0) > 0) {
+      const shared = counts.filter((c) => SHARED_COUNTY_NAMES.has(c.county.toLowerCase()));
+      const results = await Promise.all(shared.map((c) => tnCount(c.county)));
+      results.forEach((r, i) => {
+        if (r.error) throw new Error(r.error.message);
+        tnCounts.set(shared[i]!.county, r.count ?? 0);
+      });
+    }
     // Alphabetical (owner, Sep 24): a salesperson looks a county up by name.
-    return (data ?? [])
-      .map((r) => ({ county: r.county, count: Number(r.n) }))
-      .sort((a, b) => a.county.localeCompare(b.county));
+    return countyOptions(counts, tnCounts);
   });
 
 export interface BuildingDetail {
@@ -1029,7 +1134,7 @@ export const attachFootprints = createServerFn({ method: "POST" })
       const sb = context.supabase;
       const { data: pending, error } = await sb
         .from("buildings")
-        .select("id, centroid_lat, centroid_lng")
+        .select("id, centroid_lat, centroid_lng, state")
         .eq("county", data.county)
         .eq("source", "ky911")
         .is("deleted_at", null)
@@ -1040,14 +1145,24 @@ export const attachFootprints = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       const rows = (pending ?? []).slice(0, data.batch);
       if (rows.length === 0) return { checked: 0, attached: 0, remaining: 0, done: true };
-      const req = footprintsAtPointsRequest(
-        KY_FOOTPRINTS_LAYER,
-        rows.map((r) => [r.centroid_lng!, r.centroid_lat!] as [number, number]),
-      );
-      const page = (await fetchJson(req.url, req.body)) as ArcGisFeatureSet;
-      const polys = (page.features ?? [])
-        .map(footprintFromFeature)
-        .filter((c): c is NonNullable<typeof c> => c !== null && c.geometry !== null);
+      // Kentucky's own export for Kentucky rows, the national layer for any in Tennessee.
+      const polys: NonNullable<ReturnType<typeof footprintFromFeature>>[] = [];
+      for (const [layer, group] of [
+        [KY_FOOTPRINTS_LAYER, rows.filter((r) => r.state !== "TN")],
+        [USA_STRUCTURES_LAYER, rows.filter((r) => r.state === "TN")],
+      ] as const) {
+        if (group.length === 0) continue;
+        const req = footprintsAtPointsRequest(
+          layer,
+          group.map((r) => [r.centroid_lng!, r.centroid_lat!] as [number, number]),
+        );
+        const page = (await fetchJson(req.url, req.body)) as ArcGisFeatureSet;
+        polys.push(
+          ...(page.features ?? [])
+            .map(footprintFromFeature)
+            .filter((c): c is NonNullable<typeof c> => c !== null && c.geometry !== null),
+        );
+      }
       let attached = 0;
       const unmatched: string[] = [];
       for (const r of rows) {
@@ -1169,7 +1284,9 @@ export const listRefreshes = createServerFn({ method: "GET" })
 /**
  * Tap-to-add: the building outline under a tapped map point becomes a prospect (source ornl,
  * keyed by its BUILD_ID, so tapping a stored building again just returns it), with its size,
- * county from FIPS and the nearest 911 address when the county's points are loaded.
+ * county from FIPS and the nearest 911 address when the county's points are loaded. In
+ * Tennessee (the Tennessee imagery index names a county under the point) the outline comes
+ * from the national USA Structures layer, keyed usa:<BUILD_ID>, with its own address and class.
  */
 export const addBuildingAtPoint = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -1187,30 +1304,47 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
       existed: boolean;
     }> => {
       await assertPageAccess(context.supabase, context.userId, "prospect");
+      // Along the line a Tennessee index failure still lets a Kentucky outline answer; with no
+      // outline found, that failure is the message.
+      let tnCounty: string | null = null;
+      let tnError: unknown = null;
+      try {
+        tnCounty = await tennesseeCountyAt(data.lat, data.lng);
+      } catch (e) {
+        tnError = e;
+      }
+      const layer = tnCounty ? USA_STRUCTURES_LAYER : KY_FOOTPRINTS_LAYER;
+      const keyPrefix = tnCounty ? "usa" : "ornl";
       const page = (await fetchJson(
-        footprintAtPointUrl(KY_FOOTPRINTS_LAYER, data.lng, data.lat),
+        footprintAtPointUrl(layer, data.lng, data.lat),
       )) as ArcGisFeatureSet;
       const hit = (page.features ?? [])
         .map(footprintFromFeature)
         .find((c) => c !== null && pointInFootprint(data.lng, data.lat, c.geometry?.footprint));
-      if (!hit) return { id: null, roofSqFt: null, existed: false };
+      if (!hit) {
+        if (tnError) throw tnError;
+        return { id: null, roofSqFt: null, existed: false };
+      }
+      const sourceKey = `${keyPrefix}:${hit.buildId}`;
       // Already stored (the statewide load holds most outlines)? Just open it. Tapping only
       // opens a building; "Add to my prospects" on the detail card is the deliberate step
       // (owner, Sep 24).
       const { data: prior } = await context.supabase
         .from("buildings")
         .select("id")
-        .eq("source_key", `ornl:${hit.buildId}`)
+        .eq("source_key", sourceKey)
         .is("deleted_at", null)
         .maybeSingle();
       if (prior) return { id: prior.id, roofSqFt: hit.roofSqFt, existed: true };
       const who = await meName(context);
-      const county = hit.county;
+      // footprintFromFeature names Kentucky's 21xxx codes only; a 47xxx is Tennessee's.
+      const county = hit.county ?? tnCountyFromFips(hit.fips) ?? tnCounty;
       const { error } = await context.supabase.rpc("upsert_buildings", {
         rows: [
           {
-            source_key: `ornl:${hit.buildId}`,
+            source_key: sourceKey,
             source: "ornl",
+            ...(tnCounty ? { state: "TN" } : {}),
             county,
             name: hit.primaryOccupancy ?? "",
             address1: hit.address ?? "",
@@ -1223,14 +1357,23 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
             footprint: hit.geometry?.footprint ?? null,
             centroid_lat: hit.lat,
             centroid_lng: hit.lng,
-            source_layer: KY_FOOTPRINTS_LAYER,
+            source_layer: layer,
             created_by: context.userId,
             created_by_name: who,
           },
         ] as unknown as Json,
       });
       if (error) throw new Error(error.message);
-      if (county) {
+      if (tnCounty) {
+        // Before 20260929210000_buildings_state_tn.sql upsert_buildings drops `state` (the
+        // table defaults to KY), so set it here as well.
+        const { error: sErr } = await context.supabase
+          .from("buildings")
+          .update({ state: "TN" })
+          .eq("source_key", sourceKey);
+        if (sErr) throw new Error(sErr.message);
+      } else if (county) {
+        // Kentucky's 911 address points (Tennessee's outlines carry their own address).
         const { error: fErr } = await context.supabase.rpc("fill_footprint_addresses", {
           p_county: county,
         });
@@ -1239,7 +1382,7 @@ export const addBuildingAtPoint = createServerFn({ method: "POST" })
       const { data: row, error: rErr } = await context.supabase
         .from("buildings")
         .select("id")
-        .eq("source_key", `ornl:${hit.buildId}`)
+        .eq("source_key", sourceKey)
         .maybeSingle();
       if (rErr) throw new Error(rErr.message);
       return { id: row?.id ?? null, roofSqFt: hit.roofSqFt, existed: false };

@@ -23,7 +23,7 @@ deploys from `main`.
     npm run dev
     npx tsc --noEmit -p .       # typecheck
     npm run lint                # 0 errors required; a handful of warnings are pre-existing
-    npm test                    # vitest run — 640+ tests, ~10 s
+    npm test                    # vitest run — 670+ tests, ~10 s
 
 `bun.lock` is Lovable's lockfile; `package-lock.json` is CI's. When a dependency changes, update
 both (`npm install` and `bun install`) so neither drifts.
@@ -53,6 +53,23 @@ Work is done only when ALL of the following are true. Do not report done otherwi
 - Never guess a data format, a price, a formula or a legacy behaviour. Flag it, cite the
   source you would need, and stop at that seam. `FLAGGED FOR …` markers in the engine are
   open questions, not decoration — never silently resolve one.
-- Never rewrite published history (Lovable sync). Branch, PR, merge when green.
+- Never rewrite published history (Lovable sync): no force-push, rebase, amend or squash of
+  anything already pushed, on any branch.
+
+## Two chats at once (owner, Sep 29)
+
+The owner runs more than one Claude chat on this repo so nobody waits. The rules:
+
+1. One chat is the **main chat** and pushes directly to `main` (Lovable's preview follows
+   `main`, and the owner tests there). The owner says which chat that is.
+2. Every other chat works on **its own branch**: start it from the latest `main`, merge `main`
+   into the branch before opening a PR, never force-push.
+3. Before a second chat starts a task, it says which files or area it will touch and stays off
+   the area the main chat is working in. The main chat says what it is working on when asked.
+4. A PR from a second chat is merged by whichever chat the owner asks, after a conflict check
+   against `main`.
+5. Both chats read this file, `docs/TODO.md` and `docs/DECISIONS.md` first, and each writes
+   what it changed into `docs/TODO.md` (short entry; long notes go in a doc it links to).
+
 - Secrets never go in the repo or in chat. The committed `.env` holds only the Supabase
   publishable key; nothing else belongs there.

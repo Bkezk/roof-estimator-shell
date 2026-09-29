@@ -1,0 +1,144 @@
+{
+  "objectIdFieldName": "OBJECTID",
+  "geometryType": "esriGeometryPolygon",
+  "spatialReference": {
+    "wkid": 102100,
+    "latestWkid": 3857
+  },
+  "features": [
+    {
+      "attributes": {
+        "OBJECTID": 110090792,
+        "BUILD_ID": 12122135,
+        "OCC_CLS": "Commercial",
+        "PRIM_OCC": "Parking",
+        "PROP_ADDR": "321 WEST TRINITY LANE",
+        "PROP_CITY": "NASHVILLE",
+        "PROP_ST": "Tennessee",
+        "PROP_ZIP": "37207",
+        "PROP_CNTY": "Davidson",
+        "FIPS": "47037",
+        "STATE_FIPS": "47",
+        "SQFEET": 7837.009,
+        "HEIGHT": 3.69,
+        "LATITUDE": 36.2074065942232,
+        "LONGITUDE": -86.7822593382644
+      },
+      "geometry": {
+        "rings": [
+          [
+            [-9660540.0102, 4329189.6378],
+            [-9660548.0068, 4329183.4013],
+            [-9660548.9877, 4329176.0469],
+            [-9660573.194, 4329179.3032],
+            [-9660567.7014, 4329220.4926],
+            [-9660543.4304, 4329217.2276],
+            [-9660545.4996, 4329201.7107],
+            [-9660538.5254, 4329200.7726],
+            [-9660540.0102, 4329189.6378]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 110090846,
+        "BUILD_ID": 12122143,
+        "OCC_CLS": "Commercial",
+        "PRIM_OCC": "Retail Trade",
+        "PROP_ADDR": "2200 BRICK CHURCH PIKE",
+        "PROP_CITY": "NASHVILLE",
+        "PROP_ST": "Tennessee",
+        "PROP_ZIP": "37207",
+        "PROP_CNTY": "Davidson",
+        "FIPS": "47037",
+        "STATE_FIPS": "47",
+        "SQFEET": 5300.387,
+        "HEIGHT": 5.05,
+        "LATITUDE": 36.2073252640963,
+        "LONGITUDE": -86.7783098937249
+      },
+      "geometry": {
+        "rings": [
+          [
+            [-9660127.8705, 4329208.0628],
+            [-9660110.9887, 4329209.7161],
+            [-9660106.6681, 4329165.2104],
+            [-9660123.5498, 4329163.557],
+            [-9660127.8705, 4329208.0628]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 108541730,
+        "BUILD_ID": 9102813,
+        "OCC_CLS": "Unclassified",
+        "PRIM_OCC": "Unclassified",
+        "PROP_ADDR": null,
+        "PROP_CITY": null,
+        "PROP_ST": "Tennessee",
+        "PROP_ZIP": null,
+        "PROP_CNTY": "Pickett",
+        "FIPS": "47137",
+        "STATE_FIPS": "47",
+        "SQFEET": 6823.704,
+        "HEIGHT": null,
+        "LATITUDE": 36.4497653147278,
+        "LONGITUDE": -85.1226492153575
+      },
+      "geometry": {
+        "rings": [
+          [
+            [-9475798.2127, 4362682.2441],
+            [-9475808.7602, 4362684.3631],
+            [-9475810.5686, 4362675.2829],
+            [-9475812.0753, 4362675.5857],
+            [-9475811.1712, 4362680.1258],
+            [-9475845.8274, 4362687.0877],
+            [-9475843.1149, 4362700.7081],
+            [-9475770.7888, 4362686.1785],
+            [-9475773.5013, 4362672.5582],
+            [-9475799.1168, 4362677.7041],
+            [-9475798.2127, 4362682.2441]
+          ]
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "OBJECTID": 108536160,
+        "BUILD_ID": 9090035,
+        "OCC_CLS": "Residential",
+        "PRIM_OCC": "Single Family Dwelling",
+        "PROP_ADDR": "5280 EASTPORT ROAD",
+        "PROP_CITY": "ALPINE",
+        "PROP_ST": "Tennessee",
+        "PROP_ZIP": "38543",
+        "PROP_CNTY": "Pickett",
+        "FIPS": "47137",
+        "STATE_FIPS": "47",
+        "SQFEET": 7944.46,
+        "HEIGHT": null,
+        "LATITUDE": 36.434103244978,
+        "LONGITUDE": -85.1263439223275
+      },
+      "geometry": {
+        "rings": [
+          [
+            [-9476221.6597, 4360556.4343],
+            [-9476203.443, 4360553.5862],
+            [-9476207.9328, 4360524.6174],
+            [-9476217.0409, 4360526.0413],
+            [-9476224.366, 4360478.7766],
+            [-9476239.5465, 4360481.1498],
+            [-9476235.5295, 4360507.0692],
+            [-9476229.4574, 4360506.1199],
+            [-9476221.6597, 4360556.4343]
+          ]
+        ]
+      }
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 /**
  * Admin settings for the Leads page (owner, Sep 28), opened from the gear like the storm
- * thresholds: the roof keywords the planroom titles are matched against, and which Louisville
- * permits count (types, minimum size, how far back). They apply from the next refresh.
+ * thresholds: the roof keywords the planroom titles are matched against, which Louisville
+ * permits count (types, minimum size, how far back), and which Nashville permits count (types
+ * and a minimum construction cost: that layer has no square footage; the window is shared).
+ * They apply from the next refresh.
  */
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -34,6 +36,8 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
   const [types, setTypes] = useState(s.louisville_types.join(", "));
   const [minSqft, setMinSqft] = useState(Number(s.louisville_min_sqft));
   const [days, setDays] = useState(Number(s.louisville_days));
+  const [nashTypes, setNashTypes] = useState(s.nashville_types.join(", "));
+  const [nashMinCost, setNashMinCost] = useState(Number(s.nashville_min_cost));
 
   const save = useMutation({
     mutationFn: (d: LeadSettingsInput) => saveFn({ data: d }),
@@ -49,12 +53,18 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
     const problems: string[] = [];
     const kw = list(keywords);
     const ty = list(types);
+    const nty = list(nashTypes);
     if (!kw.length) problems.push("add at least one roof keyword");
     if (kw.length > 50 || kw.some((k) => k.length > 40))
       problems.push("roof keywords: at most 50, each up to 40 characters");
     if (!ty.length) problems.push("add at least one Louisville permit type");
     if (ty.length > 20 || ty.some((t) => t.length > 60))
       problems.push("permit types: at most 20, each up to 60 characters");
+    if (!nty.length) problems.push("add at least one Nashville permit type");
+    if (nty.length > 20 || nty.some((t) => t.length > 60))
+      problems.push("Nashville permit types: at most 20, each up to 60 characters");
+    if (!Number.isFinite(nashMinCost) || nashMinCost < 0 || nashMinCost > 100_000_000)
+      problems.push("Nashville min cost must be $0 to $100,000,000");
     if (!Number.isFinite(minSqft) || minSqft < 0 || minSqft > 1_000_000)
       problems.push("min sq ft must be 0 to 1,000,000");
     if (!Number.isInteger(days) || days < 7 || days > 365)
@@ -68,6 +78,8 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
       louisville_types: ty,
       louisville_min_sqft: minSqft,
       louisville_days: days,
+      nashville_types: nty,
+      nashville_min_cost: nashMinCost,
     });
   };
 
@@ -110,6 +122,26 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
             inputMode="numeric"
             invalid={days < 7 || days > 365}
             onChange={(v) => setDays(Math.round(v))}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <Label className="text-xs text-muted-foreground">
+            Nashville permit types (comma-separated, as Metro Codes spells them)
+          </Label>
+          <Input className="h-8" value={nashTypes} onChange={(e) => setNashTypes(e.target.value)} />
+        </div>
+        <div>
+          <Label className="text-xs text-muted-foreground">
+            Nashville min construction cost ($; same window)
+          </Label>
+          <NumberField
+            className="h-8"
+            value={nashMinCost}
+            blankZero={false}
+            max={100_000_000}
+            step="10000"
+            inputMode="numeric"
+            onChange={(v) => setNashMinCost(Math.round(v))}
           />
         </div>
       </div>

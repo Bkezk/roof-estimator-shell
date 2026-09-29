@@ -112,6 +112,10 @@ export function StormPanel(props: {
   });
 
   const s = summary.data?.settings;
+  // The watched states, spelled out (settings.states; KY and TN since Sep 29).
+  const stateNames = (s?.states ?? ["KY"])
+    .map((st) => ({ KY: "Kentucky", TN: "Tennessee" })[st] ?? st)
+    .join(" and ");
   const days = s?.window_days ?? 7;
   const rows = summary.data?.by_county ?? [];
   const invalid = draft
@@ -155,7 +159,7 @@ export function StormPanel(props: {
           )}
           {summary.data && counties === 0 && (
             <span className="text-xs text-muted-foreground">
-              No hail, wind or tornado reports in Kentucky in the last {days} days.
+              No hail, wind or tornado reports in {stateNames} in the last {days} days.
             </span>
           )}
           {counties > 0 && (

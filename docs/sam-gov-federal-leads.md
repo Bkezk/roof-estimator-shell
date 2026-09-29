@@ -21,3 +21,8 @@ to NAICS 238160 (Roofing Contractors) with Kentucky as the place of performance 
 window of the last 30 days; each opportunity becomes a lead with its title, agency, city,
 response deadline (as the bid date), set-aside and the SAM.gov link. Tell me when the secret is
 in place and I'll add it.
+
+**Sep 29: Tennessee too.** The daily pull now makes two calls, place of performance KY and TN
+(Fort Campbell straddles the line; Arnold AFB, the Nashville and Memphis VA hospitals, the
+Corps' Nashville and Memphis Districts), still once a day. Each lead's `state` is the
+opportunity's place-of-performance state.
