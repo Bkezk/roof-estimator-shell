@@ -196,6 +196,18 @@ export function LeadCard(props: {
         </p>
       ) : null}
 
+      {href &&
+        !/\.pdf(\?|$)/i.test(href) &&
+        (l.source === "tn_stream" || l.source === "tn_university_bids") && (
+          <p className="text-xs text-muted-foreground">
+            Opens the bid list page; look for{" "}
+            {l.source === "tn_stream"
+              ? `SBC ${l.external_id.replace(/^rfp:/, "")}`
+              : "this project"}{" "}
+            there (the page has no link of its own).
+          </p>
+        )}
+
       {l.note && !noteOpen && (
         <p className="whitespace-pre-wrap text-sm italic text-muted-foreground">{l.note}</p>
       )}
