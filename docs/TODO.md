@@ -184,8 +184,12 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
       authorities, cities, counties, districts, colleges, hospitals, churches; 25 latest posts,
       so never marked gone), Bowling Green's bids page (Open Opportunities table → Bonfire) and
       Paducah's bids page (Active Requests headings). The first live pull flagged two waterline
-      jobs on "pvc" (PVC pipe), so "pvc" left the default roof keywords. Waiting on the owner: SAM.gov federal roof
-      jobs need an API key (docs/sam-gov-federal-leads.md). Checked and not worth a feed: KCTCS
+      jobs on "pvc" (PVC pipe), so "pvc" left the default roof keywords. Later Sep 29: the owner registered one Lynn planroom login (it
+      covers ten portals) and the SAM.gov key, all in Lovable Cloud secrets → the nightly check
+      signs in and reads job pages for contacts and plan holders (src/lib/planroom.server.ts,
+      docs/planroom-login.md); seven campus planrooms (UK, WKU, NKU, EKU, UofL, JCPS, KCTCS —
+      same list format, one source `campus_planrooms`, the plan issuer named as who to bid to)
+      and SAM.gov (NAICS 238160, place of performance KY, `sam_gov`) are sources too. Checked and not worth a feed: KCTCS
       RSS (equipment only; construction goes through the state planroom), Bid Locker Kentucky
       (KCTCS only), Lexington purchasing pages (404), BidNet (blocked), JCPS bids (gone).
       Sources checked and NOT used: DHBC's statewide plan review log (exists, no public feed —

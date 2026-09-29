@@ -21,6 +21,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   lynn_bids: "Lynn Imaging bids",
   bgky_bids: "Bowling Green bids",
   paducah_bids: "Paducah bids",
+  campus_planrooms: "University & school planrooms",
+  sam_gov: "Federal (SAM.gov)",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -80,7 +82,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await refreshLeads(context.supabase);
         return {
           ran: true,
-          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah; ${r.new_leads} new (${r.new_roof_leads} roof); ${r.enriched} job pages read`,
+          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof); ${r.enriched} job pages read`,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {
@@ -96,7 +98,15 @@ const listSchema = z.object({
   /** Only leads the keyword match (or a new commercial building) flagged as roof work. */
   roofOnly: z.boolean().optional(),
   source: z
-    .enum(["ky_planroom", "louisville_permits", "lynn_bids", "bgky_bids", "paducah_bids"])
+    .enum([
+      "ky_planroom",
+      "louisville_permits",
+      "lynn_bids",
+      "bgky_bids",
+      "paducah_bids",
+      "campus_planrooms",
+      "sam_gov",
+    ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
   status: z.enum(["open", "new", "watching", "dismissed", "added", "all"]).optional(),

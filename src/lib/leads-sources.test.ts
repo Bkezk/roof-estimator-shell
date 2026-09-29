@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  campusLead,
   cityLead,
   dropPlanroomDuplicates,
   lynnLead,
+  samLead,
+  samQueryUrl,
   parseBgkyBids,
   parseLongDate,
   parseLynnFeed,
@@ -209,5 +212,87 @@ describe("Lynn posts that repeat a state planroom job", () => {
     const { keep, dropped } = dropPlanroomDuplicates(lynn, planroom);
     expect(dropped).toEqual(["29681", "29500"]);
     expect(keep.map((r) => r.external_id)).toEqual(["29686"]);
+  });
+});
+
+describe("campus planrooms", () => {
+  const job = {
+    jobId: "29592",
+    name: "Eastern Kentucky University - Elmwood Roof Project",
+    location: "26-488 Richmond, Kentucky",
+    company: "Eastern Kentucky University",
+    projectType: null,
+    prebidAt: null,
+    bidAt: "2026-09-15T18:00:00.000Z",
+  };
+  it("strips Lynn's job number from the town and names the plan issuer when it is not the owner", () => {
+    const eku = campusLead(
+      job,
+      { domain: "ekuplanroom.com", label: "Eastern Kentucky University" },
+      KEYWORDS,
+    );
+    expect(eku.location).toBe("Richmond");
+    expect(eku.external_id).toBe("ekuplanroom.com:29592");
+    expect(eku.url).toBe("https://www.ekuplanroom.com/View/ViewJob.aspx?job_id=29592");
+    expect(eku.contractor).toBeNull();
+    expect(eku.is_roof).toBe(true);
+    const wku = campusLead(
+      { ...job, company: "Messer Construction Co.", location: "26-545 Bowling Green, Kentucky" },
+      { domain: "wkuplanroom.com", label: "Western Kentucky University" },
+      KEYWORDS,
+    );
+    expect(wku.contractor).toBe("Messer Construction Co.");
+    expect(wku.contact).toBe("Plans issued by Messer Construction Co. — bid the roofing to them");
+    expect(wku.location).toBe("Bowling Green");
+  });
+});
+
+describe("SAM.gov", () => {
+  it("asks for roofing opportunities in Kentucky posted in the window", () => {
+    const url = new URL(samQueryUrl("KEY", 60, new Date("2026-09-29T12:00:00Z")));
+    expect(url.origin + url.pathname).toBe("https://api.sam.gov/opportunities/v2/search");
+    expect(url.searchParams.get("ncode")).toBe("238160");
+    expect(url.searchParams.get("state")).toBe("KY");
+    expect(url.searchParams.get("postedFrom")).toBe("07/31/2026");
+    expect(url.searchParams.get("postedTo")).toBe("09/29/2026");
+    expect(url.searchParams.get("ptype")).toBe("o,p,k");
+  });
+  it("maps an opportunity: agency path, place, deadline as bid date, point of contact", () => {
+    const lead = samLead(
+      {
+        noticeId: "abc123",
+        title: "Replace Roof Building 1234",
+        solicitationNumber: "W912QR26R0010",
+        fullParentPathName: "DEPT OF DEFENSE.DEPT OF THE ARMY.USACE.LOUISVILLE DISTRICT",
+        postedDate: "2026-09-15",
+        type: "Solicitation",
+        typeOfSetAsideDescription: "Total Small Business Set-Aside (FAR 19.5)",
+        responseDeadLine: "2026-10-20T14:00:00-04:00",
+        naicsCode: "238160",
+        placeOfPerformance: {
+          city: { name: "Fort Knox" },
+          state: { code: "KY", name: "Kentucky" },
+        },
+        pointOfContact: [
+          {
+            fullName: "Jane Doe",
+            email: "jane.doe@usace.army.mil",
+            phone: "5025550100",
+            type: "primary",
+          },
+        ],
+        uiLink: "https://sam.gov/opp/abc123/view",
+      },
+      KEYWORDS,
+    );
+    expect(lead.title).toBe("W912QR26R0010 — Replace Roof Building 1234");
+    expect(lead.agency).toBe("USACE / LOUISVILLE DISTRICT");
+    expect(lead.location).toBe("Fort Knox, KY");
+    expect(lead.bid_at).toBe("2026-10-20T18:00:00.000Z");
+    expect(lead.issued_on).toBe("2026-09-15");
+    expect(lead.contact).toBe("Jane Doe — jane.doe@usace.army.mil — 5025550100");
+    expect(lead.project_type).toBe("Solicitation · Total Small Business Set-Aside (FAR 19.5)");
+    expect(lead.is_roof).toBe(true);
+    expect(lead.source).toBe("sam_gov");
   });
 });

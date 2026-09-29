@@ -28,7 +28,13 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 
 export type LeadSource =
-  "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
+  | "ky_planroom"
+  | "louisville_permits"
+  | "lynn_bids"
+  | "bgky_bids"
+  | "paducah_bids"
+  | "campus_planrooms"
+  | "sam_gov";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -72,6 +78,36 @@ export const lynnJobUrl = (jobId: string) =>
 export const BGKY_BIDS_URL = "https://www.bgky.org/bids";
 /** Paducah's bids page: "Active Requests for Bids or Proposals", one heading per request. */
 export const PADUCAH_BIDS_URL = "https://paducahky.gov/request-bids-or-proposals";
+
+/**
+ * The other Lynn-run planrooms the owner's one login covers (Sep 29): universities and school
+ * districts, each with a public job list in the state planroom's exact format. The row's
+ * "Company Name" is whoever issued the plans (the institution, or the construction manager /
+ * architect running the bid — the party a roofing sub bids to).
+ */
+export const CAMPUS_PLANROOMS: { domain: string; label: string }[] = [
+  { domain: "ukplanroom.com", label: "University of Kentucky" },
+  { domain: "wkuplanroom.com", label: "Western Kentucky University" },
+  { domain: "nkuplanroom.com", label: "Northern Kentucky University" },
+  { domain: "ekuplanroom.com", label: "Eastern Kentucky University" },
+  { domain: "uoflplanroom.com", label: "University of Louisville" },
+  { domain: "jcpsplanroom.com", label: "Jefferson County Public Schools" },
+  { domain: "kctcsplanroom.com", label: "KCTCS" },
+];
+export const campusListUrl = (domain: string) =>
+  `https://www.${domain}/View/ViewJobList.aspx?group_id=public_all`;
+export const campusJobUrl = (domain: string, jobId: string) =>
+  `https://www.${domain}/View/ViewJob.aspx?job_id=${jobId}`;
+
+/**
+ * SAM.gov contract opportunities (federal: Fort Knox, Fort Campbell, the VA, the Corps'
+ * Louisville District). Get Opportunities v2: postedFrom/postedTo MM/dd/yyyy (required, ≤ 1
+ * year apart), ncode = NAICS, state = place of performance, ptype o/p/k = solicitation,
+ * pre-solicitation, combined synopsis. Needs SAM_GOV_API_KEY (the owner's, ~10 calls a day on
+ * a personal key): one call a run.
+ */
+export const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
+export const SAM_NAICS_ROOFING = "238160";
 
 const UA = "JBK Portal construction leads";
 
@@ -484,6 +520,127 @@ export function planroomLead(j: PlanroomJob, keywords: string[]): LeadInsert {
   };
 }
 
+/** A campus planroom row: the institution as agency, the plan issuer as who to bid to. */
+export function campusLead(
+  j: PlanroomJob,
+  portal: { domain: string; label: string },
+  keywords: string[],
+): LeadInsert {
+  // The list prefixes the town with Lynn's job number ("26-538 Lexington, Kentucky").
+  const town =
+    (j.location ?? "")
+      .replace(/^\d{2}-\d{3,5}\s+/, "")
+      .replace(/,?\s*(Kentucky|KY)\s*$/i, "")
+      .trim() || null;
+  const issuer = (j.company ?? "").trim();
+  const issuerIsOwner = !issuer || issuer.toLowerCase() === portal.label.toLowerCase();
+  return {
+    source: "campus_planrooms",
+    external_id: `${portal.domain}:${j.jobId}`,
+    title: j.name,
+    agency: portal.label,
+    contractor: issuerIsOwner ? null : issuer,
+    contact: issuerIsOwner
+      ? `${portal.label} — bid documents and plan holders on the planroom job page`
+      : `Plans issued by ${issuer} — bid the roofing to them`,
+    location: town,
+    city: town,
+    project_type: j.projectType,
+    prebid_at: j.prebidAt,
+    bid_at: j.bidAt,
+    url: campusJobUrl(portal.domain, j.jobId),
+    is_roof: isRoofLead(`${j.name} ${j.projectType ?? ""}`, keywords),
+    raw: {
+      ...j,
+      portal: portal.domain,
+      portal_base: `https://www.${portal.domain}/View`,
+    } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+export interface SamOpportunity {
+  noticeId: string;
+  title: string;
+  solicitationNumber?: string | null;
+  fullParentPathName?: string | null;
+  postedDate?: string | null;
+  type?: string | null;
+  typeOfSetAsideDescription?: string | null;
+  responseDeadLine?: string | null;
+  naicsCode?: string | null;
+  placeOfPerformance?: {
+    city?: { name?: string | null } | null;
+    state?: { code?: string | null; name?: string | null } | null;
+    zip?: string | null;
+  } | null;
+  pointOfContact?:
+    | {
+        fullName?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        type?: string | null;
+      }[]
+    | null;
+  uiLink?: string | null;
+}
+
+const mmddyyyy = (d: Date) =>
+  `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
+
+/** The one nightly SAM.gov call: roofing NAICS, Kentucky, posted in the last `days`. */
+export function samQueryUrl(apiKey: string, days = 60, now = new Date()): string {
+  const q = new URLSearchParams({
+    api_key: apiKey,
+    postedFrom: mmddyyyy(new Date(now.getTime() - days * 86400000)),
+    postedTo: mmddyyyy(now),
+    ncode: SAM_NAICS_ROOFING,
+    state: "KY",
+    ptype: "o,p,k",
+    limit: "200",
+    offset: "0",
+  });
+  return `${SAM_SEARCH_URL}?${q.toString()}`;
+}
+
+export function samLead(o: SamOpportunity, keywords: string[]): LeadInsert {
+  const agency = (o.fullParentPathName ?? "")
+    .split(".")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(-2)
+    .join(" / ");
+  const poc = (o.pointOfContact ?? []).find((c) => c.fullName || c.email) ?? null;
+  const contact = poc ? [poc.fullName, poc.email, poc.phone].filter(Boolean).join(" — ") : null;
+  const city = o.placeOfPerformance?.city?.name ?? null;
+  const st = o.placeOfPerformance?.state?.code ?? "KY";
+  const deadline =
+    o.responseDeadLine && !Number.isNaN(Date.parse(o.responseDeadLine))
+      ? new Date(o.responseDeadLine).toISOString()
+      : null;
+  const posted =
+    o.postedDate && /^\d{4}-\d{2}-\d{2}/.test(o.postedDate) ? o.postedDate.slice(0, 10) : null;
+  return {
+    source: "sam_gov",
+    external_id: o.noticeId,
+    title: o.solicitationNumber ? `${o.solicitationNumber} — ${o.title}` : o.title,
+    agency: agency || "Federal",
+    location: city ? `${city}, ${st}` : st,
+    city,
+    project_type: [o.type, o.typeOfSetAsideDescription].filter(Boolean).join(" · ") || null,
+    bid_at: deadline,
+    issued_on: posted,
+    url: o.uiLink ?? `https://sam.gov/opp/${o.noticeId}/view`,
+    contact,
+    // Pulled under the roofing NAICS code: roof work by definition, keywords or not.
+    is_roof: o.naicsCode === SAM_NAICS_ROOFING || isRoofLead(o.title, keywords),
+    raw: o as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
 export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadInsert {
   const address = (p.ADDRESS ?? "").trim();
   const type = (p.PERMIT_TYPE ?? "").trim();
@@ -556,6 +713,8 @@ export interface RefreshLeadsResult {
   lynn: number;
   bowling_green: number;
   paducah: number;
+  campus: number;
+  sam_gov: number;
   new_leads: number;
   new_roof_leads: number;
   gone: number;
@@ -580,7 +739,7 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
   const { data: rows, error } = await admin
     .from("leads")
     .select("id, source, external_id, title, raw, bid_at")
-    .in("source", ["ky_planroom", "lynn_bids"])
+    .in("source", ["ky_planroom", "lynn_bids", "campus_planrooms"])
     .eq("is_roof", true)
     .is("gone_at", null)
     .in("status", ["new", "watching"])
@@ -598,7 +757,13 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
   let n = 0;
   const sessions: Record<string, Awaited<ReturnType<typeof planroomSignIn>> | null> = {};
   for (const r of due) {
-    const site = r.source === "ky_planroom" ? STATE_PLANROOM : LYNN_PLANROOM;
+    const portalBase = (r.raw as { portal_base?: string } | null)?.portal_base;
+    const site =
+      r.source === "ky_planroom"
+        ? STATE_PLANROOM
+        : r.source === "campus_planrooms" && portalBase
+          ? { base: portalBase, label: `${new URL(portalBase).hostname} planroom` }
+          : LYNN_PLANROOM;
     if (sessions[site.base] === undefined) {
       try {
         sessions[site.base] = await planroomSignIn(site, creds.email, creds.password);
@@ -611,9 +776,10 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
     if (!session) continue;
     // Lynn posts whose "More Details" points at Lynn's planroom carry that job id; a post
     // without one (external_id is the post URL) has no job page to read.
-    if (!/^\d+$/.test(r.external_id)) continue;
+    const jobId = r.external_id.includes(":") ? r.external_id.split(":")[1]! : r.external_id;
+    if (!/^\d+$/.test(jobId)) continue;
     try {
-      const details = await fetchJobDetails(session, r.external_id);
+      const details = await fetchJobDetails(session, jobId);
       const contact = contactLine(details);
       const raw = { ...((r.raw as Record<string, unknown> | null) ?? {}) };
       raw["details"] = details.fields;
@@ -625,9 +791,7 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
       if (uErr) throw new Error(uErr.message);
       n++;
     } catch (e) {
-      failed.push(
-        `${site.label} job ${r.external_id}: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      failed.push(`${site.label} job ${jobId}: ${e instanceof Error ? e.message : String(e)}`);
       if (/session expired/.test(String(e))) sessions[site.base] = null;
     }
   }
@@ -686,12 +850,46 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
       failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+  // The campus planrooms: one pull each, all under one source; a portal that is down or
+  // empty is reported and skipped (an empty list is normal for the small portals).
+  for (const portal of CAMPUS_PLANROOMS) {
+    try {
+      const res = await fetch(campusListUrl(portal.domain), { headers: { "User-Agent": UA } });
+      if (!res.ok) throw new Error(`→ ${res.status}`);
+      const jobs = parsePlanroomHtml(await res.text());
+      rows.push(...jobs.map((j) => campusLead(j, portal, s.roof_keywords)));
+      counts["campus_planrooms"] = (counts["campus_planrooms"] ?? 0) + jobs.length;
+      fetchedSources.add("campus_planrooms");
+    } catch (e) {
+      failed.push(`${portal.label} planroom ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  // SAM.gov, only with the owner's key.
+  const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
+  if (samKey) {
+    try {
+      const res = await fetch(samQueryUrl(samKey), { headers: { "User-Agent": UA } });
+      const json = (await res.json().catch(() => ({}))) as {
+        opportunitiesData?: SamOpportunity[];
+        error?: { message?: string };
+        message?: string;
+      };
+      if (!res.ok)
+        throw new Error(`→ ${res.status} ${json.error?.message ?? json.message ?? ""}`.trim());
+      const ops = json.opportunitiesData ?? [];
+      rows.push(...ops.map((o) => samLead(o, s.roof_keywords)));
+      counts["sam_gov"] = ops.length;
+      fetchedSources.add("sam_gov");
+    } catch (e) {
+      failed.push(`SAM.gov ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   let lynnDuplicates: string[] = [];
   await pull("lynn_bids", "Lynn Imaging bids", LYNN_FEED_URL, (xml) => {
     const all = parseLynnFeed(xml).map((p) => lynnLead(p, s.roof_keywords));
     const { keep, dropped } = dropPlanroomDuplicates(
       all,
-      rows.filter((r) => r.source === "ky_planroom"),
+      rows.filter((r) => r.source === "ky_planroom" || r.source === "campus_planrooms"),
     );
     lynnDuplicates = dropped;
     return keep;
@@ -775,7 +973,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? `${counts["sam_gov"] ?? 0} SAM.gov` : "SAM.gov off (no key)"}, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -783,6 +981,8 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
     lynn: counts["lynn_bids"] ?? 0,
     bowling_green: counts["bgky_bids"] ?? 0,
     paducah: counts["paducah_bids"] ?? 0,
+    campus: counts["campus_planrooms"] ?? 0,
+    sam_gov: counts["sam_gov"] ?? 0,
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,

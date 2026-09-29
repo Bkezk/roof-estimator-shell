@@ -59,6 +59,8 @@ const ABOUT =
   "State planroom: every state-funded Kentucky project in its bid phase, with pre-bid and bid dates. " +
   "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
   "Bowling Green and Paducah bids: those cities' own bid pages. " +
+  "University & school planrooms: UK, WKU, NKU, EKU, UofL, Jefferson County Public Schools and KCTCS projects out for bid. " +
+  "Federal (SAM.gov): roofing-contractor opportunities with Kentucky as the place of performance. " +
   "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
   "The app checks them every 6 hours when this page is open, and nightly.";
 
@@ -66,7 +68,7 @@ const ABOUT =
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
