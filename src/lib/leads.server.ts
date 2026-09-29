@@ -593,6 +593,8 @@ const mmddyyyy = (d: Date) =>
   `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
 
 /** The one nightly SAM.gov call: roofing NAICS, Kentucky, posted in the last `days`. */
+/** SAM.gov pulls at least this far apart: 20 h keeps the daily cron on its once-a-day slot. */
+const SAM_GAP = 20 * 60 * 60 * 1000;
 export function samQueryUrl(apiKey: string, days = 60, now = new Date()): string {
   const q = new URLSearchParams({
     api_key: apiKey,
@@ -725,6 +727,8 @@ export interface RefreshLeadsResult {
   enriched: number;
   failed: string[];
   notified: number;
+  /** The run's summary as stamped on lead_settings. */
+  note: string;
 }
 
 /**
@@ -850,6 +854,21 @@ export async function refreshLeads(
   // that fails is reported and skipped.
   const counts: Record<string, number> = {};
   const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
+  // SAM.gov: a personal API key allows only a handful of requests a day, so one pull a day
+  // however often the page is refreshed (owner, Sep 29: "I don't want to overdo their site").
+  // The attempt is stamped before the call: a failed request spends the budget too.
+  const stamps = { ...((s.source_fetched_at as Record<string, string> | null) ?? {}) };
+  const samLast = stamps["sam_gov"] ? Date.parse(stamps["sam_gov"]) : 0;
+  const samDue = !!samKey && Date.now() - samLast > SAM_GAP;
+  const samNext = new Date(samLast + SAM_GAP);
+  if (samDue) {
+    stamps["sam_gov"] = new Date().toISOString();
+    const { error: stampErr } = await admin
+      .from("lead_settings")
+      .update({ source_fetched_at: stamps })
+      .eq("id", 1);
+    if (stampErr) throw new Error(`could not stamp the SAM.gov pull: ${stampErr.message}`);
+  }
   type Pulled = { source: LeadSource; rows: LeadInsert[]; count: number };
   const attempt = async (
     source: LeadSource,
@@ -901,7 +920,7 @@ export async function refreshLeads(
       return { rows: bids.map((b) => cityLead(b, "paducah_bids", s.roof_keywords)) };
     }),
   ];
-  if (samKey)
+  if (samDue)
     pulls.push(
       attempt("sam_gov", "SAM.gov", async () => {
         const res = await fetchTimeout(samQueryUrl(samKey));
@@ -1006,7 +1025,7 @@ export async function refreshLeads(
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? `${counts["sam_gov"] ?? 0} SAM.gov` : "SAM.gov off (no key)"}, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -1022,6 +1041,7 @@ export async function refreshLeads(
     enriched,
     failed,
     notified,
+    note,
   };
 }
 

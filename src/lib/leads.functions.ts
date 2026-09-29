@@ -121,7 +121,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await Promise.race([refreshLeads(context.supabase), timeout]);
         return {
           ran: true,
-          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof)`,
+          note: r.note,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {

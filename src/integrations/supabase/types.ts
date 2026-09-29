@@ -2755,6 +2755,7 @@ export type Database = {
           louisville_min_sqft: number;
           louisville_types: string[];
           roof_keywords: string[];
+          source_fetched_at: Json;
           updated_at: string;
         };
         Insert: {
@@ -2765,6 +2766,7 @@ export type Database = {
           louisville_min_sqft?: number;
           louisville_types?: string[];
           roof_keywords?: string[];
+          source_fetched_at?: Json;
           updated_at?: string;
         };
         Update: {
@@ -2775,6 +2777,7 @@ export type Database = {
           louisville_min_sqft?: number;
           louisville_types?: string[];
           roof_keywords?: string[];
+          source_fetched_at?: Json;
           updated_at?: string;
         };
         Relationships: [];
