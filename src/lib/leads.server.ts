@@ -829,10 +829,20 @@ export async function refreshLeads(
   const failed: string[] = [];
   const rows: LeadInsert[] = [];
   const fetchedSources = new Set<LeadSource>();
+  const t0 = Date.now();
+  const stage = (what: string) =>
+    admin
+      .rpc("stamp_lead_fetch", { note: `${what} (+${((Date.now() - t0) / 1000).toFixed(1)} s)` })
+      .then(
+        () => undefined,
+        () => undefined,
+      );
 
   // A progress stamp first: if the run dies mid-way (a platform time limit), the settings row
   // shows when it started instead of the last good run.
-  await admin.rpc("stamp_lead_fetch", { note: `running since ${new Date().toISOString()}…` });
+  await stage(
+    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + 5} lists…`,
+  );
 
   // Every list at once (the slowest site, not the sum, sets the run's length); each source
   // that fails is reported and skipped.
@@ -902,6 +912,7 @@ export async function refreshLeads(
       }),
     );
   const pulled = (await Promise.all(pulls)).filter((x): x is Pulled => x !== null);
+  await stage(`lists pulled, ${pulled.length} answered; saving…`);
   // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies.
   let lynnDuplicates: string[] = [];
   const planroomRows = pulled

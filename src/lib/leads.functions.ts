@@ -78,8 +78,25 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
       if (!data.force && Date.now() - last < SIX_HOURS)
         return { ran: false, note: s?.last_fetch_note ?? null, error: null };
       try {
+        // Stage stamps (owner, Sep 29: "refresh is still spinning"): the settings row shows how
+        // far a run got even when the platform cuts the request off before it answers.
+        const started = new Date().toISOString();
+        await context.supabase.rpc("stamp_lead_fetch", { note: `refresh requested ${started}…` });
         const { refreshLeads } = await import("@/lib/leads.server");
-        const r = await refreshLeads(context.supabase);
+        // A run must answer inside the request's budget; past 55 s report what is known so
+        // the page stops spinning and the stamp says where it stood.
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "the refresh took longer than 55 s; the sources that answered are saved on the next run — check the red line for the slow one",
+                ),
+              ),
+            55000,
+          ),
+        );
+        const r = await Promise.race([refreshLeads(context.supabase), timeout]);
         return {
           ran: true,
           note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof)`,

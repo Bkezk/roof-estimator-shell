@@ -146,7 +146,22 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     }
   };
   const refresh = useMutation({
-    mutationFn: (force: boolean) => refreshFn({ data: { force } }),
+    // The server answers within about a minute or reports why; past 90 s stop waiting.
+    mutationFn: (force: boolean) =>
+      Promise.race([
+        refreshFn({ data: { force } }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  "no answer from the server after 90 s — the run may still be going; reload in a minute and check the Checked note",
+                ),
+              ),
+            90000,
+          ),
+        ),
+      ]),
     onSuccess: (r, force) => {
       setRefreshError(r.error);
       if (r.error) toast.error(`Lead refresh: ${r.error}`);
