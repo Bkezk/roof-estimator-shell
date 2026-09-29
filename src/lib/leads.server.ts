@@ -33,8 +33,10 @@ type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
 export const PLANROOM_URL = "https://www.stateofkyplanroom.com/";
+// The list links "ViewJob.aspx?job_id=N" relative to /View/ (the root redirects there); the
+// job page asks for a free planroom sign-in. Owner, Sep 29: the bare path was a 404.
 export const planroomJobUrl = (jobId: string) =>
-  `https://www.stateofkyplanroom.com/ViewJob.aspx?job_id=${jobId}`;
+  `https://www.stateofkyplanroom.com/View/ViewJob.aspx?job_id=${jobId}`;
 export const LOUISVILLE_PERMITS_LAYER =
   "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/active_construction_permits/FeatureServer/0";
 export const LOUISVILLE_PERMITS_PAGE =
@@ -476,6 +478,35 @@ export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadIns
   };
 }
 
+/** "RFB-86-27 FSS – Jackson SOB Roof Replacement" → "rfb-86-27 fss - jackson sob roof replacement". */
+const normTitle = (t: string) => t.toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+/** The solicitation code a state job starts with ("RFB-86-27", "RFP-27-003"), if any. */
+const solicitationCode = (t: string): string | null => {
+  const m = /^(?:re-?ad(?:vertisement)?\s+of\s+)?((?:RF[BPQ]|ITB|IFB)-[\w.]+)/i.exec(t.trim());
+  return m ? m[1]!.toUpperCase() : null;
+};
+
+/**
+ * Lynn's feed repeats every state planroom job (Lynn runs that planroom too). Keep the planroom
+ * copy — it carries the bid date — and drop the Lynn one when the titles match or both start
+ * with the same solicitation code. Returns the Lynn rows to keep and the ids dropped.
+ */
+export function dropPlanroomDuplicates(
+  lynn: LeadInsert[],
+  planroom: LeadInsert[],
+): { keep: LeadInsert[]; dropped: string[] } {
+  const titles = new Set(planroom.map((r) => normTitle(r.title)));
+  const codes = new Set(planroom.map((r) => solicitationCode(r.title)).filter(Boolean));
+  const keep: LeadInsert[] = [];
+  const dropped: string[] = [];
+  for (const r of lynn) {
+    const code = solicitationCode(r.title);
+    if (titles.has(normTitle(r.title)) || (code && codes.has(code))) dropped.push(r.external_id);
+    else keep.push(r);
+  }
+  return { keep, dropped };
+}
+
 /* ------------------------------------------------------------------------------------------------
  * The refresh
  * ---------------------------------------------------------------------------------------------- */
@@ -545,9 +576,16 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
       failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  await pull("lynn_bids", "Lynn Imaging bids", LYNN_FEED_URL, (xml) =>
-    parseLynnFeed(xml).map((p) => lynnLead(p, s.roof_keywords)),
-  );
+  let lynnDuplicates: string[] = [];
+  await pull("lynn_bids", "Lynn Imaging bids", LYNN_FEED_URL, (xml) => {
+    const all = parseLynnFeed(xml).map((p) => lynnLead(p, s.roof_keywords));
+    const { keep, dropped } = dropPlanroomDuplicates(
+      all,
+      rows.filter((r) => r.source === "ky_planroom"),
+    );
+    lynnDuplicates = dropped;
+    return keep;
+  });
   await pull("bgky_bids", "Bowling Green bids", BGKY_BIDS_URL, (html) =>
     parseBgkyBids(html).map((b) => cityLead(b, "bgky_bids", s.roof_keywords)),
   );
@@ -570,6 +608,18 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
 
   // Dropped off a source that answered: mark gone (kept for history; hidden by default).
   let gone = 0;
+  if (lynnDuplicates.length) {
+    // A Lynn copy of a state job stored before the planroom row existed: retire it.
+    const { data: g, error } = await admin
+      .from("leads")
+      .update({ gone_at: new Date().toISOString() })
+      .eq("source", "lynn_bids")
+      .is("gone_at", null)
+      .in("external_id", lynnDuplicates)
+      .select("id");
+    if (error) throw new Error(error.message);
+    gone += g?.length ?? 0;
+  }
   for (const source of fetchedSources) {
     // Lynn's feed is the latest 25 posts; scrolling off it is not a withdrawal.
     if (source === "lynn_bids") continue;

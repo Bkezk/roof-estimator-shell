@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cityLead,
+  dropPlanroomDuplicates,
   lynnLead,
   parseBgkyBids,
   parseLongDate,
@@ -180,5 +181,24 @@ describe("long dates", () => {
     expect(parseLongDate("Sep 21, 2026")).toBe("2026-09-21");
     expect(parseLongDate("posted September 3, 2026")).toBe("2026-09-03");
     expect(parseLongDate("10/20/2026")).toBeNull();
+  });
+});
+
+describe("Lynn posts that repeat a state planroom job", () => {
+  const row = (source: "ky_planroom" | "lynn_bids", title: string, id: string) =>
+    ({ source, external_id: id, title }) as Parameters<typeof dropPlanroomDuplicates>[0][number];
+  it("drops the Lynn copy by matching title (dash styles differ) or solicitation code", () => {
+    const planroom = [
+      row("ky_planroom", "RFB-86-27 FSS - Jackson SOB Roof Replacement", "29681"),
+      row("ky_planroom", "RFB-39-27 RE-AD of RFB-281-26 KAC- Roof Replacement", "29433"),
+    ];
+    const lynn = [
+      row("lynn_bids", "RFB-86-27 FSS – Jackson SOB Roof Replacement", "29681"),
+      row("lynn_bids", "RFB-39-27 KAC Roof Replacement (re-ad)", "29500"),
+      row("lynn_bids", "Housing Authority of Maysville – Flat Roof Replacement", "29686"),
+    ];
+    const { keep, dropped } = dropPlanroomDuplicates(lynn, planroom);
+    expect(dropped).toEqual(["29681", "29500"]);
+    expect(keep.map((r) => r.external_id)).toEqual(["29686"]);
   });
 });

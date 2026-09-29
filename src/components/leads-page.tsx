@@ -41,7 +41,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -86,8 +85,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const statusFn = useServerFn(setLeadStatus);
   const addFn = useServerFn(addLeadToProspects);
 
-  // Roof leads are the point: on by default (the notification link sets it too).
-  const [roofOnly, setRoofOnly] = useState(props.initialRoofOnly ?? true);
+  // Roof leads are the page (owner, Sep 29: "we really only need roof bids"); the keyword
+  // match is deliberately wide so no new roof, re-roof or roof repair slips past it, and
+  // admins can widen it further from the gear.
+  const roofOnly = true;
+  void props.initialRoofOnly;
   const [source, setSource] = useState<Source>("all");
   const [tab, setTab] = useState<StatusTab>("open");
   const [showClosed, setShowClosed] = useState(false);
@@ -256,17 +258,6 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             ))}
           </TabsList>
         </Tabs>
-        <div className="flex items-center gap-2">
-          <Switch id="leads-roof" checked={roofOnly} onCheckedChange={setRoofOnly} />
-          <Label htmlFor="leads-roof" className="flex cursor-pointer items-center gap-1.5">
-            Roof only
-            {counts.data && (
-              <Badge variant="destructive" className="px-1.5">
-                Roof · {counts.data.open_roof}
-              </Badge>
-            )}
-          </Label>
-        </div>
         <Select value={source} onValueChange={(v) => setSource(v as Source)}>
           <SelectTrigger className="h-9 w-[180px]">
             <SelectValue />

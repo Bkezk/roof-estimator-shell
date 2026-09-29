@@ -41,7 +41,7 @@ describe("State planroom list", () => {
   it("flags the roof job and not the electrical one, and links the job page", () => {
     const [electrical, , roof] = parsePlanroomHtml(PLANROOM).map((j) => planroomLead(j, KEYWORDS));
     expect(roof!.is_roof).toBe(true);
-    expect(roof!.url).toBe("https://www.stateofkyplanroom.com/ViewJob.aspx?job_id=29681");
+    expect(roof!.url).toBe("https://www.stateofkyplanroom.com/View/ViewJob.aspx?job_id=29681");
     expect(roof!.source).toBe("ky_planroom");
     expect(roof!.external_id).toBe("29681");
     expect(electrical!.is_roof).toBe(false);
