@@ -84,8 +84,9 @@
  *     nightly browser job like the two Tennessee city lists (src/lib/leads-browser.ts).
  *
  * refreshLeads: pull them all, upsert on (source, external_id) keeping the team's status, mark
- * what dropped off the source as gone, and tell Prospecting users about new roof leads.
- * Nothing here touches bids.
+ * what dropped off the source as gone, and tell Prospecting users about new roof leads. Then
+ * mark buildings re-roofed from Metro Nashville's roofing permits (reroof.server.ts; those
+ * permits are not leads). Nothing here touches bids.
  */
 import type { Database, Json } from "@/integrations/supabase/types";
 import {
@@ -262,7 +263,7 @@ const UA = "JBK Portal construction leads";
  * Every outside call gives up after 25 s so one slow site cannot hang the whole run (Lynn's feed
  * has taken 15 s). `headers` add to (or replace) the default User-Agent.
  */
-const fetchTimeout = (url: string, ms = 25000, headers: Record<string, string> = {}) =>
+export const fetchTimeout = (url: string, ms = 25000, headers: Record<string, string> = {}) =>
   fetch(url, { headers: { "User-Agent": UA, ...headers }, signal: AbortSignal.timeout(ms) });
 
 /* ------------------------------------------------------------------------------------------------
@@ -2681,6 +2682,8 @@ export interface RefreshLeadsResult {
   gone: number;
   /** Planroom job pages read for contacts this run (0 without a planroom login). */
   enriched: number;
+  /** Buildings stamped re-roofed from a re-roof permit this run (reroof.server.ts). */
+  reroofs_marked: number;
   failed: string[];
   notified: number;
   /** The run's summary as stamped on lead_settings. */
@@ -3224,7 +3227,19 @@ export async function refreshLeads(
   } catch (e) {
     failed.push(`Planroom details ${e instanceof Error ? e.message : String(e)}`);
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  // Re-roof permits (reroof.server.ts): not leads — the roof went to whoever pulled the permit
+  // — but they mark the building re-roofed so nobody calls on it. Never fails the refresh.
+  let reroofMarked = 0;
+  try {
+    await stage("leads saved; marking re-roofed buildings…");
+    const { markReroofedBuildings } = await import("@/lib/reroof.server");
+    const r = await markReroofedBuildings(admin);
+    reroofMarked = r.marked;
+    failed.push(...r.problems);
+  } catch (e) {
+    failed.push(`Re-roof marking ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${reroofMarked > 0 ? `, ${reroofMarked} building${reroofMarked === 1 ? "" : "s"} marked re-roofed` : ""}${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -3246,6 +3261,7 @@ export async function refreshLeads(
     new_roof_leads: newRoof.length,
     gone,
     enriched,
+    reroofs_marked: reroofMarked,
     failed,
     notified,
     note,

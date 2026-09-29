@@ -33,6 +33,7 @@ import {
   buildingLine,
   equivalentRectangle,
   parseCountyKey,
+  reroofLine,
   stateCode,
   stateForPoint,
 } from "@/lib/prospect";
@@ -110,23 +111,32 @@ const rowTitle = (b: {
   const a = b.roof_sqft ?? b.building_sqft;
   return a ? `${num(a)} sq ft roof` : "(unnamed building)";
 };
-/** "roof 22 yrs (2004)" from roof_year, else "built 1998 (roof age unknown)", else null. */
-const roofAge = (b: { roof_year?: number | null; year_built?: number | null }) => {
+/** A building's re-roof permit stamp (reroof_permits, set by the lead refresh). */
+type ReroofStamp = { last_reroof_on?: string | null; last_reroof_by?: string | null };
+/**
+ * "re-roofed Mar 2026 by Pinaire Roofing" from a re-roof permit, else "roof 22 yrs (2004)" from
+ * roof_year, else "built 1998 (roof age unknown)", else null.
+ */
+const roofAge = (b: { roof_year?: number | null; year_built?: number | null } & ReroofStamp) => {
+  const reroofed = reroofLine(b);
+  if (reroofed) return reroofed;
   const y = new Date().getFullYear();
   if (b.roof_year) return `roof ${y - b.roof_year} yrs (${b.roof_year})`;
   if (b.year_built) return `built ${b.year_built}, roof ${y - b.year_built} yrs if original`;
   return null;
 };
-const rowDetail = (b: {
-  name: string;
-  address1: string;
-  city?: string | null;
-  county?: string | null;
-  roof_sqft?: number | null;
-  roof_year?: number | null;
-  year_built?: number | null;
-  land_use?: string | null;
-}) =>
+const rowDetail = (
+  b: {
+    name: string;
+    address1: string;
+    city?: string | null;
+    county?: string | null;
+    roof_sqft?: number | null;
+    roof_year?: number | null;
+    year_built?: number | null;
+    land_use?: string | null;
+  } & ReroofStamp,
+) =>
   [
     b.name?.trim() && b.address1?.trim() ? b.address1 : null,
     b.city,
@@ -148,7 +158,7 @@ const summaryLine = (
     perimeter_ft?: number | null;
     roof_year?: number | null;
     year_built?: number | null;
-  },
+  } & ReroofStamp,
   rect: { width: number; length: number } | null,
 ) =>
   [
@@ -1184,7 +1194,19 @@ export function ProspectPage(props: {
                     </CardTitle>
                     <CardDescription className="text-xs">
                       {form.id
-                        ? summaryLine(form, rect)
+                        ? summaryLine(
+                            {
+                              ...form,
+                              // The stamp is not on the form (the refresh writes it, not people).
+                              ...(detail.data?.building.id === form.id
+                                ? {
+                                    last_reroof_on: detail.data.building.last_reroof_on,
+                                    last_reroof_by: detail.data.building.last_reroof_by,
+                                  }
+                                : {}),
+                            },
+                            rect,
+                          )
                         : "Saves as a prospect in the Buildings list. Type what you know; anything can be left blank."}
                     </CardDescription>
                   </div>
@@ -1408,12 +1430,29 @@ export function ProspectPage(props: {
                                   })
                                 }
                               >
-                                <TableCell className="font-medium">{r.section_name}</TableCell>
+                                <TableCell className="font-medium">
+                                  {r.section_name}
+                                  {r.notes && (
+                                    <span
+                                      className="line-clamp-2 block max-w-[18rem] font-normal text-muted-foreground"
+                                      title={r.notes}
+                                    >
+                                      {r.notes}
+                                    </span>
+                                  )}
+                                </TableCell>
                                 <TableCell>{r.roof_type ?? "—"}</TableCell>
                                 <TableCell className="text-right tabular-nums">
                                   {num(r.area_sqft)}
                                 </TableCell>
-                                <TableCell>{r.install_date ?? "—"}</TableCell>
+                                <TableCell>
+                                  {r.install_date ?? "—"}
+                                  {r.installer && (
+                                    <span className="block text-muted-foreground">
+                                      by {r.installer}
+                                    </span>
+                                  )}
+                                </TableCell>
                                 <TableCell>
                                   {r.condition ? CONDITION_LABELS[r.condition] : "—"}
                                 </TableCell>

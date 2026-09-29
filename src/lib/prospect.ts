@@ -125,6 +125,33 @@ export function buildingLine(b: { name: string; address1: string; city?: string 
   return b.name && addr ? `${b.name} — ${addr}` : b.name || addr || "(unnamed building)";
 }
 
+const MONTH_SHORT = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+
+/** "Mar 2026" from "2026-03-14" (null when it is not a date). */
+export function monthYear(iso: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2})/.exec(iso ?? "");
+  const month = m ? MONTH_SHORT[Number(m[2]) - 1] : undefined;
+  return m && month ? `${month} ${m[1]}` : null;
+}
+
+/**
+ * "re-roofed Mar 2026 by Pinaire Roofing" from a building's re-roof permit stamp (without "by"
+ * when the permit named nobody; an all-lower-case name is capitalised), or null when there is
+ * no stamp — or when someone has since typed a later "Roof installed (year)", which then wins.
+ */
+export function reroofLine(b: {
+  last_reroof_on?: string | null;
+  last_reroof_by?: string | null;
+  roof_year?: number | null;
+}): string | null {
+  const when = monthYear(b.last_reroof_on);
+  if (!when) return null;
+  if (b.roof_year && b.roof_year > Number(String(b.last_reroof_on).slice(0, 4))) return null;
+  let by = (b.last_reroof_by ?? "").replace(/\s+/g, " ").trim();
+  if (by && by === by.toLowerCase()) by = by.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+  return `re-roofed ${when}${by ? ` by ${by}` : ""}`;
+}
+
 // ── Kentucky + Tennessee (owner, Sep 29: "we actually cover TN as well … whole state") ──────
 
 /** The two states the Buildings page covers. */

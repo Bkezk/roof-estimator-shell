@@ -387,6 +387,36 @@ under item 0, "Tennessee leads").
         PDF reports); Owensboro (permits appear only in newspaper articles).
       - Requests: +1 per refresh (Lexington); +1 portal per night (Louisville, 2 requests).
 
+      **Re-roof marking (Sep 29; owner: "The marking buildings as done is very useful, please
+      implement it showing when it was done and who did it").** Metro Nashville's "Building
+      Commercial - Roofing / Siding" permits are re-roofs already awarded to whoever pulled the
+      permit, so they left the Leads list (`20260930020000_nashville_types_no_reroof.sql`);
+      instead every lead refresh (the Refresh button and the nightly cron) ends with
+      `markReroofedBuildings` (`src/lib/reroof.server.ts`): one query for that permit type (a
+      year back on the first run, then 120 days), kept in `reroof_permits`; each permit whose
+      scope is a re-roof (not rooftop HVAC work, siding only or a patch) is matched to a
+      building — same street address and city, else the building whose outline holds the permit
+      point, else the nearest building within 40 m — which gets one roof record ("Whole roof
+      (permit)", installed on the issue date, installer = the permit holder, the permit number,
+      cost and scope in the notes), `roof_year` (only moves forward) and
+      `last_reroof_on` / `last_reroof_by`. The Buildings row and the building's header then read
+      "re-roofed Mar 2026 by Pinaire Roofing" instead of the roof age. **Nashville only:**
+      Louisville's permit layer has no roofing type and no description (a re-roof is an
+      unmarked "Commercial Alteration"), Chattanooga's holds only new construction; another
+      city is one more entry in `REROOF_SOURCES`. **Tennessee buildings are not loaded yet**, so
+      today nothing matches: an unmatched re-roof is tried again on every refresh for 12 months
+      and marks its building on the first refresh after the Tennessee load. Live, Sep 29: 80
+      Roofing / Siding permits in 365 days, 67 read as re-roofs (34 of them ≥ $100,000; the 13
+      others: 10 siding-only, one rooftop HVAC swap, two roof repairs); a dry run against the USA Structures layer the Tennessee load uses
+      (loader filter) suggests about 35 would match by address, 12 by point and 20 not at all
+      (apartments and small buildings the load skips). **Owner: apply
+      `20260930030000_reroof_permits.sql`** (table + `buildings.last_reroof_on/by`); until then
+      the step fails and says so in the refresh's red line (the leads still save). To watch:
+      the permit `Contact` is sometimes the applicant or an expediter, not the roofer (e.g. "anna
+      roberts-tettleton"); an apartment complex's permit ("Re-roof of buildings 100, 200 …")
+      marks the one building at the address point; a roof record deleted by hand is not written
+      back.
+
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and

@@ -903,6 +903,8 @@ export type Database = {
           last_storm_kind: string | null;
           last_storm_magnitude: number | null;
           last_storm_miles: number | null;
+          last_reroof_on: string | null;
+          last_reroof_by: string | null;
           zip: string | null;
         };
         Insert: {
@@ -949,6 +951,8 @@ export type Database = {
           last_storm_kind?: string | null;
           last_storm_magnitude?: number | null;
           last_storm_miles?: number | null;
+          last_reroof_on?: string | null;
+          last_reroof_by?: string | null;
           zip?: string | null;
         };
         Update: {
@@ -995,6 +999,8 @@ export type Database = {
           last_storm_kind?: string | null;
           last_storm_magnitude?: number | null;
           last_storm_miles?: number | null;
+          last_reroof_on?: string | null;
+          last_reroof_by?: string | null;
           zip?: string | null;
         };
         Relationships: [];
@@ -2198,6 +2204,93 @@ export type Database = {
           work_completed?: string | null;
         };
         Relationships: [];
+      };
+      reroof_permits: {
+        Row: {
+          address: string | null;
+          building_id: string | null;
+          city: string | null;
+          contractor: string | null;
+          cost: number | null;
+          description: string | null;
+          first_seen_at: string;
+          id: string;
+          issued_on: string;
+          last_seen_at: string;
+          lat: number | null;
+          lng: number | null;
+          match_method: string | null;
+          matched_at: string | null;
+          permit_no: string;
+          raw: Json;
+          roof_id: string | null;
+          roof_type: string | null;
+          source: string;
+          sqft: number | null;
+          state: string;
+        };
+        Insert: {
+          address?: string | null;
+          building_id?: string | null;
+          city?: string | null;
+          contractor?: string | null;
+          cost?: number | null;
+          description?: string | null;
+          first_seen_at?: string;
+          id?: string;
+          issued_on: string;
+          last_seen_at?: string;
+          lat?: number | null;
+          lng?: number | null;
+          match_method?: string | null;
+          matched_at?: string | null;
+          permit_no: string;
+          raw?: Json;
+          roof_id?: string | null;
+          roof_type?: string | null;
+          source: string;
+          sqft?: number | null;
+          state?: string;
+        };
+        Update: {
+          address?: string | null;
+          building_id?: string | null;
+          city?: string | null;
+          contractor?: string | null;
+          cost?: number | null;
+          description?: string | null;
+          first_seen_at?: string;
+          id?: string;
+          issued_on?: string;
+          last_seen_at?: string;
+          lat?: number | null;
+          lng?: number | null;
+          match_method?: string | null;
+          matched_at?: string | null;
+          permit_no?: string;
+          raw?: Json;
+          roof_id?: string | null;
+          roof_type?: string | null;
+          source?: string;
+          sqft?: number | null;
+          state?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "reroof_permits_building_id_fkey";
+            columns: ["building_id"];
+            isOneToOne: false;
+            referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "reroof_permits_roof_id_fkey";
+            columns: ["roof_id"];
+            isOneToOne: false;
+            referencedRelation: "roofs";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       roofs: {
         Row: {
