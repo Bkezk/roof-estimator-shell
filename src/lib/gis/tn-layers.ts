@@ -15,6 +15,8 @@
  *   - Non-residential buildings of 5,000 sq ft and up: 102,170 across the 95 counties.
  *   - TDOT imagery: tile cache to level 23; index layer 0 has Cnty_Name, TN_Ortho_Year, NAIP_Year.
  */
+import { parcelQueryUrl, str, type ArcGisFeature } from "./arcgis";
+import { footprintFromFeature } from "./ky-layers";
 
 /** National FEMA / ORNL structures layer (polygons, all states). */
 export const USA_STRUCTURES_LAYER =
@@ -166,3 +168,97 @@ export const inTennesseeBox = (lat: number, lng: number): boolean =>
   lat <= TN_BOUNDS[1][1] &&
   lng >= TN_BOUNDS[0][0] &&
   lng <= TN_BOUNDS[1][0];
+
+// ── Loader (scripts/load-tennessee.ts) ──────────────────────────────────────────────────────
+
+/** The layer serves 2,000 rows a page (maxRecordCount); Davidson needs six. */
+export const TN_PAGE_SIZE = 2000;
+
+/**
+ * One page of a county's prospects, ordered by OBJECTID. Geometry comes back in Web Mercator
+ * (outSR 102100) so Kentucky's ring helper (parcelGeometry, via footprintFromFeature) turns it
+ * into the same WGS84 GeoJSON and ground-corrected perimeter the Kentucky rows carry.
+ */
+export const tnPageUrl = (fips: string, offset: number, minSqFt = 5000): string =>
+  parcelQueryUrl(USA_STRUCTURES_LAYER, {
+    where: tnCountyWhere(fips, minSqFt),
+    offset,
+    count: TN_PAGE_SIZE,
+  });
+
+/** How many prospects the county has (the loader checks its paging against this). */
+export const tnCountUrl = (fips: string, minSqFt = 5000): string =>
+  parcelQueryUrl(USA_STRUCTURES_LAYER, { where: tnCountyWhere(fips, minSqFt), countOnly: true });
+
+/** "usa:5702572": distinct from Kentucky's "ornl:<id>" keys (the state's own copy). */
+export const tnSourceKey = (buildId: string): string => `usa:${buildId}`;
+
+/**
+ * The data_refreshes county for a Tennessee county: "Warren, TN". 34 county names exist in
+ * both states (Warren, Knox, Jefferson …) and the log has no state column, so a bare name
+ * would let a Kentucky refresh hide the Tennessee one (and --skip-fresh skip it).
+ */
+export const tnRefreshCounty = (county: string): string => `${county}, TN`;
+
+/** "NASHVILLE" → "Nashville", "MT. JULIET" → "Mt. Juliet", "LA VERGNE" → "La Vergne". */
+export function titleCaseCity(city: string | null): string | null {
+  if (!city) return null;
+  return city
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/(^|[\s\-/.'(])([a-z])/g, (_m, pre: string, c: string) => pre + c.toUpperCase())
+    .replace(/\bMc([a-z])/g, (_m, c: string) => `Mc${c.toUpperCase()}`);
+}
+
+/** A row for public.upsert_buildings (the same keys the Kentucky loader sends, plus state). */
+export interface TnBuildingRow {
+  source_key: string;
+  source: "ornl";
+  state: "TN";
+  county: string | null;
+  name: string;
+  address1: string;
+  city: string | null;
+  zip: string | null;
+  land_use: string | null;
+  roof_sqft: number | null;
+  perimeter_ft: number | null;
+  height_ft: number | null;
+  footprint: unknown;
+  centroid_lat: number | null;
+  centroid_lng: number | null;
+  source_layer: string;
+  created_by: null;
+  created_by_name: string;
+}
+
+/**
+ * One USA Structures feature → a buildings row; null for a residential building or one with
+ * no BUILD_ID. County is PROP_CNTY, else the FIPS code's county, else the county being loaded.
+ */
+export function tnBuildingRow(f: ArcGisFeature, fallbackCounty?: string): TnBuildingRow | null {
+  const a = f.attributes;
+  if (str(a["OCC_CLS"]) === "Residential") return null;
+  const c = footprintFromFeature(f);
+  if (!c) return null;
+  return {
+    source_key: tnSourceKey(c.buildId),
+    source: "ornl",
+    state: "TN",
+    county: str(a["PROP_CNTY"]) ?? tnCountyFromFips(c.fips) ?? fallbackCounty ?? null,
+    name: c.primaryOccupancy ?? "",
+    address1: c.address ?? "",
+    city: titleCaseCity(c.city),
+    zip: c.zip,
+    land_use: c.occupancyClass,
+    roof_sqft: c.roofSqFt,
+    perimeter_ft: c.geometry?.computedPerimeterFt ?? null,
+    height_ft: c.heightFt,
+    footprint: c.geometry?.footprint ?? null,
+    centroid_lat: c.lat,
+    centroid_lng: c.lng,
+    source_layer: USA_STRUCTURES_LAYER,
+    created_by: null,
+    created_by_name: "scheduled load",
+  };
+}
