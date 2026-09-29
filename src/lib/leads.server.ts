@@ -110,8 +110,8 @@ export const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
 export const SAM_NAICS_ROOFING = "238160";
 
 const UA = "JBK Portal construction leads";
-/** Every outside call gives up after 15 s so one slow site cannot hang the whole run. */
-const fetchTimeout = (url: string, ms = 15000) =>
+/** Every outside call gives up after 25 s so one slow site cannot hang the whole run (Lynn's feed has taken 15 s). */
+const fetchTimeout = (url: string, ms = 25000) =>
   fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(ms) });
 
 /* ------------------------------------------------------------------------------------------------
@@ -830,95 +830,95 @@ export async function refreshLeads(
   const rows: LeadInsert[] = [];
   const fetchedSources = new Set<LeadSource>();
 
-  try {
-    const res = await fetchTimeout(PLANROOM_URL);
-    if (!res.ok) throw new Error(`→ ${res.status}`);
-    const jobs = parsePlanroomHtml(await res.text());
-    if (!jobs.length) throw new Error("no jobs parsed (page layout changed?)");
-    rows.push(...jobs.map((j) => planroomLead(j, s.roof_keywords)));
-    fetchedSources.add("ky_planroom");
-  } catch (e) {
-    failed.push(`State planroom ${e instanceof Error ? e.message : String(e)}`);
-  }
-  let louisvilleCount = 0;
-  try {
-    const permits = await fetchLouisville(s);
-    louisvilleCount = permits.length;
-    rows.push(...permits.map((p) => louisvilleLead(p, s.roof_keywords)));
-    fetchedSources.add("louisville_permits");
-  } catch (e) {
-    failed.push(`Louisville permits ${e instanceof Error ? e.message : String(e)}`);
-  }
-  const planroomCount = rows.length - louisvilleCount;
+  // A progress stamp first: if the run dies mid-way (a platform time limit), the settings row
+  // shows when it started instead of the last good run.
+  await admin.rpc("stamp_lead_fetch", { note: `running since ${new Date().toISOString()}…` });
+
+  // Every list at once (the slowest site, not the sum, sets the run's length); each source
+  // that fails is reported and skipped.
   const counts: Record<string, number> = {};
-  const pull = async (
+  const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
+  type Pulled = { source: LeadSource; rows: LeadInsert[]; count: number };
+  const attempt = async (
     source: LeadSource,
     label: string,
-    url: string,
-    parse: (body: string) => LeadInsert[],
-  ) => {
+    run: () => Promise<{ rows: LeadInsert[]; count?: number }>,
+  ): Promise<Pulled | null> => {
     try {
-      const res = await fetchTimeout(url);
-      if (!res.ok) throw new Error(`→ ${res.status}`);
-      const parsed = parse(await res.text());
-      if (!parsed.length) throw new Error("nothing parsed (page layout changed?)");
-      rows.push(...parsed);
-      counts[source] = parsed.length;
-      fetchedSources.add(source);
+      const r = await run();
+      return { source, rows: r.rows, count: r.count ?? r.rows.length };
     } catch (e) {
       failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
+      return null;
     }
   };
-  // The campus planrooms: one pull each, all under one source; a portal that is down or
-  // empty is reported and skipped (an empty list is normal for the small portals).
-  for (const portal of CAMPUS_PLANROOMS) {
-    try {
-      const res = await fetchTimeout(campusListUrl(portal.domain));
-      if (!res.ok) throw new Error(`→ ${res.status}`);
-      const jobs = parsePlanroomHtml(await res.text());
-      rows.push(...jobs.map((j) => campusLead(j, portal, s.roof_keywords)));
-      counts["campus_planrooms"] = (counts["campus_planrooms"] ?? 0) + jobs.length;
-      fetchedSources.add("campus_planrooms");
-    } catch (e) {
-      failed.push(`${portal.label} planroom ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-  // SAM.gov, only with the owner's key.
-  const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
-  if (samKey) {
-    try {
-      const res = await fetchTimeout(samQueryUrl(samKey));
-      const json = (await res.json().catch(() => ({}))) as {
-        opportunitiesData?: SamOpportunity[];
-        error?: { message?: string };
-        message?: string;
-      };
-      if (!res.ok)
-        throw new Error(`→ ${res.status} ${json.error?.message ?? json.message ?? ""}`.trim());
-      const ops = json.opportunitiesData ?? [];
-      rows.push(...ops.map((o) => samLead(o, s.roof_keywords)));
-      counts["sam_gov"] = ops.length;
-      fetchedSources.add("sam_gov");
-    } catch (e) {
-      failed.push(`SAM.gov ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-  let lynnDuplicates: string[] = [];
-  await pull("lynn_bids", "Lynn Imaging bids", LYNN_FEED_URL, (xml) => {
-    const all = parseLynnFeed(xml).map((p) => lynnLead(p, s.roof_keywords));
-    const { keep, dropped } = dropPlanroomDuplicates(
-      all,
-      rows.filter((r) => r.source === "ky_planroom" || r.source === "campus_planrooms"),
+  const text = async (url: string) => {
+    const res = await fetchTimeout(url);
+    if (!res.ok) throw new Error(`→ ${res.status}`);
+    return res.text();
+  };
+  const pulls: Promise<Pulled | null>[] = [
+    attempt("ky_planroom", "State planroom", async () => {
+      const jobs = parsePlanroomHtml(await text(PLANROOM_URL));
+      if (!jobs.length) throw new Error("no jobs parsed (page layout changed?)");
+      return { rows: jobs.map((j) => planroomLead(j, s.roof_keywords)) };
+    }),
+    attempt("louisville_permits", "Louisville permits", async () => {
+      const permits = await fetchLouisville(s);
+      return { rows: permits.map((p) => louisvilleLead(p, s.roof_keywords)) };
+    }),
+    ...CAMPUS_PLANROOMS.map((portal) =>
+      attempt("campus_planrooms", `${portal.label} planroom`, async () => {
+        // An empty list is normal for the small portals.
+        const jobs = parsePlanroomHtml(await text(campusListUrl(portal.domain)));
+        return { rows: jobs.map((j) => campusLead(j, portal, s.roof_keywords)) };
+      }),
+    ),
+    attempt("lynn_bids", "Lynn Imaging bids", async () => {
+      const posts = parseLynnFeed(await text(LYNN_FEED_URL));
+      if (!posts.length) throw new Error("nothing parsed (feed layout changed?)");
+      return { rows: posts.map((p) => lynnLead(p, s.roof_keywords)) };
+    }),
+    attempt("bgky_bids", "Bowling Green bids", async () => {
+      const bids = parseBgkyBids(await text(BGKY_BIDS_URL));
+      return { rows: bids.map((b) => cityLead(b, "bgky_bids", s.roof_keywords)) };
+    }),
+    attempt("paducah_bids", "Paducah bids", async () => {
+      const bids = parsePaducahBids(await text(PADUCAH_BIDS_URL));
+      if (!bids.length) throw new Error("nothing parsed (page layout changed?)");
+      return { rows: bids.map((b) => cityLead(b, "paducah_bids", s.roof_keywords)) };
+    }),
+  ];
+  if (samKey)
+    pulls.push(
+      attempt("sam_gov", "SAM.gov", async () => {
+        const res = await fetchTimeout(samQueryUrl(samKey));
+        const body = await res.text();
+        if (!res.ok)
+          throw new Error(`→ ${res.status} ${body.replace(/\s+/g, " ").slice(0, 200)}`.trim());
+        const json = JSON.parse(body) as { opportunitiesData?: SamOpportunity[] };
+        const ops = json.opportunitiesData ?? [];
+        return { rows: ops.map((o) => samLead(o, s.roof_keywords)) };
+      }),
     );
-    lynnDuplicates = dropped;
-    return keep;
-  });
-  await pull("bgky_bids", "Bowling Green bids", BGKY_BIDS_URL, (html) =>
-    parseBgkyBids(html).map((b) => cityLead(b, "bgky_bids", s.roof_keywords)),
-  );
-  await pull("paducah_bids", "Paducah bids", PADUCAH_BIDS_URL, (html) =>
-    parsePaducahBids(html).map((b) => cityLead(b, "paducah_bids", s.roof_keywords)),
-  );
+  const pulled = (await Promise.all(pulls)).filter((x): x is Pulled => x !== null);
+  // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies.
+  let lynnDuplicates: string[] = [];
+  const planroomRows = pulled
+    .filter((x) => x.source === "ky_planroom" || x.source === "campus_planrooms")
+    .flatMap((x) => x.rows);
+  for (const x of pulled) {
+    if (x.source === "lynn_bids") {
+      const { keep, dropped } = dropPlanroomDuplicates(x.rows, planroomRows);
+      lynnDuplicates = dropped;
+      x.rows = keep;
+    }
+    rows.push(...x.rows);
+    counts[x.source] = (counts[x.source] ?? 0) + x.count;
+    fetchedSources.add(x.source);
+  }
+  const planroomCount = counts["ky_planroom"] ?? 0;
+  const louisvilleCount = counts["louisville_permits"] ?? 0;
 
   // Which of these are new? Compare against what is stored before the upsert.
   const { data: existing, error: eErr } = await admin.from("leads").select("source, external_id");
