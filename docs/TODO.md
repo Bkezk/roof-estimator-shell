@@ -11,8 +11,10 @@ the bottom with the commit that closed them.
   domain verified), `NOTIFY_FROM_EMAIL` (e.g. `Bid-O-Matic <notifications@flatroofonline.com>`),
   `APP_URL` (the app's public address, used for links in emails and push). Until set, email
   reminders show as failed on Admin › Reminders; in-app and push still work.
-- GitHub repository secrets: `APP_URL` (same value) and `CRON_SECRET` (the value of
-  `LOVABLE_CRON_SECRET` shown in Lovable Cloud) so `.github/workflows/reminders.yml` fires
+- GitHub repository secrets: `APP_URL` (same value) and `CRON_SECRET` — a long random value
+  the owner makes up and sets under the same name in BOTH Lovable Cloud › Secrets and GitHub
+  (Sep 29: Lovable hides LOVABLE_CRON_SECRET's value, so the app now also accepts the owner's
+  own CRON_SECRET, src/lib/cron-auth.ts) — so `.github/workflows/reminders.yml` fires
   reminders every 30 minutes in office hours. Without them, reminders go out only when an office
   user opens the app.
 - Each user: open `/account` on their phone and turn push on (iPhone: add to Home Screen first).

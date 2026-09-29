@@ -6,10 +6,10 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
-import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { authenticateCron } from "@/lib/cron-auth";
 
 async function run(request: Request): Promise<Response> {
-  const denied = await authenticateCronRequest(request);
+  const denied = await authenticateCron(request);
   if (denied) return denied;
   try {
     const { hasServiceRole } = await import("@/lib/notify.server");

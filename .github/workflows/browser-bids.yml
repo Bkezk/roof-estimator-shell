@@ -4,8 +4,8 @@
 # lists in headless Chromium (scripts/browser-bids.ts reads every portal in
 # src/lib/leads-browser.ts; no login, no registration), keeps the open solicitations and posts
 # them to the app's /api/cron/leads-import. Runs before the 10:45 leads run (leads.yml). Uses the same two
-# repository secrets as leads.yml: APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable
-# Cloud); without them the job skips. A portal that cannot be read posts nothing (its leads are
+# repository secrets as leads.yml: APP_URL and CRON_SECRET (a value the owner sets under the same name in Lovable Cloud › Secrets;
+# src/lib/cron-auth.ts); without them the job skips. A portal that cannot be read posts nothing (its leads are
 # left as they were) and turns the run red. Needs
 # supabase/migrations/20260930000000_leads_browser_sources.sql and (for Louisville)
 # 20260930010000_leads_kentucky_cities.sql applied (the import is refused on the source check

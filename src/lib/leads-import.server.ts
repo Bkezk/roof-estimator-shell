@@ -3,14 +3,14 @@
  * here so the tests can call it: cron authentication, the zod check of the browser job's
  * payload (src/lib/leads-browser.ts), then importBrowserBids (leads.server.ts).
  */
-import { authenticateCronRequest } from "@/integrations/supabase/cron-auth";
+import { authenticateCron } from "@/lib/cron-auth";
 import { browserImportSchema } from "@/lib/leads-browser";
 
 /** A body this large is not a bid list (500 rows of bounded fields stay well under it). */
 const MAX_BODY_BYTES = 4_000_000;
 
 export async function importRequest(request: Request): Promise<Response> {
-  const denied = await authenticateCronRequest(request);
+  const denied = await authenticateCron(request);
   if (denied) return denied;
   const body = await request.text();
   if (body.length > MAX_BODY_BYTES)

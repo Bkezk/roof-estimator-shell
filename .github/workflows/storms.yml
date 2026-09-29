@@ -1,6 +1,6 @@
 # Pulls the last week of NOAA Storm Prediction Center reports and flags the buildings under
 # them as call points, by calling the app's cron endpoint. Uses the same two repository secrets
-# as reminders.yml: APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable Cloud). Without
+# as reminders.yml: APP_URL and CRON_SECRET (a value the owner sets under the same name in Lovable Cloud › Secrets). Without
 # them the job skips; the app still refreshes, throttled, whenever a Prospecting user opens
 # the Buildings page.
 name: Storm call points
