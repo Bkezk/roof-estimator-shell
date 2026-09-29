@@ -55,6 +55,10 @@ const shard = (() => {
   return m ? { i: Number(m[1]) - 1, n: Number(m[2]) } : null;
 })();
 const BATCH = 200;
+// A breather between write batches so the app stays usable while a load runs (owner, Sep 29:
+// "I just don't want to not be able to work on it for a while"). About 510 batches statewide,
+// so 400 ms adds roughly three and a half minutes to the run. --fast drops it.
+const PAUSE_MS = args.includes("--fast") ? 0 : 400;
 
 // Connection (same as the Kentucky loader). Not needed for --dry-run.
 const dotenv = (() => {
@@ -227,6 +231,7 @@ async function loadCounty(county: string): Promise<CountyResult> {
         const batch = rows.slice(i, i + BATCH);
         res.written += await rpc<number>("upsert_buildings", { rows: batch as unknown as Json });
         await checkStateStored(batch[0]!.source_key);
+        if (PAUSE_MS) await new Promise((r) => setTimeout(r, PAUSE_MS));
       }
     }
     process.stdout.write(
