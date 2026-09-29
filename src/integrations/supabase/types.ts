@@ -863,6 +863,8 @@ export type Database = {
           address1: string;
           address2: string | null;
           address_checked_at: string | null;
+          address_approx: boolean;
+          address_approx_m: number | null;
           prospect_owner_name: string | null;
           prospect_stage: string | null;
           prospected_at: string | null;
@@ -911,6 +913,8 @@ export type Database = {
           address1?: string;
           address2?: string | null;
           address_checked_at?: string | null;
+          address_approx?: boolean;
+          address_approx_m?: number | null;
           prospect_owner_name?: string | null;
           prospect_stage?: string | null;
           prospected_at?: string | null;
@@ -959,6 +963,8 @@ export type Database = {
           address1?: string;
           address2?: string | null;
           address_checked_at?: string | null;
+          address_approx?: boolean;
+          address_approx_m?: number | null;
           prospect_owner_name?: string | null;
           prospect_stage?: string | null;
           prospected_at?: string | null;

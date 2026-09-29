@@ -1,7 +1,8 @@
 # Monthly refresh of the prospecting data from Kentucky's free GIS (docs/roofing-ops-portal-brief.md).
 # Footprints are a one-time survey, so the monthly run refreshes addresses, named businesses and
 # facilities; run it by hand with "Load footprints too" for the first statewide load or when the
-# state republishes footprints. The database is a small instance that cannot serve the loader
+# state republishes footprints. Every run also makes the approximate-address pass (nearest 911
+# point within 300 m, flagged; docs/TODO.md 3); "Approximate addresses only" runs just that pass. The database is a small instance that cannot serve the loader
 # and the app at once (run 10 starved it and bids would not open), so the schedule is the
 # middle of the night and a by-hand run should be started at night too.
 # Secrets (repository settings → Secrets and variables → Actions):
@@ -26,6 +27,10 @@ on:
         description: "Skip counties refreshed in the last N days (resume a cancelled pass; blank = none)"
         required: false
         default: ""
+      approx_only:
+        description: "Approximate addresses only (backfill the 300 m pass on loaded counties; no footprints, points, businesses or schools)"
+        type: boolean
+        default: false
 
 jobs:
   refresh:
@@ -52,6 +57,7 @@ jobs:
           COUNTY: ${{ github.event.inputs.county }}
           FOOTPRINTS: ${{ github.event.inputs.footprints }}
           SKIP_FRESH: ${{ github.event.inputs.skip_fresh_days }}
+          APPROX_ONLY: ${{ github.event.inputs.approx_only }}
           SHARD: ${{ matrix.shard }}
         run: |
           if [ -n "$COUNTY" ]; then
@@ -62,5 +68,8 @@ jobs:
           fi
           if [ "${{ github.event_name }}" = "schedule" ] || [ "$FOOTPRINTS" != "true" ]; then ARGS="$ARGS --skip-footprints"; fi
           if [ -n "$SKIP_FRESH" ]; then ARGS="$ARGS --skip-fresh $SKIP_FRESH"; fi
+          # The approximate pass writes no data_refreshes row, so skip_fresh cannot resume it;
+          # rerunning is safe (it only fills addresses that are still blank).
+          if [ "$APPROX_ONLY" = "true" ]; then ARGS="$ARGS --approx-only"; fi
           echo "running: $ARGS"
           npx vite-node scripts/load-kentucky.ts $ARGS

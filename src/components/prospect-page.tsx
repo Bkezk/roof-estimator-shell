@@ -30,10 +30,12 @@ import { isAdmin } from "@/lib/access";
 import { KY_COUNTIES } from "@/lib/gis/ky-layers";
 import { TN_COUNTIES } from "@/lib/gis/tn-layers";
 import {
+  approxAddressNote,
   buildingLine,
   equivalentRectangle,
   parseCountyKey,
   reroofLine,
+  shownAddress,
   stateCode,
   stateForPoint,
 } from "@/lib/prospect";
@@ -103,11 +105,13 @@ const usd = (n: number) => n.toLocaleString("en-US", { style: "currency", curren
 const rowTitle = (b: {
   name: string;
   address1: string;
+  /** The loader's approximate match: shown with a leading "≈ " (owner, Sep 29). */
+  address_approx?: boolean | null;
   roof_sqft?: number | null;
   building_sqft?: number | null;
 }) => {
   if (b.name?.trim()) return b.name;
-  if (b.address1?.trim()) return b.address1;
+  if (b.address1?.trim()) return shownAddress(b);
   const a = b.roof_sqft ?? b.building_sqft;
   return a ? `${num(a)} sq ft roof` : "(unnamed building)";
 };
@@ -129,6 +133,7 @@ const rowDetail = (
   b: {
     name: string;
     address1: string;
+    address_approx?: boolean | null;
     city?: string | null;
     county?: string | null;
     roof_sqft?: number | null;
@@ -138,7 +143,7 @@ const rowDetail = (
   } & ReroofStamp,
 ) =>
   [
-    b.name?.trim() && b.address1?.trim() ? b.address1 : null,
+    b.name?.trim() && b.address1?.trim() ? shownAddress(b) : null,
     b.city,
     b.county && `${b.county} Co.`,
     (b.name?.trim() || b.address1?.trim()) && b.roof_sqft ? `${num(b.roof_sqft)} sq ft roof` : null,
@@ -151,6 +156,7 @@ const rowDetail = (
 const summaryLine = (
   b: {
     address1: string;
+    address_approx?: boolean | null;
     city?: string | null;
     county?: string | null;
     roof_sqft?: number | null;
@@ -167,7 +173,7 @@ const summaryLine = (
           rect && rect.width > 0 ? ` (about ${rect.width} × ${rect.length} ft)` : ""
         }`
       : "roof size unknown",
-    b.address1?.trim() ? [b.address1, b.city].filter(Boolean).join(", ") : "no address yet",
+    b.address1?.trim() ? [shownAddress(b), b.city].filter(Boolean).join(", ") : "no address yet",
     roofAge(b),
     b.county && `${b.county} County`,
   ]
@@ -607,7 +613,8 @@ export function ProspectPage(props: {
     return rows.map((b) => ({
       id: b.id,
       name: b.name,
-      address1: b.address1,
+      // The map labels an unnamed building by its address; a guessed one keeps its "≈ ".
+      address1: shownAddress(b),
       lat: b.centroid_lat,
       lng: b.centroid_lng,
       footprint: b.footprint,
@@ -621,6 +628,14 @@ export function ProspectPage(props: {
     return area ? equivalentRectangle(area, b.perimeter_ft) : null;
   }, [detail.data]);
 
+  // The open building's address is the loader's approximate match (owner, Sep 29) — until the
+  // person types another one in the box (saving that clears the flag on the server).
+  const openBuilding =
+    form?.id && detail.data?.building.id === form.id ? detail.data.building : null;
+  const approxOpen =
+    !!openBuilding?.address_approx &&
+    (form?.address1 ?? "").trim() === openBuilding.address1.trim();
+  const approxNote = approxOpen && openBuilding ? approxAddressNote(openBuilding) : null;
   const setF = <K extends keyof BuildingInput>(k: K, v: BuildingInput[K]) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
   const text = (k: keyof BuildingInput, label: string, width = "") => (
@@ -630,7 +645,17 @@ export function ProspectPage(props: {
         className="h-8"
         value={(form?.[k] as string | null | undefined) ?? ""}
         disabled={!canWrite}
-        onChange={(e) => setF(k, (e.target.value || null) as BuildingInput[typeof k])}
+        onChange={(e) =>
+          setF(
+            k,
+            // name / address1 / state are required strings: an emptied box is "", not null
+            // (null failed the save's validation and broke the Save button's check).
+            (e.target.value ||
+              (k === "name" || k === "address1" || k === "state"
+                ? ""
+                : null)) as BuildingInput[typeof k],
+          )
+        }
       />
     </div>
   );
@@ -1190,13 +1215,14 @@ export function ProspectPage(props: {
                 <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
                   <div>
                     <CardTitle className="text-base">
-                      {form.id ? rowTitle(form) : "New building"}
+                      {form.id ? rowTitle({ ...form, address_approx: approxOpen }) : "New building"}
                     </CardTitle>
                     <CardDescription className="text-xs">
                       {form.id
                         ? summaryLine(
                             {
                               ...form,
+                              address_approx: approxOpen,
                               // The stamp is not on the form (the refresh writes it, not people).
                               ...(detail.data?.building.id === form.id
                                 ? {
@@ -1221,7 +1247,9 @@ export function ProspectPage(props: {
                             building: form.id,
                             ...(form.name ? { pfName: form.name } : {}),
                             ...(form.owner_name ? { pfOwner: form.owner_name } : {}),
-                            ...(form.address1 ? { pfAddr: form.address1 } : {}),
+                            // An approximate address is not handed to a bid: the estimator
+                            // would show it unlabelled, so the box starts blank instead.
+                            ...(form.address1 && !approxOpen ? { pfAddr: form.address1 } : {}),
                             ...(form.address2 ? { pfAddr2: form.address2 } : {}),
                             ...(form.city ? { pfCity: form.city } : {}),
                             ...(form.state ? { pfState: form.state } : {}),
@@ -1338,7 +1366,24 @@ export function ProspectPage(props: {
                   )}
                   {text("name", "Building / business name", "sm:col-span-2")}
                   {text("owner_name", "Owner of record", "sm:col-span-2")}
-                  {text("address1", "Address", "sm:col-span-2")}
+                  <div className="sm:col-span-2">
+                    {text("address1", "Address")}
+                    {approxNote && (
+                      <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-700 dark:text-amber-400">
+                        <span>{approxNote}</span>
+                        {canWrite && (
+                          <button
+                            type="button"
+                            className="underline underline-offset-2 hover:text-foreground"
+                            disabled={save.isPending}
+                            onClick={() => save.mutate({ ...form, address_confirmed: true })}
+                          >
+                            Address is right
+                          </button>
+                        )}
+                      </p>
+                    )}
+                  </div>
                   {text("address2", "Address 2")}
                   {text("city", "City")}
                   {text("state", "State")}

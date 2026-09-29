@@ -392,17 +392,20 @@ export async function matchBuilding(
   const want = normalizeAddress(permit.address);
   const house = /^(\d+)/.exec(want)?.[1];
   if (want && house && permit.city?.trim()) {
+    // `*` so address_approx comes along when the column exists (and nothing breaks before
+    // its migration): an approximate address is the loader's guess from the nearest 911 point
+    // (owner, Sep 29), so it never matches a permit by address — the point match below still can.
     const { data, error } = await admin
       .from("buildings")
-      .select(CANDIDATE_COLUMNS)
+      .select("*")
       .is("deleted_at", null)
       .eq("state", permit.state)
       .ilike("city", permit.city.trim().replace(/[%_\\]/g, ""))
       .ilike("address1", `${house} %`)
       .limit(50);
     if (error) throw new Error(error.message);
-    const same = ((data ?? []) as MatchCandidate[]).filter(
-      (b) => normalizeAddress(b.address1) === want,
+    const same = ((data ?? []) as (MatchCandidate & { address_approx?: boolean | null })[]).filter(
+      (b) => b.address_approx !== true && normalizeAddress(b.address1) === want,
     );
     const hit = best(same, permit.lat, permit.lng);
     if (hit) return { building: hit, method: "address" };

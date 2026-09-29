@@ -120,9 +120,40 @@ export function sortWarrantyLeads(leads: WarrantyLead[]): WarrantyLead[] {
 }
 
 /** One line for a building in lists: "Name — 123 Main St, City" (whatever is known). */
-export function buildingLine(b: { name: string; address1: string; city?: string | null }): string {
-  const addr = [b.address1, b.city].filter((x) => x && x.trim()).join(", ");
+export function buildingLine(b: {
+  name: string;
+  address1: string;
+  city?: string | null;
+  address_approx?: boolean | null;
+}): string {
+  const addr = [shownAddress(b), b.city].filter((x) => x && x.trim()).join(", ");
   return b.name && addr ? `${b.name} — ${addr}` : b.name || addr || "(unnamed building)";
+}
+
+/**
+ * The address as lists and headers show it: "≈ 1169 State Route 136 W" when it is the loader's
+ * approximate match (owner, Sep 29: guesses are labelled), else as stored. Empty stays empty.
+ * The address input itself shows the plain address.
+ */
+export function shownAddress(b: {
+  address1: string | null;
+  address_approx?: boolean | null;
+}): string {
+  const a = (b.address1 ?? "").trim();
+  return a && b.address_approx ? `≈ ${a}` : a;
+}
+
+/** The detail's note under an approximate address; null for any other address. */
+export function approxAddressNote(b: {
+  address1: string | null;
+  address_approx?: boolean | null;
+  address_approx_m?: number | null;
+}): string | null {
+  if (!b.address_approx || !(b.address1 ?? "").trim()) return null;
+  const m = b.address_approx_m;
+  return m !== null && m !== undefined && m > 0
+    ? `approximate: nearest address point, ${Math.round(m)} m away — confirm on site`
+    : "approximate: nearest address point; confirm on site";
 }
 
 const MONTH_SHORT = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");

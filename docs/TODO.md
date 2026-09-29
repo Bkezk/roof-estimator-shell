@@ -450,6 +450,23 @@ under item 0, "Tennessee leads").
    Open: Ballard, Clark, Fulton and Martin keep almost no address points (Clark 0 of 16,695;
    Martin 19 of 6,169) — their 911 layer rows likely lack the number/street fields or
    coordinates the reader expects; paste a sample feature from one of them to fix the reader.
+   **Approximate addresses (owner's three rules, Sep 29; built Sep 29, not yet run).** ~29 % of
+   the 154,556 outlines have no 911 point inside the exact radius (rural shops and barns set
+   back from the road). After the exact pass the loader now takes, for each outline still blank,
+   the nearest 911 point within 300 m, only when the next-nearest point with a different address
+   is at least twice as far, and stores it flagged (`buildings.address_approx`, distance in
+   `address_approx_m`; the app shows "≈ 64 Holly Rd" and "approximate: nearest address point,
+   190 m away — confirm on site"; typing another address, or "Address is right", clears the
+   flag). Nothing is linked, stored or promoted from a guess and it never sets land use.
+   Dry runs from the public layers (`--dry-run --county X`, no database): Graves 2,337 outlines,
+   1,695 exact, 642 blank → 126 approximate, 416 blank by rule 2, 100 with nothing within 300 m;
+   Hardin 3,883 / 3,035 / 848 → 111 approximate, 254 rule 2, 483 nothing within 300 m (353 of
+   those are on Fort Knox, which has no 911 points). Rule 2 is the binding one: half of its
+   blanks have the next address less than 1.25× as far (houses along the same road). To do, in
+   order: (1) apply `supabase/migrations/20260930040000_address_approx.sql` while no load is
+   running (without it the loader skips the pass and the run ends red); (2) run the workflow by
+   night with "Approximate addresses only" (or let the Oct 1 monthly run do it); `--no-approx`
+   turns the pass off.
    3b. **Inventory locations (built Sep 24).** Shop + four service vehicles (plates N2X384,
    08 D4L983, V3C058, 08 995892 — the owner's list had "08 D4L983" twice; confirm the fourth
    plate). Admins edit `inventory_locations` (name / order / active) in the database for now;

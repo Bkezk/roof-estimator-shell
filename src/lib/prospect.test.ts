@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   SHARED_COUNTY_NAMES,
   addYears,
+  approxAddressNote,
   boxContains,
   buildingLine,
   clipBox,
@@ -10,6 +11,7 @@ import {
   equivalentRectangle,
   kyTnLineLat,
   parseCountyKey,
+  shownAddress,
   sortWarrantyLeads,
   stateCode,
   stateForPoint,
@@ -95,6 +97,31 @@ describe("buildingLine", () => {
       buildingLine({ name: "Court House", address1: "401 Court Sq", city: "Barbourville" }),
     ).toBe("Court House — 401 Court Sq, Barbourville");
     expect(buildingLine({ name: "", address1: "", city: null })).toBe("(unnamed building)");
+  });
+  it("marks an approximate address", () => {
+    expect(
+      buildingLine({ name: "", address1: "64 Holly Rd", city: "Boaz", address_approx: true }),
+    ).toBe("≈ 64 Holly Rd, Boaz");
+  });
+});
+
+describe("approximate addresses (owner, Sep 29)", () => {
+  it("prefixes ≈ only on an approximate address", () => {
+    expect(shownAddress({ address1: "64 Holly Rd", address_approx: true })).toBe("≈ 64 Holly Rd");
+    expect(shownAddress({ address1: "64 Holly Rd", address_approx: false })).toBe("64 Holly Rd");
+    expect(shownAddress({ address1: "64 Holly Rd" })).toBe("64 Holly Rd");
+    expect(shownAddress({ address1: "", address_approx: true })).toBe("");
+    expect(shownAddress({ address1: null, address_approx: true })).toBe("");
+  });
+  it("notes the distance when it is known", () => {
+    expect(
+      approxAddressNote({ address1: "64 Holly Rd", address_approx: true, address_approx_m: 180.4 }),
+    ).toBe("approximate: nearest address point, 180 m away — confirm on site");
+    expect(
+      approxAddressNote({ address1: "64 Holly Rd", address_approx: true, address_approx_m: null }),
+    ).toBe("approximate: nearest address point; confirm on site");
+    expect(approxAddressNote({ address1: "64 Holly Rd", address_approx: false })).toBeNull();
+    expect(approxAddressNote({ address1: "", address_approx: true })).toBeNull();
   });
 });
 

@@ -102,6 +102,11 @@ export const buildingSchema = z.object({
   centroid_lng: z.number().min(-180).max(180).nullable().default(null),
   own_book: z.boolean().default(false),
   notes: z.string().max(4000).nullable().default(null),
+  /**
+   * The person says the loader's approximate address is right as it stands (the detail's
+   * "Address is right" button). Not a column: saveBuilding clears address_approx with it.
+   */
+  address_confirmed: z.boolean().optional(),
 });
 export type BuildingInput = z.infer<typeof buildingSchema>;
 
@@ -411,11 +416,23 @@ export const saveBuilding = createServerFn({ method: "POST" })
   .validator((d: unknown) => buildingSchema.parse(d))
   .handler(async ({ data, context }): Promise<BuildingRow> => {
     await assertPageAccess(context.supabase, context.userId, "prospect");
-    const { id, ...fields } = data;
+    const { id, address_confirmed, ...fields } = data;
     if (id) {
+      // An approximate address (the loader's guess, owner's rule 3 of Sep 29) becomes a
+      // person's once they type a different one or confirm it: the flag and distance clear.
+      // `*` rather than naming address_approx, so saving still works before that migration.
+      const { data: cur, error: cErr } = await context.supabase
+        .from("buildings")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (cErr) throw new Error(cErr.message);
+      const clearApprox =
+        cur.address_approx === true &&
+        (address_confirmed === true || fields.address1.trim() !== (cur.address1 ?? "").trim());
       const { data: row, error } = await context.supabase
         .from("buildings")
-        .update(fields)
+        .update(clearApprox ? { ...fields, address_approx: false, address_approx_m: null } : fields)
         .eq("id", id)
         .select()
         .single();
