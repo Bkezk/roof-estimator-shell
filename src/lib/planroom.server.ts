@@ -175,8 +175,13 @@ export interface JobDetails {
 const LABELS =
   /^(owner|owner contact|contact|contact name|contact person|architect|engineer|architect\/engineer|a\/e|design professional|bid date|bid due|bids due|pre-?bid|pre-?bid date|pre-?bid meeting|estimate|estimated cost|construction cost|project cost|location|project location|description|scope|phone|email|e-mail|fax|address|city|county|state|job type|project type|status|bid time|plans available|plans from|deposit|refundable)$/i;
 
-/** Read "Label: value" lines and the table rows shaped that way. */
-export function parseJobDetails(html: string): JobDetails {
+/**
+ * Read "Label: value" lines and the table rows shaped that way. E-mails and phones come from
+ * the job page only: the plan-holder view (`planHoldersHtml`) lists other bidders, whose
+ * addresses are not who to contact (first live read, Sep 29: a plan holder's e-mail led the
+ * card's contact line).
+ */
+export function parseJobDetails(html: string, planHoldersHtml = ""): JobDetails {
   const text = decodeText(html);
   const fields: Record<string, string> = {};
   // Table cells: <td>Label:</td><td>Value</td>
@@ -200,7 +205,9 @@ export function parseJobDetails(html: string): JobDetails {
   const phones = [...new Set(text.match(/\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}/g) ?? [])];
   // Plan holders: a table whose heading says so; company = first cell of each row.
   const planHolders: string[] = [];
-  const ph = /plan\s*holders?[\s\S]{0,400}?<table[\s\S]*?<\/table>/i.exec(html);
+  const ph = /plan\s*holders?[\s\S]{0,400}?<table[\s\S]*?<\/table>/i.exec(
+    planHoldersHtml ? `<p>Plan Holders</p>\n${planHoldersHtml}` : html,
+  );
   if (ph) {
     for (const row of ph[0].match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
       const cell = /<td[^>]*>([\s\S]*?)<\/td>/i.exec(row);
@@ -208,7 +215,13 @@ export function parseJobDetails(html: string): JobDetails {
       if (name && !/^(company|name|plan ?holder)/i.test(name)) planHolders.push(name.slice(0, 80));
     }
   }
-  return { fields, emails, phones, planHolders, text: text.slice(0, 4000) };
+  return {
+    fields,
+    emails,
+    phones,
+    planHolders: [...new Set(planHolders)],
+    text: text.slice(0, 4000),
+  };
 }
 
 /** One line for the card: owner / architect / contact, e-mail, phone, then the plan holders. */
@@ -245,11 +258,12 @@ export async function fetchJobDetails(
   const url = `${session.site.base}/ViewJob.aspx?job_id=${jobId}`;
   const { res, url: finalUrl } = await getFollow(url, session.jar);
   if (/Login\.aspx/i.test(finalUrl)) throw new Error(`${session.site.label}: session expired`);
-  let html = await res.text();
+  const html = await res.text();
   // Remember the sign-out link so the run can end the session the way the terms ask.
   const out = findLogoutLink(html, finalUrl);
   if (out) session.logoutUrl = out;
-  // A "Plan Holders" link on the page: pull that view too and append it.
+  // A "Plan Holders" link on the page: pull that view too, parsed apart from the job page.
+  let planHoldersHtml = "";
   const link = /<a[^>]*href="([^"]*(?:PlanHolder|view=ph)[^"]*)"[^>]*>/i.exec(html);
   if (link) {
     try {
@@ -257,12 +271,12 @@ export async function fetchJobDetails(
         new URL(link[1]!.replace(/&amp;/g, "&"), finalUrl).href,
         session.jar,
       );
-      html += `\n<!-- plan holders -->\n<p>Plan Holders</p>\n${await r2.text()}`;
+      planHoldersHtml = await r2.text();
     } catch {
       /* the main page is still worth parsing */
     }
   }
-  return parseJobDetails(html);
+  return parseJobDetails(html, planHoldersHtml);
 }
 
 /** The first link whose address or text says log out / sign out, made absolute. */

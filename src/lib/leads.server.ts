@@ -798,6 +798,8 @@ async function enrichPlanroomLeads(admin: Client, failed: string[], max: number)
       const raw = { ...((r.raw as Record<string, unknown> | null) ?? {}) };
       raw["details"] = details.fields;
       raw["plan_holders"] = details.planHolders;
+      // The page as text, so the parser can be fitted to the real layout from the row.
+      raw["page_text"] = details.text.slice(0, 3000);
       raw["details_read_at"] = new Date().toISOString();
       const patch: Database["public"]["Tables"]["leads"]["Update"] = { raw: raw as Json };
       if (contact) patch.contact = contact;

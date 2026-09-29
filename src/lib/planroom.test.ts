@@ -202,6 +202,19 @@ describe("planroom job page", () => {
     expect(d.phones).toEqual(["(502) 555-0100"]);
     expect(d.planHolders).toEqual(["Alpha Roofing LLC", "Beta Builders"]);
   });
+  it("takes e-mails and phones from the job page, never the plan-holder view", () => {
+    const view = `<table><tr><th>Company</th><th>Email</th></tr>
+      <tr><td>AAR of North Carolina</td><td>pc@aarnc.com (336) 727-4534</td></tr>
+      <tr><td>Alpha Roofing LLC</td><td>bids@alpha.test</td></tr>
+      <tr><td>Alpha Roofing LLC</td><td>bids@alpha.test</td></tr></table>`;
+    const d = parseJobDetails("<html><body><p>Owner: City of Jackson</p></body></html>", view);
+    expect(d.emails).toEqual([]);
+    expect(d.phones).toEqual([]);
+    expect(d.planHolders).toEqual(["AAR of North Carolina", "Alpha Roofing LLC"]);
+    expect(contactLine(d)).toBe(
+      "Owner City of Jackson — Plan holders: AAR of North Carolina, Alpha Roofing LLC",
+    );
+  });
   it("makes the card's contact line", () => {
     expect(contactLine(parseJobDetails(PAGE))).toBe(
       "Owner Commonwealth of Kentucky, Finance & Administration Cabinet — Jane Doe — A/E Sherman Carter Barnhart — jane.doe@ky.gov — (502) 555-0100 — Plan holders: Alpha Roofing LLC, Beta Builders",
