@@ -28,7 +28,14 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
 import { KY_COUNTIES } from "@/lib/gis/ky-layers";
-import { buildingLine, equivalentRectangle } from "@/lib/prospect";
+import { TN_COUNTIES } from "@/lib/gis/tn-layers";
+import {
+  buildingLine,
+  equivalentRectangle,
+  parseCountyKey,
+  stateCode,
+  stateForPoint,
+} from "@/lib/prospect";
 import {
   deleteBuilding,
   deleteRoof,
@@ -160,13 +167,13 @@ const summaryLine = (
 const num = (n: number | null | undefined) =>
   n === null || n === undefined ? "" : n.toLocaleString();
 
-/** A blank building form. */
-const emptyBuilding = (): BuildingInput => ({
+/** A blank building form; the state defaults from where the map is looking (else Kentucky). */
+const emptyBuilding = (at?: { lat: number; lng: number } | null): BuildingInput => ({
   name: "",
   address1: "",
   address2: null,
   city: null,
-  state: "KY",
+  state: at ? stateForPoint(at.lat, at.lng) : "KY",
   zip: null,
   county: null,
   parcel_id: null,
@@ -198,7 +205,8 @@ const buildingFromLead = (l: {
   owner_name: l.customerName,
   address1: l.address,
   city: l.city,
-  state: l.state ?? "KY",
+  // Bids spell it "TN" or "Tennessee"; the form takes the two-letter code.
+  state: stateCode(l.state) ?? "KY",
   zip: l.zip,
 });
 
@@ -284,7 +292,9 @@ export function ProspectPage(props: {
   const stormHitsFn = useServerFn(buildingStormHits);
 
   const [q, setQ] = useState(props.initialQuery ?? "");
+  // The county filter's key: the county, or "Franklin|TN" for a name both states use.
   const [county, setCounty] = useState("");
+  const countyPick = parseCountyKey(county);
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
   const [sort, setSort] = useState<"recent" | "biggest" | "storm">(
     props.initialStorm ? "storm" : "recent",
@@ -396,7 +406,8 @@ export function ProspectPage(props: {
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
-          ...(county ? { county } : {}),
+          ...(countyPick.county ? { county: countyPick.county } : {}),
+          ...(countyPick.state ? { state: countyPick.state } : {}),
           ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
           ...(stormHit ? { stormHit: true } : {}),
           sort,
@@ -715,7 +726,7 @@ export function ProspectPage(props: {
           <StormPanel
             canWrite={canWrite}
             isAdmin={isAdmin(profile)}
-            county={county}
+            county={countyPick.county}
             onPickCounty={pickStormCounty}
             onRefreshed={invalidateStorms}
           />
@@ -727,8 +738,8 @@ export function ProspectPage(props: {
             <SelectContent>
               <SelectItem value="all">All counties</SelectItem>
               {(counties.data ?? []).map((c) => (
-                <SelectItem key={c.county} value={c.county}>
-                  {c.county} ({c.count})
+                <SelectItem key={c.key} value={c.key}>
+                  {c.label} ({c.count.toLocaleString()})
                 </SelectItem>
               ))}
             </SelectContent>
@@ -769,7 +780,7 @@ export function ProspectPage(props: {
             className="text-left text-xs text-muted-foreground underline underline-offset-2"
             onClick={() => {
               setSelectedId(null);
-              setForm(emptyBuilding());
+              setForm(emptyBuilding(viewCenter));
             }}
           >
             <Plus className="mr-1 inline h-3 w-3" /> Not listed? Add a building by hand
@@ -844,11 +855,12 @@ export function ProspectPage(props: {
         <div>
           <h1 className="text-2xl font-semibold">Buildings</h1>
           <p className="text-sm text-muted-foreground">
-            Your prospects, and every commercial building in Kentucky to find the next one.
+            Your prospects, and every commercial building in Kentucky and Tennessee to find the next
+            one.
             {(refreshes.data?.length ?? 0) > 0 && (
               <span className="ml-1 text-xs">
                 Data refreshed {new Date(refreshes.data![0]!.ran_at).toLocaleDateString()} (
-                {refreshes.data!.length} of {KY_COUNTIES.length} counties)
+                {refreshes.data!.length} of {KY_COUNTIES.length + TN_COUNTIES.length} counties)
               </span>
             )}
           </p>
@@ -888,18 +900,31 @@ export function ProspectPage(props: {
             </Button>
           )}
           {isAdmin(profile) && (
-            /* The state's data is loaded by the monthly GitHub workflow (docs/TODO.md item 3);
-               this opens its page, where "Run workflow" refreshes one county or all of them. */
-            <Button asChild size="sm" variant="outline">
-              <a
-                href="https://github.com/Bkezk/roof-estimator-shell/actions/workflows/refresh-kentucky.yml"
-                target="_blank"
-                rel="noreferrer"
-                title="Runs at 1 am Eastern on the 1st of each month; start a by-hand refresh at night, it slows the app"
-              >
-                <ExternalLink className="mr-1 h-4 w-4" /> Refresh data
-              </a>
-            </Button>
+            /* Each state's data is loaded by its monthly GitHub workflow (docs/TODO.md item 3);
+               each link opens one, where "Run workflow" refreshes one county or all of them. */
+            <div
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs"
+              title="Runs monthly; start a by-hand refresh at night, it slows the app"
+            >
+              <ExternalLink className="h-3.5 w-3.5" /> Refresh data:
+              {(
+                [
+                  ["KY", "refresh-kentucky.yml", "Kentucky"],
+                  ["TN", "refresh-tennessee.yml", "Tennessee"],
+                ] as const
+              ).map(([code, file, name]) => (
+                <a
+                  key={code}
+                  href={`https://github.com/Bkezk/roof-estimator-shell/actions/workflows/${file}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline underline-offset-2 hover:text-primary"
+                  title={`${name}'s refresh workflow`}
+                >
+                  {code}
+                </a>
+              ))}
+            </div>
           )}
         </div>
       </div>

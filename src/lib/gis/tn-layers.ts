@@ -29,8 +29,13 @@ export const TN_IMAGERY_TILES =
 export const TN_IMAGERY_INDEX_LAYER =
   "https://tnmap.tn.gov/arcgis/rest/services/BASEMAPS/IMAGERY_WEB_MERCATOR/MapServer/0";
 export const TN_IMAGERY_CREDIT = "Imagery © TDOT Aerial Surveys (6-inch from 2022, 1-foot before)";
-/** Highest tile level the cache serves. */
-export const TN_IMAGERY_MAX_ZOOM = 23;
+/**
+ * Tile levels the cache actually serves: 6 through 19 (checked Sep 29 in Nashville, Memphis,
+ * Knoxville, Chattanooga, Perry County and Portland: 20 and up, and 5 and below, are 404 even
+ * though the service advertises 24 levels). The map stretches level 19 past that.
+ */
+export const TN_IMAGERY_MIN_ZOOM = 6;
+export const TN_IMAGERY_MAX_ZOOM = 19;
 
 /** Tennessee, [[west, south], [east, north]] in degrees; overlaps Kentucky's along the line. */
 export const TN_BOUNDS: [[number, number], [number, number]] = [

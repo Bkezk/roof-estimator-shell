@@ -9,6 +9,9 @@
  * - `warrantyLeadFrom`: an accepted bid read on demand becomes a lead — the roof we installed,
  *   with its warranty clock — without copying anything out of the estimator.
  */
+import { KY_COUNTIES } from "@/lib/gis/ky-layers";
+import { TN_COUNTIES, inTennesseeBox } from "@/lib/gis/tn-layers";
+
 export interface Rect {
   width: number;
   length: number;
@@ -121,3 +124,163 @@ export function buildingLine(b: { name: string; address1: string; city?: string 
   const addr = [b.address1, b.city].filter((x) => x && x.trim()).join(", ");
   return b.name && addr ? `${b.name} — ${addr}` : b.name || addr || "(unnamed building)";
 }
+
+// ── Kentucky + Tennessee (owner, Sep 29: "we actually cover TN as well … whole state") ──────
+
+/** The two states the Buildings page covers. */
+export type CoveredState = "KY" | "TN";
+
+/**
+ * The Kentucky / Tennessee line west → east as [lng, lat] (Census TIGER state outline, thinned
+ * to ~400 m; east of Cumberland Gap it is the Virginia line). The two states' bounding boxes
+ * overlap along 36.5–36.68°N (Murray, Middlesboro and Fulton, Kentucky sit inside Tennessee's
+ * box), so a default state needs the line; the server asks the Tennessee imagery index instead.
+ */
+const KY_TN_LINE: readonly [number, number][] = [
+  [-89.6, 36.5],
+  [-88.06, 36.5],
+  // The Tennessee River: the line runs north up the river to the Walker line.
+  [-88.05, 36.678],
+  [-87.85, 36.664],
+  [-87.84, 36.633],
+  [-86.59, 36.652],
+  [-86.493, 36.652],
+  [-85.832, 36.622],
+  [-85.502, 36.615],
+  [-85.277, 36.627],
+  [-85.027, 36.619],
+  [-84.83, 36.605],
+  [-83.988, 36.589],
+  [-83.691, 36.583],
+  [-83.675, 36.601],
+  [-83.249, 36.594],
+  [-81.934, 36.594],
+  [-81.923, 36.616],
+  [-81.647, 36.612],
+];
+
+/** The latitude of the Kentucky / Tennessee line at a longitude (flat beyond either end). */
+export function kyTnLineLat(lng: number): number {
+  const line = KY_TN_LINE;
+  if (lng <= line[0]![0]) return line[0]![1];
+  for (let i = 1; i < line.length; i++) {
+    const [x1, y1] = line[i]!;
+    if (lng <= x1) {
+      const [x0, y0] = line[i - 1]!;
+      return y0 + ((y1 - y0) * (lng - x0)) / (x1 - x0);
+    }
+  }
+  return line[line.length - 1]![1];
+}
+
+/**
+ * The state a point is in, as a default the salesperson can edit: Tennessee inside its box and
+ * south of the line, else Kentucky (the page's home state).
+ */
+export function stateForPoint(lat: number, lng: number): CoveredState {
+  return inTennesseeBox(lat, lng) && lat < kyTnLineLat(lng) ? "TN" : "KY";
+}
+
+/** "Tennessee" / "tenn." / "tn" → "TN"; "Kentucky" → "KY"; another two-letter code as is. */
+export function stateCode(s: string | null | undefined): string | null {
+  const t = (s ?? "").trim().toLowerCase().replace(/\.$/, "");
+  if (!t) return null;
+  if (t === "tn" || t === "tenn" || t === "tennessee") return "TN";
+  if (t === "ky" || t === "kent" || t === "kentucky") return "KY";
+  return /^[a-z]{2}$/.test(t) ? t.toUpperCase() : null;
+}
+
+/** County names both states use (Franklin, Warren, Montgomery, … 34 of them), lower-cased. */
+export const SHARED_COUNTY_NAMES: ReadonlySet<string> = new Set(
+  TN_COUNTIES.map((c) => c.name.toLowerCase()).filter((n) =>
+    KY_COUNTIES.some((k) => k.toLowerCase() === n),
+  ),
+);
+
+/** One entry in the county filter; `state` is set only where the name exists in both states. */
+export interface CountyOption {
+  /** The Select value: the county, or "County|ST" for a name both states have. */
+  key: string;
+  county: string;
+  state: CoveredState | null;
+  /** "Franklin, TN" for a shared name; the county alone otherwise. */
+  label: string;
+  count: number;
+}
+
+/** "Franklin|TN" / "Adair" → the county and, for a shared name, its state. */
+export function parseCountyKey(key: string): { county: string; state: CoveredState | null } {
+  const m = /^(.*)\|(KY|TN)$/.exec(key);
+  return m ? { county: m[1]!, state: m[2] as CoveredState } : { county: key, state: null };
+}
+
+/**
+ * The county filter's entries: counts per county name (what the database groups by), with each
+ * name both states use split into "Name, KY" and "Name, TN" from the Tennessee count, so
+ * Franklin County, Kentucky and Franklin County, Tennessee never merge. Alphabetical.
+ */
+export function countyOptions(
+  counts: { county: string; count: number }[],
+  tnCounts: ReadonlyMap<string, number>,
+): CountyOption[] {
+  const out: CountyOption[] = [];
+  for (const { county, count } of counts) {
+    if (!SHARED_COUNTY_NAMES.has(county.toLowerCase())) {
+      out.push({ key: county, county, state: null, label: county, count });
+      continue;
+    }
+    const tn = Math.min(count, tnCounts.get(county) ?? 0);
+    const ky = count - tn;
+    if (ky > 0)
+      out.push({ key: `${county}|KY`, county, state: "KY", label: `${county}, KY`, count: ky });
+    if (tn > 0)
+      out.push({ key: `${county}|TN`, county, state: "TN", label: `${county}, TN`, count: tn });
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * The map's Tennessee outline overlay: the USA Structures polygons of 5,000 sq ft and up (the
+ * prospecting floor) inside a [west, south, east, north] box, as WGS84 GeoJSON. The layer is a
+ * hosted FeatureServer (no map "export" to draw raster tiles from, as Kentucky's overlay does),
+ * so the map asks per view; 2,000 is the layer's page size.
+ */
+export function tnOutlinesQueryUrl(
+  layerUrl: string,
+  box: [number, number, number, number],
+  minSqFt = 5000,
+): string {
+  const p = new URLSearchParams({
+    where: `SQFEET >= ${minSqFt}`,
+    geometry: box.map((v) => v.toFixed(5)).join(","),
+    geometryType: "esriGeometryEnvelope",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    outFields: "BUILD_ID",
+    returnGeometry: "true",
+    outSR: "4326",
+    geometryPrecision: "6",
+    resultRecordCount: "2000",
+    f: "geojson",
+  });
+  return `${layerUrl.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+/** The part of a [w, s, e, n] box inside another, or null when they do not meet. */
+export function clipBox(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): [number, number, number, number] | null {
+  const w = Math.max(a[0], b[0]);
+  const s = Math.max(a[1], b[1]);
+  const e = Math.min(a[2], b[2]);
+  const n = Math.min(a[3], b[3]);
+  return w < e && s < n ? [w, s, e, n] : null;
+}
+
+/** Does box `outer` contain box `inner` ([w, s, e, n])? */
+export const boxContains = (
+  outer: [number, number, number, number],
+  inner: [number, number, number, number],
+): boolean =>
+  inner[0] >= outer[0] && inner[1] >= outer[1] && inner[2] <= outer[2] && inner[3] <= outer[3];

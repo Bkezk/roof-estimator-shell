@@ -32,6 +32,18 @@ county (parcels@regrid.com) or the Property API (self-serve up to 10,000 records
 free sandbox). Decision for the owner: buy the core counties from Regrid (then a one-time join by
 parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
 
+**Tennessee buildings (owner, Sep 29: "whole state").** Loader, workflow and migration built
+(`scripts/load-tennessee.ts`, `.github/workflows/refresh-tennessee.yml`,
+`20260929210000_buildings_state_tn.sql`; details in `docs/tennessee-buildings.md`). Owner: apply
+the migration, then run "Refresh Tennessee data" by hand once at night (about 102,000 rows);
+it then runs on the 2nd of each month. Tennessee is footprints only: the state publishes no
+statewide 911 address points or schools service, so there is no address matching, no promoted
+named businesses and no schools; addresses are whatever the national layer carries. Still to
+do in the app (other owners' files): 34 county names exist in both states (Warren, Knox,
+Jefferson …), so the Buildings county filter and `building_county_counts()` should group by
+state and county; the refresh log stores Tennessee counties as "Davidson, TN", so the
+"N of 120 counties" line on the Buildings page should count per state.
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
@@ -199,6 +211,34 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
       pricing seen); Cabinet for Economic Development news releases (earliest signal on
       industrial builds, prose only — a candidate third feed); Kentucky Press Association Smart
       Search (free keyword email alerts on legal notices, set up by hand).
+      **Tennessee leads (Sep 29; owner: "we actually cover TN as well, can we replicate what
+      we have for leads for TN?").** Three new sources plus SAM.gov, all in the same list (a
+      lead now has a `state` column, KY or TN; cards show ", TN"). Live pull from the sandbox
+      Sep 29: **STREAM** (`tn_stream`, the state's construction bid list at
+      tn.gov/generalservices/stream — 5 projects, 1 roof: East Tennessee Intermediate Care
+      Facility, roof replacement in the scope — plus the STREAM RFP page, 1 CM/GC RFP; the
+      designer firm, contact, phone and e-mail are the contact line; pre-bid and bid opening in
+      Central or Eastern time as the page says); **UT bids** (`ut_bids`, the "Invitations to
+      Bid" on the seven UT campus pages — 14 today, none roof; the site refuses a bare request
+      and answers a browser's headers); **Nashville permits** (`nashville_permits`, Metro
+      Nashville's Building Permits Issued layer — Commercial New / Addition / Shell / Roofing
+      ≥ $100,000 in the Louisville window of 90 days: 74, all counted as roof like Louisville's
+      new builds; types and cost floor in the gear panel); **SAM.gov** asks for KY and TN in its
+      one daily slot. Migration `20260929220000_leads_tennessee.sql` (source list, `leads.state`,
+      `lead_settings.nashville_types` / `nashville_min_cost`) must be applied before the next
+      refresh, or every refresh fails on the missing column. Not verified / to watch:
+      - SAM.gov Tennessee not pulled from the sandbox (no key here); first real pull is the
+        next daily run after the migration.
+      - UT invitations stay on the page after they bid, often with no bid date on the page (it
+        is in the PDF). A lead closes when the page moves its bid date, or when the same title
+        shows up under Bid Results; otherwise it stays open until the owner dismisses it
+        (today: 8 posted before September, none roof, so the roof-only page hides them).
+      - UT titles rarely say "roof": "UTM Storm Damage Repairs (24/25) (Subproject 2)" is not
+        flagged. Add keywords (e.g. "storm damage") in the gear if those should count.
+      - Nashville: the permit `Contact` is the applicant (a GC, an architect or a permit
+        expediter), not always the builder; a Shell permit can be an interior white-box.
+      - Not yet looked at: Knoxville, Chattanooga, Memphis/Shelby County permits; TN county and
+        city bid pages; TBR / community college bids; TDOT lettings (roads, not roofs).
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk

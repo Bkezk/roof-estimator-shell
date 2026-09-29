@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  SHARED_COUNTY_NAMES,
   addYears,
+  boxContains,
   buildingLine,
+  clipBox,
+  countyOptions,
   equivalentRectangle,
+  kyTnLineLat,
+  parseCountyKey,
   sortWarrantyLeads,
+  stateCode,
+  stateForPoint,
+  tnOutlinesQueryUrl,
   warrantyLeadFrom,
   warrantyYears,
 } from "./prospect";
@@ -86,5 +95,96 @@ describe("buildingLine", () => {
       buildingLine({ name: "Court House", address1: "401 Court Sq", city: "Barbourville" }),
     ).toBe("Court House — 401 Court Sq, Barbourville");
     expect(buildingLine({ name: "", address1: "", city: null })).toBe("(unnamed building)");
+  });
+});
+
+describe("Kentucky / Tennessee", () => {
+  it("picks the state along the shared band by the line, not the box", () => {
+    // Inside Tennessee's box but Kentucky: Murray, Middlesboro, Fulton.
+    expect(stateForPoint(36.61, -88.31)).toBe("KY");
+    expect(stateForPoint(36.61, -83.72)).toBe("KY");
+    expect(stateForPoint(36.504, -88.874)).toBe("KY");
+    // Tennessee right under the line: Portland, Clarksville, South Fulton, Jellico.
+    expect(stateForPoint(36.58, -86.52)).toBe("TN");
+    expect(stateForPoint(36.53, -87.36)).toBe("TN");
+    expect(stateForPoint(36.495, -88.874)).toBe("TN");
+    expect(stateForPoint(36.587, -84.13)).toBe("TN");
+    // Well inside either state.
+    expect(stateForPoint(36.16, -86.78)).toBe("TN");
+    expect(stateForPoint(35.15, -90.05)).toBe("TN");
+    expect(stateForPoint(36.99, -86.44)).toBe("KY");
+    expect(stateForPoint(38.25, -85.76)).toBe("KY");
+  });
+  it("follows the Walker line east of the Tennessee River", () => {
+    expect(kyTnLineLat(-89)).toBeCloseTo(36.5, 2);
+    expect(kyTnLineLat(-87)).toBeGreaterThan(36.63);
+    expect(kyTnLineLat(-87)).toBeLessThan(36.66);
+    expect(kyTnLineLat(-95)).toBe(36.5);
+    expect(kyTnLineLat(-80)).toBeCloseTo(36.612, 3);
+  });
+  it("reads a state however a bid spells it", () => {
+    expect(stateCode("Tennessee")).toBe("TN");
+    expect(stateCode(" tn ")).toBe("TN");
+    expect(stateCode("Tenn.")).toBe("TN");
+    expect(stateCode("Kentucky")).toBe("KY");
+    expect(stateCode("in")).toBe("IN");
+    expect(stateCode("")).toBeNull();
+    expect(stateCode(null)).toBeNull();
+    expect(stateCode("Indiana")).toBeNull();
+  });
+  it("knows the 34 county names both states use", () => {
+    expect(SHARED_COUNTY_NAMES.size).toBe(34);
+    for (const n of ["franklin", "warren", "montgomery", "knox", "shelby", "robertson"])
+      expect(SHARED_COUNTY_NAMES.has(n)).toBe(true);
+    expect(SHARED_COUNTY_NAMES.has("davidson")).toBe(false);
+    expect(SHARED_COUNTY_NAMES.has("jefferson")).toBe(true);
+    expect(SHARED_COUNTY_NAMES.has("fayette")).toBe(true);
+    expect(SHARED_COUNTY_NAMES.has("pike")).toBe(false);
+  });
+  it("splits a shared county name into one entry per state", () => {
+    const opts = countyOptions(
+      [
+        { county: "Warren", count: 900 },
+        { county: "Davidson", count: 5000 },
+        { county: "Adair", count: 40 },
+        { county: "Franklin", count: 300 },
+      ],
+      new Map([
+        ["Warren", 250],
+        ["Franklin", 0],
+      ]),
+    );
+    expect(opts).toEqual([
+      { key: "Adair", county: "Adair", state: null, label: "Adair", count: 40 },
+      { key: "Davidson", county: "Davidson", state: null, label: "Davidson", count: 5000 },
+      { key: "Franklin|KY", county: "Franklin", state: "KY", label: "Franklin, KY", count: 300 },
+      { key: "Warren|KY", county: "Warren", state: "KY", label: "Warren, KY", count: 650 },
+      { key: "Warren|TN", county: "Warren", state: "TN", label: "Warren, TN", count: 250 },
+    ]);
+    expect(parseCountyKey("Warren|TN")).toEqual({ county: "Warren", state: "TN" });
+    expect(parseCountyKey("Warren|KY")).toEqual({ county: "Warren", state: "KY" });
+    expect(parseCountyKey("Davidson")).toEqual({ county: "Davidson", state: null });
+    expect(parseCountyKey("")).toEqual({ county: "", state: null });
+  });
+  it("asks for Tennessee's outlines inside a box", () => {
+    const url = new URL(
+      tnOutlinesQueryUrl("https://x.test/FeatureServer/0/", [-86.8, 36.1, -86.7, 36.2]),
+    );
+    expect(url.pathname).toBe("/FeatureServer/0/query");
+    const p = url.searchParams;
+    expect(p.get("where")).toBe("SQFEET >= 5000");
+    expect(p.get("geometry")).toBe("-86.80000,36.10000,-86.70000,36.20000");
+    expect(p.get("geometryType")).toBe("esriGeometryEnvelope");
+    expect(p.get("inSR")).toBe("4326");
+    expect(p.get("outSR")).toBe("4326");
+    expect(p.get("f")).toBe("geojson");
+    expect(p.get("resultRecordCount")).toBe("2000");
+  });
+  it("clips and compares boxes", () => {
+    const tn: [number, number, number, number] = [-90.31, 34.98, -81.65, 36.68];
+    expect(clipBox([-87, 36.5, -86, 37], tn)).toEqual([-87, 36.5, -86, 36.68]);
+    expect(clipBox([-87, 36.9, -86, 37], tn)).toBeNull();
+    expect(boxContains(tn, [-87, 36, -86, 36.5])).toBe(true);
+    expect(boxContains(tn, [-87, 36, -86, 36.9])).toBe(false);
   });
 });
