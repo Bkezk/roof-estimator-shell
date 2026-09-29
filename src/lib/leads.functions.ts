@@ -55,6 +55,12 @@ const meName = async (ctx: Ctx) => {
 };
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
+/**
+ * The floor between pulls, Refresh button included (owner, Sep 29: "make sure we don't pull
+ * too often from the sites even if we press the refresh button repeatedly"). A run stamps
+ * last_fetch_at when it starts, so a press inside this window answers from the last run.
+ */
+const MIN_GAP = 30 * 60 * 1000;
 
 /**
  * The lazy pass: the Leads page calls this on load; if the last pull is older than six hours
@@ -67,7 +73,13 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
     async ({
       data,
       context,
-    }): Promise<{ ran: boolean; note: string | null; error: string | null }> => {
+    }): Promise<{
+      ran: boolean;
+      note: string | null;
+      error: string | null;
+      /** Set when a press landed inside the 30-minute floor: what to tell the user. */
+      waited?: string;
+    }> => {
       await prospectAccess(context);
       const { data: s } = await context.supabase
         .from("lead_settings")
@@ -75,8 +87,18 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         .eq("id", 1)
         .maybeSingle();
       const last = s?.last_fetch_at ? Date.parse(s.last_fetch_at) : 0;
-      if (!data.force && Date.now() - last < SIX_HOURS)
+      const age = Date.now() - last;
+      if (!data.force && age < SIX_HOURS)
         return { ran: false, note: s?.last_fetch_note ?? null, error: null };
+      if (age < MIN_GAP) {
+        const wait = Math.ceil((MIN_GAP - age) / 60000);
+        return {
+          ran: false,
+          note: s?.last_fetch_note ?? null,
+          error: null,
+          waited: `Checked ${Math.max(1, Math.round(age / 60000))} min ago — the sites are pulled at most every 30 minutes; try again in ${wait} min`,
+        };
+      }
       try {
         // Stage stamps (owner, Sep 29: "refresh is still spinning"): the settings row shows how
         // far a run got even when the platform cuts the request off before it answers.
@@ -186,12 +208,15 @@ export const leadCounts = createServerFn({ method: "GET" })
         if (error) throw new Error(error.message);
         return n ?? 0;
       });
+    // Open counts what the Open tab shows: still listed, and the bid date (when there is one)
+    // not yet passed (owner, Sep 29: "it says 32 open but I only counted 16").
+    const stillOpen = `bid_at.is.null,bid_at.gt.${new Date().toISOString()}`;
     const base = () =>
       sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
     const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
-      count((q) => q.in("status", ["new", "watching", "added"])),
-      count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true)),
-      count((q) => q.eq("status", "new").eq("is_roof", true)),
+      count((q) => q.in("status", ["new", "watching", "added"]).or(stillOpen)),
+      count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true).or(stillOpen)),
+      count((q) => q.eq("status", "new").eq("is_roof", true).or(stillOpen)),
       sb.from("lead_settings").select("*").eq("id", 1).single(),
     ]);
     if (error) throw new Error(error.message);
