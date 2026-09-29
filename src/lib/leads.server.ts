@@ -65,11 +65,25 @@
  *     ETSU, Tennessee Tech, Austin Peay, MTSU and TBR (community colleges, TCATs, TSU): the
  *     designer to call, pre-bid and bid opening times, the invitation PDF.
  *
+ * Tennessee, round three (Sep 29): Metro Nashville's and the City of Chattanooga's own bid lists
+ * (nashville_bids, chattanooga_bids) sit in Oracle Cloud procurement portals that only render in
+ * a browser. A nightly GitHub Actions job reads them in headless Chromium and posts the rows to
+ * /api/cron/leads-import (importBrowserBids below; src/lib/leads-browser.ts has the portals).
+ * refreshLeads never pulls them, so it never marks them gone either.
+ *
  * refreshLeads: pull them all, upsert on (source, external_id) keeping the team's status, mark
  * what dropped off the source as gone, and tell Prospecting users about new roof leads.
  * Nothing here touches bids.
  */
 import type { Database, Json } from "@/integrations/supabase/types";
+import {
+  BROWSER_PORTALS,
+  currentRounds,
+  negotiationRound,
+  type BrowserImportPayload,
+  type BrowserSource,
+  type PortalRow,
+} from "@/lib/leads-browser";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 
 export type LeadSource =
@@ -86,7 +100,10 @@ export type LeadSource =
   | "bidnet"
   | "chattanooga_permits"
   | "knox_county_bids"
-  | "tn_university_bids";
+  | "tn_university_bids"
+  // Round three: read by the nightly browser job and posted to /api/cron/leads-import.
+  | "nashville_bids"
+  | "chattanooga_bids";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -2150,6 +2167,85 @@ export function tnUniversityLead(
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Tennessee round three (Sep 29): Metro Nashville and City of Chattanooga bids, read by the
+ * nightly browser job (scripts/browser-bids.ts) and posted to /api/cron/leads-import
+ * ---------------------------------------------------------------------------------------------- */
+
+/** "10/15/26" / "10/22/2026" (with a time or not) → { year, month (0-11), day }, else null. */
+function portalYmd(
+  text: string,
+): { y: number; m: number; d: number; match: RegExpExecArray } | null {
+  const r = /\b(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})(?!\d)(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?/i.exec(
+    text,
+  );
+  if (!r) return null;
+  const y = r[3]!.length === 2 ? 2000 + Number(r[3]) : Number(r[3]);
+  const m = Number(r[1]) - 1;
+  const d = Number(r[2]);
+  const check = new Date(Date.UTC(y, m, d));
+  if (check.getUTCMonth() !== m || check.getUTCDate() !== d) return null;
+  return { y, m, d, match: r };
+}
+
+/**
+ * An Oracle portal date as shown — "10/15/26 2:00 PM" (Chattanooga), "10/22/2026 2:00 PM"
+ * (Nashville), or a date alone ("9/28/26": midnight) — read in the portal's zone → ISO instant.
+ */
+export function parsePortalDate(text: string, zone: UsZone): string | null {
+  const p = portalYmd(text);
+  if (!p) return null;
+  const r = p.match;
+  let hour = r[4] ? Number(r[4]) % 12 : 0;
+  if (r[6]?.toUpperCase() === "PM") hour += 12;
+  return zonedIso(p.y, p.m, p.d, hour, r[5] ? Number(r[5]) : 0, zone);
+}
+
+/** The calendar day a portal date shows ("9/28/26 11:58 AM" → "2026-09-28"). */
+export function portalDay(text: string): string | null {
+  const p = portalYmd(text);
+  if (!p) return null;
+  return `${p.y}-${String(p.m + 1).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
+}
+
+/**
+ * One open solicitation → a lead. external_id is the base number (without the ",N" round), so
+ * an amendment updates the same lead. The abstract's buyer is the contact (public on the
+ * abstract; Knox County's buyer is used the same way). There is no public page per row (the
+ * abstract opens in a dialog), so the lead links the portal's list.
+ */
+export function browserBidLead(
+  r: PortalRow,
+  source: BrowserSource,
+  keywords: string[],
+): LeadInsert {
+  const p = BROWSER_PORTALS[source];
+  const { base, round } = negotiationRound(r.number);
+  // Title, synopsis and the attachment names ("Roof Replacement Specs.pdf") feed the keyword
+  // match. A Construction Bid is not roof work unless the words say so.
+  const text = [r.title, r.description ?? "", ...r.attachments].join(" ");
+  return {
+    source,
+    external_id: base,
+    title: r.title,
+    agency: p.agency,
+    location: p.city,
+    city: p.city,
+    county: p.county,
+    state: "TN",
+    project_type: r.type || null,
+    bid_at: r.closeDate ? parsePortalDate(r.closeDate, p.zone) : null,
+    prebid_at: r.prebid ? parsePortalDate(r.prebid, p.zone) : null,
+    issued_on: r.postingDate ? portalDay(r.postingDate) : null,
+    url: p.url,
+    contact: [r.buyer, r.email].filter(Boolean).join(" — ") || null,
+    is_roof: isRoofLead(text, keywords),
+    raw: { ...r, round, portal: p.url, portal_time_zone: p.timeZone } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Rows
  * ---------------------------------------------------------------------------------------------- */
 
@@ -2496,6 +2592,158 @@ async function enrichPlanroomLeads(admin: Client, failed: string[], max: number)
   return n;
 }
 
+/** One list's rows as pulled; `count` is what the list held (before duplicates are dropped). */
+export interface PulledLeads {
+  source: LeadSource;
+  rows: LeadInsert[];
+  count: number;
+}
+
+export interface SavedLeads {
+  /** Rows per source as pulled (PulledLeads.count, summed). */
+  counts: Record<string, number>;
+  /** Rows written (after duplicates and repeats were dropped). */
+  saved: number;
+  fresh: LeadInsert[];
+  newRoof: LeadInsert[];
+  gone: number;
+  notified: number;
+}
+
+/**
+ * Save what one pass read — the nightly/in-app refresh (every list at once) or one browser
+ * import (a single source) — the same way:
+ *   - Lynn's copies of planroom jobs, and BidNet's copies of jobs on the owner's own lists
+ *     pulled in the same pass, are dropped (and retired if stored earlier);
+ *   - upsert on (source, external_id): the team's status and note are kept;
+ *   - a source that answered in full has what dropped off it marked gone (not Lynn's feed,
+ *     which is only the latest posts; not a source in `partial`, read only in part);
+ *   - Prospecting users are told about new roof leads.
+ */
+export async function saveLeadRows(
+  admin: Client,
+  pulled: PulledLeads[],
+  opts: { partial?: ReadonlySet<LeadSource> } = {},
+): Promise<SavedLeads> {
+  const partial = opts.partial ?? new Set<LeadSource>();
+  const counts: Record<string, number> = {};
+  const rows: LeadInsert[] = [];
+  const fetchedSources = new Set<LeadSource>();
+  // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies. BidNet
+  // repeats state, UT and some university jobs: keep the copy from the owner's own list (it
+  // carries the contact and the exact bid time).
+  const duplicates: { source: LeadSource; ids: string[] }[] = [];
+  const planroomRows = pulled
+    .filter((x) => x.source === "ky_planroom" || x.source === "campus_planrooms")
+    .flatMap((x) => x.rows);
+  const ownListRows = pulled
+    .filter(
+      (x) => x.source !== "bidnet" && x.source !== "lynn_bids" && !x.source.endsWith("_permits"),
+    )
+    .flatMap((x) => x.rows);
+  for (const x of pulled) {
+    let keepRows = x.rows;
+    if (x.source === "lynn_bids" || x.source === "bidnet") {
+      const { keep, dropped } = dropPlanroomDuplicates(
+        x.rows,
+        x.source === "lynn_bids" ? planroomRows : ownListRows,
+      );
+      if (dropped.length) duplicates.push({ source: x.source, ids: dropped });
+      keepRows = keep;
+    }
+    // Every row names its state: one upsert batch sends the union of the rows' columns, and a
+    // row without `state` would send null (not the column default) and fail the not-null check.
+    rows.push(...keepRows.map((r) => ({ ...r, state: r.state ?? "KY" })));
+    counts[x.source] = (counts[x.source] ?? 0) + x.count;
+    fetchedSources.add(x.source);
+  }
+  // One row per (source, external_id): an upsert that touches a row twice is refused outright.
+  const byKey = new Map<string, LeadInsert>();
+  for (const r of rows) {
+    const k = `${r.source}|${r.external_id}`;
+    if (!byKey.has(k)) byKey.set(k, r);
+  }
+  rows.splice(0, rows.length, ...byKey.values());
+
+  // Which of these are new? Compare against what is stored (for these sources) before the upsert.
+  let fresh: LeadInsert[] = [];
+  if (rows.length) {
+    const { data: existing, error: eErr } = await admin
+      .from("leads")
+      .select("source, external_id")
+      .in("source", [...new Set(rows.map((r) => r.source))]);
+    if (eErr) throw new Error(eErr.message);
+    const known = new Set((existing ?? []).map((r) => `${r.source}|${r.external_id}`));
+    fresh = rows.filter((r) => !known.has(`${r.source}|${r.external_id}`));
+  }
+
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await admin
+      .from("leads")
+      .upsert(rows.slice(i, i + 500), { onConflict: "source,external_id" });
+    if (error) throw new Error(error.message);
+  }
+
+  // Dropped off a source that answered: mark gone (kept for history; hidden by default).
+  let gone = 0;
+  for (const d of duplicates) {
+    // A Lynn or BidNet copy of a job stored before the other list's row existed: retire it.
+    const { data: g, error } = await admin
+      .from("leads")
+      .update({ gone_at: new Date().toISOString() })
+      .eq("source", d.source)
+      .is("gone_at", null)
+      .in("external_id", d.ids)
+      .select("id");
+    if (error) throw new Error(error.message);
+    gone += g?.length ?? 0;
+  }
+  for (const source of fetchedSources) {
+    // Lynn's feed is the latest 25 posts; scrolling off it is not a withdrawal.
+    if (source === "lynn_bids") continue;
+    if (partial.has(source)) continue;
+    const ids = rows.filter((r) => r.source === source).map((r) => r.external_id);
+    let q = admin
+      .from("leads")
+      .update({ gone_at: new Date().toISOString() })
+      .eq("source", source)
+      .is("gone_at", null);
+    // An empty list (nothing open at the source) retires every open lead of that source.
+    if (ids.length)
+      q = q.not(
+        "external_id",
+        "in",
+        `(${ids.map((x) => `"${x.replace(/"/g, '\\"')}"`).join(",")})`,
+      );
+    const { data: g, error } = await q.select("id");
+    if (error) throw new Error(error.message);
+    gone += g?.length ?? 0;
+  }
+
+  const newRoof = fresh.filter((r) => r.is_roof);
+  let notified = 0;
+  if (newRoof.length) {
+    const { data: ids } = await admin.rpc("prospect_user_ids");
+    if (ids?.length) {
+      const top = newRoof
+        .slice(0, 3)
+        .map((r) => describeLead(r))
+        .join("; ");
+      notified = await notify(
+        ids,
+        {
+          kind: "lead",
+          title: `${newRoof.length} new roof lead${newRoof.length === 1 ? "" : "s"}`,
+          body: `${top}${newRoof.length > 3 ? "; …" : ""}`,
+          url: "/prospect/leads?roof=1",
+        },
+        admin,
+      );
+    }
+  }
+  return { counts, saved: rows.length, fresh, newRoof, gone, notified };
+}
+
 export async function refreshLeads(
   sb: Client,
   opts: { readPages?: number } = {},
@@ -2509,8 +2757,6 @@ export async function refreshLeads(
   if (sErr) throw new Error(sErr.message);
   const s: SettingsRow = settings;
   const failed: string[] = [];
-  const rows: LeadInsert[] = [];
-  const fetchedSources = new Set<LeadSource>();
   const t0 = Date.now();
   const stage = (what: string) =>
     admin
@@ -2528,7 +2774,6 @@ export async function refreshLeads(
 
   // Every list at once (the slowest site, not the sum, sets the run's length); each source
   // that fails is reported and skipped.
-  const counts: Record<string, number> = {};
   const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
   // SAM.gov: a personal API key allows only a handful of requests a day, so one pull a day
   // however often the page is refreshed (owner, Sep 29: "I don't want to overdo their site").
@@ -2551,7 +2796,7 @@ export async function refreshLeads(
       .eq("id", 1);
     if (stampErr) throw new Error(`could not stamp the daily pulls: ${stampErr.message}`);
   }
-  type Pulled = { source: LeadSource; rows: LeadInsert[]; count: number };
+  type Pulled = PulledLeads;
   let bidnetClosingsRead = 0;
   // A source read from several lists (campus pages, the two STREAM pages, SAM.gov's two
   // states) with one of them failing: its rows from that list are missing, not withdrawn, so
@@ -2732,85 +2977,11 @@ export async function refreshLeads(
       );
   const pulled = (await Promise.all(pulls)).filter((x): x is Pulled => x !== null);
   await stage(`lists pulled, ${pulled.length} answered; saving…`);
-  // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies. BidNet
-  // repeats state, UT and some university jobs: keep the copy from the owner's own list (it
-  // carries the contact and the exact bid time).
-  const duplicates: { source: LeadSource; ids: string[] }[] = [];
-  const planroomRows = pulled
-    .filter((x) => x.source === "ky_planroom" || x.source === "campus_planrooms")
-    .flatMap((x) => x.rows);
-  const ownListRows = pulled
-    .filter(
-      (x) => x.source !== "bidnet" && x.source !== "lynn_bids" && !x.source.endsWith("_permits"),
-    )
-    .flatMap((x) => x.rows);
-  for (const x of pulled) {
-    if (x.source === "lynn_bids" || x.source === "bidnet") {
-      const { keep, dropped } = dropPlanroomDuplicates(
-        x.rows,
-        x.source === "lynn_bids" ? planroomRows : ownListRows,
-      );
-      if (dropped.length) duplicates.push({ source: x.source, ids: dropped });
-      x.rows = keep;
-    }
-    // Every row names its state: one upsert batch sends the union of the rows' columns, and a
-    // row without `state` would send null (not the column default) and fail the not-null check.
-    rows.push(...x.rows.map((r) => ({ ...r, state: r.state ?? "KY" })));
-    counts[x.source] = (counts[x.source] ?? 0) + x.count;
-    fetchedSources.add(x.source);
-  }
-  // One row per (source, external_id): an upsert that touches a row twice is refused outright.
-  const byKey = new Map<string, LeadInsert>();
-  for (const r of rows) {
-    const k = `${r.source}|${r.external_id}`;
-    if (!byKey.has(k)) byKey.set(k, r);
-  }
-  rows.splice(0, rows.length, ...byKey.values());
+  const saved = await saveLeadRows(admin, pulled, { partial });
+  const counts = saved.counts;
   const planroomCount = counts["ky_planroom"] ?? 0;
   const louisvilleCount = counts["louisville_permits"] ?? 0;
-
-  // Which of these are new? Compare against what is stored before the upsert.
-  const { data: existing, error: eErr } = await admin.from("leads").select("source, external_id");
-  if (eErr) throw new Error(eErr.message);
-  const known = new Set((existing ?? []).map((r) => `${r.source}|${r.external_id}`));
-  const fresh = rows.filter((r) => !known.has(`${r.source}|${r.external_id}`));
-
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await admin
-      .from("leads")
-      .upsert(rows.slice(i, i + 500), { onConflict: "source,external_id" });
-    if (error) throw new Error(error.message);
-  }
-
-  // Dropped off a source that answered: mark gone (kept for history; hidden by default).
-  let gone = 0;
-  for (const d of duplicates) {
-    // A Lynn or BidNet copy of a job stored before the other list's row existed: retire it.
-    const { data: g, error } = await admin
-      .from("leads")
-      .update({ gone_at: new Date().toISOString() })
-      .eq("source", d.source)
-      .is("gone_at", null)
-      .in("external_id", d.ids)
-      .select("id");
-    if (error) throw new Error(error.message);
-    gone += g?.length ?? 0;
-  }
-  for (const source of fetchedSources) {
-    // Lynn's feed is the latest 25 posts; scrolling off it is not a withdrawal.
-    if (source === "lynn_bids") continue;
-    if (partial.has(source)) continue;
-    const ids = rows.filter((r) => r.source === source).map((r) => r.external_id);
-    const { data: g, error } = await admin
-      .from("leads")
-      .update({ gone_at: new Date().toISOString() })
-      .eq("source", source)
-      .is("gone_at", null)
-      .not("external_id", "in", `(${ids.map((x) => `"${x.replace(/"/g, '\\"')}"`).join(",")})`)
-      .select("id");
-    if (error) throw new Error(error.message);
-    gone += g?.length ?? 0;
-  }
+  const { fresh, newRoof, gone, notified } = saved;
 
   // With a planroom login in Lovable Cloud, read each open roof job's page for its owner
   // contact, A/E and plan holders (planroom.server.ts). Never fails the refresh. The
@@ -2820,28 +2991,6 @@ export async function refreshLeads(
     enriched = await enrichPlanroomLeads(admin, failed, opts.readPages ?? 0);
   } catch (e) {
     failed.push(`Planroom details ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  const newRoof = fresh.filter((r) => r.is_roof);
-  let notified = 0;
-  if (newRoof.length) {
-    const { data: ids } = await admin.rpc("prospect_user_ids");
-    if (ids?.length) {
-      const top = newRoof
-        .slice(0, 3)
-        .map((r) => describeLead(r))
-        .join("; ");
-      notified = await notify(
-        ids,
-        {
-          kind: "lead",
-          title: `${newRoof.length} new roof lead${newRoof.length === 1 ? "" : "s"}`,
-          body: `${top}${newRoof.length > 3 ? "; …" : ""}`,
-          url: "/prospect/leads?roof=1",
-        },
-        admin,
-      );
-    }
   }
   const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
@@ -2891,4 +3040,67 @@ export function describeLead(r: {
     );
   }
   return parts.length ? `${r.title} (${parts.join(", ")})` : r.title;
+}
+
+export interface BrowserImportResult {
+  source: BrowserSource;
+  /** Rows the script sent. */
+  received: number;
+  /** Open solicitations after the round rule (one per base number), saved. */
+  open: number;
+  roof: number;
+  new_leads: number;
+  new_roof_leads: number;
+  gone: number;
+  notified: number;
+}
+
+/**
+ * The nightly browser job's rows for one portal (already checked against browserImportSchema):
+ * keep each solicitation's current round, map to leads, save them exactly as a refresh saves
+ * a list (saveLeadRows: upsert, gone-marking for this source, new-roof notifications), and
+ * stamp lead_settings.source_fetched_at[source]. An empty list is "nothing open" and retires
+ * the source's open leads; a failed browser run posts nothing, so nothing is retired.
+ */
+export async function importBrowserBids(
+  sb: Client,
+  payload: BrowserImportPayload,
+): Promise<BrowserImportResult> {
+  const admin = await serverClient(sb);
+  const { data: settings, error: sErr } = await admin
+    .from("lead_settings")
+    .select("roof_keywords")
+    .eq("id", 1)
+    .single();
+  if (sErr) throw new Error(sErr.message);
+  const open = currentRounds(payload.rows);
+  const rows = open.map((r) => browserBidLead(r, payload.source, settings.roof_keywords));
+  const saved = await saveLeadRows(admin, [{ source: payload.source, rows, count: rows.length }]);
+  // Read the stamps again right before writing them, so a refresh that stamped SAM.gov or
+  // BidNet a moment ago is not overwritten.
+  const { data: st, error: tErr } = await admin
+    .from("lead_settings")
+    .select("source_fetched_at")
+    .eq("id", 1)
+    .single();
+  if (tErr) throw new Error(tErr.message);
+  const stamps = {
+    ...((st.source_fetched_at as Record<string, string> | null) ?? {}),
+    [payload.source]: new Date().toISOString(),
+  };
+  const { error: uErr } = await admin
+    .from("lead_settings")
+    .update({ source_fetched_at: stamps })
+    .eq("id", 1);
+  if (uErr) throw new Error(`could not stamp ${payload.source}: ${uErr.message}`);
+  return {
+    source: payload.source,
+    received: payload.rows.length,
+    open: rows.length,
+    roof: rows.filter((r) => r.is_roof).length,
+    new_leads: saved.fresh.length,
+    new_roof_leads: saved.newRoof.length,
+    gone: saved.gone,
+    notified: saved.notified,
+  };
 }

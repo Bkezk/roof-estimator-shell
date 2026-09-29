@@ -35,6 +35,7 @@ import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
 import { Route as ApiCronLeadsRouteImport } from './routes/api.cron.leads'
+import { Route as ApiCronLeadsImportRouteImport } from './routes/api.cron.leads-import'
 import { Route as ApiCronRemindersRouteImport } from './routes/api.cron.reminders'
 import { Route as ApiCronStormsRouteImport } from './routes/api.cron.storms'
 
@@ -168,6 +169,11 @@ const ApiCronLeadsRoute = ApiCronLeadsRouteImport.update({
   path: '/api/cron/leads',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronLeadsImportRoute = ApiCronLeadsImportRouteImport.update({
+  id: '/api/cron/leads-import',
+  path: '/api/cron/leads-import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiCronRemindersRoute = ApiCronRemindersRouteImport.update({
   id: '/api/cron/reminders',
   path: '/api/cron/reminders',
@@ -206,6 +212,7 @@ export interface FileRoutesByFullPath {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
+  '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -236,6 +243,7 @@ export interface FileRoutesByTo {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
+  '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -267,6 +275,7 @@ export interface FileRoutesById {
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
   '/api/cron/leads': typeof ApiCronLeadsRoute
+  '/api/cron/leads-import': typeof ApiCronLeadsImportRoute
   '/api/cron/reminders': typeof ApiCronRemindersRoute
   '/api/cron/storms': typeof ApiCronStormsRoute
 }
@@ -299,6 +308,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/leads'
+    | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   fileRoutesByTo: FileRoutesByTo
@@ -329,6 +339,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/leads'
+    | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   id:
@@ -359,6 +370,7 @@ export interface FileRouteTypes {
     | '/service/invoices'
     | '/service/today'
     | '/api/cron/leads'
+    | '/api/cron/leads-import'
     | '/api/cron/reminders'
     | '/api/cron/storms'
   fileRoutesById: FileRoutesById
@@ -387,6 +399,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
+  ApiCronLeadsImportRoute: typeof ApiCronLeadsImportRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
   ApiCronStormsRoute: typeof ApiCronStormsRoute
 }
@@ -575,6 +588,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronLeadsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/leads-import': {
+      id: '/api/cron/leads-import'
+      path: '/api/cron/leads-import'
+      fullPath: '/api/cron/leads-import'
+      preLoaderRoute: typeof ApiCronLeadsImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/cron/reminders': {
       id: '/api/cron/reminders'
       path: '/api/cron/reminders'
@@ -631,6 +651,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,
+  ApiCronLeadsImportRoute: ApiCronLeadsImportRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,
   ApiCronStormsRoute: ApiCronStormsRoute,
 }

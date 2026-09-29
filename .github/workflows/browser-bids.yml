@@ -1,0 +1,49 @@
+# Reads Metro Nashville's and the City of Chattanooga's bid lists (Tennessee leads, round
+# three). Both live in Oracle Cloud procurement portals whose pages only render in a browser,
+# so this job opens the two public lists in headless Chromium (scripts/browser-bids.ts; no
+# login, no registration), keeps the open solicitations and posts them to the app's
+# /api/cron/leads-import. Runs before the 10:45 leads run (leads.yml). Uses the same two
+# repository secrets as leads.yml: APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable
+# Cloud); without them the job skips. A portal that cannot be read posts nothing (its leads are
+# left as they were) and turns the run red. Needs
+# supabase/migrations/20260930000000_leads_browser_sources.sql applied (the import is refused
+# on the source check otherwise).
+name: Browser bids
+
+on:
+  schedule:
+    - cron: "15 10 * * *" # 10:15 UTC = 6:15 am Eastern (5:15 in winter)
+  workflow_dispatch:
+
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check the secrets
+        id: secrets
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "APP_URL / CRON_SECRET not set; skipping"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secrets.outputs.skip != '1'
+      - uses: actions/setup-node@v4
+        if: steps.secrets.outputs.skip != '1'
+        with:
+          node-version: 22
+      # No lockfile is committed (.gitignore, Lovable convention), so install resolves fresh.
+      - run: npm install --no-audit --no-fund
+        if: steps.secrets.outputs.skip != '1'
+      - run: npx playwright install --with-deps chromium
+        if: steps.secrets.outputs.skip != '1'
+      - name: Read the portals and post
+        if: steps.secrets.outputs.skip != '1'
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: npx vite-node scripts/browser-bids.ts

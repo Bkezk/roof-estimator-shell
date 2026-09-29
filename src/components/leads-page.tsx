@@ -5,6 +5,8 @@
  * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
  * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits; then BidNet,
  * Chattanooga permits, Knox County and the universities) from Sep 29, all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
+ * Metro Nashville's and Chattanooga's own bid lists come in from a nightly browser job instead
+ * (GitHub Actions, scripts/browser-bids.ts); the page warns when they stop arriving.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +17,7 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
+import { BROWSER_SOURCES } from "@/lib/leads-browser";
 import {
   LEAD_SOURCES,
   leadCounts,
@@ -71,16 +74,37 @@ const ABOUT =
   "Knox County bids: Knox County's own solicitations; " +
   "TN university bids: ETSU, Tennessee Tech, Austin Peay, MTSU and the Board of Regents (community colleges, TCATs, TSU). " +
   "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. " +
-  "The app checks them every 6 hours when this page is open, and nightly.";
+  "Metro Nashville bids and Chattanooga city bids: those cities' own solicitations (the buyer to ask, the close date, Chattanooga's pre-bid meeting), from their Oracle supplier portals; those pages only work in a browser, so a nightly job reads them at about 6:15 am Eastern and Refresh does not re-read them. " +
+  "The app checks the rest every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|[\w. ]+ planroom) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|Metro Nashville bids|Chattanooga city bids|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
+}
+
+/** The nightly browser job runs once a day; a source not heard from in this long is late. */
+const BROWSER_LATE_MS = 36 * 60 * 60 * 1000;
+
+/**
+ * The browser job's sources that have come in before but not lately (a failed run posts
+ * nothing, so their leads just stop updating): "Metro Nashville bids (2 days ago)". Null when
+ * all are current or never came in (the job not set up yet).
+ */
+function lateBrowserSources(stamps: unknown, now = Date.now()): string | null {
+  const s = (stamps && typeof stamps === "object" ? stamps : {}) as Record<string, unknown>;
+  const late = BROWSER_SOURCES.filter((k) => {
+    const at = typeof s[k] === "string" ? Date.parse(s[k]) : NaN;
+    return Number.isFinite(at) && now - at > BROWSER_LATE_MS;
+  }).map(
+    (k) =>
+      `${SOURCE_LABELS[k] ?? k} (last ${formatDistanceToNow(Date.parse(s[k] as string), { addSuffix: true })})`,
+  );
+  return late.length ? late.join(", ") : null;
 }
 
 export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
@@ -233,6 +257,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
 
   const settings = counts.data?.settings;
   const problem = refreshError ?? fetchProblem(settings?.last_fetch_note);
+  const lateBrowser = lateBrowserSources(settings?.source_fetched_at);
   const neverPulled = !!counts.data && !settings?.last_fetch_at;
   const openCount = counts.data ? (roofOnly ? counts.data.open_roof : counts.data.open) : null;
 
@@ -272,7 +297,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
               variant="outline"
               disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
-              title="Pull every lead source (Kentucky and Tennessee) now"
+              title="Pull the lead sources (Kentucky and Tennessee) now; Metro Nashville and Chattanooga city bids come in nightly from a browser job"
             >
               {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -298,6 +323,12 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       </div>
 
       {problem && <p className="text-xs text-destructive">Last check had a problem: {problem}</p>}
+      {lateBrowser && (
+        <p className="text-xs text-destructive">
+          Not updated by the nightly browser job: {lateBrowser}. Its leads may be out of date — the
+          “Browser bids” run on GitHub Actions says why.
+        </p>
+      )}
       {counts.data && !counts.data.planroom_login && (
         <p className="text-xs text-muted-foreground">
           No planroom sign-in on the server yet: state and Lynn cards show contacts and plan holders

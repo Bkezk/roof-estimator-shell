@@ -32,6 +32,9 @@ export const SOURCE_LABELS: Record<string, string> = {
   chattanooga_permits: "Chattanooga permits",
   knox_county_bids: "Knox County bids",
   tn_university_bids: "TN university bids",
+  // Round three (Sep 29): read nightly in a browser (GitHub Actions) and posted to the app.
+  nashville_bids: "Metro Nashville bids",
+  chattanooga_bids: "Chattanooga city bids",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -175,6 +178,8 @@ const listSchema = z.object({
       "chattanooga_permits",
       "knox_county_bids",
       "tn_university_bids",
+      "nashville_bids",
+      "chattanooga_bids",
     ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */

@@ -49,6 +49,11 @@ state and county; the refresh log stores Tennessee counties as "Davidson, TN", s
 refresh fails on the source check (BidNet, Chattanooga permits, Knox County, TN universities;
 details under item 0, "Tennessee leads").
 
+**Tennessee leads, round three (Sep 29).** Owner: apply
+`20260930000000_leads_browser_sources.sql` before the "Browser bids" workflow first runs, or the
+app refuses its rows on the source check (Metro Nashville bids, Chattanooga city bids; details
+under item 0, "Tennessee leads").
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
@@ -291,11 +296,49 @@ details under item 0, "Tennessee leads").
         May and December 2025) and the City of Knoxville itself posts on BidNet; Memphis /
         Shelby County has no open permit data and its bids page refuses requests; Nashville's
         and Chattanooga's own city bids and Metro Nashville Public Schools sit in Oracle
-        supplier portals that need a browser session; the University of Memphis bid list only
+        supplier portals that need a browser session (the two city lists are read since round
+        three; MNPS is not); the University of Memphis bid list only
         links its Oracle supplier portal (registration). University invitations that stay
         listed after they bid carry their bid date, so the page hides them as closed.
       - Requests per refresh, round two: 1 Chattanooga, 1 Knox County, 5 universities; once a
         day 19 BidNet list pages + ≤ 8 abstracts (and SAM.gov's 2).
+
+      **Round three (Sep 29; the two city lists round two could not read).** Metro Nashville's
+      and the City of Chattanooga's own solicitations live in Oracle Cloud procurement portals
+      ("Negotiation Abstracts" / "Solicitation Abstracts") whose pages are built by scripts, so
+      the app's server fetch gets an empty shell. The owner approved a nightly job that runs a
+      real browser: `.github/workflows/browser-bids.yml` (10:15 UTC, before the 10:45 leads run,
+      and by hand) runs `scripts/browser-bids.ts` in headless Chromium on GitHub Actions, reads
+      the two public lists (never signs in or registers), and posts one JSON body per portal to
+      `/api/cron/leads-import` with the existing APP_URL / CRON_SECRET secrets (skips cleanly
+      without them). The route checks the body with zod (`src/lib/leads-browser.ts`) and saves
+      it through `saveLeadRows`, now shared with the refresh (same upsert, gone-marking,
+      duplicate rules and new-roof notifications), then stamps
+      `lead_settings.source_fetched_at`. Two sources, `nashville_bids` ("Metro Nashville bids",
+      Central time) and `chattanooga_bids` ("Chattanooga city bids", Eastern). Migration
+      `20260930000000_leads_browser_sources.sql` (source check only; apply first). Live dry run
+      from the sandbox, Sep 29:
+      - The script sets the page's own Status filter to Active (posting-date limit cleared) and
+        reads what is left: Nashville 9 open, Chattanooga 8 open — the same sets a full scroll of
+        the whole year found (220 and 459 rows; the ",N" after a number is the amendment round,
+        the highest is current, older rounds show as Amended). When the filter does not take, it
+        scrolls the whole list and applies that round rule itself.
+      - The Details abstract is public: full title (the list cuts at 80 characters), buyer and
+        e-mail (the card's contact), attachment names, the amendment description; Chattanooga
+        adds the synopsis and the pre-bid meeting (read into the pre-bid date). Title, synopsis
+        and attachment names feed the roof keywords; a Construction Bid is not a roof lead by
+        itself. No per-row public link exists, so the card opens the portal's list.
+      - Nashville's list is Metro General Government only (every number starts GG); no Metro
+        Nashville Public Schools solicitations were on it. Nothing open was roof work that day
+        (Nashville had a "Roofing Repairs and Replacement Services" RFQ earlier this year).
+      - Requests per night: per portal one page load, three small filter requests, and one
+        abstract (open and close) per open row with 0.8 s pauses — about 30 page requests each,
+        about 30 s each; each portal is cut off at 90 s.
+      - **To watch:** the portals changing layout. A list the script cannot read to the end (no
+        results table, columns renamed, a sign-in wall) posts nothing, so no lead is marked gone,
+        the "Browser bids" run turns red with the reason, and after 36 hours without new rows
+        the Leads page shows "Not updated by the nightly browser job". Refresh on the Leads page
+        does not re-read these two; they update once a night.
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
