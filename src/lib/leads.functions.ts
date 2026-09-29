@@ -23,6 +23,10 @@ export const SOURCE_LABELS: Record<string, string> = {
   paducah_bids: "Paducah bids",
   campus_planrooms: "University & school planrooms",
   sam_gov: "Federal (SAM.gov)",
+  // Tennessee (owner, Sep 29: "we actually cover TN as well").
+  tn_stream: "TN state projects (STREAM)",
+  ut_bids: "UT bids",
+  nashville_permits: "Nashville permits",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -159,6 +163,9 @@ const listSchema = z.object({
       "paducah_bids",
       "campus_planrooms",
       "sam_gov",
+      "tn_stream",
+      "ut_bids",
+      "nashville_permits",
     ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
@@ -279,10 +286,13 @@ export const addLeadToProspects = createServerFn({ method: "POST" })
       .from("buildings")
       .insert({
         source: "manual",
-        name: lead.source === "louisville_permits" ? (lead.project_type ?? lead.title) : lead.title,
+        name:
+          lead.source === "louisville_permits" || lead.source === "nashville_permits"
+            ? (lead.project_type ?? lead.title)
+            : lead.title,
         address1: lead.address ?? "",
         city: lead.city ?? lead.location ?? null,
-        state: "KY",
+        state: lead.state || "KY",
         county: lead.county,
         building_sqft: lead.sqft,
         centroid_lat: lead.lat,
@@ -323,6 +333,8 @@ const settingsSchema = z.object({
   louisville_types: z.array(z.string().trim().min(1).max(60)).max(20),
   louisville_min_sqft: z.number().min(0).max(1000000),
   louisville_days: z.number().int().min(7).max(365),
+  nashville_types: z.array(z.string().trim().min(1).max(60)).max(20),
+  nashville_min_cost: z.number().min(0).max(100_000_000),
 });
 export type LeadSettingsInput = z.input<typeof settingsSchema>;
 export const setLeadSettings = createServerFn({ method: "POST" })

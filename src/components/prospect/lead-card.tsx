@@ -78,8 +78,11 @@ function BidLine({ lead }: { lead: LeadRow }) {
       month: "short",
       day: "numeric",
     });
-    // Louisville rows are permits; the city bid pages and SAM.gov give a posting date.
-    const label = lead.source === "louisville_permits" ? "Permit issued" : "Posted";
+    // Louisville and Nashville rows are permits; the bid pages and SAM.gov give a posting date.
+    const label =
+      lead.source === "louisville_permits" || lead.source === "nashville_permits"
+        ? "Permit issued"
+        : "Posted";
     parts.push(
       <span key="issued">
         {label} {issued} ({agoText})
@@ -90,6 +93,17 @@ function BidLine({ lead }: { lead: LeadRow }) {
   return (
     <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-muted-foreground">{parts}</div>
   );
+}
+
+/**
+ * Where the job is. Kentucky rows read as before; a row from another state (Tennessee) names
+ * it unless the place already does ("Pikeville, Bledsoe County, TN").
+ */
+function placeLine(l: LeadRow): string {
+  const place = l.location ?? [l.address, l.city].filter(Boolean).join(", ");
+  if (!place || !l.state || l.state === "KY") return place;
+  const named = new RegExp(`\\b(${l.state}|Tennessee)\\b`).test(place);
+  return named ? place : `${place}, ${l.state}`;
 }
 
 const STATUS_WORD: Record<string, string> = {
@@ -124,7 +138,7 @@ export function LeadCard(props: {
 
   const who = [
     l.agency ?? (l.contractor ? `Contractor ${l.contractor}` : null),
-    l.location ?? [l.address, l.city].filter(Boolean).join(", "),
+    placeLine(l),
     l.project_type,
     l.sqft != null ? `${Math.round(l.sqft).toLocaleString()} sq ft` : null,
     l.project_cost != null && l.project_cost > 0 ? formatCost(l.project_cost) : null,

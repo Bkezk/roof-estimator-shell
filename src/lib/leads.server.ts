@@ -20,7 +20,30 @@
  *     LATITUDE, LONGITUDE, ISSUE_DATE (epoch ms). A permit means construction is starting,
  *     so the roof is still months out on a new build.
  *
- * refreshLeads: pull both, upsert on (source, external_id) keeping the team's status, mark
+ * Tennessee (owner, Sep 29: "we actually cover TN as well, can we replicate what we have for
+ * leads for TN?" — the whole state), checked from the sandbox Sep 29:
+ *
+ *   STREAM construction bid list (tn_stream)  STREAM_BID_LIST_URL
+ *     The State of Tennessee Real Estate Asset Management list of every state building project
+ *     out for bid (5 that day). One Bootstrap accordion item per project: the button reads
+ *     "142/013-01-2022 - Name" (the SBC project number), the table under it has Project,
+ *     Designer (the A/E firm, contact, phone, e-mail: who to call to bid), Description, Pre-Bid
+ *     and Bid Opening rows in prose, times "Local Time (Central Time)" or "(Eastern Time)".
+ *     The STREAM RFP page (CM/GC and design-build selections) is read into the same source.
+ *
+ *   UT system construction bids (ut_bids)  utBidsUrl(slug), one page per campus
+ *     "Invitations to Bid" (a PDF link, the post date, sometimes a moved bid opening) above
+ *     "Bid Results" (history: used only to close an invitation that has been opened). The
+ *     site answers 403 to a bare request and 200 to a browser's headers (UT_HEADERS).
+ *
+ *   Metro Nashville building permits issued (nashville_permits)  NASHVILLE_PERMITS_LAYER
+ *     ArcGIS REST, no key: Permit__, Permit_Type_Description ("Building Commercial - New"),
+ *     Permit_Subtype_Description, Date_Issued (epoch ms), Const_Cost, Address, City, ZIP,
+ *     Contact, Purpose (free-text scope), Lat, Lon. No square footage: filtered on cost.
+ *
+ *   SAM.gov: the daily pull asks for Kentucky and Tennessee (two requests, one daily slot).
+ *
+ * refreshLeads: pull them all, upsert on (source, external_id) keeping the team's status, mark
  * what dropped off the source as gone, and tell Prospecting users about new roof leads.
  * Nothing here touches bids.
  */
@@ -34,7 +57,10 @@ export type LeadSource =
   | "bgky_bids"
   | "paducah_bids"
   | "campus_planrooms"
-  | "sam_gov";
+  | "sam_gov"
+  | "tn_stream"
+  | "ut_bids"
+  | "nashville_permits";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -109,10 +135,77 @@ export const campusJobUrl = (domain: string, jobId: string) =>
 export const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
 export const SAM_NAICS_ROOFING = "238160";
 
+/** Both states SAM.gov is asked about in the one daily pull. */
+export const SAM_STATES = ["KY", "TN"] as const;
+
+/**
+ * Tennessee's STREAM office (General Services): the construction bid list and the RFP page.
+ * The bid list has no page per project, so a lead links the list with the SBC number after #.
+ */
+export const STREAM_BID_LIST_URL =
+  "https://www.tn.gov/generalservices/stream/stream/contractors/construction-bid-list.html";
+export const STREAM_RFP_URL =
+  "https://www.tn.gov/generalservices/stream/stream/contractors/requests-for-proposal--rfps-.html";
+
+/** The UT system's capital projects office: one bids page per campus. */
+export const UT_BIDS_BASE =
+  "https://tennessee.edu/about/divisions/finance-admin/capital-projects/construction-opportunities/";
+export const utBidsUrl = (slug: string) => `${UT_BIDS_BASE}${slug}-bids/`;
+export type UsZone = "ET" | "CT";
+export interface UtCampus {
+  slug: string;
+  label: string;
+  city: string;
+  county: string;
+  /** The campus's clock, for a bid time the page states without a zone. */
+  zone: UsZone;
+}
+export const UT_CAMPUSES: UtCampus[] = [
+  { slug: "utk", label: "UT Knoxville", city: "Knoxville", county: "Knox", zone: "ET" },
+  { slug: "utc", label: "UT Chattanooga", city: "Chattanooga", county: "Hamilton", zone: "ET" },
+  {
+    slug: "uthsc",
+    label: "UT Health Science Center",
+    city: "Memphis",
+    county: "Shelby",
+    zone: "CT",
+  },
+  {
+    slug: "utia",
+    label: "UT Institute of Agriculture",
+    city: "Knoxville",
+    county: "Knox",
+    zone: "ET",
+  },
+  {
+    slug: "ips",
+    label: "UT Institute for Public Service",
+    city: "Knoxville",
+    county: "Knox",
+    zone: "ET",
+  },
+  { slug: "utm", label: "UT Martin", city: "Martin", county: "Weakley", zone: "CT" },
+  { slug: "uts", label: "UT Southern", city: "Pulaski", county: "Giles", zone: "CT" },
+];
+/** tennessee.edu answers 403 to a bare request (checked Sep 29) and 200 to a browser's headers. */
+export const UT_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
+  Accept: "text/html,application/xhtml+xml",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
+/** Metro Nashville Codes: building permits issued (Nashville open data, ArcGIS REST, no key). */
+export const NASHVILLE_PERMITS_LAYER =
+  "https://services2.arcgis.com/HdTo6HJqh92wn4D8/arcgis/rest/services/Building_Permits_Issued_2/FeatureServer/0";
+
 const UA = "JBK Portal construction leads";
-/** Every outside call gives up after 25 s so one slow site cannot hang the whole run (Lynn's feed has taken 15 s). */
-const fetchTimeout = (url: string, ms = 25000) =>
-  fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(ms) });
+/**
+ * Every outside call gives up after 25 s so one slow site cannot hang the whole run (Lynn's feed
+ * has taken 15 s). `headers` add to (or replace) the default User-Agent.
+ */
+const fetchTimeout = (url: string, ms = 25000, headers: Record<string, string> = {}) =>
+  fetch(url, { headers: { "User-Agent": UA, ...headers }, signal: AbortSignal.timeout(ms) });
 
 /* ------------------------------------------------------------------------------------------------
  * Dates
@@ -132,18 +225,101 @@ export function isUsDaylightTime(y: number, m: number, d: number, h: number): bo
   return d < end || (d === end && h < 2);
 }
 
-/** "10/20/2026 01:30 PM ET" → ISO instant (Eastern, daylight or standard by date). */
-export function parseEasternDate(text: string): string | null {
+/**
+ * A wall-clock time in US Eastern or Central → ISO instant. Central (America/Chicago) switches
+ * on the same local 2:00 a.m. dates as Eastern and sits one hour further from UTC.
+ */
+function zonedIso(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  zone: UsZone,
+): string {
+  const standard = zone === "ET" ? 5 : 6;
+  const offset = isUsDaylightTime(year, month, day, hour) ? standard - 1 : standard;
+  return new Date(Date.UTC(year, month, day, hour + offset, minute)).toISOString();
+}
+
+function parseNumericDate(text: string, zone: UsZone): string | null {
   const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})\s*(AM|PM))?/i.exec(text);
   if (!m) return null;
-  const month = Number(m[1]) - 1;
-  const day = Number(m[2]);
-  const year = Number(m[3]);
   let hour = m[4] ? Number(m[4]) % 12 : 0;
-  const minute = m[5] ? Number(m[5]) : 0;
   if (m[6]?.toUpperCase() === "PM") hour += 12;
-  const offset = isUsDaylightTime(year, month, day, hour) ? 4 : 5;
-  return new Date(Date.UTC(year, month, day, hour + offset, minute)).toISOString();
+  return zonedIso(
+    Number(m[3]),
+    Number(m[1]) - 1,
+    Number(m[2]),
+    hour,
+    m[5] ? Number(m[5]) : 0,
+    zone,
+  );
+}
+
+/** "10/20/2026 01:30 PM ET" → ISO instant (Eastern, daylight or standard by date). */
+export function parseEasternDate(text: string): string | null {
+  return parseNumericDate(text, "ET");
+}
+
+/** "10/20/2026 01:30 PM" read as Central time (Nashville, Memphis, West Tennessee). */
+export function parseCentralDate(text: string): string | null {
+  return parseNumericDate(text, "CT");
+}
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/**
+ * A date written out, as the Tennessee pages do, → ISO instant:
+ *   "At 9:00 a.m. Local Time (Central Time) on Thursday, October 1, 2026"
+ *   "on Wednesday, August 26, 2026 at 10:30 a.m. Local Time (Eastern Time)."
+ *   "Bid Opening has been moved to Friday, February 27th at 2:00 pm ET" (no year: the first
+ *   such date on or after `ref`, the day it was posted).
+ * The zone is the one the text names (Eastern Time / ET / EST / EDT, Central Time / CT / CST /
+ * CDT), else `zone`. No time of day → midnight local. Null when there is no date.
+ */
+export function parseWrittenDateTime(text: string, zone: UsZone, ref?: Date): string | null {
+  const d =
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4}))?/i.exec(
+      text,
+    );
+  if (!d) return null;
+  const month = MONTHS.indexOf(d[1]!.slice(0, 3).toLowerCase());
+  const day = Number(d[2]);
+  let year: number;
+  if (d[3]) year = Number(d[3]);
+  else if (ref) {
+    year = ref.getUTCFullYear();
+    // Written without a year: the next such date from the reference day.
+    if (Date.UTC(year, month, day) < Date.UTC(year, ref.getUTCMonth(), ref.getUTCDate())) year++;
+  } else return null;
+  const check = new Date(Date.UTC(year, month, day));
+  if (check.getUTCMonth() !== month || check.getUTCDate() !== day) return null;
+  let hour = 0;
+  let minute = 0;
+  const t = /\b(\d{1,2})(?::(\d{2}))?\s*([ap])\.?\s?m\b\.?/i.exec(text);
+  if (t) {
+    hour = (Number(t[1]) % 12) + (t[3]!.toLowerCase() === "p" ? 12 : 0);
+    minute = t[2] ? Number(t[2]) : 0;
+  } else if (/\bnoon\b/i.test(text)) hour = 12;
+  const eastern = /\bEastern(?:\s+(?:Standard|Daylight))?\s+Time\b|\bE[SD]?T\b/.exec(text);
+  const central = /\bCentral(?:\s+(?:Standard|Daylight))?\s+Time\b|\bC[SD]?T\b/.exec(text);
+  let z = zone;
+  if (eastern && (!central || eastern.index < central.index)) z = "ET";
+  else if (central) z = "CT";
+  return zonedIso(year, month, day, hour, minute, z);
+}
+
+/** The calendar day ("2026-09-25") an instant falls on in Central time. */
+export function centralDay(ms: number): string {
+  const std = new Date(ms - 6 * 3600000);
+  const daylight = isUsDaylightTime(
+    std.getUTCFullYear(),
+    std.getUTCMonth(),
+    std.getUTCDate(),
+    std.getUTCHours(),
+  );
+  return new Date(daylight ? ms - 5 * 3600000 : ms - 6 * 3600000).toISOString().slice(0, 10);
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -490,6 +666,497 @@ export function cityLead(
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Tennessee: STREAM (state building projects)
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface StreamProject {
+  /** "bid": the construction bid list; "rfp": the RFP page (CM/GC, design-build selections). */
+  kind: "bid" | "rfp";
+  /** The SBC project number, "142/013-01-2022". */
+  sbc: string;
+  name: string;
+  /** "Bledsoe County Correctional Complex". */
+  facility: string | null;
+  /** The RFP page's AGENCY column ("Military"). */
+  agency: string | null;
+  city: string | null;
+  /** "Bledsoe" (without "County"). */
+  county: string | null;
+  description: string | null;
+  /** The designer (A/E firm) running the bid, and its contact. */
+  designer: string | null;
+  designerContact: string | null;
+  designerPhone: string | null;
+  designerEmail: string | null;
+  prebidText: string | null;
+  prebidAt: string | null;
+  bidText: string | null;
+  bidAt: string | null;
+  /** RFP page: the first attachment (the RFP document). */
+  documentUrl: string | null;
+}
+
+/** A cell's lines: one per <p> or <br>, tags dropped, blanks skipped. */
+const cellLines = (html: string): string[] =>
+  html
+    .split(/<\/p>|<br\s*\/?>|<\/li>/i)
+    .map((x) => decode(x))
+    .filter(Boolean);
+
+/** "Pikeville, Bledsoe County, Tennessee" → town and county. */
+function tnPlace(line: string | undefined): { city: string | null; county: string | null } {
+  if (!line) return { city: null, county: null };
+  const county = /([A-Z][\w .'-]*?)\s+County\b/i.exec(line);
+  const city = line.split(",")[0]!.trim();
+  return {
+    city: city && !/County\b/i.test(city) && !/^Tennessee$/i.test(city) ? city : null,
+    county: county ? county[1]!.trim() : null,
+  };
+}
+const isPlaceLine = (l: string) => /\bCounty\b.*\bTennessee\b|,\s*(Tennessee|TN)\s*$/i.test(l);
+
+/**
+ * The bid list: one project per accordion item. Labels are matched loosely ("Bid Opening
+ * (WebEx):" and "Bid Opening (WebEx) :" both occur). Times default to Central (the bid
+ * openings are held in Nashville); a line that says Eastern Time is read as Eastern.
+ */
+export function parseStreamBidList(html: string): StreamProject[] {
+  const out: StreamProject[] = [];
+  const seen = new Set<string>();
+  for (const item of html.split(/<div[^>]*class="accordion-item"[^>]*>/i).slice(1)) {
+    const button = /<button[^>]*accordion-button[^>]*>([\s\S]*?)<\/button>/i.exec(item);
+    if (!button) continue;
+    const heading = decode(button[1]!);
+    const cells: Record<string, string> = {};
+    for (const row of item.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+      const th = /<th[^>]*>([\s\S]*?)<\/th>/i.exec(row);
+      if (!th) continue;
+      const label = decode(th[1]!)
+        .toLowerCase()
+        .replace(/\(.*?\)/g, "")
+        .replace(/[\s:]+/g, " ")
+        .trim();
+      const td = row.slice(th.index + th[0].length).match(/<td[^>]*>[\s\S]*?<\/td>/gi) ?? [];
+      const body = td.map((c) => c.replace(/^<td[^>]*>|<\/td>$/gi, "")).join("</p>");
+      const key = label.startsWith("project")
+        ? "project"
+        : label.startsWith("designer")
+          ? "designer"
+          : label.startsWith("description")
+            ? "description"
+            : /^pre-?\s?bid/.test(label)
+              ? "prebid"
+              : /^bid (opening|date)/.test(label)
+                ? "bid"
+                : null;
+      if (key && !(key in cells)) cells[key] = body;
+    }
+    const project = cellLines(cells["project"] ?? "");
+    const head = /^(\S+)\s+[-–—]\s+(.+)$/.exec(heading);
+    const sbcLine = project.find((l) => /SBC Project No/i.test(l));
+    const sbc =
+      (sbcLine ? /SBC Project No\.?\s*:?\s*(\S+)/i.exec(sbcLine)?.[1] : null) ??
+      (head ? head[1]! : null);
+    if (!sbc || seen.has(sbc)) continue;
+    seen.add(sbc);
+    const name = project[0] ?? (head ? head[2]!.trim() : heading);
+    const placeLine = project.find(isPlaceLine);
+    const facility =
+      project.slice(1).find((l) => l !== placeLine && l !== sbcLine && l !== name) ?? null;
+    const designer = cellLines(cells["designer"] ?? "");
+    const field = (re: RegExp) => {
+      const l = designer.find((x) => re.test(x));
+      return l ? l.replace(re, "").trim() || null : null;
+    };
+    const email =
+      /mailto:([^"'>\s]+)/i.exec(cells["designer"] ?? "")?.[1] ?? field(/^E-?mail\s*:\s*/i);
+    const prebidText = decode(cells["prebid"] ?? "") || null;
+    const bidLines = cellLines(cells["bid"] ?? "");
+    const bidText =
+      bidLines.find((l) => /\b\d{4}\b/.test(l) && /[A-Z][a-z]+\.?\s+\d{1,2}/.test(l)) ??
+      bidLines[0] ??
+      null;
+    out.push({
+      kind: "bid",
+      sbc,
+      name,
+      facility,
+      agency: null,
+      ...tnPlace(placeLine),
+      description: decode(cells["description"] ?? "") || null,
+      designer:
+        designer.find((l) => !/^(Contact|Phone|Fax|E-?mail)\b/i.test(l))?.replace(/\s+/g, " ") ??
+        null,
+      designerContact: field(/^Contact\s*:\s*/i),
+      designerPhone: field(/^Phone\s*:\s*/i),
+      designerEmail: email ? decodeURIComponent(email) : null,
+      prebidText,
+      prebidAt: prebidText ? parseWrittenDateTime(prebidText, "CT") : null,
+      bidText,
+      bidAt: bidText ? parseWrittenDateTime(bidText, "CT") : null,
+      documentUrl: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * The RFP page: one table, columns found by their headings (SBC No., AGENCY, PROJECT TITLE,
+ * ATTACHMENTS); the title cell's second line is the place. No dates on the list (they are in
+ * the RFP document).
+ */
+export function parseStreamRfps(html: string): StreamProject[] {
+  const table = /<table[\s\S]*?<\/table>/gi;
+  const out: StreamProject[] = [];
+  for (const t of html.match(table) ?? []) {
+    const heads = (t.match(/<th[^>]*>[\s\S]*?<\/th>/gi) ?? []).map((h) => decode(h).toLowerCase());
+    const col = (re: RegExp) => heads.findIndex((h) => re.test(h));
+    const iSbc = col(/sbc/);
+    const iTitle = col(/title/);
+    if (iSbc < 0 || iTitle < 0) continue;
+    const iAgency = col(/agency/);
+    const iFiles = col(/attach/);
+    for (const row of t.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+      const cells = row.match(/<td[^>]*>[\s\S]*?<\/td>/gi) ?? [];
+      const sbc = decode(cells[iSbc] ?? "");
+      if (!sbc) continue;
+      const lines = cellLines((cells[iTitle] ?? "").replace(/^<td[^>]*>/i, ""));
+      const name = lines[0];
+      if (!name) continue;
+      const href = /<a[^>]*href="([^"]+)"/i.exec(cells[iFiles] ?? "")?.[1];
+      out.push({
+        kind: "rfp",
+        sbc,
+        name,
+        facility: null,
+        agency: iAgency >= 0 ? decode(cells[iAgency] ?? "") || null : null,
+        ...tnPlace(lines.find(isPlaceLine)),
+        description:
+          lines
+            .slice(1)
+            .filter((l) => !isPlaceLine(l))
+            .join(" ") || null,
+        designer: null,
+        designerContact: null,
+        designerPhone: null,
+        designerEmail: null,
+        prebidText: null,
+        prebidAt: null,
+        bidText: null,
+        bidAt: null,
+        documentUrl: href ? new URL(decode(href), STREAM_RFP_URL).href : null,
+      });
+    }
+  }
+  return out;
+}
+
+export function streamLead(p: StreamProject, keywords: string[]): LeadInsert {
+  const rfp = p.kind === "rfp";
+  return {
+    source: "tn_stream",
+    // An RFP (CM/GC selection) and the later bid for the same SBC number are two leads.
+    external_id: rfp ? `rfp:${p.sbc}` : p.sbc,
+    title: p.name,
+    agency: p.facility ?? (p.agency ? `State of Tennessee — ${p.agency}` : "State of Tennessee"),
+    location: [p.city, p.county ? `${p.county} County` : null].filter(Boolean).join(", ") || null,
+    city: p.city,
+    county: p.county,
+    state: "TN",
+    project_type: rfp ? "Request for proposals" : null,
+    contractor: p.designer,
+    // The designer runs the bid: who to ask for the documents and to bid to.
+    contact: rfp
+      ? null
+      : [p.designer, p.designerContact, p.designerPhone, p.designerEmail]
+          .filter(Boolean)
+          .join(" — ") || null,
+    prebid_at: p.prebidAt,
+    bid_at: p.bidAt,
+    url: rfp ? (p.documentUrl ?? STREAM_RFP_URL) : `${STREAM_BID_LIST_URL}#${p.sbc}`,
+    is_roof: isRoofLead(`${p.name} ${p.description ?? ""}`, keywords),
+    raw: { ...p } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Tennessee: UT system campus bid pages
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface UtBid {
+  /** The PDF's file name ("UTK-Frieson-Center-Reno-Expansion-Invitation-to-Bid-FINAL.pdf"). */
+  id: string;
+  title: string;
+  /** The invitation PDF (or the campus page when the entry has no link). */
+  url: string;
+  /** "2026-08-19". */
+  postedAt: string | null;
+  /** The entry's sub-bullets as written. */
+  notes: string[];
+  bidText: string | null;
+  bidAt: string | null;
+  /** The bid date came from the page's own Bid Results list (the bid has been opened). */
+  closedByResult: boolean;
+  /** "UT Capital Projects — Knoxville office 865-974-2231" when the page shows it. */
+  contact: string | null;
+}
+
+/** The top-level <li> items of a list block, each with its own nested items' text. */
+function listItems(block: string): { head: string; notes: string[] }[] {
+  const out: { head: string; notes: string[] }[] = [];
+  let depth = 0;
+  let cur: { head: string; notes: string[]; buf: string } | null = null;
+  let note: string | null = null;
+  for (const tok of block.split(/(<\/?(?:ul|ol|li)\b[^>]*>)/i)) {
+    const t = tok.toLowerCase();
+    if (/^<(ul|ol)\b/.test(t)) depth++;
+    else if (/^<\/(ul|ol)/.test(t)) depth--;
+    else if (/^<li\b/.test(t)) {
+      if (depth === 1) cur = { head: "", notes: [], buf: "" };
+      else if (cur) note = "";
+    } else if (/^<\/li/.test(t)) {
+      if (depth === 1 && cur) {
+        out.push({ head: cur.head, notes: cur.notes });
+        cur = null;
+      } else if (cur && note !== null) {
+        const n = decode(note);
+        if (n) cur.notes.push(n);
+        note = null;
+      }
+    } else if (cur) {
+      if (depth === 1) cur.head += tok;
+      else if (note !== null) note += tok;
+    }
+  }
+  return out;
+}
+
+/** The HTML from the <h2> whose text matches `re` up to the next <h2> (or the end of <main>). */
+function h2Section(html: string, re: RegExp): string | null {
+  const heads = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)];
+  const i = heads.findIndex((h) => re.test(decode(h[1]!)));
+  if (i < 0) return null;
+  const start = heads[i]!.index! + heads[i]![0].length;
+  const next = heads[i + 1]?.index ?? html.length;
+  const main = html.indexOf("</main>", start);
+  return html.slice(start, main >= 0 ? Math.min(next, main) : next);
+}
+
+/**
+ * One campus page: the entries under "Invitations to Bid" (the "Bid Results" list below it is
+ * history; an invitation that shows up there, bid on or after it was posted, takes that bid
+ * date so it reads as closed). A sub-bullet that moves the bid opening ("moved from X to Y")
+ * gives the bid time (the Y); dates without a zone are the campus's.
+ */
+export function parseUtBids(html: string, campus: UtCampus): UtBid[] {
+  const section = h2Section(html, /Invitations? to Bid/i);
+  if (section === null) return [];
+  const office = /<h3>\s*([A-Z][\w ]*?) Offices?\s*<\/h3>[\s\S]{0,400}?(\d{3}-\d{3}-\d{4})/i.exec(
+    html,
+  );
+  const contact = office ? `UT Capital Projects — ${office[1]} office ${office[2]}` : null;
+  const results = new Map<string, string>();
+  for (const r of listItems(h2Section(html, /Bid Results/i) ?? "")) {
+    const title = decode(r.head);
+    const date = r.notes.find((n) => /Bid Date/i.test(n));
+    if (title && date) results.set(normTitle(title), date.replace(/^.*?Bid Date\s*:?\s*/i, ""));
+  }
+  const out: UtBid[] = [];
+  const seen = new Set<string>();
+  for (const item of listItems(section)) {
+    const link = /<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(item.head);
+    if (!link) continue; // "No information available at this time."
+    const title = decode(link[2]!);
+    if (!title) continue;
+    const url = new URL(decode(link[1]!), utBidsUrl(campus.slug)).href;
+    const file = decodeURIComponent(new URL(url).pathname.split("/").filter(Boolean).pop() ?? "");
+    const id = /\.\w{2,4}$/.test(file)
+      ? file
+      : title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "")
+          .slice(0, 120);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const posted = item.notes.find((n) => /Post(ed)?\s+Date/i.test(n));
+    const postedAt = posted ? parseLongDate(posted) : null;
+    const ref = postedAt ? new Date(`${postedAt}T12:00:00Z`) : undefined;
+    let bidText: string | null = null;
+    let bidAt: string | null = null;
+    for (const n of item.notes) {
+      if (n === posted || !/\bbid|opening|due\b/i.test(n)) continue;
+      // "moved from March 10, 2026 to March 12, 2026 at 2:00 pm CT" → the new date.
+      const moved = /\bfrom\b[\s\S]*?\bto\s+([\s\S]+)$/i.exec(n);
+      const at = parseWrittenDateTime(moved ? moved[1]! : n, campus.zone, ref);
+      if (at) {
+        bidText = n;
+        bidAt = at;
+        break;
+      }
+    }
+    let closedByResult = false;
+    const result = results.get(normTitle(title));
+    if (!bidAt && result) {
+      const at = parseWrittenDateTime(result, campus.zone, ref);
+      if (at && (!postedAt || at.slice(0, 10) >= postedAt)) {
+        bidText = `Bid Date: ${result}`;
+        bidAt = at;
+        closedByResult = true;
+      }
+    }
+    out.push({
+      id,
+      title,
+      url,
+      postedAt,
+      notes: item.notes,
+      bidText,
+      bidAt,
+      closedByResult,
+      contact,
+    });
+  }
+  return out;
+}
+
+export function utLead(b: UtBid, campus: UtCampus, keywords: string[]): LeadInsert {
+  return {
+    source: "ut_bids",
+    external_id: `${campus.slug}:${b.id}`,
+    title: b.title,
+    agency: campus.label,
+    location: campus.city,
+    city: campus.city,
+    county: campus.county,
+    state: "TN",
+    bid_at: b.bidAt,
+    issued_on: b.postedAt,
+    url: b.url,
+    contact: b.contact,
+    is_roof: isRoofLead(b.title, keywords),
+    raw: { ...b, campus: campus.slug, page: utBidsUrl(campus.slug) } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Tennessee: Metro Nashville building permits
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface NashvillePermit {
+  Permit__: string;
+  Permit_Type_Description: string | null;
+  Permit_Subtype_Description: string | null;
+  Parcel?: string | null;
+  Date_Entered?: number | null;
+  Date_Issued: number | null;
+  Const_Cost: number | null;
+  Address: string | null;
+  City: string | null;
+  State?: string | null;
+  Subdivision_Lot?: string | null;
+  Contact: string | null;
+  Purpose: string | null;
+  Lon: number | null;
+  Lat: number | null;
+  ZIP: string | null;
+  [k: string]: unknown;
+}
+
+/** The ArcGIS query: the chosen permit types, at least the minimum cost, issued in the window. */
+export function nashvilleQueryUrl(
+  s: Pick<SettingsRow, "nashville_types" | "nashville_min_cost" | "louisville_days">,
+  offset = 0,
+  now = new Date(),
+): string {
+  const since = new Date(now.getTime() - s.louisville_days * 86400000).toISOString().slice(0, 10);
+  const types = s.nashville_types.length
+    ? `Permit_Type_Description IN (${s.nashville_types.map(sqlQuote).join(",")})`
+    : "1=1";
+  const min = Number(s.nashville_min_cost) || 0;
+  const where = `${types} AND Date_Issued >= DATE '${since}'${min > 0 ? ` AND Const_Cost >= ${min}` : ""}`;
+  const q = new URLSearchParams({
+    where,
+    outFields: "*",
+    orderByFields: "Date_Issued DESC",
+    resultRecordCount: "1000",
+    resultOffset: String(offset),
+    returnGeometry: "false",
+    f: "json",
+  });
+  return `${NASHVILLE_PERMITS_LAYER}/query?${q.toString()}`;
+}
+
+async function fetchNashville(s: SettingsRow): Promise<NashvillePermit[]> {
+  const out: NashvillePermit[] = [];
+  for (let offset = 0; offset < 20000; offset += 1000) {
+    const res = await fetchTimeout(nashvilleQueryUrl(s, offset));
+    if (!res.ok) throw new Error(`→ ${res.status}`);
+    const json = (await res.json()) as {
+      error?: { message?: string };
+      features?: { attributes: NashvillePermit }[];
+      exceededTransferLimit?: boolean;
+    };
+    if (json.error) throw new Error(`→ ${json.error.message ?? "error"}`);
+    out.push(...(json.features ?? []).map((f) => f.attributes));
+    if (!json.exceededTransferLimit) break;
+  }
+  return out;
+}
+
+const titleCase = (s: string) => s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+export function nashvilleLead(p: NashvillePermit, keywords: string[]): LeadInsert {
+  const type = (p.Permit_Type_Description ?? "").trim();
+  const subtype = (p.Permit_Subtype_Description ?? "").trim();
+  const purpose = (p.Purpose ?? "").replace(/\s+/g, " ").trim();
+  const address = (p.Address ?? "").trim();
+  const city = (p.City ?? "").trim();
+  const name = (p.Contact ?? "").trim();
+  // The scope text often ends with the applicant's phone and e-mail ("Poc: … 615-704-4478 …").
+  const phone = /\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}/.exec(purpose)?.[0] ?? null;
+  const email = /[\w.+-]+@[\w-]+\.[\w.]+/.exec(purpose)?.[0] ?? null;
+  const sf = /(\d[\d,]{2,})\s*(?:SF|sq\.?\s?ft|square\s+feet)\b/i.exec(purpose);
+  const shortType = type.replace(/^Building\s+/i, "");
+  return {
+    source: "nashville_permits",
+    external_id: p.Permit__,
+    title: [shortType, subtype].filter(Boolean).join(" — ") || p.Permit__,
+    agency: "Metro Nashville Codes",
+    contractor: name || null,
+    contact: [name, phone, email].filter(Boolean).join(" — ") || null,
+    // "151 OLD HERMITAGE AVE, Nashville, TN 37210": the address is the permit's site.
+    location: [address, city ? titleCase(city) : null, `TN${p.ZIP ? ` ${p.ZIP}` : ""}`]
+      .filter(Boolean)
+      .join(", "),
+    county: "Davidson",
+    state: "TN",
+    address: address || null,
+    city: city ? titleCase(city) : null,
+    lat: p.Lat,
+    lng: p.Lon,
+    project_type: subtype || null,
+    sqft: sf ? Number(sf[1]!.replace(/,/g, "")) : null,
+    project_cost: p.Const_Cost,
+    issued_on: p.Date_Issued ? centralDay(p.Date_Issued) : null,
+    // No link (owner, Sep 29: permits are not linked to the map); the card shows the permit.
+    url: null,
+    // As with Louisville: a whole new commercial building (or shell / addition) is a roof to
+    // bid whatever the permit is called; a roofing permit is roof work by definition.
+    is_roof:
+      /commercial - (new|addition|shell|roofing)/i.test(type) ||
+      isRoofLead(`${subtype} ${purpose}`, keywords),
+    raw: p as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Rows
  * ---------------------------------------------------------------------------------------------- */
 
@@ -592,16 +1259,21 @@ export interface SamOpportunity {
 const mmddyyyy = (d: Date) =>
   `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
 
-/** The one nightly SAM.gov call: roofing NAICS, Kentucky, posted in the last `days`. */
 /** SAM.gov pulls at least this far apart: 20 h keeps the daily cron on its once-a-day slot. */
 const SAM_GAP = 20 * 60 * 60 * 1000;
-export function samQueryUrl(apiKey: string, days = 60, now = new Date()): string {
+/** One state's SAM.gov call: roofing NAICS, place of performance `state`, posted in the last `days`. */
+export function samQueryUrl(
+  apiKey: string,
+  days = 60,
+  now = new Date(),
+  state: string = "KY",
+): string {
   const q = new URLSearchParams({
     api_key: apiKey,
     postedFrom: mmddyyyy(new Date(now.getTime() - days * 86400000)),
     postedTo: mmddyyyy(now),
     ncode: SAM_NAICS_ROOFING,
-    state: "KY",
+    state,
     ptype: "o,p,k",
     limit: "200",
     offset: "0",
@@ -609,7 +1281,8 @@ export function samQueryUrl(apiKey: string, days = 60, now = new Date()): string
   return `${SAM_SEARCH_URL}?${q.toString()}`;
 }
 
-export function samLead(o: SamOpportunity, keywords: string[]): LeadInsert {
+/** `queryState`: the state the opportunity was asked for, when it names no place of performance. */
+export function samLead(o: SamOpportunity, keywords: string[], queryState = "KY"): LeadInsert {
   const agency = (o.fullParentPathName ?? "")
     .split(".")
     .map((x) => x.trim())
@@ -619,7 +1292,8 @@ export function samLead(o: SamOpportunity, keywords: string[]): LeadInsert {
   const poc = (o.pointOfContact ?? []).find((c) => c.fullName || c.email) ?? null;
   const contact = poc ? [poc.fullName, poc.email, poc.phone].filter(Boolean).join(" — ") : null;
   const city = o.placeOfPerformance?.city?.name ?? null;
-  const st = o.placeOfPerformance?.state?.code ?? "KY";
+  const code = (o.placeOfPerformance?.state?.code ?? "").trim().toUpperCase();
+  const st = /^[A-Z]{2}$/.test(code) ? code : queryState;
   const deadline =
     o.responseDeadLine && !Number.isNaN(Date.parse(o.responseDeadLine))
       ? new Date(o.responseDeadLine).toISOString()
@@ -633,6 +1307,7 @@ export function samLead(o: SamOpportunity, keywords: string[]): LeadInsert {
     agency: agency || "Federal",
     location: city ? `${city}, ${st}` : st,
     city,
+    state: st,
     project_type: [o.type, o.typeOfSetAsideDescription].filter(Boolean).join(" · ") || null,
     bid_at: deadline,
     issued_on: posted,
@@ -720,6 +1395,9 @@ export interface RefreshLeadsResult {
   paducah: number;
   campus: number;
   sam_gov: number;
+  tn_stream: number;
+  ut: number;
+  nashville: number;
   new_leads: number;
   new_roof_leads: number;
   gone: number;
@@ -847,7 +1525,7 @@ export async function refreshLeads(
   // A progress stamp first: if the run dies mid-way (a platform time limit), the settings row
   // shows when it started instead of the last good run.
   await stage(
-    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + 5} lists…`,
+    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + UT_CAMPUSES.length + 8} lists…`,
   );
 
   // Every list at once (the slowest site, not the sum, sets the run's length); each source
@@ -870,6 +1548,10 @@ export async function refreshLeads(
     if (stampErr) throw new Error(`could not stamp the SAM.gov pull: ${stampErr.message}`);
   }
   type Pulled = { source: LeadSource; rows: LeadInsert[]; count: number };
+  // A source read from several lists (campus pages, the two STREAM pages, SAM.gov's two
+  // states) with one of them failing: its rows from that list are missing, not withdrawn, so
+  // nothing of that source is marked gone this run.
+  const partial = new Set<LeadSource>();
   const attempt = async (
     source: LeadSource,
     label: string,
@@ -880,11 +1562,12 @@ export async function refreshLeads(
       return { source, rows: r.rows, count: r.count ?? r.rows.length };
     } catch (e) {
       failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
+      partial.add(source);
       return null;
     }
   };
-  const text = async (url: string) => {
-    const res = await fetchTimeout(url);
+  const text = async (url: string, headers?: Record<string, string>) => {
+    const res = await fetchTimeout(url, undefined, headers);
     if (!res.ok) throw new Error(`→ ${res.status}`);
     return res.text();
   };
@@ -919,19 +1602,48 @@ export async function refreshLeads(
       if (!bids.length) throw new Error("nothing parsed (page layout changed?)");
       return { rows: bids.map((b) => cityLead(b, "paducah_bids", s.roof_keywords)) };
     }),
+    // Tennessee.
+    attempt("tn_stream", "TN STREAM bid list", async () => {
+      const html = await text(STREAM_BID_LIST_URL);
+      const projects = parseStreamBidList(html);
+      // An empty list is possible; a page with accordion items and nothing read is a layout change.
+      if (!projects.length && /accordion-item/.test(html))
+        throw new Error("nothing parsed (page layout changed?)");
+      return { rows: projects.map((p) => streamLead(p, s.roof_keywords)) };
+    }),
+    attempt("tn_stream", "TN STREAM RFPs", async () => {
+      const rfps = parseStreamRfps(await text(STREAM_RFP_URL));
+      return { rows: rfps.map((p) => streamLead(p, s.roof_keywords)) };
+    }),
+    ...UT_CAMPUSES.map((campus) =>
+      attempt("ut_bids", `${campus.label} bids`, async () => {
+        const html = await text(utBidsUrl(campus.slug), UT_HEADERS);
+        if (!/Invitations? to Bid/i.test(html))
+          throw new Error("no Invitations to Bid heading (page layout changed?)");
+        // An empty list ("No information available at this time") is normal.
+        return {
+          rows: parseUtBids(html, campus).map((b) => utLead(b, campus, s.roof_keywords)),
+        };
+      }),
+    ),
+    attempt("nashville_permits", "Nashville permits", async () => {
+      const permits = await fetchNashville(s);
+      return { rows: permits.map((p) => nashvilleLead(p, s.roof_keywords)) };
+    }),
   ];
   if (samDue)
-    pulls.push(
-      attempt("sam_gov", "SAM.gov", async () => {
-        const res = await fetchTimeout(samQueryUrl(samKey));
-        const body = await res.text();
-        if (!res.ok)
-          throw new Error(`→ ${res.status} ${body.replace(/\s+/g, " ").slice(0, 200)}`.trim());
-        const json = JSON.parse(body) as { opportunitiesData?: SamOpportunity[] };
-        const ops = json.opportunitiesData ?? [];
-        return { rows: ops.map((o) => samLead(o, s.roof_keywords)) };
-      }),
-    );
+    for (const st of SAM_STATES)
+      pulls.push(
+        attempt("sam_gov", `SAM.gov ${st}`, async () => {
+          const res = await fetchTimeout(samQueryUrl(samKey, 60, new Date(), st));
+          const body = await res.text();
+          if (!res.ok)
+            throw new Error(`→ ${res.status} ${body.replace(/\s+/g, " ").slice(0, 200)}`.trim());
+          const json = JSON.parse(body) as { opportunitiesData?: SamOpportunity[] };
+          const ops = json.opportunitiesData ?? [];
+          return { rows: ops.map((o) => samLead(o, s.roof_keywords, st)) };
+        }),
+      );
   const pulled = (await Promise.all(pulls)).filter((x): x is Pulled => x !== null);
   await stage(`lists pulled, ${pulled.length} answered; saving…`);
   // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies.
@@ -945,10 +1657,19 @@ export async function refreshLeads(
       lynnDuplicates = dropped;
       x.rows = keep;
     }
-    rows.push(...x.rows);
+    // Every row names its state: one upsert batch sends the union of the rows' columns, and a
+    // row without `state` would send null (not the column default) and fail the not-null check.
+    rows.push(...x.rows.map((r) => ({ ...r, state: r.state ?? "KY" })));
     counts[x.source] = (counts[x.source] ?? 0) + x.count;
     fetchedSources.add(x.source);
   }
+  // One row per (source, external_id): an upsert that touches a row twice is refused outright.
+  const byKey = new Map<string, LeadInsert>();
+  for (const r of rows) {
+    const k = `${r.source}|${r.external_id}`;
+    if (!byKey.has(k)) byKey.set(k, r);
+  }
+  rows.splice(0, rows.length, ...byKey.values());
   const planroomCount = counts["ky_planroom"] ?? 0;
   const louisvilleCount = counts["louisville_permits"] ?? 0;
 
@@ -982,6 +1703,7 @@ export async function refreshLeads(
   for (const source of fetchedSources) {
     // Lynn's feed is the latest 25 posts; scrolling off it is not a withdrawal.
     if (source === "lynn_bids") continue;
+    if (partial.has(source)) continue;
     const ids = rows.filter((r) => r.source === source).map((r) => r.external_id);
     const { data: g, error } = await admin
       .from("leads")
@@ -1025,7 +1747,7 @@ export async function refreshLeads(
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -1035,6 +1757,9 @@ export async function refreshLeads(
     paducah: counts["paducah_bids"] ?? 0,
     campus: counts["campus_planrooms"] ?? 0,
     sam_gov: counts["sam_gov"] ?? 0,
+    tn_stream: counts["tn_stream"] ?? 0,
+    ut: counts["ut_bids"] ?? 0,
+    nashville: counts["nashville_permits"] ?? 0,
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,

@@ -2754,6 +2754,8 @@ export type Database = {
           louisville_days: number;
           louisville_min_sqft: number;
           louisville_types: string[];
+          nashville_min_cost: number;
+          nashville_types: string[];
           roof_keywords: string[];
           source_fetched_at: Json;
           updated_at: string;
@@ -2765,6 +2767,8 @@ export type Database = {
           louisville_days?: number;
           louisville_min_sqft?: number;
           louisville_types?: string[];
+          nashville_min_cost?: number;
+          nashville_types?: string[];
           roof_keywords?: string[];
           source_fetched_at?: Json;
           updated_at?: string;
@@ -2776,6 +2780,8 @@ export type Database = {
           louisville_days?: number;
           louisville_min_sqft?: number;
           louisville_types?: string[];
+          nashville_min_cost?: number;
+          nashville_types?: string[];
           roof_keywords?: string[];
           source_fetched_at?: Json;
           updated_at?: string;
@@ -2809,6 +2815,7 @@ export type Database = {
           raw: Json | null;
           source: string;
           sqft: number | null;
+          state: string;
           status: string;
           status_at: string | null;
           status_by_name: string | null;
@@ -2841,6 +2848,7 @@ export type Database = {
           raw?: Json | null;
           source: string;
           sqft?: number | null;
+          state?: string;
           status?: string;
           status_at?: string | null;
           status_by_name?: string | null;
@@ -2873,6 +2881,7 @@ export type Database = {
           raw?: Json | null;
           source?: string;
           sqft?: number | null;
+          state?: string;
           status?: string;
           status_at?: string | null;
           status_by_name?: string | null;

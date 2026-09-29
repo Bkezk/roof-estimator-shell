@@ -2,8 +2,9 @@
  * Construction leads (owner, Sep 28: "is there any way to get data on new builds before
  * they're built giving us time to submit a bid?"). Two public feeds, pulled nightly and when
  * this page loads (throttled to six hours on the server): every state-funded project out for bid
- * on the State of KY planroom, and Louisville Metro's large commercial building permits. A lead
- * can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
+ * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
+ * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits) from Sep 29,
+ * all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import {
   SOURCE_LABELS,
   type LeadRow,
   type LeadStatus,
+  type ListLeadsInput,
 } from "@/lib/leads.functions";
 import { LeadCard } from "@/components/prospect/lead-card";
 import { isClosedBid } from "@/components/prospect/lead-format";
@@ -44,8 +46,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-type Source =
-  "all" | "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
+type Source = "all" | NonNullable<ListLeadsInput["source"]>;
 // Owner (Sep 29): Open, Watching and Dismissed are enough; leads are not put on the map.
 type StatusTab = "open" | "watching" | "dismissed";
 const TABS: { value: StatusTab; label: string }[] = [
@@ -61,15 +62,18 @@ const ABOUT =
   "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
   "Bowling Green and Paducah bids: those cities' own bid pages. " +
   "University & school planrooms: UK, WKU, NKU, EKU, UofL, Jefferson County Public Schools and KCTCS projects out for bid. " +
-  "Federal (SAM.gov): roofing-contractor opportunities with Kentucky as the place of performance. " +
+  "Federal (SAM.gov): roofing-contractor opportunities with Kentucky or Tennessee as the place of performance. " +
   "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
+  "Tennessee — TN state projects (STREAM): every state building project out for bid, with the designer to call; " +
+  "UT bids: the University of Tennessee campuses' invitations to bid; " +
+  "Nashville permits: Metro Nashville commercial new, addition, shell and roofing permits over the minimum cost; " +
   "The app checks them every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|[\w. ]+ planroom) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
@@ -257,7 +261,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
               variant="outline"
               disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
-              title="Pull the state planroom and Louisville permits now"
+              title="Pull every lead source (Kentucky and Tennessee) now"
             >
               {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
