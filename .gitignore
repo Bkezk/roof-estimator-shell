@@ -31,9 +31,6 @@ dist-ssr
 *.sln
 *.sw?
 
-# npm lockfile (project uses bun.lock; npm is only used in CI/agent containers)
-package-lock.json
-
 # PlanSwift generator inputs/outputs (owner export + generated templates)
 scripts/planswift/sample/
 scripts/planswift/out/
