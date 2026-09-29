@@ -134,6 +134,9 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Owner (Sep 29): the browser cuts a long tooltip off before the "Last check" line, so the
+  // info icon opens a panel instead.
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
   const filters = { roofOnly, source, status: tab, state };
@@ -286,14 +289,16 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
                     ? "Not checked yet"
                     : ""}
           </span>
-          <span
-            className="inline-flex h-7 w-7 cursor-help items-center justify-center text-muted-foreground"
-            tabIndex={0}
-            aria-label="Where leads come from"
-            title={`${ABOUT}${settings?.last_fetch_note ? `\n\nLast check: ${settings.last_fetch_note}` : ""}`}
+          <button
+            type="button"
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${aboutOpen ? "bg-muted" : ""}`}
+            aria-label="Where leads come from and what the last check found"
+            aria-expanded={aboutOpen}
+            title="Where leads come from and what the last check found"
+            onClick={() => setAboutOpen((v) => !v)}
           >
             <Info className="h-3.5 w-3.5" />
-          </span>
+          </button>
           {canWrite && (
             <Button
               size="sm"
@@ -337,6 +342,23 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
           No planroom sign-in on the server yet: state and Lynn cards show contacts and plan holders
           once PLANROOM_EMAIL and PLANROOM_PASSWORD are set in Lovable Cloud.
         </p>
+      )}
+
+      {aboutOpen && (
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm">
+          {settings?.last_fetch_note ? (
+            <p>
+              <span className="font-medium">Last check</span>
+              {settings.last_fetch_at
+                ? ` (${new Date(settings.last_fetch_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })})`
+                : ""}
+              : {settings.last_fetch_note}
+            </p>
+          ) : (
+            <p>No check has run yet.</p>
+          )}
+          <p className="text-xs text-muted-foreground">{ABOUT}</p>
+        </div>
       )}
 
       {admin && settings && settingsOpen && (
