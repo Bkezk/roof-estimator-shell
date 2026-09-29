@@ -14,6 +14,7 @@ import { Info, Loader2, RefreshCw, Search, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
+import { supabase } from "@/integrations/supabase/client";
 import { isAdmin } from "@/lib/access";
 import {
   addLeadToProspects,
@@ -55,6 +56,8 @@ const TABS: { value: StatusTab; label: string }[] = [
   { value: "added", label: "Added" },
   { value: "dismissed", label: "Dismissed" },
 ];
+
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
 
 const ABOUT =
   "State planroom: every state-funded Kentucky project in its bid phase, with pre-bid and bid dates. " +
@@ -147,8 +150,21 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   };
   const refresh = useMutation({
     // The server answers within about a minute or reports why; past 90 s stop waiting.
-    mutationFn: (force: boolean) =>
-      Promise.race([
+    mutationFn: async (force: boolean) => {
+      // Diagnostic stamp straight from the browser (owner, Sep 29: "still spinning" with no
+      // server stamp): if this note lands and the server's "refresh requested" never does, the
+      // server function call itself is what never comes back. Best effort, 10 s at most.
+      try {
+        await Promise.race([
+          supabase.rpc("stamp_lead_fetch", {
+            note: `refresh ${force ? "pressed" : "checked on load"} in the browser ${new Date().toISOString()}…`,
+          }),
+          new Promise<void>((resolve) => setTimeout(resolve, 10000)),
+        ]);
+      } catch {
+        // The server call below reports the real outcome.
+      }
+      return Promise.race([
         refreshFn({ data: { force } }),
         new Promise<never>((_, reject) =>
           setTimeout(
@@ -161,7 +177,8 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             90000,
           ),
         ),
-      ]),
+      ]);
+    },
     onSuccess: (r, force) => {
       setRefreshError(r.error);
       if (r.error) toast.error(`Lead refresh: ${r.error}`);
@@ -175,14 +192,20 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     },
   });
   // The lazy pass: a Prospecting user's visit pulls the feeds if the last pull is over six
-  // hours old (the server throttles). Once per page load; silent unless it fails.
+  // hours old (the server throttles too). Decided here from the counts query so a page whose
+  // last check is recent makes no refresh call at all. Once per page load; silent unless it
+  // fails.
   const refreshStarted = useRef(false);
+  const lastFetchAt = counts.data?.settings?.last_fetch_at ?? null;
   useEffect(() => {
-    if (!canWrite || refreshStarted.current) return;
+    if (!canWrite || !counts.data || refreshStarted.current) return;
     refreshStarted.current = true;
-    refresh.mutate(false);
+    const due = !lastFetchAt || Date.now() - Date.parse(lastFetchAt) > SIX_HOURS_MS;
+    if (due) refresh.mutate(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page load
-  }, [canWrite]);
+  }, [canWrite, counts.data]);
+  /** A manual press is in flight (the on-load pass does not hold the button). */
+  const pressing = refresh.isPending && refresh.variables === true;
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const setStatus = useMutation({
@@ -260,11 +283,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={refresh.isPending || reading !== null}
+              disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
               title="Pull the state planroom and Louisville permits now"
             >
-              {refresh.isPending ? (
+              {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="mr-1 h-4 w-4" />
