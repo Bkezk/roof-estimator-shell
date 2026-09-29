@@ -255,6 +255,8 @@ export function ProspectPage(props: {
   initialStorm?: boolean | undefined;
   /** ?at=lat,lng: fly the map there with the outlines on, so the building can be tapped open. */
   initialAt?: { lat: number; lng: number } | undefined;
+  /** ?q=<text>: open with the search box filled (a permit lead with no point). */
+  initialQuery?: string | undefined;
 }) {
   const { can, profile } = useAuth();
   const canWrite = can("prospect");
@@ -281,7 +283,7 @@ export function ProspectPage(props: {
   const stormSummaryFn = useServerFn(stormSummary);
   const stormHitsFn = useServerFn(buildingStormHits);
 
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(props.initialQuery ?? "");
   const [county, setCounty] = useState("");
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
   const [sort, setSort] = useState<"recent" | "biggest" | "storm">(
@@ -379,6 +381,9 @@ export function ProspectPage(props: {
   }, [props.initialStorm]);
   // A point to look at (a Louisville permit lead): outlines on so the roof can be tapped open.
   const [focus, setFocus] = useState<{ lat: number; lng: number } | null>(props.initialAt ?? null);
+  useEffect(() => {
+    if (props.initialQuery) setQ(props.initialQuery);
+  }, [props.initialQuery]);
   useEffect(() => {
     if (!props.initialAt) return;
     setFocus(props.initialAt);

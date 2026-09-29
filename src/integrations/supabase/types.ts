@@ -2786,6 +2786,7 @@ export type Database = {
           bid_at: string | null;
           building_id: string | null;
           city: string | null;
+          contact: string | null;
           contractor: string | null;
           county: string | null;
           external_id: string;
@@ -2817,6 +2818,7 @@ export type Database = {
           bid_at?: string | null;
           building_id?: string | null;
           city?: string | null;
+          contact?: string | null;
           contractor?: string | null;
           county?: string | null;
           external_id: string;
@@ -2848,6 +2850,7 @@ export type Database = {
           bid_at?: string | null;
           building_id?: string | null;
           city?: string | null;
+          contact?: string | null;
           contractor?: string | null;
           county?: string | null;
           external_id?: string;

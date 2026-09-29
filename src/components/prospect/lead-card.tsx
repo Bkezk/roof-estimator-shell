@@ -117,8 +117,10 @@ export function LeadCard(props: {
     // A permit lead points into the app (/prospect?at=lat,lng): stay in the app. Anything
     // else is the source site, in a new tab.
     if (l.url.startsWith("/prospect?")) {
-      const at = new URLSearchParams(l.url.slice(l.url.indexOf("?"))).get("at");
-      void navigate({ to: "/prospect", search: at ? { at } : {} });
+      const params = new URLSearchParams(l.url.slice(l.url.indexOf("?")));
+      const at = params.get("at");
+      const q = params.get("q");
+      void navigate({ to: "/prospect", search: { ...(at ? { at } : {}), ...(q ? { q } : {}) } });
       return;
     }
     window.open(l.url, "_blank", "noopener,noreferrer");
@@ -182,6 +184,17 @@ export function LeadCard(props: {
       </div>
 
       <BidLine lead={l} />
+
+      {l.contact ? (
+        <p className="text-sm">
+          <span className="font-medium">Contact:</span> {l.contact}
+        </p>
+      ) : l.source === "ky_planroom" || l.source === "lynn_bids" ? (
+        <p className="text-xs text-muted-foreground">
+          Bid documents, the owner's contact and the plan-holder list are on the planroom job page
+          after a free sign-in.
+        </p>
+      ) : null}
 
       {l.note && !noteOpen && (
         <p className="whitespace-pre-wrap text-sm italic text-muted-foreground">{l.note}</p>

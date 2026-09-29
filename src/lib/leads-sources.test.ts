@@ -156,6 +156,9 @@ describe("Bowling Green bids page", () => {
   });
 });
 
+const surplusContact = (bids: ReturnType<typeof parsePaducahBids>) =>
+  bids.find((b) => /Surplus/.test(b.title))?.contact ?? null;
+
 describe("Paducah bids page", () => {
   it("reads each active request heading with its packet link, scope and due-date sentence", () => {
     const bids = parsePaducahBids(PADUCAH);
@@ -167,6 +170,12 @@ describe("Paducah bids page", () => {
     );
     expect(rfp.dueText).toContain("no later than 4:30 p.m. CT on Tuesday, October 13");
     expect(rfp.scope).toContain("requesting proposals from professional services firms");
+    // The site hides the e-mail behind a span; the contact line puts it back together.
+    expect(rfp.contact).toBe(
+      "Melanie Townsend, Engineering Project Manager — mtownsend@paducahky.gov",
+    );
+    // The surplus-property block names a phone and no person.
+    expect(surplusContact(bids)).toBe("270-444-8690");
     const surplus = bids[1]!;
     expect(surplus.title).toBe("Request for Bids - Surplus Property Parcels");
     expect(surplus.url).toBe("https://paducahky.gov/request-bids-or-proposals");

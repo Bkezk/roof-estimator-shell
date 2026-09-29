@@ -45,7 +45,7 @@ export const LOUISVILLE_PERMITS_PAGE =
  * Where a permit card goes: the open-data explorer cannot deep-link one permit (owner, Sep 29:
  * "just pulls up this map") and Google Maps is blocked on the owner's network, so the card
  * opens the site on the app's own Buildings map (outlines on, ready to tap) when the permit
- * carries a point; a permit without one falls back to an OpenStreetMap address search.
+ * carries a point; a permit without one searches the Buildings list for its address.
  */
 export function permitSiteUrl(p: {
   LATITUDE: number | null;
@@ -54,8 +54,8 @@ export function permitSiteUrl(p: {
   CITY: string | null;
 }): string {
   if (p.LATITUDE != null && p.LONGITUDE != null) return `/prospect?at=${p.LATITUDE},${p.LONGITUDE}`;
-  const q = `${(p.ADDRESS ?? "").trim()}, ${(p.CITY ?? "Louisville").trim()}, KY`;
-  return `https://www.openstreetmap.org/search?query=${encodeURIComponent(q)}`;
+  // No point: search the Buildings list for the address (outside map sites are blocked there).
+  return `/prospect?q=${encodeURIComponent((p.ADDRESS ?? "").trim())}`;
 }
 
 /**
@@ -321,6 +321,8 @@ export interface CityBid {
   scope: string | null;
   /** Due date text when the page states one ("October 13"), left as written. */
   dueText: string | null;
+  /** Who to ask: "Melanie Townsend, Engineering Project Manager — mtownsend@paducahky.gov — 270-444-8690". */
+  contact: string | null;
 }
 
 /** "Sep 21, 2026" / "September 21, 2026" → ISO date, else null. */
@@ -357,6 +359,7 @@ export function parseBgkyBids(html: string): CityBid[] {
       postedAt: cells[1] ? parseLongDate(decode(cells[1])) : null,
       scope: null,
       dueText: null,
+      contact: null,
     });
   }
   return out;
@@ -382,7 +385,21 @@ export function parsePaducahBids(html: string): CityBid[] {
     const stop = rest.search(/<h[1-3][^>]*>/i);
     if (stop >= 0) rest = rest.slice(0, stop);
     const pdf = /<a[^>]*href="([^"]+\.pdf)"/i.exec(rest);
-    const text = decode(rest.replace(/<\/p>/gi, " ")).replace(/\s+/g, " ").trim();
+    // The site hides e-mail addresses as "name<span …-image></span>domain": put the @ back.
+    const text = decode(
+      rest.replace(/<span[^>]*-image"[^>]*><\/span>/gi, "@").replace(/<\/p>/gi, " "),
+    )
+      .replace(/\s+/g, " ")
+      .trim();
+    const who =
+      /(?:directed to|contact)\s+([A-Z][\w.'-]+(?:\s+[A-Z][\w.'-]+){0,3}(?:,\s*[^,.@]{3,60}?)?)(?=,?\s+(?:at|by|via)\b|\.|,\s*at\b)/.exec(
+        text,
+      );
+    const email = /[\w.+-]+@[\w-]+\.[\w.]+/.exec(text);
+    const phones = [...new Set(text.match(/\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}/g) ?? [])];
+    const contact =
+      [who?.[1]?.trim(), email?.[0], phones.slice(0, 2).join(" / ")].filter(Boolean).join(" — ") ||
+      null;
     // "…received no later than 4:30 p.m. CT on Tuesday, October 13." — the sentence ends at
     // the period followed by a new sentence, not at the one inside "p.m.".
     // (Case-sensitive on purpose: the lookahead must not treat "p.m. CT" as a sentence end.)
@@ -402,6 +419,7 @@ export function parsePaducahBids(html: string): CityBid[] {
       postedAt: null,
       scope,
       dueText: due ? due[0].trim() : null,
+      contact,
     });
   }
   return out;
@@ -424,6 +442,7 @@ export function cityLead(
     county,
     url: b.url,
     issued_on: b.postedAt,
+    contact: b.contact,
     is_roof: isRoofLead(`${b.title} ${b.scope ?? ""}`, keywords),
     raw: { ...b } as unknown as Json,
     last_seen_at: new Date().toISOString(),
@@ -475,6 +494,10 @@ export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadIns
     title: address ? `${address}${type ? ` — ${type}` : ""}` : p.PERMIT_NUMBER,
     agency: null,
     contractor: (p.CONTRACTOR ?? "").trim() || null,
+    // On a new build the roofing is bid to the general contractor on the permit.
+    contact: (p.CONTRACTOR ?? "").trim()
+      ? `General contractor ${(p.CONTRACTOR ?? "").trim()} — bid the roofing to them`
+      : null,
     location: [p.CITY, p.ZIPCODE].filter(Boolean).join(" ") || null,
     county: "Jefferson",
     address: address || null,

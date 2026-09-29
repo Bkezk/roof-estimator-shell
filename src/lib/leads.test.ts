@@ -86,24 +86,22 @@ describe("Louisville permits", () => {
   });
   it("maps a permit row: address title, Jefferson County, point, sq ft, cost, issue date", () => {
     // COM-NEW-26-00159 as returned by the service on Sep 28, 2026.
-    const lead = louisvilleLead(
-      {
-        PERMIT_NUMBER: "COM-NEW-26-00159",
-        PERMIT_TYPE: "Commercial New",
-        PERMIT_STATUS: "Issued",
-        CONTRACTOR: "MONARCH RESTORATION",
-        WORK_TYPE: null,
-        SQFT: 1232,
-        PROJECT_COSTS: 10000,
-        ADDRESS: "1338 LYNMAR DR, 1",
-        CITY: "LOUISVILLE",
-        ZIPCODE: "40216",
-        LATITUDE: 38.18,
-        LONGITUDE: -85.85,
-        ISSUE_DATE: Date.UTC(2026, 8, 24, 4),
-      },
-      KEYWORDS,
-    );
+    const permit = {
+      PERMIT_NUMBER: "COM-NEW-26-00159",
+      PERMIT_TYPE: "Commercial New",
+      PERMIT_STATUS: "Issued",
+      CONTRACTOR: "MONARCH RESTORATION",
+      WORK_TYPE: null,
+      SQFT: 1232,
+      PROJECT_COSTS: 10000,
+      ADDRESS: "1338 LYNMAR DR, 1",
+      CITY: "LOUISVILLE",
+      ZIPCODE: "40216",
+      LATITUDE: 38.18,
+      LONGITUDE: -85.85,
+      ISSUE_DATE: Date.UTC(2026, 8, 24, 4),
+    };
+    const lead = louisvilleLead(permit, KEYWORDS);
     expect(lead.title).toBe("1338 LYNMAR DR, 1 — Commercial New");
     expect(lead.county).toBe("Jefferson");
     expect(lead.contractor).toBe("MONARCH RESTORATION");
@@ -115,6 +113,11 @@ describe("Louisville permits", () => {
     expect(lead.external_id).toBe("COM-NEW-26-00159");
     // The card opens the site on the app's own map (the open-data explorer cannot link one permit).
     expect(lead.url).toBe("/prospect?at=38.18,-85.85");
+    expect(lead.contact).toBe("General contractor MONARCH RESTORATION — bid the roofing to them");
+    // No point → the Buildings search for the address, still inside the app.
+    expect(louisvilleLead({ ...permit, LATITUDE: null, LONGITUDE: null }, KEYWORDS).url).toBe(
+      "/prospect?q=1338%20LYNMAR%20DR%2C%201",
+    );
   });
 });
 
