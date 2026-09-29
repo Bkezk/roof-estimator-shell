@@ -356,7 +356,15 @@ export function AppSidebar() {
             <SidebarMenu>
               {prospectItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    // Buildings is /prospect and Leads is /prospect/leads: without the except
+                    // list both lit up on the Leads page (owner, Sep 29).
+                    isActive={
+                      isActive(item.url) && !(item.except ?? []).some((p) => pathname.startsWith(p))
+                    }
+                    tooltip={item.title}
+                  >
                     <Link to={item.url}>
                       <item.icon className="h-4 w-4" />
                       {!collapsed && <span>{item.title}</span>}

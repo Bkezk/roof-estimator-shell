@@ -37,7 +37,6 @@ import {
   stateForPoint,
 } from "@/lib/prospect";
 import {
-  deleteBuilding,
   deleteRoof,
   getBuilding,
   listBuildings,
@@ -275,7 +274,6 @@ export function ProspectPage(props: {
   const countiesFn = useServerFn(listCounties);
   const getFn = useServerFn(getBuilding);
   const saveFn = useServerFn(saveBuilding);
-  const deleteFn = useServerFn(deleteBuilding);
   const saveRoofFn = useServerFn(saveRoof);
   const deleteRoofFn = useServerFn(deleteRoof);
   const saveTaskFn = useServerFn(saveTask);
@@ -532,16 +530,6 @@ export function ProspectPage(props: {
     onSuccess: (row) => {
       toast.success("Building saved");
       setSelectedId(row.id);
-      invalidate();
-    },
-    onError: fail,
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => deleteFn({ data: { id } }),
-    onSuccess: () => {
-      toast.success("Building removed");
-      setSelectedId(null);
-      setForm(null);
       invalidate();
     },
     onError: fail,
@@ -1277,23 +1265,6 @@ export function ProspectPage(props: {
                         disabled={save.isPending || (!form.name.trim() && !form.address1.trim())}
                       >
                         {form.id ? "Save" : "Save as prospect"}
-                      </Button>
-                    )}
-                    {form.id && canWrite && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive"
-                        onClick={() => {
-                          if (
-                            confirm(
-                              "Remove this building? Its roofs and tasks stay attached to it in history.",
-                            )
-                          )
-                            remove.mutate(form.id!);
-                        }}
-                      >
-                        <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>
