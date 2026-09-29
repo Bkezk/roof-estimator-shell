@@ -1,10 +1,15 @@
 /**
- * Nightly read of the two Tennessee city bid lists that only render in a browser (Tennessee
- * leads, round three; src/lib/leads-browser.ts has the background): Metro Nashville's and the
- * City of Chattanooga's Oracle Cloud procurement portals. Both are public read-only lists; this
- * never signs in or registers anywhere.
+ * Nightly read of the city bid lists that only render in a browser (src/lib/leads-browser.ts
+ * has the background): Metro Nashville's and the City of Chattanooga's Oracle Cloud procurement
+ * portals (Tennessee leads, round three) and Louisville Metro's Bonfire portal (Kentucky, Sep
+ * 29). All are public read-only lists; this never signs in or registers anywhere.
  *
- * For each portal: open the list once, scroll the table until no more rows load (the page
+ * Louisville (Bonfire): open the list once and keep the JSON the page itself asks its server
+ * for (the open-opportunities list: reference, name, close date in UTC, department); nothing
+ * else is requested. The per-row opportunity pages sit behind a Cloudflare robot check and are
+ * never opened (the lead links them). The table the page draws must state its Eastern zone.
+ *
+ * Oracle, for each portal: open the list once, scroll the table until no more rows load (the page
  * fetches about 20 at a time), keep each solicitation's current round and drop the closed
  * ones, open the Details abstract once per open row (buyer, full title, attachments, and in
  * Chattanooga the synopsis and pre-bid meeting), then POST the rows to the app:
@@ -13,9 +18,9 @@
  * A portal that fails (or runs past its 90 s budget) posts nothing, so the app marks nothing
  * gone; the script then exits non-zero so the GitHub run turns red.
  *
- *   npx vite-node scripts/browser-bids.ts             read both and post (needs APP_URL, CRON_SECRET)
- *   npx vite-node scripts/browser-bids.ts --dry-run   read both and print the rows; posts nothing
- *   … --source nashville_bids                          one portal only
+ *   npx vite-node scripts/browser-bids.ts             read all three and post (needs APP_URL, CRON_SECRET)
+ *   npx vite-node scripts/browser-bids.ts --dry-run   read all three and print the rows; posts nothing
+ *   … --source louisville_bids  (or --portal …)        one portal only
  *
  * Env: APP_URL, CRON_SECRET; for local runs CHROMIUM_PATH (a Chromium binary) and PW_ARGS
  * (extra browser flags, e.g. "--ignore-certificate-errors --no-sandbox" behind a proxy).
@@ -23,8 +28,11 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 
 import {
+  BONFIRE_ASSET_HOST,
+  BONFIRE_OPEN_PATH,
   BROWSER_PORTALS,
   BROWSER_SOURCES,
+  bonfireRows,
   browserImportSchema,
   currentRounds,
   type BrowserPortal,
@@ -41,10 +49,10 @@ const PAUSE_MS = 800;
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
-const onlyIdx = args.indexOf("--source");
-const only = onlyIdx >= 0 ? args[onlyIdx + 1] : undefined;
+const onlyIdx = Math.max(args.indexOf("--source"), args.indexOf("--portal"));
+const only = onlyIdx >= 0 ? (args[onlyIdx + 1] ?? "") : undefined;
 if (only !== undefined && !(BROWSER_SOURCES as readonly string[]).includes(only)) {
-  console.error(`--source must be one of ${BROWSER_SOURCES.join(", ")}`);
+  console.error(`--source (or --portal) must be one of ${BROWSER_SOURCES.join(", ")}`);
   process.exit(2);
 }
 const appUrl = (process.env["APP_URL"] ?? "").trim().replace(/\/+$/, "");
@@ -295,8 +303,8 @@ const field = (a: Abstract | null, re: RegExp): string | null => {
   return k ? a.fields[k] || null : null;
 };
 
-/** One portal, start to finish, inside its budget. Throws on anything that is not a full read. */
-async function readPortal(
+/** One Oracle portal, start to finish, inside its budget. Throws on anything that is not a full read. */
+async function readOracle(
   context: BrowserContext,
   portal: BrowserPortal,
   t0: number,
@@ -415,6 +423,95 @@ async function readPortal(
   return { rows: out, listed: rows.length, requests, scrolls };
 }
 
+/**
+ * One Bonfire portal: load the list page once and keep the open-opportunities JSON the page
+ * fetches for itself. Throws (nothing is posted) when that answer does not come, is not the
+ * list, or the page does not show the portal's time zone next to its dates.
+ */
+async function readBonfire(
+  context: BrowserContext,
+  portal: BrowserPortal,
+  t0: number,
+): Promise<{ rows: PortalRow[]; listed: number; requests: number; scrolls: number }> {
+  const host = new URL(portal.url).host;
+  let requests = 0;
+  const page = await context.newPage();
+  // Only the portal and Bonfire's own script/style host: analytics, video and the robot-check
+  // host are not needed (a list behind a robot check fails here instead of being solved), nor
+  // are images and fonts.
+  await page.route("**/*", (route) => {
+    const req = route.request();
+    const u = new URL(req.url());
+    if (u.protocol.startsWith("http") && u.host !== host && u.host !== BONFIRE_ASSET_HOST)
+      return route.abort();
+    if (["image", "font", "media"].includes(req.resourceType())) return route.abort();
+    return route.continue();
+  });
+  page.on("request", (r) => {
+    const type = r.resourceType();
+    if (type === "document" || type === "xhr" || type === "fetch") requests++;
+  });
+  const answer = page.waitForResponse(
+    (r) => {
+      const u = new URL(r.url());
+      return u.host === host && u.pathname === BONFIRE_OPEN_PATH;
+    },
+    { timeout: 45000 },
+  );
+  // A failed load leaves `answer` waiting: settle it quietly, the goto error is the report.
+  answer.catch(() => undefined);
+  await page.goto(portal.url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  const res = await answer.catch(() => null);
+  const body0 = await page.evaluate(() => document.body.innerText).catch(() => "");
+  if (/Performing security verification|verify you are (not a bot|human)/i.test(body0))
+    throw new Error("the list page shows a robot check (not attempted)");
+  if (!res) throw new Error(`the page never asked for its open list (${BONFIRE_OPEN_PATH})`);
+  if (!res.ok()) throw new Error(`the open list answered ${res.status()}`);
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    throw new Error("the open list is not JSON (API changed?)");
+  }
+  const rows = bonfireRows(json, portal);
+  // The table the page draws from it: wait for it, check the zone its dates are shown in, and
+  // that it shows the same references (a warning only: the JSON is what is posted).
+  let shown = "";
+  try {
+    await page.waitForFunction(
+      (n) =>
+        n === 0
+          ? /Close Date/i.test(document.body.innerText)
+          : /View Opportunity/i.test(document.body.innerText),
+      rows.length,
+      { timeout: 15000, polling: 250 },
+    );
+    shown = await page.evaluate(() => document.body.innerText);
+  } catch {
+    throw new Error("the list table never appeared (layout changed?)");
+  }
+  if (/Log ?In/i.test(shown) && !/Open Public Opportunities/i.test(shown))
+    throw new Error("the page asks for a sign-in instead of showing the list (not attempted)");
+  if (rows.length && !portal.timeZoneText.test(shown))
+    throw new Error(
+      `the table does not show its dates in ${portal.timeZoneText.source} (dates would be read in the wrong zone)`,
+    );
+  const missing = rows.filter((r) => !shown.includes(r.number)).map((r) => r.number);
+  if (missing.length)
+    console.log(`  warning: in the JSON but not in the table: ${missing.slice(0, 10).join(", ")}`);
+  console.log(`${portal.label}: ${rows.length} open in the list (${secs(t0)})`);
+  await pause(PAUSE_MS);
+  await page.close();
+  return { rows, listed: rows.length, requests, scrolls: 0 };
+}
+
+/** One portal, start to finish, inside its budget. Throws on anything that is not a full read. */
+function readPortal(context: BrowserContext, portal: BrowserPortal, t0: number) {
+  return portal.kind === "bonfire"
+    ? readBonfire(context, portal, t0)
+    : readOracle(context, portal, t0);
+}
+
 async function withBudget<T>(
   ms: number,
   work: Promise<T>,
@@ -472,7 +569,7 @@ async function main() {
         });
         const read = r.rows.filter((x) => x.detailsRead).length;
         console.log(
-          `${portal.label}: ${r.rows.length} open, ${read} abstracts read, ${r.requests} page requests, ${secs(t0)}`,
+          `${portal.label}: ${r.rows.length} open, ${portal.kind === "oracle" ? `${read} abstracts read, ` : ""}${r.requests} page requests, ${secs(t0)}`,
         );
         if (dryRun) console.log(JSON.stringify(payload, null, 2));
         else console.log(`${portal.label}: posted → ${await post(payload)}`);

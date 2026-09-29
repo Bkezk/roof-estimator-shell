@@ -327,6 +327,7 @@ class FakeQuery {
   private patch: Rec = {};
   private filters: ((r: Rec) => boolean)[] = [];
   private single_ = false;
+  private window: [number, number] | null = null;
   constructor(
     private db: FakeDb,
     private table: string,
@@ -373,9 +374,18 @@ class FakeQuery {
     this.filters.push((r) => !vs.includes(r[c] as string));
     return this;
   }
+  // saveLeadRows reads stored leads in pages (ordered by id); the rows here are few.
+  order() {
+    return this;
+  }
+  range(from: number, to: number) {
+    this.window = [from, to];
+    return this;
+  }
   then<T>(done: (v: { data: unknown; error: null }) => T) {
     const rows = this.table === "leads" ? this.db.leads : [this.db.settings];
-    const hit = rows.filter((r) => this.filters.every((f) => f(r)));
+    let hit = rows.filter((r) => this.filters.every((f) => f(r)));
+    if (this.window) hit = hit.slice(this.window[0], this.window[1] + 1);
     if (this.op === "update") for (const r of hit) Object.assign(r, this.patch);
     const data = this.op === "upsert" ? null : this.single_ ? (hit[0] ?? null) : hit;
     return Promise.resolve({ data, error: null }).then(done);

@@ -1,13 +1,15 @@
 # Reads Metro Nashville's and the City of Chattanooga's bid lists (Tennessee leads, round
-# three). Both live in Oracle Cloud procurement portals whose pages only render in a browser,
-# so this job opens the two public lists in headless Chromium (scripts/browser-bids.ts; no
-# login, no registration), keeps the open solicitations and posts them to the app's
-# /api/cron/leads-import. Runs before the 10:45 leads run (leads.yml). Uses the same two
+# three) and Louisville Metro's (Kentucky, Sep 29). They live in Oracle Cloud and Bonfire
+# procurement portals whose pages only render in a browser, so this job opens the three public
+# lists in headless Chromium (scripts/browser-bids.ts reads every portal in
+# src/lib/leads-browser.ts; no login, no registration), keeps the open solicitations and posts
+# them to the app's /api/cron/leads-import. Runs before the 10:45 leads run (leads.yml). Uses the same two
 # repository secrets as leads.yml: APP_URL and CRON_SECRET (= LOVABLE_CRON_SECRET in Lovable
 # Cloud); without them the job skips. A portal that cannot be read posts nothing (its leads are
 # left as they were) and turns the run red. Needs
-# supabase/migrations/20260930000000_leads_browser_sources.sql applied (the import is refused
-# on the source check otherwise).
+# supabase/migrations/20260930000000_leads_browser_sources.sql and (for Louisville)
+# 20260930010000_leads_kentucky_cities.sql applied (the import is refused on the source check
+# otherwise).
 name: Browser bids
 
 on:

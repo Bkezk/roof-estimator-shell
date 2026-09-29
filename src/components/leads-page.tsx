@@ -5,8 +5,9 @@
  * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
  * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits; then BidNet,
  * Chattanooga permits, Knox County and the universities) from Sep 29, all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
- * Metro Nashville's and Chattanooga's own bid lists come in from a nightly browser job instead
- * (GitHub Actions, scripts/browser-bids.ts); the page warns when they stop arriving.
+ * Metro Nashville's, Chattanooga's and (Sep 29) Louisville Metro's own bid lists come in from a
+ * nightly browser job instead (GitHub Actions, scripts/browser-bids.ts); the page warns when
+ * they stop arriving. Lexington's city bids are pulled with the rest.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,6 +65,8 @@ const ABOUT =
   "State planroom: every state-funded Kentucky project in its bid phase, with pre-bid and bid dates. " +
   "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
   "Bowling Green and Paducah bids: those cities' own bid pages. " +
+  "Lexington city bids: the Lexington-Fayette Urban County Government's current bids and RFPs (the public list on its Ionwave supplier portal; a bid has no public page of its own, so the card opens the list). " +
+  "Louisville Metro bids: Louisville Metro Government's open solicitations with the department and close date (its Bonfire portal, read by the nightly browser job; the card opens the opportunity page). " +
   "University & school planrooms: UK, WKU, NKU, EKU, UofL, Jefferson County Public Schools and KCTCS projects out for bid. " +
   "Federal (SAM.gov): roofing-contractor opportunities with Kentucky or Tennessee as the place of performance. " +
   "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
@@ -74,14 +77,14 @@ const ABOUT =
   "Knox County bids: Knox County's own solicitations; " +
   "TN university bids: ETSU, Tennessee Tech, Austin Peay, MTSU and the Board of Regents (community colleges, TCATs, TSU). " +
   "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. " +
-  "Metro Nashville bids and Chattanooga city bids: those cities' own solicitations (the buyer to ask, the close date, Chattanooga's pre-bid meeting), from their Oracle supplier portals; those pages only work in a browser, so a nightly job reads them at about 6:15 am Eastern and Refresh does not re-read them. " +
+  "Metro Nashville bids and Chattanooga city bids: those cities' own solicitations (the buyer to ask, the close date, Chattanooga's pre-bid meeting), from their Oracle supplier portals; those pages (and Louisville Metro's) only work in a browser, so a nightly job reads them at about 6:15 am Eastern and Refresh does not re-read them. " +
   "The app checks the rest every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|Metro Nashville bids|Chattanooga city bids|[\w. ]+ planroom) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|Metro Nashville bids|Chattanooga city bids|Lexington city bids|Louisville Metro bids|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
@@ -297,7 +300,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
               variant="outline"
               disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
-              title="Pull the lead sources (Kentucky and Tennessee) now; Metro Nashville and Chattanooga city bids come in nightly from a browser job"
+              title="Pull the lead sources (Kentucky and Tennessee) now; Metro Nashville, Chattanooga and Louisville Metro city bids come in nightly from a browser job"
             >
               {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />

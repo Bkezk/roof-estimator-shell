@@ -340,6 +340,53 @@ under item 0, "Tennessee leads").
         the Leads page shows "Not updated by the nightly browser job". Refresh on the Leads page
         does not re-read these two; they update once a night.
 
+      **Kentucky cities (Sep 29; the two Kentucky gaps: Lexington's and Louisville Metro's own
+      bid lists).** Migration `20260930010000_leads_kentucky_cities.sql` (source check only).
+      **Apply it before this code is live:** until then every refresh fails (the Lexington rows
+      are refused by the source check, and one refused row fails the whole save) and the
+      Louisville import is refused. Live from the sandbox, Sep 29:
+      - **Lexington city bids** (`lexington_bids`): LFUCG's Ionwave portal, the public list
+        https://lexingtonky.ionwave.net/SourcingEvents.aspx?SourceType=1 (without `SourceType`
+        the site sends Error.aspx). Server-rendered Telerik grid, read by the refresh with a
+        browser's headers and no cookies: one request. Bid Number (the lead's id, without an
+        "Addendum N" suffix, which stays in raw), Bid Title, Bid Type (Bid / RFP), Bid Issue
+        Date, Bid Close Date/Time ("10/2/2026 02:00:00 PM (ET)"). A bid has no public page of
+        its own, so the card opens the list; no contact on the list. 7 open, 0 roof (e.g.
+        RFP-42-2026 Yard Waste Transporting and Composting, closes Oct 2 2:00 PM ET). The grid
+        showed 20 a page that day and pages by postback, which the app does not do: past one
+        page the red line says how many were not read and nothing of Lexington is marked gone
+        that run. A page whose rows cannot all be read fails (nothing marked gone).
+      - **Louisville Metro bids** (`louisville_bids`): Louisville Metro Government's Bonfire
+        portal (https://louisvilleky.bonfirehub.com/portal/?tab=openOpportunities), built by
+        scripts like the Oracle ones, so it is the nightly browser job's third portal
+        (`scripts/browser-bids.ts --dry-run --source louisville_bids`, or `--portal`). The page
+        asks its own server for the open list as JSON (reference, name, close date in UTC,
+        department): the script keeps that answer, checks the table shows the same references
+        with an EDT/EST time, and posts it; nothing else is requested (2 portal requests plus
+        Bonfire's own scripts and styles from assets.bonfirehub.com; about 5 s; cut off at 90 s).
+        12 open, 0 roof. The card names the department after the agency ("Louisville Metro
+        Government — Public Works"); the type is the reference's letters (IFB, RFP, RFQ, RFI,
+        RFA). Each row links its opportunity page (/opportunities/<id>), which answered the
+        headless browser with a Cloudflare robot check: it is never read (never solved), so no
+        description, buyer or documents; not checked in a person's browser. Same safety rules as
+        the Oracle portals (an unreadable list posts nothing; the 36-hour warning on the Leads
+        page covers Louisville too).
+      - **Bowling Green left alone:** its Bonfire list (https://bgky.bonfirehub.com) carries the
+        same reference as the city's bids page ("2027-11"), but adds only the close date and
+        department — no description or documents (behind the same robot check) — and a second
+        writer to `bgky_bids` would fight the refresh (each marks the other's missing rows gone,
+        and the refresh would blank the close date). If the close date is wanted, move
+        Bowling Green wholly to the browser job instead.
+      - **Bug fixed (latent):** the save's "already stored?" check read every stored lead of the
+        sources in one query, and the API returns at most 1,000 rows a query; past that (the
+        refresh reads all its sources at once; BidNet alone is 455), stored leads would have
+        counted as new — repeat "new roof lead" notifications. It now reads in pages of 1,000
+        (`storedLeadKeys`, ordered by id) until a short page.
+      - Checked and **skipped**: Lexington building permits (the city publishes yearly totals
+        only); Northern Kentucky (LINK-GIS exposes no permit service); Boone County (monthly
+        PDF reports); Owensboro (permits appear only in newspaper articles).
+      - Requests: +1 per refresh (Lexington); +1 portal per night (Louisville, 2 requests).
+
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
    export or subscription — owner to check Hardin's qPublic site for a data download and

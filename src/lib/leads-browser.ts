@@ -5,7 +5,10 @@
  * GitHub Actions job (.github/workflows/browser-bids.yml → scripts/browser-bids.ts) opens each
  * public list in a real headless browser, reads the rows, and posts them to the app
  * (/api/cron/leads-import), which saves them like every other source (leads.server.ts,
- * `importBrowserBids`). No login, no registration: both lists are public read-only pages.
+ * `importBrowserBids`). No login, no registration: every list here is a public read-only page.
+ *
+ * Kentucky (Sep 29): Louisville Metro's bids sit in a Bonfire portal, built by scripts the same
+ * way, so it is the job's third portal (`louisville_bids`; see `bonfireRows` below).
  *
  * This file is shared by the script, the route and the tests: the portals, the payload the
  * script sends (checked with zod on arrival), and the amendment rule. Pure: zod only.
@@ -19,17 +22,30 @@
  * amendment posts a new row and marks the one before it Amended, so the base number is the
  * solicitation and its highest round is the current state of it. The lists hold the last
  * year's postings (220 rows in Nashville, 9 open; about 500 in Chattanooga, 8 open).
+ *
+ * Louisville's Bonfire portal (Sep 29): the Open Public Opportunities tab asks its own server
+ * for the list (GET /PublicPortal/getOpenPublicOpportunitiesSectionData → JSON: per project
+ * ProjectID, ReferenceID "IFB270050", ProjectName, DateClose in UTC "2026-10-02 20:30:00",
+ * DepartmentID, and a departments map) and draws a table from it (Status OPEN, Ref. #,
+ * Project, Department, Close Date "Oct 2nd 2026, 4:30 PM EDT"). 12 open that day. Each row's
+ * "View Opportunity" page (/opportunities/<ProjectID>) sits behind a Cloudflare robot check,
+ * so it is linked but never read.
  */
 import { z } from "zod";
 
-export const BROWSER_SOURCES = ["nashville_bids", "chattanooga_bids"] as const;
+export const BROWSER_SOURCES = ["nashville_bids", "chattanooga_bids", "louisville_bids"] as const;
 export type BrowserSource = (typeof BROWSER_SOURCES)[number];
 
 export interface BrowserPortal {
   source: BrowserSource;
+  /** How the script reads the list: an Oracle ADF table, or a Bonfire portal's own JSON. */
+  kind: "oracle" | "bonfire";
   /** In logs and the failure line: "Metro Nashville bids". */
   label: string;
-  /** The public list (no per-row public page exists: the abstract opens in a dialog). */
+  /**
+   * The public list. Oracle has no per-row public page (the abstract opens in a dialog), so
+   * those leads link here; a Bonfire row links its own opportunity page.
+   */
   url: string;
   /** The zone the page states in its header ("Time Zone US Central Time"). */
   timeZone: "America/Chicago" | "America/New_York";
@@ -39,11 +55,13 @@ export interface BrowserPortal {
   agency: string;
   city: string;
   county: string;
+  state: "TN" | "KY";
 }
 
 export const BROWSER_PORTALS: Record<BrowserSource, BrowserPortal> = {
   nashville_bids: {
     source: "nashville_bids",
+    kind: "oracle",
     label: "Metro Nashville bids",
     url: "https://ibqhjb.fa.ocs.oraclecloud.com/fscmUI/faces/NegotiationAbstracts?prcBuId=300000006739049",
     timeZone: "America/Chicago",
@@ -52,9 +70,11 @@ export const BROWSER_PORTALS: Record<BrowserSource, BrowserPortal> = {
     agency: "Metro Nashville",
     city: "Nashville",
     county: "Davidson",
+    state: "TN",
   },
   chattanooga_bids: {
     source: "chattanooga_bids",
+    kind: "oracle",
     label: "Chattanooga city bids",
     url: "https://fa-eqto-saasfaprod1.fa.ocs.oraclecloud.com/fscmUI/faces/NegotiationAbstracts?prcBuId=300000003584083",
     timeZone: "America/New_York",
@@ -63,6 +83,21 @@ export const BROWSER_PORTALS: Record<BrowserSource, BrowserPortal> = {
     agency: "City of Chattanooga",
     city: "Chattanooga",
     county: "Hamilton",
+    state: "TN",
+  },
+  louisville_bids: {
+    source: "louisville_bids",
+    kind: "bonfire",
+    label: "Louisville Metro bids",
+    url: "https://louisvilleky.bonfirehub.com/portal/?tab=openOpportunities",
+    timeZone: "America/New_York",
+    // The table shows "Oct 2nd 2026, 4:30 PM EDT" (EST in winter).
+    timeZoneText: /\b\d{1,2}:\d{2}\s*[AP]M\s+E[DS]T\b/,
+    zone: "ET",
+    agency: "Louisville Metro Government",
+    city: "Louisville",
+    county: "Jefferson",
+    state: "KY",
   },
 };
 
@@ -97,6 +132,11 @@ export const portalRowSchema = z.object({
     .refine((d) => !d || Object.keys(d).length <= 40, "at most 40 detail fields"),
   /** The abstract was opened and read for this row. */
   detailsRead: z.boolean(),
+  /**
+   * The row's own public page on the portal (Bonfire's /opportunities/<id>), when it has one;
+   * checked against the portal's host on arrival. Oracle rows have none.
+   */
+  url: text(300).nullable().optional(),
 });
 export type PortalRow = z.infer<typeof portalRowSchema>;
 
@@ -121,6 +161,24 @@ export const browserImportSchema = z
         path: ["portalTimeZone"],
         message: `${p.source} is read in ${want}, not ${p.portalTimeZone}`,
       });
+    // A row's link must be a page on that portal's own site (the card opens it).
+    const host = new URL(BROWSER_PORTALS[p.source].url).host;
+    p.rows.forEach((r, i) => {
+      if (!r.url) return;
+      let ok = false;
+      try {
+        const u = new URL(r.url);
+        ok = u.protocol === "https:" && u.host === host;
+      } catch {
+        ok = false;
+      }
+      if (!ok)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["rows", i, "url"],
+          message: `not a page on ${host}`,
+        });
+    });
   });
 export type BrowserImportPayload = z.infer<typeof browserImportSchema>;
 
@@ -147,4 +205,108 @@ export function currentRounds<T extends { number: string; status: string }>(rows
     if (!cur || round > cur.round) best.set(base, { row, round });
   }
   return [...best.values()].map((x) => x.row).filter((r) => !isClosedStatus(r.status));
+}
+
+/* ---- Bonfire (Louisville Metro) ------------------------------------------------------------ */
+
+/** The request the Bonfire portal page makes for its Open Public Opportunities tab. */
+export const BONFIRE_OPEN_PATH = "/PublicPortal/getOpenPublicOpportunitiesSectionData";
+/** Where every Bonfire portal's own scripts and styles come from (the page is blank without). */
+export const BONFIRE_ASSET_HOST = "assets.bonfirehub.com";
+
+/** "2026-10-02 20:30:00" (UTC, as Bonfire sends it) → "10/2/2026 4:30 PM" on the portal's clock. */
+export function bonfireCloseText(utc: string, timeZone: BrowserPortal["timeZone"]): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(utc.trim());
+  if (!m) return null;
+  const at = new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, m[6] ? +m[6] : 0));
+  if (Number.isNaN(at.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts["month"]}/${parts["day"]}/${parts["year"]} ${parts["hour"]}:${parts["minute"]} ${String(parts["dayPeriod"]).toUpperCase()}`;
+}
+
+interface BonfireProject {
+  ProjectID?: unknown;
+  ReferenceID?: unknown;
+  ProjectName?: unknown;
+  DateClose?: unknown;
+  DepartmentID?: unknown;
+  ProjectStatusID?: unknown;
+}
+
+const str = (v: unknown): string =>
+  typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
+
+/**
+ * The open-opportunities JSON a Bonfire portal page loads → the rows the script posts. Throws
+ * when the answer is not that list (a changed API, an error page): nothing is posted then, so
+ * nothing is marked gone. An empty `projects` ({} or []) with success is "nothing open".
+ *
+ * The close date is sent as the portal's wall clock ("10/2/2026 4:30 PM", Eastern for
+ * Louisville), the way the Oracle rows are, and read back with parsePortalDate on arrival.
+ * The type is the letters the reference starts with (IFB, RFP, RFQ, RFI, RFA): Bonfire's list
+ * gives no type. The department goes into details (the card names it after the agency).
+ */
+export function bonfireRows(json: unknown, portal: BrowserPortal): PortalRow[] {
+  const j = json as {
+    success?: unknown;
+    payload?: { projects?: unknown; departments?: unknown };
+  } | null;
+  if (!j || typeof j !== "object" || (j.success !== 1 && j.success !== true))
+    throw new Error("the open-opportunities answer is not a success (API changed?)");
+  const projects = j.payload?.projects;
+  if (projects == null || typeof projects !== "object")
+    throw new Error("the open-opportunities answer has no project list (API changed?)");
+  const departments = (j.payload?.departments ?? {}) as Record<
+    string,
+    { DepartmentName?: unknown }
+  >;
+  const origin = new URL(portal.url).origin;
+  const list = (Array.isArray(projects) ? projects : Object.values(projects)) as BonfireProject[];
+  const rows = list.map((p): PortalRow => {
+    const number = str(p.ReferenceID);
+    const title = str(p.ProjectName).replace(/\s+/g, " ");
+    const id = str(p.ProjectID);
+    const close = str(p.DateClose);
+    if (!number || !title)
+      throw new Error("a project without a reference or a name (API changed?)");
+    const closeDate = close ? bonfireCloseText(close, portal.timeZone) : null;
+    if (close && !closeDate) throw new Error(`close date not understood: "${close.slice(0, 40)}"`);
+    const dept = str(departments[str(p.DepartmentID)]?.DepartmentName);
+    const details: Record<string, string> = {};
+    if (dept) details["Department"] = dept.slice(0, 2000);
+    if (close) details["Close Date (UTC)"] = close;
+    if (id) details["Project ID"] = id;
+    return {
+      number: number.slice(0, 40),
+      title: title.slice(0, 500),
+      type: /^([A-Z]{2,4})(?=[-\s]?\d)/.exec(number)?.[1] ?? null,
+      status: "Open",
+      postingDate: null,
+      openDate: null,
+      closeDate,
+      description: null,
+      buyer: null,
+      email: null,
+      prebid: null,
+      attachments: [],
+      details: Object.keys(details).length ? details : null,
+      detailsRead: false,
+      url: /^\d+$/.test(id) ? `${origin}/opportunities/${id}` : null,
+    };
+  });
+  return rows.sort((a, b) =>
+    (a.details?.["Close Date (UTC)"] ?? "").localeCompare(b.details?.["Close Date (UTC)"] ?? ""),
+  );
 }

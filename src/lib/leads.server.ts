@@ -71,6 +71,18 @@
  * /api/cron/leads-import (importBrowserBids below; src/lib/leads-browser.ts has the portals).
  * refreshLeads never pulls them, so it never marks them gone either.
  *
+ * Kentucky's two biggest cities (Sep 29), checked from the sandbox:
+ *
+ *   Lexington city bids (lexington_bids)  LEXINGTON_BIDS_URL
+ *     LFUCG's Ionwave portal: the public "Current Bid Opportunities" list, a server-rendered
+ *     Telerik grid (Bid Number, Bid Title, Bid Type, Organization, Bid Issue Date, Bid Close
+ *     Date/Time "10/2/2026 02:00:00 PM (ET)"). Answers a browser's headers with no cookies; the
+ *     bare path goes to Error.aspx. One request; the grid pages at 20 by postback, so a second
+ *     page is reported, never posted back for.
+ *
+ *   Louisville Metro bids (louisville_bids): a Bonfire portal built by scripts, read by the
+ *     nightly browser job like the two Tennessee city lists (src/lib/leads-browser.ts).
+ *
  * refreshLeads: pull them all, upsert on (source, external_id) keeping the team's status, mark
  * what dropped off the source as gone, and tell Prospecting users about new roof leads.
  * Nothing here touches bids.
@@ -103,7 +115,10 @@ export type LeadSource =
   | "tn_university_bids"
   // Round three: read by the nightly browser job and posted to /api/cron/leads-import.
   | "nashville_bids"
-  | "chattanooga_bids";
+  | "chattanooga_bids"
+  // Kentucky (Sep 29): Lexington in the refresh; Louisville Metro from the browser job.
+  | "lexington_bids"
+  | "louisville_bids";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -2210,8 +2225,9 @@ export function portalDay(text: string): string | null {
 /**
  * One open solicitation → a lead. external_id is the base number (without the ",N" round), so
  * an amendment updates the same lead. The abstract's buyer is the contact (public on the
- * abstract; Knox County's buyer is used the same way). There is no public page per row (the
- * abstract opens in a dialog), so the lead links the portal's list.
+ * abstract; Knox County's buyer is used the same way). An Oracle row has no public page (the
+ * abstract opens in a dialog), so the lead links the portal's list; a Bonfire row links its
+ * own opportunity page and names its department after the agency.
  */
 export function browserBidLead(
   r: PortalRow,
@@ -2223,23 +2239,190 @@ export function browserBidLead(
   // Title, synopsis and the attachment names ("Roof Replacement Specs.pdf") feed the keyword
   // match. A Construction Bid is not roof work unless the words say so.
   const text = [r.title, r.description ?? "", ...r.attachments].join(" ");
+  const department = p.kind === "bonfire" ? r.details?.["Department"] : undefined;
   return {
     source,
     external_id: base,
     title: r.title,
-    agency: p.agency,
+    agency: department ? `${p.agency} — ${department}` : p.agency,
     location: p.city,
     city: p.city,
     county: p.county,
-    state: "TN",
+    state: p.state,
     project_type: r.type || null,
     bid_at: r.closeDate ? parsePortalDate(r.closeDate, p.zone) : null,
     prebid_at: r.prebid ? parsePortalDate(r.prebid, p.zone) : null,
     issued_on: r.postingDate ? portalDay(r.postingDate) : null,
-    url: p.url,
+    url: r.url ?? p.url,
     contact: [r.buyer, r.email].filter(Boolean).join(" — ") || null,
     is_roof: isRoofLead(text, keywords),
     raw: { ...r, round, portal: p.url, portal_time_zone: p.timeZone } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Kentucky: Lexington (LFUCG) bids, the city's Ionwave portal (public list, server-rendered)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** The public current-bids list (SourceType=1; without it the site sends Error.aspx). */
+export const LEXINGTON_BIDS_URL =
+  "https://lexingtonky.ionwave.net/SourcingEvents.aspx?SourceType=1";
+const LEXINGTON_GRID_ID = "ctl00_mainContent_rgBidList_ctl00";
+
+export interface LexingtonBid {
+  /** "RFP-42-2026" — the number without an "Addendum N" suffix (the lead's external_id). */
+  number: string;
+  /** The number cell as shown ("RFP-42-2026 Addendum 2"). */
+  numberShown: string;
+  /** 2 for "Addendum 2", else null. */
+  addendum: number | null;
+  title: string;
+  /** "Bid" / "RFP". */
+  type: string | null;
+  /** The hidden Organization column ("Purchasing"). */
+  organization: string | null;
+  /** "8/31/2026" as shown. */
+  issueText: string | null;
+  issuedOn: string | null;
+  /** "10/2/2026 02:00:00 PM (ET)" as shown. */
+  closeText: string | null;
+  bidAt: string | null;
+  /** A public page the title links to, when it links one (none did on Sep 29). */
+  url: string | null;
+}
+
+export interface LexingtonList {
+  /** The bid grid was on the page (else the page is not the list: an error page, a new layout). */
+  grid: boolean;
+  bids: LexingtonBid[];
+  /** The grid's own empty-list row ("No records to display"). */
+  empty: boolean;
+  /** Data rows on the page (a row without a number or title is counted but not read). */
+  rowsOnPage: number;
+  /** The pager's "N items in M pages", when shown. */
+  total: number | null;
+  pages: number | null;
+  /** Header labels, for the failure text when a column is missing. */
+  labels: string[];
+}
+
+/** "10/2/2026 02:00:00 PM (ET)" → ISO instant; "(CT)" is read as Central, anything else Eastern. */
+export function parseLexingtonDate(text: string): string | null {
+  const zone: UsZone = /\(\s*C[SD]?T\s*\)|\bCentral\b/i.test(text) ? "CT" : "ET";
+  // The list shows seconds ("02:00:00 PM"): drop them so the time is read, not midnight.
+  return parsePortalDate(text.replace(/\b(\d{1,2}:\d{2}):\d{2}\b/, "$1"), zone);
+}
+
+/**
+ * The Telerik grid `ctl00_mainContent_rgBidList_ctl00`: columns found by their header labels
+ * (Bid Number, Bid Title, Bid Type, Organization, Bid Issue Date, Bid Close Date/Time), one
+ * data row per `…_ctl00__N` row. Only the page served is read; `total`/`pages` say whether the
+ * list goes on (the pager posts back, which the app does not do).
+ */
+export function parseLexingtonBids(html: string): LexingtonList {
+  const none: LexingtonList = {
+    grid: false,
+    bids: [],
+    empty: false,
+    rowsOnPage: 0,
+    total: null,
+    pages: null,
+    labels: [],
+  };
+  const start = html.search(new RegExp(`<table\\b[^>]*id="${LEXINGTON_GRID_ID}"`, "i"));
+  if (start < 0) return none;
+  const grid = html.slice(start);
+  const headRow = /<thead\b[\s\S]*?<tr\b[\s\S]*?<\/tr>/i.exec(grid)?.[0] ?? "";
+  const labels = (headRow.match(/<th\b[\s\S]*?<\/th>/gi) ?? []).map((th) =>
+    decode(th).replace(/\s+/g, " ").trim(),
+  );
+  const col = (re: RegExp) => labels.findIndex((l) => re.test(l));
+  const idx = {
+    number: col(/^Bid Number$/i),
+    title: col(/^Bid Title$/i),
+    type: col(/^Bid Type$/i),
+    org: col(/^Organization$/i),
+    issue: col(/Issue Date/i),
+    close: col(/Close Date/i),
+  };
+  const info =
+    /<strong>\s*(\d+)\s*<\/strong>\s*items?\s+in\s+<strong>\s*(\d+)\s*<\/strong>\s*pages?/i.exec(
+      grid,
+    );
+  const out: LexingtonList = {
+    grid: true,
+    bids: [],
+    empty: /class="rgNoRecords"/i.test(grid),
+    rowsOnPage: 0,
+    total: info ? Number(info[1]) : null,
+    pages: info ? Number(info[2]) : null,
+    labels,
+  };
+  if (idx.number < 0 || idx.title < 0 || idx.close < 0) return out;
+  const rowRe = new RegExp(
+    `<tr\\b[^>]*id="${LEXINGTON_GRID_ID}__\\d+"[^>]*>[\\s\\S]*?<\\/tr>`,
+    "gi",
+  );
+  for (const tr of grid.match(rowRe) ?? []) {
+    out.rowsOnPage++;
+    const cells = tr.match(/<td\b[\s\S]*?<\/td>/gi) ?? [];
+    const cell = (i: number) =>
+      i >= 0 && cells[i] ? decode(cells[i]!).replace(/\s+/g, " ").trim() : "";
+    const numberShown = cell(idx.number);
+    const title = cell(idx.title);
+    if (!numberShown || !title) continue;
+    const add = /^(.*?\S)[\s,–-]*\bAddendum\s*(?:No\.?\s*|#\s*)?(\d+)\s*$/i.exec(numberShown);
+    const link = /<a\b[^>]*href="([^"]+)"/i.exec(cells[idx.title] ?? "");
+    let url: string | null = null;
+    if (link) {
+      const href = decode(link[1]!).trim();
+      // Only a real page: not a postback, not the sign-in.
+      if (!/^javascript:|^#|Login\.aspx/i.test(href)) {
+        try {
+          url = new URL(href, LEXINGTON_BIDS_URL).href;
+        } catch {
+          url = null;
+        }
+      }
+    }
+    const issueText = cell(idx.issue) || null;
+    const closeText = cell(idx.close) || null;
+    out.bids.push({
+      number: add ? add[1]!.trim() : numberShown,
+      numberShown,
+      addendum: add ? Number(add[2]) : null,
+      title,
+      type: cell(idx.type) || null,
+      organization: cell(idx.org) || null,
+      issueText,
+      issuedOn: issueText ? portalDay(issueText) : null,
+      closeText,
+      bidAt: closeText ? parseLexingtonDate(closeText) : null,
+      url,
+    });
+  }
+  return out;
+}
+
+export function lexingtonLead(b: LexingtonBid, keywords: string[]): LeadInsert {
+  return {
+    source: "lexington_bids",
+    external_id: b.number,
+    title: b.title,
+    agency: "Lexington-Fayette Urban County Government",
+    location: "Lexington",
+    city: "Lexington",
+    county: "Fayette",
+    state: "KY",
+    project_type: b.type,
+    bid_at: b.bidAt,
+    issued_on: b.issuedOn,
+    url: b.url ?? LEXINGTON_BIDS_URL,
+    contact: null,
+    is_roof: isRoofLead(b.title, keywords),
+    raw: { ...b, list: LEXINGTON_BIDS_URL } as unknown as Json,
     last_seen_at: new Date().toISOString(),
     gone_at: null,
   };
@@ -2492,6 +2675,7 @@ export interface RefreshLeadsResult {
   chattanooga: number;
   knox_county: number;
   tn_universities: number;
+  lexington: number;
   new_leads: number;
   new_roof_leads: number;
   gone: number;
@@ -2610,6 +2794,29 @@ export interface SavedLeads {
   notified: number;
 }
 
+/** Rows per page when reading stored leads (Supabase's API caps a query at 1,000 by default). */
+export const STORED_PAGE = 1000;
+
+/**
+ * Every stored lead of these sources as "source|external_id", read STORED_PAGE rows at a time
+ * (ordered by id, so the pages neither overlap nor skip) until a short page.
+ */
+export async function storedLeadKeys(admin: Client, sources: string[]): Promise<Set<string>> {
+  const known = new Set<string>();
+  for (let from = 0; ; from += STORED_PAGE) {
+    const { data, error } = await admin
+      .from("leads")
+      .select("source, external_id")
+      .in("source", sources)
+      .order("id", { ascending: true })
+      .range(from, from + STORED_PAGE - 1);
+    if (error) throw new Error(error.message);
+    for (const r of data ?? []) known.add(`${r.source}|${r.external_id}`);
+    if (!data || data.length < STORED_PAGE) break;
+  }
+  return known;
+}
+
 /**
  * Save what one pass read — the nightly/in-app refresh (every list at once) or one browser
  * import (a single source) — the same way:
@@ -2666,14 +2873,11 @@ export async function saveLeadRows(
   rows.splice(0, rows.length, ...byKey.values());
 
   // Which of these are new? Compare against what is stored (for these sources) before the upsert.
+  // Read in pages: the API answers at most 1,000 rows a query, and a cut-off read would call
+  // stored leads new (a second notification, a lost "first seen").
   let fresh: LeadInsert[] = [];
   if (rows.length) {
-    const { data: existing, error: eErr } = await admin
-      .from("leads")
-      .select("source, external_id")
-      .in("source", [...new Set(rows.map((r) => r.source))]);
-    if (eErr) throw new Error(eErr.message);
-    const known = new Set((existing ?? []).map((r) => `${r.source}|${r.external_id}`));
+    const known = await storedLeadKeys(admin, [...new Set(rows.map((r) => r.source))]);
     fresh = rows.filter((r) => !known.has(`${r.source}|${r.external_id}`));
   }
 
@@ -2769,7 +2973,7 @@ export async function refreshLeads(
   // A progress stamp first: if the run dies mid-way (a platform time limit), the settings row
   // shows when it started instead of the last good run.
   await stage(
-    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + UT_CAMPUSES.length + TN_UNIVERSITIES.length + 10} lists (plus SAM.gov and BidNet once a day)…`,
+    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + UT_CAMPUSES.length + TN_UNIVERSITIES.length + 11} lists (plus SAM.gov and BidNet once a day)…`,
   );
 
   // Every list at once (the slowest site, not the sum, sets the run's length); each source
@@ -2857,6 +3061,34 @@ export async function refreshLeads(
       const bids = parsePaducahBids(await text(PADUCAH_BIDS_URL));
       if (!bids.length) throw new Error("nothing parsed (page layout changed?)");
       return { rows: bids.map((b) => cityLead(b, "paducah_bids", s.roof_keywords)) };
+    }),
+    attempt("lexington_bids", "Lexington city bids", async () => {
+      // Browser headers, no cookies: the list answers them (checked Sep 29).
+      const list = parseLexingtonBids(await text(LEXINGTON_BIDS_URL, UT_HEADERS));
+      if (!list.grid)
+        throw new Error("no bid list on the page (sent to the error page, or the layout changed?)");
+      if (!list.bids.length && !list.empty)
+        throw new Error(
+          `nothing parsed (page layout changed? columns: ${list.labels.join(" | ") || "none"})`,
+        );
+      // A row on the page that could not be read would be marked gone: read all or post none.
+      const shownHere = list.pages === 1 && list.total != null ? list.total : list.rowsOnPage;
+      if (list.bids.length < Math.max(list.rowsOnPage, shownHere))
+        throw new Error(
+          `${Math.max(list.rowsOnPage, shownHere) - list.bids.length} rows on the page not read (page layout changed?)`,
+        );
+      const rows = list.bids.map((b) => lexingtonLead(b, s.roof_keywords));
+      // The grid pages by postback, which the app does not do: say what was left unread, and
+      // (as a partial read) mark nothing of this source gone.
+      const unread = list.pages && list.pages > 1 ? (list.total ?? 0) - list.bids.length : 0;
+      return {
+        rows,
+        ...(list.pages && list.pages > 1
+          ? {
+              problem: `read page 1 of ${list.pages} only: ${unread} of ${list.total ?? "?"} bids not read (the list pages by postback)`,
+            }
+          : {}),
+      };
     }),
     // Tennessee.
     attempt("tn_stream", "TN STREAM bid list", async () => {
@@ -2992,7 +3224,7 @@ export async function refreshLeads(
   } catch (e) {
     failed.push(`Planroom details ${e instanceof Error ? e.message : String(e)}`);
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -3009,6 +3241,7 @@ export async function refreshLeads(
     chattanooga: counts["chattanooga_permits"] ?? 0,
     knox_county: counts["knox_county_bids"] ?? 0,
     tn_universities: counts["tn_university_bids"] ?? 0,
+    lexington: counts["lexington_bids"] ?? 0,
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,

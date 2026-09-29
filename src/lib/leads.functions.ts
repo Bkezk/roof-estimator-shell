@@ -35,6 +35,10 @@ export const SOURCE_LABELS: Record<string, string> = {
   // Round three (Sep 29): read nightly in a browser (GitHub Actions) and posted to the app.
   nashville_bids: "Metro Nashville bids",
   chattanooga_bids: "Chattanooga city bids",
+  // Kentucky (Sep 29): Lexington's Ionwave list in the refresh; Louisville Metro's Bonfire
+  // portal from the nightly browser job.
+  lexington_bids: "Lexington city bids",
+  louisville_bids: "Louisville Metro bids",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -180,6 +184,8 @@ const listSchema = z.object({
       "tn_university_bids",
       "nashville_bids",
       "chattanooga_bids",
+      "lexington_bids",
+      "louisville_bids",
     ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
