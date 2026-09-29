@@ -44,6 +44,11 @@ Jefferson …), so the Buildings county filter and `building_county_counts()` sh
 state and county; the refresh log stores Tennessee counties as "Davidson, TN", so the
 "N of 120 counties" line on the Buildings page should count per state.
 
+**Tennessee leads, round two (Sep 29).** Owner: apply
+`20260929230000_leads_tennessee_round2.sql` before the round-two code goes live, or every lead
+refresh fails on the source check (BidNet, Chattanooga permits, Knox County, TN universities;
+details under item 0, "Tennessee leads").
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
@@ -203,7 +208,8 @@ state and county; the refresh log stores Tennessee counties as "Davidson, TN", s
       same list format, one source `campus_planrooms`, the plan issuer named as who to bid to)
       and SAM.gov (NAICS 238160, place of performance KY, `sam_gov`) are sources too. Checked and not worth a feed: KCTCS
       RSS (equipment only; construction goes through the state planroom), Bid Locker Kentucky
-      (KCTCS only), Lexington purchasing pages (404), BidNet (blocked), JCPS bids (gone).
+      (KCTCS only), Lexington purchasing pages (404), BidNet (blocked then; read since Sep 29 —
+      see Tennessee leads), JCPS bids (gone).
       Sources checked and NOT used: DHBC's statewide plan review log (exists, no public feed —
       see docs/dhbc-open-records-request.md, an open records request each month); Lexington's
       data hub (no commercial permit dataset found); ConstructConnect ($129–$199/mo) and Dodge
@@ -237,8 +243,59 @@ state and county; the refresh log stores Tennessee counties as "Davidson, TN", s
         flagged. Add keywords (e.g. "storm damage") in the gear if those should count.
       - Nashville: the permit `Contact` is the applicant (a GC, an architect or a permit
         expediter), not always the builder; a Shell permit can be an interior white-box.
-      - Not yet looked at: Knoxville, Chattanooga, Memphis/Shelby County permits; TN county and
-        city bid pages; TBR / community college bids; TDOT lettings (roads, not roofs).
+      - TDOT lettings not added (roads, not roofs).
+
+      **Round two (later Sep 29; owner: bring Tennessee up to Kentucky's coverage — the other
+      big cities, the schools and universities, a statewide feed).** Four more sources, all
+      public pages or open data with no login or key (the owner's rule), in the same list.
+      Migration `20260929230000_leads_tennessee_round2.sql` (source check only; must be applied
+      first). Live pull from the sandbox through the app's own parsers, Sep 29:
+      - **BidNet** (`bidnet`, label "Cities, counties & schools (BidNet)"): the public open
+        list of BidNet Direct's Tennessee Purchasing Group (272 open, 11 pages of 25) and
+        Kentucky Purchasing Group (183, 8 pages) — cities, counties, school districts,
+        utilities, some state agencies. The issuing agency, number and documents are
+        members-only, so the card shows the group as the agency, a town or county only when
+        the title names one ("City of X", "X County"), and links the public abstract page.
+        Once a day behind `source_fetched_at` like SAM.gov: 19 list requests, one at a time,
+        300 ms apart, TN then KY, plus up to 8 abstract pages for roof rows (the exact closing
+        time; the list shows the day only, so other rows assume 4:00 PM ET). Pages stop 40 s
+        into a run so the Refresh button still answers. Today: 3 roof rows (Roof Replacement -
+        Senior Center, closes Oct 5 11:00 AM ET; the TCAT Nashville Building 6 roofing; RFB-86-27
+        Jackson SOB roof, dropped as a copy of the state planroom job). A BidNet row whose title
+        or RFB code matches a job on the owner's own lists is dropped (the TCAT Nashville
+        re-roof is worded differently on BidNet, so it shows twice). **To watch:** BidNet
+        answers some requests with an AWS WAF "verify you're not a robot" page (curl got it on
+        5 of 11 pages; Node's fetch, the app's, on none of 19). The app never solves or retries
+        it: a checked page is skipped, the red line says which, nothing is marked gone that day,
+        and if page 1 is checked that state is skipped until the next day. If it becomes
+        routine, BidNet's own free alert e-mails are the fallback. robots.txt answered the
+        sandbox with the same check, so it was not re-read here.
+      - **Chattanooga permits** (`chattanooga_permits`): the Chattanooga-Hamilton County RPA's
+        ArcGIS layer `Building_Permits_to_April_2021` (the name is historical; newest permit
+        Jul 31: it runs one to two months behind, so the window is a fixed 180 days, not the
+        Louisville one). New non-residential only, over the Nashville cost floor (relabelled in
+        the gear as the floor for both), code 329 (towers, signs, walls) left out: 39 at
+        ≥ $100,000 (47 with no floor), all counted as roof like the other new builds. One
+        request.
+      - **Knox County bids** (`knox_county_bids`, knoxcounty.org purchasing): 7 open, 0 roof;
+        the buyer (name, phone, e-mail) is the contact, the solicitation PDF the link, the
+        pre-bid note's date read. The page gives the deadline day only: 2:00 PM ET is assumed
+        (raw says so). One request.
+      - **TN university bids** (`tn_university_bids`): ETSU (1), Tennessee Tech (2, both bid in
+        August and still listed), Austin Peay (1, bid July 8, still listed), MTSU (0 — the
+        table is there and empty), and TBR's statewide list (9: community colleges, TCATs,
+        TSU; 1 roof — TCAT Nashville Building 6 Re-Roof, bids Sep 30 2:00 PM CT). The designer
+        (A/E) is the contact; bid and pre-bid times in the job's local time (Tennessee Tech is
+        Central: Putnam County keeps Central time). Five requests.
+      - Checked and **not** added: the two Knoxville permit layers on ArcGIS are stale (newest
+        May and December 2025) and the City of Knoxville itself posts on BidNet; Memphis /
+        Shelby County has no open permit data and its bids page refuses requests; Nashville's
+        and Chattanooga's own city bids and Metro Nashville Public Schools sit in Oracle
+        supplier portals that need a browser session; the University of Memphis bid list only
+        links its Oracle supplier portal (registration). University invitations that stay
+        listed after they bid carry their bid date, so the page hides them as closed.
+      - Requests per refresh, round two: 1 Chattanooga, 1 Knox County, 5 universities; once a
+        day 19 BidNet list pages + ≤ 8 abstracts (and SAM.gov's 2).
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk
