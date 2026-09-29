@@ -295,6 +295,10 @@ export function ProspectPage(props: {
   // The county filter's key: the county, or "Franklin|TN" for a name both states use.
   const [county, setCounty] = useState("");
   const countyPick = parseCountyKey(county);
+  // Owner (Sep 29): "a filter to just see KY or just see TN". A county pick names its own state
+  // when the name exists in both; otherwise the state filter applies.
+  const [stateFilter, setStateFilter] = useState<"all" | "KY" | "TN">("all");
+  const stateArg = countyPick.state ?? (stateFilter === "all" ? null : stateFilter);
   const [minSize, setMinSize] = useState("any"); // any | 5000 | 10000 | 20000 | 50000
   const [sort, setSort] = useState<"recent" | "biggest" | "storm">(
     props.initialStorm ? "storm" : "recent",
@@ -401,13 +405,13 @@ export function ProspectPage(props: {
   }, [props.initialAt]);
 
   const buildings = useQuery({
-    queryKey: ["buildings", q, county, minSize, sort, stormHit],
+    queryKey: ["buildings", q, county, stateArg, minSize, sort, stormHit],
     queryFn: () =>
       listFn({
         data: {
           ...(q.trim() ? { q: q.trim() } : {}),
           ...(countyPick.county ? { county: countyPick.county } : {}),
-          ...(countyPick.state ? { state: countyPick.state } : {}),
+          ...(stateArg ? { state: stateArg } : {}),
           ...(minSize !== "any" ? { minSqFt: Number(minSize) } : {}),
           ...(stormHit ? { stormHit: true } : {}),
           sort,
@@ -415,6 +419,13 @@ export function ProspectPage(props: {
       }),
   });
   const counties = useQuery({ queryKey: ["building-counties"], queryFn: () => countiesFn() });
+  // The county list narrowed to the state filter (a name unique to one state has no state key).
+  const countyChoices = (counties.data ?? []).filter((c) => {
+    if (stateFilter === "all") return true;
+    if (c.state) return c.state === stateFilter;
+    const list = stateFilter === "TN" ? TN_COUNTIES.map((t) => t.name) : KY_COUNTIES;
+    return list.some((n) => n.toLowerCase() === c.county.toLowerCase());
+  });
   const detail = useQuery({
     queryKey: ["building", selectedId],
     queryFn: () => getFn({ data: { id: selectedId! } }),
@@ -731,19 +742,41 @@ export function ProspectPage(props: {
             onRefreshed={invalidateStorms}
           />
         ) : (
-          <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="All counties" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All counties</SelectItem>
-              {(counties.data ?? []).map((c) => (
-                <SelectItem key={c.key} value={c.key}>
-                  {c.label} ({c.count.toLocaleString()})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
+            <Select
+              value={stateFilter}
+              onValueChange={(v) => {
+                setStateFilter(v as typeof stateFilter);
+                // A county from the other state no longer applies.
+                if (v !== "all" && county) {
+                  const pick = parseCountyKey(county);
+                  if (pick.state && pick.state !== v) setCounty("");
+                }
+              }}
+            >
+              <SelectTrigger className="h-8" aria-label="State">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Both states</SelectItem>
+                <SelectItem value="KY">Kentucky</SelectItem>
+                <SelectItem value="TN">Tennessee</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
+              <SelectTrigger className="h-8">
+                <SelectValue placeholder="All counties" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All counties</SelectItem>
+                {countyChoices.map((c) => (
+                  <SelectItem key={c.key} value={c.key}>
+                    {c.label} ({c.count.toLocaleString()})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         )}
         {/* Owner, Sep 28: no roof-age filter or sort — year built is paid data we are not
             buying; own-book roofs still show their age on the row. */}
@@ -939,6 +972,7 @@ export function ProspectPage(props: {
               showOutlines={stormHit ? false : showOutlines}
               showCities={showCities}
               focus={focus}
+              fitTo={stateFilter === "all" ? null : stateFilter}
               stormAreas={stormHit ? stormAreas : []}
               showStormAreas={showStormAreas}
               imageryYear={imageryYear.data?.year ?? null}

@@ -96,13 +96,16 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const roofOnly = true;
   void props.initialRoofOnly;
   const [source, setSource] = useState<Source>("all");
+  // Owner (Sep 29): "a filter to just see KY or just see TN".
+  const [state, setState] = useState<"all" | "KY" | "TN">("all");
+  const stateArg = state === "all" ? {} : { state };
   const [tab, setTab] = useState<StatusTab>("open");
   const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  const filters = { roofOnly, source, status: tab };
+  const filters = { roofOnly, source, status: tab, state };
   const leads = useQuery({
     queryKey: ["leads", filters],
     queryFn: () =>
@@ -111,10 +114,14 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
           roofOnly,
           status: tab,
           ...(source !== "all" ? { source } : {}),
+          ...stateArg,
         },
       }),
   });
-  const counts = useQuery({ queryKey: ["lead-counts"], queryFn: () => countsFn() });
+  const counts = useQuery({
+    queryKey: ["lead-counts", state],
+    queryFn: () => countsFn({ data: stateArg }),
+  });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["leads"] });
     void qc.invalidateQueries({ queryKey: ["lead-counts"] });
@@ -311,6 +318,16 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             ))}
           </TabsList>
         </Tabs>
+        <Select value={state} onValueChange={(v) => setState(v as typeof state)}>
+          <SelectTrigger className="h-9 w-[130px]" aria-label="State">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Both states</SelectItem>
+            <SelectItem value="KY">Kentucky</SelectItem>
+            <SelectItem value="TN">Tennessee</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={source} onValueChange={(v) => setSource(v as Source)}>
           <SelectTrigger className="h-9 w-[180px]">
             <SelectValue />

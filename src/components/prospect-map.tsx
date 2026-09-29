@@ -86,6 +86,8 @@ interface Props {
   onViewCenter?: ((center: { lng: number; lat: number } | null) => void) | undefined;
   /** Fly to this point (zoom 18) and drop a pin on it — a lead's site, not a stored building. */
   focus?: { lat: number; lng: number } | null | undefined;
+  /** Fit the view to this area when it changes (the state filter): "KY", "TN" or both (null). */
+  fitTo?: "KY" | "TN" | null | undefined;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** A tap on an outline that is not stored yet (zoomed in): add that building. */
@@ -309,6 +311,7 @@ const IMAGERY_CREDIT = `Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch
 export default function ProspectMap({
   buildings,
   focus,
+  fitTo,
   stormAreas,
   showStormAreas = true,
   imageryYear,
@@ -755,6 +758,25 @@ export default function ProspectMap({
     if (ready.current) apply();
     else pending.current = apply;
   }, [buildings, selectedId]);
+
+  // The state filter: fit the view to the chosen state (or both) when it changes.
+  const fitFirst = useRef(true);
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    // Skip the first render: the map opens on both states already.
+    if (fitFirst.current) {
+      fitFirst.current = false;
+      return;
+    }
+    const apply = () =>
+      m.fitBounds(fitTo === "KY" ? KY_BOUNDS : fitTo === "TN" ? TN_BOUNDS : BOTH_BOUNDS, {
+        padding: 24,
+        duration: 800,
+      });
+    if (ready.current) apply();
+    else m.once("load", apply);
+  }, [fitTo]);
 
   // The focus pin: fly there once the map is ready; move the pin when the point changes.
   const focusPin = useRef<Marker | null>(null);

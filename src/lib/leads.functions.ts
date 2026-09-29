@@ -172,6 +172,8 @@ const listSchema = z.object({
   status: z.enum(["open", "new", "watching", "dismissed", "added", "all"]).optional(),
   /** Include leads that dropped off their source. */
   includeGone: z.boolean().optional(),
+  /** One state only (owner, Sep 29: "a filter to just see KY or just see TN"). */
+  state: z.enum(["KY", "TN"]).optional(),
 });
 export type ListLeadsInput = z.input<typeof listSchema>;
 
@@ -184,6 +186,7 @@ export const listLeads = createServerFn({ method: "GET" })
     let q = context.supabase.from("leads").select("*").limit(500);
     if (data.roofOnly) q = q.eq("is_roof", true);
     if (data.source) q = q.eq("source", data.source);
+    if (data.state) q = q.eq("state", data.state);
     const st = data.status ?? "open";
     // "added" rows (from the retired Add-to-prospects button) stay in the open list.
     if (st === "open") q = q.in("status", ["new", "watching", "added"]);
@@ -207,7 +210,8 @@ export interface LeadCounts {
 /** The tab counts and the fetch stamp. */
 export const leadCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<LeadCounts> => {
+  .validator((d: unknown) => z.object({ state: z.enum(["KY", "TN"]).optional() }).parse(d ?? {}))
+  .handler(async ({ data, context }): Promise<LeadCounts> => {
     await readAccess(context);
     const sb = context.supabase;
     const count = (f: (q: ReturnType<typeof base>) => ReturnType<typeof base>) =>
@@ -218,8 +222,10 @@ export const leadCounts = createServerFn({ method: "GET" })
     // Open counts what the Open tab shows: still listed, and the bid date (when there is one)
     // not yet passed (owner, Sep 29: "it says 32 open but I only counted 16").
     const stillOpen = `bid_at.is.null,bid_at.gt.${new Date().toISOString()}`;
-    const base = () =>
-      sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
+    const base = () => {
+      const q = sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
+      return data.state ? q.eq("state", data.state) : q;
+    };
     const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
       count((q) => q.in("status", ["new", "watching", "added"]).or(stillOpen)),
       count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true).or(stillOpen)),
