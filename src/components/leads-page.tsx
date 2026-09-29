@@ -20,6 +20,7 @@ import {
   LEAD_SOURCES,
   leadCounts,
   listLeads,
+  readLeadContacts,
   refreshLeadsIfDue,
   setLeadStatus,
   SOURCE_LABELS,
@@ -117,6 +118,33 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     void qc.invalidateQueries({ queryKey: ["lead-counts"] });
   };
 
+  // After a refresh, read planroom job pages for contacts a few at a time (each call is
+  // short); stops when a batch comes back smaller than asked or after eight batches.
+  const readFn = useServerFn(readLeadContacts);
+  const [reading, setReading] = useState<number | null>(null);
+  const readPages = async () => {
+    if (reading !== null) return;
+    setReading(0);
+    const problems: string[] = [];
+    try {
+      for (let i = 0; i < 8; i++) {
+        const r = await readFn({ data: { max: 6 } });
+        problems.push(...r.failed);
+        setReading((n) => (n ?? 0) + r.read);
+        if (r.read > 0) void qc.invalidateQueries({ queryKey: ["leads"] });
+        if (r.read < 6 || problems.length) break;
+      }
+    } catch (e) {
+      problems.push(errText(e));
+    } finally {
+      setReading(null);
+    }
+    if (problems.length) {
+      const msg = [...new Set(problems)].join("; ");
+      setRefreshError(msg);
+      toast.error(`Planroom pages: ${msg}`);
+    }
+  };
   const refresh = useMutation({
     mutationFn: (force: boolean) => refreshFn({ data: { force } }),
     onSuccess: (r, force) => {
@@ -124,6 +152,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       if (r.error) toast.error(`Lead refresh: ${r.error}`);
       else if (force) toast.success(r.note ?? "Leads checked");
       if (r.ran || force) invalidate();
+      if ((r.ran || force) && counts.data?.planroom_login) void readPages();
     },
     onError: (e) => {
       setRefreshError(errText(e));
@@ -196,11 +225,13 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
           <span className="text-xs text-muted-foreground">
             {refresh.isPending
               ? "Checking…"
-              : settings?.last_fetch_at
-                ? `Checked ${formatDistanceToNow(Date.parse(settings.last_fetch_at), { addSuffix: true })}`
-                : counts.data
-                  ? "Not checked yet"
-                  : ""}
+              : reading !== null
+                ? `Reading job pages… ${reading}`
+                : settings?.last_fetch_at
+                  ? `Checked ${formatDistanceToNow(Date.parse(settings.last_fetch_at), { addSuffix: true })}`
+                  : counts.data
+                    ? "Not checked yet"
+                    : ""}
           </span>
           <span
             className="inline-flex h-7 w-7 cursor-help items-center justify-center text-muted-foreground"
@@ -214,7 +245,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={refresh.isPending}
+              disabled={refresh.isPending || reading !== null}
               onClick={() => refresh.mutate(true)}
               title="Pull the state planroom and Louisville permits now"
             >

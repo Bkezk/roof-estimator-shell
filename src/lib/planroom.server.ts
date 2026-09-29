@@ -87,6 +87,7 @@ async function get(url: string, jar: CookieJar): Promise<Response> {
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Cookie: jar.header() },
     redirect: "manual",
+    signal: AbortSignal.timeout(15000),
   });
   jar.absorb(res);
   return res;
@@ -134,6 +135,7 @@ export async function planroomSignIn(
     },
     body: body.toString(),
     redirect: "manual",
+    signal: AbortSignal.timeout(15000),
   });
   jar.absorb(res);
   if (res.status >= 300 && res.status < 400) return { site, jar };

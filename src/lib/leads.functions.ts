@@ -82,7 +82,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await refreshLeads(context.supabase);
         return {
           ran: true,
-          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof); ${r.enriched} job pages read`,
+          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah, ${r.campus} campus, ${r.sam_gov} SAM.gov; ${r.new_leads} new (${r.new_roof_leads} roof)`,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {
@@ -93,6 +93,20 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
       }
     },
   );
+
+/**
+ * Read a batch of planroom job pages for contacts (planroom.server.ts). The page calls this
+ * after a refresh, a few pages at a time, so no single request runs long. Returns how many
+ * were read (fewer than asked means nothing is left) and any site errors.
+ */
+export const readLeadContacts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ max: z.number().int().min(1).max(10) }).parse(d))
+  .handler(async ({ data, context }): Promise<{ read: number; failed: string[] }> => {
+    await prospectAccess(context);
+    const { readPlanroomPages } = await import("@/lib/leads.server");
+    return readPlanroomPages(context.supabase, data.max);
+  });
 
 const listSchema = z.object({
   /** Only leads the keyword match (or a new commercial building) flagged as roof work. */

@@ -20,7 +20,7 @@ async function run(request: Request): Promise<Response> {
       );
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { refreshLeads } = await import("@/lib/leads.server");
-    const r = await refreshLeads(supabaseAdmin as never);
+    const r = await refreshLeads(supabaseAdmin as never, { readPages: 40 });
     return Response.json({ ok: true, ...r, at: new Date().toISOString() });
   } catch (e) {
     return Response.json(

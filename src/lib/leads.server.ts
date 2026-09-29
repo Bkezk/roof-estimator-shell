@@ -110,6 +110,9 @@ export const SAM_SEARCH_URL = "https://api.sam.gov/opportunities/v2/search";
 export const SAM_NAICS_ROOFING = "238160";
 
 const UA = "JBK Portal construction leads";
+/** Every outside call gives up after 15 s so one slow site cannot hang the whole run. */
+const fetchTimeout = (url: string, ms = 15000) =>
+  fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(ms) });
 
 /* ------------------------------------------------------------------------------------------------
  * Dates
@@ -254,7 +257,7 @@ export function louisvilleQueryUrl(
 async function fetchLouisville(s: SettingsRow): Promise<LouisvillePermit[]> {
   const out: LouisvillePermit[] = [];
   for (let offset = 0; offset < 20000; offset += 1000) {
-    const res = await fetch(louisvilleQueryUrl(s, offset), { headers: { "User-Agent": UA } });
+    const res = await fetchTimeout(louisvilleQueryUrl(s, offset));
     if (!res.ok) throw new Error(`Louisville permits → ${res.status}`);
     const json = (await res.json()) as {
       error?: { message?: string };
@@ -726,15 +729,26 @@ export interface RefreshLeadsResult {
 
 /**
  * Sign in to the state planroom and Lynn's, read the job page of every open roof lead that
- * has not been read in the last week (40 per run, newest first), and store the contact line
- * plus the fields in raw.details. Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a no-op.
+ * has not been read in the last week (`max` per call, newest first), and store the contact
+ * line plus the fields in raw.details. Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a
+ * no-op. Kept apart from the list refresh: the page calls it in small batches after a refresh
+ * (a serverless request has a budget of outside calls and seconds), the nightly cron in one.
  */
-async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<number> {
+export async function readPlanroomPages(
+  sb: Client,
+  max: number,
+): Promise<{ read: number; failed: string[] }> {
+  const failed: string[] = [];
+  const read = await enrichPlanroomLeads(await serverClient(sb), failed, max);
+  return { read, failed };
+}
+
+async function enrichPlanroomLeads(admin: Client, failed: string[], max: number): Promise<number> {
   const { planroomCredentials, planroomSignIn, planroomSignOut, fetchJobDetails, contactLine } =
     await import("@/lib/planroom.server");
   const { STATE_PLANROOM, LYNN_PLANROOM } = await import("@/lib/planroom.server");
   const creds = planroomCredentials();
-  if (!creds) return 0;
+  if (!creds || max <= 0) return 0;
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
   const { data: rows, error } = await admin
     .from("leads")
@@ -752,7 +766,7 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
       return !d || d < since;
     })
     .filter((r) => !r.bid_at || Date.parse(r.bid_at) > Date.now() - 86400000)
-    .slice(0, 40);
+    .slice(0, max);
   if (!due.length) return 0;
   let n = 0;
   const sessions: Record<string, Awaited<ReturnType<typeof planroomSignIn>> | null> = {};
@@ -800,7 +814,10 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
   return n;
 }
 
-export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
+export async function refreshLeads(
+  sb: Client,
+  opts: { readPages?: number } = {},
+): Promise<RefreshLeadsResult> {
   const admin = await serverClient(sb);
   const { data: settings, error: sErr } = await admin
     .from("lead_settings")
@@ -814,7 +831,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
   const fetchedSources = new Set<LeadSource>();
 
   try {
-    const res = await fetch(PLANROOM_URL, { headers: { "User-Agent": UA } });
+    const res = await fetchTimeout(PLANROOM_URL);
     if (!res.ok) throw new Error(`→ ${res.status}`);
     const jobs = parsePlanroomHtml(await res.text());
     if (!jobs.length) throw new Error("no jobs parsed (page layout changed?)");
@@ -841,7 +858,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
     parse: (body: string) => LeadInsert[],
   ) => {
     try {
-      const res = await fetch(url, { headers: { "User-Agent": UA } });
+      const res = await fetchTimeout(url);
       if (!res.ok) throw new Error(`→ ${res.status}`);
       const parsed = parse(await res.text());
       if (!parsed.length) throw new Error("nothing parsed (page layout changed?)");
@@ -856,7 +873,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
   // empty is reported and skipped (an empty list is normal for the small portals).
   for (const portal of CAMPUS_PLANROOMS) {
     try {
-      const res = await fetch(campusListUrl(portal.domain), { headers: { "User-Agent": UA } });
+      const res = await fetchTimeout(campusListUrl(portal.domain));
       if (!res.ok) throw new Error(`→ ${res.status}`);
       const jobs = parsePlanroomHtml(await res.text());
       rows.push(...jobs.map((j) => campusLead(j, portal, s.roof_keywords)));
@@ -870,7 +887,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
   const samKey = process.env["SAM_GOV_API_KEY"]?.trim();
   if (samKey) {
     try {
-      const res = await fetch(samQueryUrl(samKey), { headers: { "User-Agent": UA } });
+      const res = await fetchTimeout(samQueryUrl(samKey));
       const json = (await res.json().catch(() => ({}))) as {
         opportunitiesData?: SamOpportunity[];
         error?: { message?: string };
@@ -946,10 +963,11 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
   }
 
   // With a planroom login in Lovable Cloud, read each open roof job's page for its owner
-  // contact, A/E and plan holders (planroom.server.ts). Never fails the refresh.
+  // contact, A/E and plan holders (planroom.server.ts). Never fails the refresh. The
+  // interactive refresh passes 0 and reads pages in follow-up calls instead.
   let enriched = 0;
   try {
-    enriched = await enrichPlanroomLeads(admin, failed);
+    enriched = await enrichPlanroomLeads(admin, failed, opts.readPages ?? 0);
   } catch (e) {
     failed.push(`Planroom details ${e instanceof Error ? e.message : String(e)}`);
   }
