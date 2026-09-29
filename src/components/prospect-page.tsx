@@ -253,6 +253,8 @@ export function ProspectPage(props: {
   initialBuildingId?: string | undefined;
   /** ?storm=1: open with the Storm hit filter on (the new-call-points notification). */
   initialStorm?: boolean | undefined;
+  /** ?at=lat,lng: fly the map there with the outlines on, so the building can be tapped open. */
+  initialAt?: { lat: number; lng: number } | undefined;
 }) {
   const { can, profile } = useAuth();
   const canWrite = can("prospect");
@@ -375,6 +377,13 @@ export function ProspectPage(props: {
       setSort("storm");
     }
   }, [props.initialStorm]);
+  // A point to look at (a Louisville permit lead): outlines on so the roof can be tapped open.
+  const [focus, setFocus] = useState<{ lat: number; lng: number } | null>(props.initialAt ?? null);
+  useEffect(() => {
+    if (!props.initialAt) return;
+    setFocus(props.initialAt);
+    setShowOutlines(true);
+  }, [props.initialAt]);
 
   const buildings = useQuery({
     queryKey: ["buildings", q, county, minSize, sort, stormHit],
@@ -899,6 +908,7 @@ export function ProspectPage(props: {
               onSelect={setSelectedId}
               showOutlines={stormHit ? false : showOutlines}
               showCities={showCities}
+              focus={focus}
               stormAreas={stormHit ? stormAreas : []}
               showStormAreas={showStormAreas}
               imageryYear={imageryYear.data?.year ?? null}

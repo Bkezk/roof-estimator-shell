@@ -113,8 +113,8 @@ describe("Louisville permits", () => {
     // A whole new commercial building is roof work whatever the permit says.
     expect(lead.is_roof).toBe(true);
     expect(lead.external_id).toBe("COM-NEW-26-00159");
-    // The card opens the site in Google Maps (the open-data explorer cannot link one permit).
-    expect(lead.url).toBe("https://www.google.com/maps/search/?api=1&query=38.18%2C-85.85");
+    // The card opens the site on the app's own map (the open-data explorer cannot link one permit).
+    expect(lead.url).toBe("/prospect?at=38.18,-85.85");
   });
 });
 

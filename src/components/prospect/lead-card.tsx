@@ -5,7 +5,7 @@
  * their own thing and never trigger the card.
  */
 import { useState, type ReactNode, type SyntheticEvent } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Building2, Eye, EyeOff, Loader2, Plus, StickyNote, Undo2, X } from "lucide-react";
 
 import { SOURCE_LABELS, type LeadRow, type LeadStatus } from "@/lib/leads.functions";
@@ -111,8 +111,17 @@ export function LeadCard(props: {
   const [note, setNote] = useState(l.note ?? "");
   const status = l.status as LeadStatus;
 
+  const navigate = useNavigate();
   const open = () => {
-    if (l.url) window.open(l.url, "_blank", "noopener,noreferrer");
+    if (!l.url) return;
+    // A permit lead points into the app (/prospect?at=lat,lng): stay in the app. Anything
+    // else is the source site, in a new tab.
+    if (l.url.startsWith("/prospect?")) {
+      const at = new URLSearchParams(l.url.slice(l.url.indexOf("?"))).get("at");
+      void navigate({ to: "/prospect", search: at ? { at } : {} });
+      return;
+    }
+    window.open(l.url, "_blank", "noopener,noreferrer");
   };
   const stop = (e: SyntheticEvent) => e.stopPropagation();
 
@@ -134,7 +143,13 @@ export function LeadCard(props: {
     <div
       role={l.url ? "link" : undefined}
       tabIndex={l.url ? 0 : undefined}
-      title={l.url ? `Open on the ${SOURCE_LABELS[l.source] ?? l.source} site` : undefined}
+      title={
+        l.url
+          ? l.url.startsWith("/")
+            ? "Open the site on the Buildings map"
+            : `Open on the ${SOURCE_LABELS[l.source] ?? l.source} site`
+          : undefined
+      }
       className={`space-y-2 rounded-lg border p-4 transition-all duration-150 ${
         l.url
           ? "cursor-pointer hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

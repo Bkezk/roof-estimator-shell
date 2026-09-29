@@ -43,8 +43,9 @@ export const LOUISVILLE_PERMITS_PAGE =
   "https://data.louisvilleky.gov/datasets/LOJIC::louisville-metro-ky-active-construction-permits/explore";
 /**
  * Where a permit card goes: the open-data explorer cannot deep-link one permit (owner, Sep 29:
- * "just pulls up this map"), so the card opens the site itself in Google Maps — the point when
- * the permit carries one, else the address.
+ * "just pulls up this map") and Google Maps is blocked on the owner's network, so the card
+ * opens the site on the app's own Buildings map (outlines on, ready to tap) when the permit
+ * carries a point; a permit without one falls back to an OpenStreetMap address search.
  */
 export function permitSiteUrl(p: {
   LATITUDE: number | null;
@@ -52,11 +53,9 @@ export function permitSiteUrl(p: {
   ADDRESS: string | null;
   CITY: string | null;
 }): string {
-  const q =
-    p.LATITUDE != null && p.LONGITUDE != null
-      ? `${p.LATITUDE},${p.LONGITUDE}`
-      : `${(p.ADDRESS ?? "").trim()}, ${(p.CITY ?? "Louisville").trim()}, KY`;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  if (p.LATITUDE != null && p.LONGITUDE != null) return `/prospect?at=${p.LATITUDE},${p.LONGITUDE}`;
+  const q = `${(p.ADDRESS ?? "").trim()}, ${(p.CITY ?? "Louisville").trim()}, KY`;
+  return `https://www.openstreetmap.org/search?query=${encodeURIComponent(q)}`;
 }
 
 /**

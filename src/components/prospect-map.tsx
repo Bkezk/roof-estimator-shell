@@ -68,6 +68,8 @@ interface Props {
    * fill the view, null when zoomed out over many tiles (and many flight years).
    */
   onViewCenter?: ((center: { lng: number; lat: number } | null) => void) | undefined;
+  /** Fly to this point (zoom 18) and drop a pin on it — a lead's site, not a stored building. */
+  focus?: { lat: number; lng: number } | null | undefined;
   selectedId: string | null;
   onSelect: (id: string) => void;
   /** A tap on an outline that is not stored yet (zoomed in): add that building. */
@@ -195,6 +197,7 @@ const IMAGERY_CREDIT = "Imagery © Commonwealth of Kentucky (KyFromAbove, 3-inch
 
 export default function ProspectMap({
   buildings,
+  focus,
   stormAreas,
   showStormAreas = true,
   imageryYear,
@@ -552,6 +555,24 @@ export default function ProspectMap({
     if (ready.current) apply();
     else pending.current = apply;
   }, [buildings, selectedId]);
+
+  // The focus pin: fly there once the map is ready; move the pin when the point changes.
+  const focusPin = useRef<Marker | null>(null);
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const apply = () => {
+      focusPin.current?.remove();
+      focusPin.current = null;
+      if (!focus) return;
+      focusPin.current = new Marker({ color: "#f59e0b" })
+        .setLngLat([focus.lng, focus.lat])
+        .addTo(m);
+      m.easeTo({ center: [focus.lng, focus.lat], zoom: 18, duration: 800 });
+    };
+    if (ready.current) apply();
+    else m.once("load", apply);
+  }, [focus]);
 
   return <div ref={el} className={className ?? "h-[420px] w-full rounded-md border"} />;
 }
