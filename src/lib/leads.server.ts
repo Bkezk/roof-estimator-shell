@@ -41,6 +41,23 @@ export const LOUISVILLE_PERMITS_LAYER =
   "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/active_construction_permits/FeatureServer/0";
 export const LOUISVILLE_PERMITS_PAGE =
   "https://data.louisvilleky.gov/datasets/LOJIC::louisville-metro-ky-active-construction-permits/explore";
+/**
+ * Where a permit card goes: the open-data explorer cannot deep-link one permit (owner, Sep 29:
+ * "just pulls up this map"), so the card opens the site itself in Google Maps — the point when
+ * the permit carries one, else the address.
+ */
+export function permitSiteUrl(p: {
+  LATITUDE: number | null;
+  LONGITUDE: number | null;
+  ADDRESS: string | null;
+  CITY: string | null;
+}): string {
+  const q =
+    p.LATITUDE != null && p.LONGITUDE != null
+      ? `${p.LATITUDE},${p.LONGITUDE}`
+      : `${(p.ADDRESS ?? "").trim()}, ${(p.CITY ?? "Louisville").trim()}, KY`;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
 
 /**
  * Lynn Imaging's public bids list (owner, Sep 29): the reprographics planroom behind the state's,
@@ -469,7 +486,7 @@ export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadIns
     sqft: p.SQFT,
     project_cost: p.PROJECT_COSTS,
     issued_on: p.ISSUE_DATE ? new Date(p.ISSUE_DATE).toISOString().slice(0, 10) : null,
-    url: LOUISVILLE_PERMITS_PAGE,
+    url: permitSiteUrl(p),
     // A whole new commercial building is a roof to bid whatever the permit is called.
     is_roof: /commercial (new|addition)/i.test(type) || isRoofLead(text, keywords),
     raw: p as unknown as Json,
