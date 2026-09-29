@@ -730,7 +730,7 @@ export interface RefreshLeadsResult {
  * plus the fields in raw.details. Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a no-op.
  */
 async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<number> {
-  const { planroomCredentials, planroomSignIn, fetchJobDetails, contactLine } =
+  const { planroomCredentials, planroomSignIn, planroomSignOut, fetchJobDetails, contactLine } =
     await import("@/lib/planroom.server");
   const { STATE_PLANROOM, LYNN_PLANROOM } = await import("@/lib/planroom.server");
   const creds = planroomCredentials();
@@ -795,6 +795,8 @@ async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<num
       if (/session expired/.test(String(e))) sessions[site.base] = null;
     }
   }
+  // Sign out of every site we signed in to (the planroom terms ask for it).
+  for (const session of Object.values(sessions)) if (session) await planroomSignOut(session);
   return n;
 }
 

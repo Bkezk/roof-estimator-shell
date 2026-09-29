@@ -4,6 +4,7 @@ import {
   CookieJar,
   aspHiddenFields,
   contactLine,
+  findLogoutLink,
   loginFieldNames,
   parseJobDetails,
 } from "@/lib/planroom.server";
@@ -206,5 +207,18 @@ describe("planroom job page", () => {
       "Owner Commonwealth of Kentucky, Finance & Administration Cabinet — Jane Doe — A/E Sherman Carter Barnhart — jane.doe@ky.gov — (502) 555-0100 — Plan holders: Alpha Roofing LLC, Beta Builders",
     );
     expect(contactLine(parseJobDetails("<html><body>nothing</body></html>"))).toBeNull();
+  });
+});
+
+describe("planroom sign-out link", () => {
+  it("finds the site's own log-out link and makes it absolute", () => {
+    const html = `<a href="ViewJobList.aspx">Public Projects</a> <a href="Logout.aspx?x=1">Sign Out</a>`;
+    expect(
+      findLogoutLink(html, "https://www.stateofkyplanroom.com/View/ViewJob.aspx?job_id=1"),
+    ).toBe("https://www.stateofkyplanroom.com/View/Logout.aspx?x=1");
+    expect(
+      findLogoutLink(`<a href="javascript:void(0)">Log Out</a>`, "https://x.test/"),
+    ).toBeNull();
+    expect(findLogoutLink(`<a href="Help.aspx">Help</a>`, "https://x.test/")).toBeNull();
   });
 });
