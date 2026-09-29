@@ -78,9 +78,11 @@ function BidLine({ lead }: { lead: LeadRow }) {
       month: "short",
       day: "numeric",
     });
+    // Louisville rows are permits; the city bid pages and SAM.gov give a posting date.
+    const label = lead.source === "louisville_permits" ? "Permit issued" : "Posted";
     parts.push(
       <span key="issued">
-        Permit issued {issued} ({agoText})
+        {label} {issued} ({agoText})
       </span>,
     );
   }

@@ -11,6 +11,9 @@ export function formatCost(v: number): string {
   });
 }
 
-/** A planroom lead whose bid date has passed. */
+/**
+ * A lead whose bid date has passed, whatever the source (owner, Sep 29: closed campus and
+ * SAM.gov bids were showing with "Show closed bids" off). Permits have no bid date.
+ */
 export const isClosedBid = (l: LeadRow, now = Date.now()) =>
-  l.source === "ky_planroom" && !!l.bid_at && Date.parse(l.bid_at) < now;
+  !!l.bid_at && Date.parse(l.bid_at) < now;
