@@ -3,7 +3,8 @@
  * thresholds: the roof keywords the planroom titles are matched against, which Louisville
  * permits count (types, minimum size, how far back), and which Nashville permits count (types
  * and a minimum construction cost: that layer has no square footage; the window is shared).
- * They apply from the next refresh.
+ * The cost floor applies to Chattanooga's new non-residential permits too (their window is a
+ * fixed 180 days: that layer runs a month or two behind). They apply from the next refresh.
  */
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -64,7 +65,7 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
     if (nty.length > 20 || nty.some((t) => t.length > 60))
       problems.push("Nashville permit types: at most 20, each up to 60 characters");
     if (!Number.isFinite(nashMinCost) || nashMinCost < 0 || nashMinCost > 100_000_000)
-      problems.push("Nashville min cost must be $0 to $100,000,000");
+      problems.push("Nashville / Chattanooga min cost must be $0 to $100,000,000");
     if (!Number.isFinite(minSqft) || minSqft < 0 || minSqft > 1_000_000)
       problems.push("min sq ft must be 0 to 1,000,000");
     if (!Number.isInteger(days) || days < 7 || days > 365)
@@ -132,7 +133,8 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
         </div>
         <div>
           <Label className="text-xs text-muted-foreground">
-            Nashville min construction cost ($; same window)
+            Min construction cost for Nashville and Chattanooga permits ($; Chattanooga looks back
+            180 days)
           </Label>
           <NumberField
             className="h-8"

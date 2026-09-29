@@ -3,8 +3,8 @@
  * they're built giving us time to submit a bid?"). Two public feeds, pulled nightly and when
  * this page loads (throttled to six hours on the server): every state-funded project out for bid
  * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
- * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits) from Sep 29,
- * all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
+ * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits; then BidNet,
+ * Chattanooga permits, Knox County and the universities) from Sep 29, all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,13 +67,17 @@ const ABOUT =
   "Tennessee — TN state projects (STREAM): every state building project out for bid, with the designer to call; " +
   "UT bids: the University of Tennessee campuses' invitations to bid; " +
   "Nashville permits: Metro Nashville commercial new, addition, shell and roofing permits over the minimum cost; " +
+  "Chattanooga permits: new non-residential buildings from the Chattanooga-Hamilton County planning agency (runs a month or two behind), over the same minimum cost; " +
+  "Knox County bids: Knox County's own solicitations; " +
+  "TN university bids: ETSU, Tennessee Tech, Austin Peay, MTSU and the Board of Regents (community colleges, TCATs, TSU). " +
+  "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. " +
   "The app checks them every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|[\w. ]+ planroom) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|[\w. ]+ planroom) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
@@ -284,7 +288,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
               variant={settingsOpen ? "secondary" : "ghost"}
               className="h-8 w-8"
               aria-label="Lead settings"
-              title="Lead settings: roof keywords and which Louisville permits count"
+              title="Lead settings: roof keywords and which permits count"
               onClick={() => setSettingsOpen((o) => !o)}
             >
               <Settings2 className="h-4 w-4" />

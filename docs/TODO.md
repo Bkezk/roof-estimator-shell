@@ -53,7 +53,7 @@ Spec: [`specs/2026-09-29-bid-validation-phase-0.md`](specs/2026-09-29-bid-valida
       purpose.
       **Storm call points (built Sep 28).** — [notes](handoff-service-module.md#storm-call-points-built-sep-28).
       **Construction leads (built Sep 28; sources added Sep 29).** — [notes](handoff-service-module.md#construction-leads-built-sep-28).
-      **Tennessee leads (Sep 29).** STREAM, UT bids, Nashville permits, SAM.gov TN; migration applied — [notes](handoff-service-module.md#tennessee-leads-sep-29).
+      **Tennessee leads (Sep 29).** STREAM, UT bids, Nashville permits, SAM.gov TN; round two: BidNet (TN & KY), Chattanooga permits, Knox County, TN universities; migrations applied — [notes](handoff-service-module.md#tennessee-leads-sep-29).
 
 2. **Building age.** No free statewide source carries year built (footprints: none; state
    parcels: Webster only; Census: per-tract medians). Paths, in order: (a) county PVA bulk

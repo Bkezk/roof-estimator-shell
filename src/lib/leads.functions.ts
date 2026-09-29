@@ -27,6 +27,11 @@ export const SOURCE_LABELS: Record<string, string> = {
   tn_stream: "TN state projects (STREAM)",
   ut_bids: "UT bids",
   nashville_permits: "Nashville permits",
+  // Round two (Sep 29): BidNet covers Kentucky's and Tennessee's purchasing groups.
+  bidnet: "Cities, counties & schools (BidNet)",
+  chattanooga_permits: "Chattanooga permits",
+  knox_county_bids: "Knox County bids",
+  tn_university_bids: "TN university bids",
 };
 export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
@@ -166,6 +171,10 @@ const listSchema = z.object({
       "tn_stream",
       "ut_bids",
       "nashville_permits",
+      "bidnet",
+      "chattanooga_permits",
+      "knox_county_bids",
+      "tn_university_bids",
     ])
     .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
@@ -292,10 +301,7 @@ export const addLeadToProspects = createServerFn({ method: "POST" })
       .from("buildings")
       .insert({
         source: "manual",
-        name:
-          lead.source === "louisville_permits" || lead.source === "nashville_permits"
-            ? (lead.project_type ?? lead.title)
-            : lead.title,
+        name: lead.source.endsWith("_permits") ? (lead.project_type ?? lead.title) : lead.title,
         address1: lead.address ?? "",
         city: lead.city ?? lead.location ?? null,
         state: lead.state || "KY",

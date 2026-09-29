@@ -43,6 +43,28 @@
  *
  *   SAM.gov: the daily pull asks for Kentucky and Tennessee (two requests, one daily slot).
  *
+ * Tennessee, round two (owner, Sep 29: bring Tennessee up to Kentucky's coverage — the other
+ * cities, the schools and universities, a statewide feed), checked from the sandbox Sep 29:
+ *
+ *   BidNet Direct purchasing groups (bidnet)  BIDNET_GROUPS, TN and KY
+ *     Cities, counties, school districts and utilities statewide post their solicitations
+ *     there; the open list is public (25 a page: 272 TN, 183 KY that day), the issuing agency,
+ *     number and documents are members-only. Read once a day behind the source_fetched_at
+ *     gate, one page at a time; BidNet answers some requests with an AWS WAF robot check,
+ *     which is skipped (never solved or retried) and reported.
+ *
+ *   Chattanooga permits (chattanooga_permits)  CHATTANOOGA_PERMITS_LAYER
+ *     The Chattanooga-Hamilton County RPA's building permits (ArcGIS REST, no key): new
+ *     construction only, a month or two behind; new non-residential over the Nashville cost
+ *     floor in the last 180 days.
+ *
+ *   Knox County solicitations (knox_county_bids)  KNOX_COUNTY_BIDS_URL
+ *     One HTML table: title, number, deadline day, buyer, the solicitation PDF, a pre-bid note.
+ *
+ *   TN university bid lists (tn_university_bids)  TN_UNIVERSITIES
+ *     ETSU, Tennessee Tech, Austin Peay, MTSU and TBR (community colleges, TCATs, TSU): the
+ *     designer to call, pre-bid and bid opening times, the invitation PDF.
+ *
  * refreshLeads: pull them all, upsert on (source, external_id) keeping the team's status, mark
  * what dropped off the source as gone, and tell Prospecting users about new roof leads.
  * Nothing here touches bids.
@@ -60,7 +82,11 @@ export type LeadSource =
   | "sam_gov"
   | "tn_stream"
   | "ut_bids"
-  | "nashville_permits";
+  | "nashville_permits"
+  | "bidnet"
+  | "chattanooga_permits"
+  | "knox_county_bids"
+  | "tn_university_bids";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -310,16 +336,29 @@ export function parseWrittenDateTime(text: string, zone: UsZone, ref?: Date): st
   return zonedIso(year, month, day, hour, minute, z);
 }
 
-/** The calendar day ("2026-09-25") an instant falls on in Central time. */
-export function centralDay(ms: number): string {
-  const std = new Date(ms - 6 * 3600000);
+/** The calendar day ("2026-09-25") an instant falls on in US Eastern or Central time. */
+function zoneDay(ms: number, zone: UsZone): string {
+  const offset = zone === "ET" ? 5 : 6;
+  const std = new Date(ms - offset * 3600000);
   const daylight = isUsDaylightTime(
     std.getUTCFullYear(),
     std.getUTCMonth(),
     std.getUTCDate(),
     std.getUTCHours(),
   );
-  return new Date(daylight ? ms - 5 * 3600000 : ms - 6 * 3600000).toISOString().slice(0, 10);
+  return new Date(daylight ? ms - (offset - 1) * 3600000 : std.getTime())
+    .toISOString()
+    .slice(0, 10);
+}
+
+/** The calendar day ("2026-09-25") an instant falls on in Central time. */
+export function centralDay(ms: number): string {
+  return zoneDay(ms, "CT");
+}
+
+/** The calendar day an instant falls on in Eastern time (Chattanooga, Knoxville). */
+export function easternDay(ms: number): string {
+  return zoneDay(ms, "ET");
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -1157,6 +1196,960 @@ export function nashvilleLead(p: NashvillePermit, keywords: string[]): LeadInser
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Tennessee round two (Sep 29): BidNet (cities, counties and school districts, TN and KY),
+ * Chattanooga permits, Knox County solicitations, the public universities' bid lists
+ * ---------------------------------------------------------------------------------------------- */
+
+const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** "369/005-05-2024" out of a line or a file name ("373-003-01-2026-invitation-to-bid.pdf"). */
+function sbcNumber(text: string): string | null {
+  const m = /\b(\d{3})[/-](\d{3}-\d{2}-\d{4}[A-Z]{0,3})\b/.exec(text);
+  return m ? `${m[1]}/${m[2]}` : null;
+}
+
+const slug = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 120);
+
+/** A block of HTML as text lines: one per paragraph, heading, line break, cell or list item. */
+const htmlLines = (html: string): string[] =>
+  html
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "")
+    .split(
+      /<\/p>|<p\b[^>]*>|<br\s*\/?>|<\/li>|<\/h\d>|<h\d\b[^>]*>|<\/td>|<\/th>|<\/tr>|<\/div>|<hr\b[^>]*>/i,
+    )
+    .map((x) => decode(x))
+    .filter(Boolean);
+
+/**
+ * Lines grouped under their labels ("Pre-Bid:", "Bid Opening", …): each label's lines run to
+ * the next label. A label with its value on the same line ("Contact: X") keeps the rest.
+ */
+function labeledBlocks(lines: string[], labels: [string, RegExp][]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  let cur: string | null = null;
+  for (const line of lines) {
+    const hit = labels.find(([, re]) => re.test(line));
+    if (hit) {
+      cur = hit[0];
+      out[cur] ??= [];
+      const rest = line.replace(hit[1], "").trim();
+      if (rest) out[cur]!.push(rest);
+    } else if (cur) out[cur]!.push(line);
+  }
+  return out;
+}
+
+/**
+ * The first line that carries a written date, with the next line when the time of day sits
+ * there ("Wednesday, August 26 , 2026" / "at 2:00 PM, local time").
+ */
+function whenIn(lines: string[], zone: UsZone): { text: string; at: string } | null {
+  const hasTime = (l: string) => /\b\d{1,2}(?::\d{2})?\s*[ap]\.?\s?m\b|\bnoon\b/i.test(l);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.replace(/\s+,/g, ",");
+    if (!parseWrittenDateTime(line, zone)) continue;
+    const next = lines[i + 1];
+    const text = !hasTime(line) && next && hasTime(next) ? `${line} ${next}` : line;
+    const at = parseWrittenDateTime(text.replace(/\s+,/g, ","), zone);
+    if (at) return { text, at };
+  }
+  return null;
+}
+
+const PHONE_RE = /\(?\d{3}\)?[-. ]\s?\d{3}[-. ]\d{4}/;
+const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.]+/;
+
+/* ---- BidNet Direct: the Tennessee and Kentucky purchasing groups --------------------------- */
+
+export interface BidnetGroup {
+  state: "TN" | "KY";
+  /** The group's path on bidnetdirect.com. */
+  slug: string;
+  /** Stands in for the issuing agency (members-only on BidNet). */
+  label: string;
+}
+/**
+ * BidNet Direct's state purchasing groups (Sep 29): cities, counties, school districts, utilities
+ * and some state agencies post there. The list is public; the issuing agency, the solicitation
+ * number and the documents are members-only, so a lead links the public abstract page.
+ */
+export const BIDNET_GROUPS: BidnetGroup[] = [
+  { state: "TN", slug: "tennessee", label: "Tennessee Purchasing Group (BidNet)" },
+  { state: "KY", slug: "kentucky", label: "Kentucky Purchasing Group (BidNet)" },
+];
+export const BIDNET_BASE = "https://www.bidnetdirect.com";
+export const bidnetPageUrl = (slugPath: string, page: number) =>
+  page <= 1
+    ? `${BIDNET_BASE}/${slugPath}`
+    : `${BIDNET_BASE}/${slugPath}/solicitations/open-bids/page${page}`;
+/** Rows per list page, and the most pages one pull reads. */
+const BIDNET_PAGE_SIZE = 25;
+const BIDNET_MAX_PAGES = 20;
+/** Pause between two BidNet requests. */
+const BIDNET_PAUSE_MS = 300;
+/** Abstract pages read per run for a roof row's exact closing time. */
+const BIDNET_MAX_ABSTRACTS = 8;
+
+export interface BidnetRow {
+  /** The abstract id ("444177732225"). */
+  id: string;
+  title: string;
+  /** "Tennessee". */
+  region: string | null;
+  /** "2026-09-29". */
+  publishedOn: string | null;
+  /** "2026-10-22" (the list shows the day only). */
+  closingOn: string | null;
+  /** The public abstract page. */
+  url: string;
+}
+
+/** "09/29/2026" → "2026-09-29". */
+const mdyToIso = (s: string | null | undefined): string | null => {
+  const m = /(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(s ?? "");
+  return m ? `${m[3]}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}` : null;
+};
+
+/**
+ * BidNet answers some requests with an AWS WAF "verify you're not a robot" page (HTTP 202, a
+ * 2 KB page that loads challenge.js) instead of the list. It is never solved or retried here.
+ */
+export function isBidnetChallenge(status: number, html: string): boolean {
+  return (
+    status === 202 || /awsWafCookieDomainList|token\.awswaf\.com|challenge-container/.test(html)
+  );
+}
+
+/**
+ * One list page: one row per `<tr class="mets-table-row">` with the title linked to the
+ * abstract, the region, and the published / closing dates (MM/DD/YYYY). `total` is the
+ * "272 Open Solicitations" header; `lastPage` the pager's highest page.
+ */
+export function parseBidnetList(html: string): {
+  rows: BidnetRow[];
+  total: number | null;
+  lastPage: number | null;
+} {
+  const rows: BidnetRow[] = [];
+  const seen = new Set<string>();
+  for (const part of html.split(/<tr\b[^>]*class="[^"]*mets-table-row[^"]*"[^>]*>/i).slice(1)) {
+    const row = part.split(/<\/tr>/i)[0]!;
+    const a = /<a\b([^>]*\bsolicitation-link\b[^>]*)>([\s\S]*?)<\/a>/i.exec(row);
+    if (!a) continue;
+    const href = /href="([^"]+)"/i.exec(a[1]!)?.[1];
+    const id = href ? /\/(\d+)\/abstract\b/.exec(href)?.[1] : null;
+    if (!href || !id || seen.has(id)) continue;
+    seen.add(id);
+    const date = (cls: string) =>
+      mdyToIso(new RegExp(`${cls}[\\s\\S]*?date-value">([^<]*)<`, "i").exec(row)?.[1] ?? null);
+    rows.push({
+      id,
+      title: decode(a[2]!),
+      region: decode(/sol-region-item">([\s\S]*?)<\/span>/i.exec(row)?.[1] ?? "") || null,
+      publishedOn: date("sol-publication-date"),
+      closingOn: date("sol-closing-date"),
+      url: new URL(decode(href), BIDNET_BASE).href,
+    });
+  }
+  const total = /([\d,]+)\s+Open Solicitations/i.exec(html);
+  const pages = [...html.matchAll(/data-page-number="(\d+)"/g)].map((m) => Number(m[1]));
+  return {
+    rows,
+    total: total ? Number(total[1]!.replace(/,/g, "")) : null,
+    lastPage: pages.length ? Math.max(...pages) : null,
+  };
+}
+
+/** The abstract page's public dates: "Closing Date 10/22/2026 04:00 PM EDT". */
+export function parseBidnetAbstract(html: string): {
+  publishedText: string | null;
+  closingText: string | null;
+  closingAt: string | null;
+} {
+  const field = (label: string) => {
+    const m = new RegExp(
+      `${label}\\s*</span>\\s*<div[^>]*mets-field-body[^>]*>([\\s\\S]*?)</div>`,
+      "i",
+    ).exec(html);
+    return m ? decode(m[1]!) || null : null;
+  };
+  const closingText = field("Closing Date");
+  const closingAt = closingText
+    ? /\bC[SD]?T\b/.test(closingText)
+      ? parseCentralDate(closingText)
+      : parseEasternDate(closingText)
+    : null;
+  return { publishedText: field("Publication Date"), closingText, closingAt };
+}
+
+/** Words after "City of" that are a department, not the town ("City of Franklin Park Department"). */
+const NOT_TOWN =
+  /^(Park|Parks|Department|Police|Fire|Public|Water|Utilities|Utility|Street|Streets|Schools?|Board|Recreation|Housing|Airport|Transit)$/;
+/**
+ * The place a BidNet title names, when it names one: "… for City of Clarksville", "Warren
+ * County …", "Kingsport City Schools", "Hamilton County Schools". Light on purpose: null when
+ * the title says nothing (the issuing agency is members-only).
+ */
+export function bidnetPlace(title: string): { city: string | null; county: string | null } {
+  const cityOf = /\bCity of ([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?)/.exec(title);
+  let city: string | null = null;
+  if (cityOf) {
+    const words = cityOf[1]!.split(" ");
+    city = words.length > 1 && NOT_TOWN.test(words[1]!) ? words[0]! : cityOf[1]!;
+  }
+  city ??= /\b([A-Z][a-zA-Z]+) City Schools\b/.exec(title)?.[1] ?? null;
+  // One word ("Warren", "McMinn"), or "Van Buren": "Demolition Svc Warren County" is Warren.
+  const county = /\b((?:Van )?[A-Z][a-zA-Z]+) County\b/.exec(title)?.[1] ?? null;
+  return { city, county };
+}
+
+export function bidnetLead(
+  r: BidnetRow,
+  group: BidnetGroup,
+  keywords: string[],
+  closing?: { at: string; text: string } | null,
+): LeadInsert {
+  const { city, county } = bidnetPlace(r.title);
+  // The list gives the closing day only; 4:00 PM Eastern is the time the abstracts show
+  // (read from the abstract for roof rows when it could be).
+  const assumed = r.closingOn
+    ? parseEasternDate(
+        `${r.closingOn.slice(5, 7)}/${r.closingOn.slice(8, 10)}/${r.closingOn.slice(0, 4)} 04:00 PM`,
+      )
+    : null;
+  return {
+    source: "bidnet",
+    external_id: r.id,
+    title: r.title,
+    agency: group.label,
+    location: city ?? (county ? `${county} County` : null),
+    city,
+    county,
+    state: group.state,
+    bid_at: closing?.at ?? assumed,
+    issued_on: r.publishedOn,
+    url: r.url,
+    contact: null,
+    is_roof: isRoofLead(r.title, keywords),
+    raw: {
+      ...r,
+      group: group.slug,
+      closing_text: closing?.text ?? null,
+      closing_time: closing
+        ? "read from the abstract page"
+        : "4:00 PM ET assumed (list shows the day only)",
+    } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/**
+ * Every page of one group's open list, one request at a time with a short pause. Page 1 gives
+ * the count, hence the number of pages. A page answered with the robot check is skipped (not
+ * retried) and reported in `problem`; so is a page that fails, and the pages left when the run's
+ * time budget (`deadline`, epoch ms) runs out. Throws when page 1 cannot be read.
+ */
+export async function fetchBidnetList(
+  group: BidnetGroup,
+  deadline: number,
+  headers: Record<string, string> = UT_HEADERS,
+): Promise<{ rows: BidnetRow[]; pages: number; read: number; requests: number; problem?: string }> {
+  const get = async (page: number) => {
+    const res = await fetchTimeout(bidnetPageUrl(group.slug, page), 20000, headers);
+    return { status: res.status, ok: res.ok, html: await res.text() };
+  };
+  const first = await get(1);
+  if (isBidnetChallenge(first.status, first.html))
+    throw new Error(
+      "→ the first page answered with a robot check (AWS WAF challenge; not retried), so nothing was read this time",
+    );
+  if (!first.ok) throw new Error(`→ ${first.status}`);
+  const one = parseBidnetList(first.html);
+  if (!one.rows.length && one.total !== 0 && !/0\s+Open Solicitations/i.test(first.html))
+    throw new Error("nothing parsed (page layout changed?)");
+  const pages = Math.min(
+    BIDNET_MAX_PAGES,
+    one.total != null ? Math.max(1, Math.ceil(one.total / BIDNET_PAGE_SIZE)) : (one.lastPage ?? 1),
+  );
+  const rows = new Map(one.rows.map((r) => [r.id, r]));
+  const challenged: number[] = [];
+  const problems: string[] = [];
+  let read = 1;
+  let requests = 1;
+  for (let p = 2; p <= pages; p++) {
+    if (Date.now() > deadline) {
+      problems.push(`stopped after page ${p - 1} of ${pages} (the run's time budget)`);
+      break;
+    }
+    await pause(BIDNET_PAUSE_MS);
+    requests++;
+    try {
+      const r = await get(p);
+      if (isBidnetChallenge(r.status, r.html)) challenged.push(p);
+      else if (!r.ok) problems.push(`page ${p} → ${r.status}`);
+      else {
+        for (const row of parseBidnetList(r.html).rows)
+          if (!rows.has(row.id)) rows.set(row.id, row);
+        read++;
+      }
+    } catch (e) {
+      problems.push(`page ${p} ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (challenged.length)
+    problems.unshift(
+      `${challenged.length} of ${pages} pages answered with a robot check (AWS WAF challenge; not retried): page ${challenged.join(", ")}`,
+    );
+  return {
+    rows: [...rows.values()],
+    pages,
+    read,
+    requests,
+    ...(problems.length
+      ? { problem: `→ ${read} of ${pages} pages read; ${problems.join("; ")}` }
+      : {}),
+  };
+}
+
+/** One abstract page's closing time (null on the robot check or any failure: not an error). */
+export async function fetchBidnetClosing(
+  url: string,
+  headers: Record<string, string> = UT_HEADERS,
+): Promise<{ at: string; text: string } | null> {
+  try {
+    const res = await fetchTimeout(url, 15000, headers);
+    const html = await res.text();
+    if (!res.ok || isBidnetChallenge(res.status, html)) return null;
+    const a = parseBidnetAbstract(html);
+    return a.closingAt && a.closingText ? { at: a.closingAt, text: a.closingText } : null;
+  } catch {
+    return null;
+  }
+}
+
+/* ---- Chattanooga permits (Chattanooga-Hamilton County RPA, ArcGIS) ------------------------ */
+
+/**
+ * The Regional Planning Agency's building permits layer (the service name is historical; the
+ * data ran to 2026-07-31 on Sep 29, a month or two behind). Only new construction is in it.
+ */
+export const CHATTANOOGA_PERMITS_LAYER =
+  "https://services2.arcgis.com/cclAu9OKhOfjeUdr/arcgis/rest/services/Building_Permits_to_April_2021/FeatureServer/0";
+/** The layer lags one to two months, so it is read further back than the Louisville window. */
+export const CHATTANOOGA_DAYS = 180;
+/** Census Bureau building-permit codes for new non-residential construction (DEV_TYPE_C). */
+export const CENSUS_NONRES: Record<string, string> = {
+  "213": "Hotels and motels",
+  "214": "Other shelter",
+  "318": "Amusement and recreation",
+  "319": "Churches and religious",
+  "320": "Industrial",
+  "321": "Parking garages",
+  "322": "Service stations and repair garages",
+  "323": "Hospitals and institutional",
+  "324": "Offices, banks and professional",
+  "325": "Public works and utilities",
+  "326": "Schools and educational",
+  "327": "Stores and customer services",
+  "328": "Other non-residential",
+  "329": "Structures other than buildings",
+};
+
+export interface ChattanoogaPermit {
+  PERMIT_NUM: string;
+  ADDRESS: string | null;
+  VALUATION: number | null;
+  PERMIT_DAT: number | null;
+  PERMIT_YEAR?: number | null;
+  CATEGORY: string | null;
+  P_TYPE: string | null;
+  DEV_TYPE_C: string | null;
+  P_DESC: string | null;
+  CITY: string | null;
+  [k: string]: unknown;
+}
+
+/**
+ * New non-residential permits issued in the last CHATTANOOGA_DAYS at or over the cost floor
+ * (the Nashville one, shared), leaving out code 329 (structures other than buildings: towers,
+ * signs, walls). Points in WGS84.
+ */
+export function chattanoogaQueryUrl(minCost: number, offset = 0, now = new Date()): string {
+  const since = new Date(now.getTime() - CHATTANOOGA_DAYS * 86400000).toISOString().slice(0, 10);
+  const min = Number(minCost) || 0;
+  const where = `P_TYPE = 'Non-Residential' AND PERMIT_DAT >= DATE '${since}' AND (DEV_TYPE_C IS NULL OR DEV_TYPE_C <> '329')${min > 0 ? ` AND VALUATION >= ${min}` : ""}`;
+  const q = new URLSearchParams({
+    where,
+    outFields:
+      "PERMIT_NUM,ADDRESS,VALUATION,PERMIT_DAT,PERMIT_YEAR,CATEGORY,P_TYPE,DEV_TYPE_C,P_DESC,CITY",
+    orderByFields: "PERMIT_DAT DESC",
+    resultRecordCount: "1000",
+    resultOffset: String(offset),
+    returnGeometry: "true",
+    outSR: "4326",
+    f: "json",
+  });
+  return `${CHATTANOOGA_PERMITS_LAYER}/query?${q.toString()}`;
+}
+
+export async function fetchChattanooga(
+  minCost: number,
+): Promise<{ permit: ChattanoogaPermit; lat: number | null; lng: number | null }[]> {
+  const out: { permit: ChattanoogaPermit; lat: number | null; lng: number | null }[] = [];
+  for (let offset = 0; offset < 10000; offset += 1000) {
+    const res = await fetchTimeout(chattanoogaQueryUrl(minCost, offset));
+    if (!res.ok) throw new Error(`→ ${res.status}`);
+    const json = (await res.json()) as {
+      error?: { message?: string };
+      features?: { attributes: ChattanoogaPermit; geometry?: { x?: number; y?: number } | null }[];
+      exceededTransferLimit?: boolean;
+    };
+    if (json.error) throw new Error(`→ ${json.error.message ?? "error"}`);
+    for (const f of json.features ?? [])
+      out.push({
+        permit: f.attributes,
+        lat: typeof f.geometry?.y === "number" ? f.geometry.y : null,
+        lng: typeof f.geometry?.x === "number" ? f.geometry.x : null,
+      });
+    if (!json.exceededTransferLimit) break;
+  }
+  return out;
+}
+
+export function chattanoogaLead(
+  p: ChattanoogaPermit,
+  point: { lat: number | null; lng: number | null },
+  keywords: string[],
+): LeadInsert {
+  const kind = CENSUS_NONRES[(p.DEV_TYPE_C ?? "").trim()] ?? null;
+  const desc = (p.P_DESC ?? "").replace(/\s+/g, " ").trim();
+  const address = (p.ADDRESS ?? "").trim();
+  const city = (p.CITY ?? "").trim() ? titleCase((p.CITY ?? "").trim()) : "Chattanooga";
+  const sf = /(\d[\d,]{2,})\s*(?:S\.?\s?F\.?|sq\.?\s?ft|square\s+feet)(?![a-z])/i.exec(desc);
+  return {
+    source: "chattanooga_permits",
+    external_id: p.PERMIT_NUM,
+    title: `New non-residential — ${kind ?? "other"}`,
+    agency: "Chattanooga-Hamilton County RPA",
+    location: [address, city, "TN"].filter(Boolean).join(", "),
+    address: address || null,
+    city,
+    county: "Hamilton",
+    state: "TN",
+    lat: point.lat,
+    lng: point.lng,
+    project_type: kind,
+    sqft: sf ? Number(sf[1]!.replace(/,/g, "")) : null,
+    project_cost: p.VALUATION,
+    contact: null,
+    issued_on: p.PERMIT_DAT ? easternDay(p.PERMIT_DAT) : null,
+    url: null,
+    // A new non-residential building is a new roof (as with Louisville and Nashville new
+    // builds); a row without a known building code falls back to the keyword match.
+    is_roof: kind !== null || isRoofLead(desc, keywords),
+    raw: { ...p, description: desc } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ---- Knox County purchasing (Knoxville area) --------------------------------------------- */
+
+export const KNOX_COUNTY_BIDS_URL =
+  "https://www.knoxcounty.org/apps/solicitations/solicitations.php";
+
+export interface KnoxBid {
+  /** The solicitation number ("3764"). */
+  number: string;
+  title: string;
+  /** "10-06-26" as the page shows it. */
+  deadlineText: string;
+  /** The deadline day at 2:00 PM Eastern (the page gives no time). */
+  bidAt: string | null;
+  buyer: string | null;
+  phone: string | null;
+  email: string | null;
+  /** "Click Here for the Solicitation" → the PDF, made absolute. */
+  documents: { label: string; url: string }[];
+  note: string | null;
+  prebidAt: string | null;
+}
+
+/**
+ * One solicitation per row of five cells (title, number, deadline mm-dd-yy, buyer with a
+ * mailto link and phone, attachment links); a "Note:" row under it (pre-bid meeting) belongs
+ * to it.
+ */
+export function parseKnoxCountyBids(html: string): KnoxBid[] {
+  const out: KnoxBid[] = [];
+  const clean = html.replace(/<!--[\s\S]*?-->/g, "");
+  for (const row of clean.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? []) {
+    const cells = row.match(/<td\b[\s\S]*?<\/td>/gi) ?? [];
+    if (cells.length === 1 && /Note:/i.test(cells[0]!)) {
+      const last = out[out.length - 1];
+      if (last && !last.note) {
+        last.note = decode(cells[0]!).replace(/^Note:\s*/i, "") || null;
+        if (last.note && /pre-?\s?bid/i.test(last.note))
+          last.prebidAt = parseWrittenDateTime(last.note, "ET");
+      }
+      continue;
+    }
+    if (cells.length < 5) continue;
+    const number = decode(cells[1]!);
+    const deadlineText = decode(cells[2]!);
+    const d = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/.exec(deadlineText);
+    if (!number || !d) continue; // the header row
+    const year = d[3]!.length === 2 ? 2000 + Number(d[3]) : Number(d[3]);
+    const buyerCell = cells[3]!;
+    const email = /mailto:([^'"\s>]+)/i.exec(buyerCell)?.[1] ?? null;
+    const documents = [
+      ...cells[4]!.matchAll(/<a\b[^>]*href=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/a>/gi),
+    ].map((m) => ({
+      label: decode(m[2]!).replace(/^Click Here for (the )?/i, ""),
+      url: new URL(decode(m[1]!), "https://www.knoxcounty.org/").href,
+    }));
+    out.push({
+      number,
+      title: decode(cells[0]!),
+      deadlineText,
+      bidAt: zonedIso(year, Number(d[1]) - 1, Number(d[2]), 14, 0, "ET"),
+      buyer: decode(/<a\b[^>]*>([\s\S]*?)<\/a>/i.exec(buyerCell)?.[1] ?? "") || null,
+      phone: PHONE_RE.exec(decode(buyerCell))?.[0] ?? null,
+      email: email ? decodeURIComponent(email) : null,
+      documents,
+      note: null,
+      prebidAt: null,
+    });
+  }
+  return out;
+}
+
+export function knoxCountyLead(b: KnoxBid, keywords: string[]): LeadInsert {
+  const doc = b.documents.find((x) => /solicitation/i.test(x.label)) ?? b.documents[0];
+  return {
+    source: "knox_county_bids",
+    external_id: b.number,
+    title: b.title,
+    agency: "Knox County",
+    location: "Knoxville",
+    city: "Knoxville",
+    county: "Knox",
+    state: "TN",
+    bid_at: b.bidAt,
+    prebid_at: b.prebidAt,
+    url: doc?.url ?? KNOX_COUNTY_BIDS_URL,
+    contact: [b.buyer, b.phone, b.email].filter(Boolean).join(" — ") || null,
+    is_roof: isRoofLead(b.title, keywords),
+    raw: {
+      ...b,
+      bid_time: "2:00 PM ET assumed (the list shows the deadline day only)",
+    } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ---- Tennessee public universities and TBR ----------------------------------------------- */
+
+export interface TnUniversityBid {
+  /** The SBC project number when the page gives one, else the title as a slug. */
+  id: string;
+  title: string;
+  /** TBR's list covers many schools: the row's institution ("TSU", "Chattanooga SCC"). */
+  institution: string | null;
+  city: string | null;
+  county: string | null;
+  description: string | null;
+  /** The designer (A/E firm) running the bid. */
+  designer: string | null;
+  contact: string | null;
+  prebidText: string | null;
+  prebidAt: string | null;
+  bidText: string | null;
+  bidAt: string | null;
+  /** The invitation to bid PDF, else the list page. */
+  url: string;
+}
+
+export interface TnUniversity {
+  key: string;
+  /** Agency on the lead. */
+  label: string;
+  /** In the failure line: "ETSU bids". */
+  short: string;
+  url: string;
+  city: string;
+  county: string;
+  zone: UsZone;
+  parse: (html: string, school: TnUniversity) => TnUniversityBid[];
+}
+
+const bidBase = (school: TnUniversity, title: string): TnUniversityBid => ({
+  id: slug(title),
+  title,
+  institution: null,
+  city: school.city,
+  county: school.county,
+  description: null,
+  designer: null,
+  contact: null,
+  prebidText: null,
+  prebidAt: null,
+  bidText: null,
+  bidAt: null,
+  url: school.url,
+});
+
+/**
+ * ETSU: under "Available Projects to Bid", each project a small table: "SBC Project:" (number,
+ * university, project, town), "Bids Received:" (place, then "until … 2:00 pm local time
+ * Wednesday, October 7, 2026"), "Designer:" (firm, address, "Contact:", "Phone:").
+ */
+export function parseEtsuBids(html: string, school: TnUniversity): TnUniversityBid[] {
+  const start = html.search(/Available Projects to Bid/i);
+  if (start < 0) return [];
+  let body = html.slice(start);
+  const end = body.search(/class="bottomRow"|<\/article>|<footer\b/i);
+  if (end >= 0) body = body.slice(0, end);
+  const lines = htmlLines(body);
+  const out: TnUniversityBid[] = [];
+  const chunks: string[][] = [];
+  for (const l of lines) {
+    if (/^SBC Project( No\.?)?:?$/i.test(l)) chunks.push([]);
+    chunks[chunks.length - 1]?.push(l);
+  }
+  for (const chunk of chunks) {
+    const b = labeledBlocks(chunk, [
+      ["sbc", /^SBC Project( No\.?)?:?/i],
+      ["bid", /^Bids? (Received|Opening|Due)[^:]*:?/i],
+      ["prebid", /^Pre-?\s?Bid[^:]*:/i],
+      ["designer", /^Designer:?/i],
+    ]);
+    const sbcLines = b["sbc"] ?? [];
+    const sbc = sbcNumber(sbcLines.join(" "));
+    const title = sbcLines.find(
+      (l) =>
+        !sbcNumber(l) &&
+        !/State University$/i.test(l) &&
+        !isPlaceLine(l) &&
+        !/,\s*Tennessee/i.test(l),
+    );
+    if (!title) continue;
+    const place = sbcLines.find((l) => /,\s*(Tennessee|TN)\b/i.test(l));
+    const bid = whenIn(b["bid"] ?? [], school.zone);
+    const prebid = whenIn(b["prebid"] ?? [], school.zone);
+    const d = b["designer"] ?? [];
+    const firm = d[0] ?? null;
+    const who = d.find((l) => /^Contact\s*:/i.test(l))?.replace(/^Contact\s*:\s*/i, "") ?? null;
+    const phone = d.map((l) => PHONE_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    const email = d.map((l) => EMAIL_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    out.push({
+      ...bidBase(school, title),
+      id: sbc ?? slug(title),
+      city: place ? place.split(",")[0]!.trim() : school.city,
+      designer: firm,
+      contact: [firm, who, phone, email].filter(Boolean).join(" — ") || null,
+      prebidText: prebid?.text ?? null,
+      prebidAt: prebid?.at ?? null,
+      bidText: bid?.text ?? null,
+      bidAt: bid?.at ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Tennessee Tech: "TN Tech Managed Projects", one accordion item per project titled "Name SBC#
+ * 364/011-05-2025", with Project Description, Pre-Bid, Bid Opening (date and "at 2:00 PM,
+ * local time" on separate lines) and Documents ("Please contact X at Firm, e-mail", phone,
+ * the INVITATION TO BID link). The TBR table below it is left to the TBR source.
+ */
+export function parseTtuBids(html: string, school: TnUniversity): TnUniversityBid[] {
+  let body = html;
+  const tbr = body.search(/TBR Managed Projects/i);
+  if (tbr >= 0) body = body.slice(0, tbr);
+  const out: TnUniversityBid[] = [];
+  for (const item of body.split(/<li\b[^>]*class="[^"]*accordion-item[^"]*"[^>]*>/i).slice(1)) {
+    const head = /class="[^"]*accordion-title[^"]*"[^>]*>([\s\S]*?)(?:<div\b|<\/a>)/i.exec(item);
+    if (!head) continue;
+    const heading = decode(head[1]!);
+    const sbc = sbcNumber(heading);
+    const title = heading.replace(/\s*SBC\s*#?\s*:?\s*[\d/-]+[A-Z]*\s*$/i, "").trim();
+    if (!title) continue;
+    const content = item.slice(head.index + head[0].length);
+    const b = labeledBlocks(htmlLines(content), [
+      ["description", /^Project Description:?/i],
+      ["prebid", /^Pre-?\s?Bid( Conference| Meeting)?:?/i],
+      ["bid", /^Bid Opening:?/i],
+      ["documents", /^Documents:?/i],
+    ]);
+    const prebid = whenIn(b["prebid"] ?? [], school.zone);
+    const bid = whenIn(b["bid"] ?? [], school.zone);
+    const docs = b["documents"] ?? [];
+    const ask = docs.find((l) => /contact/i.test(l)) ?? null;
+    const email = docs.map((l) => EMAIL_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    const phone = docs.map((l) => PHONE_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    // "Please contact, Art Carlton, at Bauer Askew Architecture, acarlton@…" → "Art Carlton, Bauer Askew Architecture".
+    const who = ask
+      ? ask
+          .replace(EMAIL_RE, "")
+          .replace(/^.*?contact,?\s*/i, "")
+          .replace(/,?\s+at\s+/i, ", ")
+          .replace(/[,\s]+$/, "")
+          .trim() || null
+      : null;
+    const firm = who && who.includes(", ") ? who.slice(who.indexOf(", ") + 2) : null;
+    const itb =
+      /<a\b[^>]*href="([^"]+)"[^>]*>\s*INVITATION TO BID/i.exec(content)?.[1] ??
+      /<a\b[^>]*href="([^"]+\.pdf)"/i.exec(content)?.[1];
+    out.push({
+      ...bidBase(school, title),
+      id: sbc ?? slug(title),
+      description: (b["description"] ?? []).join(" ") || null,
+      designer: firm,
+      contact: [who, email, phone].filter(Boolean).join(" — ") || null,
+      prebidText: prebid?.text ?? null,
+      prebidAt: prebid?.at ?? null,
+      bidText: bid?.text ?? null,
+      bidAt: bid?.at ?? null,
+      url: itb ? new URL(decode(itb), school.url).href : school.url,
+    });
+  }
+  return out;
+}
+
+/**
+ * Austin Peay: "Project Bids", one accordion per project (the toggle is the title) with the
+ * Invitation to Bid PDF, "Pre-Bid Conference" and "Bid Opening" ("Due by July 8, 2026, 2:00
+ * p.m. CDT"), the designer under "Questions?" and the APSU contact.
+ */
+export function parseApsuBids(html: string, school: TnUniversity): TnUniversityBid[] {
+  const start = html.search(/<h2[^>]*>\s*Project Bids\s*<\/h2>/i);
+  if (start < 0) return [];
+  let body = html.slice(start);
+  const end = body.search(/<\/main>|class="sidebar"/i);
+  if (end >= 0) body = body.slice(0, end);
+  const out: TnUniversityBid[] = [];
+  for (const part of body
+    .split(/<button\b[^>]*class="[^"]*accordion__toggle[^"]*"[^>]*>/i)
+    .slice(1)) {
+    const close = part.search(/<\/button>/i);
+    if (close < 0) continue;
+    const title = decode(part.slice(0, close).replace(/<span class="hide">[\s\S]*?<\/span>/i, ""));
+    if (!title) continue;
+    const content = part.slice(close);
+    const lines = htmlLines(content);
+    const b = labeledBlocks(lines, [
+      ["prebid", /^Pre-?\s?Bid( Conference| Meeting)?:?$/i],
+      ["bid", /^Bid Opening:?$/i],
+      ["questions", /^Questions\??$/i],
+      ["apsu", /^APSU Contact:?$/i],
+    ]);
+    const pdf =
+      /<a\b[^>]*href="([^"]+\.pdf)"[^>]*>\s*Invitation to Bid/i.exec(content)?.[1] ??
+      /<a\b[^>]*href="([^"]+\.pdf)"/i.exec(content)?.[1];
+    const url = pdf ? new URL(decode(pdf), school.url).href : school.url;
+    const q = b["questions"] ?? [];
+    const lead = q.findIndex((l) => /directed to|contact/i.test(l));
+    const firm = lead >= 0 ? (q[lead + 1] ?? null) : (q[0] ?? null);
+    const designerName =
+      q.find((l) => /^Designer\s*:/i.test(l))?.replace(/^Designer\s*:\s*/i, "") ?? null;
+    const phone = q.map((l) => PHONE_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    const email = q.map((l) => EMAIL_RE.exec(l)?.[0]).find(Boolean) ?? null;
+    const apsu = (b["apsu"] ?? []).join(" ");
+    const apsuPhone = PHONE_RE.exec(apsu)?.[0];
+    const apsuEmail = EMAIL_RE.exec(apsu)?.[0];
+    const prebid = whenIn(b["prebid"] ?? [], school.zone);
+    const bid = whenIn(b["bid"] ?? [], school.zone);
+    const sbc = sbcNumber(decodeURIComponent(url)) ?? sbcNumber(content);
+    out.push({
+      ...bidBase(school, title),
+      id: sbc ?? slug(title),
+      designer: firm,
+      contact:
+        [firm, designerName, phone, email].filter(Boolean).join(" — ") ||
+        [`${school.label} capital planning`, apsuPhone, apsuEmail].filter(Boolean).join(" — "),
+      prebidText: prebid?.text ?? null,
+      prebidAt: prebid?.at ?? null,
+      bidText: bid?.text ?? null,
+      bidAt: bid?.at ?? null,
+      url,
+    });
+  }
+  return out;
+}
+
+/** Towns and TBR regions on Eastern time (the rest of Tennessee keeps Central). */
+const TN_EASTERN =
+  /^(Chattanooga|Knoxville|Johnson City|Kingsport|Bristol|Blountville|Elizabethton|Morristown|Greeneville|Jacksboro|Harriman|Athens|Cleveland|Oneida|Maryville|Sevierville|Oak Ridge|Rogersville|Tazewell|Dandridge|Newport|Madisonville|Dayton|Erwin|Mountain City|Sneedville|Maynardville|Kingston|Loudon|Lenoir City|Etowah|Benton|Wartburg|Huntsville|Rutledge|Decatur)$/i;
+
+/**
+ * TBR's construction bid list (and MTSU's, the same four-column table): Submittal Deadline
+ * ("October 14, 2026 02:00 PM local time", region, "Bid"), Project ("in Chattanooga, TN", the
+ * SBC number, the institution, the project), Project Description, Solicitor (designer firm,
+ * "Contact: X", phone). "Local time" is the job's: Eastern in East Tennessee, else Central.
+ */
+export function parseTbrBidTable(html: string, school: TnUniversity): TnUniversityBid[] {
+  const out: TnUniversityBid[] = [];
+  for (const t of html.match(/<table[\s\S]*?<\/table>/gi) ?? []) {
+    const heads = (t.match(/<th\b[\s\S]*?<\/th>/gi) ?? []).map((h) => decode(h).toLowerCase());
+    const col = (re: RegExp) => heads.findIndex((h) => re.test(h));
+    const iDue = col(/deadline/);
+    const iProject = col(/^project$/);
+    if (iDue < 0 || iProject < 0) continue;
+    const iDesc = col(/description/);
+    const iBy = col(/solicitor/);
+    for (const row of t.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? []) {
+      const cells = row.match(/<td\b[\s\S]*?<\/td>/gi) ?? [];
+      if (cells.length <= Math.max(iDue, iProject)) continue;
+      const lines = (i: number) => (i >= 0 && cells[i] ? htmlLines(cells[i]!) : []);
+      const project = lines(iProject);
+      if (!project.length) continue; // an empty row (MTSU's table today)
+      const due = lines(iDue);
+      const placeLine = project.find((l) => /^in\s+/i.test(l)) ?? null;
+      const city = placeLine
+        ? placeLine
+            .replace(/^in\s+/i, "")
+            .split(",")[0]!
+            .trim() || null
+        : null;
+      const sbcLine = project.find((l) => /^\d{3}-\d{2}-\d{4}\w*$|^\d{3}\/\d{3}-/.test(l)) ?? null;
+      const rest = project.filter((l) => l !== placeLine && l !== sbcLine);
+      const title = rest[rest.length - 1];
+      if (!title) continue;
+      const institution = rest.length > 1 ? rest[0]! : null;
+      const region = due[1] ?? null;
+      const zone: UsZone =
+        (region && TN_EASTERN.test(region)) || (city && TN_EASTERN.test(city)) ? "ET" : school.zone;
+      const bid = whenIn(due, zone);
+      const by = lines(iBy);
+      const firm = by[0] ?? null;
+      const who = by.find((l) => /^Contact\s*:/i.test(l))?.replace(/^Contact\s*:\s*/i, "") ?? null;
+      const phone = by.map((l) => PHONE_RE.exec(l)?.[0]).find(Boolean) ?? null;
+      out.push({
+        ...bidBase(school, title),
+        id: sbcLine ?? slug(`${institution ?? ""} ${title}`),
+        institution,
+        city: city ?? school.city,
+        county: city ? (city === school.city ? school.county : null) : school.county,
+        description: lines(iDesc).join(" ") || null,
+        designer: firm,
+        contact: [firm, who, phone].filter(Boolean).join(" — ") || null,
+        bidText: bid?.text ?? null,
+        bidAt: bid?.at ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The locally governed public universities' construction bid lists, and TBR's (community
+ * colleges, TCATs and TSU). University of Memphis is left out: its bid list page only links an
+ * Oracle supplier portal that needs registration (checked Sep 29).
+ */
+export const TN_UNIVERSITIES: TnUniversity[] = [
+  {
+    key: "etsu",
+    label: "East Tennessee State University",
+    short: "ETSU",
+    url: "https://www.etsu.edu/facilities/planning/bid.php",
+    city: "Johnson City",
+    county: "Washington",
+    zone: "ET",
+    parse: parseEtsuBids,
+  },
+  {
+    key: "ttu",
+    label: "Tennessee Tech",
+    short: "Tennessee Tech",
+    url: "https://www.tntech.edu/capital-projects/sbc-capital/bid-list.php",
+    city: "Cookeville",
+    county: "Putnam",
+    // Putnam County keeps Central time.
+    zone: "CT",
+    parse: parseTtuBids,
+  },
+  {
+    key: "apsu",
+    label: "Austin Peay State University",
+    short: "Austin Peay",
+    url: "https://www.apsu.edu/univ-design-and-construction/construction_bid_list.php",
+    city: "Clarksville",
+    county: "Montgomery",
+    zone: "CT",
+    parse: parseApsuBids,
+  },
+  {
+    key: "mtsu",
+    label: "Middle Tennessee State University",
+    short: "MTSU",
+    url: "https://www.mtsu.edu/campusplanning/construction/",
+    city: "Murfreesboro",
+    county: "Rutherford",
+    zone: "CT",
+    parse: parseTbrBidTable,
+  },
+  {
+    key: "tbr",
+    label: "Tennessee Board of Regents",
+    short: "TBR",
+    url: "https://www.tbr.edu/facilities/construction-bid",
+    city: "Nashville",
+    county: "Davidson",
+    zone: "CT",
+    parse: parseTbrBidTable,
+  },
+];
+
+/** The page is the bid list we expect (a heading or table header it always has), even if empty. */
+export function isTnUniversityPage(html: string, school: TnUniversity): boolean {
+  switch (school.key) {
+    case "etsu":
+      return /Available Projects to Bid/i.test(html);
+    case "ttu":
+      return /Construction Bid List/i.test(html) && /accordion/i.test(html);
+    case "apsu":
+      return /Project Bids/i.test(html);
+    default:
+      return /Submittal Deadline/i.test(html);
+  }
+}
+
+export function tnUniversityLead(
+  b: TnUniversityBid,
+  school: TnUniversity,
+  keywords: string[],
+): LeadInsert {
+  return {
+    source: "tn_university_bids",
+    external_id: `${school.key}:${b.id}`,
+    title: b.title,
+    agency: b.institution ? `${b.institution} (${school.short})` : school.label,
+    location: b.city,
+    city: b.city,
+    county: b.county,
+    state: "TN",
+    contractor: b.designer,
+    contact: b.contact,
+    prebid_at: b.prebidAt,
+    bid_at: b.bidAt,
+    url: b.url,
+    is_roof: isRoofLead(`${b.title} ${b.description ?? ""}`, keywords),
+    raw: { ...b, school: school.key, page: school.url } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Rows
  * ---------------------------------------------------------------------------------------------- */
 
@@ -1398,6 +2391,11 @@ export interface RefreshLeadsResult {
   tn_stream: number;
   ut: number;
   nashville: number;
+  /** 0 when the once-a-day gate skipped BidNet this run. */
+  bidnet: number;
+  chattanooga: number;
+  knox_county: number;
+  tn_universities: number;
   new_leads: number;
   new_roof_leads: number;
   gone: number;
@@ -1525,7 +2523,7 @@ export async function refreshLeads(
   // A progress stamp first: if the run dies mid-way (a platform time limit), the settings row
   // shows when it started instead of the last good run.
   await stage(
-    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + UT_CAMPUSES.length + 8} lists…`,
+    `running since ${new Date().toISOString()}: pulling ${CAMPUS_PLANROOMS.length + UT_CAMPUSES.length + TN_UNIVERSITIES.length + 10} lists (plus SAM.gov and BidNet once a day)…`,
   );
 
   // Every list at once (the slowest site, not the sum, sets the run's length); each source
@@ -1535,30 +2533,43 @@ export async function refreshLeads(
   // SAM.gov: a personal API key allows only a handful of requests a day, so one pull a day
   // however often the page is refreshed (owner, Sep 29: "I don't want to overdo their site").
   // The attempt is stamped before the call: a failed request spends the budget too.
+  // BidNet takes a request per 25 solicitations (about 20 a pull): the same once-a-day gate.
   const stamps = { ...((s.source_fetched_at as Record<string, string> | null) ?? {}) };
-  const samLast = stamps["sam_gov"] ? Date.parse(stamps["sam_gov"]) : 0;
+  const lastPull = (key: string) => (stamps[key] ? Date.parse(stamps[key]) : 0);
+  const samLast = lastPull("sam_gov");
   const samDue = !!samKey && Date.now() - samLast > SAM_GAP;
   const samNext = new Date(samLast + SAM_GAP);
-  if (samDue) {
-    stamps["sam_gov"] = new Date().toISOString();
+  const bidnetLast = lastPull("bidnet");
+  const bidnetDue = Date.now() - bidnetLast > SAM_GAP;
+  const bidnetNext = new Date(bidnetLast + SAM_GAP);
+  if (samDue || bidnetDue) {
+    if (samDue) stamps["sam_gov"] = new Date().toISOString();
+    if (bidnetDue) stamps["bidnet"] = new Date().toISOString();
     const { error: stampErr } = await admin
       .from("lead_settings")
       .update({ source_fetched_at: stamps })
       .eq("id", 1);
-    if (stampErr) throw new Error(`could not stamp the SAM.gov pull: ${stampErr.message}`);
+    if (stampErr) throw new Error(`could not stamp the daily pulls: ${stampErr.message}`);
   }
   type Pulled = { source: LeadSource; rows: LeadInsert[]; count: number };
+  let bidnetClosingsRead = 0;
   // A source read from several lists (campus pages, the two STREAM pages, SAM.gov's two
   // states) with one of them failing: its rows from that list are missing, not withdrawn, so
   // nothing of that source is marked gone this run.
   const partial = new Set<LeadSource>();
+  // `problem`: the list was read only in part (BidNet pages skipped): the rows are kept, the
+  // problem is reported, and nothing of that source is marked gone.
   const attempt = async (
     source: LeadSource,
     label: string,
-    run: () => Promise<{ rows: LeadInsert[]; count?: number }>,
+    run: () => Promise<{ rows: LeadInsert[]; count?: number; problem?: string }>,
   ): Promise<Pulled | null> => {
     try {
       const r = await run();
+      if (r.problem) {
+        failed.push(`${label} ${r.problem}`);
+        partial.add(source);
+      }
       return { source, rows: r.rows, count: r.count ?? r.rows.length };
     } catch (e) {
       failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
@@ -1630,7 +2641,82 @@ export async function refreshLeads(
       const permits = await fetchNashville(s);
       return { rows: permits.map((p) => nashvilleLead(p, s.roof_keywords)) };
     }),
+    // Tennessee, round two.
+    attempt("chattanooga_permits", "Chattanooga permits", async () => {
+      const permits = await fetchChattanooga(Number(s.nashville_min_cost));
+      return { rows: permits.map((p) => chattanoogaLead(p.permit, p, s.roof_keywords)) };
+    }),
+    attempt("knox_county_bids", "Knox County bids", async () => {
+      const html = await text(KNOX_COUNTY_BIDS_URL);
+      const bids = parseKnoxCountyBids(html);
+      // An empty list is possible; a list with solicitation links and nothing read is not.
+      if (!bids.length && /showfile\.php/i.test(html))
+        throw new Error("nothing parsed (page layout changed?)");
+      return { rows: bids.map((b) => knoxCountyLead(b, s.roof_keywords)) };
+    }),
+    ...TN_UNIVERSITIES.map((school) =>
+      attempt("tn_university_bids", `${school.short} bids`, async () => {
+        const html = await text(school.url, UT_HEADERS);
+        if (!isTnUniversityPage(html, school))
+          throw new Error("not the bid list page we know (page layout changed?)");
+        // An empty list is normal (MTSU had none on Sep 29).
+        return {
+          rows: school.parse(html, school).map((b) => tnUniversityLead(b, school, s.roof_keywords)),
+        };
+      }),
+    ),
   ];
+  if (bidnetDue) {
+    // One group after the other, one page at a time: BidNet never sees two requests at once.
+    // The pages stop 40 s into the run so the page's refresh still answers inside its minute.
+    const deadline = t0 + 40000;
+    let abstracts = BIDNET_MAX_ABSTRACTS;
+    let chain: Promise<unknown> = Promise.resolve();
+    for (const group of BIDNET_GROUPS) {
+      const p = chain.then(() =>
+        attempt("bidnet", `BidNet ${group.state}`, async () => {
+          const list = await fetchBidnetList(group, deadline);
+          // Roof rows: the exact closing time from the abstract page, read once per closing day
+          // (a stored time for the same day is reused).
+          const roof = list.rows.filter((r) => isRoofLead(r.title, s.roof_keywords));
+          const closings = new Map<string, { at: string; text: string }>();
+          if (roof.length) {
+            const { data: stored, error } = await admin
+              .from("leads")
+              .select("external_id, bid_at, raw")
+              .eq("source", "bidnet")
+              .in(
+                "external_id",
+                roof.map((r) => r.id),
+              );
+            if (error) throw new Error(error.message);
+            for (const st of stored ?? []) {
+              const raw = (st.raw ?? {}) as { closing_text?: string | null; closingOn?: string };
+              const row = roof.find((r) => r.id === st.external_id);
+              if (row && st.bid_at && raw.closing_text && raw.closingOn === row.closingOn)
+                closings.set(row.id, { at: st.bid_at, text: raw.closing_text });
+            }
+            for (const row of roof) {
+              if (closings.has(row.id) || abstracts <= 0 || Date.now() > deadline) continue;
+              abstracts--;
+              await pause(BIDNET_PAUSE_MS);
+              const c = await fetchBidnetClosing(row.url);
+              if (c) {
+                closings.set(row.id, c);
+                bidnetClosingsRead++;
+              }
+            }
+          }
+          return {
+            rows: list.rows.map((r) => bidnetLead(r, group, s.roof_keywords, closings.get(r.id))),
+            ...(list.problem ? { problem: list.problem } : {}),
+          };
+        }),
+      );
+      pulls.push(p);
+      chain = p;
+    }
+  }
   if (samDue)
     for (const st of SAM_STATES)
       pulls.push(
@@ -1646,15 +2732,25 @@ export async function refreshLeads(
       );
   const pulled = (await Promise.all(pulls)).filter((x): x is Pulled => x !== null);
   await stage(`lists pulled, ${pulled.length} answered; saving…`);
-  // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies.
-  let lynnDuplicates: string[] = [];
+  // Lynn's feed repeats the state and campus planroom jobs: keep the planroom copies. BidNet
+  // repeats state, UT and some university jobs: keep the copy from the owner's own list (it
+  // carries the contact and the exact bid time).
+  const duplicates: { source: LeadSource; ids: string[] }[] = [];
   const planroomRows = pulled
     .filter((x) => x.source === "ky_planroom" || x.source === "campus_planrooms")
     .flatMap((x) => x.rows);
+  const ownListRows = pulled
+    .filter(
+      (x) => x.source !== "bidnet" && x.source !== "lynn_bids" && !x.source.endsWith("_permits"),
+    )
+    .flatMap((x) => x.rows);
   for (const x of pulled) {
-    if (x.source === "lynn_bids") {
-      const { keep, dropped } = dropPlanroomDuplicates(x.rows, planroomRows);
-      lynnDuplicates = dropped;
+    if (x.source === "lynn_bids" || x.source === "bidnet") {
+      const { keep, dropped } = dropPlanroomDuplicates(
+        x.rows,
+        x.source === "lynn_bids" ? planroomRows : ownListRows,
+      );
+      if (dropped.length) duplicates.push({ source: x.source, ids: dropped });
       x.rows = keep;
     }
     // Every row names its state: one upsert batch sends the union of the rows' columns, and a
@@ -1688,14 +2784,14 @@ export async function refreshLeads(
 
   // Dropped off a source that answered: mark gone (kept for history; hidden by default).
   let gone = 0;
-  if (lynnDuplicates.length) {
-    // A Lynn copy of a state job stored before the planroom row existed: retire it.
+  for (const d of duplicates) {
+    // A Lynn or BidNet copy of a job stored before the other list's row existed: retire it.
     const { data: g, error } = await admin
       .from("leads")
       .update({ gone_at: new Date().toISOString() })
-      .eq("source", "lynn_bids")
+      .eq("source", d.source)
       .is("gone_at", null)
-      .in("external_id", lynnDuplicates)
+      .in("external_id", d.ids)
       .select("id");
     if (error) throw new Error(error.message);
     gone += g?.length ?? 0;
@@ -1747,7 +2843,7 @@ export async function refreshLeads(
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -1760,6 +2856,10 @@ export async function refreshLeads(
     tn_stream: counts["tn_stream"] ?? 0,
     ut: counts["ut_bids"] ?? 0,
     nashville: counts["nashville_permits"] ?? 0,
+    bidnet: counts["bidnet"] ?? 0,
+    chattanooga: counts["chattanooga_permits"] ?? 0,
+    knox_county: counts["knox_county_bids"] ?? 0,
+    tn_universities: counts["tn_university_bids"] ?? 0,
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,

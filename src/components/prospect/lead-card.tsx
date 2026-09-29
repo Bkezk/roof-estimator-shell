@@ -78,11 +78,9 @@ function BidLine({ lead }: { lead: LeadRow }) {
       month: "short",
       day: "numeric",
     });
-    // Louisville and Nashville rows are permits; the bid pages and SAM.gov give a posting date.
-    const label =
-      lead.source === "louisville_permits" || lead.source === "nashville_permits"
-        ? "Permit issued"
-        : "Posted";
+    // Louisville, Nashville and Chattanooga rows are permits; the bid pages, BidNet and SAM.gov
+    // give a posting date.
+    const label = lead.source.endsWith("_permits") ? "Permit issued" : "Posted";
     parts.push(
       <span key="issued">
         {label} {issued} ({agoText})
