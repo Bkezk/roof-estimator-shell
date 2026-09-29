@@ -30,7 +30,7 @@ import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
-import { Route as ProspectLeadsRouteImport } from './routes/prospect.leads'
+import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
 import { Route as ServiceTodayRouteImport } from './routes/service.today'
@@ -144,9 +144,9 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProspectLeadsRoute = ProspectLeadsRouteImport.update({
-  id: '/leads',
-  path: '/leads',
-  getParentRoute: () => ProspectRoute,
+  id: '/prospect_/leads',
+  path: '/prospect/leads',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ServiceBoardRoute = ServiceBoardRouteImport.update({
   id: '/board',
@@ -190,7 +190,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRouteWithChildren
+  '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -220,7 +220,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRouteWithChildren
+  '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -251,7 +251,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
-  '/prospect': typeof ProspectRouteWithChildren
+  '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
@@ -262,7 +262,7 @@ export interface FileRoutesById {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
-  '/prospect/leads': typeof ProspectLeadsRoute
+  '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
   '/service/today': typeof ServiceTodayRoute
@@ -354,7 +354,7 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
-    | '/prospect/leads'
+    | '/prospect_/leads'
     | '/service/board'
     | '/service/invoices'
     | '/service/today'
@@ -374,7 +374,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
-  ProspectRoute: typeof ProspectRouteWithChildren
+  ProspectRoute: typeof ProspectRoute
   ServiceRoute: typeof ServiceRouteWithChildren
   TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
@@ -385,6 +385,7 @@ export interface RootRouteChildren {
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  ProspectLeadsRoute: typeof ProspectLeadsRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
   ApiCronRemindersRoute: typeof ApiCronRemindersRoute
   ApiCronStormsRoute: typeof ApiCronStormsRoute
@@ -539,12 +540,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/prospect/leads': {
-      id: '/prospect/leads'
-      path: '/leads'
+    '/prospect_/leads': {
+      id: '/prospect_/leads'
+      path: '/prospect/leads'
       fullPath: '/prospect/leads'
       preLoaderRoute: typeof ProspectLeadsRouteImport
-      parentRoute: typeof ProspectRoute
+      parentRoute: typeof rootRouteImport
     }
     '/service/board': {
       id: '/service/board'
@@ -591,18 +592,6 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface ProspectRouteChildren {
-  ProspectLeadsRoute: typeof ProspectLeadsRoute
-}
-
-const ProspectRouteChildren: ProspectRouteChildren = {
-  ProspectLeadsRoute: ProspectLeadsRoute,
-}
-
-const ProspectRouteWithChildren = ProspectRoute._addFileChildren(
-  ProspectRouteChildren,
-)
-
 interface ServiceRouteChildren {
   ServiceBoardRoute: typeof ServiceBoardRoute
   ServiceInvoicesRoute: typeof ServiceInvoicesRoute
@@ -629,7 +618,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
-  ProspectRoute: ProspectRouteWithChildren,
+  ProspectRoute: ProspectRoute,
   ServiceRoute: ServiceRouteWithChildren,
   TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
@@ -640,6 +629,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminServiceRatesRoute: AdminServiceRatesRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
+  ProspectLeadsRoute: ProspectLeadsRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,
   ApiCronRemindersRoute: ApiCronRemindersRoute,
   ApiCronStormsRoute: ApiCronStormsRoute,

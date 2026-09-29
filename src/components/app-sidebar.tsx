@@ -81,7 +81,7 @@ const customerItems: ServiceItem[] = [
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [
-  { title: "Buildings", url: "/prospect", icon: Building2 },
+  { title: "Buildings", url: "/prospect", icon: Building2, except: ["/prospect/leads"] },
   // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
   { title: "Leads", url: "/prospect/leads", icon: Radar },
 ];
