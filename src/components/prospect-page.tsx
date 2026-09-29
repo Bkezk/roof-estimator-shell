@@ -884,7 +884,7 @@ export function ProspectPage(props: {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold">Buildings</h1>
+          <h1 className="text-2xl font-semibold">Roofs &amp; Storms</h1>
           <p className="text-sm text-muted-foreground">
             Your prospects, and every commercial building in Kentucky and Tennessee to find the next
             one.
@@ -1207,7 +1207,7 @@ export function ProspectPage(props: {
                             },
                             rect,
                           )
-                        : "Saves as a prospect in the Buildings list. Type what you know; anything can be left blank."}
+                        : "Saves as a prospect in the Roofs & Storms list. Type what you know; anything can be left blank."}
                     </CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">

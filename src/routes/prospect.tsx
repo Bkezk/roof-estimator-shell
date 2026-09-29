@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { ProspectPage } from "@/components/prospect-page";
 
 export const Route = createFileRoute("/prospect")({
-  head: () => ({ meta: [{ title: "Buildings — JBK Portal" }] }),
+  head: () => ({ meta: [{ title: "Roofs & Storms — JBK Portal" }] }),
   // ?building=<id> opens that building (links from a bid, a task, a report card).
   // ?storm=1 opens with the Storm hit filter on (the "new storm call points" notification).
   // ?at=lat,lng flies the map to that point with the outlines on (a Louisville permit lead).

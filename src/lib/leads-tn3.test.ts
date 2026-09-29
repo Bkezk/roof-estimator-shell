@@ -449,7 +449,7 @@ describe("saveLeadRows (shared by the refresh and the browser import)", () => {
     expect(notifyMock.mock.calls[0]![0]).toEqual(["u1", "u2"]);
     expect(notifyMock.mock.calls[0]![1]).toMatchObject({
       kind: "lead",
-      title: "1 new roof lead",
+      title: "Bid Board: 1 new roof job",
       url: "/prospect/leads?roof=1",
     });
     expect(r.notified).toBe(2);

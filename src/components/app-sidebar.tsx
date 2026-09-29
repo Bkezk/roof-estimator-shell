@@ -81,9 +81,11 @@ const customerItems: ServiceItem[] = [
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [
-  { title: "Buildings", url: "/prospect", icon: Building2, except: ["/prospect/leads"] },
+  // Owner (Sep 29): "Roofs & Storms" (the map: every commercial roof plus storm call points)
+  // and "Bid Board" (jobs out to bid and permits) instead of Buildings / Leads.
+  { title: "Roofs & Storms", url: "/prospect", icon: Building2, except: ["/prospect/leads"] },
   // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
-  { title: "Leads", url: "/prospect/leads", icon: Radar },
+  { title: "Bid Board", url: "/prospect/leads", icon: Radar },
 ];
 // Admin (role) only: who can sign in and which pages each person may open, the reminder and
 // untouched-work rules, and the service labor rates (owner, Sep 28: their own pages under

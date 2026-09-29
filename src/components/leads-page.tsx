@@ -210,7 +210,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       setRefreshError(r.error);
       if (r.error) toast.error(`Lead refresh: ${r.error}`);
       else if (r.waited) toast.info(r.waited);
-      else if (force) toast.success(r.note ?? "Leads checked");
+      else if (force) toast.success(r.note ?? "Bid board checked");
       if (r.ran) invalidate();
       if (r.ran && counts.data?.planroom_login) void readPages();
     },
@@ -271,7 +271,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold">Leads</h1>
+          <h1 className="text-2xl font-semibold">Bid Board</h1>
           <p className="text-sm text-muted-foreground">
             Projects out for bid across Kentucky and Louisville commercial permits — new roofs
             before they're built.

@@ -480,7 +480,7 @@ describe("stored leads past 1,000 rows", () => {
     expect(r.fresh.map((x) => x.external_id)).toEqual(["b-new"]);
     expect(r.newRoof.map((x) => x.external_id)).toEqual(["b-new"]);
     expect(notifyMock).toHaveBeenCalledTimes(1);
-    expect(notifyMock.mock.calls[0]![1]).toMatchObject({ title: "1 new roof lead" });
+    expect(notifyMock.mock.calls[0]![1]).toMatchObject({ title: "Bid Board: 1 new roof job" });
   });
 
   it("exactly 1,000 stored: one more (empty) page is read", async () => {

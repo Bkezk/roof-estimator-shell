@@ -2940,7 +2940,7 @@ export async function saveLeadRows(
         ids,
         {
           kind: "lead",
-          title: `${newRoof.length} new roof lead${newRoof.length === 1 ? "" : "s"}`,
+          title: `Bid Board: ${newRoof.length} new roof job${newRoof.length === 1 ? "" : "s"}`,
           body: `${top}${newRoof.length > 3 ? "; …" : ""}`,
           url: "/prospect/leads?roof=1",
         },
