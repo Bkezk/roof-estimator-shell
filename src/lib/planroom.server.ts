@@ -79,6 +79,8 @@ export function loginFieldNames(html: string): {
 export interface PlanroomSession {
   site: PlanroomSite;
   jar: CookieJar;
+  /** The site's own sign-out link, once a signed-in page has shown it. */
+  logoutUrl?: string;
 }
 
 async function get(url: string, jar: CookieJar): Promise<Response> {
@@ -242,6 +244,9 @@ export async function fetchJobDetails(
   const { res, url: finalUrl } = await getFollow(url, session.jar);
   if (/Login\.aspx/i.test(finalUrl)) throw new Error(`${session.site.label}: session expired`);
   let html = await res.text();
+  // Remember the sign-out link so the run can end the session the way the terms ask.
+  const out = findLogoutLink(html, finalUrl);
+  if (out) session.logoutUrl = out;
   // A "Plan Holders" link on the page: pull that view too and append it.
   const link = /<a[^>]*href="([^"]*(?:PlanHolder|view=ph)[^"]*)"[^>]*>/i.exec(html);
   if (link) {
@@ -256,6 +261,36 @@ export async function fetchJobDetails(
     }
   }
   return parseJobDetails(html);
+}
+
+/** The first link whose address or text says log out / sign out, made absolute. */
+export function findLogoutLink(html: string, pageUrl: string): string | null {
+  for (const m of html.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = m[1]!.replace(/&amp;/g, "&");
+    const text = m[2]!.replace(/<[^>]+>/g, " ");
+    if (/log\s*out|sign\s*out|logoff/i.test(href) || /log\s*out|sign\s*out/i.test(text)) {
+      if (/^javascript:/i.test(href)) continue;
+      try {
+        return new URL(href, pageUrl).href;
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * End the session (terms §10: "exit from your account at the end of each session"). Best
+ * effort: the site's own sign-out link when a page showed one, else the conventional page.
+ */
+export async function planroomSignOut(session: PlanroomSession): Promise<void> {
+  const url = session.logoutUrl ?? `${session.site.base}/Logout.aspx`;
+  try {
+    await getFollow(url, session.jar);
+  } catch {
+    /* the cookies are dropped with the run either way */
+  }
 }
 
 export const planroomCredentials = (): { email: string; password: string } | null => {
