@@ -27,7 +27,8 @@
 import type { Database, Json } from "@/integrations/supabase/types";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 
-export type LeadSource = "ky_planroom" | "louisville_permits";
+export type LeadSource =
+  "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
 type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
@@ -38,6 +39,21 @@ export const LOUISVILLE_PERMITS_LAYER =
   "https://services1.arcgis.com/79kfd2K6fskCAkyg/arcgis/rest/services/active_construction_permits/FeatureServer/0";
 export const LOUISVILLE_PERMITS_PAGE =
   "https://data.louisvilleky.gov/datasets/LOJIC::louisville-metro-ky-active-construction-permits/explore";
+
+/**
+ * Lynn Imaging's public bids list (owner, Sep 29): the reprographics planroom behind the state's,
+ * posting every project it prints plans for — housing authorities, cities, counties, water
+ * districts, colleges, hospitals, churches — the day plans go out for bid. WordPress RSS: title,
+ * link, pubDate, and the scope paragraph with "Project Location:" and a "More Details" link to
+ * the job in Lynn's planroom (ViewJob.aspx?job_id=N, browser session needed).
+ */
+export const LYNN_FEED_URL = "https://www.lynnimaging.com/bids/feed/";
+export const lynnJobUrl = (jobId: string) =>
+  `https://www.lynnimaging.com/distribution/View/ViewJob.aspx?job_id=${jobId}`;
+/** Bowling Green's bids page: an "Open Opportunities" table (title → Bonfire, posted date). */
+export const BGKY_BIDS_URL = "https://www.bgky.org/bids";
+/** Paducah's bids page: "Active Requests for Bids or Proposals", one heading per request. */
+export const PADUCAH_BIDS_URL = "https://paducahky.gov/request-bids-or-proposals";
 
 const UA = "JBK Portal construction leads";
 
@@ -96,6 +112,8 @@ const decode = (s: string) =>
     .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16)))
     .replace(/\s+/g, " ")
     .trim();
 
@@ -197,6 +215,205 @@ async function fetchLouisville(s: SettingsRow): Promise<LouisvillePermit[]> {
 }
 
 /* ------------------------------------------------------------------------------------------------
+ * Lynn Imaging bids (RSS)
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface LynnPost {
+  /** Lynn's planroom job id when the post links one; else the post's own URL. */
+  id: string;
+  title: string;
+  postUrl: string;
+  jobUrl: string | null;
+  location: string | null;
+  scope: string;
+  postedAt: string | null;
+}
+
+const cdata = (s: string) => s.replace(/^\s*<!\[CDATA\[/, "").replace(/\]\]>\s*$/, "");
+const tag = (xml: string, name: string): string | null => {
+  const m = new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`).exec(xml);
+  return m ? cdata(m[1]!) : null;
+};
+
+/** One post per <item>; the scope is the content with its tags dropped. */
+export function parseLynnFeed(xml: string): LynnPost[] {
+  const out: LynnPost[] = [];
+  for (const item of xml.match(/<item>[\s\S]*?<\/item>/g) ?? []) {
+    const title = decode(tag(item, "title") ?? "");
+    const postUrl = (tag(item, "link") ?? "").trim();
+    if (!title || !postUrl) continue;
+    const content = tag(item, "content:encoded") ?? tag(item, "description") ?? "";
+    const job = /ViewJob\.aspx\?job_id=(\d+)/.exec(content);
+    const text = decode(content.replace(/<br\s*\/?>|<\/p>/gi, "\n"))
+      .replace(/More Details\s*$/i, "")
+      .trim();
+    const loc = /Project Location:\s*([^\n]+?)(?:\s+More Details)?\s*$/im.exec(text);
+    const pub = tag(item, "pubDate");
+    const posted = pub && !Number.isNaN(Date.parse(pub)) ? new Date(pub).toISOString() : null;
+    // The scope without the repeated title line and the location line.
+    const scope = text
+      .replace(title, "")
+      .replace(/Project Location:[^\n]*/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    out.push({
+      id: job ? job[1]! : postUrl,
+      title,
+      postUrl,
+      jobUrl: job ? lynnJobUrl(job[1]!) : null,
+      location: loc ? loc[1]!.trim() : null,
+      scope,
+      postedAt: posted,
+    });
+  }
+  return out;
+}
+
+export function lynnLead(p: LynnPost, keywords: string[]): LeadInsert {
+  // "Owner – Project" is Lynn's title convention; the owner becomes the agency.
+  const dash = p.title.split(/\s[–—-]\s/);
+  const agency = dash.length > 1 ? dash[0]!.trim() : null;
+  const town = (p.location ?? "").replace(/,?\s*(Kentucky|KY)\s*$/i, "").trim() || null;
+  return {
+    source: "lynn_bids",
+    external_id: p.id,
+    title: p.title,
+    agency,
+    location: town,
+    city: town,
+    project_type: null,
+    url: p.jobUrl ?? p.postUrl,
+    note: null,
+    is_roof: isRoofLead(`${p.title} ${p.scope}`, keywords),
+    raw: { ...p } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Bowling Green and Paducah city bid pages (HTML)
+ * ---------------------------------------------------------------------------------------------- */
+
+export interface CityBid {
+  id: string;
+  title: string;
+  url: string;
+  postedAt: string | null;
+  scope: string | null;
+  /** Due date text when the page states one ("October 13"), left as written. */
+  dueText: string | null;
+}
+
+/** "Sep 21, 2026" / "September 21, 2026" → ISO date, else null. */
+export function parseLongDate(text: string): string | null {
+  const m = /([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})/.exec(text);
+  if (!m) return null;
+  const t = Date.parse(`${m[1]} ${m[2]}, ${m[3]} 12:00:00 UTC`);
+  return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10);
+}
+
+/**
+ * Bowling Green: the rows of the table under the "Open Opportunities" heading. The title cell
+ * reads "Reference #: 2027-11. Name: Parking Lot Overlay - Police East Precinct" and links the
+ * Bonfire opportunity; the second cell is the posted date.
+ */
+export function parseBgkyBids(html: string): CityBid[] {
+  const start = html.search(/Open Opportunities/i);
+  if (start < 0) return [];
+  const table = /<table[\s\S]*?<\/table>/i.exec(html.slice(start));
+  if (!table) return [];
+  const out: CityBid[] = [];
+  for (const row of table[0].match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+    const link = /<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(row);
+    if (!link) continue;
+    const cells = row.match(/<td[\s\S]*?<\/td>/gi) ?? [];
+    const raw = decode(link[2]!);
+    const m = /Reference\s*#:\s*([^.]+)\.\s*Name:\s*(.+)$/i.exec(raw);
+    const id = m ? m[1]!.trim() : link[1]!.trim();
+    const title = m ? m[2]!.trim() : raw;
+    out.push({
+      id,
+      title,
+      url: link[1]!.trim(),
+      postedAt: cells[1] ? parseLongDate(decode(cells[1])) : null,
+      scope: null,
+      dueText: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Paducah: the headings under "Active Requests for Bids or Proposals" (each an <h4>), with the
+ * paragraphs up to the next heading as the scope and any "received no later than …" sentence
+ * as the due-date text. The first linked PDF in the block is the packet.
+ */
+export function parsePaducahBids(html: string): CityBid[] {
+  const start = html.search(/Active Requests for Bids or Proposals/i);
+  if (start < 0) return [];
+  const body = html.slice(start);
+  const out: CityBid[] = [];
+  const parts = body.split(/<h4[^>]*>/i).slice(1);
+  for (const part of parts) {
+    const end = part.search(/<\/h4>/i);
+    if (end < 0) continue;
+    const title = decode(part.slice(0, end));
+    if (!title || /^Bid Results/i.test(title)) continue;
+    let rest = part.slice(end + 5);
+    const stop = rest.search(/<h[1-3][^>]*>/i);
+    if (stop >= 0) rest = rest.slice(0, stop);
+    const pdf = /<a[^>]*href="([^"]+\.pdf)"/i.exec(rest);
+    const text = decode(rest.replace(/<\/p>/gi, " ")).replace(/\s+/g, " ").trim();
+    // "…received no later than 4:30 p.m. CT on Tuesday, October 13." — the sentence ends at
+    // the period followed by a new sentence, not at the one inside "p.m.".
+    // (Case-sensitive on purpose: the lookahead must not treat "p.m. CT" as a sentence end.)
+    const due = /(?:[Rr]eceived|[Ss]ubmitted)[^.]*?no later than.*?\.(?=\s+[A-Z][a-z]|\s*$)/.exec(
+      text,
+    );
+    const first = /^.*?\.(?=\s+[A-Z][a-z]|\s*$)/.exec(text);
+    const scope = (first ? first[0] : text).slice(0, 400) || null;
+    out.push({
+      id: title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "")
+        .slice(0, 120),
+      title,
+      url: pdf ? new URL(pdf[1]!, PADUCAH_BIDS_URL).href : PADUCAH_BIDS_URL,
+      postedAt: null,
+      scope,
+      dueText: due ? due[0].trim() : null,
+    });
+  }
+  return out;
+}
+
+export function cityLead(
+  b: CityBid,
+  source: "bgky_bids" | "paducah_bids",
+  keywords: string[],
+): LeadInsert {
+  const city = source === "bgky_bids" ? "Bowling Green" : "Paducah";
+  const county = source === "bgky_bids" ? "Warren" : "McCracken";
+  return {
+    source,
+    external_id: b.id,
+    title: b.title,
+    agency: `City of ${city}`,
+    location: city,
+    city,
+    county,
+    url: b.url,
+    issued_on: b.postedAt,
+    is_roof: isRoofLead(`${b.title} ${b.scope ?? ""}`, keywords),
+    raw: { ...b } as unknown as Json,
+    last_seen_at: new Date().toISOString(),
+    gone_at: null,
+  };
+}
+
+/* ------------------------------------------------------------------------------------------------
  * Rows
  * ---------------------------------------------------------------------------------------------- */
 
@@ -266,6 +483,9 @@ export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadIns
 export interface RefreshLeadsResult {
   planroom: number;
   louisville: number;
+  lynn: number;
+  bowling_green: number;
+  paducah: number;
   new_leads: number;
   new_roof_leads: number;
   gone: number;
@@ -306,6 +526,34 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
     failed.push(`Louisville permits ${e instanceof Error ? e.message : String(e)}`);
   }
   const planroomCount = rows.length - louisvilleCount;
+  const counts: Record<string, number> = {};
+  const pull = async (
+    source: LeadSource,
+    label: string,
+    url: string,
+    parse: (body: string) => LeadInsert[],
+  ) => {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA } });
+      if (!res.ok) throw new Error(`→ ${res.status}`);
+      const parsed = parse(await res.text());
+      if (!parsed.length) throw new Error("nothing parsed (page layout changed?)");
+      rows.push(...parsed);
+      counts[source] = parsed.length;
+      fetchedSources.add(source);
+    } catch (e) {
+      failed.push(`${label} ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  await pull("lynn_bids", "Lynn Imaging bids", LYNN_FEED_URL, (xml) =>
+    parseLynnFeed(xml).map((p) => lynnLead(p, s.roof_keywords)),
+  );
+  await pull("bgky_bids", "Bowling Green bids", BGKY_BIDS_URL, (html) =>
+    parseBgkyBids(html).map((b) => cityLead(b, "bgky_bids", s.roof_keywords)),
+  );
+  await pull("paducah_bids", "Paducah bids", PADUCAH_BIDS_URL, (html) =>
+    parsePaducahBids(html).map((b) => cityLead(b, "paducah_bids", s.roof_keywords)),
+  );
 
   // Which of these are new? Compare against what is stored before the upsert.
   const { data: existing, error: eErr } = await admin.from("leads").select("source, external_id");
@@ -323,6 +571,8 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
   // Dropped off a source that answered: mark gone (kept for history; hidden by default).
   let gone = 0;
   for (const source of fetchedSources) {
+    // Lynn's feed is the latest 25 posts; scrolling off it is not a withdrawal.
+    if (source === "lynn_bids") continue;
     const ids = rows.filter((r) => r.source === source).map((r) => r.external_id);
     const { data: g, error } = await admin
       .from("leads")
@@ -356,11 +606,14 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${fresh.length} new (${newRoof.length} roof), ${gone} gone${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${fresh.length} new (${newRoof.length} roof), ${gone} gone${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
     louisville: louisvilleCount,
+    lynn: counts["lynn_bids"] ?? 0,
+    bowling_green: counts["bgky_bids"] ?? 0,
+    paducah: counts["paducah_bids"] ?? 0,
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,

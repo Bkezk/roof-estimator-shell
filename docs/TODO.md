@@ -178,6 +178,16 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
       Leads page opens; new roof leads notify Prospecting users (`/prospect/leads?roof=1`). The
       Leads page (sidebar › Prospecting) filters roof-only / source / status, counts down to bid
       day, hides closed bids by default, and adds a lead to My prospects as a by-hand building.
+      Sep 29: three more sources — Lynn Imaging's public bids RSS
+      (https://www.lynnimaging.com/bids/feed/ — the planroom company behind the state's; every
+      project it prints plans for, statewide, posted the day plans go out for bid; housing
+      authorities, cities, counties, districts, colleges, hospitals, churches; 25 latest posts,
+      so never marked gone), Bowling Green's bids page (Open Opportunities table → Bonfire) and
+      Paducah's bids page (Active Requests headings). The first live pull flagged two waterline
+      jobs on "pvc" (PVC pipe), so "pvc" left the default roof keywords. Waiting on the owner: SAM.gov federal roof
+      jobs need an API key (docs/sam-gov-federal-leads.md). Checked and not worth a feed: KCTCS
+      RSS (equipment only; construction goes through the state planroom), Bid Locker Kentucky
+      (KCTCS only), Lexington purchasing pages (404), BidNet (blocked), JCPS bids (gone).
       Sources checked and NOT used: DHBC's statewide plan review log (exists, no public feed —
       see docs/dhbc-open-records-request.md, an open records request each month); Lexington's
       data hub (no commercial permit dataset found); ConstructConnect ($129–$199/mo) and Dodge

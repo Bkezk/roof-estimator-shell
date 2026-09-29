@@ -18,7 +18,11 @@ export type LeadStatus = "new" | "watching" | "dismissed" | "added";
 export const SOURCE_LABELS: Record<string, string> = {
   ky_planroom: "State planroom",
   louisville_permits: "Louisville permit",
+  lynn_bids: "Lynn Imaging bids",
+  bgky_bids: "Bowling Green bids",
+  paducah_bids: "Paducah bids",
 };
+export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 async function prospectAccess(ctx: Ctx) {
@@ -76,7 +80,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await refreshLeads(context.supabase);
         return {
           ran: true,
-          note: `${r.planroom} planroom jobs, ${r.louisville} Louisville permits; ${r.new_leads} new (${r.new_roof_leads} roof)`,
+          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah; ${r.new_leads} new (${r.new_roof_leads} roof)`,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {
@@ -91,7 +95,9 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
 const listSchema = z.object({
   /** Only leads the keyword match (or a new commercial building) flagged as roof work. */
   roofOnly: z.boolean().optional(),
-  source: z.enum(["ky_planroom", "louisville_permits"]).optional(),
+  source: z
+    .enum(["ky_planroom", "louisville_permits", "lynn_bids", "bgky_bids", "paducah_bids"])
+    .optional(),
   /** open = new + watching (default); otherwise that status; all = everything. */
   status: z.enum(["open", "new", "watching", "dismissed", "added", "all"]).optional(),
   /** Include leads that dropped off their source. */

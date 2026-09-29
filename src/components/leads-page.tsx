@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
 import {
   addLeadToProspects,
+  LEAD_SOURCES,
   leadCounts,
   listLeads,
   refreshLeadsIfDue,
@@ -45,7 +46,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-type Source = "all" | "ky_planroom" | "louisville_permits";
+type Source =
+  "all" | "ky_planroom" | "louisville_permits" | "lynn_bids" | "bgky_bids" | "paducah_bids";
 type StatusTab = "open" | "watching" | "added" | "dismissed";
 const TABS: { value: StatusTab; label: string }[] = [
   { value: "open", label: "Open" },
@@ -56,13 +58,17 @@ const TABS: { value: StatusTab; label: string }[] = [
 
 const ABOUT =
   "State planroom: every state-funded Kentucky project in its bid phase, with pre-bid and bid dates. " +
+  "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
+  "Bowling Green and Paducah bids: those cities' own bid pages. " +
   "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
-  "The app checks both every 6 hours when this page is open, and nightly.";
+  "The app checks them every 6 hours when this page is open, and nightly.";
 
 /** The source failures a refresh appends to its note ("…; State planroom → 503"). */
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
-  const i = note.search(/; (State planroom|Louisville permits) /);
+  const i = note.search(
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids) /,
+  );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
 }
@@ -178,8 +184,8 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
         <div>
           <h1 className="text-2xl font-semibold">Leads</h1>
           <p className="text-sm text-muted-foreground">
-            State-funded projects out for bid and Louisville commercial permits — new roofs before
-            they're built.
+            Projects out for bid across Kentucky and Louisville commercial permits — new roofs
+            before they're built.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -267,10 +273,11 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All sources</SelectItem>
-            <SelectItem value="ky_planroom">{SOURCE_LABELS["ky_planroom"]}</SelectItem>
-            <SelectItem value="louisville_permits">
-              {SOURCE_LABELS["louisville_permits"]}
-            </SelectItem>
+            {LEAD_SOURCES.map((k) => (
+              <SelectItem key={k} value={k}>
+                {SOURCE_LABELS[k]}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <div className="flex items-center gap-2">
