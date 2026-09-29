@@ -144,8 +144,6 @@ import {
   type ProfileFill,
 } from "@/lib/bid-account-link";
 import { buildReviewRows, toCsv, type ReviewData } from "@/lib/review-export";
-import { buildBidSummary } from "@/lib/bid-summary";
-import { renderBidSummaryPdf } from "@/lib/bid-summary-pdf";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2009,60 +2007,64 @@ function EstimatePage() {
       "review.csv",
     );
   };
-  // Bid summary PDF: every step of the bid, landscape, from the live state (unsaved edits
-  // included) and the same computed result the Bid-total panel and Review ledger show.
+  // Bid summary PDF: a screenshot of every estimator step exactly as it shows on screen, one
+  // step per landscape page (bid-summary-shots.ts). Walks the steps (all stay mounted, only one
+  // is displayed), captures each panel, then puts the user back on their step.
   const [summaryBusy, setSummaryBusy] = useState(false);
   const exportSummary = async () => {
-    const review = reviewData();
-    if (!result || !review || summaryBusy) return;
+    if (!result || summaryBusy) return;
     setSummaryBusy(true);
+    const startStep = step;
+    const startScroll = window.scrollY;
+    const errText = (e: unknown) => (e instanceof Error ? e.message : String(e ?? "unknown error"));
     try {
-      const model = buildBidSummary({
-        bidName,
-        statusLabel: STATUS_LABELS[bidStatus],
-        state: saved,
-        effective: {
-          hoursPerDay: effectiveHoursPerDay,
-          salesTaxRate: effSalesTaxRate,
-          taxMaterialOnly: effTaxMaterialOnly,
-        },
-        admin,
-        steps: STEPS,
-        computed: {
-          est: result.r,
-          ledger: result.ledger,
-          review,
-          sectionHours: result.sectionHours,
-          underlaymentHoursBySection: result.build.inputs.underlaymentHoursBySection ?? {},
-          tearOffHoursBySection: toLabor.byId,
-          parapetHoursById: result.parapetHoursById,
-          curbHoursById: result.curbHoursById,
-          parapetMaterial: result.parapetMaterial,
-          curbMaterial: result.curbMaterial,
-          ...(result.accessories
-            ? {
-                parapetFastenersNeeded: result.accessories.parapetTabs.fastenersNeeded,
-                accessories: result.accessories,
-              }
-            : {}),
-          adhesiveLines: result.adhesiveLines,
-          accessoryTotal,
-          accessoryLaborHours,
-          ...(result.metalsScreen ? { metalsScreen: result.metalsScreen } : {}),
-          ...(result.nonDl ? { nonDl: result.nonDl } : {}),
-          stats: reviewStats,
-          warnings: result.warnings,
-        },
+      const { capturePanel, renderShotsPdf, waitForPanel } =
+        await import("@/lib/bid-summary-shots");
+      const steps: Parameters<typeof renderShotsPdf>[0]["steps"] = [];
+      for (const [i, s] of STEPS.entries()) {
+        try {
+          goStep(i);
+          const panel = await waitForPanel(`[data-bid-step="${s.key}"]`);
+          steps.push({ label: s.label, shot: await capturePanel(panel) });
+        } catch (e) {
+          // Keep going: the step gets a page saying why, and the failure is announced below.
+          steps.push({ label: s.label, shot: null, note: errText(e) });
+        }
+      }
+      const bytes = await renderShotsPdf({
+        title: bidName.trim() || "Untitled bid",
+        subtitle: [
+          customer.name,
+          [customer.projectAddress, customer.jobCityStZip].filter(Boolean).join(", "),
+          STATUS_LABELS[bidStatus],
+        ]
+          .map((v) => (v ?? "").trim())
+          .filter(Boolean)
+          .join("  ·  "),
+        grandTotal: money(result.r.money.grandTotal),
+        exportedAt: new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
+        steps,
       });
-      const bytes = await renderBidSummaryPdf(model);
       downloadFile(new Blob([bytes as BlobPart], { type: "application/pdf" }), "summary.pdf");
+      const failed = steps.filter((s) => !s.shot);
+      if (failed.length)
+        toast.error(
+          `Bid summary: ${failed.length} step${failed.length === 1 ? "" : "s"} could not be captured (${failed
+            .map((s) => `${s.label}: ${s.note}`)
+            .join("; ")}). Those pages say so in the PDF.`,
+        );
     } catch (e) {
       // Owner rule: failures are announced, never swallowed.
-      toast.error(
-        `Bid summary PDF failed: ${e instanceof Error ? e.message : String(e ?? "unknown error")}`,
-      );
+      toast.error(`Bid summary PDF failed: ${errText(e)}`);
     } finally {
+      // Always put the user back on the step (and scroll position) they started from.
+      goStep(startStep);
       setSummaryBusy(false);
+      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, startScroll)));
     }
   };
   /** The Export button's menu (Bid-total panel and the Review step's footer). */
@@ -2277,7 +2279,11 @@ function EstimatePage() {
           </button>
         </div>
 
-        <div className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"} {...ro}>
+        <div
+          className={step === 0 ? "grid items-start gap-4 xl:grid-cols-2" : "hidden"}
+          data-bid-step="setup"
+          {...ro}
+        >
           {/* Legacy frmHome: "Setup" panel (Bid Info | Client | Job Site) on the left, the
               "Defaults" panel on the right (docs §17). */}
           <Card>
@@ -3304,7 +3310,7 @@ function EstimatePage() {
           </AlertDialog>
         </div>
 
-        <div className={step === 1 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 1 ? "space-y-6" : "hidden"} data-bid-step="sections" {...ro}>
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Roof Sections</CardTitle>
@@ -3356,7 +3362,7 @@ function EstimatePage() {
         </div>
 
         {/* Legacy Underlayment / Insulation screen: select sections, configure a layer, apply. */}
-        <div className={step === 2 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 2 ? "space-y-6" : "hidden"} data-bid-step="underlayment" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Underlayment / Insulation</CardTitle>
@@ -4309,7 +4315,7 @@ function EstimatePage() {
             Skirt-Cant-Vertical-Top-Drop profile, termination / capstone / ARP tabs, Membrane
             Options (per-wall Roof System / Attachment / adhesive / mil / color), the frmLaborPopUp
             labor link, Fasteners Needed and lvSummary — docs §19. */}
-        <div className={step === 3 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 3 ? "space-y-6" : "hidden"} data-bid-step="parapets" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Parapets</CardTitle>
@@ -4361,7 +4367,7 @@ function EstimatePage() {
         {/* Legacy Curbs screen (frmCurbs): style toolstrip, dims, termination, insulation /
             plastic, the picCurb drawing with the A/B/C/D readout and the lvSummary — docs
             §8.1–§8.3. Wrap material via curb-wrap.ts (§2); labor per §8.2 BaseHours. */}
-        <div className={step === 4 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 4 ? "space-y-6" : "hidden"} data-bid-step="curbs" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Curbs</CardTitle>
@@ -4398,7 +4404,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 5 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 5 ? "space-y-6" : "hidden"} data-bid-step="accessories" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Accessories</CardTitle>
@@ -4556,7 +4562,7 @@ function EstimatePage() {
         {/* Legacy EXCEPTIONAL Metals screen (frmMetals): four entry tiles + the lvSummary grid.
             Money per docs §13 (extracted IL): material → dMaterial[5] inside M0, labor at each
             row's own rate → dLabor[5] direct labor. */}
-        <div className={step === 6 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 6 ? "space-y-6" : "hidden"} data-bid-step="metals" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">EXCEPTIONAL Metals</CardTitle>
@@ -4671,7 +4677,7 @@ function EstimatePage() {
         {/* Legacy Tear-Off screen (mirrors the 2026-08-31 12:44 capture): section select grid,
             type tiles grouped Single Ply / Built Up / Urethane, thickness + disposal capacity,
             the red labor-variables note, and the Existing Roof / Deck info panel. */}
-        <div className={step === 7 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 7 ? "space-y-6" : "hidden"} data-bid-step="tearoff" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Tear-Off</CardTitle>
@@ -5027,7 +5033,7 @@ function EstimatePage() {
         {/* Legacy Non-Duro-Last Items screen (frmNonDL): six entry tiles + the lvSummary grid.
             Money per docs §14 (extracted IL): six material groups → OtherMaterial (taxable) with
             direct labor at each row's own rate; subs & services → LaborSubtotal2. */}
-        <div className={step === 8 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 8 ? "space-y-6" : "hidden"} data-bid-step="nondl" {...ro}>
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
               <CardTitle className="text-base">Non-Duro-Last Items</CardTitle>
@@ -5335,7 +5341,7 @@ function EstimatePage() {
           </Card>
         </div>
 
-        <div className={step === 9 ? "space-y-6" : "hidden"} {...ro}>
+        <div className={step === 9 ? "space-y-6" : "hidden"} data-bid-step="review" {...ro}>
           {result && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0">
