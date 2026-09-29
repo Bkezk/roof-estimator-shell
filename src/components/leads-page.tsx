@@ -66,7 +66,7 @@ const ABOUT =
 function fetchProblem(note: string | null | undefined): string | null {
   if (!note) return null;
   const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids) /,
+    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details) /,
   );
   if (i >= 0) return note.slice(i + 2);
   return /failed/i.test(note) ? note : null;
@@ -240,6 +240,12 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
       </div>
 
       {problem && <p className="text-xs text-destructive">Last check had a problem: {problem}</p>}
+      {counts.data && !counts.data.planroom_login && (
+        <p className="text-xs text-muted-foreground">
+          No planroom sign-in on the server yet: state and Lynn cards show contacts and plan holders
+          once PLANROOM_EMAIL and PLANROOM_PASSWORD are set in Lovable Cloud.
+        </p>
+      )}
 
       {admin && settings && settingsOpen && (
         <LeadSettingsPanel settings={settings} onClose={() => setSettingsOpen(false)} />

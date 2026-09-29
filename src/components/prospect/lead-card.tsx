@@ -192,7 +192,7 @@ export function LeadCard(props: {
       ) : l.source === "ky_planroom" || l.source === "lynn_bids" ? (
         <p className="text-xs text-muted-foreground">
           Bid documents, the owner's contact and the plan-holder list are on the planroom job page
-          after a free sign-in.
+          (free sign-in); the nightly check fills them in here once the server has a login.
         </p>
       ) : null}
 

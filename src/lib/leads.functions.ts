@@ -80,7 +80,7 @@ export const refreshLeadsIfDue = createServerFn({ method: "POST" })
         const r = await refreshLeads(context.supabase);
         return {
           ran: true,
-          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah; ${r.new_leads} new (${r.new_roof_leads} roof)`,
+          note: `${r.planroom} planroom, ${r.louisville} Louisville, ${r.lynn} Lynn, ${r.bowling_green} Bowling Green, ${r.paducah} Paducah; ${r.new_leads} new (${r.new_roof_leads} roof); ${r.enriched} job pages read`,
           error: r.failed.length ? r.failed.join("; ") : null,
         };
       } catch (e) {
@@ -130,6 +130,8 @@ export interface LeadCounts {
   open_roof: number;
   new_roof: number;
   settings: LeadSettingsRow;
+  /** PLANROOM_EMAIL / PLANROOM_PASSWORD are set on the server (job pages get read). */
+  planroom_login: boolean;
 }
 /** The tab counts and the fetch stamp. */
 export const leadCounts = createServerFn({ method: "GET" })
@@ -151,7 +153,13 @@ export const leadCounts = createServerFn({ method: "GET" })
       sb.from("lead_settings").select("*").eq("id", 1).single(),
     ]);
     if (error) throw new Error(error.message);
-    return { open, open_roof: openRoof, new_roof: newRoof, settings };
+    return {
+      open,
+      open_roof: openRoof,
+      new_roof: newRoof,
+      settings,
+      planroom_login: !!(process.env["PLANROOM_EMAIL"] && process.env["PLANROOM_PASSWORD"]),
+    };
   });
 
 export const setLeadStatus = createServerFn({ method: "POST" })

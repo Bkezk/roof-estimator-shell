@@ -559,8 +559,79 @@ export interface RefreshLeadsResult {
   new_leads: number;
   new_roof_leads: number;
   gone: number;
+  /** Planroom job pages read for contacts this run (0 without a planroom login). */
+  enriched: number;
   failed: string[];
   notified: number;
+}
+
+/**
+ * Sign in to the state planroom and Lynn's, read the job page of every open roof lead that
+ * has not been read in the last week (40 per run, newest first), and store the contact line
+ * plus the fields in raw.details. Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a no-op.
+ */
+async function enrichPlanroomLeads(admin: Client, failed: string[]): Promise<number> {
+  const { planroomCredentials, planroomSignIn, fetchJobDetails, contactLine } =
+    await import("@/lib/planroom.server");
+  const { STATE_PLANROOM, LYNN_PLANROOM } = await import("@/lib/planroom.server");
+  const creds = planroomCredentials();
+  if (!creds) return 0;
+  const since = new Date(Date.now() - 7 * 86400000).toISOString();
+  const { data: rows, error } = await admin
+    .from("leads")
+    .select("id, source, external_id, title, raw, bid_at")
+    .in("source", ["ky_planroom", "lynn_bids"])
+    .eq("is_roof", true)
+    .is("gone_at", null)
+    .in("status", ["new", "watching"])
+    .order("first_seen_at", { ascending: false })
+    .limit(120);
+  if (error) throw new Error(error.message);
+  const due = (rows ?? [])
+    .filter((r) => {
+      const d = (r.raw as { details_read_at?: string } | null)?.details_read_at;
+      return !d || d < since;
+    })
+    .filter((r) => !r.bid_at || Date.parse(r.bid_at) > Date.now() - 86400000)
+    .slice(0, 40);
+  if (!due.length) return 0;
+  let n = 0;
+  const sessions: Record<string, Awaited<ReturnType<typeof planroomSignIn>> | null> = {};
+  for (const r of due) {
+    const site = r.source === "ky_planroom" ? STATE_PLANROOM : LYNN_PLANROOM;
+    if (sessions[site.base] === undefined) {
+      try {
+        sessions[site.base] = await planroomSignIn(site, creds.email, creds.password);
+      } catch (e) {
+        sessions[site.base] = null;
+        failed.push(e instanceof Error ? e.message : String(e));
+      }
+    }
+    const session = sessions[site.base];
+    if (!session) continue;
+    // Lynn posts whose "More Details" points at Lynn's planroom carry that job id; a post
+    // without one (external_id is the post URL) has no job page to read.
+    if (!/^\d+$/.test(r.external_id)) continue;
+    try {
+      const details = await fetchJobDetails(session, r.external_id);
+      const contact = contactLine(details);
+      const raw = { ...((r.raw as Record<string, unknown> | null) ?? {}) };
+      raw["details"] = details.fields;
+      raw["plan_holders"] = details.planHolders;
+      raw["details_read_at"] = new Date().toISOString();
+      const patch: Database["public"]["Tables"]["leads"]["Update"] = { raw: raw as Json };
+      if (contact) patch.contact = contact;
+      const { error: uErr } = await admin.from("leads").update(patch).eq("id", r.id);
+      if (uErr) throw new Error(uErr.message);
+      n++;
+    } catch (e) {
+      failed.push(
+        `${site.label} job ${r.external_id}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      if (/session expired/.test(String(e))) sessions[site.base] = null;
+    }
+  }
+  return n;
 }
 
 export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
@@ -674,6 +745,15 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
     gone += g?.length ?? 0;
   }
 
+  // With a planroom login in Lovable Cloud, read each open roof job's page for its owner
+  // contact, A/E and plan holders (planroom.server.ts). Never fails the refresh.
+  let enriched = 0;
+  try {
+    enriched = await enrichPlanroomLeads(admin, failed);
+  } catch (e) {
+    failed.push(`Planroom details ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   const newRoof = fresh.filter((r) => r.is_roof);
   let notified = 0;
   if (newRoof.length) {
@@ -695,7 +775,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
       );
     }
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${fresh.length} new (${newRoof.length} roof), ${gone} gone${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${failed.length ? `; ${failed.join("; ")}` : ""}`;
   await admin.rpc("stamp_lead_fetch", { note });
   return {
     planroom: planroomCount,
@@ -706,6 +786,7 @@ export async function refreshLeads(sb: Client): Promise<RefreshLeadsResult> {
     new_leads: fresh.length,
     new_roof_leads: newRoof.length,
     gone,
+    enriched,
     failed,
     notified,
   };
