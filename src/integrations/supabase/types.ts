@@ -335,6 +335,20 @@ export type Database = {
             referencedRelation: "roofs";
             referencedColumns: ["id"];
           },
+          {
+            foreignKeyName: "bids_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "bids_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_sites";
+            referencedColumns: ["id"];
+          },
         ];
       };
       crm_accounts: {

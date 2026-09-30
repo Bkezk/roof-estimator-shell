@@ -100,6 +100,56 @@ const estimatorOf = (bid: { data: unknown }): string => {
   return d?.customer?.estimatorName?.trim() ?? "";
 };
 
+/** The bid's customer: the linked profile's name, else the name typed on Setup; "" = none. */
+const customerOf = (bid: { data: unknown; account?: { name: string } | null }): string => {
+  const linked = bid.account?.name?.trim();
+  if (linked) return linked;
+  const d = bid.data as { customer?: { name?: string } } | null;
+  return d?.customer?.name?.trim() ?? "";
+};
+
+type BidSort = "updated" | "customer" | "name" | "total" | "created";
+const SORT_LABELS: Record<BidSort, string> = {
+  updated: "Last saved",
+  customer: "Customer A–Z",
+  name: "Bid name A–Z",
+  total: "Total, high to low",
+  created: "Newest first",
+};
+/** Order rows within a status group; ties fall back to the last-saved order. */
+function sortBids<
+  T extends {
+    name: string;
+    data: unknown;
+    account?: { name: string } | null;
+    grand_total: unknown;
+    created_at: string;
+    updated_at: string;
+  },
+>(rows: T[], by: BidSort): T[] {
+  const cmp = (a: T, b: T): number => {
+    switch (by) {
+      case "customer": {
+        const ca = customerOf(a);
+        const cb = customerOf(b);
+        // Bids with no customer sort last.
+        if (!ca && cb) return 1;
+        if (ca && !cb) return -1;
+        return ca.localeCompare(cb) || a.name.localeCompare(b.name);
+      }
+      case "name":
+        return a.name.localeCompare(b.name);
+      case "total":
+        return Number(b.grand_total ?? 0) - Number(a.grand_total ?? 0);
+      case "created":
+        return b.created_at.localeCompare(a.created_at);
+      default:
+        return b.updated_at.localeCompare(a.updated_at);
+    }
+  };
+  return [...rows].sort((a, b) => cmp(a, b) || b.updated_at.localeCompare(a.updated_at));
+}
+
 /** Status groups the user has collapsed, remembered across reloads (per browser). */
 const COLLAPSED_KEY = "bid-o-matic:bids-collapsed";
 const readCollapsed = (): BidStatus[] => {
@@ -138,6 +188,7 @@ function BidsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [planswiftOpen, setPlanswiftOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<BidSort>("updated");
   const [estimatorFilter, setEstimatorFilter] = useState("all");
   const [systemFilter, setSystemFilter] = useState("all");
   const [createdFrom, setCreatedFrom] = useState("");
@@ -246,7 +297,8 @@ function BidsPage() {
   const maxPrice = priceMax.trim() === "" ? null : Number(priceMax);
   const filtered = bids.filter((b) => {
     if (statusFilter !== "all" && asBidStatus(b.status) !== statusFilter) return false;
-    if (q && !b.name.toLowerCase().includes(q)) return false;
+    if (q && !b.name.toLowerCase().includes(q) && !customerOf(b).toLowerCase().includes(q))
+      return false;
     if (estimatorFilter !== "all") {
       const est = estimatorOf(b);
       if (estimatorFilter === NO_ESTIMATOR ? est !== "" : est !== estimatorFilter) return false;
@@ -264,7 +316,10 @@ function BidsPage() {
   // filters above apply first, and a group with nothing in it is left out.
   const groups = BID_STATUSES.map((status) => ({
     status,
-    rows: filtered.filter((b) => asBidStatus(b.status) === status),
+    rows: sortBids(
+      filtered.filter((b) => asBidStatus(b.status) === status),
+      sortBy,
+    ),
   })).filter((g) => g.rows.length > 0);
   const anyFilter =
     statusFilter !== "all" ||
@@ -349,11 +404,26 @@ function BidsPage() {
             Bid name
             <Input
               type="search"
-              placeholder="Search by bid name…"
+              placeholder="Search by bid or customer name…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="bg-background"
             />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Sort by
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as BidSort)}>
+              <SelectTrigger className="w-[170px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as BidSort[]).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {SORT_LABELS[k]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Status
@@ -543,7 +613,8 @@ function BidsPage() {
                             <div>
                               <p className="font-medium">{bid.name}</p>
                               <p className="text-sm text-muted-foreground">
-                                Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+                                Customer: {customerOf(bid) || "—"} · Estimator:{" "}
+                                {estimatorOf(bid) || "—"} · Created{" "}
                                 {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
                                 {new Date(bid.updated_at).toLocaleString(undefined, {
                                   dateStyle: "short",

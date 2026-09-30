@@ -11,9 +11,11 @@ import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 export const listBids = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
+    // The linked customer's name rides along so the list can show, search and sort by it
+    // (owner, Sep 30: "make it to where you can sort bids by customers").
     const { data, error } = await context.supabase
       .from("bids")
-      .select("*")
+      .select("*, account:crm_accounts!bids_account_id_fkey(id, name)")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
     if (error) throw error;
