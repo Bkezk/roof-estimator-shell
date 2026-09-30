@@ -69,6 +69,7 @@ import {
 
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import type { AccountHit } from "@/lib/crm.functions";
+import { suggestTakeoffName } from "@/lib/takeoff/naming";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
@@ -414,7 +415,11 @@ function TakeoffList() {
         )}
       </div>
 
-      <NewTakeoffDialog open={creating} onOpenChange={setCreating} />
+      <NewTakeoffDialog
+        open={creating}
+        onOpenChange={setCreating}
+        existingNames={takeoffs.map((t) => t.name)}
+      />
 
       <AlertDialog
         open={!!toDelete}
@@ -544,7 +549,12 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
   );
 }
 
-function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function NewTakeoffDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Names already in the list, so the suggested name never repeats one. */
+  existingNames: readonly string[];
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { can } = useAuth();
@@ -581,7 +591,8 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
         }
       : null;
     setAccount(v);
-    if (!nameTouched) setName(v?.label ?? "");
+    // "Acme Foods — Plant 2 · Sep 30, 2026", numbered when that name is already in the list.
+    if (!nameTouched) setName(v ? suggestTakeoffName(v.label, props.existingNames) : "");
   };
 
   const pickFile = (f: File | null) => {
@@ -604,7 +615,9 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
       toast.error("Pick the customer this takeoff is for (or add them) before creating it.");
       return;
     }
-    const finalName = (name.trim() || account?.label || "").trim();
+    const finalName = (
+      name.trim() || (account ? suggestTakeoffName(account.label, props.existingNames) : "")
+    ).trim();
     if (!finalName) {
       toast.error("Give the takeoff a name — the job or building, not the file.");
       return;
@@ -734,7 +747,7 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
             />
             <p className="text-xs text-muted-foreground">
               {canPickCustomer
-                ? "Optional. Starts as the customer (and site) you picked."
+                ? "Optional. Starts as the customer (and site) you picked plus today's date; change it to the job if you like."
                 : "Required. Name the job, not the plan file."}
             </p>
           </div>
