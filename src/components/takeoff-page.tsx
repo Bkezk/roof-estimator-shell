@@ -68,6 +68,7 @@ import {
 } from "@/components/ui/select";
 
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
+import type { AccountHit } from "@/lib/crm.functions";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
@@ -551,18 +552,36 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
   const deleteFn = useServerFn(deleteTakeoff);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  // The customer profile the takeoff belongs to (owner, Sep 30: "the dropdown feature as you're
-  // typing to suggest existing customers to link to"). Optional; the Setup tab can set it later.
+  // The customer profile the takeoff belongs to. Owner (Sep 30): "the purpose was to require
+  // they associate it with a customer if that customer exists in the system, so Customer should
+  // be the required box and name should prefill". Required whenever the user can search
+  // customers; a takeoff-only user cannot read customer records, so for them the name is
+  // required instead and the Setup tab links the customer later.
   const [account, setAccount] = useState<AccountPickerValue | null>(null);
+  // True once the user has typed a name of their own; a customer pick then leaves it alone.
+  const [nameTouched, setNameTouched] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  // Reading customer records needs one of these; a takeoff-only user links from Setup later.
   const canPickCustomer = can("customers") || can("service") || can("estimate");
 
   const reset = () => {
     setName("");
+    setNameTouched(false);
     setFile(null);
     setAccount(null);
     setBusy(null);
+  };
+
+  /** The customer pick names the takeoff ("Acme Foods — Plant 2") unless the user typed a name. */
+  const pickAccount = (hit: AccountHit | null) => {
+    const v: AccountPickerValue | null = hit
+      ? {
+          account_id: hit.account_id,
+          site_id: hit.site_id,
+          label: hit.site_name ? `${hit.account_name} — ${hit.site_name}` : hit.account_name,
+        }
+      : null;
+    setAccount(v);
+    if (!nameTouched) setName(v?.label ?? "");
   };
 
   const pickFile = (f: File | null) => {
@@ -581,7 +600,12 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
 
   const submit = async () => {
     if (busy) return;
-    if (!name.trim()) {
+    if (canPickCustomer && !account) {
+      toast.error("Pick the customer this takeoff is for (or add them) before creating it.");
+      return;
+    }
+    const finalName = (name.trim() || account?.label || "").trim();
+    if (!finalName) {
       toast.error("Give the takeoff a name — the job or building, not the file.");
       return;
     }
@@ -612,7 +636,7 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
       setBusy("Creating the takeoff…");
       row = await createFn({
         data: {
-          name: name.trim(),
+          name: finalName,
           underlay_kind: isPdf ? "pdf" : "image",
           file_name: file.name,
           file_size: file.size,
@@ -670,8 +694,54 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
             void submit();
           }}
         >
+          {canPickCustomer && (
+            <div className="space-y-1">
+              <Label htmlFor="takeoff-customer">
+                Customer <span className="text-destructive">*</span>
+              </Label>
+              <AccountPicker
+                id="takeoff-customer"
+                value={account}
+                disabled={!!busy}
+                autoFocus
+                placeholder="Start typing a customer or site name…"
+                onChange={pickAccount}
+              />
+              <p className="text-xs text-muted-foreground">
+                Required. The takeoff and any bid made from it are filed under this customer. Not in
+                the system yet? Add them from the list.
+              </p>
+            </div>
+          )}
           <div className="space-y-1">
-            <Label htmlFor="takeoff-file">Plan file</Label>
+            <Label htmlFor="takeoff-name">
+              Name{canPickCustomer ? "" : <span className="text-destructive"> *</span>}
+            </Label>
+            <Input
+              id="takeoff-name"
+              value={name}
+              disabled={!!busy}
+              required={!canPickCustomer}
+              placeholder={
+                canPickCustomer
+                  ? "Filled from the customer; change it if you like"
+                  : "The job or building, e.g. Smith Warehouse roof"
+              }
+              onChange={(e) => {
+                setNameTouched(e.target.value.trim().length > 0);
+                setName(e.target.value);
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              {canPickCustomer
+                ? "Optional. Starts as the customer (and site) you picked."
+                : "Required. Name the job, not the plan file."}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="takeoff-file">
+              Plan file <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="takeoff-file"
               type="file"
@@ -685,50 +755,6 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
               </p>
             )}
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="takeoff-name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="takeoff-name"
-              value={name}
-              disabled={!!busy}
-              required
-              aria-required
-              placeholder="The job or building, e.g. Smith Warehouse roof"
-              onChange={(e) => setName(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Required. Name the job, not the plan file.
-            </p>
-          </div>
-          {canPickCustomer && (
-            <div className="space-y-1">
-              <Label htmlFor="takeoff-customer">Customer</Label>
-              <AccountPicker
-                id="takeoff-customer"
-                value={account}
-                disabled={!!busy}
-                placeholder="Start typing a customer or site name…"
-                onChange={(hit) =>
-                  setAccount(
-                    hit
-                      ? {
-                          account_id: hit.account_id,
-                          site_id: hit.site_id,
-                          label: hit.site_name
-                            ? `${hit.account_name} — ${hit.site_name}`
-                            : hit.account_name,
-                        }
-                      : null,
-                  )
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Optional. The takeoff and any bid made from it are filed under this customer.
-              </p>
-            </div>
-          )}
           <DialogFooter>
             <Button
               type="button"
@@ -741,7 +767,10 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={!file || !name.trim() || !!busy}>
+            <Button
+              type="submit"
+              disabled={!file || !!busy || (canPickCustomer ? !account : !name.trim())}
+            >
               {busy ? (
                 <>
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" /> {busy}
