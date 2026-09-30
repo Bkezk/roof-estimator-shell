@@ -7,13 +7,13 @@ import { createContext, useContext } from "react";
 import type { Session } from "@supabase/supabase-js";
 
 import type { UserProfile } from "@/lib/auth.functions";
-import type { Page } from "@/lib/access";
+import type { Page, Role } from "@/lib/access";
 
 export interface AuthState {
   session: Session | null;
   profile: UserProfile | null;
-  role: "admin" | "user" | null;
-  /** May this user open the page? Admins always; users by their granted pages. */
+  role: Role | null;
+  /** May this user open the page? Admins always; managers all but pricing; users as granted. */
   can: (page: Page) => boolean;
   loading: boolean;
   signOut: () => Promise<void>;

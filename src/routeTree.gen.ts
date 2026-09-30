@@ -17,6 +17,7 @@ import { Route as EstimateRouteImport } from './routes/estimate'
 import { Route as FollowupsRouteImport } from './routes/followups'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MyWorkRouteImport } from './routes/my-work'
 import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
@@ -77,6 +78,11 @@ const InventoryRoute = InventoryRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MyWorkRoute = MyWorkRouteImport.update({
+  id: '/my-work',
+  path: '/my-work',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OpportunitiesRoute = OpportunitiesRouteImport.update({
@@ -194,6 +200,7 @@ export interface FileRoutesByFullPath {
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/my-work': typeof MyWorkRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -225,6 +232,7 @@ export interface FileRoutesByTo {
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/my-work': typeof MyWorkRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -257,6 +265,7 @@ export interface FileRoutesById {
   '/followups': typeof FollowupsRoute
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
+  '/my-work': typeof MyWorkRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -290,6 +299,7 @@ export interface FileRouteTypes {
     | '/followups'
     | '/inventory'
     | '/login'
+    | '/my-work'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -321,6 +331,7 @@ export interface FileRouteTypes {
     | '/followups'
     | '/inventory'
     | '/login'
+    | '/my-work'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -352,6 +363,7 @@ export interface FileRouteTypes {
     | '/followups'
     | '/inventory'
     | '/login'
+    | '/my-work'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -384,6 +396,7 @@ export interface RootRouteChildren {
   FollowupsRoute: typeof FollowupsRoute
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
+  MyWorkRoute: typeof MyWorkRoute
   OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
@@ -460,6 +473,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-work': {
+      id: '/my-work'
+      path: '/my-work'
+      fullPath: '/my-work'
+      preLoaderRoute: typeof MyWorkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/opportunities': {
@@ -636,6 +656,7 @@ const rootRouteChildren: RootRouteChildren = {
   FollowupsRoute: FollowupsRoute,
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
+  MyWorkRoute: MyWorkRoute,
   OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,

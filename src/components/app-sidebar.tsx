@@ -24,10 +24,11 @@ import {
   CalendarCheck,
   CalendarDays,
   Receipt,
+  ListTodo,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { PAGE_LABELS, type Page } from "@/lib/access";
+import { PAGE_LABELS, ROLE_LABELS, isOffice, type Page } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -296,8 +297,8 @@ export function AppSidebar() {
       return typeof s["cat"] === "string" ? s["cat"] : undefined;
     },
   });
-  // A technician who is not an admin: Today first, no Board.
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  // A technician who is neither an admin nor a manager: Today first, no Board.
+  const isTech = !!profile && !isOffice(profile);
   const isActive = (path: string) =>
     pathname === path || (path !== "/" && pathname.startsWith(path));
 
@@ -343,6 +344,23 @@ export function AppSidebar() {
         />
       </SidebarHeader>
       <SidebarContent>
+        {/* My Work (owner, Sep 30): every signed-in user's landing page — their own tickets,
+            tasks and follow-ups in one list and calendar. */}
+        {profile && (
+          <SidebarGroup>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={isActive("/my-work")} tooltip="My Work">
+                  <Link to="/my-work">
+                    <ListTodo className="h-4 w-4" />
+                    {!collapsed && <span>My Work</span>}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+
         {profile && (
           <NavGroup
             label={can("customers") ? "Customers" : "Service"}
@@ -533,8 +551,8 @@ export function AppSidebar() {
                         {profile.full_name || profile.email}
                       </span>
                       <span className="block truncate text-muted-foreground">
-                        {profile.role === "admin"
-                          ? "Admin"
+                        {profile.role !== "user"
+                          ? ROLE_LABELS[profile.role]
                           : profile.access.map((p) => PAGE_LABELS[p]).join(" · ") || "No pages"}
                       </span>
                     </span>

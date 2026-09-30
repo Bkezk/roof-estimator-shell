@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
 
-import { canAccess, homeFor, isAdmin, normalizeAccess, pageForPath } from "./access";
+import {
+  PAGES,
+  canAccess,
+  homeFor,
+  isAdmin,
+  isOffice,
+  normalizeAccess,
+  normalizeRole,
+  pageForPath,
+  seesEveryone,
+} from "./access";
 
 describe("per-page access", () => {
   const admin = { role: "admin", access: [] };
@@ -34,23 +44,49 @@ describe("per-page access", () => {
     expect(pageForPath("/account")).toBeNull();
   });
 
-  it("lands each user on the first page they may open", () => {
-    expect(homeFor(admin)).toBe("/bids");
-    expect(homeFor(estimator)).toBe("/bids");
-    expect(homeFor(field)).toBe("/inventory");
-    expect(homeFor(pricingOnly)).toBe("/admin/settings");
-    expect(homeFor({ role: "user", access: [] })).toBe("/account");
-    // Service phase A: a technician lands on their tickets; an office user with Service +
-    // Estimate still lands on Bids; Customers alone lands on the CRM.
-    expect(homeFor({ role: "user", access: ["service"], technician: true })).toBe("/service");
-    expect(homeFor({ role: "user", access: ["estimate", "service"], technician: false })).toBe(
-      "/bids",
-    );
-    expect(homeFor({ role: "user", access: ["customers"] })).toBe("/customers");
+  it("lands every signed-in user on My Work (owner, Sep 30)", () => {
+    expect(homeFor(admin)).toBe("/my-work");
+    expect(homeFor(estimator)).toBe("/my-work");
+    expect(homeFor(field)).toBe("/my-work");
+    expect(homeFor(pricingOnly)).toBe("/my-work");
+    expect(homeFor({ role: "user", access: [] })).toBe("/my-work");
+    expect(homeFor({ role: "user", access: ["service"], technician: true })).toBe("/my-work");
+    expect(homeFor({ role: "manager", access: [] })).toBe("/my-work");
+    expect(homeFor(null)).toBe("/my-work");
+    // Every signed-in user may open My Work (and "/" only redirects there).
+    expect(pageForPath("/my-work")).toBeNull();
+    expect(pageForPath("/")).toBeNull();
     expect(pageForPath("/service")).toBe("service");
     expect(pageForPath("/customers")).toBe("customers");
     expect(pageForPath("/opportunities")).toBe("customers");
     expect(pageForPath("/followups")).toBeNull();
+  });
+
+  it("a manager reaches every page but Estimate Pricing, and no admin page", () => {
+    const manager = { role: "manager", access: [] };
+    for (const page of PAGES) expect(canAccess(manager, page)).toBe(page !== "pricing");
+    expect(isAdmin(manager)).toBe(false);
+    expect(pageForPath("/admin/users")).toBe("admin");
+    expect(pageForPath("/admin/settings")).toBe("pricing");
+    expect(normalizeRole("manager")).toBe("manager");
+    expect(normalizeRole("admin")).toBe("admin");
+    expect(normalizeRole("estimator")).toBe("user");
+  });
+
+  it("admins and managers see everyone and dispatch, even when ticked Technician", () => {
+    const tech = { role: "user", access: ["service"], technician: true };
+    const office = { role: "user", access: ["service"], technician: false };
+    const managerTech = { role: "manager", access: [], technician: true };
+    const adminTech = { role: "admin", access: [], technician: true };
+    expect(seesEveryone(tech)).toBe(false);
+    expect(seesEveryone(office)).toBe(false);
+    expect(seesEveryone(managerTech)).toBe(true);
+    expect(seesEveryone(adminTech)).toBe(true);
+    expect(isOffice(tech)).toBe(false);
+    expect(isOffice(office)).toBe(true);
+    expect(isOffice(managerTech)).toBe(true);
+    expect(isOffice(adminTech)).toBe(true);
+    expect(isOffice(null)).toBe(false);
   });
 
   it("normalizes a stored access list", () => {

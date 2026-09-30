@@ -12,7 +12,17 @@ import {
   deleteUser,
   type UserProfile,
 } from "@/lib/auth.functions";
-import { PAGES, PAGE_HELP, PAGE_LABELS, type Page, type Role } from "@/lib/access";
+import {
+  PAGES,
+  PAGE_HELP,
+  PAGE_LABELS,
+  ROLES,
+  ROLE_HELP,
+  ROLE_LABELS,
+  canAccess,
+  type Page,
+  type Role,
+} from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,8 +47,9 @@ const TECHNICIAN_HELP =
   "Appears on the service board, can be assigned tickets and vehicles; edits only their own tickets";
 
 /**
- * Admin checkbox + one checkbox per page; admin implies every page (shown ticked, disabled).
- * Technician is a separate flag beside the pages (it is not a page; an admin can be one too).
+ * Role picker (User / Manager / Admin) + one checkbox per page; admin and manager imply their
+ * pages (shown ticked, disabled: a manager every page but Estimate Pricing). Technician is a
+ * separate flag beside the pages (it is not a page; an admin or a manager can be one too).
  */
 function AccessPicker(props: {
   role: Role;
@@ -48,32 +59,38 @@ function AccessPicker(props: {
   compact?: boolean;
   onChange: (role: Role, access: Page[], technician: boolean) => void;
 }) {
-  const isAdmin = props.role === "admin";
+  // Admins and managers get their pages from the role; the boxes only mirror it.
+  const byRole = props.role !== "user";
   return (
     <div className={props.compact ? "flex flex-wrap gap-x-4 gap-y-1" : "flex flex-col gap-1.5"}>
-      <label className="flex items-center gap-1.5 text-sm" title="Everything, plus Users & access">
-        <input
-          type="checkbox"
-          className="h-4 w-4"
-          checked={isAdmin}
+      <label className="flex items-center gap-1.5 text-sm" title={ROLE_HELP[props.role]}>
+        <span className="font-medium">Role</span>
+        <select
+          className="h-8 rounded-md border bg-background px-2 text-sm"
+          aria-label="Role"
+          value={props.role}
           disabled={props.disabled}
-          onChange={(e) =>
-            props.onChange(e.target.checked ? "admin" : "user", props.access, props.technician)
-          }
-        />
-        <span className="font-medium">Admin</span>
+          onChange={(e) => props.onChange(e.target.value as Role, props.access, props.technician)}
+        >
+          {ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABELS[r]}
+            </option>
+          ))}
+        </select>
       </label>
+      {!props.compact && <p className="text-xs text-muted-foreground">{ROLE_HELP[props.role]}</p>}
       {PAGES.map((p) => (
         <label
           key={p}
-          className={`flex items-center gap-1.5 text-sm ${isAdmin ? "text-muted-foreground" : ""}`}
+          className={`flex items-center gap-1.5 text-sm ${byRole ? "text-muted-foreground" : ""}`}
           title={PAGE_HELP[p]}
         >
           <input
             type="checkbox"
             className="h-4 w-4"
-            checked={isAdmin || props.access.includes(p)}
-            disabled={props.disabled || isAdmin}
+            checked={byRole ? canAccess({ role: props.role }, p) : props.access.includes(p)}
+            disabled={props.disabled || byRole}
             onChange={(e) =>
               props.onChange(
                 "user",
@@ -172,8 +189,8 @@ function UsersPage() {
       toast.error("Password must be at least 8 characters");
       return;
     }
-    if (role !== "admin" && access.length === 0) {
-      toast.error("Tick at least one page, or make the user an admin");
+    if (role === "user" && access.length === 0) {
+      toast.error("Tick at least one page, or make the user a manager or an admin");
       return;
     }
     const trimmedName = fullName.trim();
@@ -193,7 +210,8 @@ function UsersPage() {
         <h1 className="text-2xl font-bold tracking-tight">Users &amp; access</h1>
         <p className="text-sm text-muted-foreground">
           Who can sign in and which pages each person may open. Admins reach everything and manage
-          this page. Anyone with Estimate access is listed as an estimator on a bid&apos;s Setup
+          this page. Managers see everyone&apos;s tickets, tasks and customers but not the admin or
+          pricing pages. Anyone with Estimate access is listed as an estimator on a bid&apos;s Setup
           step; Inventory-only logins record leftovers but not adjustments.
         </p>
       </div>

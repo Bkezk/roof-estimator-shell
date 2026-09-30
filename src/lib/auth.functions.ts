@@ -4,10 +4,22 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { PAGES, PAGE_LABELS, canAccess, normalizeAccess, type Page, type Role } from "@/lib/access";
+import {
+  PAGES,
+  PAGE_LABELS,
+  ROLES,
+  canAccess,
+  normalizeAccess,
+  normalizeRole,
+  type Page,
+  type Role,
+} from "@/lib/access";
 
 export type { Role } from "@/lib/access";
-/** admin: everything + user management; user: the pages in `access` (src/lib/access.ts). */
+/**
+ * admin: everything + user management; manager: every page but Estimate Pricing, everyone's
+ * work; user: the pages in `access` (src/lib/access.ts).
+ */
 export interface UserProfile {
   id: string;
   email: string;
@@ -28,7 +40,7 @@ const toProfile = (row: {
   created_at?: string;
 }): UserProfile => ({
   ...row,
-  role: row.role === "admin" ? "admin" : "user",
+  role: normalizeRole(row.role),
   access: normalizeAccess(row.access),
   technician: row.technician === true,
 });
@@ -114,7 +126,7 @@ const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   full_name: z.string().trim().max(200).optional(),
-  role: z.enum(["admin", "user"]),
+  role: z.enum(ROLES),
   access: z.array(z.enum(PAGES)).default([]),
   technician: z.boolean().default(false),
 });
@@ -145,7 +157,7 @@ export const createUser = createServerFn({ method: "POST" })
         email: data.email,
         full_name: data.full_name ?? null,
         role: data.role,
-        access: data.role === "admin" ? [] : data.access,
+        access: data.role === "user" ? data.access : [],
         technician: data.technician,
       })
       .select(PROFILE_COLS)
@@ -161,12 +173,12 @@ export const createUser = createServerFn({ method: "POST" })
 
 const updateAccessSchema = z.object({
   id: z.string().uuid(),
-  role: z.enum(["admin", "user"]),
+  role: z.enum(ROLES),
   access: z.array(z.enum(PAGES)).default([]),
   technician: z.boolean().optional(),
 });
 
-/** Set a user's role (admin / user) and, for a user, the pages they may open. */
+/** Set a user's role (admin / manager / user) and, for a user, the pages they may open. */
 export const updateUserAccess = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data) => updateAccessSchema.parse(data))
@@ -190,7 +202,7 @@ export const updateUserAccess = createServerFn({ method: "POST" })
       .from("profiles")
       .update({
         role: data.role,
-        access: data.role === "admin" ? [] : data.access,
+        access: data.role === "user" ? data.access : [],
         ...(data.technician === undefined ? {} : { technician: data.technician }),
       })
       .eq("id", data.id)

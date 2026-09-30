@@ -3,9 +3,17 @@
  * other user is granted any combination of pages. Someone with Estimate access is listed as an
  * estimator on the Setup step; without Inventory they cannot open Inventory, and so on.
  *
- * `profiles.role` is 'admin' | 'user'; `profiles.access` is the granted pages. Enforcement is
- * RLS (`public.has_access(page)`) plus the checks inside every server function; the gate and the
- * sidebar only mirror it.
+ * Roles (owner, 2026-09-30: "users should only see their own stuff except for managers who see
+ * everything"):
+ * - admin: every page, plus the Admin pages (users, reminders, service rates).
+ * - manager: every page EXCEPT Estimate Pricing and the Admin pages; sees everyone's tickets,
+ *   tasks and follow-ups (also when ticked Technician) and may dispatch.
+ * - user: only the pages in `access`; a Technician user sees and edits only their own tickets.
+ *
+ * `profiles.role` is 'admin' | 'manager' | 'user'; `profiles.access` is the granted pages (empty
+ * for admins and managers). Enforcement is RLS (`public.has_access(page)`, `public.is_admin()`,
+ * `public.is_manager()`) plus the checks inside every server function; the gate and the sidebar
+ * only mirror it. My Work (/my-work) is every signed-in user's landing page.
  */
 export const PAGES = [
   "estimate",
@@ -39,7 +47,23 @@ export const PAGE_HELP: Record<Page, string> = {
   customers: "The customer hub: accounts, sites and contacts that bids and tickets link to",
 };
 
-export type Role = "admin" | "user";
+export const ROLES = ["admin", "manager", "user"] as const;
+export type Role = (typeof ROLES)[number];
+
+export const ROLE_LABELS: Record<Role, string> = {
+  admin: "Admin",
+  manager: "Manager",
+  user: "User",
+};
+
+export const ROLE_HELP: Record<Role, string> = {
+  admin: "Everything, plus Users & access",
+  manager: "Sees everyone's tickets, tasks and customers; no admin or pricing pages",
+  user: "Only the pages ticked below; a technician sees only their own tickets",
+};
+
+/** A stored role string as a Role (anything unknown is a plain user). */
+export const normalizeRole = (v: unknown): Role => (v === "admin" || v === "manager" ? v : "user");
 
 export interface AccessLike {
   role: string | null | undefined;
@@ -48,17 +72,40 @@ export interface AccessLike {
   technician?: boolean | null | undefined;
 }
 
-/** Admins reach every page; others only the pages granted. */
+/**
+ * Admins reach every page; managers every page but Estimate Pricing; others only the pages
+ * granted. The twin of `public.has_access(page)`.
+ */
 export const canAccess = (p: AccessLike | null | undefined, page: Page): boolean =>
-  !!p && (p.role === "admin" || (p.access ?? []).includes(page));
+  !!p &&
+  (p.role === "admin" ||
+    (p.role === "manager" && page !== "pricing") ||
+    (p.access ?? []).includes(page));
 
 export const isAdmin = (p: AccessLike | null | undefined): boolean => p?.role === "admin";
+
+export const isManager = (p: AccessLike | null | undefined): boolean => p?.role === "manager";
+
+/** Admins and managers see everyone's tickets, tasks and follow-ups (My Work's "Show" picker). */
+export const seesEveryone = (p: AccessLike | null | undefined): boolean =>
+  isAdmin(p) || isManager(p);
+
+/**
+ * The office: sees every ticket and may dispatch. Everyone except a technician who is neither an
+ * admin nor a manager (that technician sees and edits only their own tickets). The twin of RLS
+ * `not is_technician() or is_admin() or is_manager()`.
+ */
+export const isOffice = (p: AccessLike | null | undefined): boolean =>
+  !!p && (!p.technician || seesEveryone(p));
 
 /** The page a route belongs to; null for routes every signed-in user may open (/account). */
 export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname === "/account" || pathname === "/login") return null;
-  // Follow-ups: every signed-in user (the server returns only what they may see).
+  // Follow-ups and My Work: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
+  if (pathname.startsWith("/my-work")) return null;
+  // "/" only redirects to My Work.
+  if (pathname === "/") return null;
   if (
     pathname.startsWith("/admin/users") ||
     pathname.startsWith("/admin/reminders") ||
@@ -75,26 +122,18 @@ export function pageForPath(pathname: string): Page | "admin" | null {
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||
-    pathname.startsWith("/proposal") ||
-    pathname === "/"
+    pathname.startsWith("/proposal")
   )
     return "estimate";
   return null;
 }
 
-/** Where a signed-in user lands: the first page they may open. */
-export function homeFor(p: AccessLike | null | undefined): string {
-  // A technician lands on their tickets.
-  if (p?.technician && canAccess(p, "service")) return "/service";
-  if (canAccess(p, "estimate")) return "/bids";
-  if (canAccess(p, "inventory")) return "/inventory";
-  if (canAccess(p, "prospect")) return "/prospect";
-  if (canAccess(p, "takeoff")) return "/takeoff";
-  if (canAccess(p, "service")) return "/service";
-  if (canAccess(p, "customers")) return "/customers";
-  if (canAccess(p, "pricing")) return "/admin/settings";
-  if (isAdmin(p)) return "/admin/users";
-  return "/account";
+/**
+ * Where a signed-in user lands: My Work, for everyone (owner, Sep 30) — every signed-in user may
+ * open it (it replaced "a technician lands on Service, others on their first page").
+ */
+export function homeFor(_p?: AccessLike | null): string {
+  return "/my-work";
 }
 
 export const normalizeAccess = (v: unknown): Page[] =>

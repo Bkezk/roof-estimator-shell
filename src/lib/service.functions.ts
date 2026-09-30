@@ -13,7 +13,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, isOffice } from "@/lib/access";
 import { siteAddressLine } from "@/lib/crm.functions";
 
 export type ServiceJobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
@@ -221,7 +221,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .eq("id", id)
         .maybeSingle();
       // A technician edits only their own ticket (RLS says the same; this gives a clear message).
-      if (p.technician && p.role !== "admin" && cur && cur.technician_id !== context.userId)
+      if (!isOffice(p) && cur && cur.technician_id !== context.userId)
         throw new Error(
           "Only the assigned technician, the office or an admin can edit this ticket",
         );
@@ -253,7 +253,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
 /** The stages a technician may set; Invoiced and Closed belong to the office (owner, Sep 27). */
 export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
 const techMayNotSet = (p: { technician: boolean; role: string }, stage: ServiceStage) =>
-  p.technician && p.role !== "admin" && !TECH_STAGES.includes(stage);
+  !isOffice(p) && !TECH_STAGES.includes(stage);
 
 /** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
 const TICKET_CLOSING: readonly ServiceStage[] = ["done", "invoiced", "closed"];
@@ -339,7 +339,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
-    if (p.technician && p.role !== "admin") throw new Error("Only the office can dispatch tickets");
+    if (!isOffice(p)) throw new Error("Only the office can dispatch tickets");
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("service_jobs")
@@ -376,7 +376,7 @@ export const deleteServiceJob = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
-    if (p.technician && p.role !== "admin") throw new Error("Ask the office to delete a ticket");
+    if (!isOffice(p)) throw new Error("Ask the office to delete a ticket");
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })

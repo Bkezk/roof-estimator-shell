@@ -3487,6 +3487,7 @@ export type Database = {
       };
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
+      is_manager: { Args: never; Returns: boolean };
       stamp_dispatch: { Args: never; Returns: undefined };
       building_county_counts_storm: {
         Args: never;
@@ -3540,6 +3541,15 @@ export type Database = {
         }[];
       };
       technician_options: {
+        Args: never;
+        Returns: {
+          email: string;
+          full_name: string | null;
+          id: string;
+          technician: boolean;
+        }[];
+      };
+      work_people: {
         Args: never;
         Returns: {
           email: string;
