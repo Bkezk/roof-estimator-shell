@@ -10,6 +10,13 @@
  * on a scaled page a typed length + Enter places the next point that far along; Delete removes
  * the selected object; in Select mode a selected area / line drags as a whole and a count pin
  * drags on its own; role chips (keys 1–6) pick the next count / linear's role.
+ *
+ * Owner, Sep 30: (1) Ortho has a tolerance — a side within ORTHO_DEG (7°) of level or plumb
+ * locks to it, a steeper side keeps its angle, so angled views can be drawn; typed lengths follow
+ * the same rule. (2) Drag a box: with Area, Cut-out or Linear and nothing in progress, press and
+ * drag past RECT_DRAG_PX (6 screen px) to draw a whole page-aligned rectangle (a linear gets its
+ * perimeter); both corners snap unless Shift is held, Esc cancels. A press that does not move
+ * that far is a click and places the first corner (on release, at the press point).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
@@ -30,18 +37,30 @@ import {
   type TakeoffPage,
 } from "@/lib/takeoff/model";
 
-import { DraftShape, MeasureLine, ObjectsLayer, ScaleLine, SnapMarker, SvgLabel } from "./overlay";
+import {
+  DraftShape,
+  MeasureLine,
+  ObjectsLayer,
+  RectPreview,
+  ScaleLine,
+  SnapMarker,
+  SvgLabel,
+} from "./overlay";
 import { ScaleDialog } from "./scale-dialog";
 import {
   DRAFT_COLOR,
   HINTS,
   KEY_TOOLS,
+  ORTHO_DEG,
+  dragRect,
   feetInches,
   isLengthKey,
+  isRectDrag,
   isTypingTarget,
   lengthLabel,
   orthoSnap,
   parseFeetInches,
+  rectObjectPoints,
   snapCandidates,
   snapTo,
   translateObject,
@@ -119,6 +138,18 @@ export function TakeoffViewer(props: ViewerProps) {
   const [move, setMove] = useState<{ id: string; start: PagePoint; dx: number; dy: number } | null>(
     null,
   );
+  /**
+   * Area / cut-out / linear with nothing in progress: a left press (page point `a`, screen point
+   * sx / sy) that becomes a click on release, or a drag-a-box rectangle to `b` once `active`.
+   */
+  const [press, setPress] = useState<{
+    a: PagePoint;
+    b: PagePoint;
+    sx: number;
+    sy: number;
+    pointerId: number;
+    active: boolean;
+  } | null>(null);
   /** A length typed on the keyboard while drawing (placed with Enter). */
   const [typed, setTyped] = useState("");
   const [countRole, setCountRole] = useState<CountRole>("drain");
@@ -150,6 +181,7 @@ export function TakeoffViewer(props: ViewerProps) {
     setScalePick(null);
     setDrag(null);
     setMove(null);
+    setPress(null);
     setTyped("");
     const c = canvasRef.current;
     if (c) c.width = 0;
@@ -323,6 +355,12 @@ export function TakeoffViewer(props: ViewerProps) {
     return { p: last && !shift ? orthoSnap(last, raw) : raw, snap: null };
   };
   const drawing = tool !== "select";
+  /** A drag-a-box rectangle's corners: each snaps to a nearby corner unless `free` (Shift). */
+  const rectEnds = (a: PagePoint, b: PagePoint, free: boolean) => {
+    const at = (q: PagePoint) => (free ? null : snapTo(q, candidates, zoom, SNAP_PX)) ?? q;
+    return { a: at(a), b: at(b) };
+  };
+  const rectLive = press?.active ? rectEnds(press.a, press.b, shift) : null;
   const live = drawing && cursor ? resolve(cursor) : null;
   const snapped: PagePoint | null = live?.p ?? null;
   const dragSnap = drag && cursor ? snapOf(cursor) : null;
@@ -333,6 +371,7 @@ export function TakeoffViewer(props: ViewerProps) {
       toast.info("Select an area first, then draw the cut-out inside it.");
       return;
     }
+    endPress();
     setTool(t);
     setDraft([]);
     setTyped("");
@@ -374,8 +413,17 @@ export function TakeoffViewer(props: ViewerProps) {
       );
   };
 
+  /** Drop a press / drag-a-box in progress and let go of the pointer. */
+  const endPress = () => {
+    if (!press) return;
+    const el = containerRef.current;
+    if (el?.hasPointerCapture(press.pointerId)) el.releasePointerCapture(press.pointerId);
+    setPress(null);
+  };
+
   const cancel = (): boolean => {
-    if (typed) setTyped("");
+    if (press) endPress();
+    else if (typed) setTyped("");
     else if (draft.length) setDraft([]);
     else if (dimension) setDimension(null);
     else if (countSession) setCountSession(null);
@@ -438,6 +486,31 @@ export function TakeoffViewer(props: ViewerProps) {
       return;
     }
     setDraft((d) => [...d, p]);
+  };
+
+  /**
+   * Release of a press with nothing in progress: a drag-a-box creates the whole rectangle (an
+   * area, a cut-out of the selected area, or a linear around its perimeter); a press that did
+   * not move, or a box under RECT_DRAG_PX on either side, places one corner like a click.
+   */
+  const releasePress = (pr: NonNullable<typeof press>, b: PagePoint, free: boolean) => {
+    const ends = rectEnds(pr.a, b, free);
+    const rect = pr.active ? dragRect(ends.a, ends.b, zoom) : null;
+    if (!rect) {
+      place(pr.a);
+      return;
+    }
+    if (tool === "area" || tool === "linear") {
+      props.onCreate(tool, rectObjectPoints(tool, rect), roles);
+    } else if (tool === "cutout") {
+      if (!selectedArea) {
+        toast.info("Select an area first, then draw the cut-out inside it.");
+        return;
+      }
+      props.onAddCutout(selectedArea.id, rect);
+    } else return;
+    setDraft([]);
+    setTyped("");
   };
 
   /** Backspace / Delete: typed text first, then the last point, then the selected object. */
@@ -563,7 +636,11 @@ export function TakeoffViewer(props: ViewerProps) {
     const p = toPage(e);
     setShift(e.shiftKey);
     setCursor(p);
-    if (drag) {
+    if (press) {
+      const active =
+        press.active || isRectDrag({ x: press.sx, y: press.sy }, { x: e.clientX, y: e.clientY });
+      setPress({ ...press, b: p, active });
+    } else if (drag) {
       const q = (!e.shiftKey && snapTo(p, candidates, zoom, SNAP_PX)) || p;
       setDrag({
         ...drag,
@@ -580,6 +657,12 @@ export function TakeoffViewer(props: ViewerProps) {
       setPanning(false);
       if (e.currentTarget.hasPointerCapture(e.pointerId))
         e.currentTarget.releasePointerCapture(e.pointerId);
+      return;
+    }
+    if (press) {
+      if (e.pointerId !== press.pointerId) return;
+      endPress();
+      releasePress(press, toPage(e), e.shiftKey);
       return;
     }
     if (drag) {
@@ -683,6 +766,7 @@ export function TakeoffViewer(props: ViewerProps) {
         onPointerDownCapture={onPointerDownCapture}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={endPress}
         onPointerLeave={() => setCursor(null)}
         onMouseDown={(e) => {
           // No middle-click autoscroll / paste.
@@ -718,7 +802,24 @@ export function TakeoffViewer(props: ViewerProps) {
                   return;
                 }
                 if (e.button !== 0) return;
-                place(toPage(e));
+                const p = toPage(e);
+                // Nothing in progress with an outline tool: wait for the release, which is a
+                // click (one corner) or, after a drag, a whole rectangle.
+                const box = containerRef.current;
+                const canBox = typingTool && draft.length === 0 && !typed && !press && !!box;
+                if (canBox && (tool !== "cutout" || selectedArea)) {
+                  box.setPointerCapture(e.pointerId);
+                  setPress({
+                    a: p,
+                    b: p,
+                    sx: e.clientX,
+                    sy: e.clientY,
+                    pointerId: e.pointerId,
+                    active: false,
+                  });
+                  return;
+                }
+                place(p);
               }}
             >
               <ObjectsLayer
@@ -762,6 +863,16 @@ export function TakeoffViewer(props: ViewerProps) {
                   nearFirst={nearFirst}
                 />
               )}
+              {rectLive && (
+                <RectPreview
+                  a={rectLive.a}
+                  b={rectLive.b}
+                  filled={closing}
+                  zoom={zoom}
+                  fpp={fpp}
+                  color={DRAFT_COLOR[tool]}
+                />
+              )}
               {snapMark && <SnapMarker at={snapMark} zoom={zoom} />}
               {typed && (cursor ?? last) && (
                 <SvgLabel
@@ -798,7 +909,9 @@ export function TakeoffViewer(props: ViewerProps) {
             {HINTS[tool]}
             {tool !== "select" && tool !== "count" && (
               <span className="ml-1">
-                Ortho and snap {shift ? "off (Shift held)" : "on — hold Shift for any angle"}.
+                {shift
+                  ? "Level / plumb lock and corner snap off (Shift held)."
+                  : `Sides within ${ORTHO_DEG}° of level or plumb lock to it and corners snap — hold Shift for neither.`}
               </span>
             )}
             {typingTool && fpp !== null && (

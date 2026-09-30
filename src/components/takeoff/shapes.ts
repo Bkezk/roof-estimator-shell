@@ -1,7 +1,8 @@
 /**
  * Takeoff page helpers — pure (no React, no I/O): object naming, measurements for labels, the
- * ortho snap, and number formatting. The authoritative quantities come from
- * `takeoffQuantities` in @/lib/takeoff/model; these helpers only label the drawing.
+ * ortho snap (level / plumb within ORTHO_DEG), the drag-a-box rectangle, and number formatting.
+ * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
+ * helpers only label the drawing.
  */
 import { edgeLengths, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 import {
@@ -40,14 +41,14 @@ export const HINTS: Record<Tool, string> = {
     "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a count pin to move that pin. Delete removes it; Ctrl+Z undoes.",
   scale:
     "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
-  area: "Click each corner. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
+  area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
   linear:
-    "Click points along the line; double-click, right-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
+    "Click points along the line, or press and drag a box for a rectangle's perimeter; double-click, right-click or press Enter to finish. Backspace removes the last point, Esc cancels.",
   count:
     "Click each item. Clicks add to the same count until you right-click or press Enter or Esc; the next click then starts a new count. Keys 1–6 pick the role.",
   dimension: "Click two points to measure a distance (not saved).",
   cutout:
-    "Draw a well or penthouse inside the selected area; close it like an area. It is subtracted from that area.",
+    "Draw a well or penthouse inside the selected area: click its corners and close it like an area, or drag a box. It is subtracted from that area.",
 };
 
 export const DRAFT_COLOR: Record<Tool, string> = {
@@ -116,9 +117,31 @@ export function parseFeetInches(text: string): number | null {
 export const isLengthKey = (key: string): boolean => /^[0-9.'" ]$/.test(key);
 
 /**
- * The point `feet` away from `from`, heading toward `toward`: along the ortho axis nearest the
- * cursor direction, or straight at the cursor when `free` (Shift held). Null when the cursor
- * sits on the last point (no direction) or the page has no scale.
+ * Ortho tolerance in degrees: a side within this of level or plumb locks to it; anything
+ * steeper stays at the angle drawn (owner, Sep 30: angled roof views must be drawable).
+ */
+export const ORTHO_DEG = 7;
+
+/**
+ * The axis a segment (dx, dy) locks to: "h" within `toleranceDeg` of level, "v" within it of
+ * plumb, else null (free angle, or no length).
+ */
+export function orthoAxis(dx: number, dy: number, toleranceDeg = ORTHO_DEG): "h" | "v" | null {
+  const ax = Math.abs(dx);
+  const ay = Math.abs(dy);
+  if (ax < 1e-9 && ay < 1e-9) return null;
+  const deg = (Math.atan2(ay, ax) * 180) / Math.PI; // 0 = level, 90 = plumb
+  const tol = toleranceDeg + 1e-9;
+  if (deg <= tol) return "h";
+  if (deg >= 90 - tol) return "v";
+  return null;
+}
+
+/**
+ * The point `feet` away from `from`, heading toward `toward`: along the level / plumb axis when
+ * the cursor direction is within `toleranceDeg` of it, otherwise straight at the cursor (and
+ * always straight at it when `free`, Shift held). Null when the cursor sits on the last point
+ * (no direction) or the page has no scale.
  */
 export function typedPoint(
   from: PagePoint,
@@ -126,20 +149,18 @@ export function typedPoint(
   feet: number,
   fpp: number | null,
   free: boolean,
+  toleranceDeg = ORTHO_DEG,
 ): PagePoint | null {
   if (fpp === null || !(fpp > 0)) return null;
   const px = feet / fpp;
   const dx = toward[0] - from[0];
   const dy = toward[1] - from[1];
-  if (free) {
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-9) return null;
-    return [from[0] + (dx / len) * px, from[1] + (dy / len) * px];
-  }
-  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return null;
-  return Math.abs(dx) >= Math.abs(dy)
-    ? [from[0] + Math.sign(dx) * px, from[1]]
-    : [from[0], from[1] + Math.sign(dy) * px];
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-9) return null;
+  const axis = free ? null : orthoAxis(dx, dy, toleranceDeg);
+  if (axis === "h") return [from[0] + Math.sign(dx) * px, from[1]];
+  if (axis === "v") return [from[0], from[1] + Math.sign(dy) * px];
+  return [from[0] + (dx / len) * px, from[1] + (dy / len) * px];
 }
 
 /** The nearest candidate within `maxPx` screen px of `p` (page px × zoom), or null. */
@@ -306,11 +327,83 @@ export function polylineMidpoint(points: readonly PagePoint[]): PagePoint {
   return points[0]!;
 }
 
-/** PlanSwift Ortho: lock the new point to 0° / 90° from the previous one. */
-export function orthoSnap(prev: PagePoint, p: PagePoint): PagePoint {
-  const dx = Math.abs(p[0] - prev[0]);
-  const dy = Math.abs(p[1] - prev[1]);
-  return dx >= dy ? [p[0], prev[1]] : [prev[0], p[1]];
+/**
+ * PlanSwift Ortho with a tolerance: lock the new point level / plumb with the previous one when
+ * the side is within `toleranceDeg` of that axis; a steeper side keeps its angle.
+ */
+export function orthoSnap(prev: PagePoint, p: PagePoint, toleranceDeg = ORTHO_DEG): PagePoint {
+  const axis = orthoAxis(p[0] - prev[0], p[1] - prev[1], toleranceDeg);
+  if (axis === "h") return [p[0], prev[1]];
+  if (axis === "v") return [prev[0], p[1]];
+  return p;
+}
+
+/**
+ * Screen px: a press that moves this far before release is a drag-a-box rectangle, and a box
+ * narrower or shorter than this on screen counts as a plain click.
+ */
+export const RECT_DRAG_PX = 6;
+
+/** True once the pointer has moved more than `px` screen px from where it was pressed. */
+export function isRectDrag(
+  press: { x: number; y: number },
+  now: { x: number; y: number },
+  px = RECT_DRAG_PX,
+): boolean {
+  return Math.hypot(now.x - press.x, now.y - press.y) > px;
+}
+
+/**
+ * The page-aligned rectangle with opposite corners `a` and `b`: four corners, clockwise on
+ * screen (y down), starting at the min-x / min-y corner.
+ */
+export function rectPoints(a: PagePoint, b: PagePoint): PagePoint[] {
+  const x0 = Math.min(a[0], b[0]);
+  const x1 = Math.max(a[0], b[0]);
+  const y0 = Math.min(a[1], b[1]);
+  const y1 = Math.max(a[1], b[1]);
+  return [
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+  ];
+}
+
+/**
+ * The rectangle a drag from `a` to `b` draws, or null when either side is under `minPx` screen
+ * px at `zoom` (the release then counts as a click).
+ */
+export function dragRect(
+  a: PagePoint,
+  b: PagePoint,
+  zoom: number,
+  minPx = RECT_DRAG_PX,
+): PagePoint[] | null {
+  const w = Math.abs(b[0] - a[0]) * zoom;
+  const h = Math.abs(b[1] - a[1]) * zoom;
+  return w < minPx || h < minPx ? null : rectPoints(a, b);
+}
+
+/**
+ * The points an object drawn as rectangle `rect` is saved with: an area or cut-out keeps the
+ * four corners (closed implicitly); a linear is an open polyline, so it returns to its start
+ * (five points) and its length is the whole perimeter, 2 × (w + h).
+ */
+export function rectObjectPoints(
+  kind: "area" | "linear" | "cutout",
+  rect: PagePoint[],
+): PagePoint[] {
+  return kind === "linear" && rect.length ? [...rect, rect[0]!] : rect;
+}
+
+/** `40' × 60' 6"` on a scaled page, else `120 × 80 px`. */
+export function rectSizeLabel(a: PagePoint, b: PagePoint, fpp: number | null): string {
+  const w = Math.abs(b[0] - a[0]);
+  const h = Math.abs(b[1] - a[1]);
+  return fpp === null
+    ? `${Math.round(w)} × ${Math.round(h)} px`
+    : `${feetInches(w * fpp)} × ${feetInches(h * fpp)}`;
 }
 
 /** 20.5 → `20' 6"`. */

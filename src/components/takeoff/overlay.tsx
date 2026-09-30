@@ -17,6 +17,8 @@ import {
   netAreaSqFt,
   polylineLengthPx,
   polylineMidpoint,
+  rectPoints,
+  rectSizeLabel,
 } from "./shapes";
 
 const pts = (p: readonly PagePoint[]) => p.map(([x, y]) => `${x},${y}`).join(" ");
@@ -386,6 +388,67 @@ export function DraftShape(props: {
             {t}
           </SvgLabel>
         ))}
+    </g>
+  );
+}
+
+/**
+ * The rectangle being dragged out (press one corner, release on the opposite one), drawn like
+ * the shape in progress: width × height at the release corner, then the area (area / cut-out)
+ * or the perimeter (linear).
+ */
+export function RectPreview(props: {
+  a: PagePoint;
+  b: PagePoint;
+  /** Fill it (area / cut-out) or draw only the outline (linear). */
+  filled: boolean;
+  zoom: number;
+  fpp: number | null;
+  color: string;
+}) {
+  const { a, b, zoom, fpp, color } = props;
+  const rect = rectPoints(a, b);
+  const w = Math.abs(b[0] - a[0]);
+  const h = Math.abs(b[1] - a[1]);
+  const lines = [rectSizeLabel(a, b, fpp)];
+  if (props.filled)
+    lines.push(fpp === null ? `${Math.round(w * h)} px²` : fmtSqFt(w * h * fpp * fpp));
+  else lines.push(`total ${lengthLabel(2 * (w + h), fpp)}`);
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <polygon
+        points={pts(rect)}
+        fill={props.filled ? color : "none"}
+        fillOpacity={0.12}
+        stroke={color}
+        strokeWidth={2}
+        strokeDasharray="6 4"
+        vectorEffect="non-scaling-stroke"
+      />
+      {rect.map(([x, y], i) => (
+        <circle
+          key={i}
+          cx={x}
+          cy={y}
+          r={4 / zoom}
+          fill="#ffffff"
+          stroke={color}
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+      {lines.map((t, i) => (
+        <SvgLabel
+          key={i}
+          x={b[0] + 14 / zoom}
+          y={b[1] + (18 + i * 15) / zoom}
+          zoom={zoom}
+          anchor="start"
+          bold={i === 0}
+        >
+          {t}
+        </SvgLabel>
+      ))}
     </g>
   );
 }

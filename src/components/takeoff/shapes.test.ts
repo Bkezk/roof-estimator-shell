@@ -1,15 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import type { TakeoffObject } from "@/lib/takeoff/model";
+import type { PagePoint, TakeoffObject } from "@/lib/takeoff/model";
 
 import {
+  ORTHO_DEG,
+  RECT_DRAG_PX,
   buildObject,
+  dragRect,
+  isRectDrag,
+  orthoSnap,
   parseFeetInches,
+  polylineLengthPx,
+  rectObjectPoints,
+  rectPoints,
+  rectSizeLabel,
   snapCandidates,
   snapTo,
   translateObject,
   typedPoint,
 } from "./shapes";
+
+/** The point `len` px from `from` at `deg` degrees below level (screen y points down). */
+const at = (from: PagePoint, deg: number, len = 100): PagePoint => [
+  from[0] + Math.cos((deg * Math.PI) / 180) * len,
+  from[1] + Math.sin((deg * Math.PI) / 180) * len,
+];
 
 describe("parseFeetInches", () => {
   it.each([
@@ -32,9 +47,22 @@ describe("parseFeetInches", () => {
 
 describe("typedPoint", () => {
   const fpp = 0.5; // 1 px = 0.5 ft, so 10 ft = 20 px
-  it("follows the ortho axis nearest the cursor", () => {
-    expect(typedPoint([100, 100], [150, 110], 10, fpp, false)).toEqual([120, 100]);
-    expect(typedPoint([100, 100], [95, 40], 10, fpp, false)).toEqual([100, 80]);
+  it("follows the level / plumb axis when the cursor is within 7° of it", () => {
+    expect(typedPoint([100, 100], [150, 104], 10, fpp, false)).toEqual([120, 100]); // 4.6°
+    expect(typedPoint([100, 100], [97, 40], 10, fpp, false)).toEqual([100, 80]); // 2.9° off plumb
+  });
+  it("heads straight at the cursor, at the typed length, on an angled side (30°)", () => {
+    const from: PagePoint = [100, 100];
+    const toward = at(from, 30);
+    const p = typedPoint(from, toward, 10, fpp, false)!;
+    expect(Math.hypot(p[0] - from[0], p[1] - from[1])).toBeCloseTo(10 / fpp, 9); // 20 px
+    expect(p[0]).toBeCloseTo(100 + 20 * Math.cos(Math.PI / 6), 9);
+    expect(p[1]).toBeCloseTo(100 + 20 * Math.sin(Math.PI / 6), 9);
+  });
+  it("was the old nearest-axis case (11°): now free, not forced level", () => {
+    const p = typedPoint([100, 100], [150, 110], 10, fpp, false)!;
+    expect(p[1]).not.toBe(100);
+    expect(Math.hypot(p[0] - 100, p[1] - 100)).toBeCloseTo(20, 9);
   });
   it("heads straight at the cursor when free", () => {
     const p = typedPoint([0, 0], [3, 4], 10, fpp, true)!;
@@ -99,5 +127,91 @@ describe("translateObject / buildObject", () => {
     expect(drain.attrs).toMatchObject({ name: "Drain 1", role: "drain", bootSize: "B" });
     const gutter = buildObject("linear", "z", 0, [[0, 0]], [], {}, null, { linear: "gutter" });
     expect(gutter.attrs).toEqual({ name: "Gutter 1", role: "gutter" });
+  });
+});
+
+describe("orthoSnap (level / plumb within ORTHO_DEG)", () => {
+  const prev: PagePoint = [200, 200];
+  it("defaults to a 7° tolerance", () => {
+    expect(ORTHO_DEG).toBe(7);
+  });
+  it("snaps a side 3° off level to level", () => {
+    const p = at(prev, 3);
+    expect(orthoSnap(prev, p)).toEqual([p[0], 200]);
+    const q = at(prev, 180 + 3); // heading left, 3° up
+    expect(orthoSnap(prev, q)).toEqual([q[0], 200]);
+  });
+  it("leaves a 45° side where it was drawn", () => {
+    const p = at(prev, 45);
+    expect(orthoSnap(prev, p)).toEqual(p);
+    const q = at(prev, -30);
+    expect(orthoSnap(prev, q)).toEqual(q);
+  });
+  it("snaps a side at 88° (2° off plumb) to plumb", () => {
+    const p = at(prev, 88);
+    expect(orthoSnap(prev, p)).toEqual([200, p[1]]);
+    const q = at(prev, -92); // heading up, 2° left of plumb
+    expect(orthoSnap(prev, q)).toEqual([200, q[1]]);
+  });
+  it("snaps exactly at 7° and not at 8°", () => {
+    expect(orthoSnap(prev, at(prev, 7))[1]).toBe(200);
+    expect(orthoSnap(prev, at(prev, 90 - 7))[0]).toBe(200);
+    expect(orthoSnap(prev, at(prev, 8))).toEqual(at(prev, 8));
+    expect(orthoSnap(prev, at(prev, 90 - 8))).toEqual(at(prev, 90 - 8));
+  });
+  it("takes a custom tolerance, and a zero-length side is left alone", () => {
+    expect(orthoSnap(prev, at(prev, 8), 10)[1]).toBe(200);
+    expect(orthoSnap(prev, at(prev, 3), 0)).toEqual(at(prev, 3));
+    expect(orthoSnap(prev, prev)).toEqual(prev);
+  });
+});
+
+describe("drag-a-box rectangle", () => {
+  it("rectPoints: four corners clockwise from min-x / min-y, whichever way it was dragged", () => {
+    const want = [
+      [10, 20],
+      [50, 20],
+      [50, 80],
+      [10, 80],
+    ];
+    expect(rectPoints([10, 20], [50, 80])).toEqual(want);
+    expect(rectPoints([50, 80], [10, 20])).toEqual(want);
+    expect(rectPoints([50, 20], [10, 80])).toEqual(want);
+    expect(rectPoints([10, 80], [50, 20])).toEqual(want);
+  });
+  it("isRectDrag: only past 6 screen px of movement", () => {
+    expect(RECT_DRAG_PX).toBe(6);
+    expect(isRectDrag({ x: 0, y: 0 }, { x: 6, y: 0 })).toBe(false);
+    expect(isRectDrag({ x: 0, y: 0 }, { x: 4, y: 4 })).toBe(false); // 5.7 px
+    expect(isRectDrag({ x: 0, y: 0 }, { x: 5, y: 5 })).toBe(true); // 7.1 px
+  });
+  it("dragRect: a box under 6 screen px on either side is a click (null), at the current zoom", () => {
+    expect(dragRect([0, 0], [100, 5], 1)).toBeNull(); // 5 px tall
+    expect(dragRect([0, 0], [100, 5], 2)).toEqual(rectPoints([0, 0], [100, 5])); // 10 px at 200%
+    expect(dragRect([0, 0], [4, 100], 1)).toBeNull();
+    expect(dragRect([0, 0], [6, 6], 1)).toEqual(rectPoints([0, 0], [6, 6]));
+  });
+  it("rectObjectPoints: an area keeps 4 corners; a linear goes round to its start (length 2(w+h))", () => {
+    const rect = rectPoints([0, 0], [40, 60]);
+    expect(rectObjectPoints("area", rect)).toEqual(rect);
+    expect(rectObjectPoints("cutout", rect)).toEqual(rect);
+    const line = rectObjectPoints("linear", rect);
+    expect(line).toHaveLength(5);
+    expect(line[4]).toEqual(line[0]);
+    expect(polylineLengthPx(line)).toBe(2 * (40 + 60));
+  });
+  it("a rectangle area and perimeter line quantify like a hand-drawn one", () => {
+    const rect = rectPoints([100, 100], [140, 160]);
+    const area = buildObject("area", "a", 0, rectObjectPoints("area", rect), [], {}, null);
+    expect(area.points).toHaveLength(4);
+    expect(area.kind === "area" && area.attrs.edges).toHaveLength(4);
+    const line = buildObject("linear", "l", 0, rectObjectPoints("linear", rect), [], {}, null);
+    expect(polylineLengthPx(line.points)).toBe(200);
+  });
+  it("rectSizeLabel: width × height in feet and inches, or px unscaled", () => {
+    // 1 px = 0.5 ft: 80 px = 40', 121 px = 60' 6".
+    expect(rectSizeLabel([0, 0], [80, 121], 0.5)).toBe(`40' × 60' 6"`);
+    expect(rectSizeLabel([80, 121], [0, 0], 0.5)).toBe(`40' × 60' 6"`);
+    expect(rectSizeLabel([0, 0], [120.4, 80], null)).toBe("120 × 80 px");
   });
 });
