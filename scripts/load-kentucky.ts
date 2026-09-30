@@ -5,6 +5,7 @@
  *   npx vite-node scripts/load-kentucky.ts --county Hardin
  *   npx vite-node scripts/load-kentucky.ts --all [--min-sqft 5000] [--skip-footprints] [--trim] [--shard 1/2] [--skip-fresh 2]
  *   npx vite-node scripts/load-kentucky.ts --all --approx-only      (backfill approximate addresses)
+ *   npx vite-node scripts/load-kentucky.ts --all --from Fleming     (resume a pass at a county)
  *   npx vite-node scripts/load-kentucky.ts --dry-run --county Graves (no database; prints the match)
  *
  * Signs in as a Prospecting login: LOADER_EMAIL and LOADER_PASSWORD in the environment (GitHub
@@ -60,6 +61,8 @@ const flag = (name: string) => {
 };
 const all = args.includes("--all");
 const only = flag("--county");
+// --from Fleming: with --all, start at that county (resume a pass that stopped part way).
+const fromCounty = flag("--from");
 const minSqFt = Number(flag("--min-sqft") ?? 5000);
 const skipFootprints = args.includes("--skip-footprints");
 const trim = args.includes("--trim");
@@ -133,8 +136,19 @@ const sb = dryRun
 
 import { parseLooseJson } from "../src/lib/loose-json";
 
+/** One request may take this long, headers and body together, before it is abandoned. */
+const FETCH_TIMEOUT_MS = 90_000;
+
 async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<unknown> {
   for (let attempt = 1; ; attempt++) {
+    // An AbortController with an ordinary timer: run 14 (Sep 30) sat on one Fleming page for
+    // three hours with AbortSignal.timeout() in place, so the timer here is one the event loop
+    // keeps, and it covers reading the body as well as the headers.
+    const ctl = new AbortController();
+    const timer = setTimeout(
+      () => ctl.abort(new Error(`no answer in ${FETCH_TIMEOUT_MS / 1000} s`)),
+      FETCH_TIMEOUT_MS,
+    );
     try {
       const res = await fetch(u, {
         method: body ? "POST" : "GET",
@@ -143,7 +157,7 @@ async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<
           ...(body ? { "content-type": "application/x-www-form-urlencoded" } : {}),
         },
         ...(body ? { body: body.toString() } : {}),
-        signal: AbortSignal.timeout(90_000),
+        signal: ctl.signal,
       });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const json = parseLooseJson(await res.text()) as { error?: { message?: string } };
@@ -152,9 +166,45 @@ async function fetchJson(u: string, body?: URLSearchParams, tries = 3): Promise<
       }
       return json;
     } catch (e) {
-      if (attempt >= tries) throw e;
+      const msg =
+        e instanceof Error ? (e.cause instanceof Error ? e.cause.message : e.message) : String(e);
+      if (attempt >= tries) throw new Error(`${msg} (${tries} tries: ${u.slice(0, 120)}…)`);
+      console.error(`  retry ${attempt}/${tries - 1} after: ${msg}`);
       await new Promise((r) => setTimeout(r, 3000 * attempt));
+    } finally {
+      clearTimeout(timer);
     }
+  }
+}
+
+/**
+ * A county that prints nothing for this long is stuck (a request the timeout somehow missed, or
+ * a server answering a byte at a time): it is failed and the run moves to the next county, so
+ * one county cannot hold the whole pass (run 14 sat on Fleming for three hours).
+ */
+const STALL_MS = 10 * 60_000;
+let lastOutputAt = Date.now();
+{
+  const w = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+    lastOutputAt = Date.now();
+    return (w as (...a: unknown[]) => boolean)(chunk, ...rest);
+  }) as typeof process.stdout.write;
+}
+/** Run `work`, but give up when nothing has been printed for STALL_MS. */
+async function withStallWatch<T>(work: Promise<T>, what: string): Promise<T> {
+  lastOutputAt = Date.now();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const watch = new Promise<never>((_, reject) => {
+    timer = setInterval(() => {
+      if (Date.now() - lastOutputAt > STALL_MS)
+        reject(new Error(`${what}: no progress for ${STALL_MS / 60_000} minutes`));
+    }, 15_000);
+  });
+  try {
+    return await Promise.race([work, watch]);
+  } finally {
+    if (timer) clearInterval(timer);
   }
 }
 
@@ -848,6 +898,15 @@ async function main() {
     approxSkippedNoMigration = true;
   }
   let counties = only ? [only] : all ? [...KY_COUNTIES] : [];
+  if (fromCounty && !only) {
+    const at = counties.findIndex((c) => c.toLowerCase() === fromCounty.toLowerCase());
+    if (at < 0) {
+      console.error(`--from: no Kentucky county called "${fromCounty}"`);
+      process.exit(2);
+    }
+    counties = counties.slice(at);
+    console.log(`starting at ${counties[0]}: ${counties.length} counties to do`);
+  }
   if (shard && !only) counties = counties.filter((_, idx) => idx % shard.n === shard.i);
   if (skipFreshDays > 0 && !only) {
     const fresh = await recentlyRefreshed(skipFreshDays);
@@ -864,7 +923,7 @@ async function main() {
   const failed: string[] = [];
   for (const c of counties) {
     try {
-      await loadCounty(c);
+      await withStallWatch(loadCounty(c), c);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (isAuthError(msg)) {
@@ -872,7 +931,7 @@ async function main() {
         console.error(`[${c}] session lost (${msg}); signing in again`);
         try {
           await signIn();
-          await loadCounty(c);
+          await withStallWatch(loadCounty(c), c);
           continue;
         } catch (e2) {
           failed.push(c);

@@ -31,6 +31,10 @@ on:
         description: "Approximate addresses only (backfill the 300 m pass on loaded counties; no footprints, points, businesses or schools)"
         type: boolean
         default: false
+      from_county:
+        description: "Start at this county, alphabetically (resume a pass that stopped part way; blank = from Adair)"
+        required: false
+        default: ""
 
 jobs:
   refresh:
@@ -58,6 +62,7 @@ jobs:
           FOOTPRINTS: ${{ github.event.inputs.footprints }}
           SKIP_FRESH: ${{ github.event.inputs.skip_fresh_days }}
           APPROX_ONLY: ${{ github.event.inputs.approx_only }}
+          FROM_COUNTY: ${{ github.event.inputs.from_county }}
           SHARD: ${{ matrix.shard }}
         run: |
           if [ -n "$COUNTY" ]; then
@@ -71,5 +76,6 @@ jobs:
           # The approximate pass writes no data_refreshes row, so skip_fresh cannot resume it;
           # rerunning is safe (it only fills addresses that are still blank).
           if [ "$APPROX_ONLY" = "true" ]; then ARGS="$ARGS --approx-only"; fi
+          if [ -n "$FROM_COUNTY" ] && [ -z "$COUNTY" ]; then ARGS="$ARGS --from $FROM_COUNTY"; fi
           echo "running: $ARGS"
           npx vite-node scripts/load-kentucky.ts $ARGS
