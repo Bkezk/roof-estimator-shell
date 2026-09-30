@@ -3,7 +3,7 @@
  * area's per-side edge table and cut-outs, a linear's role (and parapet height), a count's role
  * and sizes. Number boxes stay blank when 0 (placeholder 0); nothing is prefilled.
  */
-import { AlertTriangle, SquareDashed, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, SquareDashed, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { drawnSideLabels, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
@@ -68,6 +68,8 @@ export interface ObjectsTabProps {
   onDelete: (id: string) => void;
   /** "Edge from this area": make linears along the selected area's sides (in the viewer). */
   onEdgeFromArea?: (areaId: string) => void;
+  /** "Duplicate and stamp": copies of the selected object follow the cursor (in the viewer). */
+  onDuplicate?: (objectId: string) => void;
 }
 
 const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Counts" } as const;
@@ -100,6 +102,7 @@ export function ObjectsTab(props: ObjectsTabProps) {
           setup={props.setup}
           onUpdate={props.onUpdate}
           onDelete={props.onDelete}
+          onDuplicate={props.onDuplicate}
         />
       ) : (
         <p className="text-sm text-muted-foreground">
@@ -198,6 +201,7 @@ function SelectedEditor(props: {
   setup: TakeoffSetup;
   onUpdate: Update;
   onDelete: (id: string) => void;
+  onDuplicate?: ((id: string) => void) | undefined;
 }) {
   const o = props.object;
   const fpp = feetPerPx(props.page?.scale);
@@ -218,6 +222,22 @@ function SelectedEditor(props: {
           onChange={(e) => setName(e.target.value)}
           aria-label="Name"
         />
+        {props.onDuplicate && (
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8"
+            title="Duplicate: a copy follows the cursor on the drawing and each click stamps one (Ctrl+D)"
+            aria-label="Duplicate object"
+            onClick={(e) => {
+              props.onDuplicate?.(o.id);
+              // Mouse click: hand the keys back to the drawing (Esc stops stamping).
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+          >
+            <Copy className="h-4 w-4" />
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"

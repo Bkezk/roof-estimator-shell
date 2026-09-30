@@ -70,6 +70,7 @@ import { QuantitiesTab } from "./quantities-tab";
 import { SetupTab } from "./setup-tab";
 import {
   buildObject,
+  duplicateObject,
   isTypingTarget,
   newId,
   translateObject,
@@ -207,6 +208,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // "Edge from this area" asked for on the Objects tab (a new object each click).
   const [edgeRequest, setEdgeRequest] = useState<{ areaId: string } | null>(null);
+  // "Duplicate and stamp" asked for on the Objects tab (a new object each click).
+  const [stampRequest, setStampRequest] = useState<{ id: string } | null>(null);
   const isNew = initial.objects.length === 0 && Object.keys(initial.setup).length === 0;
   // A brand-new drawing (nothing drawn, no page scaled) opens on the Scale tool.
   const [startTool] = useState<Tool>(() =>
@@ -375,6 +378,18 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     ]);
     select(id);
     return id;
+  };
+  // A stamped copy (one undo step); the source stays selected so the next click stamps again.
+  const duplicate = (sourceId: string, dx: number, dy: number): string | null => {
+    const id = newId();
+    let made = false;
+    commit((prev) => {
+      const src = prev.find((o) => o.id === sourceId);
+      if (!src) return prev;
+      made = true;
+      return [...prev, duplicateObject(src, dx, dy, id, prev)];
+    });
+    return made ? id : null;
   };
   const changePoints = (id: string, points: PagePoint[]) =>
     commit((os) => os.map((o) => (o.id === id ? { ...o, points } : o)));
@@ -737,6 +752,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             initialTool={startTool}
             onPageSize={onPageSize}
             edgeRequest={edgeRequest}
+            onDuplicate={duplicate}
+            stampRequest={stampRequest}
           />
         </div>
 
@@ -770,6 +787,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onUpdate={updateObject}
                     onDelete={deleteObject}
                     onEdgeFromArea={(areaId) => setEdgeRequest({ areaId })}
+                    onDuplicate={(objectId) => setStampRequest({ id: objectId })}
                   />
                 </TabsContent>
                 <TabsContent value="quantities" className="mt-0">

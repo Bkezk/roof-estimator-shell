@@ -1,8 +1,8 @@
 /**
  * The SVG drawn over the page: saved objects (areas, linears, counts), the scale line (labelled
  * with the sheet note when the scale was read off the sheet), the shape being drawn, the snap
- * marker (magenta on an object, teal on the plan's own lines), and the side picker of "Edge from
- * this area". Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen
+ * marker (magenta on an object, teal on the plan's own lines), the side picker of "Edge from
+ * this area", and the ghost copy of "Duplicate and stamp". Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen
  * size — stroke, font, marker radius — is divided by the zoom to stay constant on screen.
  */
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
@@ -500,6 +500,92 @@ export function DraftShape(props: {
             {t}
           </SvgLabel>
         ))}
+    </g>
+  );
+}
+
+/**
+ * "Duplicate and stamp": the copy that follows the cursor, drawn like the shape in progress
+ * (dashed outline, light fill for an area, its cut-outs dashed too; a count as its pin) at half
+ * opacity, with the target on its reference point and "copy" and its size beside it.
+ */
+export function GhostShape(props: {
+  object: TakeoffObject;
+  /** The reference point (on the cursor, or where the snap moved it). */
+  at: PagePoint;
+  zoom: number;
+  fpp: number | null;
+  color: string;
+}) {
+  const { object: o, at, zoom, fpp, color } = props;
+  const dash = {
+    stroke: color,
+    strokeWidth: 2,
+    strokeDasharray: "6 4",
+    vectorEffect: "non-scaling-stroke" as const,
+  };
+  let size: string | null = null;
+  if (o.kind === "area") {
+    const area = netAreaSqFt(o.points, o.attrs.cutouts, fpp);
+    size = area === null ? null : fmtSqFt(area);
+  } else if (o.kind === "linear") size = lengthLabel(polylineLengthPx(o.points), fpp);
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <g opacity={0.5}>
+        {o.kind === "area" && (
+          <>
+            <path
+              d={[ringPath(o.points), ...(o.attrs.cutouts ?? []).map(ringPath)].join(" ")}
+              fill={color}
+              fillOpacity={0.12}
+              fillRule="evenodd"
+              {...dash}
+            />
+            {(o.attrs.cutouts ?? []).map((c, i) => (
+              <polygon key={i} points={pts(c)} fill="none" {...dash} strokeWidth={1.5} />
+            ))}
+          </>
+        )}
+        {o.kind === "linear" && <polyline points={pts(o.points)} fill="none" {...dash} />}
+        {o.kind === "count" &&
+          o.points.map(([x, y], i) => (
+            <g key={i}>
+              <circle
+                cx={x}
+                cy={y}
+                r={8 / zoom}
+                fill={color}
+                fillOpacity={0.85}
+                stroke="#ffffff"
+                strokeWidth={1.5}
+                vectorEffect="non-scaling-stroke"
+              />
+              <text
+                x={x}
+                y={y}
+                fontSize={10 / zoom}
+                fill="#ffffff"
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontWeight={700}
+                style={{ userSelect: "none" }}
+              >
+                {COUNT_LETTERS[o.attrs.role] ?? COUNT_LETTERS.other}
+              </text>
+            </g>
+          ))}
+      </g>
+      {o.kind !== "count" && <TargetMarker at={at} zoom={zoom} color={color} />}
+      <SvgLabel
+        x={at[0] + 14 / zoom}
+        y={at[1] + 18 / zoom}
+        zoom={zoom}
+        anchor="start"
+        bold
+        color={color}
+      >
+        {size ? `copy · ${size}` : "copy"}
+      </SvgLabel>
     </g>
   );
 }

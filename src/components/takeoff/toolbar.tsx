@@ -1,9 +1,11 @@
 /**
  * The viewer's tool bar: the tools with their keys, the role chips for the next count / linear,
- * "Edge from this area" while an area is selected, "Snap to plan" (PDF plans only, with its line
+ * "Edge from this area" while an area is selected, "Duplicate" (Ctrl+D; stamps copies of the
+ * selected object, enabled only with one selected), "Snap to plan" (PDF plans only, with its line
  * count or "reading plan lines…"), and the zoom buttons.
  */
 import {
+  Copy,
   Magnet,
   MapPin,
   Maximize,
@@ -62,6 +64,8 @@ export function ViewerToolbar(props: {
   planSnap?: PlanSnapToggle | null;
   /** "Edge from this area" for the selected area; null when no area is selected. */
   edgeFromArea?: { active: boolean; onClick: () => void } | null;
+  /** "Duplicate and stamp": active while stamping; disabled with nothing selected. */
+  duplicate?: { active: boolean; enabled: boolean; onClick: () => void } | null;
 }) {
   const ps = props.planSnap;
   return (
@@ -139,6 +143,29 @@ export function ViewerToolbar(props: {
         >
           <SquareDashed className="h-4 w-4" />
           <span className="hidden text-xs lg:inline">Edge from this area</span>
+        </Button>
+      )}
+      {props.duplicate && (
+        <Button
+          size="sm"
+          variant={props.duplicate.active ? "default" : "ghost"}
+          className="ml-1 h-8 gap-1 px-2"
+          disabled={!props.duplicate.enabled && !props.duplicate.active}
+          aria-pressed={props.duplicate.active}
+          title={
+            props.duplicate.active
+              ? "Stop stamping copies (right-click or Esc)"
+              : props.duplicate.enabled
+                ? "Duplicate the selected object: a copy follows the cursor and each click stamps one (Ctrl+D)"
+                : "Duplicate: select an area, line or count first (Ctrl+D)"
+          }
+          onClick={(e) => {
+            props.duplicate?.onClick();
+            if (e.detail > 0) e.currentTarget.blur();
+          }}
+        >
+          <Copy className="h-4 w-4" />
+          <span className="hidden text-xs lg:inline">Duplicate</span>
         </Button>
       )}
       <div className="ml-auto flex items-center gap-1">

@@ -29,6 +29,16 @@
  * 180° / 270° to the previous side locks to it (before the level / plumb lock), typed lengths
  * too. (D) "Edge from this area": with an area selected, click its sides to leave out walls or
  * shared edges, pick the role, and Create makes one linear per run of included sides.
+ *
+ * Owner, Sep 30 (Duplicate and stamp): with an area (and its cut-outs), a linear or a count
+ * selected, Ctrl/Cmd+D, the toolbar's Duplicate or the Objects tab's Duplicate button starts
+ * stamping. A half-opacity ghost of the copy follows the cursor — its bounding-box centre (a
+ * count: its pin) on the cursor, which snaps as usual (own corners + plan lines, Shift = off);
+ * and when a corner of the ghost comes within SNAP_PX of a snap point the whole ghost shifts
+ * onto it (nearest corner wins; `ghostPlacement` in ./shapes), so copies line up with grid
+ * lines. Each left click stamps a new object (`duplicateObject`: same kind and attrs, a fresh
+ * name, one undo step) and the mode stays on with the original as the source. Right-click
+ * (`stop()`), Esc, another tool, another page or deleting the source stops it.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
@@ -54,6 +64,7 @@ import {
 import {
   DraftShape,
   EdgePicker,
+  GhostShape,
   MeasureLine,
   ObjectsLayer,
   RectPreview,
@@ -76,8 +87,11 @@ import {
   HINTS,
   KEY_TOOLS,
   ORTHO_DEG,
+  STAMP_HINT,
   dragRect,
+  duplicateObject,
   feetInches,
+  ghostPlacement,
   isLengthKey,
   isRectDrag,
   isTypingTarget,
@@ -88,6 +102,7 @@ import {
   polylineLengthPx,
   rectObjectPoints,
   snapCandidates,
+  stampReference,
   translateObject,
   typedPoint,
   type NewObjectRoles,
@@ -163,6 +178,13 @@ export interface ViewerProps {
   onPageSize: (pageIndex: number, rotation: number, width: number, height: number) => void;
   /** "Edge from this area" asked for from outside (the Objects tab); a new object each time. */
   edgeRequest?: { areaId: string } | null;
+  /**
+   * "Duplicate and stamp": add a copy of `sourceId` moved by (dx, dy) page px, as one undo step,
+   * without selecting it; returns the new id, or null when the source is gone.
+   */
+  onDuplicate: (sourceId: string, dx: number, dy: number) => string | null;
+  /** "Duplicate and stamp" asked for from outside (the Objects tab); a new object each time. */
+  stampRequest?: { id: string } | null;
 }
 
 export function TakeoffViewer(props: ViewerProps) {
@@ -224,6 +246,8 @@ export function TakeoffViewer(props: ViewerProps) {
   const [sheetPick, setSheetPick] = useState(false);
   /** "Edge from this area": the area, and which of its sides are included (all at first). */
   const [edge, setEdge] = useState<{ areaId: string; included: boolean[] } | null>(null);
+  /** "Duplicate and stamp": the object copied, and how many copies were stamped so far. */
+  const [stamp, setStamp] = useState<{ sourceId: string; count: number } | null>(null);
 
   const pageKey = `${page.index}:${page.rotation}`;
   const size =
@@ -258,6 +282,7 @@ export function TakeoffViewer(props: ViewerProps) {
     setPress(null);
     setTyped("");
     setEdge(null);
+    setStamp(null);
     setSheetPick(false);
     const c = canvasRef.current;
     if (c) c.width = 0;
@@ -551,7 +576,28 @@ export function TakeoffViewer(props: ViewerProps) {
   const live = drawing && cursor ? resolve(cursor) : null;
   const snapped: PagePoint | null = live?.p ?? null;
   const dragSnap = drag && cursor ? snapAt(cursor) : null;
-  const snapMark = drawing ? (live?.snap ?? null) : dragSnap;
+
+  // "Duplicate and stamp": the source, and where its copy would go for the cursor at `raw`
+  // (the reference point on the snapped cursor, or a corner of the copy on a snap point).
+  const selectedObject = objects.find((o) => o.id === selectedId);
+  const stampSource = stamp ? objects.find((o) => o.id === stamp.sourceId) : undefined;
+  const ghostSnap = (q: PagePoint): SnapHit | null =>
+    pickSnap(q, candidates, planIndex, zoom, SNAP_PX);
+  const placeGhost = (source: TakeoffObject, raw: PagePoint, free: boolean) =>
+    ghostPlacement(source, raw, free ? [] : ghostSnap, zoom, SNAP_PX);
+  const ghost = (() => {
+    if (!stampSource || !cursor) return null;
+    const g = placeGhost(stampSource, cursor, shift);
+    const ref = stampReference(stampSource);
+    const hit = g.snap;
+    return {
+      // Exactly what a click stamps (a count: one pin); its name is settled on the click.
+      object: duplicateObject(stampSource, g.dx, g.dy, "ghost", []),
+      at: [ref[0] + g.dx, ref[1] + g.dy] as PagePoint,
+      snap: hit ? { p: hit.p, kind: "kind" in hit ? hit.kind : ("object" as const) } : null,
+    };
+  })();
+  const snapMark = stamp ? (ghost?.snap ?? null) : drawing ? (live?.snap ?? null) : dragSnap;
 
   const changeTool = (t: Tool) => {
     if (t === "cutout" && !selectedArea) {
@@ -560,6 +606,7 @@ export function TakeoffViewer(props: ViewerProps) {
     }
     endPress();
     setEdge(null);
+    setStamp(null);
     setTool(t);
     setDraft([]);
     setTyped("");
@@ -590,6 +637,7 @@ export function TakeoffViewer(props: ViewerProps) {
     setTyped("");
     setDimension(null);
     setCountSession(null);
+    setStamp(null);
     setEdge({ areaId, included: area.points.map(() => true) });
   };
   const startEdgeRef = useRef(startEdge);
@@ -619,6 +667,46 @@ export function TakeoffViewer(props: ViewerProps) {
     if (edge && !edgeArea) setEdge(null);
   }, [edge, edgeArea]);
 
+  // "Duplicate and stamp": start with the object `id` (the selection) as the source.
+  const startStamp = (id: string | null) => {
+    const o = id ? objects.find((x) => x.id === id) : undefined;
+    if (!o) {
+      toast.info("Select an area, line or count on this page first, then Duplicate (Ctrl+D).");
+      return;
+    }
+    endPress();
+    setTool("select");
+    setDraft([]);
+    setTyped("");
+    setDimension(null);
+    setCountSession(null);
+    setEdge(null);
+    setDrag(null);
+    setMove(null);
+    setStamp({ sourceId: o.id, count: 0 });
+  };
+  const startStampRef = useRef(startStamp);
+  startStampRef.current = startStamp;
+  /** A left click while stamping: add a copy where the ghost is (one undo step). */
+  const stampAt = (raw: PagePoint, free: boolean) => {
+    if (!stamp || !stampSource) return;
+    const g = placeGhost(stampSource, raw, free);
+    if (Math.hypot(g.dx, g.dy) * zoom < 1) {
+      toast.info(`The copy would sit right on ${stampSource.attrs.name} — move it off first.`);
+      return;
+    }
+    if (props.onDuplicate(stampSource.id, g.dx, g.dy))
+      setStamp((s) => (s ? { ...s, count: s.count + 1 } : s));
+  };
+  // Asked for from the Objects tab.
+  useEffect(() => {
+    if (props.stampRequest) startStampRef.current(props.stampRequest.id);
+  }, [props.stampRequest]);
+  // The source went away (deleted, undone, another page): stop stamping.
+  useEffect(() => {
+    if (stamp && !stampSource) setStamp(null);
+  }, [stamp, stampSource]);
+
   /** Finish the shape in progress; false when there is nothing (or not enough) to finish. */
   const finish = (): boolean => {
     if (tool === "area" && draft.length >= 3) props.onCreate("area", draft, roles);
@@ -632,8 +720,12 @@ export function TakeoffViewer(props: ViewerProps) {
     return true;
   };
 
-  /** Right-click: PlanSwift's "Stop" — finish what is being drawn. */
+  /** Right-click: PlanSwift's "Stop" — finish what is being drawn, or stop stamping copies. */
   const stop = () => {
+    if (stamp) {
+      setStamp(null);
+      return;
+    }
     if (finish()) return;
     if (tool === "scale" || tool === "dimension") {
       setDraft([]);
@@ -656,7 +748,8 @@ export function TakeoffViewer(props: ViewerProps) {
   };
 
   const cancel = (): boolean => {
-    if (edge) setEdge(null);
+    if (stamp) setStamp(null);
+    else if (edge) setEdge(null);
     else if (press) endPress();
     else if (typed) setTyped("");
     else if (draft.length) setDraft([]);
@@ -801,6 +894,8 @@ export function TakeoffViewer(props: ViewerProps) {
       }
       if (k === "Backspace" || k === "Delete") return true; // not the area itself
     }
+    // Stamping: Backspace / Delete never delete the source (Ctrl+Z takes back a stamp).
+    if (stamp && (k === "Backspace" || k === "Delete")) return true;
     switch (k) {
       case "Escape":
         return cancel();
@@ -841,12 +936,18 @@ export function TakeoffViewer(props: ViewerProps) {
   };
 
   // Keyboard: tool keys, Esc / Backspace / Delete / Enter, typed lengths, role keys, zoom keys,
-  // Shift (free angle, no snap), Space (pan). Keys in a text field are left alone.
+  // Ctrl/Cmd+D (duplicate and stamp), Shift (free angle, no snap), Space (pan). Keys in a text
+  // field are left alone.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (scalePick || sheetPick || isTypingTarget(e.target)) return;
       if (e.key === "Shift") {
         setShift(true);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "d") {
+        e.preventDefault(); // not the browser's bookmark
+        if (!e.repeat) startStamp(selectedId);
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -975,7 +1076,7 @@ export function TakeoffViewer(props: ViewerProps) {
       ? "grab"
       : move
         ? "move"
-        : tool === "select"
+        : tool === "select" && !stamp
           ? "default"
           : "crosshair";
 
@@ -1017,6 +1118,11 @@ export function TakeoffViewer(props: ViewerProps) {
               ? { active: false, onClick: () => startEdge(selectedArea.id) }
               : null
         }
+        duplicate={{
+          active: !!stamp,
+          enabled: !!selectedObject,
+          onClick: () => (stamp ? setStamp(null) : startStamp(selectedId)),
+        }}
       />
 
       <div
@@ -1034,7 +1140,7 @@ export function TakeoffViewer(props: ViewerProps) {
         }}
         onContextMenu={(e) => {
           // Right-click is "Stop" while a drawing tool is active: no browser menu.
-          if (drawing || draft.length || edge) e.preventDefault();
+          if (drawing || draft.length || edge || stamp) e.preventDefault();
         }}
       >
         <div
@@ -1060,6 +1166,14 @@ export function TakeoffViewer(props: ViewerProps) {
                     e.preventDefault();
                     createEdges();
                   }
+                  return;
+                }
+                if (stamp) {
+                  // Stamping: a click stamps a copy; right-click stops, like "Stop".
+                  if (e.button === 2) {
+                    e.preventDefault();
+                    stop();
+                  } else if (e.button === 0) stampAt(toPage(e), e.shiftKey);
                   return;
                 }
                 if (e.button === 2) {
@@ -1095,7 +1209,7 @@ export function TakeoffViewer(props: ViewerProps) {
                 fpp={fpp}
                 zoom={zoom}
                 selectedId={selectedId}
-                interactive={tool === "select" && !spaceDown && !edge}
+                interactive={tool === "select" && !spaceDown && !edge && !stamp}
                 onObjectDown={onObjectDown}
                 onVertexDown={onVertexDown}
               />
@@ -1153,6 +1267,15 @@ export function TakeoffViewer(props: ViewerProps) {
                   color={DRAFT_COLOR[tool]}
                 />
               )}
+              {ghost && (
+                <GhostShape
+                  object={ghost.object}
+                  at={ghost.at}
+                  zoom={zoom}
+                  fpp={fpp}
+                  color={ghost.object.color ?? DRAFT_COLOR[ghost.object.kind]}
+                />
+              )}
               {snapMark && <SnapMarker at={snapMark.p} kind={snapMark.kind} zoom={zoom} />}
               {typed && (cursor ?? last) && (
                 <SvgLabel
@@ -1195,6 +1318,20 @@ export function TakeoffViewer(props: ViewerProps) {
           </div>
         )}
 
+        {stamp && stampSource && (
+          <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow">
+            <span className="font-medium">
+              Click to stamp a copy of {stampSource.attrs.name} · right-click or Esc to stop
+            </span>
+            <span className="text-muted-foreground">
+              {stamp.count} stamped{stamp.count > 0 ? " · Ctrl+Z takes one back" : ""}
+            </span>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => setStamp(null)}>
+              Stop
+            </Button>
+          </div>
+        )}
+
         {(!source || rendering) && !props.loadError && !renderError && (
           <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
             <Loader2 className="h-3 w-3 animate-spin" /> {source ? "Rendering…" : "Loading plan…"}
@@ -1210,7 +1347,9 @@ export function TakeoffViewer(props: ViewerProps) {
           <div className="max-w-[640px] rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
             {edge
               ? "Click a side of the area to leave it out (a wall or a shared edge) or put it back; keys 1–5 pick the role. Create, Enter or right-click makes one line per run of included sides; Esc cancels."
-              : HINTS[tool]}
+              : stamp
+                ? STAMP_HINT
+                : HINTS[tool]}
             {!edge && tool !== "select" && tool !== "count" && (
               <span className="ml-1">
                 {shift

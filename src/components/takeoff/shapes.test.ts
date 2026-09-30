@@ -7,6 +7,8 @@ import {
   RECT_DRAG_PX,
   buildObject,
   dragRect,
+  duplicateObject,
+  ghostPlacement,
   isRectDrag,
   lockPoint,
   orthoSnap,
@@ -19,6 +21,7 @@ import {
   relativeSnap,
   snapCandidates,
   snapTo,
+  stampReference,
   translateObject,
   typedPoint,
 } from "./shapes";
@@ -319,5 +322,153 @@ describe("perimeterRuns (Edge from this area)", () => {
       fromArea: "area-1",
     });
     expect(o.attrs).toEqual({ name: "Gutter 1", role: "gutter", fromArea: "area-1" });
+  });
+});
+
+describe("Duplicate and stamp", () => {
+  // A 100 × 50 area with a 10 × 10 cut-out; its bounding-box centre is (150, 125).
+  const area: TakeoffObject = {
+    id: "a",
+    kind: "area",
+    page: 0,
+    color: "#16a34a",
+    points: [
+      [100, 100],
+      [200, 100],
+      [200, 150],
+      [100, 150],
+    ],
+    attrs: {
+      name: "Roof 1",
+      pitch: 4,
+      cutouts: [
+        [
+          [120, 110],
+          [130, 110],
+          [130, 120],
+          [120, 120],
+        ],
+      ],
+    },
+  };
+
+  it("ghostPlacement: no candidate within reach leaves the centre on the cursor", () => {
+    expect(stampReference(area)).toEqual([150, 125]);
+    expect(ghostPlacement(area, [400, 300], [[0, 0]], 1, 8)).toEqual({
+      dx: 250,
+      dy: 175,
+      snap: null,
+    });
+    // 20 page px from the nearest corner: out of reach at zoom 1, in reach at zoom 0.25.
+    expect(ghostPlacement(area, [400, 300], [[370, 275]], 1, 8).snap).toBeNull();
+    expect(ghostPlacement(area, [400, 300], [[370, 275]], 0.25, 8).snap?.p).toEqual([370, 275]);
+  });
+
+  it("ghostPlacement: a corner near a candidate shifts the whole shape onto it", () => {
+    // At the raw cursor (400, 300) the ghost's top-left corner is at (350, 275); a grid point
+    // at (353, 271) is 5 px away, so the whole ghost moves by (3, -4) more.
+    const g = ghostPlacement(area, [400, 300], [[353, 271]], 1, 8);
+    expect(g.dx).toBeCloseTo(253);
+    expect(g.dy).toBeCloseTo(171);
+    expect(g.snap?.p).toEqual([353, 271]);
+    const copy = duplicateObject(area, g.dx, g.dy, "b", [area]);
+    expect(copy.points[0]![0]).toBeCloseTo(353);
+    expect(copy.points[0]![1]).toBeCloseTo(271);
+    expect(copy.points[2]![0]).toBeCloseTo(453);
+    expect(copy.points[2]![1]).toBeCloseTo(321);
+  });
+
+  it("ghostPlacement: the nearest corner wins, and a snap function works like points", () => {
+    const g = ghostPlacement(
+      area,
+      [400, 300],
+      [
+        [356, 275], // 6 px from the top-left corner (350, 275)
+        [450, 327], // 2 px from the bottom-right corner (450, 325)
+      ],
+      1,
+      8,
+    );
+    expect([g.dx, g.dy]).toEqual([250, 177]);
+    // A plan line under the bottom-right corner (the viewer passes its own snap function).
+    const fn = (p: PagePoint) =>
+      Math.abs(p[0] - 450) < 3 && Math.abs(p[1] - 325) < 3
+        ? { p: [450, 330] as PagePoint, kind: "planLine" as const }
+        : null;
+    const h = ghostPlacement(area, [400, 300], fn, 1, 8);
+    expect([h.dx, h.dy]).toEqual([250, 180]);
+    expect(h.snap).toEqual({ p: [450, 330], kind: "planLine" });
+  });
+
+  it("duplicateObject: cut-outs move with the area; attrs, colour and page are kept", () => {
+    const c = duplicateObject(area, 10, -5, "b", [area]);
+    expect(c.id).toBe("b");
+    expect(c.kind).toBe("area");
+    expect(c.color).toBe("#16a34a");
+    expect(c.page).toBe(0);
+    expect(c.points[0]).toEqual([110, 95]);
+    expect(c.kind === "area" && c.attrs.cutouts?.[0]?.[0]).toEqual([130, 105]);
+    expect(c.kind === "area" && c.attrs.pitch).toBe(4);
+    // The source is untouched.
+    expect(area.points[0]).toEqual([100, 100]);
+    expect(area.kind === "area" && area.attrs.cutouts?.[0]?.[0]).toEqual([120, 110]);
+  });
+
+  it("duplicateObject: names never collide", () => {
+    // A default name takes the next free default.
+    const roof2 = duplicateObject(area, 1, 1, "b", [area]);
+    expect(roof2.attrs.name).toBe("Roof 2");
+    const roof3 = duplicateObject(area, 2, 2, "c", [area, roof2]);
+    expect(roof3.attrs.name).toBe("Roof 3");
+    // A given name gets "copy", then "copy 2"; copying a copy does not stack "copy copy".
+    const named = { ...area, attrs: { ...area.attrs, name: "Penthouse roof" } } as TakeoffObject;
+    const c1 = duplicateObject(named, 1, 1, "b", [named]);
+    expect(c1.attrs.name).toBe("Penthouse roof copy");
+    const c2 = duplicateObject(named, 1, 1, "c", [named, c1]);
+    expect(c2.attrs.name).toBe("Penthouse roof copy 2");
+    const c3 = duplicateObject(c1, 1, 1, "d", [named, c1, c2]);
+    expect(c3.attrs.name).toBe("Penthouse roof copy 3");
+    const names = [named, c1, c2, c3].map((o) => o.attrs.name.toLowerCase());
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("counts stamp a single pin on the cursor, keeping the role and drain picks", () => {
+    const drain: TakeoffObject = {
+      id: "d",
+      kind: "count",
+      page: 1,
+      color: "#db2777",
+      points: [
+        [10, 10],
+        [50, 50],
+        [90, 90],
+      ],
+      attrs: { name: "Drain 1", role: "drain", bootSize: "B" },
+    };
+    expect(stampReference(drain)).toEqual([10, 10]);
+    const g = ghostPlacement(drain, [300, 200], [], 1, 8);
+    expect([g.dx, g.dy]).toEqual([290, 190]);
+    const c = duplicateObject(drain, g.dx, g.dy, "e", [drain]);
+    expect(c.points).toEqual([[300, 200]]);
+    expect(c.attrs).toEqual({ name: "Drain 2", role: "drain", bootSize: "B" });
+    expect(c.page).toBe(1);
+  });
+
+  it("linears centre on their bounding box and drop fromArea", () => {
+    const pts: PagePoint[] = [
+      [0, 0],
+      [100, 0],
+      [100, 40],
+    ];
+    const made = buildObject("linear", "w", 0, pts, [], {}, null, { fromArea: "a" });
+    const wall = { ...made, attrs: { ...made.attrs, name: "North wall" } } as TakeoffObject;
+    expect(stampReference(wall)).toEqual([50, 20]);
+    const c = duplicateObject(wall, 0, 100, "x", [wall]);
+    expect(c.points).toEqual([
+      [0, 100],
+      [100, 100],
+      [100, 140],
+    ]);
+    expect(c.attrs).toEqual({ name: "North wall copy", role: "parapet" });
   });
 });

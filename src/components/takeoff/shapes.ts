@@ -2,7 +2,8 @@
  * Takeoff page helpers — pure (no React, no I/O): object naming, measurements for labels, the
  * ortho snap (level / plumb within ORTHO_DEG), the square-corner lock (a side at 0° / 90° / 180°
  * / 270° to the previous side, for buildings drawn at an angle), the drag-a-box rectangle, the
- * perimeter runs of an area's included sides ("Edge from this area"), and number formatting.
+ * perimeter runs of an area's included sides ("Edge from this area"), "Duplicate and stamp" (the
+ * ghost's placement with its corner snap, and the copy with a fresh name), and number formatting.
  * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
  * helpers only label the drawing.
  */
@@ -13,6 +14,7 @@ import {
   nextColor,
   type CountAttrs,
   type CountRole,
+  type LinearAttrs,
   type LinearRole,
   type ObjectKind,
   type PagePoint,
@@ -40,7 +42,7 @@ export const KEY_TOOLS: Record<string, Tool> = Object.fromEntries(
 /** The viewer's hint line per tool. */
 export const HINTS: Record<Tool, string> = {
   select:
-    "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a count pin to move that pin. Delete removes it; Ctrl+Z undoes.",
+    "Click an object to select it; drag a selected area or line to move it, its corner squares to reshape it, or a count pin to move that pin. Ctrl+D (or Duplicate) stamps copies of it; Delete removes it; Ctrl+Z undoes.",
   scale:
     "Click both ends of a known dimension, then type its length. Pick a dimension of 20 ft or more for accuracy.",
   area: "Click each corner, or press and drag a box for a rectangle. Click the first point, double-click, right-click or press Enter to close. Backspace removes the last point, Esc cancels.",
@@ -52,6 +54,10 @@ export const HINTS: Record<Tool, string> = {
   cutout:
     "Draw a well or penthouse inside the selected area: click its corners and close it like an area, or drag a box. It is subtracted from that area.",
 };
+
+/** The viewer's hint line while stamping copies ("Duplicate and stamp"). */
+export const STAMP_HINT =
+  "The copy follows the cursor, centred on it (a count on its pin); a corner of it near another corner or a plan line snaps onto it — hold Shift for no snap. Each click stamps a copy (one undo step each); right-click, Esc, another tool or another page stops.";
 
 export const DRAFT_COLOR: Record<Tool, string> = {
   select: "#2563eb",
@@ -278,6 +284,150 @@ export function translateObject(o: TakeoffObject, dx: number, dy: number): Takeo
     };
   return { ...o, points } as TakeoffObject;
 }
+
+/** The centre of the points' bounding box. */
+export function boundsCenter(points: readonly PagePoint[]): PagePoint {
+  if (!points.length) return [0, 0];
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const [x, y] of points) {
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+  return [(x0 + x1) / 2, (y0 + y1) / 2];
+}
+
+/**
+ * "Duplicate and stamp": the point of `o` that sits on the cursor — the bounding-box centre of
+ * an area's outline or a linear, the (first) pin of a count.
+ */
+export function stampReference(o: TakeoffObject): PagePoint {
+  if (o.kind === "count") return o.points[0] ?? [0, 0];
+  return boundsCenter(o.points);
+}
+
+/**
+ * The points a stamped copy of `o` is made of, before it is moved: the outline / polyline, or
+ * one pin for a count (each stamp of a count places a single pin).
+ */
+export function stampPoints(o: TakeoffObject): PagePoint[] {
+  const pts = o.kind === "count" ? o.points.slice(0, 1) : o.points;
+  return pts.map(([x, y]): PagePoint => [x, y]);
+}
+
+/** Where the ghost goes: the source moved by (dx, dy); `snap` is what it snapped to, if any. */
+export interface GhostPlacement<S extends { p: PagePoint } = { p: PagePoint }> {
+  dx: number;
+  dy: number;
+  snap: S | null;
+}
+
+/**
+ * "Duplicate and stamp": the move (dx, dy) that puts `source`'s copy under the cursor. The
+ * copy's reference point (`stampReference`) goes on the cursor; then the reference point and
+ * each outline corner (a count: its pin), as placed there, look for a snap within `snapPx`
+ * screen px at `zoom` — in `candidates` as points, or through a snap function (the viewer's
+ * own corners + plan lines, which applies the same radius). The nearest hit wins (the
+ * reference point on a tie) and the whole copy shifts so that point lands on it; with no hit
+ * the reference point stays on the cursor. Shift (no snap) = the caller passes no candidates.
+ */
+export function ghostPlacement<S extends { p: PagePoint } = { p: PagePoint }>(
+  source: TakeoffObject,
+  cursor: PagePoint,
+  candidates: readonly PagePoint[] | ((p: PagePoint) => S | null),
+  zoom: number,
+  snapPx = 8,
+): GhostPlacement<S | { p: PagePoint }> {
+  const ref = stampReference(source);
+  const dx0 = cursor[0] - ref[0];
+  const dy0 = cursor[1] - ref[1];
+  const look: (p: PagePoint) => { p: PagePoint } | null =
+    typeof candidates === "function"
+      ? candidates
+      : (p) => {
+          const c = snapTo(p, candidates, zoom, snapPx);
+          return c ? { p: c } : null;
+        };
+  const radius = snapPx / zoom + 1e-9;
+  let best: { p: PagePoint } | null = null;
+  let bestD = Infinity;
+  let sx = 0;
+  let sy = 0;
+  for (const q of [ref, ...stampPoints(source)]) {
+    const at: PagePoint = [q[0] + dx0, q[1] + dy0];
+    const hit = look(at);
+    if (!hit) continue;
+    const d = Math.hypot(hit.p[0] - at[0], hit.p[1] - at[1]);
+    if (d <= radius && d < bestD) {
+      bestD = d;
+      best = hit;
+      sx = hit.p[0] - at[0];
+      sy = hit.p[1] - at[1];
+    }
+  }
+  return { dx: dx0 + sx, dy: dy0 + sy, snap: best };
+}
+
+/** The name a copy's name is built from: "Roof A copy 2" → "Roof A". */
+const copyRoot = (name: string) => name.trim().replace(/\s+copy(?:\s+\d+)?$/i, "");
+
+/** The default-name base of `o`'s kind and role ("Roof", "Wall", "Drain"…). */
+export function defaultBaseName(o: TakeoffObject): string {
+  if (o.kind === "area") return AREA_BASE_NAME;
+  if (o.kind === "linear") return LINEAR_BASE_NAMES[o.attrs.role] ?? LINEAR_BASE_NAMES.other;
+  return COUNT_BASE_NAMES[o.attrs.role] ?? COUNT_BASE_NAMES.other;
+}
+
+/**
+ * A stamped copy's name, never one already used in `existing`: a still-default name takes the
+ * next default, as a newly drawn object would ("Roof 1" → "Roof 3" when "Roof 2" exists); a
+ * name the user gave becomes "<name> copy", then "<name> copy 2", "<name> copy 3"…
+ */
+export function copyName(o: TakeoffObject, existing: readonly TakeoffObject[]): string {
+  const base = defaultBaseName(o);
+  if (isDefaultName(o.attrs.name, base)) return uniqueName(base, existing);
+  const root = copyRoot(o.attrs.name) || base;
+  const used = new Set(existing.map((x) => x.attrs.name.trim().toLowerCase()));
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? `${root} copy` : `${root} copy ${n}`;
+    if (!used.has(name.toLowerCase())) return name;
+  }
+}
+
+/**
+ * "Duplicate and stamp": a copy of `source` moved by (dx, dy) — id `id`, the same kind, page,
+ * colour and attrs (role, pitch, edges, drain picks…), its cut-outs moved with the outline, and
+ * a fresh name (`copyName` against `existing`). A count's copy is a single pin. A linear made
+ * with "Edge from this area" drops `fromArea` (the copy no longer runs along that area).
+ */
+export function duplicateObject(
+  source: TakeoffObject,
+  dx: number,
+  dy: number,
+  id: string,
+  existing: readonly TakeoffObject[],
+): TakeoffObject {
+  const name = copyName(source, existing);
+  const points = translatePoints(stampPoints(source), dx, dy);
+  if (source.kind === "area") {
+    const attrs = { ...cloneJson(source.attrs), name };
+    if (attrs.cutouts?.length) attrs.cutouts = attrs.cutouts.map((c) => translatePoints(c, dx, dy));
+    return { ...source, id, points, attrs };
+  }
+  if (source.kind === "linear") {
+    const attrs: LinearAttrs & { fromArea?: string } = { ...cloneJson(source.attrs), name };
+    delete attrs.fromArea;
+    return { ...source, id, points, attrs };
+  }
+  return { ...source, id, points, attrs: { ...cloneJson(source.attrs), name } };
+}
+
+/** Attrs are plain JSON (they are saved as such): a deep copy shares nothing with the source. */
+const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /** Default object names per role ("Roof 1", "Wall 1", "Drain 1"). */
 export const AREA_BASE_NAME = "Roof";
