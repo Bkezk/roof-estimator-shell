@@ -480,6 +480,7 @@ export function takeoffQuantities(
         return ne;
       });
     }
+    roundSectionDims(section);
     const slopedEdgeLengthsFt = planLens.map((l, i) => (rakes.sides.includes(i) ? l * factor : l));
     const slopedPerimeterFt = slopedEdgeLengthsFt.reduce((t, l) => t + l, 0);
     const sq: SectionQuantity = {
@@ -511,6 +512,22 @@ export function takeoffQuantities(
   }
   out.counts = [...countGroups.values()];
   return out;
+}
+
+const round2 = (x: number) => Math.round(x * 100) / 100;
+
+/**
+ * The bid's dimensions carry two decimals (an eighth of an inch): the layout rectangle and each
+ * side's length and perimeter run. The measured area and perimeter stay exact.
+ */
+function roundSectionDims(section: OutlineSection): void {
+  section.length = round2(section.length);
+  section.width = round2(section.width);
+  section.edges = section.edges.map((e) => {
+    const ne = { ...e, lengthFt: round2(e.lengthFt) };
+    if (e.perimLengthFt !== undefined) ne.perimLengthFt = round2(e.perimLengthFt);
+    return ne;
+  });
 }
 
 /** A side's edge details without the tag bookkeeping (`alongRole`, `alongLineId`, `beforeRole`). */

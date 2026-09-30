@@ -98,10 +98,18 @@ describe("test_pS.xlsx → seed", async () => {
     expect(seed.sections).toHaveLength(1);
     const s = seed.sections[0]!;
     expect(s.name).toBe("Roof 1");
-    expect(s.length! * s.width!).toBeCloseTo(13445.64, 6);
-    expect(2 * (s.length! + s.width!)).toBeCloseTo(1268.56, 6);
-    expect(s.edges!.map((e) => e.side)).toEqual(["A", "B", "C", "D"]);
-    expect(s.edges!.reduce((t, e) => t + e.lengthFt, 0)).toBeCloseTo(1268.56, 6);
+    // Two decimals (an eighth of an inch): 612.32 × 21.96 keeps the sheet's area within 0.01 %.
+    expect([s.length, s.width]).toEqual([612.32, 21.96]);
+    expect(Math.abs(s.length! * s.width! - 13445.64) / 13445.64).toBeLessThan(1e-4);
+    expect(2 * (s.length! + s.width!)).toBeCloseTo(1268.56, 1);
+    expect(s.edges!.map((e) => [e.side, e.lengthFt])).toEqual([
+      ["A", 612.32],
+      ["B", 21.96],
+      ["C", 612.32],
+      ["D", 21.96],
+    ]);
+    // The summary keeps the sheet's exact area (the rounding is the layout rectangle's alone).
+    expect(seed.summary).toContain("13,445.64 sq ft");
     expect(s.edges!.every((e) => !e.isPerimeter)).toBe(true);
     // A typed section (PlanSwift has no outline), so the Sections screen keeps it editable.
     expect(s.measured).toBeUndefined();
@@ -239,7 +247,7 @@ describe("knox.xlsx → seed", async () => {
       [seed.sections[1]!, 18291.82],
       [seed.sections[2]!, 355.37],
     ] as const) {
-      expect(s.length).toBeCloseTo(Math.sqrt(area), 9);
+      expect(s.length).toBe(Math.round(Math.sqrt(area) * 100) / 100);
       expect(s.width).toBe(s.length);
     }
     expect(seed.warnings.filter((w) => /No Linear total/.test(w))).toHaveLength(4);
@@ -413,7 +421,7 @@ describe("the bid made from the seed", async () => {
 
   it("sections, parapets, curbs through the route's factories; Non-DL lines at the crew rate", () => {
     const s = bid.sections[0]!;
-    expect(s.length * s.width).toBeCloseTo(13445.64, 6);
+    expect(Math.abs(s.length * s.width - 13445.64) / 13445.64).toBeLessThan(1e-4);
     expect(s.roofSystem).toBeUndefined();
     expect(bid.roofSystem).toBe("Duro-Tech TPO");
     expect(s.thickness).toBe(50);
@@ -436,7 +444,9 @@ describe("the bid made from the seed", async () => {
 
   it("the engine's bid input reads it: roof area and parapet footage match the sheet", () => {
     const input = buildBidInput(bid);
-    expect(input.sections[0]!.length * input.sections[0]!.width).toBeCloseTo(13445.64, 6);
+    expect(
+      Math.abs(input.sections[0]!.length * input.sections[0]!.width - 13445.64) / 13445.64,
+    ).toBeLessThan(1e-4);
     expect(input.parapets.reduce((t, p) => t + p.lengthFt, 0)).toBeCloseTo(1134.88, 6);
     expect(input.curbs.map((c) => c.quantity)).toEqual([10, 1]);
   });

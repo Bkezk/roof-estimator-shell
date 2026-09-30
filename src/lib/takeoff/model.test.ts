@@ -140,8 +140,41 @@ describe("takeoffQuantities", () => {
     const s = q.sections[0]!;
     expect(s.areaSqFt).toBeCloseTo(4000 - 400, 9);
     expect(s.perimeterFt).toBeCloseTo(280, 9);
-    expect(s.section.length * s.section.width).toBeCloseTo(3600, 6);
-    expect(2 * (s.section.length + s.section.width)).toBeCloseTo(280, 6);
+    expect(Math.abs(s.section.length * s.section.width - 3600) / 3600).toBeLessThan(1e-4);
+    expect(2 * (s.section.length + s.section.width)).toBeCloseTo(280, 1);
+  });
+
+  it("the layout rectangle and the side lengths carry two decimals (an eighth of an inch)", () => {
+    // A 100 × 40 outline less a 20 × 20 well: the equivalent rectangle's sides are irrational
+    // (70 ± √(4900 − 3600))/… — without rounding they carry 13+ decimals.
+    const withWell: TakeoffObject = {
+      ...(objects[0] as Extract<TakeoffObject, { kind: "area" }>),
+      attrs: {
+        name: "Main roof",
+        pitch: 4,
+        cutouts: [
+          [
+            [400, 300],
+            [600, 300],
+            [600, 500],
+            [400, 500],
+          ],
+        ],
+      },
+    };
+    const s = takeoffQuantities([page()], [withWell]).sections[0]!;
+    const decimals = (x: number) => (String(x).split(".")[1] ?? "").length;
+    expect(decimals(s.section.length)).toBeLessThanOrEqual(2);
+    expect(decimals(s.section.width)).toBeLessThanOrEqual(2);
+    for (const e of s.section.edges) {
+      expect(decimals(e.lengthFt)).toBeLessThanOrEqual(2);
+      if (e.perimLengthFt !== undefined) expect(decimals(e.perimLengthFt)).toBeLessThanOrEqual(2);
+    }
+    // The sloped rakes (B, D at 4:12: 40 × 1.0541 = 42.16) are rounded too, and the true
+    // measured area and perimeter stay exact.
+    expect(s.section.edges.map((e) => e.lengthFt)).toEqual([100, 42.16, 100, 42.16]);
+    expect(s.areaSqFt).toBeCloseTo(3600 * s.slopeFactor, 9);
+    expect(s.perimeterFt).toBeCloseTo(280, 9);
   });
 
   it("objects on an uncalibrated page are reported, not measured; counts still count", () => {
@@ -195,8 +228,10 @@ describe("slope factor (pitch, rise per 12)", () => {
     expect(s.edgeLengthsFt.map((x) => Math.round(x))).toEqual([100, 10, 100, 10]);
     // The layout rectangle is the sloped surface: length stays, width grows by the factor.
     expect(s.section.length).toBeCloseTo(100, 6);
-    expect(s.section.width).toBeCloseTo(10 * s.slopeFactor, 6);
-    expect(s.section.length * s.section.width).toBeCloseTo(s.areaSqFt, 6);
+    expect(s.section.width).toBe(Math.round(10 * s.slopeFactor * 100) / 100);
+    expect(Math.abs(s.section.length * s.section.width - s.areaSqFt) / s.areaSqFt).toBeLessThan(
+      1e-4,
+    );
     expect(s.section.measured.areaSqFt).toBeCloseTo(s.areaSqFt, 9);
     expect(s.section.measured.perimeterFt).toBeCloseTo(220, 9);
     expect(q.totals.roofAreaSqFt).toBeCloseTo(1118.034, 3);
@@ -227,7 +262,9 @@ describe("slope factor (pitch, rise per 12)", () => {
     const [a, b] = q.sections;
     expect(a!.planAreaSqFt).toBeCloseTo(950, 9);
     expect(a!.areaSqFt).toBeCloseTo(950 * slopeFactor(4), 9);
-    expect(a!.section.length * a!.section.width).toBeCloseTo(a!.areaSqFt, 6);
+    expect(Math.abs(a!.section.length * a!.section.width - a!.areaSqFt) / a!.areaSqFt).toBeLessThan(
+      1e-4,
+    );
     expect(b!.areaSqFt).toBeCloseTo(1000, 9);
     expect(b!.slopeFactor).toBe(1);
     expect(b!.pitch).toBeUndefined();

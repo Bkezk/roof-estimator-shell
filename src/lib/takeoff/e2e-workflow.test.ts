@@ -528,9 +528,12 @@ describe("2. Seed → bid", () => {
     expect(sec("Section 1").notes).toBe(
       "Measured in Takeoff: 5920 sq ft (6000 sq ft outline less 80 sq ft of cut-outs; layout 101.9 × 58.1 ft is the net-area equivalent, the sides stay as drawn), 320 ft around, 4 sides; penthouse walls 36 ft (not seeded); parapet wall sides B, C, D; gutter side A.",
     );
-    expect(sec("Section 1").length).toBeCloseTo(101.909, 3);
-    expect(sec("Section 1").width).toBeCloseTo(58.091, 3);
-    expect(sec("Section 1").length * sec("Section 1").width).toBeCloseTo(5920, 6);
+    // Two decimals (an eighth of an inch); the rectangle keeps the net area within 0.01 %.
+    expect(sec("Section 1").length).toBe(101.91);
+    expect(sec("Section 1").width).toBe(58.09);
+    expect(Math.abs(sec("Section 1").length * sec("Section 1").width - 5920) / 5920).toBeLessThan(
+      1e-4,
+    );
     expect(sec("Section 1").edges!.map((e) => [e.side, e.lengthFt])).toEqual([
       ["A", 100],
       ["B", 60],
@@ -539,17 +542,15 @@ describe("2. Seed → bid", () => {
     ]);
     // Section 2: the slope stretches the width: 40 × 31.62 = 1264.9 (plan 1200).
     expect(sec("Section 2").length).toBe(40);
-    expect(sec("Section 2").width).toBeCloseTo(31.623, 3);
+    expect(sec("Section 2").width).toBe(31.62);
     expect(sec("Section 2").notes).toBe(
       "Measured in Takeoff: 1264.9 sq ft (1200 sq ft on plan at 4:12, ×1.054), 143.2 ft around (140 ft on plan; rakes assumed: the two shorter sides (B, D) run up the slope), 4 sides.",
     );
     // FIXED (#5): the rake edges run up the slope (31.62 ft) — their length, perimeter run and
     // blocking are sloped; the eaves (A, C) keep the plan length.
-    expect(sec("Section 2").edges!.map((e) => Math.round(e.lengthFt * 1000) / 1000)).toEqual([
-      40, 31.623, 40, 31.623,
-    ]);
+    expect(sec("Section 2").edges!.map((e) => e.lengthFt)).toEqual([40, 31.62, 40, 31.62]);
     expect(sec("Section 2").edges![1]!.blockingFt).toBe(31.62);
-    expect(sec("Section 2").edges![1]!.perimLengthFt).toBeCloseTo(31.623, 3);
+    expect(sec("Section 2").edges![1]!.perimLengthFt).toBe(31.62);
     // Section 3: the L keeps its six drawn sides; the re-entrant corner is not enhanced.
     expect([sec("Section 3").length, sec("Section 3").width]).toEqual([70, 20]);
     expect(sec("Section 3").edges!.map((e) => e.side)).toEqual(["1", "2", "3", "4", "5", "6"]);
@@ -584,7 +585,7 @@ describe("2. Seed → bid", () => {
       edgeSum.terminations.map((t) => [t.termination, Math.round(t.totalFt * 100) / 100]),
     ).toEqual([
       ['4" Drip Edge', 100],
-      ['4" Fascia', 323.25],
+      ['4" Fascia', 323.24],
     ]);
     expect(edgeSum.blockingFt).toBeCloseTo(423.24, 2);
     // Expansion joint / walkway / other lines leave the edges alone (Sections 2 and 3 keep the
@@ -727,16 +728,19 @@ describe("3. Engine on the seeded bid", () => {
   });
 
   it("roof area, perimeter and parapet footage match the takeoff", () => {
-    expect(est.roofSqFootage).toBeCloseTo(q.totals.roofAreaSqFt, 6);
+    // Within the two-decimal rounding of each section's layout rectangle.
+    expect(
+      Math.abs(est.roofSqFootage - q.totals.roofAreaSqFt) / q.totals.roofAreaSqFt,
+    ).toBeLessThan(1e-4);
     // The bid's edges are the built roof edge (Section 2's rakes sloped, #5).
     expect(
       sum(bidInput.sections.flatMap((s) => (s.edges ?? []).map((e) => e.lengthFt))),
-    ).toBeCloseTo(q.totals.slopedPerimeterFt, 9);
+    ).toBeCloseTo(q.totals.slopedPerimeterFt, 1);
     // Perimeter-enhancement zone length = sides less one 3 ft enhancement width per marked corner
     // on each side: 643.25 − 2 × 3 × (4 + 4 + 5) = 565.25.
     expect(sum(bidInput.sections.map((s) => resolveSectionZones(s).perimLengthFt))).toBeCloseTo(
       565.25,
-      2,
+      1,
     );
     expect(sum(bidInput.parapets.map((p) => p.lengthFt))).toBe(q.totals.parapetFt);
   });
@@ -747,7 +751,7 @@ describe("3. Engine on the seeded bid", () => {
     expect(row("Parapets")).toBeGreaterThan(0);
     expect(row("Curbs")).toBeGreaterThanOrEqual(0);
     expect(est.curbLaborHours).toBeGreaterThan(0);
-    expect(row("Roof Sections")).toBeCloseTo(13171.66, 2);
+    expect(row("Roof Sections")).toBeCloseTo(13171.66, 0);
     expect(row("Parapets")).toBe(888);
     // Drains sit in accessoriesCalc; they are priced only when the admin data carries the §12
     // accessories reference lists, which this fixture does not. The $240 is the wall adhesive
@@ -755,7 +759,8 @@ describe("3. Engine on the seeded bid", () => {
     expect(row("Accessories")).toBe(240);
     // Was $25,827.95 before the fixes: the seeded wall now prices as the Setup's adhered system
     // (+$369.24, #3); the blank curb size (#4) and the edge changes (#1, #5) make up the rest.
-    expect(est.money.grandTotal).toBeCloseTo(26188.86, 2);
+    // Within $1: the two-decimal layout rectangles move the roof area by under 0.01 %.
+    expect(est.money.grandTotal).toBeCloseTo(26188.86, 0);
   });
 
   it("unsized curbs are flagged; a size measured in the takeoff prices the real curb", () => {
@@ -885,7 +890,7 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     const r = apply(drawTakeoff({ grow: true }));
     const s1 = r.sections.find((s) => s.name === "Section 1")!;
     expect(s1.measured!.areaSqFt).toBe(7120); // 120 × 60 − 80
-    expect(s1.length * s1.width).toBeCloseTo(7120, 6);
+    expect(Math.abs(s1.length * s1.width - 7120) / 7120).toBeLessThan(1e-4);
     expect(s1.deckType).toBe("Concrete");
     expect(s1.fastenerOc).toBe(12);
     // FIXED (#2): the estimator's edge details are kept (the 2" drip edge on A, the ARP on B),

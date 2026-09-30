@@ -313,7 +313,10 @@ export function planSwiftSeed(
         `${names[i]}: the equivalent rectangle is ${num(round2(rect.length))} × ${num(round2(rect.width))} ft — the Linear total may include more than the roof edge (walls, curbs); check the perimeter.`,
       );
     const area = rect.length * rect.width;
-    const edges = defaultEdges(rect.length, rect.width);
+    // The bid's dimensions carry two decimals (an eighth of an inch); the area stays the sheet's.
+    const length = round2(rect.length);
+    const width = round2(rect.width);
+    const edges = defaultEdges(length, width);
     sections.push({
       objectId: `planswift-row-${r.sheetRow}`,
       name: names[i]!,
@@ -331,16 +334,16 @@ export function planSwiftSeed(
       cutoutAreaSqFt: 0,
       cutoutPerimetersFt: [],
       section: {
-        length: rect.length,
-        width: rect.width,
+        length,
+        width,
         edges,
         perimCorners: [false, false, false, false],
         measured: {
           points: [
             [0, 0],
-            [rect.length, 0],
-            [rect.length, rect.width],
-            [0, rect.width],
+            [length, 0],
+            [length, width],
+            [0, width],
           ],
           areaSqFt: area,
           perimeterFt: rect.perimeterFt,

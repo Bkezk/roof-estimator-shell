@@ -1127,8 +1127,8 @@ export function SectionsScreen(p: SectionsScreenProps) {
                       className={i2 === i ? "cursor-pointer bg-muted/60" : "cursor-pointer"}
                     >
                       <TableCell className="whitespace-nowrap font-medium">{s2.name}</TableCell>
-                      <TableCell className="text-right tabular-nums">{s2.length}</TableCell>
-                      <TableCell className="text-right tabular-nums">{s2.width}</TableCell>
+                      <TableCell className="text-right tabular-nums">{n2(s2.length)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{n2(s2.width)}</TableCell>
                       <TableCell className="whitespace-nowrap">{sys2.roofSystem}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {sys2.attachment === "adhered" ? "Adhered" : "Mechanical"}
@@ -1506,8 +1506,8 @@ export function SectionsScreen(p: SectionsScreenProps) {
                   return (
                     <TableRow key={s2.id} className="text-xs">
                       <TableCell className="whitespace-nowrap font-medium">{s2.name}</TableCell>
-                      <TableCell className="text-right">{s2.length}</TableCell>
-                      <TableCell className="text-right">{s2.width}</TableCell>
+                      <TableCell className="text-right">{n2(s2.length)}</TableCell>
+                      <TableCell className="text-right">{n2(s2.width)}</TableCell>
                       <TableCell className="whitespace-nowrap">{sys2.roofSystem}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {ATTACHMENT_LABEL[sys2.attachment]}
