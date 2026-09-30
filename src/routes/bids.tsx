@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import {
   ChevronDown,
   ChevronRight,
+  FileSpreadsheet,
   FileUp,
   Layers,
   PlusCircle,
@@ -27,6 +28,7 @@ import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/
 import { Button } from "@/components/ui/button";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { ImportBaxDialog } from "@/components/import-bax-dialog";
+import { ImportPlanSwiftDialog } from "@/components/import-planswift-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -48,11 +50,14 @@ import {
 
 const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 
-/** True when the bid's data carries a legacy .bax import record (src/lib/bax). */
-const importedFrom = (data: unknown): boolean =>
-  !!data &&
-  typeof data === "object" &&
-  (data as { importInfo?: { source?: string } }).importInfo?.source === "bid-advantage";
+/** Where an imported bid came from: a legacy .bax (src/lib/bax) or a PlanSwift export. */
+const importedFrom = (data: unknown): string | null => {
+  const src =
+    !!data && typeof data === "object"
+      ? (data as { importInfo?: { source?: string } }).importInfo?.source
+      : undefined;
+  return src === "bid-advantage" ? "Bid-Advantage" : src === "planswift" ? "PlanSwift" : null;
+};
 
 export const Route = createFileRoute("/bids")({
   head: () => ({
@@ -131,6 +136,7 @@ function BidsPage() {
   });
   const [statusFilter, setStatusFilter] = useState("all");
   const [importOpen, setImportOpen] = useState(false);
+  const [planswiftOpen, setPlanswiftOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [estimatorFilter, setEstimatorFilter] = useState("all");
   const [systemFilter, setSystemFilter] = useState("all");
@@ -317,6 +323,15 @@ function BidsPage() {
             <FileUp className="mr-2 h-5 w-5" />
             Import old bids
           </Button>
+          <Button
+            variant="outline"
+            size="lg"
+            title="Start a bid from a PlanSwift takeoff exported to Excel (.xlsx)"
+            onClick={() => setPlanswiftOpen(true)}
+          >
+            <FileSpreadsheet className="mr-2 h-5 w-5" />
+            Import PlanSwift takeoff
+          </Button>
           <Button asChild size="lg" className="text-base font-semibold">
             <Link to="/estimate">
               <PlusCircle className="mr-2 h-5 w-5" />
@@ -326,6 +341,7 @@ function BidsPage() {
         </div>
       </div>
       <ImportBaxDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <ImportPlanSwiftDialog open={planswiftOpen} onClose={() => setPlanswiftOpen(false)} />
 
       {bids.length > 0 && (
         <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
@@ -537,7 +553,9 @@ function BidsPage() {
                                 {st === "lost" && bid.lost_reason
                                   ? ` · Lost: ${bid.lost_reason}`
                                   : ""}
-                                {importedFrom(bid.data) ? ` · Imported from Bid-Advantage` : ""}
+                                {importedFrom(bid.data)
+                                  ? ` · Imported from ${importedFrom(bid.data)}`
+                                  : ""}
                               </p>
                             </div>
                           </div>

@@ -54,6 +54,9 @@ import {
   bidAccountFromTakeoff,
   bidSeedFromTakeoff,
 } from "@/lib/takeoff/create-bid";
+import { newBidFromSeed } from "@/lib/takeoff/seed-to-bid";
+import { readPlanSwiftHandoff } from "@/lib/planswift/handoff";
+import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
@@ -192,6 +195,8 @@ export interface EstimateSearch {
   combine?: string;
   /** A takeoff id: a NEW bid seeded from that drawing (docs/planswift-research.md §4.6). */
   takeoff?: string;
+  /** A PlanSwift import hand-off id: a NEW bid seeded from the export (src/lib/planswift). */
+  planswift?: string;
   building?: string;
   pfName?: string;
   pfOwner?: string;
@@ -222,6 +227,7 @@ export const Route = createFileRoute("/estimate")({
       // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
       ...(typeof c === "string" && c ? { combine: c } : {}),
       ...str("takeoff"),
+      ...str("planswift"),
       // Generic prefill for a NEW bid (another module hands the estimator plain values in the
       // URL — the estimator imports nothing from it): the linked building id (bids.building_id),
       // client / job-site fields, and one section's width × length.
@@ -403,7 +409,12 @@ function EstimatePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const search = Route.useSearch();
-  const { bid: bidParam, combine: combineParam, takeoff: takeoffParam } = search;
+  const {
+    bid: bidParam,
+    combine: combineParam,
+    takeoff: takeoffParam,
+    planswift: planswiftParam,
+  } = search;
   // Gate every authed fetch on a live session: without one the server fns 401 (e.g. a mobile
   // browser whose token expired while backgrounded); AuthGate redirects to /login.
   const { session, profile, can } = useAuth();
@@ -627,6 +638,8 @@ function EstimatePage() {
   // Set when this bid came from a Takeoff drawing; the notice lists what still needs placing.
   const [takeoffInfo, setTakeoffInfo] = useState<TakeoffInfo | undefined>(undefined);
   const [linkedTakeoffId, setLinkedTakeoffId] = useState<string | null>(null);
+  // Where an imported bid came from (.bax or PlanSwift): kept through saves.
+  const [importInfo, setImportInfo] = useState<SavedBidState["importInfo"]>(undefined);
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [lostReason, setLostReason] = useState<string | null>(null);
   const [askLost, setAskLost] = useState(false);
@@ -1037,6 +1050,7 @@ function EstimatePage() {
     setCombineInfo(d.combineInfo);
     setTakeoffInfo(d.takeoffInfo);
     setLinkedTakeoffId(d.takeoffInfo?.takeoffId ?? null);
+    setImportInfo(d.importInfo);
     const bump = (ids: string[], prefix: string, cur: number) =>
       Math.max(
         cur,
@@ -1175,8 +1189,9 @@ function EstimatePage() {
   };
   // The takeoff's customer onto a bid that has none (owner, Sep 30): linked as a change of this
   // session (so the save sends it), and the bid's BLANK client fields filled from the profile.
-  const linkFromTakeoff = (accountId: string, label: string) => {
-    const seq = setLink(accountId, null, label, true);
+  // (The PlanSwift import links a customer the same way, with the site picked in its dialog.)
+  const linkFromTakeoff = (accountId: string, label: string, siteId: string | null = null) => {
+    const seq = setLink(accountId, siteId, label, true);
     void qc
       .fetchQuery({
         queryKey: ["account", accountId],
@@ -1184,7 +1199,8 @@ function EstimatePage() {
       })
       .then((detail) => {
         if (seq !== pickSeq.current) return;
-        const fill = profileFill(detail.account, null);
+        const site = siteId ? (detail.sites.find((x) => x.id === siteId) ?? null) : null;
+        const fill = profileFill(detail.account, site);
         setCustomer((c) => applyProfileFill(c, blankFieldsOnly(c, fill), false));
       })
       .catch(() => {});
@@ -1251,7 +1267,6 @@ function EstimatePage() {
         void navigate({ to: "/estimate", search: { bid: bidParam }, replace: true });
         return;
       }
-      const secDefaults = { ...sectionDefaults, ...seed.sectionDefaults };
       const info: TakeoffInfo = {
         takeoffId: takeoffRow.id,
         takeoffName: takeoffRow.name,
@@ -1260,20 +1275,11 @@ function EstimatePage() {
         unmapped: seed.unmapped,
       };
       const merged: SavedBidState = {
-        ...saved,
-        ...(seed.roofSystem ? { roofSystem: seed.roofSystem } : {}),
-        ...(seed.attachment ? { attachment: seed.attachment } : {}),
-        ...(seed.membraneAdhesiveName ? { membraneAdhesiveName: seed.membraneAdhesiveName } : {}),
-        sections: seed.sections.map((o) => newSection({ ...secDefaults, ...o })),
-        parapets: seed.parapets.map((o) => newParapet(o)),
-        curbs: seed.curbs.map((o) => newCurb(o)),
-        accessoriesCalc: {
-          ...saved.accessoriesCalc,
-          pipeStacks: seed.pipeStacks,
-          drains: seed.drains,
-        },
-        sectionDefaults: secDefaults,
-        parapetDefaults: { ...parapetDefaults, ...seed.parapetDefaults },
+        ...newBidFromSeed({ ...saved, sectionDefaults }, seed, {
+          newSection,
+          newParapet,
+          newCurb,
+        }),
         takeoffInfo: info,
       };
       hydrateSaved(merged, {});
@@ -1300,6 +1306,60 @@ function EstimatePage() {
         takeoffError instanceof Error ? takeoffError.message : "Could not load the takeoff.",
       );
   }, [takeoffError]);
+
+  // PlanSwift import (src/lib/planswift): ?planswift=<id> — the Bids page's import dialog left
+  // the seed in this tab's storage. It starts a NEW bid exactly like ?takeoff= does (read through
+  // a query so, like the takeoff row, it lands after the new-bid defaults have been applied).
+  const { data: planswiftHandoff } = useQuery({
+    queryKey: ["planswift-handoff", planswiftParam],
+    queryFn: () => {
+      let storage: Storage | null = null;
+      try {
+        storage = typeof window === "undefined" ? null : window.sessionStorage;
+      } catch {
+        // Blocked storage: read as "not in this tab" (the effect below says so).
+      }
+      return readPlanSwiftHandoff(storage, planswiftParam!);
+    },
+    enabled: !!planswiftParam && !bidParam,
+    staleTime: Infinity,
+  });
+  const planswiftSeededFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!planswiftParam || bidParam || planswiftHandoff === undefined) return;
+    if (planswiftSeededFor.current === planswiftParam) return;
+    planswiftSeededFor.current = planswiftParam;
+    if (!planswiftHandoff) {
+      toast.error(
+        "This PlanSwift import is no longer in this browser tab — import the file again from the Bids page.",
+      );
+      return;
+    }
+    try {
+      const { seed, account, bidName: name } = planswiftHandoff;
+      const merged = savedFromPlanSwiftSeed({ ...saved, sectionDefaults }, seed, {
+        newSection,
+        newParapet,
+        newCurb,
+      });
+      hydrateSaved(merged, {});
+      setBidId(undefined);
+      if (account) linkFromTakeoff(account.id, account.label, account.siteId);
+      else setLink(null, null, "", false);
+      setBidName(name.trim() || "Untitled bid");
+      setBidStatus("draft");
+      setLostReason(null);
+      // Unsaved on purpose, like a bid from a takeoff: nothing exists until the estimator saves.
+      toast.success(
+        `Bid started from PlanSwift: ${seed.sections.length} section${seed.sections.length === 1 ? "" : "s"}. Read the notice for what still needs placing, then save.`,
+      );
+    } catch (e) {
+      toast.error(
+        `Could not start a bid from the PlanSwift import: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once per ?planswift value
+  }, [planswiftHandoff, planswiftParam, bidParam]);
 
   // NEW bids start from the seeded admin default (legacy Labor & Markup Options "Default":
   // $45/hr, 35% gross profit) instead of hardcoded fallbacks; saved bids keep their own values.
@@ -1521,6 +1581,7 @@ function EstimatePage() {
     highWindBand,
     ...(combineInfo ? { combineInfo } : {}),
     ...(takeoffInfo ? { takeoffInfo } : {}),
+    ...(importInfo ? { importInfo } : {}),
   };
   // Unsaved-changes tracking: the serialized bid vs the last saved / hydrated baseline. Every
   // custom row (Non-DL custom items, metals entries, accessory quantities, quote layers) lives
@@ -2240,6 +2301,48 @@ function EstimatePage() {
                 Open the takeoff
               </a>
             </p>
+          </div>
+        )}
+        {importInfo?.source === "planswift" && !importInfo.noticeDismissed && (
+          <div className="space-y-1 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <p className="font-semibold">From PlanSwift</p>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setImportInfo({ ...importInfo, noticeDismissed: true })}
+                title="Hide this notice (the import record stays on the bid)"
+              >
+                Dismiss
+              </Button>
+            </div>
+            <p>{importInfo.summary}</p>
+            {importInfo.unmapped.length > 0 ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  On the sheet but not placed automatically — add these by hand:
+                </p>
+                <ul className="list-disc pl-5 text-xs">
+                  {importInfo.unmapped.map((u, i) => (
+                    <li key={i}>
+                      <span className="font-medium">{u.label}</span> — {u.detail}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Every row has been placed.</p>
+            )}
+            {importInfo.warnings.length > 0 && (
+              <>
+                <p className="text-xs text-amber-700">Check:</p>
+                <ul className="list-disc pl-5 text-xs text-amber-700">
+                  {importInfo.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </>
+            )}
           </div>
         )}
         {bidLoadFailed && (

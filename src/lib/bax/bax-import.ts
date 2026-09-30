@@ -90,7 +90,8 @@ export interface BaxConversion {
   legacyStatus: string;
   /** Legacy last-save time (ISO) — becomes the imported row's created_at. */
   lastSavedAt: string | null;
-  saved: SavedBidState;
+  /** The bid state; its import record is always the Bid-Advantage one. */
+  saved: SavedBidState & { importInfo?: BaxImportInfo };
   warnings: string[];
   importInfo: BaxImportInfo;
 }
@@ -1276,7 +1277,7 @@ export function convertBax(doc: XNode, opts: ConvertOptions): BaxConversion {
   const taxExempt = bool(text(est, "taxexempt"));
   const hoursPerDay = num(child(management, "settings"), "mandayhours", 0);
 
-  const saved: SavedBidState = {
+  const saved: SavedBidState & { importInfo?: BaxImportInfo } = {
     roofSystem: first?.roofSystem ?? systemName(defRs),
     attachment: first?.attachment ?? "mechanical",
     sections,

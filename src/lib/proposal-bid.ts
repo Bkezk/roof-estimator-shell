@@ -7,6 +7,7 @@
 
 import type { CombineInfo } from "@/lib/combine-bids";
 import type { BaxImportInfo } from "@/lib/bax/bax-import";
+import type { PlanSwiftImportInfo } from "@/lib/planswift/to-seed";
 import type { PerDiemChart } from "@/lib/per-diem-chart";
 import type {
   BidInput,
@@ -199,8 +200,11 @@ export interface SavedBidState {
   combineInfo?: CombineInfo;
   /** Set when the bid was created from a Takeoff drawing (docs/planswift-research.md §4.6). */
   takeoffInfo?: TakeoffInfo;
-  /** Set on a bid imported from a legacy Bid-Advantage .bax file (src/lib/bax). */
-  importInfo?: BaxImportInfo;
+  /**
+   * Set on a bid imported from a legacy Bid-Advantage .bax file (src/lib/bax) or started from a
+   * PlanSwift Excel export (src/lib/planswift); `source` tells which.
+   */
+  importInfo?: BaxImportInfo | PlanSwiftImportInfo;
 }
 
 /**

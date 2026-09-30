@@ -225,6 +225,22 @@ What we deliberately do not build: assemblies and parts, report designer, Excel 
 DWG or DXF input (PDF export from the architect covers it), pitch (flat commercial roofs; a
 pitch factor is a one-field addition if a sloped job ever appears).
 
+### 4.9 Importing a PlanSwift Excel export (Sep 30)
+
+For jobs already measured in PlanSwift, the Bids page has "Import PlanSwift takeoff (.xlsx)"
+(`src/components/import-planswift-dialog.tsx`, `src/lib/planswift/`). PlanSwift 11's Export to
+Excel gives one row per item: Name (typed by hand), Takeoff (the quantity), Units (SQ FT / FT /
+EA) and, on newer exports, Linear total (an area's perimeter). The importer reads the rows
+(`parse.ts`), guesses each row's place in the bid from its unit and name (`classify.ts`: roof
+sections with the membrane, mil and insulation read from the name; tapered / crickets quote
+layers; parapets with the skirt / vertical profile; coping and other sheet metal as Non-DL
+lines; curbs with W × L × H; drains; pipe stacks with size), shows a review table where every
+target can be changed (the choices are remembered per name in the browser), and starts a new
+bid through the same seed as Create bid (`to-seed.ts` builds `TakeoffQuantities` and calls
+`bidSeedFromTakeoff`). A section is the equivalent rectangle of the row's area and Linear
+total (a square without one, with a warning); its sides A–D are not real walls. Anything with
+no home in the bid is listed on the bid's "From PlanSwift" notice with its numbers.
+
 ## 5. Owner's answers (Sep 24) and what they change
 
 1. **What else is measured beyond area, edge and parapets:** not sure yet. The three tools stay
