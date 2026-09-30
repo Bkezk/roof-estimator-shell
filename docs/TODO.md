@@ -56,6 +56,15 @@ details under item 0, "Tennessee leads").
 app refuses its rows on the source check (Metro Nashville bids, Chattanooga city bids; details
 under item 0, "Tennessee leads").
 
+**Bid Board fixes (Sep 30).** Owner: apply `20260930050000_bid_board_fixes.sql` with the code
+(new `leads.details` / `details_read_at`, `lead_settings.last_fetch_problems`,
+`stamp_lead_fetch(note, problems)`, read policies = Prospecting or Estimate). Done: a refresh
+no longer writes null over team notes, planroom contacts and job-page reads (one upsert per
+source and key set; job-page reads in their own columns); the red line reads the stored
+problem list; Paducah's due sentence is the bid date; the Open count follows Source and search;
+Unwatch/Restore no longer bring back "New"; keywords take only plain endings ("addition" no
+longer matches "additional"); BidNet copies of portal jobs are dropped (see BidNet below).
+
 0. **HANDOFF — repairs / service jobs and the CenterPoint CRM (owner, Sep 24).** Read this
    first in a new session. **Step 1 is done (Sep 24–26):** the exploration report, the Bell
    County daily log and 77 screenshots are in `docs/centerpoint/`, and the build plan is
@@ -270,7 +279,9 @@ under item 0, "Tennessee leads").
         Senior Center, closes Oct 5 11:00 AM ET; the TCAT Nashville Building 6 roofing; RFB-86-27
         Jackson SOB roof, dropped as a copy of the state planroom job). A BidNet row whose title
         or RFB code matches a job on the owner's own lists is dropped (the TCAT Nashville
-        re-roof is worded differently on BidNet, so it shows twice). **To watch:** BidNet
+        re-roof is worded differently on BidNet, so it shows twice). Done Sep 30: also dropped
+        when its title matches a stored open lead of a portal (the browser job's city lists
+        arrive apart; same state), and a portal import retires a stored BidNet copy. **To watch:** BidNet
         answers some requests with an AWS WAF "verify you're not a robot" page (curl got it on
         5 of 11 pages; Node's fetch, the app's, on none of 19). The app never solves or retries
         it: a checked page is skipped, the red line says which, nothing is marked gone that day,

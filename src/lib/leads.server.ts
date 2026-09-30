@@ -120,7 +120,16 @@ export type LeadSource =
   // Kentucky (Sep 29): Lexington in the refresh; Louisville Metro from the browser job.
   | "lexington_bids"
   | "louisville_bids";
-type LeadInsert = Database["public"]["Tables"]["leads"]["Insert"];
+/**
+ * A row as a list builds it. The team's note and status, the building link, and what the
+ * planroom job page gave (details, details_read_at) belong to the app, so a builder cannot
+ * send them: a refresh upserts only the keys a row has (saveLeadRows), and a key it never
+ * sends is never written over.
+ */
+type LeadInsert = Omit<
+  Database["public"]["Tables"]["leads"]["Insert"],
+  "note" | "status" | "status_by_name" | "status_at" | "building_id" | "details" | "details_read_at"
+>;
 type SettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
 
 export const PLANROOM_URL = "https://www.stateofkyplanroom.com/";
@@ -588,7 +597,7 @@ export function lynnLead(p: LynnPost, keywords: string[]): LeadInsert {
     city: town,
     project_type: null,
     url: p.jobUrl ?? p.postUrl,
-    note: null,
+    // No contact: the planroom job page (readPlanroomPages) fills it in and owns it.
     is_roof: isRoofLead(`${p.title} ${p.scope}`, keywords),
     raw: { ...p } as unknown as Json,
     last_seen_at: new Date().toISOString(),
@@ -712,10 +721,31 @@ export function parsePaducahBids(html: string): CityBid[] {
   return out;
 }
 
+/**
+ * The deadline in a city page's due sentence ("received no later than 4:30 p.m. CT on Tuesday,
+ * October 13.") → ISO instant. Both cities are on Central time. The sentence gives no year: it
+ * is the first such date on or after the posted date, or, with none (Paducah), on or after 90
+ * days before `now`, so a bid still listed a few weeks after its deadline reads as closed and
+ * one due in the new year lands in it.
+ */
+export function cityDueAt(b: CityBid, now = new Date()): string | null {
+  if (!b.dueText) return null;
+  const ref = b.postedAt
+    ? new Date(`${b.postedAt}T12:00:00Z`)
+    : new Date(now.getTime() - 90 * 86400000);
+  return parseWrittenDateTime(b.dueText, "CT", ref);
+}
+
+/**
+ * A Bowling Green or Paducah bid → a lead. Paducah's due sentence becomes the bid date, so the
+ * lead closes on time. Bowling Green's list shows only the title and the posted date (the close
+ * date is on the Bonfire page), so its leads close by dropping off the list (marked gone).
+ */
 export function cityLead(
   b: CityBid,
   source: "bgky_bids" | "paducah_bids",
   keywords: string[],
+  now = new Date(),
 ): LeadInsert {
   const city = source === "bgky_bids" ? "Bowling Green" : "Paducah";
   const county = source === "bgky_bids" ? "Warren" : "McCracken";
@@ -729,6 +759,7 @@ export function cityLead(
     county,
     url: b.url,
     issued_on: b.postedAt,
+    bid_at: cityDueAt(b, now),
     contact: b.contact,
     is_roof: isRoofLead(`${b.title} ${b.scope ?? ""}`, keywords),
     raw: { ...b } as unknown as Json,
@@ -2433,13 +2464,22 @@ export function lexingtonLead(b: LexingtonBid, keywords: string[]): LeadInsert {
  * Rows
  * ---------------------------------------------------------------------------------------------- */
 
-/** Keyword match, case-insensitive, at a word start ("roof" also catches "roofing", "Roofs"). */
+/**
+ * Keyword match, case-insensitive: the keyword at a word start, then at most a plain ending
+ * (s, es, ing, ed, er, ers) and the end of the word. "roof" catches "Roofs", "roofing",
+ * "roofed", "roofer"; "re-roof" catches "re-roofing"; "shingle" catches "shingles". A longer
+ * word is not a match: "addition" does not catch "additional" or "Additionally" (Sep 30: it
+ * flagged a janitorial contract and a boiler job as roof work).
+ */
 export function isRoofLead(text: string, keywords: string[]): boolean {
   const hay = text.toLowerCase();
   return keywords.some((k) => {
     const kw = k.trim().toLowerCase();
     if (!kw) return false;
-    const re = new RegExp(`(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+    const re = new RegExp(
+      `(^|[^a-z0-9])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:s|es|ing|ed|er|ers)?(?![a-z0-9])`,
+      "i",
+    );
     return re.test(hay);
   });
 }
@@ -2482,10 +2522,9 @@ export function campusLead(
     external_id: `${portal.domain}:${j.jobId}`,
     title: j.name,
     agency: portal.label,
+    // The plan issuer: the card says to bid the roofing to them until the job page (read with
+    // the planroom login, readPlanroomPages) gives the contact, which it owns: no contact here.
     contractor: issuerIsOwner ? null : issuer,
-    contact: issuerIsOwner
-      ? `${portal.label} — bid documents and plan holders on the planroom job page`
-      : `Plans issued by ${issuer} — bid the roofing to them`,
     location: town,
     city: town,
     project_type: j.projectType,
@@ -2627,8 +2666,18 @@ export function louisvilleLead(p: LouisvillePermit, keywords: string[]): LeadIns
   };
 }
 
-/** "RFB-86-27 FSS – Jackson SOB Roof Replacement" → "rfb-86-27 fss - jackson sob roof replacement". */
-const normTitle = (t: string) => t.toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ").trim();
+/**
+ * "RFB-86-27 FSS – Jackson SOB Roof Replacement" → "rfb-86-27 fss - jackson sob roof replacement":
+ * lower case, one space, plain dashes and quotes.
+ */
+const normTitle = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/[‐‑‒–—―]/g, "-")
+    .replace(/[‘’‚′]/g, "'")
+    .replace(/[“”„″]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
 /** The solicitation code a state job starts with ("RFB-86-27", "RFP-27-003"), if any. */
 const solicitationCode = (t: string): string | null => {
   const m = /^(?:re-?ad(?:vertisement)?\s+of\s+)?((?:RF[BPQ]|ITB|IFB)-[\w.]+)/i.exec(t.trim());
@@ -2693,9 +2742,12 @@ export interface RefreshLeadsResult {
 /**
  * Sign in to the state planroom and Lynn's, read the job page of every open roof lead that
  * has not been read in the last week (`max` per call, newest first), and store the contact
- * line plus the fields in raw.details. Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a
- * no-op. Kept apart from the list refresh: the page calls it in small batches after a refresh
- * (a serverless request has a budget of outside calls and seconds), the nightly cron in one.
+ * line, plus the fields, plan holders and page text in `details` with the time in
+ * `details_read_at`: columns of their own, which a refresh never sends, so a read survives
+ * the next refresh (Sep 30: kept in raw, it was wiped by every refresh and each job page was
+ * read again). Without PLANROOM_EMAIL / PLANROOM_PASSWORD this is a no-op. Kept apart from
+ * the list refresh: the page calls it in small batches after a refresh (a serverless request
+ * has a budget of outside calls and seconds), the nightly cron in one.
  */
 export async function readPlanroomPages(
   sb: Client,
@@ -2715,7 +2767,7 @@ async function enrichPlanroomLeads(admin: Client, failed: string[], max: number)
   const since = new Date(Date.now() - 7 * 86400000).toISOString();
   const { data: rows, error } = await admin
     .from("leads")
-    .select("id, source, external_id, title, raw, bid_at")
+    .select("id, source, external_id, title, raw, bid_at, details_read_at")
     .in("source", ["ky_planroom", "lynn_bids", "campus_planrooms"])
     .eq("is_roof", true)
     .is("gone_at", null)
@@ -2723,12 +2775,15 @@ async function enrichPlanroomLeads(admin: Client, failed: string[], max: number)
     .order("first_seen_at", { ascending: false })
     .limit(120);
   if (error) throw new Error(error.message);
+  // Lynn posts whose "More Details" points at Lynn's planroom carry that job id; a post
+  // without one (external_id is the post URL) has no job page to read, so it is left out
+  // before the batch is cut (it would otherwise take a slot of every batch, unread).
+  const jobIdOf = (externalId: string) =>
+    externalId.includes(":") ? externalId.split(":")[1]! : externalId;
   const due = (rows ?? [])
-    .filter((r) => {
-      const d = (r.raw as { details_read_at?: string } | null)?.details_read_at;
-      return !d || d < since;
-    })
+    .filter((r) => !r.details_read_at || Date.parse(r.details_read_at) < Date.parse(since))
     .filter((r) => !r.bid_at || Date.parse(r.bid_at) > Date.now() - 86400000)
+    .filter((r) => /^\d+$/.test(jobIdOf(r.external_id)))
     .slice(0, max);
   if (!due.length) return 0;
   let n = 0;
@@ -2751,20 +2806,19 @@ async function enrichPlanroomLeads(admin: Client, failed: string[], max: number)
     }
     const session = sessions[site.base];
     if (!session) continue;
-    // Lynn posts whose "More Details" points at Lynn's planroom carry that job id; a post
-    // without one (external_id is the post URL) has no job page to read.
-    const jobId = r.external_id.includes(":") ? r.external_id.split(":")[1]! : r.external_id;
-    if (!/^\d+$/.test(jobId)) continue;
+    const jobId = jobIdOf(r.external_id);
     try {
       const details = await fetchJobDetails(session, jobId);
       const contact = contactLine(details);
-      const raw = { ...((r.raw as Record<string, unknown> | null) ?? {}) };
-      raw["details"] = details.fields;
-      raw["plan_holders"] = details.planHolders;
-      // The page as text, so the parser can be fitted to the real layout from the row.
-      raw["page_text"] = details.text.slice(0, 3000);
-      raw["details_read_at"] = new Date().toISOString();
-      const patch: Database["public"]["Tables"]["leads"]["Update"] = { raw: raw as Json };
+      const patch: Database["public"]["Tables"]["leads"]["Update"] = {
+        details: {
+          fields: details.fields,
+          plan_holders: details.planHolders,
+          // The page as text, so the parser can be fitted to the real layout from the row.
+          page_text: details.text.slice(0, 3000),
+        } as unknown as Json,
+        details_read_at: new Date().toISOString(),
+      };
       if (contact) patch.contact = contact;
       const { error: uErr } = await admin.from("leads").update(patch).eq("id", r.id);
       if (uErr) throw new Error(uErr.message);
@@ -2801,6 +2855,69 @@ export interface SavedLeads {
 export const STORED_PAGE = 1000;
 
 /**
+ * The owner's own lists and city portals. BidNet repeats some of their jobs (Sep 30: "Golf
+ * Merchandise", "Bulk Fuel", Nashville's fire hydrant and camera jobs were each stored twice);
+ * the copy from the own list is kept (it has the contact and the exact bid time).
+ */
+export const PORTAL_SOURCES: LeadSource[] = [
+  "nashville_bids",
+  "chattanooga_bids",
+  "louisville_bids",
+  "lexington_bids",
+  "knox_county_bids",
+  "paducah_bids",
+  "bgky_bids",
+  "tn_university_bids",
+  "ut_bids",
+  "ky_planroom",
+  "campus_planrooms",
+  "tn_stream",
+];
+const isPortalSource = (s: string) => (PORTAL_SOURCES as string[]).includes(s);
+/** A job's identity across lists: its state and its title, normalized. */
+const titleKey = (state: string | null | undefined, title: string) =>
+  `${state ?? "KY"}|${normTitle(title)}`;
+/**
+ * Words that say what kind of job it is but not which one. A title made only of these ("Roof
+ * Replacement", "Roofing Repairs") names no particular job, so two lists sharing it are not
+ * taken for the same job across passes.
+ */
+const GENERIC_TITLE_WORDS = new Set(
+  (
+    "a an and the of for to at in on - & roof roofs roofing re-roof reroof re-roofing " +
+    "replacement replacements replace repair repairs project projects services service " +
+    "bid bids rfp rfq itb ifb new renovation renovations improvements work"
+  ).split(" "),
+);
+const isGenericTitle = (title: string) =>
+  normTitle(title)
+    .split(" ")
+    .every((w) => GENERIC_TITLE_WORDS.has(w));
+
+/** Stored leads still listed (not gone) of these sources in these states, read in pages. */
+async function storedOpenLeads(
+  admin: Client,
+  sources: string[],
+  states: string[],
+): Promise<{ id: string; title: string; state: string }[]> {
+  const out: { id: string; title: string; state: string }[] = [];
+  for (let from = 0; ; from += STORED_PAGE) {
+    const { data, error } = await admin
+      .from("leads")
+      .select("id, title, state")
+      .in("source", sources)
+      .in("state", states)
+      .is("gone_at", null)
+      .order("id", { ascending: true })
+      .range(from, from + STORED_PAGE - 1);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < STORED_PAGE) break;
+  }
+  return out;
+}
+
+/**
  * Every stored lead of these sources as "source|external_id", read STORED_PAGE rows at a time
  * (ordered by id, so the pages neither overlap nor skip) until a short page.
  */
@@ -2825,7 +2942,12 @@ export async function storedLeadKeys(admin: Client, sources: string[]): Promise<
  * import (a single source) — the same way:
  *   - Lynn's copies of planroom jobs, and BidNet's copies of jobs on the owner's own lists
  *     pulled in the same pass, are dropped (and retired if stored earlier);
- *   - upsert on (source, external_id): the team's status and note are kept;
+ *   - so are BidNet's copies of jobs stored from a portal (PORTAL_SOURCES; the browser job's
+ *     city portals arrive in their own pass), same title and state; and a portal row saved
+ *     retires a stored BidNet copy of it;
+ *   - upsert on (source, external_id), one request per source and key set, each sending only
+ *     the keys its rows have: the team's status and note, and what the planroom job page gave
+ *     (contact on the planroom sources, details, details_read_at), are never written over;
  *   - a source that answered in full has what dropped off it marked gone (not Lynn's feed,
  *     which is only the latest posts; not a source in `partial`, read only in part);
  *   - Prospecting users are told about new roof leads.
@@ -2851,6 +2973,22 @@ export async function saveLeadRows(
       (x) => x.source !== "bidnet" && x.source !== "lynn_bids" && !x.source.endsWith("_permits"),
     )
     .flatMap((x) => x.rows);
+  // The portals' stored open leads in BidNet's states (the browser job's portals are never in
+  // the same pass as BidNet).
+  const bidnetStates = [
+    ...new Set(
+      pulled
+        .filter((x) => x.source === "bidnet")
+        .flatMap((x) => x.rows.map((r) => r.state ?? "KY")),
+    ),
+  ];
+  const portalTitles = new Set(
+    bidnetStates.length
+      ? (await storedOpenLeads(admin, PORTAL_SOURCES, bidnetStates)).map((r) =>
+          titleKey(r.state, r.title),
+        )
+      : [],
+  );
   for (const x of pulled) {
     let keepRows = x.rows;
     if (x.source === "lynn_bids" || x.source === "bidnet") {
@@ -2858,8 +2996,15 @@ export async function saveLeadRows(
         x.rows,
         x.source === "lynn_bids" ? planroomRows : ownListRows,
       );
+      keepRows =
+        x.source === "bidnet"
+          ? keep.filter((r) => {
+              const copy = !isGenericTitle(r.title) && portalTitles.has(titleKey(r.state, r.title));
+              if (copy) dropped.push(r.external_id);
+              return !copy;
+            })
+          : keep;
       if (dropped.length) duplicates.push({ source: x.source, ids: dropped });
-      keepRows = keep;
     }
     // Every row names its state: one upsert batch sends the union of the rows' columns, and a
     // row without `state` would send null (not the column default) and fail the not-null check.
@@ -2884,12 +3029,27 @@ export async function saveLeadRows(
     fresh = rows.filter((r) => !known.has(`${r.source}|${r.external_id}`));
   }
 
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await admin
-      .from("leads")
-      .upsert(rows.slice(i, i + 500), { onConflict: "source,external_id" });
-    if (error) throw new Error(error.message);
+  // One request per source and key set. supabase-js sends the union of a batch's keys as the
+  // columns to write, and null for a row that lacks one: a batch mixing lists wrote null over
+  // the team's notes and the planroom contacts on every refresh (Sep 30). A key whose value is
+  // undefined is dropped (it would go out as null the same way).
+  const batches = new Map<string, LeadInsert[]>();
+  for (const r of rows) {
+    const clean = Object.fromEntries(
+      Object.entries(r).filter(([, v]) => v !== undefined),
+    ) as LeadInsert;
+    const key = `${clean.source}|${Object.keys(clean).sort().join(",")}`;
+    const batch = batches.get(key);
+    if (batch) batch.push(clean);
+    else batches.set(key, [clean]);
   }
+  for (const batch of batches.values())
+    for (let i = 0; i < batch.length; i += 500) {
+      const { error } = await admin
+        .from("leads")
+        .upsert(batch.slice(i, i + 500), { onConflict: "source,external_id" });
+      if (error) throw new Error(error.message);
+    }
 
   // Dropped off a source that answered: mark gone (kept for history; hidden by default).
   let gone = 0;
@@ -2925,6 +3085,25 @@ export async function saveLeadRows(
     const { data: g, error } = await q.select("id");
     if (error) throw new Error(error.message);
     gone += g?.length ?? 0;
+  }
+  // A portal row saved now retires a stored BidNet copy of the same job (same title and state).
+  const portalRows = rows.filter((r) => isPortalSource(r.source) && !isGenericTitle(r.title));
+  if (portalRows.length) {
+    const keys = new Set(portalRows.map((r) => titleKey(r.state, r.title)));
+    const states = [...new Set(portalRows.map((r) => r.state ?? "KY"))];
+    const copies = (await storedOpenLeads(admin, ["bidnet"], states))
+      .filter((r) => keys.has(titleKey(r.state, r.title)))
+      .map((r) => r.id);
+    for (let i = 0; i < copies.length; i += 200) {
+      const { data: g, error } = await admin
+        .from("leads")
+        .update({ gone_at: new Date().toISOString() })
+        .in("id", copies.slice(i, i + 200))
+        .is("gone_at", null)
+        .select("id");
+      if (error) throw new Error(error.message);
+      gone += g?.length ?? 0;
+    }
   }
 
   const newRoof = fresh.filter((r) => r.is_roof);
@@ -3240,7 +3419,9 @@ export async function refreshLeads(
     failed.push(`Re-roof marking ${e instanceof Error ? e.message : String(e)}`);
   }
   const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${reroofMarked > 0 ? `, ${reroofMarked} building${reroofMarked === 1 ? "" : "s"} marked re-roofed` : ""}${failed.length ? `; ${failed.join("; ")}` : ""}`;
-  await admin.rpc("stamp_lead_fetch", { note });
+  // The problems go in a list of their own (lead_settings.last_fetch_problems): the page's red
+  // line reads it instead of picking them out of the note.
+  await admin.rpc("stamp_lead_fetch", { note, problems: failed });
   return {
     planroom: planroomCount,
     louisville: louisvilleCount,

@@ -194,8 +194,68 @@ const listSchema = z.object({
   includeGone: z.boolean().optional(),
   /** One state only (owner, Sep 29: "a filter to just see KY or just see TN"). */
   state: z.enum(["KY", "TN"]).optional(),
+  /** The search box: part of the title, agency, place, address, city or contractor. */
+  q: z.string().max(200).optional(),
 });
 export type ListLeadsInput = z.input<typeof listSchema>;
+
+/** The filters the list and its counts share (the Source and State pickers, the search box). */
+export interface LeadFilter {
+  source?: string | undefined;
+  state?: "KY" | "TN" | undefined;
+  q?: string | undefined;
+}
+/** The fields the search box looks in (what the card shows). */
+export const LEAD_SEARCH_FIELDS = [
+  "title",
+  "agency",
+  "location",
+  "address",
+  "city",
+  "contractor",
+] as const;
+
+/**
+ * The search box as one PostgREST `or` filter: any of the fields contains the text, case
+ * aside. A character that means something to the filter or to LIKE (, ( ) " * % _ \ :) stands
+ * for any one character, so no text can break out of the filter. Null for an empty box.
+ */
+export function leadSearchFilter(q: string | null | undefined): string | null {
+  const term = (q ?? "").trim().replace(/[,()"*%_\\:]/g, "_");
+  if (!term) return null;
+  return LEAD_SEARCH_FIELDS.map((f) => `${f}.ilike.%${term}%`).join(",");
+}
+
+/** Source, state and search on a leads query: the one place the list and its counts filter. */
+export function applyLeadFilters<
+  Q extends { eq(column: string, value: string): Q; or(filters: string): Q },
+>(q: Q, f: LeadFilter): Q {
+  let out = q;
+  if (f.source) out = out.eq("source", f.source);
+  if (f.state) out = out.eq("state", f.state);
+  const search = leadSearchFilter(f.q);
+  if (search) out = out.or(search);
+  return out;
+}
+
+type Sb = SupabaseClient<Database>;
+
+/** The list's query (listLeads without the access check). */
+export async function listLeadRows(sb: Sb, data: z.output<typeof listSchema>): Promise<LeadRow[]> {
+  let q = sb.from("leads").select("*").limit(500);
+  if (data.roofOnly) q = q.eq("is_roof", true);
+  q = applyLeadFilters(q, data);
+  const st = data.status ?? "open";
+  // "added" rows (from the retired Add-to-prospects button) stay in the open list.
+  if (st === "open") q = q.in("status", ["new", "watching", "added"]);
+  else if (st !== "all") q = q.eq("status", st);
+  if (!data.includeGone) q = q.is("gone_at", null);
+  const { data: rows, error } = await q
+    .order("bid_at", { ascending: true, nullsFirst: false })
+    .order("first_seen_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return rows ?? [];
+}
 
 /** The leads, soonest bid date first (undated after, newest first), 500 at most. */
 export const listLeads = createServerFn({ method: "GET" })
@@ -203,20 +263,7 @@ export const listLeads = createServerFn({ method: "GET" })
   .validator((d: unknown) => listSchema.parse(d ?? {}))
   .handler(async ({ data, context }): Promise<LeadRow[]> => {
     await readAccess(context);
-    let q = context.supabase.from("leads").select("*").limit(500);
-    if (data.roofOnly) q = q.eq("is_roof", true);
-    if (data.source) q = q.eq("source", data.source);
-    if (data.state) q = q.eq("state", data.state);
-    const st = data.status ?? "open";
-    // "added" rows (from the retired Add-to-prospects button) stay in the open list.
-    if (st === "open") q = q.in("status", ["new", "watching", "added"]);
-    else if (st !== "all") q = q.eq("status", st);
-    if (!data.includeGone) q = q.is("gone_at", null);
-    const { data: rows, error } = await q
-      .order("bid_at", { ascending: true, nullsFirst: false })
-      .order("first_seen_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return rows ?? [];
+    return listLeadRows(context.supabase, data);
   });
 
 export interface LeadCounts {
@@ -227,37 +274,47 @@ export interface LeadCounts {
   /** PLANROOM_EMAIL / PLANROOM_PASSWORD are set on the server (job pages get read). */
   planroom_login: boolean;
 }
+const countsSchema = listSchema.pick({ source: true, state: true, q: true });
+
+/**
+ * The tab counts (leadCounts without the access check), under the same Source, State and
+ * search filters as the list (Sep 30: the Open count ignored the Source picker and the box).
+ */
+export async function countLeads(
+  sb: Sb,
+  data: LeadFilter,
+): Promise<Omit<LeadCounts, "planroom_login">> {
+  const count = (f: (q: ReturnType<typeof base>) => ReturnType<typeof base>) =>
+    f(base()).then(({ count: n, error }) => {
+      if (error) throw new Error(error.message);
+      return n ?? 0;
+    });
+  // Open counts what the Open tab shows: still listed, and the bid date (when there is one)
+  // not yet passed (owner, Sep 29: "it says 32 open but I only counted 16").
+  const stillOpen = `bid_at.is.null,bid_at.gt.${new Date().toISOString()}`;
+  const base = () =>
+    applyLeadFilters(
+      sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null),
+      data,
+    );
+  const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
+    count((q) => q.in("status", ["new", "watching", "added"]).or(stillOpen)),
+    count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true).or(stillOpen)),
+    count((q) => q.eq("status", "new").eq("is_roof", true).or(stillOpen)),
+    sb.from("lead_settings").select("*").eq("id", 1).single(),
+  ]);
+  if (error) throw new Error(error.message);
+  return { open, open_roof: openRoof, new_roof: newRoof, settings };
+}
+
 /** The tab counts and the fetch stamp. */
 export const leadCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ state: z.enum(["KY", "TN"]).optional() }).parse(d ?? {}))
+  .validator((d: unknown) => countsSchema.parse(d ?? {}))
   .handler(async ({ data, context }): Promise<LeadCounts> => {
     await readAccess(context);
-    const sb = context.supabase;
-    const count = (f: (q: ReturnType<typeof base>) => ReturnType<typeof base>) =>
-      f(base()).then(({ count: n, error }) => {
-        if (error) throw new Error(error.message);
-        return n ?? 0;
-      });
-    // Open counts what the Open tab shows: still listed, and the bid date (when there is one)
-    // not yet passed (owner, Sep 29: "it says 32 open but I only counted 16").
-    const stillOpen = `bid_at.is.null,bid_at.gt.${new Date().toISOString()}`;
-    const base = () => {
-      const q = sb.from("leads").select("id", { count: "exact", head: true }).is("gone_at", null);
-      return data.state ? q.eq("state", data.state) : q;
-    };
-    const [open, openRoof, newRoof, { data: settings, error }] = await Promise.all([
-      count((q) => q.in("status", ["new", "watching", "added"]).or(stillOpen)),
-      count((q) => q.in("status", ["new", "watching", "added"]).eq("is_roof", true).or(stillOpen)),
-      count((q) => q.eq("status", "new").eq("is_roof", true).or(stillOpen)),
-      sb.from("lead_settings").select("*").eq("id", 1).single(),
-    ]);
-    if (error) throw new Error(error.message);
     return {
-      open,
-      open_roof: openRoof,
-      new_roof: newRoof,
-      settings,
+      ...(await countLeads(context.supabase, data)),
       planroom_login: !!(process.env["PLANROOM_EMAIL"] && process.env["PLANROOM_PASSWORD"]),
     };
   });

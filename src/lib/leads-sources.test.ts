@@ -242,7 +242,8 @@ describe("campus planrooms", () => {
       KEYWORDS,
     );
     expect(wku.contractor).toBe("Messer Construction Co.");
-    expect(wku.contact).toBe("Plans issued by Messer Construction Co. — bid the roofing to them");
+    // The job page owns the contact (readPlanroomPages); the card names the issuer until then.
+    expect(wku).not.toHaveProperty("contact");
     expect(wku.location).toBe("Bowling Green");
   });
 });

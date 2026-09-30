@@ -9,7 +9,7 @@ import { useState, type ReactNode, type SyntheticEvent } from "react";
 import { Eye, EyeOff, Loader2, StickyNote, Undo2, X } from "lucide-react";
 
 import { SOURCE_LABELS, type LeadRow, type LeadStatus } from "@/lib/leads.functions";
-import { formatCost } from "@/components/prospect/lead-format";
+import { formatCost, isNewLead } from "@/components/prospect/lead-format";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -129,9 +129,9 @@ export function LeadCard(props: {
   const open = () => {
     if (href) window.open(href, "_blank", "noopener,noreferrer");
   };
-  // "New" is a recent arrival nobody has acted on: first seen in the last three days and
-  // neither watched nor dismissed.
-  const isNew = status === "new" && Date.now() - Date.parse(l.first_seen_at) < 3 * DAY;
+  // "New" is a recent arrival nobody has acted on: first seen in the last three days, and
+  // never watched, dismissed or noted (Unwatch and Restore put it back to new, not to New).
+  const isNew = isNewLead(l);
   const stop = (e: SyntheticEvent) => e.stopPropagation();
 
   const who = [
@@ -189,7 +189,15 @@ export function LeadCard(props: {
         <p className="text-sm">
           <span className="font-medium">Contact:</span> {l.contact}
         </p>
-      ) : l.source === "ky_planroom" || l.source === "lynn_bids" ? (
+      ) : l.source === "campus_planrooms" && l.contractor ? (
+        // The plan issuer from the list, until the job page gives the contact.
+        <p className="text-sm">
+          <span className="font-medium">Contact:</span> Plans issued by {l.contractor} — bid the
+          roofing to them
+        </p>
+      ) : l.source === "ky_planroom" ||
+        l.source === "lynn_bids" ||
+        l.source === "campus_planrooms" ? (
         <p className="text-xs text-muted-foreground">
           Bid documents, the owner's contact and the plan-holder list are on the planroom job page
           (free sign-in); the nightly check fills them in here once the server has a login.

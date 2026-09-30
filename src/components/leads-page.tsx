@@ -10,7 +10,7 @@
  * they stop arriving. Lexington's city bids are pulled with the rest.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { formatDistanceToNow } from "date-fns";
 import { Info, Loader2, RefreshCw, Search, Settings2 } from "lucide-react";
@@ -32,7 +32,7 @@ import {
   type ListLeadsInput,
 } from "@/lib/leads.functions";
 import { LeadCard } from "@/components/prospect/lead-card";
-import { isClosedBid } from "@/components/prospect/lead-format";
+import { isClosedBid, lastCheckProblem } from "@/components/prospect/lead-format";
 import { LeadSettingsPanel } from "@/components/prospect/lead-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,19 +76,9 @@ const ABOUT =
   "Chattanooga permits: new non-residential buildings from the Chattanooga-Hamilton County planning agency (runs a month or two behind), over the same minimum cost; " +
   "Knox County bids: Knox County's own solicitations; " +
   "TN university bids: ETSU, Tennessee Tech, Austin Peay, MTSU and the Board of Regents (community colleges, TCATs, TSU). " +
-  "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. " +
+  "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. A job BidNet repeats from a list above (same title, same state) shows once, from that list, which has the contact. " +
   "Metro Nashville bids and Chattanooga city bids: those cities' own solicitations (the buyer to ask, the close date, Chattanooga's pre-bid meeting), from their Oracle supplier portals; those pages (and Louisville Metro's) only work in a browser, so a nightly job reads them at about 6:15 am Eastern and Refresh does not re-read them. " +
   "The app checks the rest every 6 hours when this page is open, and nightly.";
-
-/** The source failures a refresh appends to its note ("…; State planroom → 503"). */
-function fetchProblem(note: string | null | undefined): string | null {
-  if (!note) return null;
-  const i = note.search(
-    /; (State planroom|Louisville permits|Lynn Imaging bids|Bowling Green bids|Paducah bids|Lynn planroom|Planroom details|SAM\.gov|TN STREAM|UT [\w ]+ bids|Nashville permits|Chattanooga permits|Knox County bids|BidNet (?:TN|KY)|(?:ETSU|Tennessee Tech|Austin Peay|MTSU|TBR) bids|Metro Nashville bids|Chattanooga city bids|Lexington city bids|Louisville Metro bids|[\w. ]+ planroom) /,
-  );
-  if (i >= 0) return note.slice(i + 2);
-  return /failed/i.test(note) ? note : null;
-}
 
 /** The nightly browser job runs once a day; a source not heard from in this long is late. */
 const BROWSER_LATE_MS = 36 * 60 * 60 * 1000;
@@ -133,13 +123,24 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const [tab, setTab] = useState<StatusTab>("open");
   const [showClosed, setShowClosed] = useState(false);
   const [search, setSearch] = useState("");
+  // The box filters the cards at once; the server (the list and the Open count) follows a
+  // moment after typing stops.
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const sourceArg = source !== "all" ? { source } : {};
+  const searchArg = q ? { q } : {};
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Owner (Sep 29): the browser cuts a long tooltip off before the "Last check" line, so the
   // info icon opens a panel instead.
   const [aboutOpen, setAboutOpen] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  // The job-page reads after a refresh report apart, so neither hides the other.
+  const [pagesError, setPagesError] = useState<string | null>(null);
 
-  const filters = { roofOnly, source, status: tab, state };
+  const filters = { roofOnly, source, status: tab, state, q };
   const leads = useQuery({
     queryKey: ["leads", filters],
     queryFn: () =>
@@ -147,14 +148,18 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
         data: {
           roofOnly,
           status: tab,
-          ...(source !== "all" ? { source } : {}),
+          ...sourceArg,
           ...stateArg,
+          ...searchArg,
         },
       }),
+    placeholderData: keepPreviousData,
   });
+  // The Open count follows the same Source, State and search as the list.
   const counts = useQuery({
-    queryKey: ["lead-counts", state],
-    queryFn: () => countsFn({ data: stateArg }),
+    queryKey: ["lead-counts", state, source, q],
+    queryFn: () => countsFn({ data: { ...stateArg, ...sourceArg, ...searchArg } }),
+    placeholderData: keepPreviousData,
   });
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -168,6 +173,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   const readPages = async () => {
     if (reading !== null) return;
     setReading(0);
+    setPagesError(null);
     const problems: string[] = [];
     try {
       for (let i = 0; i < 8; i++) {
@@ -184,7 +190,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
     }
     if (problems.length) {
       const msg = [...new Set(problems)].join("; ");
-      setRefreshError(msg);
+      setPagesError(msg);
       toast.error(`Planroom pages: ${msg}`);
     }
   };
@@ -262,7 +268,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
   }, [rows, search, showClosed]);
 
   const settings = counts.data?.settings;
-  const problem = refreshError ?? fetchProblem(settings?.last_fetch_note);
+  const problem = lastCheckProblem(settings, refreshError, pagesError);
   const lateBrowser = lateBrowserSources(settings?.source_fetched_at);
   const neverPulled = !!counts.data && !settings?.last_fetch_at;
   const openCount = counts.data ? (roofOnly ? counts.data.open_roof : counts.data.open) : null;

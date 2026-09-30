@@ -2850,6 +2850,7 @@ export type Database = {
           id: number;
           last_fetch_at: string | null;
           last_fetch_note: string | null;
+          last_fetch_problems: string[] | null;
           louisville_days: number;
           louisville_min_sqft: number;
           louisville_types: string[];
@@ -2863,6 +2864,7 @@ export type Database = {
           id?: number;
           last_fetch_at?: string | null;
           last_fetch_note?: string | null;
+          last_fetch_problems?: string[] | null;
           louisville_days?: number;
           louisville_min_sqft?: number;
           louisville_types?: string[];
@@ -2876,6 +2878,7 @@ export type Database = {
           id?: number;
           last_fetch_at?: string | null;
           last_fetch_note?: string | null;
+          last_fetch_problems?: string[] | null;
           louisville_days?: number;
           louisville_min_sqft?: number;
           louisville_types?: string[];
@@ -2897,6 +2900,8 @@ export type Database = {
           contact: string | null;
           contractor: string | null;
           county: string | null;
+          details: Json | null;
+          details_read_at: string | null;
           external_id: string;
           first_seen_at: string;
           gone_at: string | null;
@@ -2930,6 +2935,8 @@ export type Database = {
           contact?: string | null;
           contractor?: string | null;
           county?: string | null;
+          details?: Json | null;
+          details_read_at?: string | null;
           external_id: string;
           first_seen_at?: string;
           gone_at?: string | null;
@@ -2963,6 +2970,8 @@ export type Database = {
           contact?: string | null;
           contractor?: string | null;
           county?: string | null;
+          details?: Json | null;
+          details_read_at?: string | null;
           external_id?: string;
           first_seen_at?: string;
           gone_at?: string | null;
@@ -3433,7 +3442,10 @@ export type Database = {
       };
       prospect_user_ids: { Args: never; Returns: string[] };
       stamp_storm_fetch: { Args: { note: string }; Returns: undefined };
-      stamp_lead_fetch: { Args: { note: string }; Returns: undefined };
+      stamp_lead_fetch: {
+        Args: { note: string; problems?: string[] | null };
+        Returns: undefined;
+      };
       crm_untouched: {
         Args: never;
         Returns: {
