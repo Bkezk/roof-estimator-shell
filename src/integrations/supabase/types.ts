@@ -353,6 +353,7 @@ export type Database = {
       };
       crm_accounts: {
         Row: {
+          account_manager_id: string | null;
           address1: string | null;
           address2: string | null;
           billing_instructions: string | null;
@@ -366,6 +367,13 @@ export type Database = {
           external_id: string | null;
           id: string;
           kind: string;
+          mailing_address1: string | null;
+          mailing_address2: string | null;
+          mailing_city: string | null;
+          mailing_same: boolean;
+          mailing_state: string | null;
+          mailing_zip: string | null;
+          mobile: string | null;
           name: string;
           notes: string | null;
           phone: string | null;
@@ -377,6 +385,7 @@ export type Database = {
           zip: string | null;
         };
         Insert: {
+          account_manager_id?: string | null;
           address1?: string | null;
           address2?: string | null;
           billing_instructions?: string | null;
@@ -390,6 +399,13 @@ export type Database = {
           external_id?: string | null;
           id?: string;
           kind?: string;
+          mailing_address1?: string | null;
+          mailing_address2?: string | null;
+          mailing_city?: string | null;
+          mailing_same?: boolean;
+          mailing_state?: string | null;
+          mailing_zip?: string | null;
+          mobile?: string | null;
           name: string;
           notes?: string | null;
           phone?: string | null;
@@ -401,6 +417,7 @@ export type Database = {
           zip?: string | null;
         };
         Update: {
+          account_manager_id?: string | null;
           address1?: string | null;
           address2?: string | null;
           billing_instructions?: string | null;
@@ -414,6 +431,13 @@ export type Database = {
           external_id?: string | null;
           id?: string;
           kind?: string;
+          mailing_address1?: string | null;
+          mailing_address2?: string | null;
+          mailing_city?: string | null;
+          mailing_same?: boolean;
+          mailing_state?: string | null;
+          mailing_zip?: string | null;
+          mobile?: string | null;
           name?: string;
           notes?: string | null;
           phone?: string | null;
@@ -424,7 +448,15 @@ export type Database = {
           updated_by_name?: string | null;
           zip?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "crm_accounts_account_manager_id_fkey";
+            columns: ["account_manager_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       crm_contacts: {
         Row: {
@@ -3497,6 +3529,14 @@ export type Database = {
           id: string;
           notify_email: boolean;
           notify_push: boolean;
+        }[];
+      };
+      crm_user_options: {
+        Args: never;
+        Returns: {
+          email: string;
+          full_name: string | null;
+          id: string;
         }[];
       };
       technician_options: {

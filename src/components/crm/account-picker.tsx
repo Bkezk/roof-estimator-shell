@@ -1,7 +1,8 @@
 /**
  * The customer typeahead (docs/service-module-design.md §5.1, §11): one search box over accounts
  * and their sites. Picking a site row sets account + site in one click; the last row adds the
- * typed name as a new customer through a small inline dialog (quickCreateAccount) and selects it,
+ * typed name as a new customer through a small inline dialog (quickCreateAccount: the account
+ * only, no site — sites are added on the Customers page afterwards) and selects it,
  * then offers to link saved bids that look like the new customer (LinkBidsDialog) — after the
  * pick, so the surrounding form (a ticket) keeps its state.
  * Used by the service ticket form and the Customers page's "New customer".
@@ -18,6 +19,13 @@ import { toast } from "sonner";
 import { Building2, Loader2, MapPin, Plus, User, X } from "lucide-react";
 
 import { quickCreateAccount, searchAccounts, type AccountHit } from "@/lib/crm.functions";
+import { CONTACT_REQUIRED, hasContactMethod } from "@/lib/crm-account";
+import {
+  AccountManagerSelect,
+  AddressInputs,
+  MailingAddressInputs,
+  type AddressValue,
+} from "@/components/crm/account-fields";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -280,8 +288,8 @@ export function AccountPicker(props: {
 }
 
 /**
- * New customer in one step: the account and (when a site name or address is given) its first
- * site. An individual's site defaults to their own name.
+ * New customer in one step: the account only (owner, Sep 30: its sites are added on the account
+ * afterwards, under Customers). Needs an email, a cell phone or an office phone.
  */
 export function QuickAddCustomerDialog(props: {
   open: boolean;
@@ -294,13 +302,15 @@ export function QuickAddCustomerDialog(props: {
   const [name, setName] = useState("");
   const [kind, setKind] = useState<"company" | "individual">("company");
   const [contact, setContact] = useState("");
+  const [email, setEmail] = useState("");
+  const [mobile, setMobile] = useState("");
   const [phone, setPhone] = useState("");
-  const [siteName, setSiteName] = useState("");
-  const [siteTouched, setSiteTouched] = useState(false);
-  const [address1, setAddress1] = useState("");
-  const [city, setCity] = useState("");
-  const [state, setState] = useState("KY");
-  const [zip, setZip] = useState("");
+  const [physical, setPhysical] = useState<AddressValue>(blankAddress("KY"));
+  const [mailingSame, setMailingSame] = useState(true);
+  const [mailing, setMailing] = useState<AddressValue>(blankAddress(""));
+  const [manager, setManager] = useState("");
+  // The "Add an email or a phone number" line shows once Save has been tried.
+  const [tried, setTried] = useState(false);
 
   // Reset each time the dialog opens, prefilled with the typed name.
   useEffect(() => {
@@ -308,17 +318,17 @@ export function QuickAddCustomerDialog(props: {
     setName(props.initialName);
     setKind("company");
     setContact("");
+    setEmail("");
+    setMobile("");
     setPhone("");
-    setSiteName("");
-    setSiteTouched(false);
-    setAddress1("");
-    setCity("");
-    setState("KY");
-    setZip("");
+    setPhysical(blankAddress("KY"));
+    setMailingSame(true);
+    setMailing(blankAddress(""));
+    setManager("");
+    setTried(false);
   }, [props.open, props.initialName]);
 
-  // An individual's site is their own name unless edited.
-  const effectiveSite = siteTouched ? siteName : kind === "individual" ? name : siteName;
+  const reachable = hasContactMethod({ email, phone, mobile });
 
   const save = useMutation({
     mutationFn: () =>
@@ -327,12 +337,21 @@ export function QuickAddCustomerDialog(props: {
           name: name.trim(),
           kind,
           contact_name: contact,
+          email,
+          mobile,
           phone,
-          site_name: effectiveSite,
-          address1,
-          city,
-          state,
-          zip,
+          ...physical,
+          mailing_same: mailingSame,
+          ...(mailingSame
+            ? {}
+            : {
+                mailing_address1: mailing.address1,
+                mailing_address2: mailing.address2,
+                mailing_city: mailing.city,
+                mailing_state: mailing.state,
+                mailing_zip: mailing.zip,
+              }),
+          account_manager_id: manager || null,
         },
       }),
     onSuccess: (hit) => {
@@ -352,12 +371,12 @@ export function QuickAddCustomerDialog(props: {
         props.onOpenChange(o);
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>New customer</DialogTitle>
           <DialogDescription>
-            The customer and their first site in one step. Everything but the name can be filled in
-            later on the Customers page.
+            The name and one way to reach them (email or a phone) are required. Sites are added on
+            the customer after it is saved.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -366,8 +385,13 @@ export function QuickAddCustomerDialog(props: {
             e.preventDefault();
             // The dialog is portalled, but React still bubbles submit to a surrounding form.
             e.stopPropagation();
+            setTried(true);
             if (!name.trim()) {
               toast.error("The customer needs a name");
+              return;
+            }
+            if (!reachable) {
+              toast.error(CONTACT_REQUIRED);
               return;
             }
             save.mutate();
@@ -405,54 +429,57 @@ export function QuickAddCustomerDialog(props: {
               <Input id="qa-contact" value={contact} onChange={(e) => setContact(e.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="qa-phone">Phone</Label>
+              <Label htmlFor="qa-email">Email</Label>
+              <Input
+                id="qa-email"
+                type="email"
+                inputMode="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="qa-mobile">Cell phone</Label>
+              <Input
+                id="qa-mobile"
+                type="tel"
+                inputMode="tel"
+                value={mobile}
+                onChange={(e) => setMobile(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="qa-phone">Office phone</Label>
               <Input
                 id="qa-phone"
                 type="tel"
+                inputMode="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
             </div>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="qa-site">Site name</Label>
-            <Input
-              id="qa-site"
-              value={effectiveSite}
-              placeholder="e.g. Yellow Creek Elementary (optional)"
-              onChange={(e) => {
-                setSiteTouched(true);
-                setSiteName(e.target.value);
-              }}
+          {tried && !reachable && (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              {CONTACT_REQUIRED}
+            </p>
+          )}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Physical address</p>
+            <AddressInputs
+              label="Physical address"
+              value={physical}
+              onChange={(k, v) => setPhysical((a) => ({ ...a, [k]: v }))}
             />
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="qa-address1">Address</Label>
-            <Input
-              id="qa-address1"
-              value={address1}
-              onChange={(e) => setAddress1(e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-[1fr_4.5rem_6rem] gap-3">
-            <div className="space-y-1">
-              <Label htmlFor="qa-city">City</Label>
-              <Input id="qa-city" value={city} onChange={(e) => setCity(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="qa-state">State</Label>
-              <Input id="qa-state" value={state} onChange={(e) => setState(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="qa-zip">Zip</Label>
-              <Input
-                id="qa-zip"
-                inputMode="numeric"
-                value={zip}
-                onChange={(e) => setZip(e.target.value)}
-              />
-            </div>
-          </div>
+          <MailingAddressInputs
+            idPrefix="qa"
+            same={mailingSame}
+            onSame={setMailingSame}
+            value={mailing}
+            onChange={(k, v) => setMailing((a) => ({ ...a, [k]: v }))}
+          />
+          <AccountManagerSelect id="qa-manager" value={manager} onChange={setManager} />
           <DialogFooter>
             <Button
               type="button"
@@ -477,3 +504,11 @@ export function QuickAddCustomerDialog(props: {
     </Dialog>
   );
 }
+
+const blankAddress = (state: string): AddressValue => ({
+  address1: "",
+  address2: "",
+  city: "",
+  state,
+  zip: "",
+});

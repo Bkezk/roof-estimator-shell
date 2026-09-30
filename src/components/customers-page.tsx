@@ -1,7 +1,9 @@
 /**
  * Customers — the CRM hub (docs/service-module-design.md §11). A customer is an account (a
- * company / group or an individual) with one or more sites; service tickets and bids link to
- * it. Left: the searchable list; right (`?id=<uuid>`): the account's fields, its sites, its
+ * company / group or an individual) with zero or more sites; service tickets and bids link to
+ * it. A new customer is saved without sites; they are added on the account (Sites › Add site).
+ * Each account has an account manager (the list filters by it), a physical and a mailing
+ * address, and at least one of email / cell phone / office phone (owner, Sep 30). Left: the searchable list; right (`?id=<uuid>`): the account's fields, its sites, its
  * tickets and (with Estimate access) its bids. On a phone the two panes stack: the list, or
  * the open customer with a way back.
  *
@@ -57,9 +59,24 @@ import {
   type LinkedBidRow,
   type SiteRow,
 } from "@/lib/crm.functions";
+import {
+  CONTACT_REQUIRED,
+  addressLines,
+  hasContactMethod,
+  mailingLines,
+  matchesManager,
+  type ManagerFilter,
+} from "@/lib/crm-account";
 import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
+import {
+  AccountManagerSelect,
+  AddressInputs,
+  MailingAddressInputs,
+  type AddressValue,
+} from "@/components/crm/account-fields";
+import { useCrmUsers } from "@/lib/use-crm-users";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import {
   AlertDialog,
@@ -76,6 +93,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -157,16 +181,20 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
     queryFn: () => listFn(),
     enabled: !!session,
   });
+  const users = useCrmUsers();
+  const userName = new Map((users.data ?? []).map((u) => [u.id, u.name]));
   const [search, setSearch] = useState("");
+  const [manager, setManager] = useState<ManagerFilter>("all");
   const q = search.trim().toLowerCase();
   const rows = (list.data ?? []).filter(
     (a) =>
-      !q ||
-      [a.name, a.city, a.contact_name, a.external_id, a.phone]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
+      matchesManager(a, manager) &&
+      (!q ||
+        [a.name, a.city, a.contact_name, a.external_id, a.phone, a.mobile, a.email]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)),
   );
   return (
     <div className="space-y-3">
@@ -176,6 +204,25 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
+      <Select value={manager} onValueChange={(v) => setManager(v)}>
+        <SelectTrigger aria-label="Filter by account manager">
+          <SelectValue placeholder="Filter by account manager" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All account managers</SelectItem>
+          <SelectItem value="unassigned">Unassigned</SelectItem>
+          {(users.data ?? []).map((u) => (
+            <SelectItem key={u.id} value={u.id}>
+              {u.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {users.error && (
+        <p className="text-xs text-destructive">
+          Could not load the account managers: {errText(users.error)}
+        </p>
+      )}
       {list.error ? (
         <p className="text-sm text-destructive">
           Could not load customers ({errText(list.error)}). Try refreshing, or sign in again.
@@ -189,7 +236,14 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
           No customers yet. Add one with New customer, or from a ticket&apos;s customer search.
         </p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No customer matches “{search.trim()}”.</p>
+        <p className="text-sm text-muted-foreground">
+          {q ? `No customer matches “${search.trim()}”` : "No customer matches"}
+          {manager === "all"
+            ? "."
+            : manager === "unassigned"
+              ? " without an account manager."
+              : ` for ${userName.get(manager) ?? "that account manager"}.`}
+        </p>
       ) : (
         <div className="divide-y rounded-lg border">
           {rows.map((a) => (
@@ -215,6 +269,7 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
               <p className="mt-0.5 pl-6 text-xs text-muted-foreground">
                 {[
                   a.city,
+                  a.account_manager_id ? (userName.get(a.account_manager_id) ?? null) : null,
                   `${a.site_count} site${a.site_count === 1 ? "" : "s"}`,
                   a.open_jobs ? `${a.open_jobs} open ticket${a.open_jobs === 1 ? "" : "s"}` : null,
                 ]
@@ -328,13 +383,24 @@ type AccountFields = {
   name: string;
   kind: "company" | "individual";
   contact_name: string;
+  /** Office phone. */
   phone: string;
+  /** Cell phone. */
+  mobile: string;
   email: string;
   address1: string;
   address2: string;
   city: string;
   state: string;
   zip: string;
+  mailing_same: boolean;
+  mailing_address1: string;
+  mailing_address2: string;
+  mailing_city: string;
+  mailing_state: string;
+  mailing_zip: string;
+  /** "" = unassigned. */
+  account_manager_id: string;
   billing_instructions: string;
   external_id: string;
   notes: string;
@@ -344,12 +410,20 @@ const accountFields = (a: AccountRow): AccountFields => ({
   kind: a.kind === "individual" ? "individual" : "company",
   contact_name: a.contact_name ?? "",
   phone: a.phone ?? "",
+  mobile: a.mobile ?? "",
   email: a.email ?? "",
   address1: a.address1 ?? "",
   address2: a.address2 ?? "",
   city: a.city ?? "",
   state: a.state ?? "",
   zip: a.zip ?? "",
+  mailing_same: a.mailing_same,
+  mailing_address1: a.mailing_address1 ?? "",
+  mailing_address2: a.mailing_address2 ?? "",
+  mailing_city: a.mailing_city ?? "",
+  mailing_state: a.mailing_state ?? "",
+  mailing_zip: a.mailing_zip ?? "",
+  account_manager_id: a.account_manager_id ?? "",
   billing_instructions: a.billing_instructions ?? "",
   external_id: a.external_id ?? "",
   notes: a.notes ?? "",
@@ -364,11 +438,30 @@ function AccountBlock({ account, onDelete }: { account: AccountRow; onDelete: ()
 
 function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDelete: () => void }) {
   const { can } = useAuth();
+  const users = useCrmUsers();
   const a = props.account;
-  const street = [a.address1, a.address2].filter((x) => x && x.trim()).join(", ");
-  const cityLine = [a.city, [a.state, a.zip].filter((x) => x && x.trim()).join(" ")]
-    .filter((x) => x && x.trim())
-    .join(", ");
+  const physical = addressLines(a);
+  const mailing = mailingLines(a);
+  const manager = a.account_manager_id
+    ? (users.data?.find((u) => u.id === a.account_manager_id)?.name ??
+      (users.isLoading ? "…" : "(a removed user)"))
+    : null;
+  const lines = (ls: string[]) =>
+    ls.length ? (
+      <>
+        {ls.map((l) => (
+          <span key={l} className="block">
+            {l}
+          </span>
+        ))}
+      </>
+    ) : null;
+  const tel = (n: string | null) =>
+    n ? (
+      <a href={`tel:${n}`} className="underline-offset-2 hover:underline">
+        {n}
+      </a>
+    ) : null;
   const none = <span className="text-muted-foreground">—</span>;
   const row = (label: string, value: React.ReactNode, wide?: boolean) => (
     <div className={wide ? "sm:col-span-2" : undefined}>
@@ -413,16 +506,16 @@ function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDele
           </Button>
         </div>
       </div>
+      {!a.deleted_at && !hasContactMethod(a) && (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          {CONTACT_REQUIRED}: this customer has no email or phone on file. Edit to add one.
+        </p>
+      )}
       <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+        {row("Account manager", manager ?? "Unassigned")}
         {row("Contact", a.contact_name)}
-        {row(
-          "Phone",
-          a.phone ? (
-            <a href={`tel:${a.phone}`} className="underline-offset-2 hover:underline">
-              {a.phone}
-            </a>
-          ) : null,
-        )}
+        {row("Cell phone", tel(a.mobile))}
+        {row("Office phone", tel(a.phone))}
         {row(
           "Email",
           a.email ? (
@@ -431,14 +524,21 @@ function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDele
             </a>
           ) : null,
         )}
+        {row("Physical address", lines(physical))}
         {row(
-          "Billing address",
-          street || cityLine ? (
-            <>
-              {street && <span className="block">{street}</span>}
-              {cityLine && <span className="block">{cityLine}</span>}
-            </>
-          ) : null,
+          "Mailing address",
+          a.mailing_same ? (
+            physical.length ? (
+              <>
+                {lines(physical)}
+                <span className="block text-xs text-muted-foreground">Same as physical</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">Same as physical</span>
+            )
+          ) : (
+            lines(mailing)
+          ),
         )}
         {row(
           "Billing instructions",
@@ -466,8 +566,25 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
   const set = <K extends keyof AccountFields>(k: K, v: AccountFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 
+  const reachable = hasContactMethod(f);
+  const [tried, setTried] = useState(false);
+  const mailing: AddressValue = {
+    address1: f.mailing_address1,
+    address2: f.mailing_address2,
+    city: f.mailing_city,
+    state: f.mailing_state,
+    zip: f.mailing_zip,
+  };
+
   const save = useMutation({
-    mutationFn: () => saveFn({ data: { id: account.id, ...f } }),
+    mutationFn: () =>
+      saveFn({
+        data: {
+          id: account.id,
+          ...f,
+          account_manager_id: f.account_manager_id || null,
+        },
+      }),
     onSuccess: (row) => {
       toast.success("Customer saved");
       qc.setQueryData<AccountDetail>(["account", row.id], (old) =>
@@ -482,7 +599,11 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
     onError: (e) => toast.error(`Could not save the customer: ${errText(e)}`),
   });
 
-  const field = (k: keyof AccountFields, label: string, props?: { type?: string }) => (
+  const field = (
+    k: Exclude<keyof AccountFields, "mailing_same" | "kind">,
+    label: string,
+    props?: { type?: string },
+  ) => (
     <div className="space-y-1">
       <Label htmlFor={`acct-${k}`}>{label}</Label>
       <Input
@@ -500,8 +621,13 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
       aria-label="Edit customer"
       onSubmit={(e) => {
         e.preventDefault();
+        setTried(true);
         if (!f.name.trim()) {
           toast.error("The customer needs a name");
+          return;
+        }
+        if (!reachable) {
+          toast.error(CONTACT_REQUIRED);
           return;
         }
         save.mutate();
@@ -542,49 +668,49 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
           </ToggleGroup>
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         {field("contact_name", "Contact")}
-        {field("phone", "Phone", { type: "tel" })}
+        <AccountManagerSelect
+          id="acct-manager"
+          value={f.account_manager_id}
+          onChange={(v) => set("account_manager_id", v)}
+        />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
         {field("email", "Email", { type: "email" })}
+        {field("mobile", "Cell phone", { type: "tel" })}
+        {field("phone", "Office phone", { type: "tel" })}
       </div>
+      {tried && !reachable ? (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          {CONTACT_REQUIRED}
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          At least one of email, cell phone or office phone is required.
+        </p>
+      )}
       <div className="space-y-2">
-        <p className="text-sm font-medium">Billing address</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Input
-            aria-label="Billing address line 1"
-            placeholder="Address line 1"
-            value={f.address1}
-            onChange={(e) => set("address1", e.target.value)}
-          />
-          <Input
-            aria-label="Billing address line 2"
-            placeholder="Address line 2"
-            value={f.address2}
-            onChange={(e) => set("address2", e.target.value)}
-          />
-        </div>
-        <div className="grid grid-cols-[1fr_4.5rem_6rem] gap-3">
-          <Input
-            aria-label="City"
-            placeholder="City"
-            value={f.city}
-            onChange={(e) => set("city", e.target.value)}
-          />
-          <Input
-            aria-label="State"
-            placeholder="State"
-            value={f.state}
-            onChange={(e) => set("state", e.target.value)}
-          />
-          <Input
-            aria-label="Zip"
-            placeholder="Zip"
-            inputMode="numeric"
-            value={f.zip}
-            onChange={(e) => set("zip", e.target.value)}
-          />
-        </div>
+        <p className="text-sm font-medium">Physical address</p>
+        <AddressInputs
+          label="Physical address"
+          value={{
+            address1: f.address1,
+            address2: f.address2,
+            city: f.city,
+            state: f.state,
+            zip: f.zip,
+          }}
+          onChange={(k, v) => set(k, v)}
+        />
       </div>
+      <MailingAddressInputs
+        idPrefix="acct"
+        same={f.mailing_same}
+        onSame={(v) => set("mailing_same", v)}
+        value={mailing}
+        onChange={(k, v) => set(`mailing_${k}`, v)}
+      />
       <div className="space-y-1">
         <Label htmlFor="acct-billing">Billing instructions</Label>
         <Textarea

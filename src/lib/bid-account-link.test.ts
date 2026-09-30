@@ -109,6 +109,15 @@ describe("profileDifferences / accountFromBid", () => {
       external_id: "C-12",
     });
   });
+
+  it("passes the profile's cell phone through (the bid has none), so it is never wiped", () => {
+    const same = applyProfileFill(bid(), profileFill(account), true);
+    const input = accountFromBid(
+      { ...same, phone: "", email: "" },
+      { ...account, phone: null, mobile: "606-555-0199" },
+    );
+    expect(input.mobile).toBe("606-555-0199");
+  });
 });
 
 describe("blankFieldsOnly (a bid that arrives already linked)", () => {

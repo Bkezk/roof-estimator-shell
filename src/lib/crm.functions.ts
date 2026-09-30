@@ -13,7 +13,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import {
+  accountSchema,
+  optText,
+  parseInput,
+  quickAccountSchema,
+  type AccountInput,
+  type QuickAccountInput,
+} from "@/lib/crm-account";
 import { namesLookAlike } from "@/lib/name-match";
+
+export type { AccountInput, QuickAccountInput };
 
 export type AccountRow = Database["public"]["Tables"]["crm_accounts"]["Row"];
 export type SiteRow = Database["public"]["Tables"]["crm_sites"]["Row"];
@@ -225,44 +235,24 @@ export const getAccount = createServerFn({ method: "GET" })
     return { account, sites: sites ?? [], jobs: jobs ?? [], bids };
   });
 
-/** Optional text: missing, null or blank all become null (the DB column's "not set"). */
-const optText = (max: number) =>
-  z
-    .string()
-    .trim()
-    .max(max)
-    .nullable()
-    .optional()
-    .transform((v) => (v == null || v === "" ? null : v));
+/** Drop the keys a caller left out, so an update leaves those columns as they are. */
+const defined = <T extends Record<string, unknown>>(o: T) =>
+  Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as {
+    [K in keyof T]: Exclude<T[K], undefined>;
+  };
 
-const accountSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z.string().trim().min(1, "Name is required").max(200),
-  kind: z.enum(["company", "individual"]).default("company"),
-  contact_name: optText(200),
-  phone: optText(60),
-  email: optText(200),
-  address1: optText(200),
-  address2: optText(200),
-  city: optText(120),
-  state: optText(20),
-  zip: optText(20),
-  billing_instructions: optText(2000),
-  external_id: optText(40),
-  notes: optText(5000),
-  source: z.enum(["manual", "prospect", "import"]).optional(),
-});
-export type AccountInput = z.input<typeof accountSchema>;
-
-/** Create (no id) or update an account. Returns the saved row. */
+/**
+ * Create (no id) or update an account. Returns the saved row. Needs an email, a cell phone or
+ * an office phone (crm-account.ts; the database checks it too).
+ */
 export const saveAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => accountSchema.parse(d))
+  .validator((d: unknown) => parseInput(accountSchema, d))
   .handler(async ({ data, context }): Promise<AccountRow> => {
     const p = await writeAccess(context);
     const sb = context.supabase;
     const { id, source, ...fields } = data;
-    const patch = { ...fields, updated_by_name: nameOf(p) };
+    const patch = { ...defined(fields), updated_by_name: nameOf(p) };
     if (id) {
       const { data: row, error } = await sb
         .from("crm_accounts")
@@ -319,79 +309,57 @@ export const saveSite = createServerFn({ method: "POST" })
   });
 
 /**
- * The one-step "new customer" from a ticket or a bid: account + (optionally) its first site in
- * one call. An individual's site defaults to their own name and address.
+ * The one-step "new customer" from the Customers page or a ticket's / bid's customer search: the
+ * account only, no site (owner, Sep 30: sites are added under the account afterwards). Needs an
+ * email, a cell phone or an office phone.
  */
-const quickSchema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(200),
-  kind: z.enum(["company", "individual"]).default("company"),
-  contact_name: optText(200),
-  phone: optText(60),
-  email: optText(200),
-  site_name: optText(200),
-  address1: optText(200),
-  city: optText(120),
-  state: optText(20),
-  zip: optText(20),
-  source: z.enum(["manual", "prospect", "import"]).optional(),
-});
-export type QuickAccountInput = z.input<typeof quickSchema>;
-
 export const quickCreateAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => quickSchema.parse(d))
+  .validator((d: unknown) => parseInput(quickAccountSchema, d))
   .handler(async ({ data, context }): Promise<AccountHit> => {
     const p = await writeAccess(context);
     const sb = context.supabase;
+    const { source, ...fields } = data;
     const { data: account, error } = await sb
       .from("crm_accounts")
       .insert({
-        name: data.name,
-        kind: data.kind,
-        contact_name: data.contact_name ?? null,
-        phone: data.phone ?? null,
-        email: data.email ?? null,
-        // The billing address starts as the first site's address (an individual's is where
-        // they live); a company's separate billing address is edited on the Customers page.
-        address1: data.address1 ?? null,
-        city: data.city ?? null,
-        state: data.state ?? null,
-        zip: data.zip ?? null,
-        source: data.source ?? "manual",
+        ...defined(fields),
+        source: source ?? "manual",
         created_by: context.userId,
         updated_by_name: nameOf(p),
       })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    let site: SiteRow | null = null;
-    const wantsSite = !!(data.site_name || data.address1 || data.city);
-    if (wantsSite) {
-      const { data: s, error: sErr } = await sb
-        .from("crm_sites")
-        .insert({
-          account_id: account.id,
-          name: data.site_name || data.name,
-          address1: data.address1 ?? null,
-          city: data.city ?? null,
-          state: data.state ?? null,
-          zip: data.zip ?? null,
-        })
-        .select("*")
-        .single();
-      if (sErr) throw new Error(sErr.message);
-      site = s;
-    }
     return {
       account_id: account.id,
       account_name: account.name,
       kind: data.kind,
-      site_id: site?.id ?? null,
-      site_name: site?.name ?? null,
-      site_address: siteAddressLine(site),
+      site_id: null,
+      site_name: null,
+      site_address: "",
       contact_name: account.contact_name,
-      phone: account.phone,
+      phone: account.phone ?? account.mobile,
     };
+  });
+
+/** A user who can be a customer's account manager. */
+export interface CrmUserOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * Every user, for the Account manager pickers and the Customers filter. `crm_user_options()` is
+ * SECURITY DEFINER because profiles RLS hides other users' rows from non-admins.
+ */
+export const listCrmUsers = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<CrmUserOption[]> => {
+    await readAccess(context);
+    const { data, error } = await context.supabase.rpc("crm_user_options");
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => ({ id: r.id, name: (r.full_name ?? "").trim() || r.email }));
   });
 
 /** Soft delete; tickets and bids keep their snapshot names and lose the link on purge. */

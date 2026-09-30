@@ -146,7 +146,8 @@ export function profileDifferences(customer: CustomerInfo, account: AccountLike)
 export function accountFromBid(
   customer: CustomerInfo,
   account: AccountLike &
-    Pick<AccountRow, "id" | "kind" | "billing_instructions" | "external_id" | "notes">,
+    Pick<AccountRow, "id" | "kind" | "billing_instructions" | "external_id" | "notes"> &
+    Partial<Pick<AccountRow, "mobile">>,
 ): AccountInput {
   // A blank bid field keeps the profile's value (see profileDifferences).
   const keep = (bid: string | undefined, profile: string | null) => t(bid) || t(profile);
@@ -157,6 +158,9 @@ export function accountFromBid(
     contact_name: keep(customer.contact, account.contact_name),
     phone: keep(customer.phone, account.phone),
     email: keep(customer.email, account.email),
+    // The bid has no cell phone field: the profile's is passed through (it may be the only way
+    // to reach the customer, which saveAccount requires).
+    mobile: account.mobile,
     address1: keep(customer.clientAddress, account.address1),
     address2: keep(customer.clientAddress2, account.address2),
     city: keep(customer.clientCity, account.city),
