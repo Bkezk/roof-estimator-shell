@@ -72,10 +72,9 @@ describe("renderShotsPdf", () => {
     expect(doc.getTitle()).toBe("Acme Warehouse Reroof — Bid summary");
   });
 
-  it("continues a very tall screenshot on following pages", async () => {
+  it("keeps a very tall screenshot whole on one page (owner: never cut across pages)", async () => {
     const tall = { png, width: 1000, height: 5000 };
-    const expected = shotLayout(tall.width, tall.height).pages;
-    expect(expected).toBeGreaterThan(1);
+    expect(shotLayout(tall.width, tall.height).pages).toBe(1);
     const doc = await pagesOf(
       await renderShotsPdf(
         base([
@@ -84,7 +83,7 @@ describe("renderShotsPdf", () => {
         ]),
       ),
     );
-    expect(doc.getPageCount()).toBe(1 + 1 + expected);
+    expect(doc.getPageCount()).toBe(1 + 2);
   });
 
   it("gives a step that could not be captured its own page with the note", async () => {
@@ -101,12 +100,16 @@ describe("renderShotsPdf", () => {
 });
 
 describe("shotLayout", () => {
-  it("fits the page width, shrinks slightly-too-tall pictures onto one page", () => {
+  it("fits the page width, and shrinks a taller picture to fit its height instead of splitting", () => {
     expect(shotLayout(1000, 600)).toMatchObject({ width: 720, pages: 1 });
-    // 720 wide would be ~540 pt tall: a little over the area, so it is shrunk instead of split.
+    // 720 wide would be ~540 pt tall: over the area, so it is shrunk to the area's height.
     const near = shotLayout(1000, 750);
     expect(near.pages).toBe(1);
     expect(near.width).toBeLessThan(720);
-    expect(shotLayout(1000, 3000).pages).toBeGreaterThan(1);
+    // A very tall panel is still one page, scaled to the area's height, keeping its proportions.
+    const tall = shotLayout(1000, 3000);
+    expect(tall.pages).toBe(1);
+    expect(tall.height / tall.width).toBeCloseTo(3, 5);
+    expect(tall.height).toBeLessThanOrEqual(near.height + 1e-9);
   });
 });

@@ -1,8 +1,9 @@
 /**
  * Bid summary (PDF export), screenshot edition: each estimator step is captured as a picture of
  * exactly what is on screen (capturePanel, html-to-image) and laid out one step per US-Letter
- * LANDSCAPE page (renderShotsPdf, pdf-lib) behind a small cover page. A panel taller than one
- * page continues on the next page(s), labelled "(continued)".
+ * LANDSCAPE page (renderShotsPdf, pdf-lib) behind a small cover page. A panel is scaled to fit
+ * its page whole, width and height, never cut across pages (owner, Sep 30: "one screenshot per
+ * page rather than cutting some into two pages").
  *
  * Browser-only helpers, no React. html-to-image and pdf-lib are imported dynamically so the
  * estimator bundle only pays for them when someone actually exports (type imports are erased).
@@ -140,10 +141,6 @@ const AREA_TOP = HEADER_RULE_Y - 8;
 const FOOTER_RULE_Y = MARGIN + 12;
 const AREA_BOTTOM = FOOTER_RULE_Y + 8;
 const AREA_H = AREA_TOP - AREA_BOTTOM;
-/** A picture at most this much taller than the area is shrunk onto one page instead of split. */
-const SHRINK_TO_FIT = 1.2;
-/** Continuation pages repeat this much of the previous slice so a cut row is readable. */
-const OVERLAP = 18;
 
 type Rgb = readonly [number, number, number];
 const INK: Rgb = [0.12, 0.12, 0.14];
@@ -152,17 +149,14 @@ const RULE: Rgb = [0.72, 0.72, 0.75];
 const FRAME: Rgb = [0.85, 0.85, 0.88];
 const ACCENT: Rgb = [0.1, 0.27, 0.5];
 
-/** How a picture of `w`×`h` CSS px is placed: its drawn size and the number of pages it spans. */
+/**
+ * How a picture of `w`×`h` CSS px is placed: scaled to fit the page's picture area on both axes
+ * (never enlarged past the page width), so every step is one whole page. `pages` is always 1
+ * and stays for callers that count pages.
+ */
 export function shotLayout(w: number, h: number): { width: number; height: number; pages: number } {
-  let scale = CONTENT_W / w;
-  let height = h * scale;
-  if (height > AREA_H && height <= AREA_H * SHRINK_TO_FIT) {
-    scale = AREA_H / h;
-    height = AREA_H;
-  }
-  const width = w * scale;
-  const pages = height <= AREA_H ? 1 : 1 + Math.ceil((height - AREA_H) / (AREA_H - OVERLAP));
-  return { width, height, pages };
+  const scale = Math.min(CONTENT_W / w, AREA_H / h);
+  return { width: w * scale, height: h * scale, pages: 1 };
 }
 
 /** Render the screenshot bid summary: a cover page, then one page run per step. */
@@ -293,30 +287,18 @@ export async function renderShotsPdf(input: ShotsPdfInput): Promise<Uint8Array> 
       images.set(shot.png, image);
     }
     const lay = shotLayout(shot.width, shot.height);
+    // Whole picture on one page, centred left to right, hung from the top of the area.
     const x = MARGIN + (CONTENT_W - lay.width) / 2;
-    for (let k = 0; k < lay.pages; k++) {
-      const page = stepPage(k === 0 ? heading : `${heading} (continued)`);
-      // Slice k shows the picture from k·(AREA_H − OVERLAP) down; clip to the area so the rest
-      // of the picture (drawn off the area) never covers the header or footer.
-      const top = AREA_TOP + k * (AREA_H - OVERLAP);
-      const visible = Math.min(AREA_H, lay.height - k * (AREA_H - OVERLAP));
-      page.pushOperators(
-        pdfLib.pushGraphicsState(),
-        pdfLib.rectangle(x, AREA_TOP - visible, lay.width, visible),
-        pdfLib.clip(),
-        pdfLib.endPath(),
-      );
-      page.drawImage(image, { x, y: top - lay.height, width: lay.width, height: lay.height });
-      page.pushOperators(pdfLib.popGraphicsState());
-      page.drawRectangle({
-        x,
-        y: AREA_TOP - visible,
-        width: lay.width,
-        height: visible,
-        borderColor: color(FRAME),
-        borderWidth: 0.5,
-      });
-    }
+    const page = stepPage(heading);
+    page.drawImage(image, { x, y: AREA_TOP - lay.height, width: lay.width, height: lay.height });
+    page.drawRectangle({
+      x,
+      y: AREA_TOP - lay.height,
+      width: lay.width,
+      height: lay.height,
+      borderColor: color(FRAME),
+      borderWidth: 0.5,
+    });
   }
 
   tocSlots.forEach((slotY, i) => {
