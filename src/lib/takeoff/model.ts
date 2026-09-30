@@ -14,7 +14,7 @@
 
 import type { UnderlaymentLayer } from "@/lib/engine/bid-builder";
 import type { Attachment } from "@/lib/engine/estimate";
-import { areaSideRoles, edgeLineSides } from "./edge-lines";
+import { edgeLineSides, sideRolesOf, type SideRoles } from "./edge-lines";
 import {
   drawnSideLabels,
   edgeLengths,
@@ -78,10 +78,23 @@ export const COUNT_ROLE_LABELS: Record<CountRole, string> = {
   other: "Other",
 };
 
+/** The line roles an area side is tagged with in its edge table (a wall or a gutter along it). */
+export type SideTagRole = "parapet" | "gutter";
+/**
+ * One side of an area: its edge details, plus the tag kept by `syncSideTags` (./side-tags.ts)
+ * while a parapet or gutter line runs exactly along it — the line's role and id, and the side's
+ * own details from before the role applied (restored when the line goes or changes role).
+ */
+export type AreaEdge = OutlineEdgeOptions & {
+  alongRole?: SideTagRole;
+  alongLineId?: string;
+  beforeRole?: { termination?: string; blockingFt?: number };
+};
+
 export interface AreaAttrs {
   name: string;
   /** Per drawn edge i (points[i] → points[i+1]); missing = inert edge. */
-  edges?: OutlineEdgeOptions[];
+  edges?: AreaEdge[];
   /** Inner outlines subtracted from the area (wells, penthouses), page px. */
   cutouts?: PagePoint[][];
   /**
@@ -427,16 +440,9 @@ export function takeoffQuantities(
     const cutoutRings = (o.attrs.cutouts ?? []).map((c) => toFeet(c, fpp));
     const cutoutArea = cutoutRings.reduce((s, c) => s + polygonArea(c), 0);
     const cutoutPerimetersFt = cutoutRings.filter((c) => c.length >= 3).map(polygonPerimeter);
-    // The "Edge from this area" lines along this outline set their sides' edge details
-    // (`edgeOptionsForRole`): matched geometrically, side by side (./edge-lines.ts).
-    const sideRoles = areaSideRoles(o, objects);
-    const edgeOpts: OutlineEdgeOptions[] = o.points.map((_, i) =>
-      edgeOptionsForRole(
-        o.attrs.edges?.[i] ?? {},
-        sideRoles.roles[i] ?? null,
-        sideRoles.heightIn[i],
-      ),
-    );
+    // The parapet / gutter lines along this outline set their sides' edge details: the side's
+    // tag when it has one, else matched geometrically, side by side (`sideEdgeOptions`).
+    const { opts: edgeOpts, ...sideRoles } = sideEdgeOptions(o, objects);
     const section = sectionFromOutline(outer, edgeOpts);
     const outlineAreaSqFt = section.measured.areaSqFt;
     if (cutoutArea > 0) {
@@ -505,6 +511,55 @@ export function takeoffQuantities(
   }
   out.counts = [...countGroups.values()];
   return out;
+}
+
+/** A side's edge details without the tag bookkeeping (`alongRole`, `alongLineId`, `beforeRole`). */
+export function edgeDetails(e: AreaEdge): OutlineEdgeOptions {
+  const o: AreaEdge = { ...e };
+  delete o.alongRole;
+  delete o.alongLineId;
+  delete o.beforeRole;
+  return o;
+}
+
+/**
+ * Per drawn side of `area`: the role of the line along it (`sideRolesOf`: the side's tag when it
+ * has one, else geometry) and the edge details the bid takes for it. A side tagged gutter keeps
+ * its termination as the estimator left it (the tag pre-set the drip edge; it stays editable);
+ * any other side goes through `edgeOptionsForRole`. What the Objects tab shows is exactly this.
+ */
+export function sideEdgeOptions(
+  area: { id: string; page: number; points: readonly PagePoint[]; attrs: { edges?: AreaEdge[] } },
+  objects: readonly TakeoffObject[],
+): SideRoles & { opts: OutlineEdgeOptions[] } {
+  const r = sideRolesOf(area, objects);
+  const opts = area.points.map((_, i) => {
+    const base = edgeDetails(area.attrs.edges?.[i] ?? {});
+    const role = r.roles[i] ?? null;
+    if (r.tagged[i] && role === "gutter") return base;
+    return edgeOptionsForRole(base, role, r.heightIn[i]);
+  });
+  return { ...r, opts };
+}
+
+/**
+ * The Quantities tab's side-role line for a section: "parapet sides: B, C, D (220 ft) · gutter:
+ * A (100 ft)" — the bid's side letters and lengths (rakes sloped); null when no side has either.
+ */
+export function sectionSideRolesText(
+  s: Pick<SectionQuantity, "edgeRoles" | "section">,
+): string | null {
+  const parts: string[] = [];
+  for (const role of ["parapet", "gutter"] as const) {
+    const edges = s.section.edges.filter((_, k) => s.edgeRoles[k] === role);
+    if (!edges.length) continue;
+    const ft = Math.round(edges.reduce((t, e) => t + e.lengthFt, 0) * 10) / 10;
+    const label = role === "parapet" ? `parapet side${edges.length === 1 ? "" : "s"}` : "gutter";
+    parts.push(
+      `${label}: ${edges.map((e) => e.side).join(", ")} (${ft.toLocaleString("en-US")} ft)`,
+    );
+  }
+  return parts.length ? parts.join(" · ") : null;
 }
 
 /** The termination a gutter side takes: the setup's own drip edge, else a 4" drip edge. */

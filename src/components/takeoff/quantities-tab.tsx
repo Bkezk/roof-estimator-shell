@@ -9,6 +9,7 @@ import { AlertTriangle, Download } from "lucide-react";
 import {
   COUNT_ROLE_LABELS,
   LINEAR_ROLE_LABELS,
+  sectionSideRolesText,
   type CountQuantity,
   type TakeoffPage,
   type TakeoffQuantities,
@@ -247,7 +248,17 @@ export function QuantitiesTab(props: {
             <TableBody>
               {q.sections.map((s) => (
                 <TableRow key={s.objectId}>
-                  <C>{s.name}</C>
+                  <C>
+                    {s.name}
+                    {sectionSideRolesText(s) && (
+                      <span
+                        className="block text-[10px] text-muted-foreground"
+                        title="Sides with a parapet wall or a gutter along them (the bid's side letters)"
+                      >
+                        {sectionSideRolesText(s)}
+                      </span>
+                    )}
+                  </C>
                   <C>{pageName(s.page)}</C>
                   <C right>
                     {fmtNum(s.areaSqFt, 0)}

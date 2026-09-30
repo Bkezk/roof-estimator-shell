@@ -125,7 +125,14 @@ describe("bidSeedFromTakeoff", () => {
     const s = seed.sections[0]!;
     expect(s.name).toBe("Main roof");
     expect([s.length, s.width]).toEqual([100, 40]);
-    expect(s.edges?.map((e) => e.termination)).toEqual(Array(4).fill('4" Fascia'));
+    // The hand-drawn north wall and south gutter run exactly along sides A and C: those sides
+    // take the wall's / gutter's edge details, as an "Edge from this area" line's would.
+    expect(s.edges?.map((e) => e.termination)).toEqual([
+      "No Termination",
+      '4" Fascia',
+      '4" Drip Edge',
+      '4" Fascia',
+    ]);
     expect(s.perimCorners).toEqual([true, true, true, true]);
     expect(s.measured?.areaSqFt).toBe(4000);
     expect(s).toMatchObject({
@@ -326,7 +333,8 @@ describe("applyTakeoffToBid", () => {
     ]);
     expect(r.drains).toEqual([]);
     expect(r.changes).toEqual([
-      "Main roof: 4,000 → 4,800 sq ft; perimeter 280 → 320 ft.",
+      // The south gutter (drawn by hand along side C) is gone from the new drawing.
+      "Main roof: 4,000 → 4,800 sq ft; perimeter 280 → 320 ft; side C gutter → no line.",
       'Added section "Wing" (600 sq ft).',
       "North wall: 100 → 120 ft.",
       'Removed curb "RTU curb" (no longer in the drawing).',

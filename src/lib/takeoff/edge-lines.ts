@@ -7,14 +7,17 @@
  * corners, either way round, within `SIDE_MATCH_TOL_PX`), never by name:
  *  - `lineSides` — which sides of the area each segment of a line runs along;
  *  - `areaSideRoles` — per side of an area, the role of the edge line along it (parapet / gutter
- *    / …), which the bid seed turns into that side's edge details;
+ *    / …); with `handDrawn`, a line drawn by hand (no `fromArea`) along a side counts too;
+ *  - `sideRolesOf` — the same, reading the side's tag first (`edges[i].alongRole`, kept by
+ *    ./side-tags.ts) and matching geometrically (hand-drawn lines included) where there is none;
+ *    the bid seed turns it into each side's edge details;
  *  - `followAreaEdits` — when an area's points change (vertex drag, move, edit), its edge lines
  *    that ran along its sides are re-derived on the same sides (by index); if the side count
  *    changed they are left alone and reported as stale. A side's blocking that ran its whole
  *    old length follows the new length.
  */
 
-import type { LinearRole, PagePoint, TakeoffObject } from "./model";
+import type { AreaEdge, LinearRole, PagePoint, TakeoffObject } from "./model";
 
 /** Page px (at zoom 1) within which a line's end and an area corner are the same point. */
 export const SIDE_MATCH_TOL_PX = 1;
@@ -75,28 +78,73 @@ export interface AreaSideRoles {
   roles: Array<LinearRole | null>;
   /** Per drawn side: the wall height (in) of the parapet line along it, when typed. */
   heightIn: Array<number | undefined>;
+  /** Per drawn side: the id of the line along it, or null. */
+  lineIds: Array<string | null>;
 }
 
 /**
  * Per side of `area` (in drawing order), the role of the "Edge from this area" line that runs
- * along it. A line counts only where its segments coincide with the side (a line left behind by
- * a later edit to the area marks nothing). When two lines claim a side, the later one wins.
+ * along it — and with `handDrawn`, of a line drawn by hand (no `fromArea`) exactly along it too
+ * (a line made from ANOTHER area never counts). A line counts only where its segments coincide
+ * with the side (a line left behind by a later edit to the area marks nothing). When two lines
+ * claim a side, the later one wins.
  */
 export function areaSideRoles(
   area: { id: string; page: number; points: readonly PagePoint[] },
   objects: readonly TakeoffObject[],
+  opts: { handDrawn?: boolean } = {},
 ): AreaSideRoles {
   const n = sideCount(area.points.length);
   const roles: Array<LinearRole | null> = Array.from({ length: n }, () => null);
   const heightIn: Array<number | undefined> = Array.from({ length: n }, () => undefined);
-  for (const l of edgeLinesOf(objects, area)) {
+  const lineIds: Array<string | null> = Array.from({ length: n }, () => null);
+  const lines = objects.filter(
+    (o): o is Extract<TakeoffObject, { kind: "linear" }> =>
+      o.kind === "linear" &&
+      o.page === area.page &&
+      (o.attrs.fromArea === area.id || (!!opts.handDrawn && !o.attrs.fromArea)),
+  );
+  for (const l of lines) {
     for (const hit of lineSides(l.points, area.points)) {
       if (!hit) continue;
       roles[hit.side] = l.attrs.role;
       heightIn[hit.side] = l.attrs.role === "parapet" ? l.attrs.heightIn : undefined;
+      lineIds[hit.side] = l.id;
     }
   }
-  return { roles, heightIn };
+  return { roles, heightIn, lineIds };
+}
+
+export interface SideRoles extends AreaSideRoles {
+  /** Per drawn side: true when the role comes from the side's tag (`edges[i].alongRole`). */
+  tagged: boolean[];
+}
+
+/**
+ * Per side of `area`: its tag when it has one (`edges[i].alongRole`, kept by ./side-tags.ts —
+ * the source of truth; a tag whose line no longer exists is ignored), else the geometric match
+ * (`areaSideRoles` with hand-drawn lines). The wall height is read off the tagged line.
+ */
+export function sideRolesOf(
+  area: { id: string; page: number; points: readonly PagePoint[]; attrs: { edges?: AreaEdge[] } },
+  objects: readonly TakeoffObject[],
+): SideRoles {
+  const geo = areaSideRoles(area, objects, { handDrawn: true });
+  const tagged = geo.roles.map(() => false);
+  geo.roles.forEach((_, i) => {
+    const e = area.attrs.edges?.[i];
+    if (!e?.alongRole) return;
+    const line = e.alongLineId
+      ? objects.find((o) => o.id === e.alongLineId && o.kind === "linear")
+      : undefined;
+    if (e.alongLineId && !line) return;
+    geo.roles[i] = e.alongRole;
+    geo.heightIn[i] =
+      e.alongRole === "parapet" && line?.kind === "linear" ? line.attrs.heightIn : undefined;
+    geo.lineIds[i] = e.alongLineId ?? null;
+    tagged[i] = true;
+  });
+  return { ...geo, tagged };
 }
 
 /**
@@ -182,12 +230,16 @@ export function followAreaEdits(
       const now = sideLengthsPx(area.points);
       let changed = false;
       const nextEdges = edges.map((e, i) => {
-        const b = e.blockingFt ?? 0;
         const oldFt = Math.round((was[i] ?? 0) * fpp * 100) / 100;
         const newFt = Math.round((now[i] ?? 0) * fpp * 100) / 100;
-        if (!(b > 0) || Math.abs(b - oldFt) > 0.011 || newFt === oldFt) return e;
-        changed = true;
-        return { ...e, blockingFt: newFt };
+        const follows = (b = 0) => b > 0 && Math.abs(b - oldFt) <= 0.011 && newFt !== oldFt;
+        let ne = e;
+        if (follows(e.blockingFt)) ne = { ...ne, blockingFt: newFt };
+        // A parapet side's own blocking (put back when the wall goes) follows the same way.
+        if (e.beforeRole && follows(e.beforeRole.blockingFt))
+          ne = { ...ne, beforeRole: { ...e.beforeRole, blockingFt: newFt } };
+        if (ne !== e) changed = true;
+        return ne;
       });
       if (changed)
         out = out.map((o) =>

@@ -53,7 +53,7 @@ import {
   takeoffChangeList,
   TAKEOFF_LOCKED,
 } from "@/lib/takeoff/lock";
-import { followAreaEdits } from "@/lib/takeoff/edge-lines";
+import { settleEdit, syncSideTags } from "@/lib/takeoff/side-tags";
 import {
   feetPerPx,
   rotatePoints,
@@ -225,7 +225,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   // The objects list with undo / redo (Ctrl+Z / Ctrl+Y): every change goes through `commit`,
   // which keeps the previous list (up to HISTORY_LIMIT). Quick successive edits of one object's
   // attributes (typing a name) merge into one step. Autosave is not undone — only the document.
-  const [objects, setObjectsState] = useState<TakeoffObject[]>(initial.objects);
+  // A drawing saved before side tags existed shows them at once (not saved until an edit).
+  const [objects, setObjectsState] = useState<TakeoffObject[]>(() => syncSideTags(initial.objects));
   const objectsRef = useRef(objects);
   const history = useRef<{
     past: TakeoffObject[][];
@@ -244,7 +245,9 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     // An area whose points changed (vertex drag, move, edit) takes its "Edge from this area"
     // lines along: the lines that ran on its sides are re-derived on the same sides, in the
     // same undo step. A changed side count cannot be mapped: the lines stay, and we say so.
-    const { objects: next, stale } = followAreaEdits(prev, edited, (i) =>
+    // Then every area's edge table follows the parapet / gutter lines along its sides (made,
+    // deleted, re-roled, or drawn by hand onto a side): src/lib/takeoff/side-tags.ts.
+    const { objects: next, stale } = settleEdit(prev, edited, (i) =>
       feetPerPx(pages.find((p) => p.index === i)?.scale),
     );
     for (const name of stale)

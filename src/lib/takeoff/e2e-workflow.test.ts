@@ -35,8 +35,10 @@ import { buildBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal
 
 import { applyTakeoffToBid, bidAccountFromTakeoff, bidSeedFromTakeoff } from "./create-bid";
 import { followAreaEdits } from "./edge-lines";
+import { syncSideTags } from "./side-tags";
 import { newBidFromSeed as seedToBid } from "./seed-to-bid";
 import {
+  sectionSideRolesText,
   takeoffQuantities,
   type ObjectKind,
   type PagePoint,
@@ -988,6 +990,31 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
       ["Hand wall", 12, undefined],
     ]);
     expect(r.changes).toContain('Parapet 1: renamed "Parapet 2"; 220 → 240 ft.');
+  });
+
+  it("side tags (the editor's edge table) change nothing: tagged and untagged seed and apply alike", () => {
+    // The editor tags each side with the parapet / gutter line along it (side-tags.ts) on every
+    // edit; the seed reads the tag first and the geometry otherwise — the bid is the same.
+    for (const opts of [{}, { grow: true }, { grow: true, regenerateEdges: true }]) {
+      const untagged = drawTakeoff(opts);
+      const tagged = syncSideTags(untagged);
+      expect(tagged).not.toBe(untagged);
+      const s1 = tagged.find((o) => o.kind === "area" && o.attrs.name === "Section 1")!;
+      expect(s1.kind === "area" && s1.attrs.edges!.map((e) => e.alongRole ?? null)).toEqual([
+        "gutter",
+        "parapet",
+        "parapet",
+        "parapet",
+      ]);
+      const qTagged = takeoffQuantities([page], tagged);
+      expect(qTagged).toEqual(takeoffQuantities([page], untagged));
+      expect(bidSeedFromTakeoff(setup, qTagged, { accountId: ACCOUNT })).toEqual(
+        bidSeedFromTakeoff(setup, takeoffQuantities([page], untagged), { accountId: ACCOUNT }),
+      );
+      expect(apply(tagged)).toEqual(apply(untagged));
+    }
+    const s1q = takeoffQuantities([page], syncSideTags(objects)).sections[0]!;
+    expect(sectionSideRolesText(s1q)).toBe("parapet sides: B, C, D (220 ft) · gutter: A (100 ft)");
   });
 });
 

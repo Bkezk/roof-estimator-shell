@@ -3,13 +3,18 @@
  * area's per-side edge table and cut-outs, a linear's role (and parapet height), a count's role
  * and sizes. Number boxes stay blank when 0 (placeholder 0); nothing is prefilled.
  *
+ * The edge table shows the lines along the area's sides (src/lib/takeoff/side-tags.ts): a side
+ * with a parapet wall along it reads "Parapet wall" (and the wall's height), no blocking, locked
+ * until the line changes; a side with a gutter along it has the drip edge pre-set (editable) and
+ * a "gutter" tag. It shows exactly what the bid seed takes for each side.
+ *
  * While "Edge from this area" is on, its panel takes the top of the tab instead of the selected
  * object's card (owner, Sep 30: "the pop-up is easy to miss"): one row per side — its letter,
  * length and a role Select (the linear roles, or Leave out) — a live summary of what Create
  * makes, and big Create / Cancel buttons. The session is the editor's, shared with the viewer.
  */
 import { useEffect, useRef } from "react";
-import { AlertTriangle, Copy, SquareDashed, Trash2 } from "lucide-react";
+import { AlertTriangle, Copy, Lock, SquareDashed, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import {
@@ -34,6 +39,7 @@ import {
   type TakeoffQuantities,
   type TakeoffSetup,
 } from "@/lib/takeoff/model";
+import { areaSideRows, resetEdgesToDefaults } from "@/lib/takeoff/side-tags";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -310,7 +316,15 @@ function SelectedEditor(props: {
           No scale on this page — set one with the Scale tool to get real sizes.
         </p>
       )}
-      {o.kind === "area" && <AreaEditor object={o} fpp={fpp} setup={props.setup} update={update} />}
+      {o.kind === "area" && (
+        <AreaEditor
+          object={o}
+          objects={props.objects}
+          fpp={fpp}
+          setup={props.setup}
+          update={update}
+        />
+      )}
       {o.kind === "linear" && (
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
@@ -709,6 +723,7 @@ const triState = (xs: readonly boolean[]): boolean | "indeterminate" =>
 
 function AreaEditor(props: {
   object: Extract<TakeoffObject, { kind: "area" }>;
+  objects: readonly TakeoffObject[];
   fpp: number | null;
   setup: TakeoffSetup;
   update: (fn: (o: TakeoffObject) => TakeoffObject) => void;
@@ -718,7 +733,12 @@ function AreaEditor(props: {
   const lens = edgeLengthsFt(o.points, fpp);
   // Side labels as the drawing and the bid show them (A–D on a four-sided outline, else 1..N).
   const sideLabels = drawnSideLabels(o.points);
-  const edges: OutlineEdgeOptions[] = o.points.map((_, i) => o.attrs.edges?.[i] ?? {});
+  // Per side: what the bid takes for it, and the parapet / gutter line along it (if any). A
+  // parapet side's termination, blocking and tall-wall mark are the wall's — locked here.
+  const rows = areaSideRows(o, props.objects);
+  const edges: OutlineEdgeOptions[] = rows.map((r) => r.shown);
+  const lockedSide = rows.map((r) => r.locked);
+  const free = edges.filter((_, i) => !lockedSide[i]);
   const cutouts = o.attrs.cutouts ?? [];
   const net = netAreaSqFt(o.points, cutouts, fpp);
   // A pitched roof: the drawing is the plan, the roof surface is plan × the slope factor.
@@ -736,28 +756,32 @@ function AreaEditor(props: {
       return { ...x, attrs: { ...x.attrs, edges: cur } };
     });
   // "All sides": one change applied to every side (value per side, e.g. blocking = its length).
+  // A parapet side's termination and blocking are the wall's: "All sides" leaves them alone.
   const setAll = <K extends keyof OutlineEdgeOptions>(
     k: K,
     v: (i: number) => OutlineEdgeOptions[K] | undefined,
   ) =>
     props.update((x) => {
       if (x.kind !== "area") return x;
-      const cur = x.points.map((_, j) => withAttr(x.attrs.edges?.[j] ?? {}, k, v(j)));
+      const cur = x.points.map((_, j) => {
+        const e = x.attrs.edges?.[j] ?? {};
+        if (lockedSide[j] && (k === "termination" || k === "blockingFt")) return e;
+        return withAttr(e, k, v(j));
+      });
       return { ...x, attrs: { ...x.attrs, edges: cur } };
     });
-  // Re-apply the Setup tab's edge defaults to every side (tall-wall marks are kept).
+  // Re-apply the Setup tab's edge defaults to every side (tall-wall marks are kept); a side
+  // with a parapet / gutter line along it keeps that line's role on top of the defaults.
   const resetToSetup = () =>
     props.update((x) => {
       if (x.kind !== "area") return x;
       const defaults = defaultEdgeOptions(x.points, props.setup, fpp);
-      const cur = defaults.map((d, j) =>
-        x.attrs.edges?.[j]?.hasTallWall ? { ...d, hasTallWall: true } : d,
-      );
+      const cur = resetEdgesToDefaults(x.attrs.edges ?? [], defaults);
       return { ...x, attrs: { ...x.attrs, edges: cur } };
     });
   const allPerimeter = triState(edges.map((e) => e.isPerimeter ?? false));
-  const allBlocking = triState(edges.map((e) => (e.blockingFt ?? 0) > 0));
-  const allTermination = common(edges.map((e) => e.termination ?? "No Termination"));
+  const allBlocking = triState(free.map((e) => (e.blockingFt ?? 0) > 0));
+  const allTermination = common(free.map((e) => e.termination ?? "No Termination"));
   const allArp = common(edges.map((e) => e.arpSizeIn ?? 0));
 
   return (
@@ -832,6 +856,7 @@ function AreaEditor(props: {
               <td className="pr-1">
                 <Select
                   value={allTermination ?? ""}
+                  disabled={!free.length}
                   onValueChange={(v) => setAll("termination", () => v)}
                 >
                   <SelectTrigger
@@ -860,7 +885,7 @@ function AreaEditor(props: {
                 >
                   <Checkbox
                     checked={allBlocking}
-                    disabled={fpp === null}
+                    disabled={fpp === null || !free.length}
                     onCheckedChange={(c) =>
                       setAll("blockingFt", (i) =>
                         c === true ? Math.round((lens[i] ?? 0) * 100) / 100 : 0,
@@ -890,71 +915,125 @@ function AreaEditor(props: {
               </td>
               <td />
             </tr>
-            {edges.map((e, i) => (
-              <tr key={i} className="border-t">
-                <td className="py-1 pr-1 font-medium">{sideLabels[i]}</td>
-                <td className="whitespace-nowrap pr-1 tabular-nums">
-                  {fpp === null ? "—" : `${fmtNum(lens[i]!)} ft`}
-                </td>
-                <td className="pr-1">
-                  <Checkbox
-                    checked={e.isPerimeter ?? false}
-                    onCheckedChange={(c) => setEdge(i, "isPerimeter", c === true)}
-                    aria-label={`Side ${sideLabels[i]} perimeter`}
-                  />
-                </td>
-                <td className="pr-1">
-                  <Select
-                    value={e.termination ?? "No Termination"}
-                    onValueChange={(v) => setEdge(i, "termination", v)}
-                  >
-                    <SelectTrigger className="h-7 w-[118px] px-2 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
-                      {TERMINATION_OPTIONS.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </td>
-                <td className="pr-1">
-                  <Num
-                    className="h-7 w-[64px] px-2 text-xs"
-                    value={e.blockingFt}
-                    onChange={(v) => setEdge(i, "blockingFt", v ?? 0)}
-                  />
-                </td>
-                <td className="pr-1">
-                  <Select
-                    value={String(e.arpSizeIn ?? 0)}
-                    onValueChange={(v) => setEdge(i, "arpSizeIn", Number(v))}
-                  >
-                    <SelectTrigger className="h-7 w-[64px] px-2 text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
-                      {ARP_SIZE_OPTIONS.map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n === 0 ? "None" : `${n} in`}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </td>
-                <td>
-                  <Checkbox
-                    checked={e.hasTallWall ?? false}
-                    onCheckedChange={(c) =>
-                      setEdge(i, "hasTallWall", c === true ? true : undefined)
-                    }
-                    aria-label={`Side ${sideLabels[i]} tall wall`}
-                  />
-                </td>
-              </tr>
-            ))}
+            {edges.map((e, i) => {
+              const row = rows[i]!;
+              const along = row.lineName ? `“${row.lineName}”` : "the line";
+              return (
+                <tr key={i} className="border-t">
+                  <td className="py-1 pr-1 font-medium">
+                    <span className="flex items-center gap-1">
+                      {sideLabels[i]}
+                      {row.role === "gutter" && (
+                        <span
+                          className="rounded border px-1 text-[10px] font-normal leading-4"
+                          style={{
+                            borderColor: LINEAR_ROLE_COLORS.gutter,
+                            color: LINEAR_ROLE_COLORS.gutter,
+                          }}
+                          title={`A gutter (${along}) runs along this side: its termination is pre-set to a drip edge`}
+                        >
+                          gutter
+                        </span>
+                      )}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap pr-1 tabular-nums">
+                    {fpp === null ? "—" : `${fmtNum(lens[i]!)} ft`}
+                  </td>
+                  <td className="pr-1">
+                    <Checkbox
+                      checked={e.isPerimeter ?? false}
+                      onCheckedChange={(c) => setEdge(i, "isPerimeter", c === true)}
+                      aria-label={`Side ${sideLabels[i]} perimeter`}
+                    />
+                  </td>
+                  <td className="pr-1">
+                    {row.locked ? (
+                      <span
+                        className="flex h-7 min-w-[118px] items-center gap-1 whitespace-nowrap rounded-md border border-dashed px-2 text-xs"
+                        style={{ borderColor: LINEAR_ROLE_COLORS.parapet }}
+                        title={`A parapet wall (${along}) runs along this side: no termination or blocking here — the wall is flashed on the bid's Parapets screen. Change or delete the line to edit this side.`}
+                        aria-label={`Side ${sideLabels[i]} termination: parapet wall`}
+                      >
+                        <Lock className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        Parapet wall
+                        {row.heightIn ? (
+                          <span className="text-muted-foreground">· {fmtNum(row.heightIn)} in</span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <Select
+                        value={e.termination ?? "No Termination"}
+                        onValueChange={(v) => setEdge(i, "termination", v)}
+                      >
+                        <SelectTrigger
+                          className="h-7 w-[118px] px-2 text-xs"
+                          aria-label={`Side ${sideLabels[i]} termination`}
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
+                          {TERMINATION_OPTIONS.map((t) => (
+                            <SelectItem key={t} value={t}>
+                              {t}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </td>
+                  <td className="pr-1">
+                    {row.locked ? (
+                      <span
+                        className="block w-[64px] px-2 tabular-nums text-muted-foreground"
+                        title="A parapet side has no blocking"
+                        aria-label={`Side ${sideLabels[i]} blocking: none`}
+                      >
+                        0
+                      </span>
+                    ) : (
+                      <Num
+                        className="h-7 w-[64px] px-2 text-xs"
+                        value={e.blockingFt}
+                        onChange={(v) => setEdge(i, "blockingFt", v ?? 0)}
+                      />
+                    )}
+                  </td>
+                  <td className="pr-1">
+                    <Select
+                      value={String(e.arpSizeIn ?? 0)}
+                      onValueChange={(v) => setEdge(i, "arpSizeIn", Number(v))}
+                    >
+                      <SelectTrigger className="h-7 w-[64px] px-2 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
+                        {ARP_SIZE_OPTIONS.map((n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {n === 0 ? "None" : `${n} in`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td>
+                    <Checkbox
+                      checked={e.hasTallWall ?? false}
+                      disabled={row.locked}
+                      title={
+                        row.locked
+                          ? "Set from the wall's height: on when the perimeter wall is over 24 in"
+                          : undefined
+                      }
+                      onCheckedChange={(c) =>
+                        setEdge(i, "hasTallWall", c === true ? true : undefined)
+                      }
+                      aria-label={`Side ${sideLabels[i]} tall wall`}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

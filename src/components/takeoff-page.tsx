@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -70,6 +70,7 @@ import {
 
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import type { AccountHit } from "@/lib/crm.functions";
+import { cardOpenProps } from "@/lib/card-open";
 import { isTakeoffLocked } from "@/lib/takeoff/lock";
 import { suggestTakeoffName } from "@/lib/takeoff/naming";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
@@ -456,15 +457,32 @@ function TakeoffList() {
   );
 }
 
-/** One takeoff in the list: a card-like row with its file, pages, last update and linked bid. */
+/**
+ * One takeoff in the list: a card-like row with its file, pages, last update and linked bid. A
+ * click anywhere on it opens the takeoff (like the bids list; a locked one opens read-only), as
+ * does Enter / Space when it has focus; its own buttons and links do only their own thing.
+ */
 function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: () => void }) {
   const { can } = useAuth();
+  const navigate = useNavigate();
   const status = asTakeoffStatus(t.status);
   const pageCount = takeoffDoc(t).pages.length;
   const isPdf = t.underlay_kind === "pdf";
   const locked = isTakeoffLocked(t);
+  const router = useRouter();
+  const card = cardOpenProps((newTab) => {
+    const to = { to: "/takeoff", search: { id: t.id } } as const;
+    if (newTab) window.open(router.buildLocation(to).href, "_blank", "noopener");
+    else void navigate(to);
+  });
+  const own = (e: { stopPropagation: () => void }) => e.stopPropagation();
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-colors duration-150 hover:border-primary/40 hover:bg-muted/40">
+    <div
+      {...card}
+      aria-label={`Open takeoff ${t.name}${locked ? " (locked, read-only)" : ""}`}
+      title={locked ? "Open this takeoff (read-only: it built a bid)" : "Open this takeoff"}
+      className="flex cursor-pointer flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-colors duration-150 hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+    >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <Link
@@ -472,6 +490,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
             search={{ id: t.id }}
             className="font-medium underline-offset-2 hover:underline"
             title="Open this takeoff"
+            onClick={own}
           >
             {t.name}
           </Link>
@@ -514,6 +533,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
                 search={{ id: t.account.id }}
                 className="font-medium underline-offset-2 hover:underline"
                 title="Open the customer profile"
+                onClick={own}
               >
                 {t.account.name}
               </Link>
@@ -531,6 +551,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
                 search={{ bid: t.bid.id }}
                 className="font-medium underline-offset-2 hover:underline"
                 title="Open the bid made from this takeoff"
+                onClick={own}
               >
                 {t.bid.name}
               </Link>
@@ -545,7 +566,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
       </div>
       <div className="flex items-center gap-1">
         <Button asChild size="sm" variant="outline">
-          <Link to="/takeoff" search={{ id: t.id }}>
+          <Link to="/takeoff" search={{ id: t.id }} onClick={own}>
             Open
           </Link>
         </Button>
@@ -555,7 +576,10 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
           className="text-destructive hover:text-destructive"
           title="Delete this takeoff"
           aria-label={`Delete ${t.name}`}
-          onClick={onDelete}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
         >
           <Trash2 className="h-4 w-4" />
         </Button>
