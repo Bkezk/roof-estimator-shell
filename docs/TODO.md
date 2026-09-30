@@ -18,6 +18,14 @@ the bottom with the commit that closed them.
   reminders every 30 minutes in office hours. Without them, reminders go out only when an office
   user opens the app.
 - Each user: open `/account` on their phone and turn push on (iPhone: add to Home Screen first).
+- **Tasks with email notices (Sep 30, item 11).** The task emails (new task, morning of the due
+  date, morning after if still open) go out through the same Resend path as the follow-up
+  reminders, so they need the three Lovable Cloud secrets above (`RESEND_API_KEY` from a Resend
+  account with the sending domain verified, `NOTIFY_FROM_EMAIL`, `APP_URL`) and the two GitHub
+  secrets (`APP_URL`, `CRON_SECRET`) so the reminders workflow fires them on schedule. Outside
+  attendees (people without a login) get the emails only once the domain is verified — Resend's
+  onboarding sender delivers to the account owner only. Until then the notices land in the
+  in-app inbox and show as failed email on Admin › Reminders.
 - For phase D: CenterPoint CSV exports of Companies, Properties, Contacts, Tickets and Invoices
   (⋮ › Download All to CSV / Email CSV on each list), and if reachable the 475 repair templates
   and 142 materials.
