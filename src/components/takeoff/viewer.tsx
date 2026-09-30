@@ -56,6 +56,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } 
 import { toast } from "sonner";
 import { Loader2, SquareDashed } from "lucide-react";
 
+import { toolAllowed } from "@/lib/takeoff/lock";
 import { Button } from "@/components/ui/button";
 
 import {
@@ -207,6 +208,11 @@ export interface ViewerProps {
   onDuplicate: (sourceId: string, dx: number, dy: number) => string | null;
   /** "Duplicate and stamp" asked for from outside (the Objects tab); a new object each time. */
   stampRequest?: { id: string } | null;
+  /**
+   * A locked takeoff (it built a bid, src/lib/takeoff/lock.ts): look, select and measure only —
+   * no drawing tools, no dragging, no delete, no stamping, no scale read off the sheet.
+   */
+  readOnly?: boolean;
 }
 
 export function TakeoffViewer(props: ViewerProps) {
@@ -214,7 +220,13 @@ export function TakeoffViewer(props: ViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [tool, setTool] = useState<Tool>(props.initialTool ?? "select");
+  const readOnly = !!props.readOnly;
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const [tool, setTool] = useState<Tool>(() => {
+    const t = props.initialTool ?? "select";
+    return toolAllowed(t, readOnly) ? t : "select";
+  });
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 });
   const [renderZoom, setRenderZoom] = useState(1);
   const [rendered, setRendered] = useState<{ key: string; w: number; h: number } | null>(null);
@@ -272,6 +284,18 @@ export function TakeoffViewer(props: ViewerProps) {
   onEdgeChangeRef.current = props.onEdgeChange;
   /** "Duplicate and stamp": the object copied, and how many copies were stamped so far. */
   const [stamp, setStamp] = useState<{ sourceId: string; count: number } | null>(null);
+  // Locked while open (the takeoff just built a bid): back to Select, anything in progress dropped.
+  useEffect(() => {
+    if (!readOnly) return;
+    setTool((t) => (toolAllowed(t, true) ? t : "select"));
+    setDraft([]);
+    setStamp(null);
+    setCountSession(null);
+    setDrag(null);
+    setMove(null);
+    setPress(null);
+    onEdgeChangeRef.current(null);
+  }, [readOnly]);
 
   const pageKey = `${page.index}:${page.rotation}`;
   const size =
@@ -363,7 +387,7 @@ export function TakeoffViewer(props: ViewerProps) {
       setSheet({ index, read });
       const note = read.scale;
       let done = sheetApplied.get(doc);
-      if (!note || hasScaleRef.current || done?.has(index)) return;
+      if (!note || hasScaleRef.current || readOnlyRef.current || done?.has(index)) return;
       const pos = await pdfPointToPage(doc, index, rotation, note.at);
       if (!live || hasScaleRef.current) return;
       if (!done) {
@@ -402,7 +426,7 @@ export function TakeoffViewer(props: ViewerProps) {
   /** Use one of the sheet's scale notes as this page's scale (from the Scale dialog). */
   const applySheetNote = (i: number) => {
     const note = sheetNotes[i];
-    if (!note || !source || source.kind !== "pdf") return;
+    if (!note || !source || source.kind !== "pdf" || readOnly) return;
     const index = page.index;
     void pdfPointToPage(source.doc, index, page.rotation, note.at).then((pos) => {
       if (pageIndexRef.current !== index) return;
@@ -624,6 +648,10 @@ export function TakeoffViewer(props: ViewerProps) {
   const snapMark = stamp ? (ghost?.snap ?? null) : drawing ? (live?.snap ?? null) : dragSnap;
 
   const changeTool = (t: Tool) => {
+    if (!toolAllowed(t, readOnly)) {
+      toast.info("This takeoff is locked (it built a bid). Use Edit a copy to draw or change it.");
+      return;
+    }
     if (t === "cutout" && !selectedArea) {
       toast.info("Select an area first, then draw the cut-out inside it.");
       return;
@@ -652,6 +680,7 @@ export function TakeoffViewer(props: ViewerProps) {
   const edgeRoles = edge && edgeArea ? edgeSideRoles(edge, edgeArea.points.length) : [];
   const edgeSum = edge && edgeArea ? edgeSummary(edgeArea.points, edgeRoles, fpp) : null;
   const startEdge = (areaId: string) => {
+    if (readOnly) return;
     const area = objects.find((o) => o.id === areaId && o.kind === "area");
     if (!area) {
       toast.info("Select an area on this page first.");
@@ -695,6 +724,7 @@ export function TakeoffViewer(props: ViewerProps) {
 
   // "Duplicate and stamp": start with the object `id` (the selection) as the source.
   const startStamp = (id: string | null) => {
+    if (readOnly) return;
     const o = id ? objects.find((x) => x.id === id) : undefined;
     if (!o) {
       toast.info("Select an area, line or count on this page first, then Duplicate (Ctrl+D).");
@@ -877,6 +907,10 @@ export function TakeoffViewer(props: ViewerProps) {
       setDraft((d) => d.slice(0, -1));
       return true;
     }
+    if (readOnly) {
+      if (dimension) setDimension(null);
+      return !!dimension;
+    }
     if (countSession) {
       const cur = objects.find((o) => o.id === countSession);
       if (cur && cur.points.length > 1) props.onChangePoints(cur.id, cur.points.slice(0, -1));
@@ -1054,7 +1088,7 @@ export function TakeoffViewer(props: ViewerProps) {
     (id: string, e: PointerEvent<SVGElement>) => {
       if (e.button !== 0) return;
       e.stopPropagation();
-      if (id !== selectedId) {
+      if (id !== selectedId || readOnly) {
         onSelect(id);
         return;
       }
@@ -1068,7 +1102,7 @@ export function TakeoffViewer(props: ViewerProps) {
         dy: 0,
       });
     },
-    [onSelect, selectedId, zoom],
+    [onSelect, selectedId, zoom, readOnly],
   );
   // A corner handle of the selected area / line, or any count pin: drag that one point.
   const onVertexDown = useCallback(
@@ -1078,10 +1112,11 @@ export function TakeoffViewer(props: ViewerProps) {
       const o = objects.find((x) => x.id === id);
       if (!o) return;
       if (id !== selectedId) onSelect(id);
+      if (readOnly) return;
       e.currentTarget.setPointerCapture(e.pointerId);
       setDrag({ id, index, points: o.points.map((p) => [p[0], p[1]]), moved: false });
     },
-    [objects, onSelect, selectedId],
+    [objects, onSelect, selectedId, readOnly],
   );
 
   const shown = useMemo(
@@ -1147,6 +1182,7 @@ export function TakeoffViewer(props: ViewerProps) {
         onZoomIn={() => zoomCenter(ZOOM_STEP)}
         onZoomOut={() => zoomCenter(1 / ZOOM_STEP)}
         onFit={fit}
+        readOnly={readOnly}
         roles={roleChips}
         planSnap={{
           available: !source || isPdf, // unknown while the file loads
@@ -1155,17 +1191,23 @@ export function TakeoffViewer(props: ViewerProps) {
           onToggle: toggleSnapPlan,
         }}
         edgeFromArea={
-          edge
-            ? { active: true, onClick: endEdge }
-            : selectedArea
-              ? { active: false, onClick: () => startEdge(selectedArea.id) }
-              : null
+          readOnly
+            ? null
+            : edge
+              ? { active: true, onClick: endEdge }
+              : selectedArea
+                ? { active: false, onClick: () => startEdge(selectedArea.id) }
+                : null
         }
-        duplicate={{
-          active: !!stamp,
-          enabled: !!selectedObject,
-          onClick: () => (stamp ? setStamp(null) : startStamp(selectedId)),
-        }}
+        duplicate={
+          readOnly
+            ? null
+            : {
+                active: !!stamp,
+                enabled: !!selectedObject,
+                onClick: () => (stamp ? setStamp(null) : startStamp(selectedId)),
+              }
+        }
       />
 
       <div

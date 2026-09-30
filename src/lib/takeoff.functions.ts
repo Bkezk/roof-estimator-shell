@@ -11,6 +11,14 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
 import { takeoffAccountFromBid } from "@/lib/takeoff/create-bid";
+import {
+  copyTakeoffName,
+  copyTakeoffRow,
+  lockedSaveRefusal,
+  setupForLinkChange,
+  TAKEOFF_LOCKED,
+  type BidPresence,
+} from "@/lib/takeoff/lock";
 import type { TakeoffObject, TakeoffPage, TakeoffSetup } from "@/lib/takeoff/model";
 
 export type TakeoffRow = Database["public"]["Tables"]["takeoffs"]["Row"];
@@ -21,6 +29,10 @@ export interface LinkedBid {
   status: string;
   /** The bid's customer profile, if any (a takeoff without one inherits it). */
   account_id: string | null;
+  /** When the bid was made (the lock banner's date when the takeoff has no `lockedAt`). */
+  created_at?: string;
+  /** Set when the bid is in its Recently deleted bin (the lock may then be cleared). */
+  deleted_at?: string | null;
 }
 /** The customer profile a takeoff belongs to (null when none, or not visible to this user). */
 export interface LinkedAccount {
@@ -36,7 +48,7 @@ export const TAKEOFF_BUCKET = "takeoffs";
 /** Soft-deleted takeoffs are kept this long, then purged (lazily, whenever the bin is listed). */
 export const DELETED_TAKEOFF_RETENTION_DAYS = 30;
 const WITH_BID =
-  "*, bid:bids!takeoffs_bid_id_fkey(id, name, status, account_id), account:crm_accounts!takeoffs_account_id_fkey(id, name)";
+  "*, bid:bids!takeoffs_bid_id_fkey(id, name, status, account_id, created_at, deleted_at), account:crm_accounts!takeoffs_account_id_fkey(id, name)";
 
 const pageSchema = z.object({
   index: z.number().int().min(0),
@@ -70,23 +82,22 @@ const objectSchema = z.object({
 });
 const setupSchema = z.record(z.string(), z.unknown());
 
-const readAccess = async (ctx: {
+/** The request context the handlers use (the caller's RLS-bound client and id). */
+export interface TakeoffCtx {
   supabase: Parameters<typeof assertPageAccess>[0];
   userId: string;
-}) => {
+}
+
+const readAccess = async (ctx: TakeoffCtx) => {
   try {
     await assertPageAccess(ctx.supabase, ctx.userId, "takeoff");
   } catch {
     await assertPageAccess(ctx.supabase, ctx.userId, "estimate");
   }
 };
-const writeAccess = (ctx: { supabase: Parameters<typeof assertPageAccess>[0]; userId: string }) =>
-  assertPageAccess(ctx.supabase, ctx.userId, "takeoff");
+const writeAccess = (ctx: TakeoffCtx) => assertPageAccess(ctx.supabase, ctx.userId, "takeoff");
 /** Who is saving — shown on the list as "Last updated … by <name>". */
-const meName = async (ctx: {
-  supabase: Parameters<typeof assertPageAccess>[0];
-  userId: string;
-}): Promise<string | null> => {
+const meName = async (ctx: TakeoffCtx): Promise<string | null> => {
   const { data } = await ctx.supabase
     .from("profiles")
     .select("full_name, email")
@@ -278,49 +289,152 @@ export const saveTakeoffInput = z.object({
 
 /** A saved takeoff; `inherited_account_id` is set when linking a bid gave it the bid's customer. */
 export type SavedTakeoff = TakeoffRow & { inherited_account_id: string | null };
+export type SaveTakeoffInput = z.infer<typeof saveTakeoffInput>;
 
 /**
  * Save any subset of the editable fields (the page autosaves pages / setup / objects). Linking a
  * bid (`bid_id`) to a takeoff that has no customer gives it the bid's customer, if the bid has
  * one (owner, Sep 30: the takeoff with the building plans belongs to the customer too).
+ *
+ * The lock (src/lib/takeoff/lock.ts): a takeoff that built a bid (`bid_id` set) refuses any
+ * change to its drawing — only a rename, the status, the customer, and clearing the bid link
+ * once that bid is gone go through. The update itself is conditioned on the bid link read here,
+ * so a save racing the lock (the bid saved in another tab) cannot slip through either.
  */
+export async function saveTakeoffImpl(
+  ctx: TakeoffCtx,
+  data: SaveTakeoffInput,
+): Promise<SavedTakeoff> {
+  await writeAccess(ctx);
+  const { id, ...rest } = data;
+  const { data: cur, error: curErr } = await ctx.supabase
+    .from("takeoffs")
+    .select("id, bid_id, account_id, setup")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (curErr) throw new Error(curErr.message);
+  if (!cur) throw new Error("This takeoff was not found (it may have been deleted).");
+
+  if (cur.bid_id) {
+    const bid = rest.bid_id === null ? await bidPresence(ctx, cur.bid_id) : "unknown";
+    const refusal = lockedSaveRefusal(rest, cur.bid_id, bid);
+    if (refusal) throw new Error(refusal);
+  }
+
+  const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {
+    updated_by_name: await meName(ctx),
+  };
+  if (rest.name !== undefined) patch.name = rest.name;
+  if (rest.status !== undefined) patch.status = rest.status;
+  if (rest.pages !== undefined) patch.pages = rest.pages as unknown as Json;
+  if (rest.setup !== undefined) patch.setup = rest.setup as unknown as Json;
+  if (rest.objects !== undefined) patch.objects = rest.objects as unknown as Json;
+  if (rest.building_id !== undefined) patch.building_id = rest.building_id;
+  if (rest.bid_id !== undefined) patch.bid_id = rest.bid_id;
+  if (rest.account_id !== undefined) patch.account_id = rest.account_id;
+  // Linking the bid it built stamps when (the lock banner's date); clearing it drops the stamp.
+  const stamped = setupForLinkChange(
+    rest.setup ?? cur.setup,
+    cur.bid_id,
+    rest.bid_id,
+    new Date().toISOString(),
+  );
+  if (stamped) patch.setup = stamped as unknown as Json;
+  let inherited: string | null = null;
+  if (rest.bid_id && rest.account_id === undefined) {
+    // Null when the bid is not visible to this user (no Estimate access): nothing inherited.
+    const { data: bid } = await ctx.supabase
+      .from("bids")
+      .select("account_id")
+      .eq("id", rest.bid_id)
+      .maybeSingle();
+    inherited = takeoffAccountFromBid(cur.account_id, bid?.account_id);
+    if (inherited) patch.account_id = inherited;
+  }
+  const base = ctx.supabase.from("takeoffs").update(patch).eq("id", id).is("deleted_at", null);
+  // Only if the bid link is still the one checked above.
+  const guarded = cur.bid_id ? base.eq("bid_id", cur.bid_id) : base.is("bid_id", null);
+  const { data: row, error } = await guarded.select("*").maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!row)
+    throw new Error(
+      `${TAKEOFF_LOCKED} or changed while saving (it may have just built a bid). Reload it.`,
+    );
+  return { ...row, inherited_account_id: inherited };
+}
+
+/**
+ * Whether the bid a locked takeoff built still exists, as far as this user can tell. Only a user
+ * with Estimate access can see bids; for anyone else the answer is "unknown" (never "gone").
+ */
+async function bidPresence(ctx: TakeoffCtx, bidId: string): Promise<BidPresence> {
+  try {
+    await assertPageAccess(ctx.supabase, ctx.userId, "estimate");
+  } catch {
+    return "unknown";
+  }
+  const { data: bid, error } = await ctx.supabase
+    .from("bids")
+    .select("id, deleted_at")
+    .eq("id", bidId)
+    .maybeSingle();
+  if (error) return "unknown";
+  return !bid || bid.deleted_at ? "gone" : "exists";
+}
+
 export const saveTakeoff = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => saveTakeoffInput.parse(d))
-  .handler(async ({ data, context }): Promise<SavedTakeoff> => {
-    await writeAccess(context);
-    const { id, ...rest } = data;
-    const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {
-      updated_by_name: await meName(context),
-    };
-    if (rest.name !== undefined) patch.name = rest.name;
-    if (rest.status !== undefined) patch.status = rest.status;
-    if (rest.pages !== undefined) patch.pages = rest.pages as unknown as Json;
-    if (rest.setup !== undefined) patch.setup = rest.setup as unknown as Json;
-    if (rest.objects !== undefined) patch.objects = rest.objects as unknown as Json;
-    if (rest.building_id !== undefined) patch.building_id = rest.building_id;
-    if (rest.bid_id !== undefined) patch.bid_id = rest.bid_id;
-    if (rest.account_id !== undefined) patch.account_id = rest.account_id;
-    let inherited: string | null = null;
-    if (rest.bid_id && rest.account_id === undefined) {
-      const [{ data: cur }, { data: bid }] = await Promise.all([
-        context.supabase.from("takeoffs").select("account_id").eq("id", id).maybeSingle(),
-        // Null when the bid is not visible to this user (no Estimate access): nothing inherited.
-        context.supabase.from("bids").select("account_id").eq("id", rest.bid_id).maybeSingle(),
-      ]);
-      inherited = takeoffAccountFromBid(cur?.account_id, bid?.account_id);
-      if (inherited) patch.account_id = inherited;
-    }
-    const { data: row, error } = await context.supabase
-      .from("takeoffs")
-      .update(patch)
-      .eq("id", id)
-      .is("deleted_at", null)
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
-    return { ...row, inherited_account_id: inherited };
+  .handler(({ data, context }): Promise<SavedTakeoff> => saveTakeoffImpl(context, data));
+
+/**
+ * "Edit a copy": a new takeoff with the same plan file (the same storage object — the bucket's
+ * read policy is by bucket, so nothing is copied), pages, objects, setup, customer and building;
+ * named "<name> (copy)" (numbered when taken); Draft; no bid; `setup.copiedFrom` recorded.
+ */
+export async function copyTakeoffImpl(ctx: TakeoffCtx, data: { id: string }): Promise<TakeoffRow> {
+  await writeAccess(ctx);
+  const { data: src, error } = await ctx.supabase
+    .from("takeoffs")
+    .select("*")
+    .eq("id", data.id)
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!src) throw new Error("This takeoff was not found (it may have been deleted).");
+  const { data: names, error: nErr } = await ctx.supabase
+    .from("takeoffs")
+    .select("name")
+    .is("deleted_at", null);
+  if (nErr) throw new Error(nErr.message);
+  const row = copyTakeoffRow(src, {
+    name: copyTakeoffName(
+      src.name,
+      (names ?? []).map((n) => n.name),
+    ),
+    now: new Date().toISOString(),
+    userId: ctx.userId,
+    updatedByName: await meName(ctx),
   });
+  const { data: inserted, error: iErr } = await ctx.supabase
+    .from("takeoffs")
+    .insert({
+      ...row,
+      pages: row.pages as unknown as Json,
+      objects: row.objects as unknown as Json,
+      setup: row.setup as unknown as Json,
+    })
+    .select("*")
+    .single();
+  if (iErr) throw new Error(iErr.message);
+  return inserted;
+}
+
+export const copyTakeoff = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(({ data, context }): Promise<TakeoffRow> => copyTakeoffImpl(context, data));
 
 /**
  * Link a takeoff to a customer profile, or unlink it (null). Takeoff write access only; the

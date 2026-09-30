@@ -26,6 +26,7 @@ import {
   takeoffDoc,
   type LinkedAccount,
 } from "@/lib/takeoff.functions";
+import { lockMeta, withoutLockMeta } from "@/lib/takeoff/lock";
 import type { TakeoffSetup } from "@/lib/takeoff/model";
 import { AccountPicker } from "@/components/crm/account-picker";
 import { Button } from "@/components/ui/button";
@@ -192,6 +193,8 @@ export function SetupTab(props: {
   takeoffId: string;
   setup: TakeoffSetup;
   onChange: (next: TakeoffSetup) => void;
+  /** A locked takeoff (it built a bid): every answer shown, none editable (the customer is). */
+  readOnly?: boolean;
   isNew: boolean;
   /** The customer this takeoff is linked to (the editor owns it; this tab saves changes). */
   customer?: LinkedAccount | null;
@@ -218,7 +221,8 @@ export function SetupTab(props: {
   const source = useMemo(() => {
     for (const t of others ?? []) {
       if (t.id === props.takeoffId) continue;
-      const s = takeoffDoc(t).setup;
+      // Only the answers: never another takeoff's lock bookkeeping (copiedFrom, lockedAt).
+      const s = withoutLockMeta(takeoffDoc(t).setup);
       if (Object.keys(s).length > 0) return { name: t.name, setup: s };
     }
     return null;
@@ -226,7 +230,8 @@ export function SetupTab(props: {
   const copyFrom = () => {
     if (!source) return;
     const before = setup;
-    onChange(structuredClone(source.setup));
+    // This takeoff keeps its own lock bookkeeping (a copy keeps where it came from).
+    onChange({ ...structuredClone(source.setup), ...lockMeta(setup) });
     toast.success(`Setup copied from “${source.name}”`, {
       action: { label: "Undo", onClick: () => onChange(before) },
     });
@@ -305,192 +310,202 @@ export function SetupTab(props: {
           onChange={props.onCustomerChange}
         />
       )}
-      {source && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-auto w-full justify-start whitespace-normal py-1.5 text-left"
-          title="Replace these answers with that takeoff's Setup (roof, deck, edges, parapets, drains, notes)"
-          onClick={(e) => {
-            copyFrom();
-            if (e.detail > 0) e.currentTarget.blur();
-          }}
-        >
-          <Copy className="mr-2 h-4 w-4 shrink-0" />
-          <span className="min-w-0">
-            Use the setup from <span className="font-semibold">“{source.name}”</span>
-          </span>
-        </Button>
-      )}
-
-      <Group title="Roof membrane">
-        <Field label="Roofing system">
-          <Pick value={setup.roofSystem} options={systems} onChange={(v) => set("roofSystem", v)} />
-        </Field>
-        <Field label="Attachment">
-          <Pick
-            value={setup.attachment}
-            options={ATTACHMENTS}
-            onChange={(v) => {
-              const nx: TakeoffSetup = { ...setup, attachment: v as Attachment };
-              if (v !== "adhered") delete nx.membraneAdhesiveName;
-              onChange(nx);
+      <fieldset
+        disabled={props.readOnly}
+        aria-disabled={props.readOnly}
+        className={`min-w-0 space-y-3 ${props.readOnly ? "pointer-events-none opacity-70" : ""}`}
+      >
+        {source && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-auto w-full justify-start whitespace-normal py-1.5 text-left"
+            title="Replace these answers with that takeoff's Setup (roof, deck, edges, parapets, drains, notes)"
+            onClick={(e) => {
+              copyFrom();
+              if (e.detail > 0) e.currentTarget.blur();
             }}
-          />
-        </Field>
-        {setup.attachment === "adhered" && (
-          <Field label="Adhesive" className="col-span-2">
-            {adhesives.length ? (
+          >
+            <Copy className="mr-2 h-4 w-4 shrink-0" />
+            <span className="min-w-0">
+              Use the setup from <span className="font-semibold">“{source.name}”</span>
+            </span>
+          </Button>
+        )}
+
+        <Group title="Roof membrane">
+          <Field label="Roofing system">
+            <Pick
+              value={setup.roofSystem}
+              options={systems}
+              onChange={(v) => set("roofSystem", v)}
+            />
+          </Field>
+          <Field label="Attachment">
+            <Pick
+              value={setup.attachment}
+              options={ATTACHMENTS}
+              onChange={(v) => {
+                const nx: TakeoffSetup = { ...setup, attachment: v as Attachment };
+                if (v !== "adhered") delete nx.membraneAdhesiveName;
+                onChange(nx);
+              }}
+            />
+          </Field>
+          {setup.attachment === "adhered" && (
+            <Field label="Adhesive" className="col-span-2">
+              {adhesives.length ? (
+                <Pick
+                  value={setup.membraneAdhesiveName}
+                  options={opts(adhesives)}
+                  onChange={(v) => set("membraneAdhesiveName", v)}
+                />
+              ) : (
+                <Input
+                  className="h-8"
+                  value={setup.membraneAdhesiveName ?? ""}
+                  onChange={(e) => set("membraneAdhesiveName", e.target.value)}
+                />
+              )}
+            </Field>
+          )}
+          <Field label="Membrane (mil)">
+            <Pick
+              value={setup.thickness === undefined ? undefined : String(setup.thickness)}
+              options={thicknesses}
+              onChange={(v) => set("thickness", Number(v))}
+            />
+          </Field>
+          <Field label="Colour">
+            <Pick value={setup.color} options={colors} onChange={(v) => set("color", v)} />
+          </Field>
+          <Field label="Sheet size" className="col-span-2">
+            {sheetSizes.length ? (
               <Pick
-                value={setup.membraneAdhesiveName}
-                options={opts(adhesives)}
-                onChange={(v) => set("membraneAdhesiveName", v)}
+                value={setup.sheetSizeLabel}
+                options={opts(sheetSizes)}
+                onChange={(v) => set("sheetSizeLabel", v)}
               />
             ) : (
               <Input
                 className="h-8"
-                value={setup.membraneAdhesiveName ?? ""}
-                onChange={(e) => set("membraneAdhesiveName", e.target.value)}
+                placeholder="e.g. 1500 sf"
+                value={setup.sheetSizeLabel ?? ""}
+                onChange={(e) => set("sheetSizeLabel", e.target.value)}
               />
             )}
           </Field>
-        )}
-        <Field label="Membrane (mil)">
-          <Pick
-            value={setup.thickness === undefined ? undefined : String(setup.thickness)}
-            options={thicknesses}
-            onChange={(v) => set("thickness", Number(v))}
-          />
-        </Field>
-        <Field label="Colour">
-          <Pick value={setup.color} options={colors} onChange={(v) => set("color", v)} />
-        </Field>
-        <Field label="Sheet size" className="col-span-2">
-          {sheetSizes.length ? (
+        </Group>
+
+        <Group title="Deck and fastening">
+          <Field label="Deck type">
+            <Pick value={setup.deckType} options={decks} onChange={(v) => set("deckType", v)} />
+          </Field>
+          <Field label="Design table (psf)">
             <Pick
-              value={setup.sheetSizeLabel}
-              options={opts(sheetSizes)}
-              onChange={(v) => set("sheetSizeLabel", v)}
+              value={setup.designTable === undefined ? undefined : String(setup.designTable)}
+              options={opts(DESIGN_TABLE_OPTIONS)}
+              onChange={(v) => set("designTable", Number(v))}
             />
-          ) : (
+          </Field>
+          <Field label="Pull test (lbs)">
+            <NumberField
+              className="h-8"
+              value={setup.pullTest ?? 0}
+              onChange={(v) => set("pullTest", v)}
+              step="any"
+            />
+          </Field>
+          <Field label="Field lap (in)">
+            <NumberField
+              className="h-8"
+              value={setup.fieldLap ?? 0}
+              onChange={(v) => set("fieldLap", v)}
+              step="any"
+            />
+          </Field>
+        </Group>
+
+        <Group title="Edge defaults" note="Applied to every side of each new area as you draw it.">
+          <label className="col-span-2 flex items-center justify-between gap-2 text-sm">
+            Perimeter edge
+            <Switch
+              checked={edge.isPerimeter ?? true}
+              onCheckedChange={(c) => setEdge("isPerimeter", c)}
+            />
+          </label>
+          <Field label="Termination" className="col-span-2">
+            <Pick
+              value={edge.termination}
+              options={opts(TERMINATION_OPTIONS)}
+              onChange={(v) => setEdge("termination", v)}
+            />
+          </Field>
+          <label className="flex items-center justify-between gap-2 text-sm">
+            Wood blocking
+            <Switch
+              checked={edge.blocking ?? false}
+              onCheckedChange={(c) => setEdge("blocking", c)}
+            />
+          </label>
+          <Field label="ARP size">
+            <Pick
+              value={edge.arpSizeIn === undefined ? undefined : String(edge.arpSizeIn)}
+              options={ARP_OPTS}
+              onChange={(v) => setEdge("arpSizeIn", Number(v))}
+            />
+          </Field>
+        </Group>
+
+        <Group title="Parapet defaults">
+          <Field label="System">
+            <Pick
+              value={parapet.roofSystem}
+              options={systems}
+              onChange={(v) => setParapet("roofSystem", v)}
+            />
+          </Field>
+          <Field label="Attachment">
+            <Pick
+              value={parapet.attachment}
+              options={ATTACHMENTS}
+              onChange={(v) => setParapet("attachment", v as Attachment)}
+            />
+          </Field>
+          <Field label="Height band">
             <Input
               className="h-8"
-              placeholder="e.g. 1500 sf"
-              value={setup.sheetSizeLabel ?? ""}
-              onChange={(e) => set("sheetSizeLabel", e.target.value)}
+              placeholder="e.g. 12–24 in"
+              value={parapet.heightBand ?? ""}
+              onChange={(e) => setParapet("heightBand", e.target.value)}
             />
-          )}
-        </Field>
-      </Group>
+          </Field>
+          <Field label="Deck type">
+            <Pick
+              value={parapet.deckType}
+              options={decks}
+              onChange={(v) => setParapet("deckType", v)}
+            />
+          </Field>
+        </Group>
 
-      <Group title="Deck and fastening">
-        <Field label="Deck type">
-          <Pick value={setup.deckType} options={decks} onChange={(v) => set("deckType", v)} />
-        </Field>
-        <Field label="Design table (psf)">
-          <Pick
-            value={setup.designTable === undefined ? undefined : String(setup.designTable)}
-            options={opts(DESIGN_TABLE_OPTIONS)}
-            onChange={(v) => set("designTable", Number(v))}
-          />
-        </Field>
-        <Field label="Pull test (lbs)">
-          <NumberField
-            className="h-8"
-            value={setup.pullTest ?? 0}
-            onChange={(v) => set("pullTest", v)}
-            step="any"
-          />
-        </Field>
-        <Field label="Field lap (in)">
-          <NumberField
-            className="h-8"
-            value={setup.fieldLap ?? 0}
-            onChange={(v) => set("fieldLap", v)}
-            step="any"
-          />
-        </Field>
-      </Group>
+        <Group
+          title="Drains"
+          note="Given to every drain you place from now on (each drain can still be changed). A drain needs a boot and a ring to go into the bid's Roof Drains & Boots."
+        >
+          <DrainFields idPrefix="setup-drain" value={setup.drain ?? {}} onChange={setDrain} />
+        </Group>
 
-      <Group title="Edge defaults" note="Applied to every side of each new area as you draw it.">
-        <label className="col-span-2 flex items-center justify-between gap-2 text-sm">
-          Perimeter edge
-          <Switch
-            checked={edge.isPerimeter ?? true}
-            onCheckedChange={(c) => setEdge("isPerimeter", c)}
+        <section className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Notes</Label>
+          <Textarea
+            rows={3}
+            value={setup.notes ?? ""}
+            onChange={(e) => set("notes", e.target.value)}
           />
-        </label>
-        <Field label="Termination" className="col-span-2">
-          <Pick
-            value={edge.termination}
-            options={opts(TERMINATION_OPTIONS)}
-            onChange={(v) => setEdge("termination", v)}
-          />
-        </Field>
-        <label className="flex items-center justify-between gap-2 text-sm">
-          Wood blocking
-          <Switch
-            checked={edge.blocking ?? false}
-            onCheckedChange={(c) => setEdge("blocking", c)}
-          />
-        </label>
-        <Field label="ARP size">
-          <Pick
-            value={edge.arpSizeIn === undefined ? undefined : String(edge.arpSizeIn)}
-            options={ARP_OPTS}
-            onChange={(v) => setEdge("arpSizeIn", Number(v))}
-          />
-        </Field>
-      </Group>
-
-      <Group title="Parapet defaults">
-        <Field label="System">
-          <Pick
-            value={parapet.roofSystem}
-            options={systems}
-            onChange={(v) => setParapet("roofSystem", v)}
-          />
-        </Field>
-        <Field label="Attachment">
-          <Pick
-            value={parapet.attachment}
-            options={ATTACHMENTS}
-            onChange={(v) => setParapet("attachment", v as Attachment)}
-          />
-        </Field>
-        <Field label="Height band">
-          <Input
-            className="h-8"
-            placeholder="e.g. 12–24 in"
-            value={parapet.heightBand ?? ""}
-            onChange={(e) => setParapet("heightBand", e.target.value)}
-          />
-        </Field>
-        <Field label="Deck type">
-          <Pick
-            value={parapet.deckType}
-            options={decks}
-            onChange={(v) => setParapet("deckType", v)}
-          />
-        </Field>
-      </Group>
-
-      <Group
-        title="Drains"
-        note="Given to every drain you place from now on (each drain can still be changed). A drain needs a boot and a ring to go into the bid's Roof Drains & Boots."
-      >
-        <DrainFields idPrefix="setup-drain" value={setup.drain ?? {}} onChange={setDrain} />
-      </Group>
-
-      <section className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Notes</Label>
-        <Textarea
-          rows={3}
-          value={setup.notes ?? ""}
-          onChange={(e) => set("notes", e.target.value)}
-        />
-      </section>
+        </section>
+      </fieldset>
     </div>
   );
 }

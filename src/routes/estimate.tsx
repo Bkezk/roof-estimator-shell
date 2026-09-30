@@ -48,6 +48,7 @@ import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estima
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
+import { lockedToast } from "@/lib/takeoff/lock";
 import {
   applyTakeoffToBid,
   bidAccountFromTakeoff,
@@ -1154,6 +1155,24 @@ function EstimatePage() {
     enabled: authed && !!takeoffParam,
   });
   const takeoffSeededFor = useRef<string | null>(null);
+  // A takeoff (an "Edit a copy" copy) that updated THIS saved bid: saving the bid links it, which
+  // locks it (src/lib/takeoff/lock.ts) — it built what is saved now.
+  const takeoffToLock = useRef<{ takeoffId: string; bidId: string } | null>(null);
+  // The takeoff remembers the bid it built (best effort; the bid already links back), which locks
+  // it; the user is told once. A takeoff with no customer takes this bid's (server side).
+  const lockTakeoff = (takeoffId: string, builtBidId: string, builtBidName: string) => {
+    takeoffToLock.current = null;
+    void saveTakeoffFn({ data: { id: takeoffId, bid_id: builtBidId } })
+      .then((t) => {
+        toast.info(lockedToast(builtBidName));
+        if (t.inherited_account_id)
+          toast.info("The takeoff is now linked to this bid's customer too.");
+        void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+        void qc.invalidateQueries({ queryKey: ["takeoff", takeoffId] });
+        void qc.invalidateQueries({ queryKey: ["takeoff-lock", takeoffId] });
+      })
+      .catch(() => {});
+  };
   // The takeoff's customer onto a bid that has none (owner, Sep 30): linked as a change of this
   // session (so the save sends it), and the bid's BLANK client fields filled from the profile.
   const linkFromTakeoff = (accountId: string, label: string) => {
@@ -1217,6 +1236,8 @@ function EstimatePage() {
           unmapped: seed.unmapped,
         });
         setLinkedTakeoffId(takeoffRow.id);
+        takeoffToLock.current =
+          takeoffRow.bid_id || !bidParam ? null : { takeoffId: takeoffRow.id, bidId: bidParam };
         const inherit = bidAccountFromTakeoff(linkedAccountId, takeoffRow.account_id);
         if (inherit) linkFromTakeoff(inherit, takeoffCustomer);
         toast.success(
@@ -1947,17 +1968,11 @@ function EstimatePage() {
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
-        // The takeoff remembers the bid it produced (best effort; the bid already links back).
-        // A takeoff with no customer takes this bid's (server side); say so when it did.
-        if (linkedTakeoffId)
-          void saveTakeoffFn({ data: { id: linkedTakeoffId, bid_id: row.id } })
-            .then((t) => {
-              if (t.inherited_account_id)
-                toast.info("The takeoff is now linked to this bid's customer too.");
-            })
-            .catch(() => {});
+        // The takeoff that built this bid is linked to it, and so locked.
+        if (linkedTakeoffId) lockTakeoff(linkedTakeoffId, row.id, row.name);
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
-      }
+      } else if (row && takeoffToLock.current?.bidId === row.id)
+        lockTakeoff(takeoffToLock.current.takeoffId, row.id, row.name);
       return true;
     } catch (e) {
       if (sendLink) linkDirty.current = true;

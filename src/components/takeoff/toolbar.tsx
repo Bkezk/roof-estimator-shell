@@ -31,6 +31,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
+import { toolAllowed } from "@/lib/takeoff/lock";
+
 import { TOOL_KEYS, type Tool } from "./shapes";
 
 /** How long the pointer rests on a control before its tooltip opens. */
@@ -132,6 +134,8 @@ export function ViewerToolbar(props: {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  /** A locked takeoff: only Select and Dimension are enabled. */
+  readOnly?: boolean;
   roles: RoleChips | null;
   /** Snap to the plan's own lines; null hides the toggle. */
   planSnap?: PlanSnapToggle | null;
@@ -145,24 +149,37 @@ export function ViewerToolbar(props: {
   return (
     <div className="border-b bg-background">
       <div className="flex flex-wrap items-center gap-1 px-2 py-1.5">
-        {TOOLS.map(({ tool: t, label, purpose, icon: Icon }) => (
-          <Tip key={t} name={label} text={`${purpose} (${TOOL_KEYS[t]})`}>
-            <Button
-              size="sm"
-              variant={props.tool === t ? "default" : "ghost"}
-              className="h-8 gap-1 px-2"
-              onClick={(e) => {
-                props.onTool(t);
-                if (e.detail > 0) e.currentTarget.blur();
-              }}
-              aria-pressed={props.tool === t}
-              aria-label={label}
+        {TOOLS.map(({ tool: t, label, purpose, icon: Icon }) => {
+          const off = !toolAllowed(t, !!props.readOnly);
+          return (
+            <Tip
+              key={t}
+              name={label}
+              wrap={off}
+              text={
+                off
+                  ? "locked: this takeoff built a bid (Edit a copy to draw)"
+                  : `${purpose} (${TOOL_KEYS[t]})`
+              }
             >
-              <Icon className="h-4 w-4" />
-              <span className="hidden text-xs lg:inline">{label}</span>
-            </Button>
-          </Tip>
-        ))}
+              <Button
+                size="sm"
+                variant={props.tool === t ? "default" : "ghost"}
+                disabled={off}
+                className="h-8 gap-1 px-2"
+                onClick={(e) => {
+                  props.onTool(t);
+                  if (e.detail > 0) e.currentTarget.blur();
+                }}
+                aria-pressed={props.tool === t}
+                aria-label={label}
+              >
+                <Icon className="h-4 w-4" />
+                <span className="hidden text-xs lg:inline">{label}</span>
+              </Button>
+            </Tip>
+          );
+        })}
         {props.edgeFromArea && (
           <Tip
             name="Edge from this area"

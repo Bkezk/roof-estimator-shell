@@ -16,6 +16,7 @@ import {
   FileImage,
   FileText,
   Loader2,
+  Lock,
   Plus,
   RotateCcw,
   Ruler,
@@ -69,6 +70,7 @@ import {
 
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import type { AccountHit } from "@/lib/crm.functions";
+import { isTakeoffLocked } from "@/lib/takeoff/lock";
 import { suggestTakeoffName } from "@/lib/takeoff/naming";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
@@ -460,6 +462,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
   const status = asTakeoffStatus(t.status);
   const pageCount = takeoffDoc(t).pages.length;
   const isPdf = t.underlay_kind === "pdf";
+  const locked = isTakeoffLocked(t);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4 transition-colors duration-150 hover:border-primary/40 hover:bg-muted/40">
       <div className="min-w-0 flex-1 space-y-1">
@@ -482,6 +485,16 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
           >
             {TAKEOFF_STATUS_LABELS[status]}
           </Badge>
+          {locked && (
+            <Badge
+              variant="outline"
+              className="gap-1 border-amber-400 bg-amber-50 px-1.5 py-0 text-[11px] font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+              title={`Locked: it built ${t.bid ? `bid “${t.bid.name}”` : "a bid"}. Open it and use Edit a copy to measure again.`}
+            >
+              <Lock className="h-3 w-3" />
+              Locked
+            </Badge>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">
           {t.file_name && (
@@ -512,7 +525,7 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
         <p className="flex flex-wrap items-center gap-1.5 text-sm">
           {t.bid ? (
             <>
-              <span className="text-muted-foreground">Bid:</span>
+              <span className="text-muted-foreground">{locked ? "Built bid:" : "Bid:"}</span>
               <Link
                 to="/estimate"
                 search={{ bid: t.bid.id }}
@@ -523,6 +536,8 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
               </Link>
               <BidStatusBadge status={t.bid.status} />
             </>
+          ) : locked ? (
+            <span className="text-muted-foreground">Built a bid (you cannot see bids)</span>
           ) : (
             <span className="text-muted-foreground">No bid yet</span>
           )}

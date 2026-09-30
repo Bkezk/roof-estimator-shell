@@ -2,6 +2,11 @@
  * Takeoff editor (/takeoff?id=…): pages on the left, the drawing in the middle, Setup /
  * Objects / Quantities on the right. Local state is authoritative and autosaves 800 ms after
  * any change to the name, pages, setup or objects.
+ *
+ * Locked takeoffs (src/lib/takeoff/lock.ts; owner, Sep 30): a takeoff that built a bid opens
+ * read-only — no drawing tools, no Setup / Objects edits, no autosave — under a banner offering
+ * "Edit a copy" and "Open bid". A copy's Create bid makes a NEW bid; updating the original's bid
+ * from the copy is offered only behind a confirmation that names the bid and lists the changes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,8 +17,10 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  Copy,
   FilePlus2,
   Loader2,
+  Lock,
   Maximize2,
   Minimize2,
   PanelLeftClose,
@@ -30,12 +37,22 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth-store";
 import {
+  copyTakeoff,
   getTakeoff,
   saveTakeoff,
   takeoffDoc,
   TAKEOFF_BUCKET,
   type TakeoffWithBid,
 } from "@/lib/takeoff.functions";
+import {
+  bidActions,
+  isTakeoffLocked,
+  lockBannerText,
+  lockedToast,
+  lockMeta,
+  takeoffChangeList,
+  TAKEOFF_LOCKED,
+} from "@/lib/takeoff/lock";
 import {
   feetPerPx,
   rotatePoints,
@@ -48,6 +65,16 @@ import {
   type TakeoffPage,
   type TakeoffSetup,
 } from "@/lib/takeoff/model";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -155,8 +182,36 @@ function SaveIndicator({ state }: { state: SaveState }) {
   );
 }
 
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+const noChange = () => {};
+
 function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const initial = useMemo(() => takeoffDoc(row), [row]);
+  const { can } = useAuth();
+  const qc = useQueryClient();
+  const getFn = useServerFn(getTakeoff);
+  // The lock, kept current while the editor is open: a bid saved from this takeoff (another tab,
+  // or a save refused as locked) locks it. Refetched on window focus; gcTime 0 so a reopened
+  // takeoff never starts from a stale copy.
+  const lockQ = useQuery({
+    queryKey: ["takeoff-lock", row.id],
+    queryFn: () => getFn({ data: { id: row.id } }),
+    initialData: row,
+    staleTime: 15_000,
+    gcTime: 0,
+    refetchOnWindowFocus: true,
+  });
+  const live = lockQ.data ?? row;
+  const locked = isTakeoffLocked(live);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  const lockedBid = locked ? live.bid : null;
+  // Told once: the takeoff became locked while open (it was not when it opened).
+  const wasLocked = useRef(isTakeoffLocked(row));
+  useEffect(() => {
+    if (locked && !wasLocked.current) toast.info(lockedToast(live.bid?.name ?? null));
+    wasLocked.current = locked;
+  }, [locked, live.bid?.name]);
   const [name, setName] = useState(row.name);
   const [pages, setPages] = useState<TakeoffPage[]>(() =>
     initial.pages.length ? initial.pages : [{ index: 0, name: "Page 1", rotation: 0, scale: null }],
@@ -181,6 +236,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const syncHistory = () =>
     setHistorySize({ past: history.current.past.length, future: history.current.future.length });
   const commit = (fn: (os: TakeoffObject[]) => TakeoffObject[], mergeKey?: string) => {
+    if (lockedRef.current) return;
     const prev = objectsRef.current;
     const next = fn(prev);
     if (next === prev) return;
@@ -198,6 +254,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     syncHistory();
   };
   const travel = (from: "past" | "future") => {
+    if (lockedRef.current) return;
     const h = history.current;
     const target = h[from].pop();
     if (!target) return;
@@ -221,24 +278,37 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const isNew = initial.objects.length === 0 && Object.keys(initial.setup).length === 0;
   // A brand-new drawing (nothing drawn, no page scaled) opens on the Scale tool.
   const [startTool] = useState<Tool>(() =>
-    initial.objects.length === 0 && !initial.pages.some((p) => p.scale) ? "scale" : "select",
+    !isTakeoffLocked(row) && initial.objects.length === 0 && !initial.pages.some((p) => p.scale)
+      ? "scale"
+      : "select",
   );
   const [tab, setTab] = useState(isNew ? "setup" : "objects");
 
-  // Autosave (name / pages / setup / objects).
+  // Autosave (name / pages / setup / objects) — never on a locked takeoff.
   const saveFn = useServerFn(saveTakeoff);
   const doc = useMemo(() => ({ name, pages, setup, objects }), [name, pages, setup, objects]);
-  const { state: saveState, flush: flushSave } = useAutosave(doc, async (d) => {
-    await saveFn({
-      data: {
-        id: row.id,
-        name: d.name.trim() || "Untitled takeoff",
-        pages: d.pages,
-        setup: d.setup,
-        objects: d.objects,
-      },
-    });
-  });
+  const { state: saveState, flush: flushSave } = useAutosave(
+    doc,
+    async (d) => {
+      try {
+        await saveFn({
+          data: {
+            id: row.id,
+            name: d.name.trim() || "Untitled takeoff",
+            pages: d.pages,
+            setup: d.setup,
+            objects: d.objects,
+          },
+        });
+      } catch (e) {
+        // Refused as locked: pick up the lock (the editor turns read-only).
+        if (errText(e).includes(TAKEOFF_LOCKED)) void lockQ.refetch();
+        throw e;
+      }
+    },
+    800,
+    locked,
+  );
 
   // The underlay file, straight from the private storage bucket.
   const [source, setSource] = useState<UnderlaySource | null>(null);
@@ -279,7 +349,6 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const quantities = useMemo(() => takeoffQuantities(pages, objects), [pages, objects]);
 
   // Draft / Done — saved at once (separately from the autosave, which never sends status).
-  const qc = useQueryClient();
   const [status, setStatus] = useState<TakeoffStatus>(row.status === "done" ? "done" : "draft");
   const saveStatus = useMutation({
     mutationFn: (next: TakeoffStatus) => saveFn({ data: { id: row.id, status: next } }),
@@ -299,12 +368,57 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   });
 
   // Bid from takeoff (docs/planswift-research.md §4.6): save what is pending, then open the
-  // estimator — on a NEW bid seeded from this drawing (/estimate?takeoff=<id>), or on the bid
-  // this takeoff already made, with the drawing's new quantities applied
-  // (/estimate?bid=<bid id>&takeoff=<id>).
+  // estimator — on a NEW bid seeded from this drawing (/estimate?takeoff=<id>), or (a copy, after
+  // the confirmation) on the bid its original built, with this drawing's quantities applied
+  // (/estimate?bid=<bid id>&takeoff=<id>). A locked takeoff offers neither: it already built one.
   const navigate = useNavigate();
-  const linkedBid = row.bid;
   const canCreateBid = quantities.sections.length > 0;
+  // A copy ("Edit a copy") remembers its original and the bid that one built.
+  const origin = lockMeta(initial.setup).copiedFrom ?? null;
+  const originQ = useQuery({
+    queryKey: ["takeoff-origin", origin?.takeoffId],
+    queryFn: () => getFn({ data: { id: origin!.takeoffId } }),
+    enabled: !!origin?.bidId && !locked,
+    staleTime: 60_000,
+  });
+  const originBid =
+    origin?.bidId &&
+    originQ.data?.bid &&
+    originQ.data.bid.id === origin.bidId &&
+    !originQ.data.bid.deleted_at
+      ? originQ.data.bid
+      : null;
+  const actions = bidActions({ locked, originBid });
+  const [confirmUpdate, setConfirmUpdate] = useState(false);
+  const updateChanges = useMemo(() => {
+    if (!confirmUpdate || !originQ.data) return [];
+    const o = takeoffDoc(originQ.data);
+    return takeoffChangeList(takeoffQuantities(o.pages, o.objects), quantities);
+  }, [confirmUpdate, originQ.data, quantities]);
+
+  // "Edit a copy": a new, unlocked takeoff with this drawing; open it.
+  const copyFn = useServerFn(copyTakeoff);
+  const makeCopy = useMutation({
+    mutationFn: () => copyFn({ data: { id: row.id } }),
+    onSuccess: (copy) => {
+      toast.success(
+        `Copy made: “${copy.name}”. Measure away — its Create bid starts a new bid; “${live.bid?.name ?? "the original bid"}” is not touched.`,
+      );
+      void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+      void navigate({ to: "/takeoff", search: { id: copy.id } });
+    },
+    onError: (e) => toast.error(`Could not copy the takeoff: ${errText(e)}`),
+  });
+  // The bid it built was deleted: the lock may be cleared (the server checks the bid is gone).
+  const unlock = useMutation({
+    mutationFn: () => saveFn({ data: { id: row.id, bid_id: null } }),
+    onSuccess: () => {
+      toast.success("Takeoff unlocked: the bid it built was deleted.");
+      void lockQ.refetch();
+      void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+    },
+    onError: (e) => toast.error(errText(e)),
+  });
   const toBid = async (bidId: string | null) => {
     const ok = await flushSave();
     if (!ok) {
@@ -333,7 +447,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
 
   const rotatePage = (i: number) => {
     const p = pages[i];
-    if (!p) return;
+    if (!p || lockedRef.current) return;
     const rotation = ((p.rotation + 1) % 4) as TakeoffPage["rotation"];
     const W = p.width;
     const H = p.height;
@@ -413,7 +527,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     );
   // Set this page's scale; with `applyToAll`, pages that have none take the same one (turned
   // to their own rotation when it differs). Pages with a scale keep it.
-  const setScale = (scale: PageScale, applyToAll: boolean) =>
+  const setScale = (scale: PageScale, applyToAll: boolean) => {
+    if (lockedRef.current) return;
     setPages((ps) =>
       ps.map((x) => {
         if (x.index === page.index) return { ...x, scale };
@@ -424,6 +539,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         return { ...x, scale: turns && W && H ? rotateScale(scale, W, H, turns) : { ...scale } };
       }),
     );
+  };
   const unscaledOtherPages = pages.filter((x) => x.index !== page.index && !x.scale).length;
   const updateObject = (id: string, fn: (o: TakeoffObject) => TakeoffObject) =>
     commit((os) => os.map((o) => (o.id === id ? fn(o) : o)), `update:${id}`);
@@ -544,6 +660,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
+          readOnly={locked}
           className="h-9 w-[min(420px,100%)] text-base font-semibold"
           aria-label="Takeoff name"
         />
@@ -553,47 +670,62 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             {row.file_name}
           </span>
         )}
-        <SaveIndicator state={saveState} />
-        <div className="flex items-center">
-          <Tip
-            name="Undo"
-            text="take back the last change to the drawing (Ctrl+Z)"
-            wrap={historySize.past === 0}
+        {locked ? (
+          <span
+            className="flex max-w-[280px] items-center gap-1 text-xs font-medium text-amber-800 dark:text-amber-300"
+            aria-live="polite"
+            title="This takeoff built a bid, so it is read-only. Use Edit a copy to measure again."
           >
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              disabled={historySize.past === 0}
-              onClick={(e) => {
-                undo();
-                if (e.detail > 0) e.currentTarget.blur();
-              }}
-              aria-label="Undo"
-            >
-              <Undo2 className="h-4 w-4" />
-            </Button>
-          </Tip>
-          <Tip
-            name="Redo"
-            text="put back what Undo took back (Ctrl+Y or Ctrl+Shift+Z)"
-            wrap={historySize.future === 0}
-          >
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              disabled={historySize.future === 0}
-              onClick={(e) => {
-                redo();
-                if (e.detail > 0) e.currentTarget.blur();
-              }}
-              aria-label="Redo"
-            >
-              <Redo2 className="h-4 w-4" />
-            </Button>
-          </Tip>
-        </div>
+            <Lock className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              Locked · built {lockedBid ? `bid “${lockedBid.name}”` : "a bid"}
+            </span>
+          </span>
+        ) : (
+          <>
+            <SaveIndicator state={saveState} />
+            <div className="flex items-center">
+              <Tip
+                name="Undo"
+                text="take back the last change to the drawing (Ctrl+Z)"
+                wrap={historySize.past === 0}
+              >
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  disabled={historySize.past === 0}
+                  onClick={(e) => {
+                    undo();
+                    if (e.detail > 0) e.currentTarget.blur();
+                  }}
+                  aria-label="Undo"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </Button>
+              </Tip>
+              <Tip
+                name="Redo"
+                text="put back what Undo took back (Ctrl+Y or Ctrl+Shift+Z)"
+                wrap={historySize.future === 0}
+              >
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  disabled={historySize.future === 0}
+                  onClick={(e) => {
+                    redo();
+                    if (e.detail > 0) e.currentTarget.blur();
+                  }}
+                  aria-label="Redo"
+                >
+                  <Redo2 className="h-4 w-4" />
+                </Button>
+              </Tip>
+            </div>
+          </>
+        )}
         <Select value={status} onValueChange={(v) => saveStatus.mutate(v as TakeoffStatus)}>
           <SelectTrigger
             className="h-8 w-[100px] text-xs"
@@ -677,62 +809,31 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
               </Button>
             </Tip>
           </div>
-          {linkedBid ? (
-            <>
-              <span className="flex items-center gap-1.5 text-xs">
-                <Link
-                  to="/estimate"
-                  search={{ bid: linkedBid.id }}
-                  className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
-                  title={`Open “${linkedBid.name}” as it is saved now`}
-                >
-                  Open bid
-                </Link>
-                <BidStatusBadge status={linkedBid.status} />
-              </span>
-              <Tooltip delayDuration={TIP_DELAY_MS}>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!canCreateBid}
-                      onClick={() => void toBid(null)}
-                    >
-                      <FilePlus2 className="mr-1 h-4 w-4" /> Create a new bid
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  <span className="font-semibold">Create a new bid</span> —{" "}
-                  {canCreateBid
-                    ? "start another, separate bid with these sections, edges, parapets and counts filled in"
-                    : NO_AREA_TIP}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip delayDuration={TIP_DELAY_MS}>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0} className="min-w-0">
-                    <Button
-                      size="sm"
-                      disabled={!canCreateBid}
-                      className="max-w-[320px]"
-                      onClick={() => void toBid(linkedBid.id)}
-                    >
-                      <RefreshCw className="mr-1 h-4 w-4 shrink-0" />
-                      <span className="truncate">Update bid “{linkedBid.name}”</span>
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">
-                  <span className="font-semibold">Update bid</span> —{" "}
-                  {canCreateBid
-                    ? `open “${linkedBid.name}” with this drawing's new quantities applied`
-                    : NO_AREA_TIP}
-                </TooltipContent>
-              </Tooltip>
-            </>
-          ) : (
+          {actions.updateBid && (
+            <Tooltip delayDuration={TIP_DELAY_MS}>
+              <TooltipTrigger asChild>
+                <span tabIndex={0} className="min-w-0">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!canCreateBid}
+                    className="max-w-[320px]"
+                    onClick={() => setConfirmUpdate(true)}
+                  >
+                    <RefreshCw className="mr-1 h-4 w-4 shrink-0" />
+                    <span className="truncate">Update bid “{actions.updateBid.bidName}”…</span>
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs">
+                <span className="font-semibold">Update bid</span> —{" "}
+                {canCreateBid
+                  ? `apply this copy's quantities to “${actions.updateBid.bidName}”, the bid the original built (asks first, listing the changes)`
+                  : NO_AREA_TIP}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {actions.createBid && (
             <Tooltip delayDuration={TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <span tabIndex={0}>
@@ -751,6 +852,95 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
           )}
         </div>
       </div>
+
+      {locked && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          <Lock className="h-4 w-4 shrink-0" aria-hidden />
+          <p className="min-w-0 flex-1">
+            {lockBannerText(
+              lockedBid?.name ?? null,
+              lockMeta(live.setup).lockedAt ?? lockedBid?.created_at ?? null,
+            )}
+            {lockedBid?.deleted_at && " That bid has since been deleted."}
+          </p>
+          {lockedBid && (
+            <span className="flex items-center gap-1.5">
+              <BidStatusBadge status={lockedBid.status} />
+              <Button asChild size="sm" variant="outline">
+                <Link to="/estimate" search={{ bid: lockedBid.id }}>
+                  Open bid
+                </Link>
+              </Button>
+            </span>
+          )}
+          {lockedBid?.deleted_at && can("estimate") && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={unlock.isPending}
+              onClick={() => unlock.mutate()}
+              title="The bid this takeoff built was deleted, so it can be edited again"
+            >
+              Unlock
+            </Button>
+          )}
+          {actions.editCopy && (
+            <Button size="sm" disabled={makeCopy.isPending} onClick={() => makeCopy.mutate()}>
+              {makeCopy.isPending ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Copy className="mr-1 h-4 w-4" />
+              )}
+              Edit a copy
+            </Button>
+          )}
+        </div>
+      )}
+
+      <AlertDialog open={confirmUpdate} onOpenChange={setConfirmUpdate}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update bid “{actions.updateBid?.bidName}”?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  This changes its measured quantities
+                  {updateChanges.length
+                    ? ":"
+                    : ". Nothing measured differs from the takeoff that built it; the bid's measured sections, parapets, curbs, pipe stacks and drains are set from this drawing again."}
+                </p>
+                {updateChanges.length > 0 && (
+                  <ul className="max-h-60 list-disc space-y-0.5 overflow-y-auto pl-5 text-foreground">
+                    {updateChanges.map((c) => (
+                      <li key={c}>{c}</li>
+                    ))}
+                  </ul>
+                )}
+                <p>
+                  The bid's own edits to unrelated fields are kept. The bid opens with the changes
+                  applied; nothing is saved until you save it there.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            {/* Cancel takes the focus when the dialog opens (Radix), so Enter cancels. */}
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = actions.updateBid;
+                setConfirmUpdate(false);
+                if (target) void toBid(target.bidId);
+              }}
+            >
+              Update bid
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="grid min-h-0 flex-1 gap-2" style={{ gridTemplateColumns: gridCols }}>
         {pagesOpen && (
@@ -795,6 +985,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                       size="icon"
                       variant="ghost"
                       className="h-6 w-6 shrink-0"
+                      disabled={locked}
                       title="Rotate clockwise"
                       aria-label={`Rotate ${p.name} clockwise`}
                       onClick={() => rotatePage(i)}
@@ -832,6 +1023,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             onEdgeCreate={createEdges}
             onDuplicate={duplicate}
             stampRequest={stampRequest}
+            readOnly={locked}
           />
         </div>
 
@@ -848,7 +1040,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                   <SetupTab
                     takeoffId={row.id}
                     setup={setup}
-                    onChange={setSetup}
+                    onChange={locked ? noChange : setSetup}
+                    readOnly={locked}
                     isNew={isNew}
                     customer={customer}
                     onCustomerChange={setCustomer}
@@ -869,6 +1062,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onEdgeChange={changeEdge}
                     onEdgeCreate={createEdges}
                     onDuplicate={(objectId) => setStampRequest({ id: objectId })}
+                    readOnly={locked}
                   />
                 </TabsContent>
                 <TabsContent value="quantities" className="mt-0">

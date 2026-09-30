@@ -96,6 +96,8 @@ export interface ObjectsTabProps {
   edge?: EdgeSession | null;
   onEdgeChange?: (edge: EdgeSession | null) => void;
   onEdgeCreate?: () => void;
+  /** A locked takeoff (it built a bid): the list still selects; nothing is editable. */
+  readOnly?: boolean;
 }
 
 const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Counts" } as const;
@@ -123,50 +125,58 @@ export function ObjectsTab(props: ObjectsTabProps) {
 
   return (
     <div className="space-y-4">
-      {edge && edgeArea?.kind === "area" ? (
-        <EdgePanel
-          area={edgeArea}
-          page={pageOf(edgeArea.page)}
-          edge={edge}
-          onChange={(e) => props.onEdgeChange?.(e)}
-          onCreate={() => props.onEdgeCreate?.()}
-          onCancel={() => props.onEdgeChange?.(null)}
-        />
-      ) : selected ? (
-        <SelectedEditor
-          key={selected.id}
-          object={selected}
-          page={pageOf(selected.page)}
-          objects={objects}
-          setup={props.setup}
-          onUpdate={props.onUpdate}
-          onDelete={props.onDelete}
-          onDuplicate={props.onDuplicate}
-        />
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Draw with Area, Linear or Count, or click an object (Select tool) to edit it here.
-        </p>
-      )}
-      {!edgeArea && selected?.kind === "area" && props.onEdgeFromArea && (
-        <Tip
-          name="Edge from this area"
-          text="turn the area's sides into parapet, gutter or other lines, a role per side"
-        >
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 w-full gap-1"
-            onClick={(e) => {
-              props.onEdgeFromArea?.(selected.id);
-              // Mouse click: hand the keys back to the drawing (Enter, Esc, role keys).
-              if (e.detail > 0) e.currentTarget.blur();
-            }}
+      <fieldset
+        disabled={props.readOnly}
+        aria-disabled={props.readOnly}
+        className={`min-w-0 space-y-4 ${props.readOnly ? "pointer-events-none opacity-70" : ""}`}
+      >
+        {edge && edgeArea?.kind === "area" ? (
+          <EdgePanel
+            area={edgeArea}
+            page={pageOf(edgeArea.page)}
+            edge={edge}
+            onChange={(e) => props.onEdgeChange?.(e)}
+            onCreate={() => props.onEdgeCreate?.()}
+            onCancel={() => props.onEdgeChange?.(null)}
+          />
+        ) : selected ? (
+          <SelectedEditor
+            key={selected.id}
+            object={selected}
+            page={pageOf(selected.page)}
+            objects={objects}
+            setup={props.setup}
+            onUpdate={props.onUpdate}
+            onDelete={props.onDelete}
+            onDuplicate={props.onDuplicate}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {props.readOnly
+              ? "Locked: click an object to see it here (use Edit a copy to change anything)."
+              : "Draw with Area, Linear or Count, or click an object (Select tool) to edit it here."}
+          </p>
+        )}
+        {!edgeArea && selected?.kind === "area" && props.onEdgeFromArea && (
+          <Tip
+            name="Edge from this area"
+            text="turn the area's sides into parapet, gutter or other lines, a role per side"
           >
-            <SquareDashed className="h-4 w-4" /> Edge from this area
-          </Button>
-        </Tip>
-      )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 w-full gap-1"
+              onClick={(e) => {
+                props.onEdgeFromArea?.(selected.id);
+                // Mouse click: hand the keys back to the drawing (Enter, Esc, role keys).
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+            >
+              <SquareDashed className="h-4 w-4" /> Edge from this area
+            </Button>
+          </Tip>
+        )}
+      </fieldset>
 
       {(["area", "linear", "count"] as const).map((kind) => {
         const list = objects.filter((o) => o.kind === kind);

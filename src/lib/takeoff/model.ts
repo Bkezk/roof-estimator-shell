@@ -162,6 +162,12 @@ export interface TakeoffSetup {
     ringSize?: string;
   };
   notes?: string;
+  /**
+   * Lock bookkeeping (./lock.ts), not material answers: where an "Edit a copy" copy came from,
+   * and when this takeoff built its bid. Never copied by "Use the setup from …".
+   */
+  copiedFrom?: { takeoffId: string; bidId: string | null; at: string };
+  lockedAt?: string;
 }
 
 /** Feet per displayed pixel for a calibrated page; null when the page has no scale yet. */
