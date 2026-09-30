@@ -1348,36 +1348,13 @@ export function TakeoffViewer(props: ViewerProps) {
             <div className="min-w-0 flex-1 space-y-0.5">
               <p>
                 <span className="font-semibold">Edge from {edgeArea.attrs.name}</span> — pick a role
-                for each side in the panel on the right, or click a side on the plan to cycle it.
-                Enter / right-click creates · Esc cancels.
+                for each side in the panel on the right, or click a side on the plan to cycle it,
+                then press Create there. Enter / right-click also creates · Esc cancels.
               </p>
               <p className="text-xs opacity-90">{edgeSum.text}</p>
             </div>
-            <Tip
-              name="Create"
-              wrap={!edgeSum.lines}
-              text="make one line per run of sides with the same role (Enter or right-click)"
-            >
-              <Button
-                size="sm"
-                variant="secondary"
-                className="h-8 px-4 font-semibold"
-                onClick={createEdges}
-                disabled={!edgeSum.lines}
-              >
-                Create
-              </Button>
-            </Tip>
-            <Tip name="Cancel" text="leave without making any lines (Esc)">
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
-                onClick={endEdge}
-              >
-                Cancel
-              </Button>
-            </Tip>
+            {/* The Create / Cancel buttons live in the Objects panel only (owner, Sep 30: "why
+                are there 2 create buttons?"); Enter / right-click and Esc still work here. */}
           </div>
         )}
 

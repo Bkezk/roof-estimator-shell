@@ -378,7 +378,7 @@ export function ghostPlacement<S extends { p: PagePoint } = { p: PagePoint }>(
 /** The name a copy's name is built from: "East wing copy 2" → "East wing". */
 const copyRoot = (name: string) => name.trim().replace(/\s+copy(?:\s+\d+)?$/i, "");
 
-/** The default-name base of `o`'s kind and role ("Section", "Wall", "Drain"…). */
+/** The default-name base of `o`'s kind and role ("Section", "Parapet", "Drain"…). */
 export function defaultBaseName(o: TakeoffObject): string {
   if (o.kind === "area") return AREA_BASE_NAME;
   if (o.kind === "linear") return LINEAR_BASE_NAMES[o.attrs.role] ?? LINEAR_BASE_NAMES.other;
@@ -434,7 +434,7 @@ export function duplicateObject(
 const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
 /**
- * Default object names per role ("Section 1", "Wall 1", "Drain 1"). Areas are "Section N" to
+ * Default object names per role ("Section 1", "Parapet 1", "Drain 1"). Areas are "Section N" to
  * match Bid-Advantage's section names (owner, Sep 30).
  */
 export const AREA_BASE_NAME = "Section";
@@ -443,11 +443,18 @@ export const AREA_BASE_NAME = "Section";
  * is still an untouched default name, and its number counts as taken when numbering new areas.
  */
 export const LEGACY_AREA_BASE_NAME = "Roof";
-/** Every base a default name of `base` may use (the area's older "Roof" too). */
+/** Parapet lines were "Wall 1", "Wall 2"… before Sep 30; saved names stay and still count. */
+export const LEGACY_PARAPET_BASE_NAME = "Wall";
+/** Every base a default name of `base` may use (the older "Roof" and "Wall" too). */
 const defaultBases = (base: string): string[] =>
-  base === AREA_BASE_NAME ? [base, LEGACY_AREA_BASE_NAME] : [base];
+  base === AREA_BASE_NAME
+    ? [base, LEGACY_AREA_BASE_NAME]
+    : base === LINEAR_BASE_NAMES.parapet
+      ? [base, LEGACY_PARAPET_BASE_NAME]
+      : [base];
+// Owner (Sep 30): a parapet line must read "Parapet", not "Wall", so it is told apart at a glance.
 export const LINEAR_BASE_NAMES: Record<LinearRole, string> = {
-  parapet: "Wall",
+  parapet: "Parapet",
   gutter: "Gutter",
   expansion_joint: "Expansion joint",
   walkway: "Walkway",

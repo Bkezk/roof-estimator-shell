@@ -160,6 +160,10 @@ describe("translateObject / buildObject", () => {
     expect(isDefaultName("Section 3", AREA_BASE_NAME)).toBe(true);
     expect(isDefaultName("Roof deck", AREA_BASE_NAME)).toBe(false);
     expect(isDefaultName("Roof 3", "Wall")).toBe(false);
+    // Parapet lines are "Parapet N" now; an older "Wall N" is still a default of that base.
+    expect(isDefaultName("Parapet 2", "Parapet")).toBe(true);
+    expect(isDefaultName("Wall 2", "Parapet")).toBe(true);
+    expect(isDefaultName("Wall 2", "Gutter")).toBe(false);
     // Stamping an old "Roof 2" gives the next default, not "Roof 2 copy".
     expect(duplicateObject(old[1]!, 5, 5, "d", old).attrs.name).toBe("Section 3");
   });
