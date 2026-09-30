@@ -31,6 +31,12 @@ import {
   parapetRemainingHeightIn,
 } from "@/lib/engine/accessories";
 import { TERMINATION_OPTIONS } from "@/lib/engine/edges";
+import {
+  offeredMils,
+  parapetMilChoices,
+  parseParapetMilChoice,
+  snapParapetMils,
+} from "@/lib/bid-mils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
@@ -274,6 +280,17 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
     onChange(parapets.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const updFn = (fn: (x: ParapetInput) => ParapetInput) =>
     onChange(parapets.map((x, j) => (j === i ? fn(x) : x)));
+  /**
+   * A wall material change (Roof System / Attached With / "Use bid defaults" / "Copy Settings"):
+   * the wall's mil must exist on its new system — snap to the nearest offered mil (like the
+   * Sections screen does on a system change). The wall without a mil of its own is pinned when
+   * the bid default it inherits is not offered for its new system.
+   */
+  const setWallMaterial = (nx: ParapetInput) => {
+    const snapped = snapParapetMils([nx], p.bidDefaults, p.sections[0]?.thickness, admin)
+      .parapets[0]!;
+    onChange(parapets.map((x, j) => (j === i ? snapped : x)));
+  };
 
   const systemOptions = [...new Set(Object.keys(admin.labor).map((k) => k.split("|")[0]!))];
   const attachmentsFor = (rs: string): Attachment[] => {
@@ -710,7 +727,8 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     }
                     onChange={(v) => {
                       const atts = attachmentsFor(v);
-                      upd({
+                      setWallMaterial({
+                        ...w,
                         roofSystem: v,
                         attachment: atts.includes(ps.attachment) ? ps.attachment : atts[0]!,
                       });
@@ -735,7 +753,8 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                         onChange={(v) => {
                           const o = opts.find((x) => x.label === v);
                           if (!o) return;
-                          upd({
+                          setWallMaterial({
+                            ...w,
                             roofSystem: ps.roofSystem,
                             attachment: o.attachment,
                             ...(o.attachment === "adhered"
@@ -747,29 +766,40 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     );
                   })()}
                 </Field>
-                {/* Owner: show the bid's actual mil / color instead of "Bid default"; picking
-                    the bid's own value keeps the wall following the bid. */}
+                {/* The wall system's own mils (Duro-Tech TPO 45/60/80 …) plus "Bid default
+                    (N mil)" — the bid's actual mil, so picking it keeps the wall following the
+                    bid (owner). Never a mil the wall's system does not offer. */}
                 <Field label="Mil">
-                  <Pick
-                    className="w-[120px]"
-                    value={`${w.thicknessMil ?? p.sections[0]?.thickness ?? 40}mil`}
-                    options={[
-                      ...new Set([
-                        `${p.sections[0]?.thickness ?? 40}mil`,
-                        "40mil",
-                        "50mil",
-                        "60mil",
-                      ]),
-                    ]}
-                    onChange={(v) =>
-                      updFn((x) => {
-                        const nx = { ...x };
-                        if (parseInt(v, 10) === p.sections[0]?.thickness) delete nx.thicknessMil;
-                        else nx.thicknessMil = parseInt(v, 10);
-                        return nx;
-                      })
-                    }
-                  />
+                  {(() => {
+                    const mil = parapetMilChoices(
+                      offeredMils(admin, ps.roofSystem, ps.attachment),
+                      w.thicknessMil,
+                      p.sections[0]?.thickness,
+                    );
+                    return (
+                      <>
+                        <Pick
+                          className={`w-[170px] ${mil.notOffered ? "border-destructive" : ""}`}
+                          value={mil.value}
+                          options={mil.options}
+                          onChange={(v) =>
+                            updFn((x) => {
+                              const nx = { ...x };
+                              const m = parseParapetMilChoice(v);
+                              if (m === undefined) delete nx.thicknessMil;
+                              else nx.thicknessMil = m;
+                              return nx;
+                            })
+                          }
+                        />
+                        {mil.notOffered && (
+                          <p className="mt-1 text-[11px] text-destructive">
+                            Not offered for {ps.roofSystem} — pick one
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </Field>
                 <Field label="Color">
                   <Pick
@@ -794,7 +824,7 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                     delete nx.roofSystem;
                     delete nx.attachment;
                     delete nx.membraneAdhesiveName;
-                    onChange(parapets.map((x, j) => (j === i ? nx : x)));
+                    setWallMaterial(nx);
                   }}
                 >
                   Use bid defaults
@@ -832,7 +862,7 @@ export function ParapetsScreen(p: ParapetsScreenProps) {
                       };
                       if (s.membraneAdhesiveName)
                         patch.membraneAdhesiveName = s.membraneAdhesiveName;
-                      upd(patch);
+                      setWallMaterial({ ...w, ...patch });
                     }}
                   >
                     Copy

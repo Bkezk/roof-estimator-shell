@@ -55,6 +55,15 @@ import {
   bidSeedFromTakeoff,
 } from "@/lib/takeoff/create-bid";
 import { newBidFromSeed, parapetFromDefaults } from "@/lib/takeoff/seed-to-bid";
+import {
+  applyParapetDefaultsToWalls,
+  applySectionDefaultsToSections,
+  offeredMils,
+  snapBidMils,
+  snapParapetDefaults,
+  snapParapetMils,
+  type MilBidState,
+} from "@/lib/bid-mils";
 import { readPlanSwiftHandoff } from "@/lib/planswift/handoff";
 import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
@@ -980,6 +989,10 @@ function EstimatePage() {
   // Bumped when a saved bid finishes hydrating so the unsaved-changes baseline is captured
   // from the hydrated state (not the empty pre-load render).
   const [hydrationStamp, setHydrationStamp] = useState(0);
+  // Bumped by every hydrate (a loaded bid, the Bid Combiner's result): the membrane-mil check
+  // after the unsaved-changes baseline (see the effect below it).
+  const [milCheckStamp, setMilCheckStamp] = useState(0);
+  const milCheckDone = useRef(0);
   /**
    * Hydrate the form from a saved payload (a loaded bid, or the Bid Combiner's merged result).
    * `d.sections` must be an array. Also moves the new-section / parapet / curb id counters past
@@ -1038,6 +1051,7 @@ function EstimatePage() {
     setHighWind(d.highWind ?? false);
     setHighWindTermYears(d.highWindTermYears ?? 0);
     setHighWindBand(d.highWindBand ?? "");
+    setMilCheckStamp((n) => n + 1);
     setSnapshot(
       d.adminSnapshot
         ? {
@@ -1482,6 +1496,81 @@ function EstimatePage() {
     setAccessoriesCalc(w.accessoriesCalc);
   };
 
+  // ── Membrane mil guard (owner, Sep 30): a bid never carries a mil its roof system does not
+  // offer — the engine prices a missing thickness at $0 with no warning (src/lib/bid-mils.ts).
+  const milState = (over: Partial<MilBidState> = {}): MilBidState => ({
+    roofSystem,
+    attachment,
+    membraneAdhesiveName: membraneAdhesive,
+    sections,
+    parapets,
+    sectionDefaults,
+    parapetDefaults,
+    ...over,
+  });
+  /** Write `after`'s corrected mils (by section / wall id) over whatever the state holds now. */
+  const applyMilFix = (before: MilBidState, after: MilBidState) => {
+    if (after.sections !== before.sections) {
+      const mil = new Map(after.sections.map((s) => [s.id, s.thickness]));
+      setSections((prev) =>
+        prev.map((s) => {
+          const m = mil.get(s.id);
+          return m !== undefined && m !== s.thickness ? { ...s, thickness: m } : s;
+        }),
+      );
+    }
+    if (after.parapets && after.parapets !== before.parapets) {
+      const mil = new Map(after.parapets.map((p) => [p.id, p.thicknessMil]));
+      setParapets((prev) =>
+        prev.map((p) => {
+          const m = mil.get(p.id);
+          return m !== undefined && m !== p.thicknessMil ? { ...p, thicknessMil: m } : p;
+        }),
+      );
+    }
+    const sd = after.sectionDefaults;
+    if (sd && sd !== before.sectionDefaults)
+      setSectionDefaults((p) => ({ ...p, thickness: sd.thickness }));
+    const pdMil = after.parapetDefaults?.thicknessMil;
+    if (after.parapetDefaults !== before.parapetDefaults && pdMil !== undefined)
+      setParapetDefaults((p) => ({ ...p, thicknessMil: pdMil }));
+  };
+  const warnMilChanges = (title: string, changes: string[]) =>
+    toast.warning(title, {
+      description: (
+        <ul className="list-disc space-y-0.5 pl-4">
+          {changes.map((c) => (
+            <li key={c}>{c}</li>
+          ))}
+        </ul>
+      ),
+      duration: 15000,
+    });
+  /** Setup "5. Parapets Material" system / attachment change: the default mil follows (c). */
+  const setParapetDefaultsSnapped = (nx: NonNullable<SavedBidState["parapetDefaults"]>) => {
+    if (!admin) {
+      setParapetDefaults(nx);
+      return;
+    }
+    const r = snapParapetDefaults(
+      nx,
+      { roofSystem, attachment, membraneAdhesiveName: membraneAdhesive },
+      sectionDefaults.thickness,
+      admin,
+    );
+    setParapetDefaults(r.parapetDefaults);
+    if (r.change) toast.info(r.change);
+  };
+  /** Snap the mils after a bid-level material change (sections / walls that follow the bid). */
+  const snapMilsFor = (over: Partial<MilBidState>) => {
+    if (!admin) return;
+    const before = milState(over);
+    const r = snapBidMils(before, admin);
+    if (!r.changes.length) return;
+    applyMilFix(before, r.state);
+    warnMilChanges("Membrane mil adjusted to the new roof system", r.changes);
+  };
+
   /**
    * Legacy frmHome.btnUpdate_Click (docs §22.39): the Update Bid Options dialog's OK. Material
    * pricing = replace the frozen snapshot with live admin data (custom underlayment quotes survive
@@ -1490,6 +1579,7 @@ function EstimatePage() {
    */
   const applyUpdateOptions = async (o: UpdateBidOptions) => {
     const done: string[] = [];
+    let milFix: { before: MilBidState; after: MilBidState; changes: string[] } | null = null;
     if (o.materialPricing) {
       const [a, w] = await Promise.all([getFn(), getWarrantyFn()]);
       // Legacy NDLCollectionBase.UpdateManagement: Non-DL rows are stored copies — an un-ticked
@@ -1506,6 +1596,11 @@ function EstimatePage() {
       setSnapshot({ admin: a, warranty: w ?? null, asOf: new Date().toISOString() });
       setLiveCheck({ admin: a, warranty: w ?? null });
       done.push("pricing & labor");
+      // The NEW pricing may not offer a mil the bid carries (a thickness dropped from a system's
+      // table): snap to the nearest offered mil. Written at the end, over the labor template.
+      const before = milState();
+      const r = snapBidMils(before, a);
+      if (r.changes.length) milFix = { before, after: r.state, changes: r.changes };
       if (o.resetUnderlaymentQuotes) {
         setUnderlaymentPriceOverrides({});
         done.push("underlayment quotes reset");
@@ -1535,7 +1630,15 @@ function EstimatePage() {
       setFormulasVersion(CURRENT_FORMULAS_VERSION);
       done.push(`formulas ${CURRENT_FORMULAS_VERSION}`);
     }
+    if (milFix) {
+      applyMilFix(milFix.before, milFix.after);
+      done.push(
+        `membrane mil on ${milFix.changes.length} item${milFix.changes.length === 1 ? "" : "s"}`,
+      );
+    }
     toast.success(`Bid updated (${done.join(", ")}) — totals recomputed. Save to keep it.`);
+    if (milFix)
+      warnMilChanges("The updated pricing does not offer every mil this bid had:", milFix.changes);
   };
 
   const saved: SavedBidState = {
@@ -1600,6 +1703,28 @@ function EstimatePage() {
     if (loadFill.current) loadFill.current.baselined = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- baseline only at mount / hydration
   }, [hydrationStamp]);
+  // Membrane-mil check on load (owner, Sep 30): the bid's saved snapshot is the pricing in force;
+  // a mil its system does not offer there (an imported bid, a bid saved before the guard) would
+  // price at $0. Runs once per hydrate, after the baseline above, so a correction leaves the bid
+  // unsaved ("Save to keep it"). Waits for the live admin data when the bid has no snapshot. A
+  // read-only bid is not changed — the list is only shown.
+  useEffect(() => {
+    if (milCheckStamp === 0 || milCheckDone.current === milCheckStamp || !admin) return;
+    milCheckDone.current = milCheckStamp;
+    const before = milState();
+    const r = snapBidMils(before, admin);
+    if (!r.changes.length) return;
+    if (readOnly) {
+      warnMilChanges("This bid has a membrane mil its roof system does not offer:", r.changes);
+      return;
+    }
+    applyMilFix(before, r.state);
+    warnMilChanges(
+      "This bid had a membrane mil its roof system does not offer — corrected (save to keep it):",
+      r.changes,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per hydrate, on that state
+  }, [milCheckStamp, admin]);
   // A bid loaded already linked (from the Customers page) fills its BLANK client fields — and
   // blank job-site fields when a site is linked — from the profile once it has loaded: no
   // prompt, typed text is never replaced. Once per load (loadFill), so a field cleared by hand
@@ -2971,11 +3096,20 @@ function EstimatePage() {
                         const mils = Object.keys(lt?.thicknessLaborByMil ?? {})
                           .map(Number)
                           .filter((n) => n > 0);
-                        if (mils.length && !mils.includes(sectionDefaults.thickness))
-                          setSectionDefaults((p) => ({
-                            ...p,
-                            thickness: mils.includes(60) ? 60 : mils[0]!,
-                          }));
+                        const sdThickness =
+                          mils.length && !mils.includes(sectionDefaults.thickness)
+                            ? mils.includes(60)
+                              ? 60
+                              : mils[0]!
+                            : sectionDefaults.thickness;
+                        if (sdThickness !== sectionDefaults.thickness)
+                          setSectionDefaults((p) => ({ ...p, thickness: sdThickness }));
+                        // Sections / walls that follow the bid system move with it: snap a
+                        // mil the new system does not offer (and say so).
+                        snapMilsFor({
+                          roofSystem: v,
+                          sectionDefaults: { ...sectionDefaults, thickness: sdThickness },
+                        });
                       }}
                     >
                       <SelectTrigger>
@@ -3008,6 +3142,8 @@ function EstimatePage() {
                             if (!o) return;
                             setAttachment(o.attachment);
                             if (o.attachment === "adhered") setMembraneAdhesive(o.adhesiveName);
+                            if (o.attachment !== attachment)
+                              snapMilsFor({ attachment: o.attachment });
                           }}
                         />
                       );
@@ -3121,17 +3257,15 @@ function EstimatePage() {
                           ? systemOptions
                           : [parapetDefaults.roofSystem ?? roofSystem, ...systemOptions]
                       }
-                      onChange={(v) =>
-                        setParapetDefaults((p) => {
-                          const nx = { ...p };
-                          if (v === roofSystem) delete nx.roofSystem;
-                          else nx.roofSystem = v;
-                          const atts = attachmentsForSystem(v);
-                          const cur = nx.attachment ?? attachment;
-                          if (!atts.includes(cur)) nx.attachment = atts[0]!;
-                          return nx;
-                        })
-                      }
+                      onChange={(v) => {
+                        const nx = { ...parapetDefaults };
+                        if (v === roofSystem) delete nx.roofSystem;
+                        else nx.roofSystem = v;
+                        const atts = attachmentsForSystem(v);
+                        const cur = nx.attachment ?? attachment;
+                        if (!atts.includes(cur)) nx.attachment = atts[0]!;
+                        setParapetDefaultsSnapped(nx);
+                      }}
                     />
                   </Field>
                   <Field label="Attached With">
@@ -3156,16 +3290,14 @@ function EstimatePage() {
                           onChange={(v) => {
                             const o = opts.find((x) => x.label === v);
                             if (!o) return;
-                            setParapetDefaults((p) => {
-                              const nx = { ...p };
-                              if (o.attachment === attachment && nx.roofSystem === undefined)
-                                delete nx.attachment;
-                              else nx.attachment = o.attachment;
-                              if (o.attachment !== "adhered" || o.adhesiveName === membraneAdhesive)
-                                delete nx.membraneAdhesiveName;
-                              else nx.membraneAdhesiveName = o.adhesiveName;
-                              return nx;
-                            });
+                            const nx = { ...parapetDefaults };
+                            if (o.attachment === attachment && nx.roofSystem === undefined)
+                              delete nx.attachment;
+                            else nx.attachment = o.attachment;
+                            if (o.attachment !== "adhered" || o.adhesiveName === membraneAdhesive)
+                              delete nx.membraneAdhesiveName;
+                            else nx.membraneAdhesiveName = o.adhesiveName;
+                            setParapetDefaultsSnapped(nx);
                           }}
                         />
                       );
@@ -3176,7 +3308,15 @@ function EstimatePage() {
                   <Field label="Type">
                     <PickOne
                       value={String(parapetDefaults.thicknessMil ?? sectionDefaults.thickness)}
-                      options={[...new Set([String(sectionDefaults.thickness), "40", "50", "60"])]}
+                      // The parapet system's own thickness list (Duro-Tech TPO 45/60/80 …).
+                      options={withCurrent(
+                        offeredMils(
+                          admin,
+                          parapetDefaults.roofSystem ?? roofSystem,
+                          parapetDefaults.attachment ?? attachment,
+                        ).map(String),
+                        String(parapetDefaults.thicknessMil ?? sectionDefaults.thickness),
+                      )}
                       onChange={(v) =>
                         setParapetDefaults((p) => {
                           const nx = { ...p };
@@ -3207,34 +3347,24 @@ function EstimatePage() {
                   size="sm"
                   className="mt-2"
                   disabled={parapets.length === 0}
-                  onClick={() =>
+                  onClick={() => {
                     // Legacy Button1_Click_1: membrane type + color onto every present parapet;
-                    // owner: the Setup Deck Type and Wall Type go onto them too.
-                    setParapets((prev) =>
-                      prev.map((pp) => {
-                        const nx: ParapetInput = {
-                          ...pp,
-                          deckType: sectionDefaults.deckType,
-                          wallType: parapetDefaults.wallType ?? 4,
-                        };
-                        // Roof System / Attached With / adhesive: the defaults when they differ
-                        // from the bid material, else back to "bid default".
-                        if (parapetDefaults.roofSystem) nx.roofSystem = parapetDefaults.roofSystem;
-                        else delete nx.roofSystem;
-                        if (parapetDefaults.attachment) nx.attachment = parapetDefaults.attachment;
-                        else delete nx.attachment;
-                        if (parapetDefaults.membraneAdhesiveName)
-                          nx.membraneAdhesiveName = parapetDefaults.membraneAdhesiveName;
-                        else delete nx.membraneAdhesiveName;
-                        if (parapetDefaults.thicknessMil !== undefined)
-                          nx.thicknessMil = parapetDefaults.thicknessMil;
-                        else delete nx.thicknessMil;
-                        if (parapetDefaults.color) nx.color = parapetDefaults.color;
-                        else delete nx.color;
-                        return nx;
-                      }),
-                    )
-                  }
+                    // owner: the Setup Deck Type and Wall Type go onto them too. The copied mil
+                    // is checked against each wall's system (never a mil it does not offer).
+                    const r = applyParapetDefaultsToWalls(
+                      parapets,
+                      {
+                        parapetDefaults,
+                        deckType: sectionDefaults.deckType,
+                        bid: { roofSystem, attachment, membraneAdhesiveName: membraneAdhesive },
+                        inheritedMil: sections[0]?.thickness,
+                      },
+                      admin,
+                    );
+                    setParapets(r.parapets);
+                    if (r.changes.length)
+                      warnMilChanges("Parapet mil adjusted to each wall's roof system", r.changes);
+                  }}
                 >
                   Apply to Existing Parapets
                 </Button>
@@ -3439,30 +3569,27 @@ function EstimatePage() {
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={() => {
-                    setSections((prev) =>
-                      prev.map((sec) => {
-                        // Roof System / Attached With / adhesive: clear the per-section
-                        // overrides so the bid defaults apply (legacy OverwriteWithDefault).
-                        const nx = { ...sec };
-                        delete nx.roofSystem;
-                        delete nx.attachment;
-                        delete nx.membraneAdhesiveName;
-                        return {
-                          ...nx,
-                          // "1. Deck Type" too (owner's request; legacy OverwriteWithDefault
-                          // leaves DeckType alone — docs §22.30).
-                          deckType: sectionDefaults.deckType,
-                          designTable: sectionDefaults.designTable ?? 60,
-                          thickness: sectionDefaults.thickness,
-                          color: sectionDefaults.color,
-                        };
-                      }),
-                    );
+                    // Roof System / Attached With / adhesive: clear the per-section overrides so
+                    // the bid defaults apply (legacy OverwriteWithDefault); "1. Deck Type" too
+                    // (owner's request; legacy leaves DeckType alone — docs §22.30). The copied
+                    // mil is checked against the bid system (owner, Sep 30).
+                    const bid = { roofSystem, attachment, membraneAdhesiveName: membraneAdhesive };
+                    const r = applySectionDefaultsToSections(sections, sectionDefaults, bid, admin);
+                    setSections(r.sections);
                     // Owner's expectation (docs §22.30): the "2. Wall Type" default beside these
-                    // material defaults re-routes the existing walls' drill split as well.
+                    // material defaults re-routes the existing walls' drill split as well. A
+                    // wall following the first section's mil is re-checked against its system.
                     const wallType = parapetDefaults.wallType;
-                    if (wallType !== undefined && parapets.length > 0)
-                      setParapets((prev) => prev.map((pp) => ({ ...pp, wallType })));
+                    const walls =
+                      wallType !== undefined
+                        ? parapets.map((pp) => ({ ...pp, wallType }))
+                        : parapets;
+                    const w = snapParapetMils(walls, bid, r.sections[0]?.thickness, admin);
+                    if (parapets.length > 0 && (wallType !== undefined || w.changes.length))
+                      setParapets(w.parapets);
+                    const changes = [...r.changes, ...w.changes];
+                    if (changes.length)
+                      warnMilChanges("Membrane mil adjusted to the roof system", changes);
                   }}
                 >
                   OK

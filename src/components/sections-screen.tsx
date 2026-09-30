@@ -25,6 +25,7 @@ import {
   sheetSizeSqFt,
   type BidSectionInput,
 } from "@/lib/engine/bid-builder";
+import { offeredMils, sectionMilChoices } from "@/lib/bid-mils";
 import {
   ARP_SIZE_OPTIONS,
   EDGE_SIDES,
@@ -414,6 +415,12 @@ export function SectionsScreen(p: SectionsScreenProps) {
     setEdges(nextEdges, { isQuickBid: false, perimCorners: [false, false, false, false] });
   };
 
+  // Membrane mil guard: the section's own system + attachment decides the offered mils.
+  const milChoice = sectionMilChoices(
+    offeredMils(admin, sys.roofSystem, sys.attachment),
+    s.thickness,
+  );
+
   // ── Legacy VerifyFields (non-blocking hints; the legacy form refuses to save on any) ──
   const problems: string[] = [];
   if (!(s.width > 0)) problems.push("Width");
@@ -793,20 +800,17 @@ export function SectionsScreen(p: SectionsScreenProps) {
             </Field>
             <Field label="Type (mil)">
               <Pick
-                className="w-[90px]"
-                value={String(s.thickness)}
+                className={milChoice.notOffered ? "w-[150px] border-destructive" : "w-[90px]"}
+                value={milChoice.value}
                 // The combo's thickness table (Duro-Last 40/50/60, Duro-Tech TPO 45/60/80 …); the
-                // legacy trio when the combo carries none. A saved thickness stays listed.
-                options={(() => {
-                  const fromCombo = Object.keys(laborTable?.thicknessLaborByMil ?? {})
-                    .map(Number)
-                    .filter((n) => n > 0)
-                    .sort((a, b) => a - b)
-                    .map(String);
-                  const base = fromCombo.length ? fromCombo : ["40", "50", "60"];
-                  return base.includes(String(s.thickness)) ? base : [String(s.thickness), ...base];
-                })()}
-                onChange={(v) => updWithSpacing({ thickness: Number(v) })}
+                // legacy trio when the combo carries none. A saved thickness the system does not
+                // offer stays listed as "50 (not offered)" — it would price at $0.
+                options={milChoice.options}
+                onChange={(v) => {
+                  const m = parseInt(v, 10);
+                  if (Number.isFinite(m) && m > 0 && m !== s.thickness)
+                    updWithSpacing({ thickness: m });
+                }}
               />
             </Field>
             <Field label="Color">
@@ -819,6 +823,11 @@ export function SectionsScreen(p: SectionsScreenProps) {
                 onChange={(v) => upd({ color: v })}
               />
             </Field>
+            {milChoice.notOffered && (
+              <p className="basis-full text-xs text-destructive">
+                {s.thickness} mil is not offered for {sys.roofSystem} — pick one
+              </p>
+            )}
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -1120,13 +1129,23 @@ export function SectionsScreen(p: SectionsScreenProps) {
               <TableBody>
                 {sections.map((s2, i2) => {
                   const sys2 = resolveSectionSystem(p.bidDefaults, s2);
+                  const milBad = !offeredMils(admin, sys2.roofSystem, sys2.attachment).includes(
+                    s2.thickness,
+                  );
                   return (
                     <TableRow
                       key={s2.id}
                       onClick={() => p.onSelect(i2)}
                       className={i2 === i ? "cursor-pointer bg-muted/60" : "cursor-pointer"}
                     >
-                      <TableCell className="whitespace-nowrap font-medium">{s2.name}</TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">
+                        {s2.name}
+                        {milBad && (
+                          <span className="block text-[11px] font-normal text-destructive">
+                            {s2.thickness} mil is not offered for {sys2.roofSystem} — pick one
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{n2(s2.length)}</TableCell>
                       <TableCell className="text-right tabular-nums">{n2(s2.width)}</TableCell>
                       <TableCell className="whitespace-nowrap">{sys2.roofSystem}</TableCell>
