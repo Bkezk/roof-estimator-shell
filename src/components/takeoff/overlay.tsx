@@ -35,6 +35,31 @@ import type { SnapKind } from "./plan-lines";
 import { scaleOrigin } from "./sheet-scale";
 
 const pts = (p: readonly PagePoint[]) => p.map(([x, y]) => `${x},${y}`).join(" ");
+
+/**
+ * The unit normal of the segment under a polyline's midpoint, pointing "up" on the page (so a
+ * label along a level line sits above it and along a plumb line sits to its left). [0, -1] for
+ * a degenerate line.
+ */
+function polylineNormalAt(points: readonly PagePoint[]): [number, number] {
+  if (points.length < 2) return [0, -1];
+  const total = polylineLengthPx(points);
+  let acc = 0;
+  for (let i = 1; i < points.length; i++) {
+    const [ax, ay] = points[i - 1]!;
+    const [bx, by] = points[i]!;
+    const len = Math.hypot(bx - ax, by - ay);
+    if (acc + len >= total / 2 || i === points.length - 1) {
+      if (len === 0) return [0, -1];
+      const nx = -(by - ay) / len;
+      const ny = (bx - ax) / len;
+      // Prefer the side that is up (negative y) or, for a plumb line, left.
+      return ny < 0 || (ny === 0 && nx < 0) ? [nx, ny] : [-nx, -ny];
+    }
+    acc += len;
+  }
+  return [0, -1];
+}
 const ringPath = (p: readonly PagePoint[]) =>
   p.length ? `M${p.map(([x, y]) => `${x},${y}`).join("L")}Z` : "";
 
@@ -50,23 +75,44 @@ export function SvgLabel(props: {
   bold?: boolean;
 }) {
   const size = (props.size ?? 12) / props.zoom;
+  const anchor = props.anchor ?? "middle";
+  // A solid pill behind the text (owner, Sep 30: labels were hard to read over the plan's own
+  // line work). Its width is estimated from the text (no measuring in SVG); a little generous.
+  const w = props.children.length * size * 0.58 + size * 0.9;
+  const h = size * 1.35;
+  const left =
+    anchor === "start"
+      ? props.x - size * 0.45
+      : anchor === "end"
+        ? props.x - w + size * 0.45
+        : props.x - w / 2;
   return (
-    <text
-      x={props.x}
-      y={props.y}
-      fontSize={size}
-      textAnchor={props.anchor ?? "middle"}
-      dominantBaseline="middle"
-      fill={props.color ?? "#111827"}
-      stroke="#ffffff"
-      strokeWidth={3 / props.zoom}
-      strokeLinejoin="round"
-      paintOrder="stroke"
-      fontWeight={props.bold ? 600 : 500}
-      style={{ pointerEvents: "none", userSelect: "none" }}
-    >
-      {props.children}
-    </text>
+    <g style={{ pointerEvents: "none", userSelect: "none" }}>
+      <rect
+        x={left}
+        y={props.y - h / 2}
+        width={w}
+        height={h}
+        rx={h / 3}
+        fill="#ffffff"
+        fillOpacity={0.92}
+        stroke={props.color ?? "#111827"}
+        strokeOpacity={0.25}
+        strokeWidth={1}
+        vectorEffect="non-scaling-stroke"
+      />
+      <text
+        x={props.x}
+        y={props.y}
+        fontSize={size}
+        textAnchor={anchor}
+        dominantBaseline="middle"
+        fill={props.color ?? "#111827"}
+        fontWeight={props.bold ? 600 : 500}
+      >
+        {props.children}
+      </text>
+    </g>
   );
 }
 
@@ -86,6 +132,55 @@ export interface ObjectsLayerProps {
 export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps) {
   const { zoom, fpp } = props;
   const pe = props.interactive ? "auto" : "none";
+  // Labels are drawn in a second pass, above every shape, so a later outline never crosses an
+  // earlier label (owner, Sep 30: "it appears below the lines sometimes"). Side lengths show on
+  // the selected area only; the others keep just their name and size, which is far less clutter
+  // when areas nest or lines run along an area's sides.
+  const labels = props.objects.map((o) => {
+    const color = o.color ?? "#2563eb";
+    const sel = o.id === props.selectedId;
+    if (o.kind === "area") {
+      const cut = o.attrs.cutouts ?? [];
+      const [cx, cy] = centroid(o.points);
+      const area = netAreaSqFt(o.points, cut, fpp);
+      const lens = edgeLengths(o.points);
+      const sideLabels = drawnSideLabels(o.points);
+      return (
+        <g key={o.id}>
+          {sel &&
+            o.points.map((p, i) => {
+              const q = o.points[(i + 1) % o.points.length]!;
+              // "A · 100 ft": the side label matches the Objects tab and the bid's Sections
+              // screen (A–D from the longest side on a four-sided outline, else 1..N).
+              return (
+                <SvgLabel key={i} x={(p[0] + q[0]) / 2} y={(p[1] + q[1]) / 2} zoom={zoom} size={11}>
+                  {`${sideLabels[i]} · ${lengthLabel(lens[i]!, fpp)}`}
+                </SvgLabel>
+              );
+            })}
+          <SvgLabel x={cx} y={cy - 9 / zoom} zoom={zoom} bold color={color}>
+            {o.attrs.name}
+          </SvgLabel>
+          <SvgLabel x={cx} y={cy + 9 / zoom} zoom={zoom}>
+            {area === null ? "no scale" : fmtSqFt(area)}
+          </SvgLabel>
+        </g>
+      );
+    }
+    if (o.kind === "linear") {
+      // The label sits to one side of the line (its normal at the midpoint), clear of the line
+      // itself and of an area side it may run along.
+      const [mx, my] = polylineMidpoint(o.points);
+      const [nx, ny] = polylineNormalAt(o.points);
+      const off = 14 / zoom;
+      return (
+        <SvgLabel key={o.id} x={mx + nx * off} y={my + ny * off} zoom={zoom} bold color={color}>
+          {`${o.attrs.name} · ${lengthLabel(polylineLengthPx(o.points), fpp)}`}
+        </SvgLabel>
+      );
+    }
+    return null;
+  });
   return (
     <g>
       {props.objects.map((o) => {
@@ -95,10 +190,6 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
         const down = (e: ReactPointerEvent<SVGElement>) => props.onObjectDown(o.id, e);
         if (o.kind === "area") {
           const cut = o.attrs.cutouts ?? [];
-          const [cx, cy] = centroid(o.points);
-          const area = netAreaSqFt(o.points, cut, fpp);
-          const lens = edgeLengths(o.points);
-          const sideLabels = drawnSideLabels(o.points);
           return (
             <g key={o.id}>
               <path
@@ -128,33 +219,10 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                   style={{ pointerEvents: "none" }}
                 />
               ))}
-              {o.points.map((p, i) => {
-                const q = o.points[(i + 1) % o.points.length]!;
-                // "A · 100 ft": the side label matches the Objects tab and the bid's Sections
-                // screen (A–D from the longest side on a four-sided outline, else 1..N).
-                return (
-                  <SvgLabel
-                    key={i}
-                    x={(p[0] + q[0]) / 2}
-                    y={(p[1] + q[1]) / 2}
-                    zoom={zoom}
-                    size={11}
-                  >
-                    {`${sideLabels[i]} · ${lengthLabel(lens[i]!, fpp)}`}
-                  </SvgLabel>
-                );
-              })}
-              <SvgLabel x={cx} y={cy - 8 / zoom} zoom={zoom} bold color={color}>
-                {o.attrs.name}
-              </SvgLabel>
-              <SvgLabel x={cx} y={cy + 8 / zoom} zoom={zoom}>
-                {area === null ? "no scale" : fmtSqFt(area)}
-              </SvgLabel>
             </g>
           );
         }
         if (o.kind === "linear") {
-          const [mx, my] = polylineMidpoint(o.points);
           return (
             <g key={o.id}>
               {/* A wide transparent twin makes a thin line easy to click. */}
@@ -180,9 +248,6 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
                 vectorEffect="non-scaling-stroke"
                 style={{ pointerEvents: "none" }}
               />
-              <SvgLabel x={mx} y={my - 10 / zoom} zoom={zoom} bold color={color}>
-                {`${o.attrs.name} · ${lengthLabel(polylineLengthPx(o.points), fpp)}`}
-              </SvgLabel>
             </g>
           );
         }
@@ -220,6 +285,7 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
           </g>
         );
       })}
+      {labels}
       {props.interactive &&
         props.objects
           .filter((o) => o.id === props.selectedId && o.kind !== "count")
