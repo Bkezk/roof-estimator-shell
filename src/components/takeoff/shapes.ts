@@ -1,6 +1,8 @@
 /**
  * Takeoff page helpers — pure (no React, no I/O): object naming, measurements for labels, the
- * ortho snap (level / plumb within ORTHO_DEG), the drag-a-box rectangle, and number formatting.
+ * ortho snap (level / plumb within ORTHO_DEG), the square-corner lock (a side at 0° / 90° / 180°
+ * / 270° to the previous side, for buildings drawn at an angle), the drag-a-box rectangle, the
+ * perimeter runs of an area's included sides ("Edge from this area"), and number formatting.
  * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
  * helpers only label the drawing.
  */
@@ -138,10 +140,11 @@ export function orthoAxis(dx: number, dy: number, toleranceDeg = ORTHO_DEG): "h"
 }
 
 /**
- * The point `feet` away from `from`, heading toward `toward`: along the level / plumb axis when
- * the cursor direction is within `toleranceDeg` of it, otherwise straight at the cursor (and
- * always straight at it when `free`, Shift held). Null when the cursor sits on the last point
- * (no direction) or the page has no scale.
+ * The point `feet` away from `from`, heading toward `toward`: square to the previous side
+ * (`before` → `from`) when the cursor direction is within `toleranceDeg` of 0° / 90° / 180° /
+ * 270° to it, else along the level / plumb axis when within `toleranceDeg` of it, otherwise
+ * straight at the cursor (and always straight at it when `free`, Shift held). Null when the
+ * cursor sits on the last point (no direction) or the page has no scale.
  */
 export function typedPoint(
   from: PagePoint,
@@ -150,6 +153,7 @@ export function typedPoint(
   fpp: number | null,
   free: boolean,
   toleranceDeg = ORTHO_DEG,
+  before: PagePoint | null = null,
 ): PagePoint | null {
   if (fpp === null || !(fpp > 0)) return null;
   const px = feet / fpp;
@@ -157,10 +161,71 @@ export function typedPoint(
   const dy = toward[1] - from[1];
   const len = Math.hypot(dx, dy);
   if (len < 1e-9) return null;
+  if (!free && before) {
+    const u = relativeDirection(before, from, dx, dy, toleranceDeg);
+    if (u) return [from[0] + u[0] * px, from[1] + u[1] * px];
+  }
   const axis = free ? null : orthoAxis(dx, dy, toleranceDeg);
   if (axis === "h") return [from[0] + Math.sign(dx) * px, from[1]];
   if (axis === "v") return [from[0], from[1] + Math.sign(dy) * px];
   return [from[0] + (dx / len) * px, from[1] + (dy / len) * px];
+}
+
+/**
+ * Square corners on an angled building: the unit direction (0° / 90° / 180° / 270° to the
+ * previous side `before` → `from`) that a new side heading (dx, dy) locks to when it is within
+ * `toleranceDeg` of it; null when the previous side or the new one has no length, or the new
+ * side is further off than that.
+ */
+export function relativeDirection(
+  before: PagePoint,
+  from: PagePoint,
+  dx: number,
+  dy: number,
+  toleranceDeg = ORTHO_DEG,
+): [number, number] | null {
+  const rx = from[0] - before[0];
+  const ry = from[1] - before[1];
+  if (Math.hypot(rx, ry) < 1e-9 || Math.hypot(dx, dy) < 1e-9) return null;
+  const ref = Math.atan2(ry, rx);
+  let diff = ((Math.atan2(dy, dx) - ref) * 180) / Math.PI;
+  diff = (((diff % 360) + 540) % 360) - 180; // −180 .. 180
+  const k = Math.round(diff / 90);
+  if (Math.abs(diff - k * 90) > toleranceDeg + 1e-9) return null;
+  const a = ref + (k * Math.PI) / 2;
+  return [Math.cos(a), Math.sin(a)];
+}
+
+/**
+ * The square-corner lock: `p` moved onto the direction 0° / 90° / 180° / 270° to the previous
+ * side (`prev2` → `prev`) when the new side is within `toleranceDeg` of it (the distance along
+ * that direction is kept), else null.
+ */
+export function relativeSnap(
+  prev2: PagePoint,
+  prev: PagePoint,
+  p: PagePoint,
+  toleranceDeg = ORTHO_DEG,
+): PagePoint | null {
+  const dx = p[0] - prev[0];
+  const dy = p[1] - prev[1];
+  const u = relativeDirection(prev2, prev, dx, dy, toleranceDeg);
+  if (!u) return null;
+  const along = dx * u[0] + dy * u[1];
+  return [prev[0] + u[0] * along, prev[1] + u[1] * along];
+}
+
+/**
+ * Where the next point goes without a snap: square to the previous side (when there is one and
+ * the side is within `toleranceDeg`), else level / plumb within `toleranceDeg`, else as drawn.
+ */
+export function lockPoint(
+  prev2: PagePoint | null | undefined,
+  prev: PagePoint,
+  p: PagePoint,
+  toleranceDeg = ORTHO_DEG,
+): PagePoint {
+  return (prev2 && relativeSnap(prev2, prev, p, toleranceDeg)) || orthoSnap(prev, p, toleranceDeg);
 }
 
 /** The nearest candidate within `maxPx` screen px of `p` (page px × zoom), or null. */
@@ -406,6 +471,50 @@ export function rectSizeLabel(a: PagePoint, b: PagePoint, fpp: number | null): s
     : `${feetInches(w * fpp)} × ${feetInches(h * fpp)}`;
 }
 
+const copy = (p: PagePoint): PagePoint => [p[0], p[1]];
+
+/**
+ * "Edge from this area": the open polylines along an area outline's included sides (side i runs
+ * points[i] → points[i + 1], the last back to points[0]). Each run of contiguous included sides
+ * is one polyline; when every side is included it is one closed run that returns to its start
+ * (n + 1 points, as a rectangle's perimeter line does). No side included → no runs.
+ */
+export function perimeterRuns(
+  points: readonly PagePoint[],
+  included: readonly boolean[],
+): PagePoint[][] {
+  const n = points.length;
+  if (n < 2) return [];
+  const on = (i: number) => included[((i % n) + n) % n] !== false;
+  const sides = n === 2 ? 1 : n; // a two-point "outline" has one side
+  let all = true;
+  let any = false;
+  for (let i = 0; i < sides; i++) {
+    if (on(i)) any = true;
+    else all = false;
+  }
+  if (!any) return [];
+  if (all) return [(sides === 1 ? points.slice(0, 2) : [...points, points[0]!]).map(copy)];
+  // Start just after an excluded side, so no run wraps past the start.
+  let excluded = 0;
+  while (on(excluded)) excluded++;
+  const start = excluded + 1;
+  const runs: PagePoint[][] = [];
+  let cur: PagePoint[] | null = null;
+  for (let k = 0; k < sides; k++) {
+    const i = (start + k) % n;
+    if (on(i)) {
+      cur ??= [copy(points[i]!)];
+      cur.push(copy(points[(i + 1) % n]!));
+    } else if (cur) {
+      runs.push(cur);
+      cur = null;
+    }
+  }
+  if (cur) runs.push(cur);
+  return runs;
+}
+
 /** 20.5 → `20' 6"`. */
 export function feetInches(feet: number): string {
   const totalIn = Math.round(feet * 12);
@@ -448,6 +557,8 @@ export function defaultEdgeOptions(
 export interface NewObjectRoles {
   linear?: LinearRole;
   count?: CountRole;
+  /** A linear made with "Edge from this area": the area's id, saved as `attrs.fromArea`. */
+  fromArea?: string;
 }
 
 /**
@@ -482,14 +593,10 @@ export function buildObject(
     };
   }
   if (kind === "linear") {
-    return {
-      id,
-      kind,
-      page,
-      points,
-      color,
-      attrs: { name: uniqueName(LINEAR_BASE_NAMES[linearRole], existing), role: linearRole },
-    };
+    const attrs = { name: uniqueName(LINEAR_BASE_NAMES[linearRole], existing), role: linearRole };
+    // `fromArea` is kept for traceability (attrs are saved as free-form JSON).
+    if (roles.fromArea) Object.assign(attrs, { fromArea: roles.fromArea });
+    return { id, kind, page, points, color, attrs };
   }
   return {
     id,

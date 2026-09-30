@@ -8,12 +8,15 @@ import {
   buildObject,
   dragRect,
   isRectDrag,
+  lockPoint,
   orthoSnap,
   parseFeetInches,
+  perimeterRuns,
   polylineLengthPx,
   rectObjectPoints,
   rectPoints,
   rectSizeLabel,
+  relativeSnap,
   snapCandidates,
   snapTo,
   translateObject,
@@ -213,5 +216,108 @@ describe("drag-a-box rectangle", () => {
     expect(rectSizeLabel([0, 0], [80, 121], 0.5)).toBe(`40' × 60' 6"`);
     expect(rectSizeLabel([80, 121], [0, 0], 0.5)).toBe(`40' × 60' 6"`);
     expect(rectSizeLabel([0, 0], [120.4, 80], null)).toBe("120 × 80 px");
+  });
+});
+
+describe("square corners on an angled building (relative lock)", () => {
+  const a: PagePoint = [100, 100];
+  const b = at(a, 30, 200); // the first side heads 30° below level
+  const dirOf = (from: PagePoint, p: PagePoint) =>
+    (Math.atan2(p[1] - from[1], p[0] - from[0]) * 180) / Math.PI;
+
+  it("a cursor at 118° (88° off a 30° side) locks to exactly 120°, square to the side", () => {
+    const p = relativeSnap(a, b, at(b, 118, 80))!;
+    expect(dirOf(b, p)).toBeCloseTo(120, 9);
+    expect(lockPoint(a, b, at(b, 118, 80))).toEqual(p);
+    // The distance along the locked direction is the cursor's projection onto it.
+    expect(Math.hypot(p[0] - b[0], p[1] - b[1])).toBeCloseTo(80 * Math.cos(Math.PI / 90), 9);
+  });
+  it("also locks straight on (0°), the other square (−90°) and straight back (180°)", () => {
+    expect(dirOf(b, relativeSnap(a, b, at(b, 34))!)).toBeCloseTo(30, 9);
+    expect(dirOf(b, relativeSnap(a, b, at(b, 30 - 90 + 5))!)).toBeCloseTo(-60, 9);
+    expect(dirOf(b, relativeSnap(a, b, at(b, 30 + 180 - 6))!)).toBeCloseTo(-150, 9);
+  });
+  it("45° off the side stays free (75° is not near level or plumb either)", () => {
+    const p = at(b, 30 + 45, 80);
+    expect(relativeSnap(a, b, p)).toBeNull();
+    expect(lockPoint(a, b, p)).toEqual(p);
+  });
+  it("relative lock first, then level / plumb", () => {
+    const p = at(b, 96, 80); // 6° off plumb, 66° off the side: plumb
+    expect(lockPoint(a, b, p)).toEqual(orthoSnap(b, p));
+    const q = at(b, 116, 80); // 4° from square to the side (and 26° off plumb): 120°
+    expect(dirOf(b, lockPoint(a, b, q))).toBeCloseTo(120, 9);
+  });
+  it("a level side keeps the level / plumb behaviour unchanged", () => {
+    const l0: PagePoint = [0, 0];
+    const l1: PagePoint = [100, 0];
+    for (const deg of [3, 85, 93, 178, -4]) {
+      const p = at(l1, deg, 60);
+      const got = lockPoint(l0, l1, p);
+      const want = orthoSnap(l1, p);
+      expect(got[0]).toBeCloseTo(want[0], 9);
+      expect(got[1]).toBeCloseTo(want[1], 9);
+    }
+    const free = at(l1, 30, 60);
+    expect(lockPoint(l0, l1, free)).toEqual(free);
+  });
+  it("typedPoint heads along the locked direction (straight at the cursor when free)", () => {
+    const fpp = 0.5;
+    const p = typedPoint(b, at(b, 118), 10, fpp, false, ORTHO_DEG, a)!;
+    expect(dirOf(b, p)).toBeCloseTo(120, 9);
+    expect(Math.hypot(p[0] - b[0], p[1] - b[1])).toBeCloseTo(20, 9);
+    const f = typedPoint(b, at(b, 118), 10, fpp, true, ORTHO_DEG, a)!;
+    expect(dirOf(b, f)).toBeCloseTo(118, 9);
+  });
+});
+
+describe("perimeterRuns (Edge from this area)", () => {
+  const sq: PagePoint[] = [
+    [0, 0],
+    [100, 0],
+    [100, 50],
+    [0, 50],
+  ];
+  it("every side included → one closed run back to the start (5 points, the perimeter)", () => {
+    const runs = perimeterRuns(sq, [true, true, true, true]);
+    expect(runs).toEqual([[...sq, sq[0]]]);
+    expect(polylineLengthPx(runs[0]!)).toBe(300);
+    expect(perimeterRuns(sq, [])).toEqual(runs); // a missing entry counts as included
+  });
+  it("two excluded non-adjacent sides → two open runs with the right lengths", () => {
+    const runs = perimeterRuns(sq, [true, false, true, false]);
+    expect(runs).toEqual([
+      [
+        [100, 50],
+        [0, 50],
+      ],
+      [
+        [0, 0],
+        [100, 0],
+      ],
+    ]);
+    expect(runs.map(polylineLengthPx)).toEqual([100, 100]);
+  });
+  it("one excluded side → one open run of the rest, even across the start point", () => {
+    const runs = perimeterRuns(sq, [true, true, true, false]); // side 3 → 0 left out
+    expect(runs).toEqual([sq]);
+    expect(polylineLengthPx(runs[0]!)).toBe(250);
+    const wrap = perimeterRuns(sq, [true, false, true, true]); // sides 2, 3, 0 in a row
+    expect(wrap).toEqual([[sq[2], sq[3], sq[0], sq[1]]]);
+    expect(polylineLengthPx(wrap[0]!)).toBe(250);
+  });
+  it("nothing included → no runs", () => {
+    expect(perimeterRuns(sq, [false, false, false, false])).toEqual([]);
+  });
+  it("a linear made from an area keeps the area's id and the role's default name", () => {
+    const pts: PagePoint[] = [
+      [0, 0],
+      [1, 0],
+    ];
+    const o = buildObject("linear", "l", 0, pts, [], {}, null, {
+      linear: "gutter",
+      fromArea: "area-1",
+    });
+    expect(o.attrs).toEqual({ name: "Gutter 1", role: "gutter", fromArea: "area-1" });
   });
 });

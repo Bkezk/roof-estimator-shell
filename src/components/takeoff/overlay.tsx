@@ -1,6 +1,8 @@
 /**
- * The SVG drawn over the page: saved objects (areas, linears, counts), the scale line, and the
- * shape being drawn. Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen
+ * The SVG drawn over the page: saved objects (areas, linears, counts), the scale line (labelled
+ * with the sheet note when the scale was read off the sheet), the shape being drawn, the snap
+ * marker (magenta on an object, teal on the plan's own lines), and the side picker of "Edge from
+ * this area". Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen
  * size — stroke, font, marker radius — is divided by the zoom to stay constant on screen.
  */
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
@@ -20,6 +22,8 @@ import {
   rectPoints,
   rectSizeLabel,
 } from "./shapes";
+import type { SnapKind } from "./plan-lines";
+import { scaleOrigin } from "./sheet-scale";
 
 const pts = (p: readonly PagePoint[]) => p.map(([x, y]) => `${x},${y}`).join(" ");
 const ringPath = (p: readonly PagePoint[]) =>
@@ -231,10 +235,9 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
   );
 });
 
-/** The small square shown where the cursor has snapped to an existing point. */
 /**
  * The target at the live end of the line being drawn: where the next corner lands (after snap
- * and the level / plumb lock), which can sit a little off the mouse itself. A ring with four
+ * and the square-corner / level / plumb lock), which can sit a little off the mouse itself. A ring with four
  * ticks, sized on screen so it reads the same at any zoom.
  */
 export function TargetMarker(props: { at: PagePoint; zoom: number; color: string }) {
@@ -259,26 +262,105 @@ export function TargetMarker(props: { at: PagePoint; zoom: number; color: string
   );
 }
 
-export function SnapMarker(props: { at: PagePoint; zoom: number }) {
+/** Snap marker colours: own objects magenta, the plan's own lines teal. */
+const SNAP_COLORS: Record<SnapKind, string> = {
+  object: "#d946ef",
+  plan: "#0d9488",
+  planLine: "#0d9488",
+};
+
+/**
+ * The small square shown where the cursor has snapped: magenta on another object's corner or
+ * the scale line's end, teal on a plan point (a line end or crossing), and a teal diamond on a
+ * point along a plan line.
+ */
+export function SnapMarker(props: { at: PagePoint; zoom: number; kind?: SnapKind }) {
+  const kind = props.kind ?? "object";
   const h = 6 / props.zoom;
+  const [x, y] = props.at;
+  const common = {
+    fill: "none",
+    stroke: SNAP_COLORS[kind],
+    strokeWidth: 2,
+    vectorEffect: "non-scaling-stroke" as const,
+    style: { pointerEvents: "none" as const },
+  };
+  if (kind === "planLine")
+    return (
+      <polygon points={`${x},${y - h} ${x + h},${y} ${x},${y + h} ${x - h},${y}`} {...common} />
+    );
+  return <rect x={x - h} y={y - h} width={2 * h} height={2 * h} {...common} />;
+}
+
+/**
+ * "Edge from this area": the area's sides, thick and clickable. Included sides are drawn in the
+ * linear colour, left-out sides grey and dashed; clicking a side toggles it.
+ */
+export function EdgePicker(props: {
+  points: readonly PagePoint[];
+  included: readonly boolean[];
+  zoom: number;
+  color: string;
+  onToggle: (side: number) => void;
+}) {
+  const { points, zoom } = props;
+  const n = points.length;
   return (
-    <rect
-      x={props.at[0] - h}
-      y={props.at[1] - h}
-      width={2 * h}
-      height={2 * h}
-      fill="none"
-      stroke="#d946ef"
-      strokeWidth={2}
-      vectorEffect="non-scaling-stroke"
-      style={{ pointerEvents: "none" }}
-    />
+    <g>
+      {points.map((p, i) => {
+        const q = points[(i + 1) % n]!;
+        const on = props.included[i] !== false;
+        return (
+          <g key={i}>
+            <line
+              x1={p[0]}
+              y1={p[1]}
+              x2={q[0]}
+              y2={q[1]}
+              stroke={on ? props.color : "#9ca3af"}
+              strokeWidth={on ? 5 : 3}
+              strokeDasharray={on ? undefined : "6 5"}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+              style={{ pointerEvents: "none" }}
+            />
+            {/* A wide transparent twin makes the side easy to click. */}
+            <line
+              x1={p[0]}
+              y1={p[1]}
+              x2={q[0]}
+              y2={q[1]}
+              stroke="transparent"
+              strokeWidth={16}
+              vectorEffect="non-scaling-stroke"
+              style={{ pointerEvents: "stroke", cursor: "pointer" }}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                e.stopPropagation();
+                props.onToggle(i);
+              }}
+            />
+            <SvgLabel
+              x={(p[0] + q[0]) / 2}
+              y={(p[1] + q[1]) / 2 - 12 / zoom}
+              zoom={zoom}
+              size={11}
+              color={on ? props.color : "#6b7280"}
+              bold={on}
+            >
+              {on ? "included" : "left out"}
+            </SvgLabel>
+          </g>
+        );
+      })}
+    </g>
   );
 }
 
-/** The page's calibration line with its real length. */
+/** The page's calibration line with its real length (and the sheet note it was read from). */
 export function ScaleLine(props: { scale: PageScale; zoom: number }) {
   const { ax, ay, bx, by, feet } = props.scale;
+  const origin = scaleOrigin(props.scale);
   const z = props.zoom;
   const len = Math.hypot(bx - ax, by - ay) || 1;
   // Short end ticks perpendicular to the line.
@@ -312,7 +394,9 @@ export function ScaleLine(props: { scale: PageScale; zoom: number }) {
         />
       ))}
       <SvgLabel x={(ax + bx) / 2} y={(ay + by) / 2 - 12 / z} zoom={z} color="#c2410c" bold>
-        {`Scale ${feetInches(feet)}`}
+        {origin?.source === "sheet"
+          ? `Scale read from the sheet: ${origin.note}`
+          : `Scale ${feetInches(feet)}`}
       </SvgLabel>
     </g>
   );

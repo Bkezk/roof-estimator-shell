@@ -35,6 +35,10 @@ export interface PageScale {
   by: number;
   /** The real distance between a and b, in feet (decimal; 20 ft 6 in = 20.5). */
   feet: number;
+  /** Read off the sheet's scale note ("sheet") or drawn by hand ("drawn"); absent = drawn. */
+  source?: "sheet" | "drawn";
+  /** The sheet's scale note as printed, when `source` is "sheet". */
+  note?: string;
 }
 
 export interface TakeoffPage {
@@ -205,7 +209,8 @@ export function rotateScale(
     height,
     quarterTurns,
   ) as [PagePoint, PagePoint];
-  return { ax, ay, bx, by, feet: scale.feet };
+  // Keep the sheet-read tag and note: a rotation moves the line, it does not change its origin.
+  return { ...scale, ax, ay, bx, by };
 }
 
 /**

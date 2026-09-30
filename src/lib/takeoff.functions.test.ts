@@ -36,3 +36,30 @@ describe("saveTakeoff input", () => {
     expect(parsed.objects?.[0]?.attrs).toEqual({ name: "Roof 1", pitch: 4 });
   });
 });
+
+describe("saveTakeoff keeps a sheet-read scale's tag", () => {
+  it("passes source and note through the page schema", () => {
+    const out = saveTakeoffInput.parse({
+      id,
+      pages: [
+        {
+          index: 0,
+          name: "A1",
+          rotation: 0,
+          scale: {
+            ax: 10,
+            ay: 20,
+            bx: 82,
+            by: 20,
+            feet: 8,
+            source: "sheet",
+            note: '1/8" = 1\'-0"',
+          },
+        },
+      ],
+    });
+    const scale = out.pages?.[0]?.scale;
+    expect(scale?.source).toBe("sheet");
+    expect(scale?.note).toBe('1/8" = 1\'-0"');
+  });
+});

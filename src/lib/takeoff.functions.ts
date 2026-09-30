@@ -51,6 +51,11 @@ const pageSchema = z.object({
       bx: z.number(),
       by: z.number(),
       feet: z.number().positive(),
+      // Where the scale came from: read off the sheet's own scale note, or drawn by hand. The
+      // viewer keeps telling the user a sheet-read scale should be checked, so it must survive
+      // a save.
+      source: z.enum(["sheet", "drawn"]).optional(),
+      note: z.string().max(120).optional(),
     })
     .nullable(),
 });

@@ -3,7 +3,7 @@
  * area's per-side edge table and cut-outs, a linear's role (and parapet height), a count's role
  * and sizes. Number boxes stay blank when 0 (placeholder 0); nothing is prefilled.
  */
-import { AlertTriangle, Trash2 } from "lucide-react";
+import { AlertTriangle, SquareDashed, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { drawnSideLabels, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
@@ -66,6 +66,8 @@ export interface ObjectsTabProps {
   onSelect: (id: string) => void;
   onUpdate: Update;
   onDelete: (id: string) => void;
+  /** "Edge from this area": make linears along the selected area's sides (in the viewer). */
+  onEdgeFromArea?: (areaId: string) => void;
 }
 
 const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Counts" } as const;
@@ -103,6 +105,21 @@ export function ObjectsTab(props: ObjectsTabProps) {
         <p className="text-sm text-muted-foreground">
           Draw with Area, Linear or Count, or click an object (Select tool) to edit it here.
         </p>
+      )}
+      {selected?.kind === "area" && props.onEdgeFromArea && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 w-full gap-1"
+          title="Make linears along this area's sides; click a side on the drawing to leave it out"
+          onClick={(e) => {
+            props.onEdgeFromArea?.(selected.id);
+            // Mouse click: hand the keys back to the drawing (Enter, Esc, role keys).
+            if (e.detail > 0) e.currentTarget.blur();
+          }}
+        >
+          <SquareDashed className="h-4 w-4" /> Edge from this area
+        </Button>
       )}
 
       {(["area", "linear", "count"] as const).map((kind) => {

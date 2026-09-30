@@ -1,5 +1,10 @@
-/** The viewer's tool bar, the tool list with its keys and hints, and the key-target check. */
+/**
+ * The viewer's tool bar: the tools with their keys, the role chips for the next count / linear,
+ * "Edge from this area" while an area is selected, "Snap to plan" (PDF plans only, with its line
+ * count or "reading plan lines…"), and the zoom buttons.
+ */
 import {
+  Magnet,
   MapPin,
   Maximize,
   MousePointer2,
@@ -8,6 +13,7 @@ import {
   Ruler,
   Scissors,
   Spline,
+  SquareDashed,
   ZoomIn,
   ZoomOut,
   type LucideIcon,
@@ -27,6 +33,16 @@ const TOOLS: Array<{ tool: Tool; label: string; icon: LucideIcon }> = [
   { tool: "dimension", label: "Dimension", icon: MoveHorizontal },
   { tool: "cutout", label: "Cut-out", icon: Scissors },
 ];
+/** The "Snap to plan" toggle and what it knows of the page's plan lines. */
+export interface PlanSnapToggle {
+  /** False for an image underlay (it has no lines to read). */
+  available: boolean;
+  on: boolean;
+  /** "reading plan lines…", "1,234 plan lines", or null. */
+  status: string | null;
+  onToggle: () => void;
+}
+
 /** Role chips for the next count / linear (keys 1–6 pick them). */
 export interface RoleChips {
   options: Array<{ value: string; label: string }>;
@@ -42,7 +58,12 @@ export function ViewerToolbar(props: {
   onZoomOut: () => void;
   onFit: () => void;
   roles: RoleChips | null;
+  /** Snap to the plan's own lines; null hides the toggle. */
+  planSnap?: PlanSnapToggle | null;
+  /** "Edge from this area" for the selected area; null when no area is selected. */
+  edgeFromArea?: { active: boolean; onClick: () => void } | null;
 }) {
+  const ps = props.planSnap;
   return (
     <div className="flex flex-wrap items-center gap-1 border-b bg-background px-2 py-1.5">
       {TOOLS.map(({ tool: t, label, icon: Icon }) => (
@@ -104,7 +125,56 @@ export function ViewerToolbar(props: {
           })}
         </div>
       )}
+      {props.edgeFromArea && (
+        <Button
+          size="sm"
+          variant={props.edgeFromArea.active ? "default" : "ghost"}
+          className="ml-1 h-8 gap-1 px-2"
+          aria-pressed={props.edgeFromArea.active}
+          title="Make linears along the selected area's sides (leave out walls or shared edges)"
+          onClick={(e) => {
+            props.edgeFromArea?.onClick();
+            if (e.detail > 0) e.currentTarget.blur();
+          }}
+        >
+          <SquareDashed className="h-4 w-4" />
+          <span className="hidden text-xs lg:inline">Edge from this area</span>
+        </Button>
+      )}
       <div className="ml-auto flex items-center gap-1">
+        {ps && (
+          <>
+            {ps.available && ps.on && ps.status && (
+              <span className="mr-1 hidden text-[11px] text-muted-foreground md:inline">
+                {ps.status}
+              </span>
+            )}
+            {!ps.available && (
+              <span className="mr-1 hidden text-[11px] text-muted-foreground md:inline">
+                only for PDF plans
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant={ps.available && ps.on ? "secondary" : "ghost"}
+              className="h-8 gap-1 px-2"
+              disabled={!ps.available}
+              aria-pressed={ps.available && ps.on}
+              title={
+                ps.available
+                  ? "Snap to the plan's own lines: their ends, crossings and anywhere along them (teal marker). Hold Shift to draw without any snap."
+                  : "Snap to plan: only for PDF plans (an image has no lines to read)"
+              }
+              onClick={(e) => {
+                ps.onToggle();
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+            >
+              <Magnet className="h-4 w-4" />
+              <span className="hidden text-xs lg:inline">Snap to plan</span>
+            </Button>
+          </>
+        )}
         <span className="mr-1 text-xs tabular-nums text-muted-foreground">
           {Math.round(props.zoom * 100)}%
         </span>

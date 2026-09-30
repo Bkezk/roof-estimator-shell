@@ -17,10 +17,24 @@
  * drag past RECT_DRAG_PX (6 screen px) to draw a whole page-aligned rectangle (a linear gets its
  * perimeter); both corners snap unless Shift is held, Esc cancels. A press that does not move
  * that far is a click and places the first corner (on release, at the press point).
+ *
+ * Owner, Sep 30 (later): (A) "Snap to plan" (toolbar toggle, PDF plans only, on by default,
+ * remembered in localStorage `takeoff.snapPlan`): the page's own vector lines are read once
+ * (./plan-lines via ./underlay) and the cursor also snaps to their ends and crossings, or onto a
+ * line itself — a teal marker, where a snap to one of our own objects is magenta. (B) A PDF page
+ * with no scale reads its scale note (`1/8" = 1'-0"`) off the sheet when opened; exactly one
+ * distinct note sets the scale, tagged "read from the sheet" everywhere it shows (chip, scale
+ * line, Scale dialog, a toast); several are offered as choices in the Scale dialog. Drawing a
+ * scale replaces it. (C) Square corners: after two points, a side within ORTHO_DEG of 0° / 90° /
+ * 180° / 270° to the previous side locks to it (before the level / plumb lock), typed lengths
+ * too. (D) "Edge from this area": with an area selected, click its sides to leave out walls or
+ * shared edges, pick the role, and Create makes one linear per run of included sides.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 
 import {
   COUNT_ROLES,
@@ -39,6 +53,7 @@ import {
 
 import {
   DraftShape,
+  EdgePicker,
   MeasureLine,
   ObjectsLayer,
   RectPreview,
@@ -47,7 +62,15 @@ import {
   SvgLabel,
   TargetMarker,
 } from "./overlay";
+import { pickSnap, type PlanIndex, type SnapHit } from "./plan-lines";
 import { ScaleDialog } from "./scale-dialog";
+import {
+  scaleOrigin,
+  sheetScaleLine,
+  sheetScaleMessage,
+  sheetSizeWarning,
+  type ScaleNote,
+} from "./sheet-scale";
 import {
   DRAFT_COLOR,
   HINTS,
@@ -59,18 +82,26 @@ import {
   isRectDrag,
   isTypingTarget,
   lengthLabel,
-  orthoSnap,
+  lockPoint,
   parseFeetInches,
+  perimeterRuns,
+  polylineLengthPx,
   rectObjectPoints,
   snapCandidates,
-  snapTo,
   translateObject,
   typedPoint,
   type NewObjectRoles,
   type Tool,
 } from "./shapes";
 import { ViewerToolbar } from "./toolbar";
-import { renderUnderlayPage, type UnderlaySource } from "./underlay";
+import {
+  pdfPointToPage,
+  readPlanLines,
+  readSheetScale,
+  renderUnderlayPage,
+  type SheetScaleRead,
+  type UnderlaySource,
+} from "./underlay";
 
 const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 20;
@@ -82,6 +113,26 @@ const DOUBLE_PX = 4;
 /** Screen px: the cursor snaps to another object's corner this close. */
 const SNAP_PX = 8;
 const ZOOM_STEP = 1.25;
+/** Browser key remembering the "Snap to plan" toggle (on unless turned off). */
+const SNAP_PLAN_KEY = "takeoff.snapPlan";
+
+function readSnapPlan(): boolean {
+  try {
+    return window.localStorage.getItem(SNAP_PLAN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function writeSnapPlan(on: boolean) {
+  try {
+    window.localStorage.setItem(SNAP_PLAN_KEY, on ? "1" : "0");
+  } catch {
+    // Storage unavailable: the toggle still works for this visit.
+  }
+}
+
+/** PDF pages whose sheet scale was already set automatically this session (per document). */
+const sheetApplied = new WeakMap<object, Set<number>>();
 
 export interface ViewerProps {
   source: UnderlaySource | null;
@@ -110,6 +161,8 @@ export interface ViewerProps {
   initialTool?: Tool;
   /** The page's displayed size at zoom 1 once rendered (with the rotation it was rendered at). */
   onPageSize: (pageIndex: number, rotation: number, width: number, height: number) => void;
+  /** "Edge from this area" asked for from outside (the Objects tab); a new object each time. */
+  edgeRequest?: { areaId: string } | null;
 }
 
 export function TakeoffViewer(props: ViewerProps) {
@@ -158,6 +211,19 @@ export function TakeoffViewer(props: ViewerProps) {
   const [scalePick, setScalePick] = useState<{ a: PagePoint; b: PagePoint } | null>(null);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const [panning, setPanning] = useState(false);
+  /** Snap to the plan's own lines (PDF only); read from localStorage after mount. */
+  const [snapPlan, setSnapPlan] = useState(true);
+  const [plan, setPlan] = useState<{
+    key: string;
+    index: PlanIndex | null;
+    failed: boolean;
+  } | null>(null);
+  /** What this page's sheet text says about its scale (PDF only). */
+  const [sheet, setSheet] = useState<{ index: number; read: SheetScaleRead } | null>(null);
+  /** The Scale dialog opened only to pick one of the sheet's scale notes (no line drawn). */
+  const [sheetPick, setSheetPick] = useState(false);
+  /** "Edge from this area": the area, and which of its sides are included (all at first). */
+  const [edge, setEdge] = useState<{ areaId: string; included: boolean[] } | null>(null);
 
   const pageKey = `${page.index}:${page.rotation}`;
   const size =
@@ -173,6 +239,13 @@ export function TakeoffViewer(props: ViewerProps) {
 
   const onPageSizeRef = useRef(props.onPageSize);
   onPageSizeRef.current = props.onPageSize;
+  const onSetScaleRef = useRef(props.onSetScale);
+  onSetScaleRef.current = props.onSetScale;
+  const hasScaleRef = useRef(!!page.scale);
+  hasScaleRef.current = !!page.scale;
+  const pageIndexRef = useRef(page.index);
+  pageIndexRef.current = page.index;
+  const isPdf = source?.kind === "pdf";
 
   // A new page (or a rotation): drop everything in progress and blank the old bitmap.
   useEffect(() => {
@@ -184,9 +257,117 @@ export function TakeoffViewer(props: ViewerProps) {
     setMove(null);
     setPress(null);
     setTyped("");
+    setEdge(null);
+    setSheetPick(false);
     const c = canvasRef.current;
     if (c) c.width = 0;
   }, [pageKey]);
+
+  // "Snap to plan": remembered per browser.
+  useEffect(() => setSnapPlan(readSnapPlan()), []);
+  const toggleSnapPlan = () => {
+    setSnapPlan((on) => {
+      writeSnapPlan(!on);
+      return !on;
+    });
+  };
+
+  // The plan's own lines on this PDF page, read once per page and rotation (cached per file).
+  useEffect(() => {
+    if (!source || source.kind !== "pdf" || !snapPlan) return;
+    let live = true;
+    const key = `${page.index}:${page.rotation}`;
+    readPlanLines(source.doc, page.index, page.rotation).then(
+      (index) => {
+        if (live) setPlan({ key, index, failed: false });
+      },
+      () => {
+        if (live) setPlan({ key, index: null, failed: true });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [source, page.index, page.rotation, snapPlan]);
+  const planHere = isPdf && plan?.key === pageKey ? plan : null;
+  const planIndex = snapPlan ? (planHere?.index ?? null) : null;
+  const planStatus = !isPdf
+    ? null
+    : !planHere
+      ? "reading plan lines…"
+      : planHere.index
+        ? `${planHere.index.segments.length.toLocaleString("en-US")} plan lines`
+        : "could not read the plan lines";
+
+  // Read the scale off the sheet (PDF): when this page has no scale and its text has exactly
+  // one distinct scale note, set it (once per page per session) and say so; several notes are
+  // offered in the Scale dialog instead.
+  useEffect(() => {
+    if (!source || source.kind !== "pdf") return;
+    let live = true;
+    const doc = source.doc;
+    const index = page.index;
+    const rotation = page.rotation;
+    void (async () => {
+      const read = await readSheetScale(doc, index);
+      if (!live) return;
+      setSheet({ index, read });
+      const note = read.scale;
+      let done = sheetApplied.get(doc);
+      if (!note || hasScaleRef.current || done?.has(index)) return;
+      const pos = await pdfPointToPage(doc, index, rotation, note.at);
+      if (!live || hasScaleRef.current) return;
+      if (!done) {
+        done = new Set();
+        sheetApplied.set(doc, done);
+      }
+      if (done.has(index)) return;
+      done.add(index);
+      onSetScaleRef.current(sheetScaleLine(note, pos.at, pos.width, pos.height), false);
+      toast.info(`${sheetScaleMessage(note.text)}.`, {
+        description: sheetSizeWarning(pos.width, pos.height) ?? undefined,
+        duration: 12000,
+      });
+    })().catch(() => {
+      // No text layer or an unreadable page: the scale is drawn by hand as before.
+    });
+    return () => {
+      live = false;
+    };
+  }, [source, page.index, page.rotation]);
+  const sheetHere = isPdf && sheet?.index === page.index ? sheet.read : null;
+  /** Every distinct scale note on this sheet (the one set automatically, or the choices). */
+  const sheetNotes: ScaleNote[] = sheetHere
+    ? sheetHere.scale
+      ? [sheetHere.scale]
+      : sheetHere.choices
+    : [];
+  const origin = scaleOrigin(page.scale);
+  const sheetInfo =
+    origin?.source === "sheet"
+      ? {
+          note: origin.note,
+          warning: isPdf && sizeW && sizeH ? sheetSizeWarning(sizeW, sizeH) : null,
+        }
+      : null;
+  /** Use one of the sheet's scale notes as this page's scale (from the Scale dialog). */
+  const applySheetNote = (i: number) => {
+    const note = sheetNotes[i];
+    if (!note || !source || source.kind !== "pdf") return;
+    const index = page.index;
+    void pdfPointToPage(source.doc, index, page.rotation, note.at).then((pos) => {
+      if (pageIndexRef.current !== index) return;
+      onSetScaleRef.current(sheetScaleLine(note, pos.at, pos.width, pos.height), false);
+      toast.info(`${sheetScaleMessage(note.text)}.`, {
+        description: sheetSizeWarning(pos.width, pos.height) ?? undefined,
+        duration: 12000,
+      });
+    });
+    setScalePick(null);
+    setSheetPick(false);
+    setDraft([]);
+    if (tool === "scale") setTool("select");
+  };
 
   // Re-render the underlay crisply a moment after the zoom settles.
   useEffect(() => {
@@ -326,8 +507,9 @@ export function TakeoffViewer(props: ViewerProps) {
     () => snapCandidates(objects, snapExcept, page.scale),
     [objects, snapExcept, page.scale],
   );
-  const snapOf = (p: PagePoint | null): PagePoint | null =>
-    p && !shift ? snapTo(p, candidates, zoom, SNAP_PX) : null;
+  /** The snap under `p` (own objects, then the plan's own lines), or null; none when `free`. */
+  const snapAt = (p: PagePoint | null, free = shift): SnapHit | null =>
+    p && !free ? pickSnap(p, candidates, planIndex, zoom, SNAP_PX) : null;
 
   // Typed lengths: on a scaled page, with a point placed, for the outline tools.
   const typingTool = tool === "area" || tool === "linear" || tool === "cutout";
@@ -343,28 +525,32 @@ export function TakeoffViewer(props: ViewerProps) {
         : prev
           ? ([2 * last[0] - prev[0], 2 * last[1] - prev[1]] as PagePoint)
           : null;
-    return toward ? typedPoint(last, toward, typedFeet, fpp, shift) : null;
+    return toward ? typedPoint(last, toward, typedFeet, fpp, shift, ORTHO_DEG, prev ?? null) : null;
   };
 
-  /** The point a click at `raw` places: close, typed, snapped, ortho, or as is. */
-  const resolve = (raw: PagePoint): { p: PagePoint; snap: PagePoint | null } => {
+  /**
+   * The point a click at `raw` places: close, typed, snapped (own objects / plan lines), square
+   * to the previous side, level / plumb, or as is.
+   */
+  const resolve = (raw: PagePoint): { p: PagePoint; snap: SnapHit | null } => {
     if (nearFirst && draft[0]) return { p: draft[0], snap: null };
     const t = typedTarget();
     if (t) return { p: t, snap: null };
-    const s = snapOf(raw);
-    if (s) return { p: s, snap: s };
-    return { p: last && !shift ? orthoSnap(last, raw) : raw, snap: null };
+    const s = snapAt(raw);
+    if (s) return { p: s.p, snap: s };
+    const prev2 = draft[draft.length - 2];
+    return { p: last && !shift ? lockPoint(prev2, last, raw) : raw, snap: null };
   };
   const drawing = tool !== "select";
   /** A drag-a-box rectangle's corners: each snaps to a nearby corner unless `free` (Shift). */
   const rectEnds = (a: PagePoint, b: PagePoint, free: boolean) => {
-    const at = (q: PagePoint) => (free ? null : snapTo(q, candidates, zoom, SNAP_PX)) ?? q;
+    const at = (q: PagePoint) => snapAt(q, free)?.p ?? q;
     return { a: at(a), b: at(b) };
   };
   const rectLive = press?.active ? rectEnds(press.a, press.b, shift) : null;
   const live = drawing && cursor ? resolve(cursor) : null;
   const snapped: PagePoint | null = live?.p ?? null;
-  const dragSnap = drag && cursor ? snapOf(cursor) : null;
+  const dragSnap = drag && cursor ? snapAt(cursor) : null;
   const snapMark = drawing ? (live?.snap ?? null) : dragSnap;
 
   const changeTool = (t: Tool) => {
@@ -373,6 +559,7 @@ export function TakeoffViewer(props: ViewerProps) {
       return;
     }
     endPress();
+    setEdge(null);
     setTool(t);
     setDraft([]);
     setTyped("");
@@ -385,6 +572,52 @@ export function TakeoffViewer(props: ViewerProps) {
     setCountRole(r);
     setCountSession(null); // the next click starts a new count with this role
   };
+
+  // "Edge from this area": the area's sides, some left out; Create makes the linears.
+  const edgeArea = edge
+    ? objects.find((o) => o.id === edge.areaId && o.kind === "area")
+    : undefined;
+  const edgeRuns = edge && edgeArea ? perimeterRuns(edgeArea.points, edge.included) : [];
+  const startEdge = (areaId: string) => {
+    const area = objects.find((o) => o.id === areaId && o.kind === "area");
+    if (!area) {
+      toast.info("Select an area on this page first.");
+      return;
+    }
+    endPress();
+    setTool("select");
+    setDraft([]);
+    setTyped("");
+    setDimension(null);
+    setCountSession(null);
+    setEdge({ areaId, included: area.points.map(() => true) });
+  };
+  const startEdgeRef = useRef(startEdge);
+  startEdgeRef.current = startEdge;
+  const toggleEdgeSide = (i: number) =>
+    setEdge((e) => (e ? { ...e, included: e.included.map((on, j) => (j === i ? !on : on)) } : e));
+  const createEdges = () => {
+    if (!edge || !edgeArea) return;
+    if (!edgeRuns.length) {
+      toast.info("Every side is left out — click a side to include it, or press Esc.");
+      return;
+    }
+    for (const run of edgeRuns)
+      props.onCreate("linear", run, { linear: linearRole, fromArea: edgeArea.id });
+    setEdge(null);
+    const n = edgeRuns.length;
+    toast.success(
+      `${n} ${LINEAR_ROLE_LABELS[linearRole].toLowerCase()} line${n === 1 ? "" : "s"} made from ${edgeArea.attrs.name}.`,
+    );
+  };
+  // Asked for from the Objects tab.
+  useEffect(() => {
+    if (props.edgeRequest) startEdgeRef.current(props.edgeRequest.areaId);
+  }, [props.edgeRequest]);
+  // The area went away (deleted, undone): leave the mode.
+  useEffect(() => {
+    if (edge && !edgeArea) setEdge(null);
+  }, [edge, edgeArea]);
 
   /** Finish the shape in progress; false when there is nothing (or not enough) to finish. */
   const finish = (): boolean => {
@@ -423,7 +656,8 @@ export function TakeoffViewer(props: ViewerProps) {
   };
 
   const cancel = (): boolean => {
-    if (press) endPress();
+    if (edge) setEdge(null);
+    else if (press) endPress();
     else if (typed) setTyped("");
     else if (draft.length) setDraft([]);
     else if (dimension) setDimension(null);
@@ -555,6 +789,18 @@ export function TakeoffViewer(props: ViewerProps) {
       setSpaceDown(true);
       return true;
     }
+    if (edge) {
+      if (k === "Enter") {
+        createEdges();
+        return true;
+      }
+      if (/^[1-6]$/.test(k)) {
+        const r = LINEAR_ROLES[Number(k) - 1];
+        if (r) setLinearRole(r);
+        return !!r;
+      }
+      if (k === "Backspace" || k === "Delete") return true; // not the area itself
+    }
     switch (k) {
       case "Escape":
         return cancel();
@@ -598,7 +844,7 @@ export function TakeoffViewer(props: ViewerProps) {
   // Shift (free angle, no snap), Space (pan). Keys in a text field are left alone.
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      if (scalePick || isTypingTarget(e.target)) return;
+      if (scalePick || sheetPick || isTypingTarget(e.target)) return;
       if (e.key === "Shift") {
         setShift(true);
         return;
@@ -642,7 +888,7 @@ export function TakeoffViewer(props: ViewerProps) {
         press.active || isRectDrag({ x: press.sx, y: press.sy }, { x: e.clientX, y: e.clientY });
       setPress({ ...press, b: p, active });
     } else if (drag) {
-      const q = (!e.shiftKey && snapTo(p, candidates, zoom, SNAP_PX)) || p;
+      const q = snapAt(p, e.shiftKey)?.p ?? p;
       setDrag({
         ...drag,
         moved: true,
@@ -740,7 +986,7 @@ export function TakeoffViewer(props: ViewerProps) {
           value: countRole,
           onChange: (v: string) => pickCountRole(v as CountRole),
         }
-      : tool === "linear"
+      : tool === "linear" || edge
         ? {
             options: LINEAR_ROLES.map((r) => ({ value: r, label: LINEAR_ROLE_LABELS[r] })),
             value: linearRole,
@@ -758,6 +1004,19 @@ export function TakeoffViewer(props: ViewerProps) {
         onZoomOut={() => zoomCenter(1 / ZOOM_STEP)}
         onFit={fit}
         roles={roleChips}
+        planSnap={{
+          available: !source || isPdf, // unknown while the file loads
+          on: snapPlan,
+          status: planStatus,
+          onToggle: toggleSnapPlan,
+        }}
+        edgeFromArea={
+          edge
+            ? { active: true, onClick: () => setEdge(null) }
+            : selectedArea
+              ? { active: false, onClick: () => startEdge(selectedArea.id) }
+              : null
+        }
       />
 
       <div
@@ -775,7 +1034,7 @@ export function TakeoffViewer(props: ViewerProps) {
         }}
         onContextMenu={(e) => {
           // Right-click is "Stop" while a drawing tool is active: no browser menu.
-          if (drawing || draft.length) e.preventDefault();
+          if (drawing || draft.length || edge) e.preventDefault();
         }}
       >
         <div
@@ -795,6 +1054,14 @@ export function TakeoffViewer(props: ViewerProps) {
               height={sizeH * zoom}
               viewBox={`0 0 ${sizeW} ${sizeH}`}
               onPointerDown={(e) => {
+                if (edge) {
+                  // Picking sides: a side toggles itself; right-click creates, like "Stop".
+                  if (e.button === 2) {
+                    e.preventDefault();
+                    createEdges();
+                  }
+                  return;
+                }
                 if (e.button === 2) {
                   if (drawing) {
                     e.preventDefault();
@@ -828,11 +1095,20 @@ export function TakeoffViewer(props: ViewerProps) {
                 fpp={fpp}
                 zoom={zoom}
                 selectedId={selectedId}
-                interactive={tool === "select" && !spaceDown}
+                interactive={tool === "select" && !spaceDown && !edge}
                 onObjectDown={onObjectDown}
                 onVertexDown={onVertexDown}
               />
               {page.scale && <ScaleLine scale={page.scale} zoom={zoom} />}
+              {edge && edgeArea && (
+                <EdgePicker
+                  points={edgeArea.points}
+                  included={edge.included}
+                  zoom={zoom}
+                  color={DRAFT_COLOR.linear}
+                  onToggle={toggleEdgeSide}
+                />
+              )}
               {dimension && (
                 <MeasureLine
                   a={dimension.a}
@@ -877,7 +1153,7 @@ export function TakeoffViewer(props: ViewerProps) {
                   color={DRAFT_COLOR[tool]}
                 />
               )}
-              {snapMark && <SnapMarker at={snapMark} zoom={zoom} />}
+              {snapMark && <SnapMarker at={snapMark.p} kind={snapMark.kind} zoom={zoom} />}
               {typed && (cursor ?? last) && (
                 <SvgLabel
                   x={(cursor ?? last)![0] + 14 / zoom}
@@ -897,6 +1173,28 @@ export function TakeoffViewer(props: ViewerProps) {
           )}
         </div>
 
+        {edge && edgeArea && (
+          <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow">
+            <span className="font-medium">Edge from {edgeArea.attrs.name}</span>
+            <span className="text-muted-foreground">
+              {edge.included.filter(Boolean).length} of {edge.included.length} sides ·{" "}
+              {edgeRuns.length} {LINEAR_ROLE_LABELS[linearRole].toLowerCase()} line
+              {edgeRuns.length === 1 ? "" : "s"}
+              {edgeRuns.length > 0 &&
+                ` · ${lengthLabel(
+                  edgeRuns.reduce((t, r) => t + polylineLengthPx(r), 0),
+                  fpp,
+                )}`}
+            </span>
+            <Button size="sm" className="h-7" onClick={createEdges} disabled={!edgeRuns.length}>
+              Create
+            </Button>
+            <Button size="sm" variant="outline" className="h-7" onClick={() => setEdge(null)}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
         {(!source || rendering) && !props.loadError && !renderError && (
           <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-1 rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
             <Loader2 className="h-3 w-3 animate-spin" /> {source ? "Rendering…" : "Loading plan…"}
@@ -910,12 +1208,14 @@ export function TakeoffViewer(props: ViewerProps) {
 
         <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end gap-2">
           <div className="max-w-[640px] rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
-            {HINTS[tool]}
-            {tool !== "select" && tool !== "count" && (
+            {edge
+              ? "Click a side of the area to leave it out (a wall or a shared edge) or put it back; keys 1–5 pick the role. Create, Enter or right-click makes one line per run of included sides; Esc cancels."
+              : HINTS[tool]}
+            {!edge && tool !== "select" && tool !== "count" && (
               <span className="ml-1">
                 {shift
-                  ? "Level / plumb lock and corner snap off (Shift held)."
-                  : `Sides within ${ORTHO_DEG}° of level or plumb lock to it and corners snap — hold Shift for neither.`}
+                  ? "Square-corner, level / plumb lock and snapping off (Shift held)."
+                  : `A side within ${ORTHO_DEG}° of square to the previous side, or of level / plumb, locks to it; the cursor snaps to corners${planIndex ? " and the plan's own lines (teal)" : ""} — hold Shift for neither.`}
               </span>
             )}
             {typingTool && fpp !== null && (
@@ -928,33 +1228,55 @@ export function TakeoffViewer(props: ViewerProps) {
           {!page.scale && (
             <div className="rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 shadow dark:bg-amber-900/60 dark:text-amber-100">
               No scale on this page — use Scale (S) on a known dimension first.
+              {sheetNotes.length > 1 && (
+                <button
+                  type="button"
+                  className="pointer-events-auto ml-1 underline underline-offset-2"
+                  onClick={() => setSheetPick(true)}
+                >
+                  This sheet has {sheetNotes.length} scale notes — pick one…
+                </button>
+              )}
+            </div>
+          )}
+          {sheetInfo && (
+            <div className="max-w-[520px] rounded bg-sky-100 px-2 py-1 text-xs text-sky-900 shadow dark:bg-sky-900/60 dark:text-sky-100">
+              <span className="font-medium">{sheetScaleMessage(sheetInfo.note)}.</span>
+              {sheetInfo.warning && <span className="ml-1">{sheetInfo.warning}</span>} Redraw it
+              with Scale (S) to replace it.
             </div>
           )}
         </div>
       </div>
 
       <ScaleDialog
-        open={!!scalePick}
+        open={!!scalePick || sheetPick}
         pageCount={props.pageCount}
         unscaledOtherPages={props.unscaledOtherPages}
         pixels={
           scalePick
             ? Math.hypot(scalePick.b[0] - scalePick.a[0], scalePick.b[1] - scalePick.a[1])
-            : 0
+            : null
         }
-        onCancel={() => setScalePick(null)}
+        sheetScale={sheetInfo}
+        sheetChoices={sheetNotes}
+        onUseSheetNote={applySheetNote}
+        onCancel={() => {
+          setScalePick(null);
+          setSheetPick(false);
+        }}
         onSave={(feet, applyToAll) => {
           if (!scalePick) return;
-          props.onSetScale(
-            {
-              ax: scalePick.a[0],
-              ay: scalePick.a[1],
-              bx: scalePick.b[0],
-              by: scalePick.b[1],
-              feet,
-            },
-            applyToAll,
-          );
+          // A drawn scale; it replaces one read from the sheet.
+          const drawnScale: PageScale & { source: "drawn" } = {
+            ax: scalePick.a[0],
+            ay: scalePick.a[1],
+            bx: scalePick.b[0],
+            by: scalePick.b[1],
+            feet,
+            source: "drawn",
+          };
+          props.onSetScale(drawnScale, applyToAll);
           setScalePick(null);
           setTool("select");
           const n = applyToAll ? props.unscaledOtherPages : 0;

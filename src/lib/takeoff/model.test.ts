@@ -231,3 +231,18 @@ describe("slope factor (pitch, rise per 12)", () => {
     expect(b!.pitch).toBeUndefined();
   });
 });
+
+describe("rotateScale keeps the sheet tag", () => {
+  it("carries source and note through a quarter turn", () => {
+    const r = rotateScale(
+      { ax: 10, ay: 20, bx: 82, by: 20, feet: 8, source: "sheet", note: '1/8" = 1\'-0"' },
+      600,
+      400,
+      1,
+    );
+    expect(r.feet).toBe(8);
+    expect(r.source).toBe("sheet");
+    expect(r.note).toBe('1/8" = 1\'-0"');
+    expect([r.ax, r.ay, r.bx, r.by]).not.toEqual([10, 20, 82, 20]);
+  });
+});

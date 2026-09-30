@@ -2,8 +2,21 @@
  * The takeoff underlay: a plan-set PDF (rendered with pdf.js) or an aerial image. pdf.js is
  * loaded lazily and only in the browser — this app server-renders routes, and pdf.js must
  * never be evaluated on the server.
+ *
+ * For a PDF page it also reads the plan's own lines (`readPlanLines`, for snapping; see
+ * ./plan-lines) and the sheet's scale notes (`readSheetScale`; see ./sheet-scale), each once per
+ * page and cached per open document.
  */
 import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+
+import {
+  buildPlanIndex,
+  runChunked,
+  walkOperatorList,
+  type Matrix,
+  type PlanIndex,
+} from "./plan-lines";
+import { joinTextItems, pickSheetScale, type ScaleNote, type TextItemLike } from "./sheet-scale";
 
 type PdfJs = typeof import("pdfjs-dist");
 
@@ -103,7 +116,7 @@ export function renderUnderlayPage(
     if (source.kind === "pdf") {
       const page = await source.doc.getPage(pageIndex + 1);
       if (cancelled) throw new Error("cancelled");
-      const rot = (((page.rotate + rotation * 90) % 360) + 360) % 360;
+      const rot = pageRotation(page.rotate, rotation);
       const base = page.getViewport({ scale: 1, rotation: rot });
       const s = clampScale(scale, base.width, base.height);
       const vp = page.getViewport({ scale: s, rotation: rot });
@@ -142,4 +155,103 @@ export function renderUnderlayPage(
 function clampScale(scale: number, width: number, height: number): number {
   const max = Math.sqrt(MAX_CANVAS_PIXELS / Math.max(1, width * height));
   return Math.max(0.1, Math.min(scale, max));
+}
+
+/** The page's rotation as pdf.js takes it: its own /Rotate plus the takeoff's quarter turns. */
+function pageRotation(pageRotate: number, rotation: number): number {
+  return (((pageRotate + rotation * 90) % 360) + 360) % 360;
+}
+
+/** Plan lines per open document: page index → the rotation read and its (shared) result. */
+const planCache = new WeakMap<
+  PDFDocumentProxy,
+  Map<number, { rotation: number; promise: Promise<PlanIndex> }>
+>();
+
+/**
+ * The plan's own lines on one PDF page, in the page units the underlay is drawn in at
+ * `rotation`, indexed for snapping. Read once per page; a new rotation replaces the cached read.
+ * The walk runs in slices so the page stays responsive.
+ */
+export function readPlanLines(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  rotation: number,
+): Promise<PlanIndex> {
+  let byPage = planCache.get(doc);
+  if (!byPage) {
+    byPage = new Map();
+    planCache.set(doc, byPage);
+  }
+  const cache = byPage;
+  const hit = cache.get(pageIndex);
+  if (hit && hit.rotation === rotation) return hit.promise;
+  const promise = (async () => {
+    const [pdfjs, page] = await Promise.all([loadPdfjs(), doc.getPage(pageIndex + 1)]);
+    const vp = page.getViewport({ scale: 1, rotation: pageRotation(page.rotate, rotation) });
+    const list = await page.getOperatorList();
+    const geometry = await runChunked(
+      walkOperatorList(list.fnArray, list.argsArray, vp.transform as Matrix, pdfjs.OPS),
+    );
+    return runChunked(buildPlanIndex(geometry));
+  })();
+  cache.set(pageIndex, { rotation, promise });
+  // A failed read is not kept, so opening the page again tries again.
+  promise.catch(() => {
+    if (cache.get(pageIndex)?.promise === promise) cache.delete(pageIndex);
+  });
+  return promise;
+}
+
+/** What a sheet's text says about its scale (note positions in PDF user space). */
+export interface SheetScaleRead {
+  scale: ScaleNote | null;
+  choices: ScaleNote[];
+}
+
+const sheetCache = new WeakMap<PDFDocumentProxy, Map<number, Promise<SheetScaleRead>>>();
+
+/** The scale notes in one PDF page's text; read once per page per open document. */
+export function readSheetScale(doc: PDFDocumentProxy, pageIndex: number): Promise<SheetScaleRead> {
+  let byPage = sheetCache.get(doc);
+  if (!byPage) {
+    byPage = new Map();
+    sheetCache.set(doc, byPage);
+  }
+  const cache = byPage;
+  const hit = cache.get(pageIndex);
+  if (hit) return hit;
+  const promise = (async () => {
+    const page = await doc.getPage(pageIndex + 1);
+    const content = await page.getTextContent();
+    const items: TextItemLike[] = [];
+    for (const it of content.items) if ("str" in it) items.push(it);
+    const { text, starts } = joinTextItems(items);
+    return pickSheetScale(text, starts);
+  })();
+  cache.set(pageIndex, promise);
+  promise.catch(() => {
+    if (cache.get(pageIndex) === promise) cache.delete(pageIndex);
+  });
+  return promise;
+}
+
+/**
+ * A point in PDF user space (a text item's origin) in the page units the underlay is drawn in
+ * at `rotation`, and the displayed page size.
+ */
+export async function pdfPointToPage(
+  doc: PDFDocumentProxy,
+  pageIndex: number,
+  rotation: number,
+  at: [number, number] | null,
+): Promise<{ at: [number, number] | null; width: number; height: number }> {
+  const page = await doc.getPage(pageIndex + 1);
+  const vp = page.getViewport({ scale: 1, rotation: pageRotation(page.rotate, rotation) });
+  const p = at ? vp.convertToViewportPoint(at[0], at[1]) : null;
+  return {
+    at: p ? [Number(p[0]), Number(p[1])] : null,
+    width: vp.width,
+    height: vp.height,
+  };
 }

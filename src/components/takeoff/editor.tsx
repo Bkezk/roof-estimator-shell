@@ -205,6 +205,8 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const redo = () => travel("future");
   const [pageIdx, setPageIdx] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // "Edge from this area" asked for on the Objects tab (a new object each click).
+  const [edgeRequest, setEdgeRequest] = useState<{ areaId: string } | null>(null);
   const isNew = initial.objects.length === 0 && Object.keys(initial.setup).length === 0;
   // A brand-new drawing (nothing drawn, no page scaled) opens on the Scale tool.
   const [startTool] = useState<Tool>(() =>
@@ -734,6 +736,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             unscaledOtherPages={unscaledOtherPages}
             initialTool={startTool}
             onPageSize={onPageSize}
+            edgeRequest={edgeRequest}
           />
         </div>
 
@@ -766,6 +769,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onSelect={selectFromList}
                     onUpdate={updateObject}
                     onDelete={deleteObject}
+                    onEdgeFromArea={(areaId) => setEdgeRequest({ areaId })}
                   />
                 </TabsContent>
                 <TabsContent value="quantities" className="mt-0">
