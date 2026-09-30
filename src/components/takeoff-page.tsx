@@ -67,6 +67,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { BidStatusBadge } from "@/components/takeoff/bid-status-badge";
 import { TakeoffEditor } from "@/components/takeoff/editor";
 import { pdfPageCount } from "@/components/takeoff/underlay";
@@ -545,15 +546,22 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
 function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const { can } = useAuth();
   const createFn = useServerFn(createTakeoff);
   const deleteFn = useServerFn(deleteTakeoff);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  // The customer profile the takeoff belongs to (owner, Sep 30: "the dropdown feature as you're
+  // typing to suggest existing customers to link to"). Optional; the Setup tab can set it later.
+  const [account, setAccount] = useState<AccountPickerValue | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Reading customer records needs one of these; a takeoff-only user links from Setup later.
+  const canPickCustomer = can("customers") || can("service") || can("estimate");
 
   const reset = () => {
     setName("");
     setFile(null);
+    setAccount(null);
     setBusy(null);
   };
 
@@ -567,12 +575,17 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
       toast.error("That file is over 100 MB.");
       return setFile(null);
     }
+    // Owner (Sep 30): the name is the job's, typed on purpose, never the plan file's name.
     setFile(f);
-    if (!name.trim()) setName(f.name.replace(/\.[^.]+$/, ""));
   };
 
   const submit = async () => {
-    if (!file || !name.trim() || busy) return;
+    if (busy) return;
+    if (!name.trim()) {
+      toast.error("Give the takeoff a name — the job or building, not the file.");
+      return;
+    }
+    if (!file) return;
     const isPdf = file.type === "application/pdf";
     let pages: TakeoffSheet[];
     try {
@@ -604,6 +617,7 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
           file_name: file.name,
           file_size: file.size,
           pages,
+          ...(account ? { account_id: account.account_id } : {}),
         },
       });
     } catch (e) {
@@ -672,15 +686,49 @@ function NewTakeoffDialog(props: { open: boolean; onOpenChange: (open: boolean) 
             )}
           </div>
           <div className="space-y-1">
-            <Label htmlFor="takeoff-name">Name</Label>
+            <Label htmlFor="takeoff-name">
+              Name <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="takeoff-name"
               value={name}
               disabled={!!busy}
-              placeholder="e.g. Smith Warehouse roof"
+              required
+              aria-required
+              placeholder="The job or building, e.g. Smith Warehouse roof"
               onChange={(e) => setName(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Required. Name the job, not the plan file.
+            </p>
           </div>
+          {canPickCustomer && (
+            <div className="space-y-1">
+              <Label htmlFor="takeoff-customer">Customer</Label>
+              <AccountPicker
+                id="takeoff-customer"
+                value={account}
+                disabled={!!busy}
+                placeholder="Start typing a customer or site name…"
+                onChange={(hit) =>
+                  setAccount(
+                    hit
+                      ? {
+                          account_id: hit.account_id,
+                          site_id: hit.site_id,
+                          label: hit.site_name
+                            ? `${hit.account_name} — ${hit.site_name}`
+                            : hit.account_name,
+                        }
+                      : null,
+                  )
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Optional. The takeoff and any bid made from it are filed under this customer.
+              </p>
+            </div>
+          )}
           <DialogFooter>
             <Button
               type="button"
