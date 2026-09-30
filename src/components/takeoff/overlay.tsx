@@ -232,6 +232,33 @@ export const ObjectsLayer = memo(function ObjectsLayer(props: ObjectsLayerProps)
 });
 
 /** The small square shown where the cursor has snapped to an existing point. */
+/**
+ * The target at the live end of the line being drawn: where the next corner lands (after snap
+ * and the level / plumb lock), which can sit a little off the mouse itself. A ring with four
+ * ticks, sized on screen so it reads the same at any zoom.
+ */
+export function TargetMarker(props: { at: PagePoint; zoom: number; color: string }) {
+  const [x, y] = props.at;
+  const z = props.zoom;
+  const r = 7 / z;
+  const tick = 5 / z;
+  const stroke = {
+    stroke: props.color,
+    strokeWidth: 1.5,
+    vectorEffect: "non-scaling-stroke" as const,
+  };
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      <circle cx={x} cy={y} r={r} fill="none" {...stroke} />
+      <line x1={x - r - tick} y1={y} x2={x - r + tick / 2} y2={y} {...stroke} />
+      <line x1={x + r - tick / 2} y1={y} x2={x + r + tick} y2={y} {...stroke} />
+      <line x1={x} y1={y - r - tick} x2={x} y2={y - r + tick / 2} {...stroke} />
+      <line x1={x} y1={y + r - tick / 2} x2={x} y2={y + r + tick} {...stroke} />
+      <circle cx={x} cy={y} r={1.5 / z} fill={props.color} stroke="none" />
+    </g>
+  );
+}
+
 export function SnapMarker(props: { at: PagePoint; zoom: number }) {
   const h = 6 / props.zoom;
   return (
@@ -375,6 +402,7 @@ export function DraftShape(props: {
           vectorEffect="non-scaling-stroke"
         />
       ))}
+      {cursor && <TargetMarker at={cursor} zoom={zoom} color={color} />}
       {cursor &&
         lines.map((t, i) => (
           <SvgLabel

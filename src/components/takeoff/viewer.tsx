@@ -45,6 +45,7 @@ import {
   ScaleLine,
   SnapMarker,
   SvgLabel,
+  TargetMarker,
 } from "./overlay";
 import { ScaleDialog } from "./scale-dialog";
 import {
@@ -851,6 +852,9 @@ export function TakeoffViewer(props: ViewerProps) {
                   label="?"
                   color="#ea580c"
                 />
+              )}
+              {tool !== "select" && tool !== "count" && draft.length === 0 && snapped && !press && (
+                <TargetMarker at={snapped} zoom={zoom} color={DRAFT_COLOR[tool]} />
               )}
               {tool !== "select" && (draft.length > 0 || tool === "count") && (
                 <DraftShape
