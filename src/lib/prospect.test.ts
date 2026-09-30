@@ -7,10 +7,15 @@ import {
   boxContains,
   buildingLine,
   clipBox,
+  countyKeyFor,
+  countyKeyInState,
+  countyLabelFor,
   countyOptions,
   equivalentRectangle,
   kyTnLineLat,
+  nearKyTnLine,
   parseCountyKey,
+  searchFilters,
   shownAddress,
   sortWarrantyLeads,
   stateCode,
@@ -169,18 +174,14 @@ describe("Kentucky / Tennessee", () => {
     expect(SHARED_COUNTY_NAMES.has("pike")).toBe(false);
   });
   it("splits a shared county name into one entry per state", () => {
-    const opts = countyOptions(
-      [
-        { county: "Warren", count: 900 },
-        { county: "Davidson", count: 5000 },
-        { county: "Adair", count: 40 },
-        { county: "Franklin", count: 300 },
-      ],
-      new Map([
-        ["Warren", 250],
-        ["Franklin", 0],
-      ]),
-    );
+    // building_county_counts() rows: (county, state, n), state TN or KY (anything not TN).
+    const opts = countyOptions([
+      { county: "Warren", state: "KY", count: 650 },
+      { county: "Davidson", state: "TN", count: 5000 },
+      { county: "Adair", state: "KY", count: 40 },
+      { county: "Franklin", state: "KY", count: 300 },
+      { county: "Warren", state: "TN", count: 250 },
+    ]);
     expect(opts).toEqual([
       { key: "Adair", county: "Adair", state: null, label: "Adair", count: 40 },
       { key: "Davidson", county: "Davidson", state: null, label: "Davidson", count: 5000 },
@@ -188,10 +189,58 @@ describe("Kentucky / Tennessee", () => {
       { key: "Warren|KY", county: "Warren", state: "KY", label: "Warren, KY", count: 650 },
       { key: "Warren|TN", county: "Warren", state: "TN", label: "Warren, TN", count: 250 },
     ]);
+    // A one-state name the data holds under both states is split too (never two same keys).
+    expect(
+      countyOptions([
+        { county: "Adair", state: "KY", count: 3 },
+        { county: "Adair", state: "TN", count: 1 },
+      ]).map((o) => o.key),
+    ).toEqual(["Adair|KY", "Adair|TN"]);
     expect(parseCountyKey("Warren|TN")).toEqual({ county: "Warren", state: "TN" });
     expect(parseCountyKey("Warren|KY")).toEqual({ county: "Warren", state: "KY" });
     expect(parseCountyKey("Davidson")).toEqual({ county: "Davidson", state: null });
     expect(parseCountyKey("")).toEqual({ county: "", state: null });
+  });
+  it("keeps a county filter only while it is in the chosen state", () => {
+    // Bug: Adair (Kentucky only) stayed picked after State → Tennessee ("No buildings match").
+    expect(countyKeyInState("Adair", "TN")).toBe(false);
+    expect(countyKeyInState("Adair", "KY")).toBe(true);
+    expect(countyKeyInState("Davidson", "KY")).toBe(false);
+    expect(countyKeyInState("Davidson", "TN")).toBe(true);
+    expect(countyKeyInState("Warren|KY", "TN")).toBe(false);
+    expect(countyKeyInState("Warren|TN", "TN")).toBe(true);
+    expect(countyKeyInState("Adair", "all")).toBe(true);
+    expect(countyKeyInState("", "TN")).toBe(true);
+  });
+  it("keys and labels a county by state only where both states use the name", () => {
+    expect(countyKeyFor("Lawrence", "TN")).toBe("Lawrence|TN");
+    expect(countyLabelFor("Lawrence", "KY")).toBe("Lawrence, KY");
+    expect(countyKeyFor("Adair", "KY")).toBe("Adair");
+    expect(countyLabelFor("Davidson", "TN")).toBe("Davidson");
+    expect(countyKeyFor("(unknown)", "TN")).toBe("(unknown)");
+  });
+  it("quotes search text for PostgREST, one filter per comma-separated part", () => {
+    // Bug: "1338 LYNMAR DR, 1" (a permit lead's ?q=) failed to parse; "Smith (Annex)" found nothing.
+    const [a, b] = searchFilters("1338 LYNMAR DR, 1");
+    expect(a).toContain('name.ilike."%1338 LYNMAR DR%"');
+    expect(a).toContain('address1.ilike."%1338 LYNMAR DR%"');
+    expect(b).toContain('address1.ilike."%1%"');
+    expect(searchFilters("Smith (Annex)")[0]).toContain('name.ilike."%Smith (Annex)%"');
+    expect(searchFilters('Joe "Bob"')[0]).toContain('name.ilike."%Joe \\"Bob\\"%"');
+    // LIKE sees a literal backslash (\\), PostgREST an escaped one per character.
+    expect(searchFilters("a\\b")[0]).toContain('name.ilike."%a\\\\\\\\b%"');
+    expect(searchFilters("50%_off*")[0]).toContain('name.ilike."%50off%"');
+    expect(searchFilters(" , ,")).toEqual([]);
+    expect(searchFilters("a,b,c,d,e,f,g,h")).toHaveLength(6);
+  });
+  it("knows the band along the line where the state needs asking", () => {
+    // Fulton, KY: 0.4 km north of the (thinned) line, inside Tennessee's box.
+    expect(nearKyTnLine(36.50356, -88.87884)).toBe(true);
+    expect(nearKyTnLine(36.496, -88.879)).toBe(true);
+    // Portland, TN (8 km south) and Bowling Green (far north) are not.
+    expect(nearKyTnLine(36.58, -86.52)).toBe(false);
+    expect(nearKyTnLine(36.99, -86.44)).toBe(false);
+    expect(nearKyTnLine(36.16, -86.78)).toBe(false);
   });
   it("asks for Tennessee's outlines inside a box", () => {
     const url = new URL(

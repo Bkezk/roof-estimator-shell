@@ -40,11 +40,12 @@ parcel id / point-in-polygon fills `year_built`), or keep it hand-entered.
 the migration, then run "Refresh Tennessee data" by hand once at night (about 102,000 rows);
 it then runs on the 2nd of each month. Tennessee is footprints only: the state publishes no
 statewide 911 address points or schools service, so there is no address matching, no promoted
-named businesses and no schools; addresses are whatever the national layer carries. Still to
-do in the app (other owners' files): 34 county names exist in both states (Warren, Knox,
-Jefferson …), so the Buildings county filter and `building_county_counts()` should group by
-state and county; the refresh log stores Tennessee counties as "Davidson, TN", so the
-"N of 120 counties" line on the Buildings page should count per state.
+named businesses and no schools; addresses are whatever the national layer carries. 34
+county names exist in both states (Warren, Knox, Jefferson …): since Sep 30 the county filter
+(`building_county_counts()`) and the Storm hits county chips (`building_county_counts_storm()`)
+group by county and state (`20260930060000_county_counts_by_state.sql`, applied with the code).
+Still to do: the refresh log stores Tennessee counties as "Davidson, TN", so the "N of 120
+counties" line on the Buildings page should count per state.
 
 **Tennessee leads, round two (Sep 29).** Owner: apply
 `20260929230000_leads_tennessee_round2.sql` before the round-two code goes live, or every lead

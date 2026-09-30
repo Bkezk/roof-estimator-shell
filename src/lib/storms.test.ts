@@ -8,6 +8,7 @@ import {
   spcUrl,
   windowDates,
 } from "@/lib/storms.server";
+import { stormHitQualifies, stormReportQualifies, stormWindowFrom } from "@/lib/storms.functions";
 
 // Rows copied from the real SPC files on Sep 28, 2026 (May 16, 2025 hail; Jul 1, 2025 wind/torn).
 const HAIL = `Time,Size,Location,County,State,Lat,Lon,Comments
@@ -78,5 +79,38 @@ describe("SPC storm reports", () => {
     expect(describeReport({ kind: "hail", magnitude: 1 })).toBe("1.0-inch hail");
     expect(describeReport({ kind: "wind", magnitude: null })).toBe("damaging wind");
     expect(describeReport({ kind: "tornado", magnitude: 2 })).toBe("EF2 tornado");
+  });
+});
+
+describe("which stored hits still count", () => {
+  const settings = {
+    states: ["KY", "TN"],
+    min_hail_in: 1.5,
+    min_wind_mph: 58,
+    hail_radius_mi: 1,
+    wind_radius_mi: 3,
+    tornado_radius_mi: 5,
+  };
+  it("starts the window where the panel does", () => {
+    expect(stormWindowFrom(7, Date.parse("2026-09-30T15:00:00Z"))).toBe("2026-09-23");
+  });
+  it("applies today's thresholds, states and radius (match_storm_reports' rule)", () => {
+    const hail = { kind: "hail", magnitude: 1.0, state: "KY" };
+    expect(stormReportQualifies(settings, hail)).toBe(false);
+    expect(stormReportQualifies(settings, { ...hail, magnitude: 1.75 })).toBe(true);
+    expect(stormHitQualifies(settings, { ...hail, magnitude: 1.75 }, 2.5)).toBe(false);
+    expect(stormHitQualifies(settings, { ...hail, magnitude: 1.75 }, 0.8)).toBe(true);
+    expect(stormReportQualifies(settings, { kind: "wind", magnitude: null, state: "TN" })).toBe(
+      true,
+    );
+    expect(stormReportQualifies(settings, { kind: "wind", magnitude: 50, state: "TN" })).toBe(
+      false,
+    );
+    expect(stormReportQualifies(settings, { kind: "tornado", magnitude: null, state: "IN" })).toBe(
+      false,
+    );
+    expect(stormHitQualifies(settings, { kind: "tornado", magnitude: 1, state: "KY" }, 4.9)).toBe(
+      true,
+    );
   });
 });

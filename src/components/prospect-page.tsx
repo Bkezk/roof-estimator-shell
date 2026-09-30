@@ -32,6 +32,7 @@ import { TN_COUNTIES } from "@/lib/gis/tn-layers";
 import {
   approxAddressNote,
   buildingLine,
+  countyKeyInState,
   equivalentRectangle,
   parseCountyKey,
   reroofLine,
@@ -74,6 +75,7 @@ const ProspectMap = lazy(() => import("@/components/prospect-map"));
 import type { StormArea } from "@/components/prospect-map";
 import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel";
 import { stormDay, stormRadius } from "@/components/prospect/storm-format";
+import { mergeEdits } from "@/components/prospect/form-merge";
 
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Badge } from "@/components/ui/badge";
@@ -181,6 +183,7 @@ const summaryLine = (
     .join(" · ");
 const num = (n: number | null | undefined) =>
   n === null || n === undefined ? "" : n.toLocaleString();
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** A blank building form; the state defaults from where the map is looking (else Kentucky). */
 const emptyBuilding = (at?: { lat: number; lng: number } | null): BuildingInput => ({
@@ -434,17 +437,29 @@ export function ProspectPage(props: {
   });
   const counties = useQuery({ queryKey: ["building-counties"], queryFn: () => countiesFn() });
   // The county list narrowed to the state filter (a name unique to one state has no state key).
-  const countyChoices = (counties.data ?? []).filter((c) => {
-    if (stateFilter === "all") return true;
-    if (c.state) return c.state === stateFilter;
-    const list = stateFilter === "TN" ? TN_COUNTIES.map((t) => t.name) : KY_COUNTIES;
-    return list.some((n) => n.toLowerCase() === c.county.toLowerCase());
-  });
+  const countyChoices = (counties.data ?? []).filter((c) => countyKeyInState(c.key, stateFilter));
   const detail = useQuery({
     queryKey: ["building", selectedId],
     queryFn: () => getFn({ data: { id: selectedId! } }),
     enabled: !!selectedId,
   });
+  // Owner rule: a failure is announced (toast with the server's message), never an empty list.
+  useEffect(() => {
+    if (buildings.error)
+      toast.error(`Could not load buildings: ${errMsg(buildings.error)}`, {
+        id: "buildings-error",
+      });
+  }, [buildings.error]);
+  useEffect(() => {
+    if (detail.error)
+      toast.error(`Could not open the building: ${errMsg(detail.error)}`, { id: "building-error" });
+  }, [detail.error]);
+  useEffect(() => {
+    if (counties.error)
+      toast.error(`Could not load the county list: ${errMsg(counties.error)}`, {
+        id: "counties-error",
+      });
+  }, [counties.error]);
   const openTasks = useQuery({ queryKey: ["open-tasks"], queryFn: () => openTasksFn() });
   // The working list: flagged buildings, newest first (listProspects).
   const prospects = useQuery({ queryKey: ["prospects"], queryFn: () => prospectsFn() });
@@ -499,16 +514,29 @@ export function ProspectPage(props: {
       );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per page load
   }, [canWrite]);
-  const pickStormCounty = (name: string) => {
+  // A chip passes its county key ("Lawrence|TN" for a name both states use, else "Adair"; ""
+  // for All): the county Select shows it and the list keeps to that state's county.
+  const pickStormCounty = (key: string) => {
     // NOAA names the county the way the buildings do, but match loosely just in case.
-    const match = (counties.data ?? []).find((c) => c.county.toLowerCase() === name.toLowerCase());
-    setCounty(match?.county ?? name);
+    const match = (counties.data ?? []).find((c) => c.key.toLowerCase() === key.toLowerCase());
+    const next = match?.key ?? key;
+    setCounty(next);
+    if (next && !countyKeyInState(next, stateFilter)) setStateFilter("all");
     setStormFilter(true);
   };
 
-  // The detail form follows the selected building; edits are local until Save.
+  // The detail form follows the selected building; edits are local until Save. The row is read
+  // again underneath it (the stage button, a task or roof added, the storm refresh): what the
+  // person has typed stays, and only the fields they have not touched take the new values.
+  // A different building, or this person's own Save, fills the form afresh.
+  const formBase = useRef<BuildingInput | null>(null);
   useEffect(() => {
-    if (detail.data) setForm(toInput(detail.data.building));
+    const b = detail.data?.building;
+    if (!b) return;
+    const next = toInput(b);
+    const base = formBase.current;
+    formBase.current = next;
+    setForm((cur) => (cur?.id === b.id && base?.id === b.id ? mergeEdits(base, cur, next) : next));
   }, [detail.data]);
 
   const invalidate = () => {
@@ -545,6 +573,9 @@ export function ProspectPage(props: {
     mutationFn: (b: BuildingInput) => saveFn({ data: b }),
     onSuccess: (row) => {
       toast.success("Building saved");
+      // The saved row is the form now (the server tidies it: "tn" → "TN").
+      formBase.current = toInput(row);
+      setForm(toInput(row));
       setSelectedId(row.id);
       invalidate();
     },
@@ -719,6 +750,33 @@ export function ProspectPage(props: {
       }));
   }, [storms.data]);
 
+  // Flagged buildings under the State filter (it applies on both tabs, so the count matches the list).
+  const flaggedShown =
+    stateFilter === "all"
+      ? (storms.data?.buildings_flagged ?? 0)
+      : (storms.data?.flagged_by_state?.[stateFilter] ?? 0);
+  // The State filter, on both tabs (owner, Sep 29: "just see KY or just see TN").
+  const stateSelect = (
+    <Select
+      value={stateFilter}
+      onValueChange={(v) => {
+        const st = v as typeof stateFilter;
+        setStateFilter(st);
+        // A county that is not in the chosen state no longer applies.
+        if (county && !countyKeyInState(county, st)) setCounty("");
+      }}
+    >
+      <SelectTrigger className="h-8" aria-label="State">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">Both states</SelectItem>
+        <SelectItem value="KY">Kentucky</SelectItem>
+        <SelectItem value="TN">Tennessee</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
   // The find-buildings panel: search, filters and results. Over the map's left side when the
   // map is on (it can be tucked away); a plain card in the left column when the map is off.
   const searchCard = (
@@ -748,7 +806,7 @@ export function ProspectPage(props: {
               className={`h-3.5 w-3.5 ${storms.data?.buildings_flagged ? "text-destructive" : ""}`}
             />
             Storm hits
-            {storms.data ? ` · ${storms.data.buildings_flagged.toLocaleString()}` : ""}
+            {storms.data ? ` · ${flaggedShown.toLocaleString()}` : ""}
           </button>
         </div>
         <Input
@@ -756,38 +814,11 @@ export function ProspectPage(props: {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {stormHit ? (
-          <StormPanel
-            canWrite={canWrite}
-            isAdmin={isAdmin(profile)}
-            county={countyPick.county}
-            onPickCounty={pickStormCounty}
-            onRefreshed={invalidateStorms}
-          />
-        ) : (
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
-            <Select
-              value={stateFilter}
-              onValueChange={(v) => {
-                setStateFilter(v as typeof stateFilter);
-                // A county from the other state no longer applies.
-                if (v !== "all" && county) {
-                  const pick = parseCountyKey(county);
-                  if (pick.state && pick.state !== v) setCounty("");
-                }
-              }}
-            >
-              <SelectTrigger className="h-8" aria-label="State">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Both states</SelectItem>
-                <SelectItem value="KY">Kentucky</SelectItem>
-                <SelectItem value="TN">Tennessee</SelectItem>
-              </SelectContent>
-            </Select>
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-2">
+          {stateSelect}
+          {!stormHit && (
             <Select value={county || "all"} onValueChange={(v) => setCounty(v === "all" ? "" : v)}>
-              <SelectTrigger className="h-8">
+              <SelectTrigger className="h-8" aria-label="County">
                 <SelectValue placeholder="All counties" />
               </SelectTrigger>
               <SelectContent>
@@ -799,7 +830,22 @@ export function ProspectPage(props: {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          )}
+        </div>
+        {counties.error && (
+          <p className="text-xs text-destructive">
+            Could not load the county list: {errMsg(counties.error)}
+          </p>
+        )}
+        {stormHit && (
+          <StormPanel
+            canWrite={canWrite}
+            isAdmin={isAdmin(profile)}
+            county={county}
+            state={stateFilter}
+            onPickCounty={pickStormCounty}
+            onRefreshed={invalidateStorms}
+          />
         )}
         {/* Owner, Sep 28: no roof-age filter or sort — year built is paid data we are not
             buying; own-book roofs still show their age on the row. */}
@@ -845,6 +891,11 @@ export function ProspectPage(props: {
       </CardHeader>
       <CardContent className="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
         {buildings.isLoading && <p className="p-2 text-xs text-muted-foreground">Loading…</p>}
+        {buildings.error && (
+          <p className="p-2 text-xs text-destructive">
+            Could not load buildings: {errMsg(buildings.error)}
+          </p>
+        )}
         {buildings.data?.length === 0 && (
           <p className="p-2 text-xs text-muted-foreground">
             {stormHit
@@ -1131,7 +1182,13 @@ export function ProspectPage(props: {
           {!form ? (
             <Card>
               <CardContent className="space-y-3 p-6 text-sm text-muted-foreground">
-                <p>Select a prospect on the left, or add one.</p>
+                {selectedId && detail.error ? (
+                  <p className="text-destructive">
+                    Could not open the building: {errMsg(detail.error)}
+                  </p>
+                ) : (
+                  <p>Select a prospect on the left, or add one.</p>
+                )}
                 {canWrite && (
                   <div>
                     <p className="mb-1 flex items-center gap-1 font-medium text-foreground">

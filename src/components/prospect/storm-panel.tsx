@@ -3,7 +3,9 @@
  * event in the past week so that they are potential call points"). A compact card at the top of
  * the "Storm hits" tab of the find-buildings card (owner, Sep 28: one place, not a toggle plus a
  * strip): county chips with how many buildings each report flagged, a by-hand refresh, and
- * (admins) the thresholds. Picking a chip narrows the list to that county.
+ * (admins) the thresholds. Picking a chip narrows the list to that county. A county name both
+ * states use is two chips ("Lawrence, KY", "Lawrence, TN"); the page's State filter narrows the
+ * chips and the counts to one state.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -77,10 +79,12 @@ const draftFrom = (s: StormSettingsRow): Draft => ({
 export function StormPanel(props: {
   canWrite: boolean;
   isAdmin: boolean;
-  /** The county the list is narrowed to ("" = every county). */
+  /** The county filter key the list is narrowed to ("Lawrence|TN", "Adair"; "" = every county). */
   county: string;
-  /** A county chip was clicked ("" for All counties). */
-  onPickCounty: (county: string) => void;
+  /** The page's State filter: chips and the All count keep to it. */
+  state?: "all" | "KY" | "TN" | undefined;
+  /** A county chip was clicked: its county filter key ("" for All counties). */
+  onPickCounty: (countyKey: string) => void;
   /** After a by-hand refresh ran: the building list and anything else storm-derived. */
   onRefreshed?: (() => void) | undefined;
 }) {
@@ -117,7 +121,13 @@ export function StormPanel(props: {
     .map((st) => ({ KY: "Kentucky", TN: "Tennessee" })[st] ?? st)
     .join(" and ");
   const days = s?.window_days ?? 7;
-  const rows = summary.data?.by_county ?? [];
+  const stateFilter = props.state ?? "all";
+  const rows = (summary.data?.by_county ?? []).filter(
+    (c) => stateFilter === "all" || c.state === stateFilter,
+  );
+  // "No reports in Tennessee …" when the State filter is on.
+  const shownStates =
+    stateFilter === "all" ? stateNames : stateFilter === "TN" ? "Tennessee" : "Kentucky";
   const invalid = draft
     ? FIELDS.filter((f) => {
         const v = draft[f.key];
@@ -136,7 +146,10 @@ export function StormPanel(props: {
   };
 
   const counties = rows.length;
-  const flagged = summary.data?.buildings_flagged ?? 0;
+  const flagged =
+    stateFilter === "all"
+      ? (summary.data?.buildings_flagged ?? 0)
+      : (summary.data?.flagged_by_state?.[stateFilter] ?? 0);
   const selected = props.county.trim().toLowerCase();
   const chip = (active: boolean) =>
     `rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
@@ -159,7 +172,7 @@ export function StormPanel(props: {
           )}
           {summary.data && counties === 0 && (
             <span className="text-xs text-muted-foreground">
-              No hail, wind or tornado reports in {stateNames} in the last {days} days.
+              No hail, wind or tornado reports in {shownStates} in the last {days} days.
             </span>
           )}
           {counties > 0 && (
@@ -175,14 +188,14 @@ export function StormPanel(props: {
               </button>
               {rows.map((c) => (
                 <button
-                  key={c.county}
+                  key={`${c.county}|${c.state}`}
                   type="button"
-                  className={chip(selected === c.county.toLowerCase())}
-                  aria-pressed={selected === c.county.toLowerCase()}
-                  title={`${c.county} County: ${countySummary(c)}, latest ${stormDay(c.latest)}`}
-                  onClick={() => props.onPickCounty(c.county)}
+                  className={chip(selected === c.key.toLowerCase())}
+                  aria-pressed={selected === c.key.toLowerCase()}
+                  title={`${c.county} County, ${c.state}: ${countySummary(c)}, latest ${stormDay(c.latest)}`}
+                  onClick={() => props.onPickCounty(c.key)}
                 >
-                  {c.county} · {c.buildings_hit.toLocaleString()}
+                  {c.label} · {c.buildings_hit.toLocaleString()}
                 </button>
               ))}
             </>

@@ -342,6 +342,9 @@ export default function ProspectMap({
   const outlinesOn = useRef(showOutlines);
   outlinesOn.current = showOutlines;
   const refreshTnOutlinesRef = useRef<(() => void) | null>(null);
+  // Read by the framing below: a linked point being looked at is never framed away from.
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
 
   useEffect(() => {
     if (!el.current || map.current) return;
@@ -746,6 +749,10 @@ export default function ProspectMap({
       const sel = buildings.find((b) => b.id === selectedId);
       if (sel && sel.lat !== null && sel.lng !== null) {
         m.easeTo({ center: [sel.lng, sel.lat], zoom: Math.max(m.getZoom(), 18), duration: 600 });
+      } else if (selectedId || focusRef.current) {
+        // A building is open but not on the map yet (a search result: it arrives with its
+        // detail, and the view eases to it then), or it has no position, or a linked point
+        // (?at=) is being looked at: stay put rather than jump out to every building.
       } else {
         const withPos = buildings.filter((b) => b.lat !== null && b.lng !== null);
         if (withPos.length > 0) {

@@ -44,6 +44,20 @@ export const TN_BOUNDS: [[number, number], [number, number]] = [
 ];
 
 export const TN_STATE_FIPS = "47";
+export const KY_STATE_FIPS = "21";
+
+/**
+ * Census TIGERweb counties (one polygon per county, all states): NAME ("Fulton County") and
+ * STATE, the state's FIPS code. The authority on which side of the Kentucky / Tennessee line a
+ * point is: Tennessee's imagery index reaches up to ~2 km into Kentucky in the west (checked Sep
+ * 30, 2026: 36.50356, -88.87884 is Fulton County, KY here, "Obion" in the Tennessee index).
+ */
+export const CENSUS_COUNTY_LAYER =
+  "https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/State_County/MapServer/1";
+
+/** "21" → "KY", "47" → "TN"; any other state (or nothing) → null. */
+export const stateFromFips = (fips: unknown): "KY" | "TN" | null =>
+  fips === KY_STATE_FIPS ? "KY" : fips === TN_STATE_FIPS ? "TN" : null;
 
 /** The 95 counties with their FIPS codes, as the national layer spells them (PROP_CNTY). */
 export const TN_COUNTIES: readonly { name: string; fips: string }[] = [

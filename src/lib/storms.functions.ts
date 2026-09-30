@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import { countyKeyFor, countyLabelFor } from "@/lib/prospect";
 
 export type StormSettingsRow = Database["public"]["Tables"]["storm_settings"]["Row"];
 export type StormReportRow = Database["public"]["Tables"]["storm_reports"]["Row"];
@@ -55,6 +56,51 @@ export function stormLabel(kind: string | null, magnitude: number | null): strin
 
 const SIX_HOURS = 6 * 60 * 60 * 1000;
 
+/** The first day of the storm window ("2026-09-23" for 7 days on Sep 30), as the panel counts it. */
+export function stormWindowFrom(windowDays: number, now = Date.now()): string {
+  return new Date(now - windowDays * 86400000).toISOString().slice(0, 10);
+}
+
+type StormRule = Pick<
+  StormSettingsRow,
+  | "states"
+  | "min_hail_in"
+  | "min_wind_mph"
+  | "hail_radius_mi"
+  | "wind_radius_mi"
+  | "tornado_radius_mi"
+>;
+
+/**
+ * Does a report clear the thresholds (match_storm_reports' rule): a watched state, hail with a
+ * size at or above the minimum, wind at or above the minimum or with no speed (damage reported),
+ * any tornado.
+ */
+export function stormReportQualifies(
+  s: StormRule,
+  r: { kind: string; magnitude: number | null; state: string },
+): boolean {
+  if (!(s.states ?? []).includes(r.state)) return false;
+  if (r.kind === "hail") return r.magnitude != null && r.magnitude >= Number(s.min_hail_in);
+  if (r.kind === "wind") return r.magnitude == null || r.magnitude >= Number(s.min_wind_mph);
+  return r.kind === "tornado";
+}
+
+/** Does a stored hit still flag its building: the report qualifies and lies within its kind's radius. */
+export function stormHitQualifies(
+  s: StormRule,
+  r: { kind: string; magnitude: number | null; state: string },
+  distanceMi: number,
+): boolean {
+  const radius =
+    r.kind === "hail"
+      ? s.hail_radius_mi
+      : r.kind === "wind"
+        ? s.wind_radius_mi
+        : s.tornado_radius_mi;
+  return stormReportQualifies(s, r) && distanceMi <= Number(radius);
+}
+
 /**
  * The lazy pass: a Prospecting user's Buildings page calls this on load; if the last pull is
  * older than six hours it refreshes. `force` (the Refresh button) skips the throttle.
@@ -95,6 +141,12 @@ export const refreshStormsIfDue = createServerFn({ method: "POST" })
 
 export interface StormCountyRow {
   county: string;
+  /** The reports' state (NOAA's): a county name both states use is two rows. */
+  state: string;
+  /** The county filter key: "Lawrence|TN" for a name both states use, else the county. */
+  key: string;
+  /** "Lawrence, TN" for a name both states use, else the county. */
+  label: string;
   reports: number;
   hail: number;
   wind: number;
@@ -110,6 +162,8 @@ export interface StormSummary {
   reports: StormReportRow[];
   by_county: StormCountyRow[];
   buildings_flagged: number;
+  /** Flagged buildings per state ("KY" is everything not marked "TN", as the list counts). */
+  flagged_by_state: Record<string, number>;
 }
 
 /** The window's reports, rolled up by county, plus how many buildings are flagged. */
@@ -124,8 +178,8 @@ export const stormSummary = createServerFn({ method: "GET" })
       .eq("id", 1)
       .single();
     if (sErr) throw new Error(sErr.message);
-    const from = new Date(Date.now() - settings.window_days * 86400000).toISOString().slice(0, 10);
-    const [{ data: reports, error }, { count }] = await Promise.all([
+    const from = stormWindowFrom(settings.window_days);
+    const [{ data: reports, error }, { count, error: cErr }] = await Promise.all([
       sb
         .from("storm_reports")
         .select("*")
@@ -140,16 +194,30 @@ export const stormSummary = createServerFn({ method: "GET" })
         .not("last_storm_at", "is", null),
     ]);
     if (error) throw new Error(error.message);
+    if (cErr) throw new Error(cErr.message);
     const rows = reports ?? [];
-    // Buildings hit per county come from the flagged buildings themselves.
-    const { data: hitCounties } = await sb.rpc("building_county_counts_storm");
+    // Buildings hit per county and state come from the flagged buildings themselves; a failure
+    // is an error, not a row of zeros.
+    const { data: hitCounties, error: hErr } = await sb.rpc("building_county_counts_storm");
+    if (hErr) throw new Error(hErr.message);
     const hitBy = new Map<string, number>();
-    for (const r of hitCounties ?? []) hitBy.set(r.county, Number(r.n));
+    const flaggedByState: Record<string, number> = {};
+    for (const r of hitCounties ?? []) {
+      const st = r.state === "TN" ? "TN" : "KY";
+      hitBy.set(`${r.county}|${st}`, Number(r.n));
+      flaggedByState[st] = (flaggedByState[st] ?? 0) + Number(r.n);
+    }
+    // Grouped by county AND state: Lawrence County, KY and Lawrence County, TN are two chips.
     const by = new Map<string, StormCountyRow>();
     for (const r of rows) {
       const c = r.county ?? "(unknown)";
-      const row = by.get(c) ?? {
+      const st = r.state === "TN" ? "TN" : "KY";
+      const id = `${c}|${st}`;
+      const row = by.get(id) ?? {
         county: c,
+        state: st,
+        key: countyKeyFor(c, st),
+        label: countyLabelFor(c, st),
         reports: 0,
         hail: 0,
         wind: 0,
@@ -157,7 +225,7 @@ export const stormSummary = createServerFn({ method: "GET" })
         max_hail_in: null,
         max_wind_mph: null,
         latest: r.report_date,
-        buildings_hit: hitBy.get(c) ?? 0,
+        buildings_hit: hitBy.get(id) ?? 0,
       };
       row.reports++;
       if (r.kind === "hail") {
@@ -170,7 +238,7 @@ export const stormSummary = createServerFn({ method: "GET" })
           row.max_wind_mph = r.magnitude;
       } else row.tornado++;
       if (r.report_date > row.latest) row.latest = r.report_date;
-      by.set(c, row);
+      by.set(id, row);
     }
     return {
       settings,
@@ -180,25 +248,39 @@ export const stormSummary = createServerFn({ method: "GET" })
         (a, b) => b.buildings_hit - a.buildings_hit || b.reports - a.reports,
       ),
       buildings_flagged: count ?? 0,
+      flagged_by_state: flaggedByState,
     };
   });
 
-/** The reports that flagged one building, nearest first. */
+/**
+ * The reports that flag one building now, nearest first: in the window (the panel's first day)
+ * and still clearing today's thresholds and radius. Older hits stay stored until the 30-day
+ * prune, and a tightened setting leaves hits that no longer count.
+ */
 export const buildingStormHits = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ building_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<(StormReportRow & { distance_mi: number })[]> => {
     await readAccess(context);
+    const { data: settings, error: sErr } = await context.supabase
+      .from("storm_settings")
+      .select("*")
+      .eq("id", 1)
+      .single();
+    if (sErr) throw new Error(sErr.message);
+    const from = stormWindowFrom(settings.window_days);
     const { data: hits, error } = await context.supabase
       .from("building_storm_hits")
-      .select("distance_mi, storm_reports(*)")
+      .select("distance_mi, storm_reports!inner(*)")
       .eq("building_id", data.building_id)
+      .gte("storm_reports.report_date", from)
       .order("distance_mi")
       .limit(50);
     if (error) throw new Error(error.message);
     return (hits ?? [])
       .filter((h) => h.storm_reports)
-      .map((h) => ({ ...(h.storm_reports as StormReportRow), distance_mi: Number(h.distance_mi) }));
+      .map((h) => ({ ...(h.storm_reports as StormReportRow), distance_mi: Number(h.distance_mi) }))
+      .filter((h) => h.report_date >= from && stormHitQualifies(settings, h, h.distance_mi));
   });
 
 export const getStormSettings = createServerFn({ method: "GET" })

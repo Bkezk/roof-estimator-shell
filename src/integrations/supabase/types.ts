@@ -3394,7 +3394,8 @@ export type Database = {
       };
       building_county_counts: {
         Args: never;
-        Returns: { county: string; n: number }[];
+        /** state: "TN", or "KY" for every row not marked TN (20260930060000). */
+        Returns: { county: string; state: string; n: number }[];
       };
       reset_address_checks: {
         Args: { p_county: string };
@@ -3431,7 +3432,10 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
       stamp_dispatch: { Args: never; Returns: undefined };
-      building_county_counts_storm: { Args: never; Returns: { county: string; n: number }[] };
+      building_county_counts_storm: {
+        Args: never;
+        Returns: { county: string; state: string; n: number }[];
+      };
       match_storm_reports: {
         Args: never;
         Returns: { reports_in_window: number; new_hits: number; buildings_flagged: number }[];

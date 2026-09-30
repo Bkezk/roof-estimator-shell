@@ -192,7 +192,8 @@ export type CoveredState = "KY" | "TN";
  * The Kentucky / Tennessee line west → east as [lng, lat] (Census TIGER state outline, thinned
  * to ~400 m; east of Cumberland Gap it is the Virginia line). The two states' bounding boxes
  * overlap along 36.5–36.68°N (Murray, Middlesboro and Fulton, Kentucky sit inside Tennessee's
- * box), so a default state needs the line; the server asks the Tennessee imagery index instead.
+ * box), so a default state needs the line. Within a few km of it the server asks the Census
+ * county layer (nearKyTnLine): Tennessee's imagery index reaches up to ~2 km into Kentucky.
  */
 const KY_TN_LINE: readonly [number, number][] = [
   [-89.6, 36.5],
@@ -273,28 +274,97 @@ export function parseCountyKey(key: string): { county: string; state: CoveredSta
 }
 
 /**
- * The county filter's entries: counts per county name (what the database groups by), with each
- * name both states use split into "Name, KY" and "Name, TN" from the Tennessee count, so
- * Franklin County, Kentucky and Franklin County, Tennessee never merge. Alphabetical.
+ * The county filter's entries from counts per (county, state) — building_county_counts() groups
+ * by both, with anything not marked Tennessee counted as Kentucky, as the list's state filter
+ * does. A name both states use (or one the data holds under both) becomes "Name, KY" and
+ * "Name, TN", so Franklin County, Kentucky and Franklin County, Tennessee never merge; any other
+ * name is one entry. Alphabetical.
  */
 export function countyOptions(
-  counts: { county: string; count: number }[],
-  tnCounts: ReadonlyMap<string, number>,
+  rows: { county: string; state?: string | null; count: number }[],
 ): CountyOption[] {
+  const byName = new Map<string, { county: string; KY: number; TN: number }>();
+  for (const r of rows) {
+    const e = byName.get(r.county) ?? { county: r.county, KY: 0, TN: 0 };
+    e[r.state === "TN" ? "TN" : "KY"] += r.count;
+    byName.set(r.county, e);
+  }
   const out: CountyOption[] = [];
-  for (const { county, count } of counts) {
-    if (!SHARED_COUNTY_NAMES.has(county.toLowerCase())) {
-      out.push({ key: county, county, state: null, label: county, count });
+  for (const { county, KY, TN } of byName.values()) {
+    if (!SHARED_COUNTY_NAMES.has(county.toLowerCase()) && !(KY > 0 && TN > 0)) {
+      out.push({ key: county, county, state: null, label: county, count: KY + TN });
       continue;
     }
-    const tn = Math.min(count, tnCounts.get(county) ?? 0);
-    const ky = count - tn;
-    if (ky > 0)
-      out.push({ key: `${county}|KY`, county, state: "KY", label: `${county}, KY`, count: ky });
-    if (tn > 0)
-      out.push({ key: `${county}|TN`, county, state: "TN", label: `${county}, TN`, count: tn });
+    if (KY > 0)
+      out.push({ key: `${county}|KY`, county, state: "KY", label: `${county}, KY`, count: KY });
+    if (TN > 0)
+      out.push({ key: `${county}|TN`, county, state: "TN", label: `${county}, TN`, count: TN });
   }
   return out.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Does a county filter key belong to a state? "Franklin|TN" names its state; a bare name is
+ * looked up in the state's county list. Anything fits "all", and "" (every county) fits any.
+ */
+export function countyKeyInState(key: string, state: "all" | CoveredState): boolean {
+  if (!key || state === "all") return true;
+  const pick = parseCountyKey(key);
+  if (pick.state) return pick.state === state;
+  const name = pick.county.trim().toLowerCase();
+  return state === "TN"
+    ? TN_COUNTIES.some((c) => c.name.toLowerCase() === name)
+    : KY_COUNTIES.some((c) => c.toLowerCase() === name);
+}
+
+/** The county filter key for a county in a state: "Lawrence|TN" for a shared name, else "Adair". */
+export function countyKeyFor(county: string, state: string | null | undefined): string {
+  return SHARED_COUNTY_NAMES.has(county.toLowerCase()) && (state === "KY" || state === "TN")
+    ? `${county}|${state}`
+    : county;
+}
+
+/** How a county reads in chips and lists: "Lawrence, TN" for a shared name, else "Adair". */
+export function countyLabelFor(county: string, state: string | null | undefined): string {
+  const key = countyKeyFor(county, state);
+  return key === county ? county : `${county}, ${state}`;
+}
+
+/** The columns the search box looks in. */
+const SEARCH_COLUMNS = [
+  "name",
+  "address1",
+  "city",
+  "owner_name",
+  "parcel_id",
+  "county",
+  "state",
+  "zip",
+] as const;
+
+/**
+ * The search box as PostgREST `or` filters, one per comma-separated part ("1338 LYNMAR DR, 1",
+ * "Louisville, KY"): every part must appear in some column. Each value is double-quoted with
+ * `"` and `\` escaped, so commas, parentheses and dots in the text cannot break the filter
+ * (PostgREST reads an unquoted "," or ")" as syntax); `%`, `_` and `*` are dropped (they are
+ * wildcards) and a backslash is escaped for LIKE. At most six parts.
+ */
+export function searchFilters(q: string): string[] {
+  return q
+    .split(",")
+    .map((t) => t.replace(/[%_*]/g, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 6)
+    .map((t) => {
+      const like = `%${t.replace(/\\/g, "\\\\")}%`;
+      const quoted = `"${like.replace(/["\\]/g, (c) => `\\${c}`)}"`;
+      return SEARCH_COLUMNS.map((c) => `${c}.ilike.${quoted}`).join(",");
+    });
+}
+
+/** Within `km` of the Kentucky / Tennessee line (where the thinned line is not exact). */
+export function nearKyTnLine(lat: number, lng: number, km = 3): boolean {
+  return inTennesseeBox(lat, lng) && Math.abs(lat - kyTnLineLat(lng)) * 111 <= km;
 }
 
 /**
