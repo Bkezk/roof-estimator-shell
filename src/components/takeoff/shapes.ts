@@ -2,14 +2,17 @@
  * Takeoff page helpers — pure (no React, no I/O): object naming, measurements for labels, the
  * ortho snap (level / plumb within ORTHO_DEG), the square-corner lock (a side at 0° / 90° / 180°
  * / 270° to the previous side, for buildings drawn at an angle), the drag-a-box rectangle, the
- * perimeter runs of an area's included sides ("Edge from this area"), "Duplicate and stamp" (the
- * ghost's placement with its corner snap, and the copy with a fresh name), and number formatting.
+ * per-side roles of "Edge from this area" (the runs of sides sharing a role, the colours, the
+ * panel's summary), "Duplicate and stamp" (the ghost's placement with its corner snap, and the
+ * copy with a fresh name), and number formatting.
  * The authoritative quantities come from `takeoffQuantities` in @/lib/takeoff/model; these
  * helpers only label the drawing.
  */
 import { edgeLengths, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
 import {
   COUNT_ROLE_LABELS,
+  LINEAR_ROLES,
+  LINEAR_ROLE_LABELS,
   feetPerPx,
   nextColor,
   type CountAttrs,
@@ -372,10 +375,10 @@ export function ghostPlacement<S extends { p: PagePoint } = { p: PagePoint }>(
   return { dx: dx0 + sx, dy: dy0 + sy, snap: best };
 }
 
-/** The name a copy's name is built from: "Roof A copy 2" → "Roof A". */
+/** The name a copy's name is built from: "East wing copy 2" → "East wing". */
 const copyRoot = (name: string) => name.trim().replace(/\s+copy(?:\s+\d+)?$/i, "");
 
-/** The default-name base of `o`'s kind and role ("Roof", "Wall", "Drain"…). */
+/** The default-name base of `o`'s kind and role ("Section", "Wall", "Drain"…). */
 export function defaultBaseName(o: TakeoffObject): string {
   if (o.kind === "area") return AREA_BASE_NAME;
   if (o.kind === "linear") return LINEAR_BASE_NAMES[o.attrs.role] ?? LINEAR_BASE_NAMES.other;
@@ -384,7 +387,8 @@ export function defaultBaseName(o: TakeoffObject): string {
 
 /**
  * A stamped copy's name, never one already used in `existing`: a still-default name takes the
- * next default, as a newly drawn object would ("Roof 1" → "Roof 3" when "Roof 2" exists); a
+ * next default, as a newly drawn object would ("Section 1" → "Section 3" when "Section 2"
+ * exists; an older "Roof 1" is a default name too); a
  * name the user gave becomes "<name> copy", then "<name> copy 2", "<name> copy 3"…
  */
 export function copyName(o: TakeoffObject, existing: readonly TakeoffObject[]): string {
@@ -429,8 +433,19 @@ export function duplicateObject(
 /** Attrs are plain JSON (they are saved as such): a deep copy shares nothing with the source. */
 const cloneJson = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-/** Default object names per role ("Roof 1", "Wall 1", "Drain 1"). */
-export const AREA_BASE_NAME = "Roof";
+/**
+ * Default object names per role ("Section 1", "Wall 1", "Drain 1"). Areas are "Section N" to
+ * match Bid-Advantage's section names (owner, Sep 30).
+ */
+export const AREA_BASE_NAME = "Section";
+/**
+ * Areas drawn before that were "Roof 1", "Roof 2"… and saved takeoffs keep those names: "Roof N"
+ * is still an untouched default name, and its number counts as taken when numbering new areas.
+ */
+export const LEGACY_AREA_BASE_NAME = "Roof";
+/** Every base a default name of `base` may use (the area's older "Roof" too). */
+const defaultBases = (base: string): string[] =>
+  base === AREA_BASE_NAME ? [base, LEGACY_AREA_BASE_NAME] : [base];
 export const LINEAR_BASE_NAMES: Record<LinearRole, string> = {
   parapet: "Wall",
   gutter: "Gutter",
@@ -456,18 +471,45 @@ export const COUNT_LETTERS: Record<CountRole, string> = {
   other: "•",
 };
 
-/** "Roof 3": the first "<base> n" not already used. */
+/** A role's purpose in a few words, for its hover tooltip ("Parapet wall — …"). */
+export const LINEAR_ROLE_HINTS: Record<LinearRole, string> = {
+  parapet: "the roof edge that meets a wall",
+  gutter: "an eave edge that drains into a gutter",
+  expansion_joint: "a joint line across or along the roof",
+  walkway: "a run of walkway pads",
+  other: "any other length to measure",
+};
+export const COUNT_ROLE_HINTS: Record<CountRole, string> = {
+  drain: "a roof drain, with its boot and ring",
+  pipe: "a pipe coming through the roof",
+  vent: "a roof vent",
+  curb: "a curbed unit or hatch, width × length",
+  scupper: "an opening through the wall that drains the roof",
+  other: "any other item to count",
+};
+/** The "Leave out" choice of "Edge from this area", for its tooltip. */
+export const LEAVE_OUT_HINT = "no line along this side (a side shared with another roof)";
+
+/**
+ * "Section 3": the first "<base> n" not already used (for areas, n is also taken by an older
+ * "Roof n").
+ */
 export function uniqueName(base: string, existing: readonly TakeoffObject[]): string {
   const used = new Set(existing.map((o) => o.attrs.name.trim().toLowerCase()));
+  const bases = defaultBases(base);
   for (let n = 1; ; n++) {
-    const name = `${base} ${n}`;
-    if (!used.has(name.toLowerCase())) return name;
+    if (bases.every((b) => !used.has(`${b} ${n}`.toLowerCase()))) return `${base} ${n}`;
   }
 }
 
-/** True when `name` is still the untouched default for `base` ("Wall 2" for "Wall"). */
+/**
+ * True when `name` is still the untouched default for `base` ("Wall 2" for "Wall"; "Section 2"
+ * or an older "Roof 2" for an area).
+ */
 export function isDefaultName(name: string, base: string): boolean {
-  return new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\d+$`, "i").test(name.trim());
+  return defaultBases(base).some((b) =>
+    new RegExp(`^${b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\d+$`, "i").test(name.trim()),
+  );
 }
 
 export const newId = (): string =>
@@ -624,45 +666,166 @@ export function rectSizeLabel(a: PagePoint, b: PagePoint, fpp: number | null): s
 const copy = (p: PagePoint): PagePoint => [p[0], p[1]];
 
 /**
- * "Edge from this area": the open polylines along an area outline's included sides (side i runs
- * points[i] → points[i + 1], the last back to points[0]). Each run of contiguous included sides
- * is one polyline; when every side is included it is one closed run that returns to its start
- * (n + 1 points, as a rectangle's perimeter line does). No side included → no runs.
+ * "Edge from this area" (owner, Sep 30: "select which sides you want that to apply to"): each
+ * side of the area gets its own linear role, or is left out. Held by the editor while the mode is
+ * on and shared by the viewer (the plan, the banner) and the Objects tab (the per-side panel).
  */
-export function perimeterRuns(
+export interface EdgeSession {
+  /** The area whose sides are being picked. */
+  areaId: string;
+  /** The role chips' role: what a click on a side sets, and what untouched sides take. */
+  current: LinearRole;
+  /**
+   * Per side (side i runs points[i] → points[i + 1]): a role, null = left out, undefined or
+   * missing = not touched yet (takes `current`).
+   */
+  sides: ReadonlyArray<LinearRole | null | undefined>;
+}
+
+/** A side's colour on the plan while picking roles (and its swatch in the Objects panel). */
+export const LINEAR_ROLE_COLORS: Record<LinearRole, string> = {
+  parapet: "#1d4ed8",
+  gutter: "#c026d3",
+  expansion_joint: "#ea580c",
+  walkway: "#0f766e",
+  other: "#7c3aed",
+};
+/** A left-out side on the plan. */
+export const LEFT_OUT_COLOR = "#6b7280";
+
+/** How many sides an outline of `n` points has (a two-point "outline" has one). */
+const sideCount = (n: number) => (n < 2 ? 0 : n === 2 ? 1 : n);
+
+/** Every side's role for an outline of `n` points: untouched sides take `session.current`. */
+export function edgeSideRoles(session: EdgeSession, n: number): Array<LinearRole | null> {
+  return Array.from({ length: sideCount(n) }, (_, i) => {
+    const r = session.sides[i];
+    return r === undefined ? session.current : r;
+  });
+}
+
+/** `session` with side `i` (of an outline of `n` points) set to `role` (null = left out). */
+export function setEdgeSide(
+  session: EdgeSession,
+  n: number,
+  i: number,
+  role: LinearRole | null,
+): EdgeSession {
+  const sides = edgeSideRoles(session, n).map((r, j) =>
+    j === i ? role : session.sides[j] === undefined ? undefined : r,
+  );
+  return { ...session, sides };
+}
+
+/**
+ * A click on side `i` on the plan: left out → the current role; the current role → left out;
+ * any other role → the current role (pick a chip, then click the sides that take it).
+ */
+export function cycleEdgeSide(session: EdgeSession, n: number, i: number): EdgeSession {
+  const r = edgeSideRoles(session, n)[i];
+  return setEdgeSide(session, n, i, r === session.current ? null : session.current);
+}
+
+/** One linear "Edge from this area" makes: its role, its points and the sides it runs along. */
+export interface RoleRun {
+  role: LinearRole;
+  points: PagePoint[];
+  sides: number[];
+}
+
+/**
+ * "Edge from this area": the open polylines along an area outline's sides, one per run of
+ * contiguous sides that share a role (side i runs points[i] → points[i + 1], the last back to
+ * points[0]). A run may continue past the first corner (the last side and the first side are
+ * contiguous). A left-out side (null, or no entry) breaks runs. When every side has the same role
+ * it is one closed run that returns to its start (n + 1 points, as a rectangle's perimeter line
+ * does). Every side left out → no runs. Runs are listed going round from the first side (in
+ * side order) that starts one.
+ */
+export function perimeterRunsByRole(
   points: readonly PagePoint[],
-  included: readonly boolean[],
-): PagePoint[][] {
+  roles: ReadonlyArray<LinearRole | null | undefined>,
+): RoleRun[] {
   const n = points.length;
-  if (n < 2) return [];
-  const on = (i: number) => included[((i % n) + n) % n] !== false;
-  const sides = n === 2 ? 1 : n; // a two-point "outline" has one side
-  let all = true;
+  const sides = sideCount(n);
+  if (!sides) return [];
+  const roleOf = (i: number): LinearRole | null => roles[((i % n) + n) % n] ?? null;
+  const first = roleOf(0);
+  let same = true;
   let any = false;
   for (let i = 0; i < sides; i++) {
-    if (on(i)) any = true;
-    else all = false;
+    if (roleOf(i) !== null) any = true;
+    if (roleOf(i) !== first) same = false;
   }
   if (!any) return [];
-  if (all) return [(sides === 1 ? points.slice(0, 2) : [...points, points[0]!]).map(copy)];
-  // Start just after an excluded side, so no run wraps past the start.
-  let excluded = 0;
-  while (on(excluded)) excluded++;
-  const start = excluded + 1;
-  const runs: PagePoint[][] = [];
-  let cur: PagePoint[] | null = null;
+  if (same && first !== null) {
+    const loop = sides === 1 ? points.slice(0, 2) : [...points, points[0]!];
+    return [
+      { role: first, points: loop.map(copy), sides: Array.from({ length: sides }, (_, i) => i) },
+    ];
+  }
+  // Start on a side whose role differs from the side before it, so no run wraps past the start.
+  let start = 0;
+  while (roleOf(start - 1) === roleOf(start)) start++;
+  const runs: RoleRun[] = [];
+  let cur: RoleRun | null = null;
   for (let k = 0; k < sides; k++) {
     const i = (start + k) % n;
-    if (on(i)) {
-      cur ??= [copy(points[i]!)];
-      cur.push(copy(points[(i + 1) % n]!));
-    } else if (cur) {
+    const role = roleOf(i);
+    if (cur && cur.role !== role) {
       runs.push(cur);
       cur = null;
     }
+    if (role === null) continue;
+    cur ??= { role, points: [copy(points[i]!)], sides: [] };
+    cur.points.push(copy(points[(i + 1) % n]!));
+    cur.sides.push(i);
   }
   if (cur) runs.push(cur);
   return runs;
+}
+
+/** What Create would make, per role (in the role chips' order), for the panel and the banner. */
+export interface EdgeSummary {
+  runs: RoleRun[];
+  /** Lines Create makes (0 = nothing to create). */
+  lines: number;
+  /** Sides left out. */
+  leftOut: number;
+  /** Lines and total length (page px) per role that has any. */
+  byRole: Array<{ role: LinearRole; lines: number; px: number }>;
+  /** "3 parapet wall lines · 160.4 ft, 1 gutter line · 60.4 ft, 1 side left out". */
+  text: string;
+}
+
+/**
+ * The runs Create would make for `roles` (see `perimeterRunsByRole`) and the panel's live
+ * summary: lines and length per role, then how many sides are left out.
+ */
+export function edgeSummary(
+  points: readonly PagePoint[],
+  roles: ReadonlyArray<LinearRole | null | undefined>,
+  fpp: number | null,
+): EdgeSummary {
+  const runs = perimeterRunsByRole(points, roles);
+  const sides = sideCount(points.length);
+  let leftOut = 0;
+  for (let i = 0; i < sides; i++) if ((roles[i] ?? null) === null) leftOut++;
+  const byRole = LINEAR_ROLES.map((role) => {
+    const mine = runs.filter((r) => r.role === role);
+    return {
+      role,
+      lines: mine.length,
+      px: mine.reduce((t, r) => t + polylineLengthPx(r.points), 0),
+    };
+  }).filter((x) => x.lines > 0);
+  const parts = byRole.map(
+    (x) =>
+      `${x.lines} ${LINEAR_ROLE_LABELS[x.role].toLowerCase()} line${x.lines === 1 ? "" : "s"} · ${lengthLabel(x.px, fpp)}`,
+  );
+  if (leftOut && parts.length) parts.push(`${leftOut} side${leftOut === 1 ? "" : "s"} left out`);
+  const text = parts.length ? parts.join(", ") : "Every side is left out — nothing to create";
+  return { runs, lines: runs.length, leftOut, byRole, text };
 }
 
 /** 20.5 → `20' 6"`. */

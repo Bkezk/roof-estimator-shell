@@ -37,6 +37,7 @@ import {
   type TakeoffWithBid,
 } from "@/lib/takeoff.functions";
 import {
+  feetPerPx,
   rotatePoints,
   rotateScale,
   takeoffQuantities,
@@ -71,14 +72,18 @@ import { SetupTab } from "./setup-tab";
 import {
   buildObject,
   duplicateObject,
+  edgeSideRoles,
+  edgeSummary,
   isTypingTarget,
   newId,
   translateObject,
+  type EdgeSession,
   type NewObjectRoles,
   type Tool,
 } from "./shapes";
 import { closePdf, openPdf, type UnderlaySource } from "./underlay";
 import { useAutosave, type SaveState } from "./use-autosave";
+import { TIP_DELAY_MS, Tip } from "./toolbar";
 import { TakeoffViewer } from "./viewer";
 
 export function TakeoffEditor({ id }: { id: string }) {
@@ -121,7 +126,7 @@ export function TakeoffEditor({ id }: { id: string }) {
 }
 
 type TakeoffStatus = "draft" | "done";
-const NO_AREA_TIP = "Draw at least one roof area on a scaled page first";
+const NO_AREA_TIP = "draw at least one roof area on a scaled page first";
 
 /** Undo steps kept for the objects list, and how close attribute edits merge into one step. */
 const HISTORY_LIMIT = 50;
@@ -208,6 +213,9 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // "Edge from this area" asked for on the Objects tab (a new object each click).
   const [edgeRequest, setEdgeRequest] = useState<{ areaId: string } | null>(null);
+  // "Edge from this area" while it is on: the area and each side's role. Shared by the viewer
+  // (the plan, the banner) and the Objects tab (the per-side panel); the viewer starts it.
+  const [edge, setEdge] = useState<EdgeSession | null>(null);
   // "Duplicate and stamp" asked for on the Objects tab (a new object each click).
   const [stampRequest, setStampRequest] = useState<{ id: string } | null>(null);
   const isNew = initial.objects.length === 0 && Object.keys(initial.setup).length === 0;
@@ -478,6 +486,49 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     writePanel("panel", !next);
     if (!isMobile) setNavOpen(!next);
   };
+  // Starting "Edge from this area" brings up the Objects tab (opening the panel if folded), where
+  // its per-side panel is.
+  const changeEdge = (next: EdgeSession | null) => {
+    if (next && !edge) {
+      setTab("objects");
+      if (!panelOpen) {
+        setPanelOpen(true);
+        writePanel("panel", true);
+      }
+    }
+    setEdge(next);
+  };
+  // Create: one linear per run of sides sharing a role, all in one undo step; the last is selected.
+  const createEdges = () => {
+    if (!edge) return;
+    const area = objectsRef.current.find((o) => o.id === edge.areaId && o.kind === "area");
+    if (!area) {
+      setEdge(null);
+      return;
+    }
+    const scale = pages.find((p) => p.index === area.page)?.scale ?? null;
+    const sum = edgeSummary(area.points, edgeSideRoles(edge, area.points.length), feetPerPx(scale));
+    if (!sum.lines) {
+      toast.info("Every side is left out — give at least one side a role, or Cancel (Esc).");
+      return;
+    }
+    const ids = sum.runs.map(() => newId());
+    commit((prev) =>
+      sum.runs.reduce(
+        (acc, run, k) => [
+          ...acc,
+          buildObject("linear", ids[k]!, area.page, run.points, acc, setup, scale, {
+            linear: run.role,
+            fromArea: area.id,
+          }),
+        ],
+        prev,
+      ),
+    );
+    select(ids[ids.length - 1]!);
+    setEdge(null);
+    toast.success(`Made from ${area.attrs.name}: ${sum.text}.`);
+  };
   const gridCols = `${pagesOpen ? "150px " : ""}minmax(0,1fr)${panelOpen ? " 380px" : ""}`;
 
   return (
@@ -504,34 +555,44 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
         )}
         <SaveIndicator state={saveState} />
         <div className="flex items-center">
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            disabled={historySize.past === 0}
-            onClick={(e) => {
-              undo();
-              if (e.detail > 0) e.currentTarget.blur();
-            }}
-            title="Undo (Ctrl+Z)"
-            aria-label="Undo"
+          <Tip
+            name="Undo"
+            text="take back the last change to the drawing (Ctrl+Z)"
+            wrap={historySize.past === 0}
           >
-            <Undo2 className="h-4 w-4" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            disabled={historySize.future === 0}
-            onClick={(e) => {
-              redo();
-              if (e.detail > 0) e.currentTarget.blur();
-            }}
-            title="Redo (Ctrl+Y)"
-            aria-label="Redo"
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              disabled={historySize.past === 0}
+              onClick={(e) => {
+                undo();
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+              aria-label="Undo"
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+          </Tip>
+          <Tip
+            name="Redo"
+            text="put back what Undo took back (Ctrl+Y or Ctrl+Shift+Z)"
+            wrap={historySize.future === 0}
           >
-            <Redo2 className="h-4 w-4" />
-          </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              disabled={historySize.future === 0}
+              onClick={(e) => {
+                redo();
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+              aria-label="Redo"
+            >
+              <Redo2 className="h-4 w-4" />
+            </Button>
+          </Tip>
         </div>
         <Select value={status} onValueChange={(v) => saveStatus.mutate(v as TakeoffStatus)}>
           <SelectTrigger
@@ -557,53 +618,64 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             source={source}
           />
           <div className="flex items-center rounded-md border">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              onClick={togglePages}
-              title={pagesOpen ? "Hide the pages list" : "Show the pages list"}
-              aria-pressed={pagesOpen}
-            >
-              {pagesOpen ? (
-                <PanelLeftClose className="h-4 w-4" />
-              ) : (
-                <PanelLeftOpen className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 px-2"
-              onClick={togglePanel}
-              title={
+            <Tip name="Pages" text={pagesOpen ? "hide the pages list" : "show the pages list"}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2"
+                onClick={togglePages}
+                aria-label="Pages list"
+                aria-pressed={pagesOpen}
+              >
+                {pagesOpen ? (
+                  <PanelLeftClose className="h-4 w-4" />
+                ) : (
+                  <PanelLeftOpen className="h-4 w-4" />
+                )}
+              </Button>
+            </Tip>
+            <Tip
+              name="Side panel"
+              text={
                 panelOpen
-                  ? "Hide the Setup / Objects / Quantities panel"
-                  : "Show the Setup / Objects / Quantities panel"
+                  ? "hide the Setup / Objects / Quantities panel"
+                  : "show the Setup / Objects / Quantities panel"
               }
-              aria-pressed={panelOpen}
             >
-              {panelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 gap-1 px-2"
-              onClick={toggleFocus}
-              title={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2"
+                onClick={togglePanel}
+                aria-label="Setup / Objects / Quantities panel"
+                aria-pressed={panelOpen}
+              >
+                {panelOpen ? (
+                  <PanelRightClose className="h-4 w-4" />
+                ) : (
+                  <PanelRightOpen className="h-4 w-4" />
+                )}
+              </Button>
+            </Tip>
+            <Tip
+              name={focused ? "Exit focus" : "Focus"}
+              text={
                 focused
-                  ? "Show the menu and side panels again"
-                  : "Hide the menu and side panels to give the drawing the whole screen"
+                  ? "show the menu and side panels again"
+                  : "hide the menu and side panels to give the drawing the whole screen"
               }
-              aria-pressed={focused}
             >
-              {focused ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-              <span className="text-xs">{focused ? "Exit focus" : "Focus"}</span>
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1 px-2"
+                onClick={toggleFocus}
+                aria-pressed={focused}
+              >
+                {focused ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                <span className="text-xs">{focused ? "Exit focus" : "Focus"}</span>
+              </Button>
+            </Tip>
           </div>
           {linkedBid ? (
             <>
@@ -618,7 +690,7 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                 </Link>
                 <BidStatusBadge status={linkedBid.status} />
               </span>
-              <Tooltip>
+              <Tooltip delayDuration={TIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <span tabIndex={0}>
                     <Button
@@ -631,13 +703,14 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     </Button>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent className="max-w-xs">
+                  <span className="font-semibold">Create a new bid</span> —{" "}
                   {canCreateBid
-                    ? "Start another, separate bid with these sections, edges, parapets and counts filled in"
+                    ? "start another, separate bid with these sections, edges, parapets and counts filled in"
                     : NO_AREA_TIP}
                 </TooltipContent>
               </Tooltip>
-              <Tooltip>
+              <Tooltip delayDuration={TIP_DELAY_MS}>
                 <TooltipTrigger asChild>
                   <span tabIndex={0} className="min-w-0">
                     <Button
@@ -651,15 +724,16 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     </Button>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>
+                <TooltipContent className="max-w-xs">
+                  <span className="font-semibold">Update bid</span> —{" "}
                   {canCreateBid
-                    ? `Open “${linkedBid.name}” with this drawing's new quantities applied`
+                    ? `open “${linkedBid.name}” with this drawing's new quantities applied`
                     : NO_AREA_TIP}
                 </TooltipContent>
               </Tooltip>
             </>
           ) : (
-            <Tooltip>
+            <Tooltip delayDuration={TIP_DELAY_MS}>
               <TooltipTrigger asChild>
                 <span tabIndex={0}>
                   <Button size="sm" disabled={!canCreateBid} onClick={() => void toBid(null)}>
@@ -667,9 +741,10 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                   </Button>
                 </span>
               </TooltipTrigger>
-              <TooltipContent>
+              <TooltipContent className="max-w-xs">
+                <span className="font-semibold">Create bid</span> —{" "}
                 {canCreateBid
-                  ? "Start a new bid with these sections, edges, parapets and counts filled in"
+                  ? "start a new bid with these sections, edges, parapets and counts filled in"
                   : NO_AREA_TIP}
               </TooltipContent>
             </Tooltip>
@@ -752,6 +827,9 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             initialTool={startTool}
             onPageSize={onPageSize}
             edgeRequest={edgeRequest}
+            edge={edge}
+            onEdgeChange={changeEdge}
+            onEdgeCreate={createEdges}
             onDuplicate={duplicate}
             stampRequest={stampRequest}
           />
@@ -787,6 +865,9 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
                     onUpdate={updateObject}
                     onDelete={deleteObject}
                     onEdgeFromArea={(areaId) => setEdgeRequest({ areaId })}
+                    edge={edge}
+                    onEdgeChange={changeEdge}
+                    onEdgeCreate={createEdges}
                     onDuplicate={(objectId) => setStampRequest({ id: objectId })}
                   />
                 </TabsContent>

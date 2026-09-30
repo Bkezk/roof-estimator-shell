@@ -28,6 +28,7 @@ import {
 import type { TakeoffObject, TakeoffPage } from "@/lib/takeoff/model";
 import { Button } from "@/components/ui/button";
 
+import { Tip } from "./toolbar";
 import { renderUnderlayPage, type UnderlaySource } from "./underlay";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -131,27 +132,33 @@ export function ExportMarkupButton(props: {
     }
   };
   const nothing = props.objects.length === 0;
+  const disabled = busy || nothing || !props.source;
   return (
-    <Button
-      size="sm"
-      variant="outline"
-      disabled={busy || nothing || !props.source}
-      title={
+    <Tip
+      name="Export marked-up PDF"
+      wrap={disabled}
+      text={
         nothing
-          ? "Draw something first"
-          : "A PDF of every page with objects, marked up and labelled, plus a quantities summary"
+          ? "draw something first"
+          : "every page with objects, marked up and labelled, plus a quantities summary"
       }
-      onClick={(e) => {
-        void run();
-        if (e.detail > 0) e.currentTarget.blur();
-      }}
     >
-      {busy ? (
-        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-      ) : (
-        <FileDown className="mr-1 h-4 w-4" />
-      )}
-      Export marked-up PDF
-    </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled}
+        onClick={(e) => {
+          void run();
+          if (e.detail > 0) e.currentTarget.blur();
+        }}
+      >
+        {busy ? (
+          <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+        ) : (
+          <FileDown className="mr-1 h-4 w-4" />
+        )}
+        Export marked-up PDF
+      </Button>
+    </Tip>
   );
 }

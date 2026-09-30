@@ -9,7 +9,8 @@
  * snaps to other objects' corners and the scale line's ends (Shift = free, no snap, no ortho);
  * on a scaled page a typed length + Enter places the next point that far along; Delete removes
  * the selected object; in Select mode a selected area / line drags as a whole and a count pin
- * drags on its own; role chips (keys 1–6) pick the next count / linear's role.
+ * drags on its own; role chips (keys 1–6; a second toolbar line under the tools) pick the next
+ * count / linear's role.
  *
  * Owner, Sep 30: (1) Ortho has a tolerance — a side within ORTHO_DEG (7°) of level or plumb
  * locks to it, a steeper side keeps its angle, so angled views can be drawn; typed lengths follow
@@ -27,8 +28,19 @@
  * line, Scale dialog, a toast); several are offered as choices in the Scale dialog. Drawing a
  * scale replaces it. (C) Square corners: after two points, a side within ORTHO_DEG of 0° / 90° /
  * 180° / 270° to the previous side locks to it (before the level / plumb lock), typed lengths
- * too. (D) "Edge from this area": with an area selected, click its sides to leave out walls or
- * shared edges, pick the role, and Create makes one linear per run of included sides.
+ * too. (D) "Edge from this area": with an area selected, Create makes linears along its sides.
+ *
+ * Owner, Sep 30 (Edge from this area, per side: "if 3 of the sides have a parapet wall and one
+ * doesn't I should be able to select that. Also the pop-up is easy to miss"): each side has its
+ * own role or is left out. The session (`EdgeSession` in ./shapes) is held by the editor so the
+ * Objects tab can show its per-side panel (a role Select per side, a live summary, Create /
+ * Cancel); this viewer starts it (toolbar button, or the Objects tab via `edgeRequest`), draws
+ * each side thick in its role's colour with "A · 50.3 ft · Parapet wall" (left-out sides grey,
+ * dashed) and shows a banner across the top of the drawing. A click on a side cycles it (the
+ * current role → left out → the current role; another role → the current role); the role chips /
+ * keys 1–5 set the current role, which clicks use and untouched sides take. Enter / right-click
+ * (or Create) makes one linear per run of contiguous sides sharing a role (a whole loop of one
+ * role returns to its start), as one undo step; Esc, another tool or another page cancels.
  *
  * Owner, Sep 30 (Duplicate and stamp): with an area (and its cut-outs), a linear or a count
  * selected, Ctrl/Cmd+D, the toolbar's Duplicate or the Objects tab's Duplicate button starts
@@ -42,7 +54,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, SquareDashed } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -83,13 +95,18 @@ import {
   type ScaleNote,
 } from "./sheet-scale";
 import {
+  COUNT_ROLE_HINTS,
   DRAFT_COLOR,
   HINTS,
   KEY_TOOLS,
+  LINEAR_ROLE_HINTS,
   ORTHO_DEG,
   STAMP_HINT,
+  cycleEdgeSide,
   dragRect,
   duplicateObject,
+  edgeSideRoles,
+  edgeSummary,
   feetInches,
   ghostPlacement,
   isLengthKey,
@@ -98,17 +115,16 @@ import {
   lengthLabel,
   lockPoint,
   parseFeetInches,
-  perimeterRuns,
-  polylineLengthPx,
   rectObjectPoints,
   snapCandidates,
   stampReference,
   translateObject,
   typedPoint,
+  type EdgeSession,
   type NewObjectRoles,
   type Tool,
 } from "./shapes";
-import { ViewerToolbar } from "./toolbar";
+import { Tip, ViewerToolbar } from "./toolbar";
 import {
   pdfPointToPage,
   readPlanLines,
@@ -178,6 +194,12 @@ export interface ViewerProps {
   onPageSize: (pageIndex: number, rotation: number, width: number, height: number) => void;
   /** "Edge from this area" asked for from outside (the Objects tab); a new object each time. */
   edgeRequest?: { areaId: string } | null;
+  /** "Edge from this area" while it is on (held by the editor, shared with the Objects tab). */
+  edge: EdgeSession | null;
+  /** Start (a new session), change or end (null) "Edge from this area". */
+  onEdgeChange: (edge: EdgeSession | null) => void;
+  /** Create the linears of the current "Edge from this area" session and end it. */
+  onEdgeCreate: () => void;
   /**
    * "Duplicate and stamp": add a copy of `sourceId` moved by (dx, dy) page px, as one undo step,
    * without selecting it; returns the new id, or null when the source is gone.
@@ -244,8 +266,10 @@ export function TakeoffViewer(props: ViewerProps) {
   const [sheet, setSheet] = useState<{ index: number; read: SheetScaleRead } | null>(null);
   /** The Scale dialog opened only to pick one of the sheet's scale notes (no line drawn). */
   const [sheetPick, setSheetPick] = useState(false);
-  /** "Edge from this area": the area, and which of its sides are included (all at first). */
-  const [edge, setEdge] = useState<{ areaId: string; included: boolean[] } | null>(null);
+  /** "Edge from this area": the area and each side's role (held by the editor). */
+  const edge = props.edge;
+  const onEdgeChangeRef = useRef(props.onEdgeChange);
+  onEdgeChangeRef.current = props.onEdgeChange;
   /** "Duplicate and stamp": the object copied, and how many copies were stamped so far. */
   const [stamp, setStamp] = useState<{ sourceId: string; count: number } | null>(null);
 
@@ -281,7 +305,7 @@ export function TakeoffViewer(props: ViewerProps) {
     setMove(null);
     setPress(null);
     setTyped("");
-    setEdge(null);
+    onEdgeChangeRef.current(null);
     setStamp(null);
     setSheetPick(false);
     const c = canvasRef.current;
@@ -605,7 +629,7 @@ export function TakeoffViewer(props: ViewerProps) {
       return;
     }
     endPress();
-    setEdge(null);
+    endEdge();
     setStamp(null);
     setTool(t);
     setDraft([]);
@@ -620,11 +644,13 @@ export function TakeoffViewer(props: ViewerProps) {
     setCountSession(null); // the next click starts a new count with this role
   };
 
-  // "Edge from this area": the area's sides, some left out; Create makes the linears.
+  // "Edge from this area": the area's sides, each with a role or left out; Create (in the editor)
+  // makes one linear per run of sides sharing a role.
   const edgeArea = edge
     ? objects.find((o) => o.id === edge.areaId && o.kind === "area")
     : undefined;
-  const edgeRuns = edge && edgeArea ? perimeterRuns(edgeArea.points, edge.included) : [];
+  const edgeRoles = edge && edgeArea ? edgeSideRoles(edge, edgeArea.points.length) : [];
+  const edgeSum = edge && edgeArea ? edgeSummary(edgeArea.points, edgeRoles, fpp) : null;
   const startEdge = (areaId: string) => {
     const area = objects.find((o) => o.id === areaId && o.kind === "area");
     if (!area) {
@@ -638,33 +664,33 @@ export function TakeoffViewer(props: ViewerProps) {
     setDimension(null);
     setCountSession(null);
     setStamp(null);
-    setEdge({ areaId, included: area.points.map(() => true) });
+    // Every side starts on the role chips' role (untouched sides follow the chips).
+    props.onEdgeChange({ areaId, current: linearRole, sides: [] });
   };
   const startEdgeRef = useRef(startEdge);
   startEdgeRef.current = startEdge;
-  const toggleEdgeSide = (i: number) =>
-    setEdge((e) => (e ? { ...e, included: e.included.map((on, j) => (j === i ? !on : on)) } : e));
+  const endEdge = () => {
+    if (edge) props.onEdgeChange(null);
+  };
+  /** A click on side `i`: the current role → left out → the current role. */
+  const cycleEdge = (i: number) => {
+    if (edge && edgeArea) props.onEdgeChange(cycleEdgeSide(edge, edgeArea.points.length, i));
+  };
   const createEdges = () => {
-    if (!edge || !edgeArea) return;
-    if (!edgeRuns.length) {
-      toast.info("Every side is left out — click a side to include it, or press Esc.");
-      return;
-    }
-    for (const run of edgeRuns)
-      props.onCreate("linear", run, { linear: linearRole, fromArea: edgeArea.id });
-    setEdge(null);
-    const n = edgeRuns.length;
-    toast.success(
-      `${n} ${LINEAR_ROLE_LABELS[linearRole].toLowerCase()} line${n === 1 ? "" : "s"} made from ${edgeArea.attrs.name}.`,
-    );
+    if (edge) props.onEdgeCreate();
+  };
+  /** The role chips / keys 1–5: the next linear's role, and in "Edge" the current role. */
+  const pickLinearRole = (r: LinearRole) => {
+    setLinearRole(r);
+    if (edge && edge.current !== r) props.onEdgeChange({ ...edge, current: r });
   };
   // Asked for from the Objects tab.
   useEffect(() => {
     if (props.edgeRequest) startEdgeRef.current(props.edgeRequest.areaId);
   }, [props.edgeRequest]);
-  // The area went away (deleted, undone): leave the mode.
+  // The area went away (deleted, undone, another page): leave the mode.
   useEffect(() => {
-    if (edge && !edgeArea) setEdge(null);
+    if (edge && !edgeArea) onEdgeChangeRef.current(null);
   }, [edge, edgeArea]);
 
   // "Duplicate and stamp": start with the object `id` (the selection) as the source.
@@ -680,7 +706,7 @@ export function TakeoffViewer(props: ViewerProps) {
     setTyped("");
     setDimension(null);
     setCountSession(null);
-    setEdge(null);
+    endEdge();
     setDrag(null);
     setMove(null);
     setStamp({ sourceId: o.id, count: 0 });
@@ -749,7 +775,7 @@ export function TakeoffViewer(props: ViewerProps) {
 
   const cancel = (): boolean => {
     if (stamp) setStamp(null);
-    else if (edge) setEdge(null);
+    else if (edge) endEdge();
     else if (press) endPress();
     else if (typed) setTyped("");
     else if (draft.length) setDraft([]);
@@ -889,7 +915,7 @@ export function TakeoffViewer(props: ViewerProps) {
       }
       if (/^[1-6]$/.test(k)) {
         const r = LINEAR_ROLES[Number(k) - 1];
-        if (r) setLinearRole(r);
+        if (r) pickLinearRole(r);
         return !!r;
       }
       if (k === "Backspace" || k === "Delete") return true; // not the area itself
@@ -924,7 +950,7 @@ export function TakeoffViewer(props: ViewerProps) {
         return true;
       }
       if (tool === "linear" && LINEAR_ROLES[n]) {
-        setLinearRole(LINEAR_ROLES[n]);
+        pickLinearRole(LINEAR_ROLES[n]);
         return true;
       }
       return false;
@@ -1080,18 +1106,35 @@ export function TakeoffViewer(props: ViewerProps) {
           ? "default"
           : "crosshair";
 
-  const roleChips =
-    tool === "count"
+  const linearChipOptions = LINEAR_ROLES.map((r) => ({
+    value: r,
+    label: LINEAR_ROLE_LABELS[r],
+    hint: LINEAR_ROLE_HINTS[r],
+  }));
+  const roleChips = edge
+    ? {
+        title: "Role for sides you click",
+        options: linearChipOptions,
+        value: edge.current,
+        onChange: (v: string) => pickLinearRole(v as LinearRole),
+      }
+    : tool === "count"
       ? {
-          options: COUNT_ROLES.map((r) => ({ value: r, label: COUNT_ROLE_LABELS[r] })),
+          title: "Count role",
+          options: COUNT_ROLES.map((r) => ({
+            value: r,
+            label: COUNT_ROLE_LABELS[r],
+            hint: COUNT_ROLE_HINTS[r],
+          })),
           value: countRole,
           onChange: (v: string) => pickCountRole(v as CountRole),
         }
-      : tool === "linear" || edge
+      : tool === "linear"
         ? {
-            options: LINEAR_ROLES.map((r) => ({ value: r, label: LINEAR_ROLE_LABELS[r] })),
+            title: "Line role",
+            options: linearChipOptions,
             value: linearRole,
-            onChange: (v: string) => setLinearRole(v as LinearRole),
+            onChange: (v: string) => pickLinearRole(v as LinearRole),
           }
         : null;
 
@@ -1113,7 +1156,7 @@ export function TakeoffViewer(props: ViewerProps) {
         }}
         edgeFromArea={
           edge
-            ? { active: true, onClick: () => setEdge(null) }
+            ? { active: true, onClick: endEdge }
             : selectedArea
               ? { active: false, onClick: () => startEdge(selectedArea.id) }
               : null
@@ -1161,7 +1204,7 @@ export function TakeoffViewer(props: ViewerProps) {
               viewBox={`0 0 ${sizeW} ${sizeH}`}
               onPointerDown={(e) => {
                 if (edge) {
-                  // Picking sides: a side toggles itself; right-click creates, like "Stop".
+                  // Picking roles: a side cycles itself; right-click creates, like "Stop".
                   if (e.button === 2) {
                     e.preventDefault();
                     createEdges();
@@ -1217,10 +1260,10 @@ export function TakeoffViewer(props: ViewerProps) {
               {edge && edgeArea && (
                 <EdgePicker
                   points={edgeArea.points}
-                  included={edge.included}
+                  roles={edgeRoles}
+                  fpp={fpp}
                   zoom={zoom}
-                  color={DRAFT_COLOR.linear}
-                  onToggle={toggleEdgeSide}
+                  onCycle={cycleEdge}
                 />
               )}
               {dimension && (
@@ -1296,25 +1339,45 @@ export function TakeoffViewer(props: ViewerProps) {
           )}
         </div>
 
-        {edge && edgeArea && (
-          <div className="absolute left-2 top-2 flex max-w-[calc(100%-1rem)] flex-wrap items-center gap-2 rounded-md border bg-background/95 px-3 py-2 text-xs shadow">
-            <span className="font-medium">Edge from {edgeArea.attrs.name}</span>
-            <span className="text-muted-foreground">
-              {edge.included.filter(Boolean).length} of {edge.included.length} sides ·{" "}
-              {edgeRuns.length} {LINEAR_ROLE_LABELS[linearRole].toLowerCase()} line
-              {edgeRuns.length === 1 ? "" : "s"}
-              {edgeRuns.length > 0 &&
-                ` · ${lengthLabel(
-                  edgeRuns.reduce((t, r) => t + polylineLengthPx(r), 0),
-                  fpp,
-                )}`}
-            </span>
-            <Button size="sm" className="h-7" onClick={createEdges} disabled={!edgeRuns.length}>
-              Create
-            </Button>
-            <Button size="sm" variant="outline" className="h-7" onClick={() => setEdge(null)}>
-              Cancel
-            </Button>
+        {edge && edgeArea && edgeSum && (
+          <div
+            role="status"
+            className="absolute inset-x-0 top-0 z-10 flex flex-wrap items-center gap-x-3 gap-y-2 bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-lg"
+          >
+            <SquareDashed className="h-5 w-5 shrink-0" />
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <p>
+                <span className="font-semibold">Edge from {edgeArea.attrs.name}</span> — pick a role
+                for each side in the panel on the right, or click a side on the plan to cycle it.
+                Enter / right-click creates · Esc cancels.
+              </p>
+              <p className="text-xs opacity-90">{edgeSum.text}</p>
+            </div>
+            <Tip
+              name="Create"
+              wrap={!edgeSum.lines}
+              text="make one line per run of sides with the same role (Enter or right-click)"
+            >
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 px-4 font-semibold"
+                onClick={createEdges}
+                disabled={!edgeSum.lines}
+              >
+                Create
+              </Button>
+            </Tip>
+            <Tip name="Cancel" text="leave without making any lines (Esc)">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
+                onClick={endEdge}
+              >
+                Cancel
+              </Button>
+            </Tip>
           </div>
         )}
 
@@ -1326,9 +1389,11 @@ export function TakeoffViewer(props: ViewerProps) {
             <span className="text-muted-foreground">
               {stamp.count} stamped{stamp.count > 0 ? " · Ctrl+Z takes one back" : ""}
             </span>
-            <Button size="sm" variant="outline" className="h-7" onClick={() => setStamp(null)}>
-              Stop
-            </Button>
+            <Tip name="Stop" text="stop stamping copies (right-click or Esc)">
+              <Button size="sm" variant="outline" className="h-7" onClick={() => setStamp(null)}>
+                Stop
+              </Button>
+            </Tip>
           </div>
         )}
 
@@ -1346,7 +1411,7 @@ export function TakeoffViewer(props: ViewerProps) {
         <div className="pointer-events-none absolute inset-x-2 bottom-2 flex flex-wrap items-end gap-2">
           <div className="max-w-[640px] rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow">
             {edge
-              ? "Click a side of the area to leave it out (a wall or a shared edge) or put it back; keys 1–5 pick the role. Create, Enter or right-click makes one line per run of included sides; Esc cancels."
+              ? "Edge from this area: give each side a role in the Objects panel, or click a side here to cycle it (the current role → left out → back). The role chips / keys 1–5 set the current role, which clicks use and untouched sides take. Create, Enter or right-click makes one line per run of sides with the same role; Esc cancels."
               : stamp
                 ? STAMP_HINT
                 : HINTS[tool]}

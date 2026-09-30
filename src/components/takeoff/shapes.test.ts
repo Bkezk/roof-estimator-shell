@@ -3,17 +3,23 @@ import { describe, expect, it } from "vitest";
 import type { PagePoint, TakeoffObject } from "@/lib/takeoff/model";
 
 import {
+  AREA_BASE_NAME,
   ORTHO_DEG,
   RECT_DRAG_PX,
   buildObject,
   dragRect,
   duplicateObject,
   ghostPlacement,
+  isDefaultName,
   isRectDrag,
   lockPoint,
   orthoSnap,
+  cycleEdgeSide,
+  edgeSideRoles,
+  edgeSummary,
   parseFeetInches,
-  perimeterRuns,
+  perimeterRunsByRole,
+  setEdgeSide,
   polylineLengthPx,
   rectObjectPoints,
   rectPoints,
@@ -133,6 +139,29 @@ describe("translateObject / buildObject", () => {
     expect(drain.attrs).toMatchObject({ name: "Drain 1", role: "drain", bootSize: "B" });
     const gutter = buildObject("linear", "z", 0, [[0, 0]], [], {}, null, { linear: "gutter" });
     expect(gutter.attrs).toEqual({ name: "Gutter 1", role: "gutter" });
+  });
+  it("names new areas Section 1, 2… (Bid-Advantage's section names); an older Roof n still counts", () => {
+    const sq: PagePoint[] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+    ];
+    const first = buildObject("area", "a", 0, sq, [], {}, null);
+    expect(first.attrs.name).toBe("Section 1");
+    const second = buildObject("area", "b", 0, sq, [first], {}, null);
+    expect(second.attrs.name).toBe("Section 2");
+    // A takeoff saved with "Roof 1" / "Roof 2": those numbers are taken, the names are kept.
+    const old = [
+      { ...first, attrs: { ...first.attrs, name: "Roof 1" } },
+      { ...second, attrs: { ...second.attrs, name: "Roof 2" } },
+    ] as TakeoffObject[];
+    expect(buildObject("area", "c", 0, sq, old, {}, null).attrs.name).toBe("Section 3");
+    expect(isDefaultName("Roof 3", AREA_BASE_NAME)).toBe(true);
+    expect(isDefaultName("Section 3", AREA_BASE_NAME)).toBe(true);
+    expect(isDefaultName("Roof deck", AREA_BASE_NAME)).toBe(false);
+    expect(isDefaultName("Roof 3", "Wall")).toBe(false);
+    // Stamping an old "Roof 2" gives the next default, not "Roof 2 copy".
+    expect(duplicateObject(old[1]!, 5, 5, "d", old).attrs.name).toBe("Section 3");
   });
 });
 
@@ -274,43 +303,122 @@ describe("square corners on an angled building (relative lock)", () => {
   });
 });
 
-describe("perimeterRuns (Edge from this area)", () => {
+describe("perimeterRunsByRole (Edge from this area)", () => {
   const sq: PagePoint[] = [
     [0, 0],
     [100, 0],
     [100, 50],
     [0, 50],
   ];
-  it("every side included → one closed run back to the start (5 points, the perimeter)", () => {
-    const runs = perimeterRuns(sq, [true, true, true, true]);
-    expect(runs).toEqual([[...sq, sq[0]]]);
-    expect(polylineLengthPx(runs[0]!)).toBe(300);
-    expect(perimeterRuns(sq, [])).toEqual(runs); // a missing entry counts as included
+  const P = "parapet" as const;
+  const G = "gutter" as const;
+  it("every side one role → one closed run back to the start (5 points, the perimeter)", () => {
+    const runs = perimeterRunsByRole(sq, [P, P, P, P]);
+    expect(runs).toEqual([{ role: P, points: [...sq, sq[0]], sides: [0, 1, 2, 3] }]);
+    expect(polylineLengthPx(runs[0]!.points)).toBe(300);
   });
-  it("two excluded non-adjacent sides → two open runs with the right lengths", () => {
-    const runs = perimeterRuns(sq, [true, false, true, false]);
+  it("three parapet + one gutter → one open 3-side parapet run and one gutter run", () => {
+    const runs = perimeterRunsByRole(sq, [P, P, P, G]); // side 3 → 0 is the gutter
     expect(runs).toEqual([
-      [
-        [100, 50],
-        [0, 50],
-      ],
+      { role: P, points: sq, sides: [0, 1, 2] },
+      { role: G, points: [sq[3], sq[0]], sides: [3] },
+    ]);
+    expect(runs.map((r) => polylineLengthPx(r.points))).toEqual([250, 50]);
+  });
+  it("a run continues past the first corner (the last side and the first are contiguous)", () => {
+    const runs = perimeterRunsByRole(sq, [P, G, P, P]); // parapet on sides 2, 3, 0
+    expect(runs).toEqual([
+      { role: G, points: [sq[1], sq[2]], sides: [1] },
+      { role: P, points: [sq[2], sq[3], sq[0], sq[1]], sides: [2, 3, 0] },
+    ]);
+    expect(polylineLengthPx(runs[1]!.points)).toBe(250);
+  });
+  it("two non-adjacent sides left out → two open runs with the right lengths", () => {
+    const runs = perimeterRunsByRole(sq, [P, null, P, null]);
+    expect(runs.map((r) => r.points)).toEqual([
       [
         [0, 0],
         [100, 0],
       ],
+      [
+        [100, 50],
+        [0, 50],
+      ],
     ]);
-    expect(runs.map(polylineLengthPx)).toEqual([100, 100]);
+    expect(runs.map((r) => r.sides)).toEqual([[0], [2]]);
+    expect(runs.map((r) => polylineLengthPx(r.points))).toEqual([100, 100]);
   });
-  it("one excluded side → one open run of the rest, even across the start point", () => {
-    const runs = perimeterRuns(sq, [true, true, true, false]); // side 3 → 0 left out
-    expect(runs).toEqual([sq]);
-    expect(polylineLengthPx(runs[0]!)).toBe(250);
-    const wrap = perimeterRuns(sq, [true, false, true, true]); // sides 2, 3, 0 in a row
-    expect(wrap).toEqual([[sq[2], sq[3], sq[0], sq[1]]]);
-    expect(polylineLengthPx(wrap[0]!)).toBe(250);
+  it("one side left out → one open run of the rest, even across the start point", () => {
+    expect(perimeterRunsByRole(sq, [P, P, P, null]).map((r) => r.points)).toEqual([sq]);
+    const wrap = perimeterRunsByRole(sq, [G, null, G, G]);
+    expect(wrap).toEqual([{ role: G, points: [sq[2], sq[3], sq[0], sq[1]], sides: [2, 3, 0] }]);
   });
-  it("nothing included → no runs", () => {
-    expect(perimeterRuns(sq, [false, false, false, false])).toEqual([]);
+  it("two adjacent sides with different roles meet at their shared corner", () => {
+    const runs = perimeterRunsByRole(sq, [P, G, null, null]);
+    expect(runs).toEqual([
+      { role: P, points: [sq[0], sq[1]], sides: [0] },
+      { role: G, points: [sq[1], sq[2]], sides: [1] },
+    ]);
+  });
+  it("every side left out (or no entries) → no runs; a two-point outline has one side", () => {
+    expect(perimeterRunsByRole(sq, [null, null, null, null])).toEqual([]);
+    expect(perimeterRunsByRole(sq, [])).toEqual([]);
+    const two: PagePoint[] = [
+      [0, 0],
+      [10, 0],
+    ];
+    expect(perimeterRunsByRole(two, [G, P])).toEqual([{ role: G, points: two, sides: [0] }]);
+    expect(perimeterRunsByRole([[0, 0]], [P])).toEqual([]);
+  });
+});
+
+describe("Edge from this area: per-side roles and the summary", () => {
+  const sq: PagePoint[] = [
+    [0, 0],
+    [100, 0],
+    [100, 50],
+    [0, 50],
+  ];
+  const fresh = { areaId: "a", current: "parapet" as const, sides: [] };
+  it("untouched sides take the current role (the role chips); set ones keep theirs", () => {
+    expect(edgeSideRoles(fresh, 4)).toEqual(["parapet", "parapet", "parapet", "parapet"]);
+    const s = setEdgeSide(fresh, 4, 2, "gutter");
+    expect(s.sides).toEqual([undefined, undefined, "gutter", undefined]);
+    const later = { ...s, current: "walkway" as const }; // key 4 pressed
+    expect(edgeSideRoles(later, 4)).toEqual(["walkway", "walkway", "gutter", "walkway"]);
+    expect(edgeSideRoles(setEdgeSide(later, 4, 0, null), 4)).toEqual([
+      null,
+      "walkway",
+      "gutter",
+      "walkway",
+    ]);
+  });
+  it("a click cycles: current role → left out → current role; another role → current", () => {
+    const out = cycleEdgeSide(fresh, 4, 1);
+    expect(edgeSideRoles(out, 4)[1]).toBeNull();
+    const back = cycleEdgeSide(out, 4, 1);
+    expect(edgeSideRoles(back, 4)[1]).toBe("parapet");
+    const gutter = setEdgeSide(fresh, 4, 3, "gutter");
+    expect(edgeSideRoles(cycleEdgeSide(gutter, 4, 3), 4)[3]).toBe("parapet");
+  });
+  it("summarises lines and length per role, then the sides left out", () => {
+    const fpp = 0.5; // 100 px = 50 ft
+    const s = edgeSummary(sq, ["parapet", "parapet", "gutter", null], fpp);
+    expect(s.lines).toBe(2);
+    expect(s.leftOut).toBe(1);
+    expect(s.byRole).toEqual([
+      { role: "parapet", lines: 1, px: 150 },
+      { role: "gutter", lines: 1, px: 100 },
+    ]);
+    expect(s.text).toBe("1 parapet wall line · 75.0 ft, 1 gutter line · 50.0 ft, 1 side left out");
+    const two = edgeSummary(sq, ["parapet", null, "parapet", null], null);
+    expect(two.text).toBe("2 parapet wall lines · 200 px, 2 sides left out");
+    const none = edgeSummary(sq, [null, null, null, null], fpp);
+    expect(none.lines).toBe(0);
+    expect(none.text).toBe("Every side is left out — nothing to create");
+    expect(edgeSummary(sq, ["gutter", "gutter", "gutter", "gutter"], fpp).text).toBe(
+      "1 gutter line · 150.0 ft",
+    );
   });
   it("a linear made from an area keeps the area's id and the role's default name", () => {
     const pts: PagePoint[] = [
@@ -339,7 +447,7 @@ describe("Duplicate and stamp", () => {
       [100, 150],
     ],
     attrs: {
-      name: "Roof 1",
+      name: "Section 1",
       pitch: 4,
       cutouts: [
         [
@@ -416,10 +524,10 @@ describe("Duplicate and stamp", () => {
 
   it("duplicateObject: names never collide", () => {
     // A default name takes the next free default.
-    const roof2 = duplicateObject(area, 1, 1, "b", [area]);
-    expect(roof2.attrs.name).toBe("Roof 2");
-    const roof3 = duplicateObject(area, 2, 2, "c", [area, roof2]);
-    expect(roof3.attrs.name).toBe("Roof 3");
+    const s2 = duplicateObject(area, 1, 1, "b", [area]);
+    expect(s2.attrs.name).toBe("Section 2");
+    const s3 = duplicateObject(area, 2, 2, "c", [area, s2]);
+    expect(s3.attrs.name).toBe("Section 3");
     // A given name gets "copy", then "copy 2"; copying a copy does not stack "copy copy".
     const named = { ...area, attrs: { ...area.attrs, name: "Penthouse roof" } } as TakeoffObject;
     const c1 = duplicateObject(named, 1, 1, "b", [named]);

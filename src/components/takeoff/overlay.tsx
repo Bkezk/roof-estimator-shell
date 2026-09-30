@@ -2,16 +2,25 @@
  * The SVG drawn over the page: saved objects (areas, linears, counts), the scale line (labelled
  * with the sheet note when the scale was read off the sheet), the shape being drawn, the snap
  * marker (magenta on an object, teal on the plan's own lines), the side picker of "Edge from
- * this area", and the ghost copy of "Duplicate and stamp". Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen
- * size — stroke, font, marker radius — is divided by the zoom to stay constant on screen.
+ * this area" (each side in its role's colour), and the ghost copy of "Duplicate and stamp".
+ * Coordinates are page px at zoom 1 (the SVG's viewBox), so every on-screen size — stroke, font,
+ * marker radius — is divided by the zoom to stay constant on screen.
  */
 import { memo, type PointerEvent as ReactPointerEvent } from "react";
 
 import { drawnSideLabels, edgeLengths, polygonArea } from "@/lib/takeoff/geometry";
-import type { PagePoint, PageScale, TakeoffObject } from "@/lib/takeoff/model";
+import {
+  LINEAR_ROLE_LABELS,
+  type LinearRole,
+  type PagePoint,
+  type PageScale,
+  type TakeoffObject,
+} from "@/lib/takeoff/model";
 
 import {
   COUNT_LETTERS,
+  LEFT_OUT_COLOR,
+  LINEAR_ROLE_COLORS,
   centroid,
   feetInches,
   fmtSqFt,
@@ -293,23 +302,47 @@ export function SnapMarker(props: { at: PagePoint; zoom: number; kind?: SnapKind
 }
 
 /**
- * "Edge from this area": the area's sides, thick and clickable. Included sides are drawn in the
- * linear colour, left-out sides grey and dashed; clicking a side toggles it.
+ * "Edge from this area": the area's sides, thick and clickable, each in its own role's colour
+ * with "A · 50.3 ft · Parapet wall" beside it (outside the outline, clear of the area's own
+ * side labels); left-out sides grey and dashed ("left out"). Clicking a side cycles its role.
  */
 export function EdgePicker(props: {
   points: readonly PagePoint[];
-  included: readonly boolean[];
+  /** Per side: its role, or null when left out. */
+  roles: ReadonlyArray<LinearRole | null>;
+  fpp: number | null;
   zoom: number;
-  color: string;
-  onToggle: (side: number) => void;
+  onCycle: (side: number) => void;
 }) {
-  const { points, zoom } = props;
+  const { points, zoom, fpp } = props;
   const n = points.length;
+  const sideLabels = drawnSideLabels(points);
+  const lens = edgeLengths(points);
+  // The outline's winding (shoelace sign) tells which side of each edge is outside.
+  let twice = 0;
+  for (let i = 0; i < n; i++) {
+    const [x1, y1] = points[i]!;
+    const [x2, y2] = points[(i + 1) % n]!;
+    twice += x1 * y2 - x2 * y1;
+  }
+  const out = twice > 0 ? -1 : 1;
   return (
     <g>
-      {points.map((p, i) => {
+      {props.roles.map((role, i) => {
+        const p = points[i]!;
         const q = points[(i + 1) % n]!;
-        const on = props.included[i] !== false;
+        const color = role ? LINEAR_ROLE_COLORS[role] : LEFT_OUT_COLOR;
+        const mx = (p[0] + q[0]) / 2;
+        const my = (p[1] + q[1]) / 2;
+        // The label sits just outside the side, along its outward normal.
+        const len = Math.hypot(q[0] - p[0], q[1] - p[1]) || 1;
+        const nx = (out * -(q[1] - p[1])) / len;
+        const ny = (out * (q[0] - p[0])) / len;
+        const sideways = Math.abs(nx) > Math.abs(ny);
+        const off = (sideways ? 10 : 14) / zoom;
+        const text = `${sideLabels[i]} · ${lengthLabel(lens[i]!, fpp)} · ${
+          role ? LINEAR_ROLE_LABELS[role] : "left out"
+        }`;
         return (
           <g key={i}>
             <line
@@ -317,9 +350,9 @@ export function EdgePicker(props: {
               y1={p[1]}
               x2={q[0]}
               y2={q[1]}
-              stroke={on ? props.color : "#9ca3af"}
-              strokeWidth={on ? 5 : 3}
-              strokeDasharray={on ? undefined : "6 5"}
+              stroke={color}
+              strokeWidth={role ? 6 : 3}
+              strokeDasharray={role ? undefined : "6 5"}
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: "none" }}
@@ -331,24 +364,27 @@ export function EdgePicker(props: {
               x2={q[0]}
               y2={q[1]}
               stroke="transparent"
-              strokeWidth={16}
+              strokeWidth={18}
               vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: "stroke", cursor: "pointer" }}
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
                 e.stopPropagation();
-                props.onToggle(i);
+                props.onCycle(i);
               }}
-            />
-            <SvgLabel
-              x={(p[0] + q[0]) / 2}
-              y={(p[1] + q[1]) / 2 - 12 / zoom}
-              zoom={zoom}
-              size={11}
-              color={on ? props.color : "#6b7280"}
-              bold={on}
             >
-              {on ? "included" : "left out"}
+              <title>Click to cycle this side: the current role ↔ left out</title>
+            </line>
+            <SvgLabel
+              x={mx + nx * off}
+              y={my + ny * off}
+              zoom={zoom}
+              size={12}
+              anchor={sideways ? (nx > 0 ? "start" : "end") : "middle"}
+              color={color}
+              bold={!!role}
+            >
+              {text}
             </SvgLabel>
           </g>
         );

@@ -2,11 +2,22 @@
  * Objects tab — every drawn object grouped by kind, and the editor for the selected one: an
  * area's per-side edge table and cut-outs, a linear's role (and parapet height), a count's role
  * and sizes. Number boxes stay blank when 0 (placeholder 0); nothing is prefilled.
+ *
+ * While "Edge from this area" is on, its panel takes the top of the tab instead of the selected
+ * object's card (owner, Sep 30: "the pop-up is easy to miss"): one row per side — its letter,
+ * length and a role Select (the linear roles, or Leave out) — a live summary of what Create
+ * makes, and big Create / Cancel buttons. The session is the editor's, shared with the viewer.
  */
+import { useEffect, useRef } from "react";
 import { AlertTriangle, Copy, SquareDashed, Trash2 } from "lucide-react";
 
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
-import { drawnSideLabels, polygonArea, type OutlineEdgeOptions } from "@/lib/takeoff/geometry";
+import {
+  drawnSideLabels,
+  edgeLengths,
+  polygonArea,
+  type OutlineEdgeOptions,
+} from "@/lib/takeoff/geometry";
 import {
   COUNT_ROLES,
   COUNT_ROLE_LABELS,
@@ -37,21 +48,32 @@ import {
 
 import { pointerCloseAutoFocus } from "./focus";
 import { DrainFields } from "./drain-fields";
+import { Tip } from "./toolbar";
 import {
   COUNT_BASE_NAMES,
+  COUNT_ROLE_HINTS,
+  LEAVE_OUT_HINT,
+  LEFT_OUT_COLOR,
   LINEAR_BASE_NAMES,
+  LINEAR_ROLE_COLORS,
+  LINEAR_ROLE_HINTS,
   drainDefaults,
   defaultEdgeOptions,
   edgeLengthsFt,
+  edgeSideRoles,
+  edgeSummary,
   fmtFt,
   fmtNum,
   fmtSqFt,
   isDefaultName,
+  lengthLabel,
   netAreaSqFt,
   polylineLengthPx,
+  setEdgeSide,
   uniqueName,
   withDrainPick,
   withoutDrainPicks,
+  type EdgeSession,
 } from "./shapes";
 
 type Update = (id: string, fn: (o: TakeoffObject) => TakeoffObject) => void;
@@ -70,6 +92,10 @@ export interface ObjectsTabProps {
   onEdgeFromArea?: (areaId: string) => void;
   /** "Duplicate and stamp": copies of the selected object follow the cursor (in the viewer). */
   onDuplicate?: (objectId: string) => void;
+  /** "Edge from this area" while it is on: its panel replaces the selected object's card. */
+  edge?: EdgeSession | null;
+  onEdgeChange?: (edge: EdgeSession | null) => void;
+  onEdgeCreate?: () => void;
 }
 
 const KIND_TITLES = { area: "Areas", linear: "Linears", count: "Counts" } as const;
@@ -79,6 +105,10 @@ export function ObjectsTab(props: ObjectsTabProps) {
   const unscaled = new Set(quantities.unscaled.map((u) => u.objectId));
   const pageOf = (i: number) => pages.find((p) => p.index === i);
   const selected = objects.find((o) => o.id === props.selectedId) ?? null;
+  const edge = props.edge ?? null;
+  const edgeArea = edge
+    ? objects.find((o) => o.id === edge.areaId && o.kind === "area")
+    : undefined;
 
   const summary = (o: TakeoffObject): string => {
     const fpp = feetPerPx(pageOf(o.page)?.scale);
@@ -93,7 +123,16 @@ export function ObjectsTab(props: ObjectsTabProps) {
 
   return (
     <div className="space-y-4">
-      {selected ? (
+      {edge && edgeArea?.kind === "area" ? (
+        <EdgePanel
+          area={edgeArea}
+          page={pageOf(edgeArea.page)}
+          edge={edge}
+          onChange={(e) => props.onEdgeChange?.(e)}
+          onCreate={() => props.onEdgeCreate?.()}
+          onCancel={() => props.onEdgeChange?.(null)}
+        />
+      ) : selected ? (
         <SelectedEditor
           key={selected.id}
           object={selected}
@@ -109,20 +148,24 @@ export function ObjectsTab(props: ObjectsTabProps) {
           Draw with Area, Linear or Count, or click an object (Select tool) to edit it here.
         </p>
       )}
-      {selected?.kind === "area" && props.onEdgeFromArea && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-full gap-1"
-          title="Make linears along this area's sides; click a side on the drawing to leave it out"
-          onClick={(e) => {
-            props.onEdgeFromArea?.(selected.id);
-            // Mouse click: hand the keys back to the drawing (Enter, Esc, role keys).
-            if (e.detail > 0) e.currentTarget.blur();
-          }}
+      {!edgeArea && selected?.kind === "area" && props.onEdgeFromArea && (
+        <Tip
+          name="Edge from this area"
+          text="turn the area's sides into parapet, gutter or other lines, a role per side"
         >
-          <SquareDashed className="h-4 w-4" /> Edge from this area
-        </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-full gap-1"
+            onClick={(e) => {
+              props.onEdgeFromArea?.(selected.id);
+              // Mouse click: hand the keys back to the drawing (Enter, Esc, role keys).
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+          >
+            <SquareDashed className="h-4 w-4" /> Edge from this area
+          </Button>
+        </Tip>
       )}
 
       {(["area", "linear", "count"] as const).map((kind) => {
@@ -223,30 +266,33 @@ function SelectedEditor(props: {
           aria-label="Name"
         />
         {props.onDuplicate && (
+          <Tip name="Duplicate" text="stamp copies of this shape on the drawing (Ctrl+D)">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8"
+              aria-label="Duplicate object"
+              onClick={(e) => {
+                props.onDuplicate?.(o.id);
+                // Mouse click: hand the keys back to the drawing (Esc stops stamping).
+                if (e.detail > 0) e.currentTarget.blur();
+              }}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </Tip>
+        )}
+        <Tip name="Delete" text="remove this shape (Delete; Ctrl+Z brings it back)">
           <Button
             size="icon"
             variant="ghost"
-            className="h-8 w-8"
-            title="Duplicate: a copy follows the cursor on the drawing and each click stamps one (Ctrl+D)"
-            aria-label="Duplicate object"
-            onClick={(e) => {
-              props.onDuplicate?.(o.id);
-              // Mouse click: hand the keys back to the drawing (Esc stops stamping).
-              if (e.detail > 0) e.currentTarget.blur();
-            }}
+            className="h-8 w-8 text-destructive"
+            onClick={() => props.onDelete(o.id)}
+            aria-label="Delete object"
           >
-            <Copy className="h-4 w-4" />
+            <Trash2 className="h-4 w-4" />
           </Button>
-        )}
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 text-destructive"
-          onClick={() => props.onDelete(o.id)}
-          aria-label="Delete object"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        </Tip>
       </div>
       {fpp === null && o.kind !== "count" && (
         <p className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
@@ -273,9 +319,11 @@ function SelectedEditor(props: {
                 })
               }
             >
-              <SelectTrigger className="h-8">
-                <SelectValue />
-              </SelectTrigger>
+              <Tip name={LINEAR_ROLE_LABELS[o.attrs.role]} text={LINEAR_ROLE_HINTS[o.attrs.role]}>
+                <SelectTrigger className="h-8" aria-label="Line role">
+                  <SelectValue />
+                </SelectTrigger>
+              </Tip>
               <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                 {LINEAR_ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
@@ -331,9 +379,11 @@ function SelectedEditor(props: {
                 })
               }
             >
-              <SelectTrigger className="h-8">
-                <SelectValue />
-              </SelectTrigger>
+              <Tip name={COUNT_ROLE_LABELS[o.attrs.role]} text={COUNT_ROLE_HINTS[o.attrs.role]}>
+                <SelectTrigger className="h-8" aria-label="Count role">
+                  <SelectValue />
+                </SelectTrigger>
+              </Tip>
               <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
                 {COUNT_ROLES.map((r) => (
                   <SelectItem key={r} value={r}>
@@ -415,6 +465,174 @@ function SelectedEditor(props: {
           )}
         </div>
       )}
+    </section>
+  );
+}
+
+/** The role Select's value for a side left out ("Edge from this area"). */
+const LEAVE_OUT = "leave_out";
+
+/** A role's colour swatch and name, as the Select shows it (grey and dashed for Leave out). */
+function RoleOption(props: { role: LinearRole | null }) {
+  const r = props.role;
+  return (
+    <span className="flex items-center gap-2">
+      <span
+        className="h-2.5 w-4 shrink-0 rounded-sm"
+        style={
+          r
+            ? { backgroundColor: LINEAR_ROLE_COLORS[r] }
+            : { border: `2px dashed ${LEFT_OUT_COLOR}` }
+        }
+      />
+      {r ? LINEAR_ROLE_LABELS[r] : "Leave out"}
+    </span>
+  );
+}
+
+/**
+ * "Edge from this area": a role (or Leave out) per side, what Create makes, Create / Cancel.
+ * Untouched sides follow the role chips' current role until set here or clicked on the plan.
+ */
+function EdgePanel(props: {
+  area: Extract<TakeoffObject, { kind: "area" }>;
+  page: TakeoffPage | undefined;
+  edge: EdgeSession;
+  onChange: (edge: EdgeSession) => void;
+  onCreate: () => void;
+  onCancel: () => void;
+}) {
+  const { area, edge } = props;
+  const fpp = feetPerPx(props.page?.scale);
+  const n = area.points.length;
+  const roles = edgeSideRoles(edge, n);
+  const labels = drawnSideLabels(area.points);
+  const lens = edgeLengths(area.points);
+  const sum = edgeSummary(area.points, roles, fpp);
+  const toRole = (v: string): LinearRole | null => (v === LEAVE_OUT ? null : (v as LinearRole));
+  const setSide = (i: number, v: string) => props.onChange(setEdgeSide(edge, n, i, toRole(v)));
+  const setAll = (v: string) => props.onChange({ ...edge, sides: roles.map(() => toRole(v)) });
+  const allValue = common(roles.map((r) => r ?? LEAVE_OUT));
+  const hint = (r: LinearRole | null) =>
+    r ? `${LINEAR_ROLE_LABELS[r]}: ${LINEAR_ROLE_HINTS[r]}` : `Leave out: ${LEAVE_OUT_HINT}`;
+  const options = (
+    <SelectContent onCloseAutoFocus={pointerCloseAutoFocus}>
+      {LINEAR_ROLES.map((r) => (
+        <SelectItem key={r} value={r}>
+          <RoleOption role={r} />
+        </SelectItem>
+      ))}
+      <SelectItem value={LEAVE_OUT}>
+        <RoleOption role={null} />
+      </SelectItem>
+    </SelectContent>
+  );
+  // Bring the panel into view when the mode starts (the tab may be scrolled down the list).
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest" });
+  }, [area.id]);
+  return (
+    <section
+      ref={ref}
+      className="space-y-3 rounded-md border-2 border-primary bg-primary/5 p-3 shadow-sm"
+      aria-label={`Edge from ${area.attrs.name}`}
+    >
+      <div className="flex items-start gap-2">
+        <SquareDashed className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+        <div className="min-w-0 space-y-1">
+          <h3 className="text-base font-semibold leading-tight">Edge from {area.attrs.name}</h3>
+          <p className="text-xs text-muted-foreground">
+            Pick what runs along each side, or Leave out a side (a side shared with another roof).
+            Clicking a side on the plan cycles it; the role chips (keys 1–5) set the role of sides
+            not set here.
+          </p>
+        </div>
+      </div>
+      {fpp === null && (
+        <p className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+          No scale on this page — lengths are in px until you set one with the Scale tool.
+        </p>
+      )}
+      <table className="w-full text-sm">
+        <thead className="text-xs text-muted-foreground">
+          <tr className="text-left">
+            <th className="py-1 pr-2 font-medium">Side</th>
+            <th className="pr-2 font-medium">Length</th>
+            <th className="font-medium">Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-t bg-muted/40">
+            <td className="py-1.5 pr-2 font-semibold" colSpan={2}>
+              All sides
+            </td>
+            <td>
+              <Select value={allValue ?? ""} onValueChange={setAll}>
+                <Tip name="All sides" text="give every side the same role, or leave them all out">
+                  <SelectTrigger className="h-8 w-full" aria-label="Role of all sides">
+                    <SelectValue placeholder="Mixed" />
+                  </SelectTrigger>
+                </Tip>
+                {options}
+              </Select>
+            </td>
+          </tr>
+          {roles.map((r, i) => (
+            <tr key={i} className="border-t">
+              <td className="py-1.5 pr-2 font-semibold">{labels[i]}</td>
+              <td className="whitespace-nowrap pr-2 tabular-nums">{lengthLabel(lens[i]!, fpp)}</td>
+              <td>
+                <Select value={r ?? LEAVE_OUT} onValueChange={(v) => setSide(i, v)}>
+                  <Tip name={`Side ${labels[i]}`} text={hint(r)}>
+                    <SelectTrigger className="h-8 w-full" aria-label={`Side ${labels[i]} role`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                  </Tip>
+                  {options}
+                </Select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p
+        className="rounded border bg-background px-2 py-1.5 text-sm font-medium"
+        aria-live="polite"
+      >
+        {sum.text}
+      </p>
+      <div className="flex gap-2">
+        <Tip
+          name="Create"
+          wrap={!sum.lines}
+          wrapClassName="flex flex-1"
+          text="make one line per run of sides with the same role (Enter or right-click on the plan)"
+        >
+          <Button
+            className="h-10 flex-1 text-base"
+            disabled={!sum.lines}
+            onClick={(e) => {
+              props.onCreate();
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+          >
+            Create {sum.lines > 0 ? `${sum.lines} line${sum.lines === 1 ? "" : "s"}` : ""}
+          </Button>
+        </Tip>
+        <Tip name="Cancel" text="leave without making any lines (Esc)">
+          <Button
+            variant="outline"
+            className="h-10 flex-1 text-base"
+            onClick={(e) => {
+              props.onCancel();
+              if (e.detail > 0) e.currentTarget.blur();
+            }}
+          >
+            Cancel
+          </Button>
+        </Tip>
+      </div>
     </section>
   );
 }
