@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 
-import { applyTakeoffToBid, bidSeedFromTakeoff } from "./create-bid";
+import {
+  applyTakeoffToBid,
+  bidAccountFromTakeoff,
+  bidSeedFromTakeoff,
+  takeoffAccountFromBid,
+} from "./create-bid";
 import type { BidSectionInput, CurbInput, ParapetInput } from "@/lib/engine/bid-builder";
 import {
   takeoffQuantities,
@@ -315,5 +320,52 @@ describe("applyTakeoffToBid", () => {
       'Removed curb "RTU curb" (no longer in the drawing).',
       "Pipe stacks from the drawing: 1 row(s).",
     ]);
+  });
+});
+
+describe("pitch and the customer link", () => {
+  // 100 ft × 10 ft = 1,000 sq ft on plan, drawn at 6:12.
+  const gable: TakeoffObject = {
+    id: "g6",
+    kind: "area",
+    page: 0,
+    points: [
+      [0, 0],
+      [1000, 0],
+      [1000, 100],
+      [0, 100],
+    ],
+    attrs: { name: "Gable", pitch: 6 },
+  };
+
+  it("the bid's section is the sloped roof area (plan × factor), noted with the pitch", () => {
+    const seed = bidSeedFromTakeoff({}, takeoffQuantities([page], [gable]));
+    const s = seed.sections[0]!;
+    expect(Math.round(s.length! * s.width!)).toBe(1118);
+    expect(Math.round(s.measured!.areaSqFt)).toBe(1118);
+    expect(s.measured!.perimeterFt).toBeCloseTo(220, 9);
+    expect(s.notes).toContain("1118 sq ft (1000 sq ft on plan at 6:12, ×1.118)");
+    expect(seed.summary).toContain("1118 sq ft");
+  });
+
+  it("a new bid takes the takeoff's customer; none when the takeoff has none", () => {
+    const q = takeoffQuantities([page], objects);
+    const acct = "11111111-1111-4111-8111-111111111111";
+    expect(bidSeedFromTakeoff(setup, q, { accountId: acct }).accountId).toBe(acct);
+    expect(bidSeedFromTakeoff(setup, q, { accountId: null }).accountId).toBeUndefined();
+    expect(bidSeedFromTakeoff(setup, q).accountId).toBeUndefined();
+  });
+
+  it("inheritance: only an unlinked side takes the other's customer", () => {
+    // Bid made / updated from a takeoff.
+    expect(bidAccountFromTakeoff(null, "t")).toBe("t");
+    expect(bidAccountFromTakeoff(undefined, "t")).toBe("t");
+    expect(bidAccountFromTakeoff("b", "t")).toBeNull();
+    expect(bidAccountFromTakeoff(null, null)).toBeNull();
+    // Takeoff linked to a bid that has a customer.
+    expect(takeoffAccountFromBid(null, "b")).toBe("b");
+    expect(takeoffAccountFromBid("t", "b")).toBeNull();
+    expect(takeoffAccountFromBid(null, null)).toBeNull();
+    expect(takeoffAccountFromBid("t", null)).toBeNull();
   });
 });

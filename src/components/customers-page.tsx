@@ -25,6 +25,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  Ruler,
   Save,
   Sparkles,
   Trash2,
@@ -57,6 +58,7 @@ import {
   type SiteRow,
 } from "@/lib/crm.functions";
 import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
+import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import {
@@ -287,6 +289,7 @@ function AccountDetailPane({ id }: { id: string }) {
       <SitesSection accountId={id} sites={d.sites} />
       <TicketsSection jobs={d.jobs} />
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} />}
+      {can("takeoff") && <TakeoffsSection accountId={id} />}
 
       <AlertDialog
         open={confirmDelete}
@@ -1336,6 +1339,66 @@ function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
                 {j.scheduled_date ? day(j.scheduled_date) : `Updated ${shortDate(j.updated_at)}`}
               </span>
             </Link>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The customer's takeoffs (their building plans): link on the takeoff's Setup tab. */
+function TakeoffsSection({ accountId }: { accountId: string }) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listAccountTakeoffs);
+  const list = useQuery({
+    queryKey: ["account-takeoffs", accountId],
+    queryFn: () => listFn({ data: { account_id: accountId } }),
+    enabled: !!session,
+  });
+  const rows = list.data ?? [];
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Takeoffs">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <Ruler className="h-4 w-4" /> Takeoffs
+        {list.data && (
+          <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
+        )}
+      </h2>
+      {list.error ? (
+        <p className="text-sm text-destructive">
+          Could not load the takeoffs: {errText(list.error)}
+        </p>
+      ) : !list.data ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No takeoffs linked to this customer. Link one from its Setup tab in Takeoff.
+        </p>
+      ) : (
+        <div className="divide-y rounded-md border">
+          {rows.map((t) => (
+            <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+              <Link
+                to="/takeoff"
+                search={{ id: t.id }}
+                className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline"
+                title="Open this takeoff"
+              >
+                {t.name}
+              </Link>
+              <Badge variant="outline" className="px-1.5 py-0 text-[11px] capitalize">
+                {t.status}
+              </Badge>
+              <span className="text-sm tabular-nums text-muted-foreground">
+                {t.page_count} page{t.page_count === 1 ? "" : "s"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Updated {shortDate(t.updated_at)}
+                {t.updated_by_name ? ` by ${t.updated_by_name}` : ""}
+              </span>
+            </div>
           ))}
         </div>
       )}

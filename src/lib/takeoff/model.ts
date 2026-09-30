@@ -78,6 +78,11 @@ export interface AreaAttrs {
   edges?: OutlineEdgeOptions[];
   /** Inner outlines subtracted from the area (wells, penthouses), page px. */
   cutouts?: PagePoint[][];
+  /**
+   * Roof pitch as rise (in) per 12 in of run: 4 = a 4:12 slope. Absent (or 0) = flat. The plan
+   * view shows the roof's horizontal projection, so its area is multiplied by `slopeFactor`.
+   */
+  pitch?: number;
 }
 export interface LinearAttrs {
   name: string;
@@ -203,6 +208,21 @@ export function rotateScale(
   return { ax, ay, bx, by, feet: scale.feet };
 }
 
+/**
+ * Sloped-surface area per plan area for a pitch of `pitch` in 12: sqrt(1 + (pitch / 12)^2). A
+ * blank, zero, negative or non-numeric pitch is flat (1). 4:12 -> 1.0541; 6:12 -> 1.1180.
+ */
+export function slopeFactor(pitch: number | null | undefined): number {
+  if (typeof pitch !== "number" || !Number.isFinite(pitch) || pitch <= 0) return 1;
+  return Math.sqrt(1 + (pitch / 12) ** 2);
+}
+
+/** "×1.054" for a sloped area; "" when flat. */
+export function slopeFactorLabel(pitch: number | null | undefined): string {
+  const f = slopeFactor(pitch);
+  return f === 1 ? "" : `×${f.toFixed(3)}`;
+}
+
 const toFeet = (pts: readonly PagePoint[], fpp: number): Pt[] =>
   pts.map(([x, y]) => [x * fpp, y * fpp]);
 
@@ -210,7 +230,15 @@ export interface SectionQuantity {
   objectId: string;
   name: string;
   page: number;
+  /** The roof surface: plan area (less cut-outs) × the slope factor. What the bid prices. */
   areaSqFt: number;
+  /** The horizontal (plan) area less cut-outs, as measured on the sheet. */
+  planAreaSqFt: number;
+  /** Rise per 12 when the area has a pitch; absent = flat. */
+  pitch?: number;
+  /** sqrt(1 + (pitch/12)^2); 1 when flat. */
+  slopeFactor: number;
+  /** The plan perimeter — pitch never changes edge lengths. */
   perimeterFt: number;
   /** Outer edge lengths (ft), one per drawn side. */
   edgeLengthsFt: number[];
@@ -243,7 +271,8 @@ export interface TakeoffQuantities {
   counts: CountQuantity[];
   /** Objects on a page with no scale yet: they have no real-world size. */
   unscaled: Array<{ objectId: string; page: number; name: string }>;
-  totals: { roofAreaSqFt: number; perimeterFt: number; parapetFt: number };
+  /** `roofAreaSqFt` is the sloped surface; `planAreaSqFt` the same areas as drawn (flat). */
+  totals: { roofAreaSqFt: number; planAreaSqFt: number; perimeterFt: number; parapetFt: number };
 }
 
 /**
@@ -261,7 +290,7 @@ export function takeoffQuantities(
     linears: [],
     counts: [],
     unscaled: [],
-    totals: { roofAreaSqFt: 0, perimeterFt: 0, parapetFt: 0 },
+    totals: { roofAreaSqFt: 0, planAreaSqFt: 0, perimeterFt: 0, parapetFt: 0 },
   };
   const countGroups = new Map<string, CountQuantity>();
   for (const o of objects) {
@@ -331,16 +360,31 @@ export function takeoffQuantities(
       section.width = width;
       section.measured = { ...section.measured, areaSqFt };
     }
-    out.sections.push({
+    const planAreaSqFt = section.measured.areaSqFt;
+    const factor = slopeFactor(o.attrs.pitch);
+    if (factor !== 1) {
+      // A pitched roof: the drawing is its plan (horizontal) projection. The slope runs across
+      // the layout rectangle's width (the shorter run, like rafters on a gable), so the width
+      // grows by the factor and length × width stays the true surface area; the edges and the
+      // perimeter are the plan's (pitch never changes an edge length along the eave).
+      section.width *= factor;
+      section.measured = { ...section.measured, areaSqFt: planAreaSqFt * factor };
+    }
+    const sq: SectionQuantity = {
       objectId: o.id,
       name: o.attrs.name,
       page: o.page,
       areaSqFt: section.measured.areaSqFt,
+      planAreaSqFt,
+      slopeFactor: factor,
       perimeterFt: polygonPerimeter(outer),
       edgeLengthsFt: edgeLengths(outer),
       section,
-    });
+    };
+    if (factor !== 1) sq.pitch = o.attrs.pitch!;
+    out.sections.push(sq);
     out.totals.roofAreaSqFt += section.measured.areaSqFt;
+    out.totals.planAreaSqFt += planAreaSqFt;
     out.totals.perimeterFt += polygonPerimeter(outer);
   }
   out.counts = [...countGroups.values()];

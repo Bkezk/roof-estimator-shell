@@ -4,6 +4,8 @@ import {
   feetPerPx,
   rotatePoints,
   rotateScale,
+  slopeFactor,
+  slopeFactorLabel,
   takeoffQuantities,
   type TakeoffObject,
   type TakeoffPage,
@@ -106,7 +108,14 @@ describe("takeoffQuantities", () => {
       { name: "4in drain", role: "drain", qty: 2, sizeIn: 4, objectIds: ["c1", "c2"] },
       { name: "Pipe", role: "pipe", qty: 1, sizeIn: 3, objectIds: ["c3"] },
     ]);
-    expect(q.totals).toEqual({ roofAreaSqFt: 4000, perimeterFt: 280, parapetFt: 140 });
+    expect(q.totals).toEqual({
+      roofAreaSqFt: 4000,
+      planAreaSqFt: 4000,
+      perimeterFt: 280,
+      parapetFt: 140,
+    });
+    expect(s).toMatchObject({ planAreaSqFt: 4000, slopeFactor: 1 });
+    expect(s.pitch).toBeUndefined();
     expect(q.unscaled).toEqual([]);
   });
 
@@ -139,5 +148,86 @@ describe("takeoffQuantities", () => {
     expect(q.linears).toEqual([]);
     expect(q.unscaled.map((u) => u.objectId)).toEqual(["a1", "l1"]);
     expect(q.counts.map((c) => c.qty)).toEqual([2, 1]);
+  });
+});
+
+describe("slope factor (pitch, rise per 12)", () => {
+  it("4:12 → 1.0541; 0, blank, negative or junk → flat (1)", () => {
+    expect(slopeFactor(4)).toBeCloseTo(1.0541, 4);
+    expect(slopeFactor(6)).toBeCloseTo(1.118, 4);
+    expect(slopeFactor(12)).toBeCloseTo(Math.SQRT2, 12);
+    expect(slopeFactor(0)).toBe(1);
+    expect(slopeFactor(undefined)).toBe(1);
+    expect(slopeFactor(null)).toBe(1);
+    expect(slopeFactor(-3)).toBe(1);
+    expect(slopeFactor(Number.NaN)).toBe(1);
+    expect(slopeFactorLabel(4)).toBe("×1.054");
+    expect(slopeFactorLabel(undefined)).toBe("");
+  });
+
+  // 1,000 px per 100 ft: a 1,000 × 100 px outline is 100 ft × 10 ft = 1,000 sq ft on plan.
+  const plan: Array<[number, number]> = [
+    [0, 0],
+    [1000, 0],
+    [1000, 100],
+    [0, 100],
+  ];
+  const pg: TakeoffPage = {
+    index: 0,
+    name: "A1",
+    rotation: 0,
+    scale: { ax: 0, ay: 0, bx: 1000, by: 0, feet: 100 },
+  };
+
+  it("a 1,000 sq ft plan area at 6:12 is 1,118 sq ft of roof; the perimeter is not scaled", () => {
+    const q = takeoffQuantities(
+      [pg],
+      [{ id: "a", kind: "area", page: 0, points: plan, attrs: { name: "Gable", pitch: 6 } }],
+    );
+    const s = q.sections[0]!;
+    expect(s.planAreaSqFt).toBeCloseTo(1000, 9);
+    expect(Math.round(s.areaSqFt)).toBe(1118);
+    expect(s.pitch).toBe(6);
+    expect(s.slopeFactor).toBeCloseTo(1.118034, 6);
+    expect(s.perimeterFt).toBeCloseTo(220, 9);
+    expect(s.edgeLengthsFt.map((x) => Math.round(x))).toEqual([100, 10, 100, 10]);
+    // The layout rectangle is the sloped surface: length stays, width grows by the factor.
+    expect(s.section.length).toBeCloseTo(100, 6);
+    expect(s.section.width).toBeCloseTo(10 * s.slopeFactor, 6);
+    expect(s.section.length * s.section.width).toBeCloseTo(s.areaSqFt, 6);
+    expect(s.section.measured.areaSqFt).toBeCloseTo(s.areaSqFt, 9);
+    expect(s.section.measured.perimeterFt).toBeCloseTo(220, 9);
+    expect(q.totals.roofAreaSqFt).toBeCloseTo(1118.034, 3);
+    expect(q.totals.planAreaSqFt).toBeCloseTo(1000, 9);
+    expect(q.totals.perimeterFt).toBeCloseTo(220, 9);
+  });
+
+  it("cut-outs are scaled the same (net plan area × factor); a 0 pitch is flat", () => {
+    const hole: Array<[number, number]> = [
+      [100, 20],
+      [200, 20],
+      [200, 70],
+      [100, 70],
+    ]; // 10 ft × 5 ft = 50 sq ft
+    const q = takeoffQuantities(
+      [pg],
+      [
+        {
+          id: "a",
+          kind: "area",
+          page: 0,
+          points: plan,
+          attrs: { name: "Gable", pitch: 4, cutouts: [hole] },
+        },
+        { id: "b", kind: "area", page: 0, points: plan, attrs: { name: "Flat", pitch: 0 } },
+      ],
+    );
+    const [a, b] = q.sections;
+    expect(a!.planAreaSqFt).toBeCloseTo(950, 9);
+    expect(a!.areaSqFt).toBeCloseTo(950 * slopeFactor(4), 9);
+    expect(a!.section.length * a!.section.width).toBeCloseTo(a!.areaSqFt, 6);
+    expect(b!.areaSqFt).toBeCloseTo(1000, 9);
+    expect(b!.slopeFactor).toBe(1);
+    expect(b!.pitch).toBeUndefined();
   });
 });

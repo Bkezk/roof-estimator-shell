@@ -185,7 +185,12 @@ function TakeoffList() {
   const deleted = deletedQuery.data ?? [];
   const q = search.trim().toLowerCase();
   const filtered = takeoffs.filter((t) => {
-    if (q && !t.name.toLowerCase().includes(q)) return false;
+    if (
+      q &&
+      !t.name.toLowerCase().includes(q) &&
+      !(t.account?.name ?? "").toLowerCase().includes(q)
+    )
+      return false;
     if (kindFilter !== "all" && (t.underlay_kind === "pdf" ? "pdf" : "image") !== kindFilter)
       return false;
     if (statusFilter !== "all" && asTakeoffStatus(t.status) !== statusFilter) return false;
@@ -236,10 +241,10 @@ function TakeoffList() {
           {takeoffs.length > 0 && (
             <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-muted/30 p-3">
               <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground">
-                Takeoff name
+                Takeoff or customer name
                 <Input
                   type="search"
-                  placeholder="Search by takeoff name…"
+                  placeholder="Search by takeoff or customer name…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="bg-background"
@@ -444,6 +449,7 @@ function TakeoffList() {
 
 /** One takeoff in the list: a card-like row with its file, pages, last update and linked bid. */
 function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: () => void }) {
+  const { can } = useAuth();
   const status = asTakeoffStatus(t.status);
   const pageCount = takeoffDoc(t).pages.length;
   const isPdf = t.underlay_kind === "pdf";
@@ -479,6 +485,23 @@ function TakeoffListRow({ row: t, onDelete }: { row: TakeoffWithBid; onDelete: (
           {pageCount} page{pageCount === 1 ? "" : "s"} · Last updated {when(t.updated_at)}
           {t.updated_by_name ? ` by ${t.updated_by_name}` : ""}
         </p>
+        {t.account_id && (
+          <p className="flex flex-wrap items-center gap-1.5 text-sm">
+            <span className="text-muted-foreground">Customer:</span>
+            {t.account && can("customers") ? (
+              <Link
+                to="/customers"
+                search={{ id: t.account.id }}
+                className="font-medium underline-offset-2 hover:underline"
+                title="Open the customer profile"
+              >
+                {t.account.name}
+              </Link>
+            ) : (
+              <span className="font-medium">{t.account?.name ?? "linked"}</span>
+            )}
+          </p>
+        )}
         <p className="flex flex-wrap items-center gap-1.5 text-sm">
           {t.bid ? (
             <>

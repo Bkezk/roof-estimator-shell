@@ -10,6 +10,7 @@ import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import { takeoffAccountFromBid } from "@/lib/takeoff/create-bid";
 import type { TakeoffObject, TakeoffPage, TakeoffSetup } from "@/lib/takeoff/model";
 
 export type TakeoffRow = Database["public"]["Tables"]["takeoffs"]["Row"];
@@ -18,13 +19,24 @@ export interface LinkedBid {
   id: string;
   name: string;
   status: string;
+  /** The bid's customer profile, if any (a takeoff without one inherits it). */
+  account_id: string | null;
 }
-/** A takeoff row with its linked bid joined (null when none, or not visible to this user). */
-export type TakeoffWithBid = TakeoffRow & { bid: LinkedBid | null };
+/** The customer profile a takeoff belongs to (null when none, or not visible to this user). */
+export interface LinkedAccount {
+  id: string;
+  name: string;
+}
+/**
+ * A takeoff row with its linked bid and customer joined (null when none, or not visible to this
+ * user — the row's own `account_id` still says whether a customer is linked).
+ */
+export type TakeoffWithBid = TakeoffRow & { bid: LinkedBid | null; account: LinkedAccount | null };
 export const TAKEOFF_BUCKET = "takeoffs";
 /** Soft-deleted takeoffs are kept this long, then purged (lazily, whenever the bin is listed). */
 export const DELETED_TAKEOFF_RETENTION_DAYS = 30;
-const WITH_BID = "*, bid:bids!takeoffs_bid_id_fkey(id, name, status)";
+const WITH_BID =
+  "*, bid:bids!takeoffs_bid_id_fkey(id, name, status, account_id), account:crm_accounts!takeoffs_account_id_fkey(id, name)";
 
 const pageSchema = z.object({
   index: z.number().int().min(0),
@@ -165,6 +177,38 @@ export const getTakeoff = createServerFn({ method: "GET" })
     return (row as unknown as TakeoffWithBid | null) ?? null;
   });
 
+/** A customer's takeoffs, for the Customers page's Takeoffs section (newest update first). */
+export interface AccountTakeoffRow {
+  id: string;
+  name: string;
+  status: string;
+  page_count: number;
+  updated_at: string;
+  updated_by_name: string | null;
+}
+export const listAccountTakeoffs = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ account_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<AccountTakeoffRow[]> => {
+    await readAccess(context);
+    const { data: rows, error } = await context.supabase
+      .from("takeoffs")
+      .select("id, name, status, pages, updated_at, updated_by_name")
+      .eq("account_id", data.account_id)
+      .is("deleted_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(200);
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      page_count: Array.isArray(r.pages) ? r.pages.length : 0,
+      updated_at: r.updated_at,
+      updated_by_name: r.updated_by_name,
+    }));
+  });
+
 /**
  * Create the row for a new takeoff. Returns the row with `file_path` = "<id>/<file name>" —
  * the browser then uploads the file to that path in the "takeoffs" bucket.
@@ -180,6 +224,7 @@ export const createTakeoff = createServerFn({ method: "POST" })
         file_size: z.number().int().nonnegative().max(104857600),
         pages: z.array(pageSchema).max(500),
         building_id: z.string().uuid().nullable().optional(),
+        account_id: z.string().uuid().nullable().optional(),
       })
       .parse(d),
   )
@@ -194,6 +239,7 @@ export const createTakeoff = createServerFn({ method: "POST" })
         file_size: data.file_size,
         pages: data.pages as unknown as Json,
         building_id: data.building_id ?? null,
+        account_id: data.account_id ?? null,
         created_by: context.userId,
         updated_by_name: await meName(context),
       })
@@ -211,24 +257,32 @@ export const createTakeoff = createServerFn({ method: "POST" })
     return row;
   });
 
-/** Save any subset of the editable fields (the page autosaves pages / setup / objects). */
+/** saveTakeoff's input: any subset of the editable fields (exported for its tests). */
+export const saveTakeoffInput = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(["draft", "done"]).optional(),
+  pages: z.array(pageSchema).max(500).optional(),
+  setup: setupSchema.optional(),
+  objects: z.array(objectSchema).max(5000).optional(),
+  building_id: z.string().uuid().nullable().optional(),
+  bid_id: z.string().uuid().nullable().optional(),
+  /** The customer profile (null unlinks). */
+  account_id: z.string().uuid().nullable().optional(),
+});
+
+/** A saved takeoff; `inherited_account_id` is set when linking a bid gave it the bid's customer. */
+export type SavedTakeoff = TakeoffRow & { inherited_account_id: string | null };
+
+/**
+ * Save any subset of the editable fields (the page autosaves pages / setup / objects). Linking a
+ * bid (`bid_id`) to a takeoff that has no customer gives it the bid's customer, if the bid has
+ * one (owner, Sep 30: the takeoff with the building plans belongs to the customer too).
+ */
 export const saveTakeoff = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) =>
-    z
-      .object({
-        id: z.string().uuid(),
-        name: z.string().trim().min(1).max(200).optional(),
-        status: z.enum(["draft", "done"]).optional(),
-        pages: z.array(pageSchema).max(500).optional(),
-        setup: setupSchema.optional(),
-        objects: z.array(objectSchema).max(5000).optional(),
-        building_id: z.string().uuid().nullable().optional(),
-        bid_id: z.string().uuid().nullable().optional(),
-      })
-      .parse(d),
-  )
-  .handler(async ({ data, context }): Promise<TakeoffRow> => {
+  .validator((d: unknown) => saveTakeoffInput.parse(d))
+  .handler(async ({ data, context }): Promise<SavedTakeoff> => {
     await writeAccess(context);
     const { id, ...rest } = data;
     const patch: Database["public"]["Tables"]["takeoffs"]["Update"] = {
@@ -241,6 +295,17 @@ export const saveTakeoff = createServerFn({ method: "POST" })
     if (rest.objects !== undefined) patch.objects = rest.objects as unknown as Json;
     if (rest.building_id !== undefined) patch.building_id = rest.building_id;
     if (rest.bid_id !== undefined) patch.bid_id = rest.bid_id;
+    if (rest.account_id !== undefined) patch.account_id = rest.account_id;
+    let inherited: string | null = null;
+    if (rest.bid_id && rest.account_id === undefined) {
+      const [{ data: cur }, { data: bid }] = await Promise.all([
+        context.supabase.from("takeoffs").select("account_id").eq("id", id).maybeSingle(),
+        // Null when the bid is not visible to this user (no Estimate access): nothing inherited.
+        context.supabase.from("bids").select("account_id").eq("id", rest.bid_id).maybeSingle(),
+      ]);
+      inherited = takeoffAccountFromBid(cur?.account_id, bid?.account_id);
+      if (inherited) patch.account_id = inherited;
+    }
     const { data: row, error } = await context.supabase
       .from("takeoffs")
       .update(patch)
@@ -249,7 +314,39 @@ export const saveTakeoff = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    return row;
+    return { ...row, inherited_account_id: inherited };
+  });
+
+/**
+ * Link a takeoff to a customer profile, or unlink it (null). Takeoff write access only; the
+ * customer is checked to exist (and be readable) first so a bad id fails with a clear message.
+ */
+export const setTakeoffAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ id: z.string().uuid(), account_id: z.string().uuid().nullable() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<TakeoffWithBid> => {
+    await writeAccess(context);
+    if (data.account_id) {
+      const { data: acct, error: aErr } = await context.supabase
+        .from("crm_accounts")
+        .select("id")
+        .eq("id", data.account_id)
+        .is("deleted_at", null)
+        .maybeSingle();
+      if (aErr) throw new Error(aErr.message);
+      if (!acct) throw new Error("That customer was not found (or you cannot read customers).");
+    }
+    const { data: row, error } = await context.supabase
+      .from("takeoffs")
+      .update({ account_id: data.account_id, updated_by_name: await meName(context) })
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .select(WITH_BID)
+      .single();
+    if (error) throw new Error(error.message);
+    return row as unknown as TakeoffWithBid;
   });
 
 /** Soft delete (the row and its file stay recoverable by an admin). */

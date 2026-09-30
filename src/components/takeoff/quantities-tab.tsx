@@ -1,7 +1,8 @@
 /**
  * Quantities tab — what the drawing measures, straight from `takeoffQuantities`: sections,
  * linears, counts, totals, and the objects that cannot be measured yet (no scale on their page).
- * "Export CSV" writes every row into one file named after the takeoff.
+ * "Export CSV" writes every row into one file named after the takeoff. Areas are the roof surface
+ * (plan × the pitch's slope factor); the plan area is shown alongside when they differ.
  */
 import { AlertTriangle, Download } from "lucide-react";
 
@@ -30,6 +31,8 @@ const CSV_HEADER = [
   "Page",
   "Role",
   "Area (sq ft)",
+  "Plan area (sq ft)",
+  "Pitch (rise per 12)",
   "Perimeter (ft)",
   "Sides",
   "Layout L (ft)",
@@ -67,6 +70,8 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         pageName(s.page),
         "",
         s.areaSqFt,
+        s.planAreaSqFt,
+        s.pitch ?? "",
         s.perimeterFt,
         s.edgeLengthsFt.length,
         s.section.length,
@@ -81,7 +86,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         l.name,
         pageName(l.page),
         LINEAR_ROLE_LABELS[l.role],
-        ...blank(5),
+        ...blank(7),
         l.lengthFt,
         l.heightIn,
         ...blank(4 + DRAIN_COLS),
@@ -94,7 +99,7 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
         c.name,
         "",
         COUNT_ROLE_LABELS[c.role],
-        ...blank(7),
+        ...blank(9),
         c.qty,
         c.sizeIn,
         c.widthIn,
@@ -105,10 +110,26 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
       ]),
     );
   rows.push(
-    csvLine(["Total", "Roof area", "", "", q.totals.roofAreaSqFt, ...blank(10 + DRAIN_COLS)]),
+    csvLine([
+      "Total",
+      "Roof area",
+      "",
+      "",
+      q.totals.roofAreaSqFt,
+      q.totals.planAreaSqFt,
+      ...blank(11 + DRAIN_COLS),
+    ]),
   );
   rows.push(
-    csvLine(["Total", "Perimeter", "", "", "", q.totals.perimeterFt, ...blank(9 + DRAIN_COLS)]),
+    csvLine([
+      "Total",
+      "Perimeter",
+      "",
+      "",
+      ...blank(3),
+      q.totals.perimeterFt,
+      ...blank(9 + DRAIN_COLS),
+    ]),
   );
   rows.push(
     csvLine([
@@ -116,14 +137,14 @@ function quantitiesCsv(q: TakeoffQuantities, pageName: (i: number) => string): s
       "Parapet",
       "",
       "",
-      ...blank(5),
+      ...blank(7),
       q.totals.parapetFt,
       ...blank(5 + DRAIN_COLS),
     ]),
   );
   for (const u of q.unscaled)
     rows.push(
-      csvLine(["Unscaled (no scale on page)", u.name, pageName(u.page), ...blank(12 + DRAIN_COLS)]),
+      csvLine(["Unscaled (no scale on page)", u.name, pageName(u.page), ...blank(14 + DRAIN_COLS)]),
     );
   return rows.join("\r\n") + "\r\n";
 }
@@ -177,7 +198,15 @@ export function QuantitiesTab(props: {
       <section className="space-y-1">
         <h3 className="text-sm font-semibold">Totals</h3>
         <div className="grid grid-cols-2 gap-2 text-sm">
-          <Stat label="Roof area" value={`${fmtNum(q.totals.roofAreaSqFt, 0)} sq ft`} />
+          <Stat
+            label="Roof area"
+            value={`${fmtNum(q.totals.roofAreaSqFt, 0)} sq ft`}
+            note={
+              Math.abs(q.totals.roofAreaSqFt - q.totals.planAreaSqFt) > 0.005
+                ? `${fmtNum(q.totals.planAreaSqFt, 0)} sq ft on plan (pitch applied)`
+                : undefined
+            }
+          />
           <Stat label="Perimeter" value={`${fmtNum(q.totals.perimeterFt)} ft`} />
           <Stat label="Parapet" value={`${fmtNum(q.totals.parapetFt)} ft`} />
           <Stat label="Counted items" value={String(countTotal)} />
@@ -205,7 +234,17 @@ export function QuantitiesTab(props: {
                 <TableRow key={s.objectId}>
                   <C>{s.name}</C>
                   <C>{pageName(s.page)}</C>
-                  <C right>{fmtNum(s.areaSqFt, 0)}</C>
+                  <C right>
+                    {fmtNum(s.areaSqFt, 0)}
+                    {s.slopeFactor !== 1 && (
+                      <span
+                        className="block text-[10px] text-muted-foreground"
+                        title={`Plan area × ${s.slopeFactor.toFixed(4)} for a ${s.pitch}:12 pitch`}
+                      >
+                        plan {fmtNum(s.planAreaSqFt, 0)} · {s.pitch}:12
+                      </span>
+                    )}
+                  </C>
                   <C right>{fmtNum(s.perimeterFt)}</C>
                   <C right>{s.edgeLengthsFt.length}</C>
                   <C right>
@@ -306,11 +345,12 @@ export function QuantitiesTab(props: {
   );
 }
 
-function Stat(props: { label: string; value: string }) {
+function Stat(props: { label: string; value: string; note?: string | undefined }) {
   return (
     <div className="rounded-md border px-2 py-1.5">
       <div className="text-[11px] text-muted-foreground">{props.label}</div>
       <div className="font-semibold tabular-nums">{props.value}</div>
+      {props.note && <div className="text-[10px] text-muted-foreground">{props.note}</div>}
     </div>
   );
 }

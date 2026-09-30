@@ -3,12 +3,16 @@
  * 1:1 onto `TakeoffSetup`; the option lists come from the same admin data the estimator's Setup
  * step reads (roof systems, thicknesses, colours, sheet sizes, deck order), with plain fixed
  * lists when that data is not available. Nothing is prefilled with made-up values.
+ *
+ * Above the material answers: the customer profile the takeoff (its building plans) belongs to
+ * (owner, Sep 30). A bid made from the takeoff starts linked to the same customer.
  */
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { Copy, Link2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { Link } from "@tanstack/react-router";
 
 import { useAuth } from "@/lib/auth-store";
 import { getEngineAdminData } from "@/lib/engine.functions";
@@ -16,8 +20,14 @@ import { attachedWithOptions, STANDARD_DECK_ORDER } from "@/lib/engine/adapters"
 import { ARP_SIZE_OPTIONS, TERMINATION_OPTIONS } from "@/lib/engine/edges";
 import { DESIGN_TABLE_OPTIONS, LEGACY_ROOF_SYSTEM_IDS } from "@/lib/engine/fastener-spacing";
 import type { Attachment } from "@/lib/engine/estimate";
-import { listTakeoffs, takeoffDoc } from "@/lib/takeoff.functions";
+import {
+  listTakeoffs,
+  setTakeoffAccount,
+  takeoffDoc,
+  type LinkedAccount,
+} from "@/lib/takeoff.functions";
 import type { TakeoffSetup } from "@/lib/takeoff/model";
+import { AccountPicker } from "@/components/crm/account-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -94,12 +104,98 @@ function Group(props: { title: string; note?: string; children: React.ReactNode 
   );
 }
 
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * The takeoff's customer: a search box (the shared customer typeahead) while unlinked; once
+ * linked, a chip with Open customer and Unlink. Saved at once (not through the autosave).
+ */
+function CustomerGroup(props: {
+  takeoffId: string;
+  /** `name` is "" when the link exists but the profile is not readable by this user. */
+  customer: LinkedAccount | null;
+  onChange: (next: LinkedAccount | null) => void;
+}) {
+  const { can } = useAuth();
+  // The typeahead reads customer profiles: Customers, Service or Estimate access.
+  const canSearch = can("customers") || can("service") || can("estimate");
+  const qc = useQueryClient();
+  const setFn = useServerFn(setTakeoffAccount);
+  const link = useMutation({
+    mutationFn: (next: LinkedAccount | null) =>
+      setFn({ data: { id: props.takeoffId, account_id: next?.id ?? null } }),
+    onSuccess: (row, next) => {
+      props.onChange(next ? (row.account ?? next) : null);
+      toast.success(next ? `Takeoff linked to ${next.name}` : "Takeoff unlinked from the customer");
+      void qc.invalidateQueries({ queryKey: ["takeoffs"] });
+      void qc.invalidateQueries({ queryKey: ["account-takeoffs"] });
+    },
+    onError: (e) => toast.error(`Could not change the customer: ${errText(e)}`),
+  });
+  const c = props.customer;
+  return (
+    <section className="space-y-2 rounded-md border p-3">
+      <h3 className="text-sm font-semibold">Customer</h3>
+      <p className="text-xs text-muted-foreground">
+        Who these plans belong to. A bid made from this takeoff starts linked to the same customer.
+      </p>
+      {c ? (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <span className="inline-flex min-w-0 items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-muted-foreground">
+            <Link2 className="h-3 w-3 shrink-0" />
+            <span className="min-w-0 truncate">
+              Linked to{" "}
+              <span className="font-medium text-foreground">{c.name || "a customer"}</span>
+            </span>
+          </span>
+          {can("customers") && (
+            <Link
+              to="/customers"
+              search={{ id: c.id }}
+              target="_blank"
+              className="font-medium text-primary underline-offset-2 hover:underline"
+              title="Open the customer profile in a new tab"
+            >
+              Open customer
+            </Link>
+          )}
+          <button
+            type="button"
+            className="font-medium text-foreground hover:underline disabled:opacity-50"
+            title="Unlink this takeoff from the customer profile"
+            disabled={link.isPending}
+            onClick={() => link.mutate(null)}
+          >
+            Unlink
+          </button>
+        </div>
+      ) : canSearch ? (
+        <AccountPicker
+          value={null}
+          disabled={link.isPending}
+          placeholder="Search customers and sites…"
+          onChange={(hit) => {
+            if (hit) link.mutate({ id: hit.account_id, name: hit.account_name });
+          }}
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Linking a customer needs Customers, Service or Estimate access as well.
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function SetupTab(props: {
   /** This takeoff (left out when looking for a setup to copy). */
   takeoffId: string;
   setup: TakeoffSetup;
   onChange: (next: TakeoffSetup) => void;
   isNew: boolean;
+  /** The customer this takeoff is linked to (the editor owns it; this tab saves changes). */
+  customer?: LinkedAccount | null;
+  onCustomerChange?: (next: LinkedAccount | null) => void;
 }) {
   const { setup, onChange } = props;
   const { session } = useAuth();
@@ -202,6 +298,13 @@ export function SetupTab(props: {
           ? "Start here: answer the material questions for this roof, then draw. Each new area's sides take the edge defaults below (you can still change any side)."
           : "The material answers for this takeoff. Changes apply to areas you draw from now on; existing sides keep their own settings."}
       </p>
+      {props.onCustomerChange && (
+        <CustomerGroup
+          takeoffId={props.takeoffId}
+          customer={props.customer ?? null}
+          onChange={props.onCustomerChange}
+        />
+      )}
       {source && (
         <Button
           type="button"

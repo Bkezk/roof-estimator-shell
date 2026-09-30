@@ -48,7 +48,11 @@ import { computeEstimate, computeSectionInstallHours } from "@/lib/engine/estima
 import { combineSavedBids, combineWarningLines, type CombineInfo } from "@/lib/combine-bids";
 import { getTakeoff, saveTakeoff, takeoffDoc } from "@/lib/takeoff.functions";
 import { takeoffQuantities } from "@/lib/takeoff/model";
-import { applyTakeoffToBid, bidSeedFromTakeoff } from "@/lib/takeoff/create-bid";
+import {
+  applyTakeoffToBid,
+  bidAccountFromTakeoff,
+  bidSeedFromTakeoff,
+} from "@/lib/takeoff/create-bid";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
@@ -1150,6 +1154,22 @@ function EstimatePage() {
     enabled: authed && !!takeoffParam,
   });
   const takeoffSeededFor = useRef<string | null>(null);
+  // The takeoff's customer onto a bid that has none (owner, Sep 30): linked as a change of this
+  // session (so the save sends it), and the bid's BLANK client fields filled from the profile.
+  const linkFromTakeoff = (accountId: string, label: string) => {
+    const seq = setLink(accountId, null, label, true);
+    void qc
+      .fetchQuery({
+        queryKey: ["account", accountId],
+        queryFn: () => getAccountFn({ data: { id: accountId } }),
+      })
+      .then((detail) => {
+        if (seq !== pickSeq.current) return;
+        const fill = profileFill(detail.account, null);
+        setCustomer((c) => applyProfileFill(c, blankFieldsOnly(c, fill), false));
+      })
+      .catch(() => {});
+  };
   useEffect(() => {
     if (!takeoffParam || takeoffRow === undefined) return;
     // With ?bid= too, the takeoff UPDATES that saved bid (owner, Sep 24): wait until the bid is
@@ -1166,7 +1186,11 @@ function EstimatePage() {
     try {
       const doc = takeoffDoc(takeoffRow);
       const q = takeoffQuantities(doc.pages, doc.objects);
-      const seed = bidSeedFromTakeoff(doc.setup, q, { takeoffName: takeoffRow.name });
+      const seed = bidSeedFromTakeoff(doc.setup, q, {
+        takeoffName: takeoffRow.name,
+        accountId: takeoffRow.account_id,
+      });
+      const takeoffCustomer = takeoffRow.account?.name ?? "";
       if (updating) {
         const r = applyTakeoffToBid(
           {
@@ -1193,8 +1217,14 @@ function EstimatePage() {
           unmapped: seed.unmapped,
         });
         setLinkedTakeoffId(takeoffRow.id);
+        const inherit = bidAccountFromTakeoff(linkedAccountId, takeoffRow.account_id);
+        if (inherit) linkFromTakeoff(inherit, takeoffCustomer);
         toast.success(
-          `Quantities updated from the takeoff (${r.changes.length} change${r.changes.length === 1 ? "" : "s"}). Review the notice, then save.`,
+          `Quantities updated from the takeoff (${r.changes.length} change${r.changes.length === 1 ? "" : "s"}).${
+            inherit
+              ? ` Linked to the takeoff's customer${takeoffCustomer ? ` “${takeoffCustomer}”` : ""}.`
+              : ""
+          } Review the notice, then save.`,
         );
         // Drop ?takeoff= so a reload shows the saved bid as it is, not a second update.
         void navigate({ to: "/estimate", search: { bid: bidParam }, replace: true });
@@ -1227,7 +1257,9 @@ function EstimatePage() {
       };
       hydrateSaved(merged, {});
       setBidId(undefined);
-      setLink(null, null, "", false); // a bid made from a takeoff starts unlinked
+      // A bid made from a takeoff starts linked to the takeoff's customer, if it has one.
+      if (seed.accountId) linkFromTakeoff(seed.accountId, takeoffCustomer);
+      else setLink(null, null, "", false);
       setBidName(takeoffRow.name.trim() || "Untitled bid");
       setBidStatus("draft");
       setLostReason(null);
@@ -1916,8 +1948,14 @@ function EstimatePage() {
         setBidId(row.id);
         hydratedFor.current = row.id;
         // The takeoff remembers the bid it produced (best effort; the bid already links back).
+        // A takeoff with no customer takes this bid's (server side); say so when it did.
         if (linkedTakeoffId)
-          void saveTakeoffFn({ data: { id: linkedTakeoffId, bid_id: row.id } }).catch(() => {});
+          void saveTakeoffFn({ data: { id: linkedTakeoffId, bid_id: row.id } })
+            .then((t) => {
+              if (t.inherited_account_id)
+                toast.info("The takeoff is now linked to this bid's customer too.");
+            })
+            .catch(() => {});
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
       }
       return true;

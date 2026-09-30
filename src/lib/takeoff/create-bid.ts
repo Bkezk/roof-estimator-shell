@@ -52,6 +52,11 @@ export interface TakeoffBidSeed {
   unmapped: Array<{ label: string; detail: string }>;
   /** Free-text summary of the drawing for the bid's notes. */
   summary: string;
+  /**
+   * The customer profile the takeoff is linked to: a NEW bid starts linked to it (owner, Sep
+   * 30: the takeoff holds the building plans, so it belongs to the customer). Absent = none.
+   */
+  accountId?: string;
 }
 
 const round1 = (x: number) => Math.round(x * 10) / 10;
@@ -68,7 +73,7 @@ const ftIn = (ft: number): string => {
 export function bidSeedFromTakeoff(
   setup: TakeoffSetup,
   q: TakeoffQuantities,
-  opts: { takeoffName?: string } = {},
+  opts: { takeoffName?: string; accountId?: string | null } = {},
 ): TakeoffBidSeed {
   const sectionDefaults: TakeoffBidSeed["sectionDefaults"] = {};
   if (setup.deckType) sectionDefaults.deckType = setup.deckType;
@@ -96,7 +101,11 @@ export function bidSeedFromTakeoff(
     if (setup.fieldLap) o.fieldLap = setup.fieldLap;
     if (setup.pullTest) o.pullTest = setup.pullTest;
     if (setup.layers?.length) o.layers = setup.layers;
-    o.notes = `Measured in Takeoff: ${round1(s.areaSqFt)} sq ft, ${round1(s.perimeterFt)} ft around, ${s.section.edges.length} sides.`;
+    const slope =
+      s.slopeFactor !== 1 && s.pitch !== undefined
+        ? ` (${round1(s.planAreaSqFt)} sq ft on plan at ${s.pitch}:12, ×${s.slopeFactor.toFixed(3)})`
+        : "";
+    o.notes = `Measured in Takeoff: ${round1(s.areaSqFt)} sq ft${slope}, ${round1(s.perimeterFt)} ft around, ${s.section.edges.length} sides.`;
     return o;
   });
 
@@ -210,7 +219,32 @@ export function bidSeedFromTakeoff(
   if (setup.roofSystem) seed.roofSystem = setup.roofSystem;
   if (setup.attachment) seed.attachment = setup.attachment;
   if (setup.membraneAdhesiveName) seed.membraneAdhesiveName = setup.membraneAdhesiveName;
+  if (opts.accountId) seed.accountId = opts.accountId;
   return seed;
+}
+
+/**
+ * Takeoff → bid customer link: the account to SET on a bid made or updated from a takeoff, or
+ * null to leave the bid's link alone. A bid that already has a customer keeps it; one without
+ * takes the takeoff's (when the takeoff has one).
+ */
+export function bidAccountFromTakeoff(
+  bidAccountId: string | null | undefined,
+  takeoffAccountId: string | null | undefined,
+): string | null {
+  return !bidAccountId && takeoffAccountId ? takeoffAccountId : null;
+}
+
+/**
+ * Bid → takeoff customer link: when a takeoff is linked to a bid that has a customer and the
+ * takeoff has none, the takeoff inherits the bid's. Returns the account to SET on the takeoff,
+ * or null to leave it (it has its own, or the bid has none).
+ */
+export function takeoffAccountFromBid(
+  takeoffAccountId: string | null | undefined,
+  bidAccountId: string | null | undefined,
+): string | null {
+  return !takeoffAccountId && bidAccountId ? bidAccountId : null;
 }
 
 /** Pipe stack / drain rows the seed creates carry these id prefixes so an update can replace them. */

@@ -64,6 +64,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 
 import { pointerCloseAutoFocus } from "./focus";
 import { BidStatusBadge } from "./bid-status-badge";
+import { ExportMarkupButton, TakeoffCustomerChip } from "./editor-extras";
 import { ObjectsTab } from "./objects-tab";
 import { QuantitiesTab } from "./quantities-tab";
 import { SetupTab } from "./setup-tab";
@@ -155,6 +156,10 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
     initial.pages.length ? initial.pages : [{ index: 0, name: "Page 1", rotation: 0, scale: null }],
   );
   const [setup, setSetup] = useState<TakeoffSetup>(initial.setup);
+  // The customer these plans belong to (saved at once from the Setup tab, not autosaved).
+  const [customer, setCustomer] = useState<TakeoffWithBid["account"]>(
+    () => row.account ?? (row.account_id ? { id: row.account_id, name: "" } : null),
+  );
   // The objects list with undo / redo (Ctrl+Z / Ctrl+Y): every change goes through `commit`,
   // which keeps the previous list (up to HISTORY_LIMIT). Quick successive edits of one object's
   // attributes (typing a name) merge into one step. Autosave is not undone — only the document.
@@ -525,7 +530,15 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
             <SelectItem value="done">Done</SelectItem>
           </SelectContent>
         </Select>
+        <TakeoffCustomerChip row={row} customer={customer} onChange={setCustomer} />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <ExportMarkupButton
+            name={name}
+            customer={customer}
+            pages={pages}
+            objects={objects}
+            source={source}
+          />
           <div className="flex items-center rounded-md border">
             <Button
               variant="ghost"
@@ -734,7 +747,14 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
               </TabsList>
               <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
                 <TabsContent value="setup" className="mt-0">
-                  <SetupTab takeoffId={row.id} setup={setup} onChange={setSetup} isNew={isNew} />
+                  <SetupTab
+                    takeoffId={row.id}
+                    setup={setup}
+                    onChange={setSetup}
+                    isNew={isNew}
+                    customer={customer}
+                    onCustomerChange={setCustomer}
+                  />
                 </TabsContent>
                 <TabsContent value="objects" className="mt-0">
                   <ObjectsTab

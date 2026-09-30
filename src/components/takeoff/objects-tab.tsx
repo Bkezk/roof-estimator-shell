@@ -13,6 +13,8 @@ import {
   LINEAR_ROLES,
   LINEAR_ROLE_LABELS,
   feetPerPx,
+  slopeFactor,
+  slopeFactorLabel,
   type CountRole,
   type LinearRole,
   type TakeoffObject,
@@ -78,7 +80,10 @@ export function ObjectsTab(props: ObjectsTabProps) {
     const fpp = feetPerPx(pageOf(o.page)?.scale);
     if (o.kind === "count") return `qty ${Math.max(1, o.points.length)}`;
     if (fpp === null) return "";
-    if (o.kind === "area") return fmtSqFt(netAreaSqFt(o.points, o.attrs.cutouts, fpp) ?? 0);
+    if (o.kind === "area")
+      return fmtSqFt(
+        (netAreaSqFt(o.points, o.attrs.cutouts, fpp) ?? 0) * slopeFactor(o.attrs.pitch),
+      );
     return fmtFt(polylineLengthPx(o.points) * fpp);
   };
 
@@ -399,6 +404,8 @@ function AreaEditor(props: {
   const edges: OutlineEdgeOptions[] = o.points.map((_, i) => o.attrs.edges?.[i] ?? {});
   const cutouts = o.attrs.cutouts ?? [];
   const net = netAreaSqFt(o.points, cutouts, fpp);
+  // A pitched roof: the drawing is the plan, the roof surface is plan × the slope factor.
+  const factor = slopeFactor(o.attrs.pitch);
 
   const setEdge = <K extends keyof OutlineEdgeOptions>(
     i: number,
@@ -439,7 +446,10 @@ function AreaEditor(props: {
   return (
     <div className="space-y-3">
       <p className="text-sm tabular-nums">
-        {net === null ? "Area —" : fmtSqFt(net)}
+        {net === null ? "Area —" : fmtSqFt(net * factor)}
+        {net !== null && factor !== 1 && (
+          <span className="text-muted-foreground"> ({fmtSqFt(net)} on plan)</span>
+        )}
         {fpp !== null && (
           <span className="text-muted-foreground">
             {" "}
@@ -447,6 +457,32 @@ function AreaEditor(props: {
           </span>
         )}
       </p>
+      <div className="flex items-end gap-2">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Pitch (rise per 12)</Label>
+          <NumberField
+            className="h-8 w-[96px]"
+            step="any"
+            inputMode="decimal"
+            placeholder="flat"
+            title="Roof slope as inches of rise per 12 in of run (4 = 4:12). Blank = flat. The area is multiplied by the slope factor; edge lengths stay as drawn."
+            value={o.attrs.pitch ?? 0}
+            onChange={(v) =>
+              props.update((x) =>
+                x.kind === "area"
+                  ? { ...x, attrs: withAttr(x.attrs, "pitch", v > 0 ? v : undefined) }
+                  : x,
+              )
+            }
+          />
+        </div>
+        <span
+          className="pb-2 text-xs tabular-nums text-muted-foreground"
+          title="Slope factor: sqrt(1 + (pitch / 12)²) — roof area per plan area"
+        >
+          {factor === 1 ? "flat (×1)" : slopeFactorLabel(o.attrs.pitch)}
+        </span>
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="text-muted-foreground">

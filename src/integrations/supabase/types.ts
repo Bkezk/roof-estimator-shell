@@ -3095,6 +3095,7 @@ export type Database = {
       };
       takeoffs: {
         Row: {
+          account_id: string | null;
           bid_id: string | null;
           building_id: string | null;
           created_at: string;
@@ -3114,6 +3115,7 @@ export type Database = {
           updated_by_name: string | null;
         };
         Insert: {
+          account_id?: string | null;
           bid_id?: string | null;
           building_id?: string | null;
           created_at?: string;
@@ -3133,6 +3135,7 @@ export type Database = {
           updated_by_name?: string | null;
         };
         Update: {
+          account_id?: string | null;
           bid_id?: string | null;
           building_id?: string | null;
           created_at?: string;
@@ -3152,6 +3155,13 @@ export type Database = {
           updated_by_name?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "takeoffs_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "takeoffs_bid_id_fkey";
             columns: ["bid_id"];
