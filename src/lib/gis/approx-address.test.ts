@@ -117,6 +117,17 @@ describe("Grid.within", () => {
     expect(got.has(5)).toBe(false);
   });
 
+  it("answers at once, with nothing, for a position that is not degrees (the Fleming hang)", () => {
+    const g = new Grid();
+    const p = east(120, "x");
+    g.add(p.lat, p.lng, 0);
+    // 315,450 = 876 turns + 90°: cos ≈ 0, so the naive cell count is in the trillions.
+    const t0 = Date.now();
+    expect(g.within(315450, 1836884.875, APPROX_SEARCH_M)).toEqual([]);
+    expect(g.within(Number.NaN, 0, APPROX_SEARCH_M)).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
   it("around() still covers the 3 × 3 neighbourhood", () => {
     const g = new Grid();
     const p = east(120, "x");

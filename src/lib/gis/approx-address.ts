@@ -38,6 +38,8 @@ export const exactRadiusM = (roofSqFt: number | null | undefined): number =>
  * that can hold something inside a given radius (a superset: callers measure the distance).
  */
 export const GRID_DEG = 0.0015;
+/** The widest neighbourhood `within` will search, in cells each way (≈ 8 km at this latitude). */
+const MAX_CELLS = 60;
 export class Grid {
   private cells = new Map<string, number[]>();
   private key(la: number, lo: number) {
@@ -66,6 +68,10 @@ export class Grid {
   within(lat: number, lng: number, radiusM: number): number[] {
     const rLat = Math.ceil(radiusM / (GRID_DEG * 111320));
     const rLng = Math.ceil(radiusM / (GRID_DEG * 111320 * Math.cos((lat * Math.PI) / 180)));
+    // A position that is not degrees (Fleming's 911 file gave a "latitude" of 315,450, whose
+    // cosine is ~0) would ask for trillions of cells and hang the process; nothing real in
+    // Kentucky or Tennessee needs more than a few dozen. Off the map = no neighbours.
+    if (!Number.isFinite(rLng) || rLng < 0 || rLng > MAX_CELLS || rLat > MAX_CELLS) return [];
     return this.collect(lat, lng, rLat, rLng);
   }
 }

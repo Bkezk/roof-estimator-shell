@@ -234,17 +234,27 @@ function pointOf(
   latField?: string,
   lngField?: string,
 ): { lat: number; lng: number } | null {
+  // The typed latitude / longitude fields, but only when they read as degrees; otherwise the
+  // feature's own geometry (where the map draws it). Fleming's 911 file (and Shelby's, Oldham's,
+  // Clark's, Bullitt's, …) fills "Lat" / "Long" with state-plane feet, which put every point off
+  // the map, and once a "latitude" of 315,450 (a whole number of turns plus 90°) sent the grid
+  // search into a loop that hung the loader for hours (Sep 30).
   const a = f.attributes;
   const lat = latField ? num(a[latField]) : null;
   const lng = lngField ? num(a[lngField]) : null;
-  if (lat !== null && lng !== null && lat !== 0 && lng !== 0) return { lat, lng };
+  if (lat !== null && lng !== null && lat !== 0 && lng !== 0 && isDegrees(lat, lng))
+    return { lat, lng };
   const g = f.geometry;
-  if (g && typeof g.x === "number" && typeof g.y === "number") {
+  if (g && typeof g.x === "number" && typeof g.y === "number" && isFinite(g.x) && isFinite(g.y)) {
     const [lng2, lat2] = mercatorToLngLat([g.x, g.y]);
-    return { lat: lat2, lng: lng2 };
+    if (isDegrees(lat2, lng2)) return { lat: lat2, lng: lng2 };
   }
   return null;
 }
+
+/** A real WGS84 position (not feet, metres or a blank). */
+const isDegrees = (lat: number, lng: number): boolean =>
+  Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 
 // ── Building footprints (ORNL) ──────────────────────────────────────────────────────────────
 

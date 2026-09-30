@@ -121,6 +121,20 @@ describe("911 address points (owner sample, 2026-09-24)", () => {
     expect(p.lat).toBeCloseTo(37.5556, 3);
     expect(p.lng).toBeCloseTo(-87.2676, 3);
   });
+  it("takes the position from the geometry when the Lat / Long fields are not degrees", () => {
+    // Fleming's 911 file stores state-plane feet in Lat / Long (Sep 30); the geometry is right.
+    const f = structuredClone(points.features![1]!);
+    f.attributes["Lat"] = 315450;
+    f.attributes["Long"] = 1836884.875;
+    f.geometry = { x: -9312000, y: 4640000 }; // web mercator, roughly 38.4°N 83.65°W
+    const p = addressPointFromFeature(f)!;
+    expect(p.lat).toBeCloseTo(38.4, 0);
+    expect(p.lng).toBeCloseTo(-83.65, 0);
+    // No geometry and no real degrees: no point at all rather than one off the map.
+    const bare = structuredClone(f);
+    delete (bare as { geometry?: unknown }).geometry;
+    expect(addressPointFromFeature(bare)).toBeNull();
+  });
 });
 
 describe("facility layers (Schools sample, 2026-09-24)", () => {
