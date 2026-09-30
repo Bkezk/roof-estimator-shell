@@ -77,7 +77,18 @@ describe("newBidFromSeed (moved from the estimate route's ?takeoff= handler)", (
         designTable: 60,
       },
     ]);
-    expect(b.parapets).toEqual([{ id: "p1", name: "North", lengthFt: 80 }]);
+    // Finding #3: the wall takes the bid's parapet defaults exactly as "Add parapet" does (deck
+    // from the section defaults, wall type, the Setup's parapet attachment).
+    expect(b.parapets).toEqual([
+      {
+        id: "p1",
+        name: "North",
+        lengthFt: 80,
+        deckType: "Steel",
+        wallType: 4,
+        attachment: "adhered",
+      },
+    ]);
     expect(b.curbs).toEqual([{ id: "c1", name: "RTU", quantity: 2, widthIn: 48, lengthIn: 96 }]);
     expect(b.accessoriesCalc).toEqual({
       vents: { delta: { White: 2 }, adjustPct: 0 },

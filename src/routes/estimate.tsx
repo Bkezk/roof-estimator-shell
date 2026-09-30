@@ -54,7 +54,7 @@ import {
   bidAccountFromTakeoff,
   bidSeedFromTakeoff,
 } from "@/lib/takeoff/create-bid";
-import { newBidFromSeed } from "@/lib/takeoff/seed-to-bid";
+import { newBidFromSeed, parapetFromDefaults } from "@/lib/takeoff/seed-to-bid";
 import { readPlanSwiftHandoff } from "@/lib/planswift/handoff";
 import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
@@ -1163,6 +1163,15 @@ function EstimatePage() {
   // drawing cannot place by itself is listed in the notice with its numbers.
   const getTakeoffFn = useServerFn(getTakeoff);
   const saveTakeoffFn = useServerFn(saveTakeoff);
+  // The factories a takeoff / PlanSwift seed builds its items with: a seeded wall also takes the
+  // labor template's parapet adjust, like "Add parapet" (the bid's parapet material defaults are
+  // applied by the seed step itself — `parapetFromDefaults`).
+  const seedFactories = () => ({
+    newSection,
+    newParapet: (d: Partial<ParapetInput>) =>
+      newParapet({ adjustLaborPct: seedParapetAdjust(templateDeltas), ...d }),
+    newCurb,
+  });
   const { data: takeoffRow, error: takeoffError } = useQuery({
     queryKey: ["takeoff-seed", takeoffParam],
     queryFn: () => getTakeoffFn({ data: { id: takeoffParam! } }),
@@ -1234,14 +1243,19 @@ function EstimatePage() {
             curbs,
             pipeStacks: accessoriesCalc.pipeStacks,
             drains: accessoriesCalc.drains,
+            notes: customer.notes,
+            parapetDefaults,
+            sectionDefaults,
           },
           seed,
-          { newSection, newParapet, newCurb },
+          seedFactories(),
         );
         setSections(r.sections.map((x) => ({ ...x, layers: sectionLayers(x) })));
         setParapets(r.parapets);
         setCurbs(r.curbs);
         setAccessoriesCalc((prev) => ({ ...prev, pipeStacks: r.pipeStacks, drains: r.drains }));
+        // The takeoff Setup's notes, carried once into the bid's notes.
+        if (r.notes !== customer.notes) setCustomer((c) => ({ ...c, notes: r.notes }));
         setTakeoffInfo({
           takeoffId: takeoffRow.id,
           takeoffName: takeoffRow.name,
@@ -1275,11 +1289,7 @@ function EstimatePage() {
         unmapped: seed.unmapped,
       };
       const merged: SavedBidState = {
-        ...newBidFromSeed({ ...saved, sectionDefaults }, seed, {
-          newSection,
-          newParapet,
-          newCurb,
-        }),
+        ...newBidFromSeed({ ...saved, sectionDefaults }, seed, seedFactories()),
         takeoffInfo: info,
       };
       hydrateSaved(merged, {});
@@ -1337,11 +1347,7 @@ function EstimatePage() {
     }
     try {
       const { seed, account, bidName: name } = planswiftHandoff;
-      const merged = savedFromPlanSwiftSeed({ ...saved, sectionDefaults }, seed, {
-        newSection,
-        newParapet,
-        newCurb,
-      });
+      const merged = savedFromPlanSwiftSeed({ ...saved, sectionDefaults }, seed, seedFactories());
       hydrateSaved(merged, {});
       setBidId(undefined);
       if (account) linkFromTakeoff(account.id, account.label, account.siteId);
@@ -4497,22 +4503,9 @@ function EstimatePage() {
                   newParapet({
                     // Legacy Parapet ctor: a new wall seeds AdjustLabor from Template.ParapetsLabor.
                     adjustLaborPct: seedParapetAdjust(templateDeltas),
-                    // Setup "1. Deck Type" / "2. Wall Type" seed every new wall.
-                    deckType: sectionDefaults.deckType,
-                    wallType: parapetDefaults.wallType ?? 4,
-                    ...(parapetDefaults.roofSystem
-                      ? { roofSystem: parapetDefaults.roofSystem }
-                      : {}),
-                    ...(parapetDefaults.attachment
-                      ? { attachment: parapetDefaults.attachment }
-                      : {}),
-                    ...(parapetDefaults.membraneAdhesiveName
-                      ? { membraneAdhesiveName: parapetDefaults.membraneAdhesiveName }
-                      : {}),
-                    ...(parapetDefaults.thicknessMil !== undefined
-                      ? { thicknessMil: parapetDefaults.thicknessMil }
-                      : {}),
-                    ...(parapetDefaults.color ? { color: parapetDefaults.color } : {}),
+                    // Setup "1. Deck Type" / "2. Wall Type" / "5. Parapets Material" seed every
+                    // new wall (the same defaults a wall seeded from a takeoff starts from).
+                    ...parapetFromDefaults(parapetDefaults, sectionDefaults.deckType),
                   })
                 }
               />

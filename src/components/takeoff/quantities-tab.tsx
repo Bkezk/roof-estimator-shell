@@ -207,7 +207,22 @@ export function QuantitiesTab(props: {
                 : undefined
             }
           />
-          <Stat label="Perimeter" value={`${fmtNum(q.totals.perimeterFt)} ft`} />
+          <Stat
+            label="Perimeter"
+            value={`${fmtNum(q.totals.slopedPerimeterFt)} ft`}
+            note={
+              [
+                Math.abs(q.totals.slopedPerimeterFt - q.totals.perimeterFt) > 0.005
+                  ? `${fmtNum(q.totals.perimeterFt)} ft on plan (rakes sloped)`
+                  : null,
+                q.totals.cutoutWallFt > 0
+                  ? `+ ${fmtNum(q.totals.cutoutWallFt)} ft of penthouse walls`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join("; ") || undefined
+            }
+          />
           <Stat label="Parapet" value={`${fmtNum(q.totals.parapetFt)} ft`} />
           <Stat label="Counted items" value={String(countTotal)} />
         </div>
@@ -245,7 +260,19 @@ export function QuantitiesTab(props: {
                       </span>
                     )}
                   </C>
-                  <C right>{fmtNum(s.perimeterFt)}</C>
+                  <C right>
+                    {fmtNum(s.slopedPerimeterFt)}
+                    {s.rakeSides.length > 0 && (
+                      <span className="block text-[10px] text-muted-foreground" title={s.rakeNote}>
+                        plan {fmtNum(s.perimeterFt)} · rakes sloped
+                      </span>
+                    )}
+                    {s.cutoutPerimetersFt.length > 0 && (
+                      <span className="block text-[10px] text-muted-foreground">
+                        penthouse walls {fmtNum(s.cutoutPerimetersFt.reduce((t, l) => t + l, 0))}
+                      </span>
+                    )}
+                  </C>
                   <C right>{s.edgeLengthsFt.length}</C>
                   <C right>
                     {fmtNum(s.section.length)} × {fmtNum(s.section.width)}

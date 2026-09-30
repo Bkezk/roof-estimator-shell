@@ -147,6 +147,9 @@ describe("bidSeedFromTakeoff", () => {
         deckType: "Wood",
         verticalInches: 30,
         fromTakeoff: true,
+        // The takeoff object it came from: an update matches by it (a drawn line with no
+        // "Edge from this area" has no area sides to remember).
+        takeoffObjectId: "w",
       },
     ]);
     expect(seed.curbs).toEqual([
@@ -157,6 +160,8 @@ describe("bidSeedFromTakeoff", () => {
         lengthIn: 96,
         deckType: "Steel",
         fromTakeoff: true,
+        takeoffObjectId: "k1",
+        takeoffObjectIds: ["k1"],
       },
     ]);
     expect(seed.pipeStacks).toEqual([
@@ -168,6 +173,8 @@ describe("bidSeedFromTakeoff", () => {
         size: 3,
         quantity: 1,
         adjustPct: 0,
+        takeoffObjectId: "p1",
+        takeoffObjectIds: ["p1"],
       },
     ]);
   });
@@ -191,6 +198,8 @@ describe("bidSeedFromTakeoff", () => {
         bootSize: '4" Boot',
         ringSize: '4" Ring',
         adjustPct: 0,
+        takeoffObjectId: "d1",
+        takeoffObjectIds: ["d1", "d2"],
       },
     ]);
     expect(s2.unmapped.map((u) => u.label)).toEqual(["South gutter: 100 ft"]);
@@ -202,7 +211,7 @@ describe("bidSeedFromTakeoff", () => {
     expect(seed.unmapped[0]!.detail).toContain("Roof Drains");
     expect(seed.unmapped[1]!.detail).toContain("Gutters");
     expect(seed.summary).toBe(
-      'From takeoff "Test job": 1 section, 4000 sq ft, 280 ft of roof edge; 100 ft of parapet; 2 Drain, 1 Plumbing vent, 1 RTU curb.',
+      'From takeoff "Test job": 1 section, 4000 sq ft, 280 ft of roof edge; 100 ft of parapet; 2 drains, 1 curb, 1 pipe.',
     );
   });
 });
@@ -300,7 +309,9 @@ describe("applyTakeoffToBid", () => {
     expect([main.length, main.width]).toEqual([120, 40]);
     expect(main.deckType).toBe("Concrete"); // hand edit kept
     expect(main.fastenerOc).toBe(12);
-    expect(main.edges?.every((e) => !e.isPerimeter)).toBe(true); // new drawing had no edge options
+    // The new drawing had no edge options; the bid's edges were never edited by hand, so they
+    // follow the takeoff (an edited detail would be kept — see e2e-workflow.test.ts §4).
+    expect(main.edges?.every((e) => !e.isPerimeter)).toBe(true);
     expect(r.sections[2]!.measured?.areaSqFt).toBe(600);
     expect(r.parapets.map((p) => [p.name, p.lengthFt])).toEqual([
       ["North wall", 120],
@@ -308,17 +319,18 @@ describe("applyTakeoffToBid", () => {
     ]);
     expect(r.parapets[0]!.predrill).toBe(true);
     expect(r.curbs).toEqual([]);
+    // The takeoff's pipe row is updated in place (#8), the hand-added one kept.
     expect(r.pipeStacks.map((p) => [p.id, p.quantity])).toEqual([
-      ["manual-1", 4],
       ["takeoff-pipe-1", 2],
+      ["manual-1", 4],
     ]);
     expect(r.drains).toEqual([]);
     expect(r.changes).toEqual([
-      'Re-measured section "Main roof".',
-      'Added section "Wing" from the drawing.',
-      'Re-measured parapet "North wall".',
+      "Main roof: 4,000 → 4,800 sq ft; perimeter 280 → 320 ft.",
+      'Added section "Wing" (600 sq ft).',
+      "North wall: 100 → 120 ft.",
       'Removed curb "RTU curb" (no longer in the drawing).',
-      "Pipe stacks from the drawing: 1 row(s).",
+      "Pipe stacks (3 in): 1 → 2.",
     ]);
   });
 });

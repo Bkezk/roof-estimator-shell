@@ -323,6 +323,13 @@ export function planSwiftSeed(
       slopeFactor: 1,
       perimeterFt: rect.perimeterFt,
       edgeLengthsFt: edges.map((e) => e.lengthFt),
+      slopedEdgeLengthsFt: edges.map((e) => e.lengthFt),
+      slopedPerimeterFt: rect.perimeterFt,
+      rakeSides: [],
+      edgeRoles: edges.map(() => null),
+      outlineAreaSqFt: area,
+      cutoutAreaSqFt: 0,
+      cutoutPerimetersFt: [],
       section: {
         length: rect.length,
         width: rect.width,
@@ -392,7 +399,7 @@ export function planSwiftSeed(
         if (d.lengthIn !== undefined) k.lengthIn = d.lengthIn;
         if (d.widthIn === undefined || d.lengthIn === undefined)
           warnings.push(
-            `${k.name}: no W × L size in the name — the curb starts at the 1 × 1 in default; enter its size on the Curbs screen.`,
+            `${k.name}: no W × L size in the name — the curb starts with a blank size; enter its size on the Curbs screen.`,
           );
         counts.push(k);
         curbRows.push(c);
@@ -458,7 +465,9 @@ export function planSwiftSeed(
       roofAreaSqFt: sections.reduce((s, x) => s + x.areaSqFt, 0),
       planAreaSqFt: sections.reduce((s, x) => s + x.planAreaSqFt, 0),
       perimeterFt: sections.reduce((s, x) => s + x.perimeterFt, 0),
+      slopedPerimeterFt: sections.reduce((s, x) => s + x.perimeterFt, 0),
       parapetFt,
+      cutoutWallFt: 0,
     },
   };
   const base = bidSeedFromTakeoff(setup, q, {

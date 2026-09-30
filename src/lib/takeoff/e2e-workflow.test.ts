@@ -6,9 +6,10 @@
  * does, run the estimating engine (`buildBidInput` → `buildEstimateInputs` → `computeEstimate` →
  * `buildReviewLedger`), then change the drawing and re-apply it (`applyTakeoffToBid`).
  *
- * The assertions pin what the code does TODAY. Lines marked "ESTIMATOR:" are places where the
- * result differs from what an estimator would expect; they document the gap rather than hide it,
- * so a future fix shows up here as a (welcome) failing assertion to update.
+ * The assertions pin what the code does. The test drive's findings were first pinned here as
+ * "ESTIMATOR:" gaps; each is now fixed in the hand-off layer (create-bid.ts, seed-to-bid.ts,
+ * model.ts, edge-lines.ts — the estimating engine is untouched) and its assertion flipped to the
+ * expected behaviour, marked "FIXED (#n):" with the finding's number.
  */
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +34,8 @@ import { buildReviewLedger } from "@/lib/engine/review-ledger";
 import { buildBidInput, emptyCustomer, type SavedBidState } from "@/lib/proposal-bid";
 
 import { applyTakeoffToBid, bidAccountFromTakeoff, bidSeedFromTakeoff } from "./create-bid";
+import { followAreaEdits } from "./edge-lines";
+import { newBidFromSeed as seedToBid } from "./seed-to-bid";
 import {
   takeoffQuantities,
   type ObjectKind,
@@ -272,8 +275,14 @@ function drawTakeoff(opts: { grow?: boolean; regenerateEdges?: boolean } = {}): 
   add("count", [[80, 55]], { count: "other" });
 
   if (opts.grow) {
-    // Drag Section 1's east corners out to 120 ft (the vertex drag changes only the area).
-    objs = objs.map((o) => (o.id === s1.id ? { ...o, points: SECTION1_GROWN } : o));
+    // Drag Section 1's east corners out to 120 ft. The editor commits the drag through
+    // `followAreaEdits` (editor.tsx `commit`): the "Edge from this area" lines follow the sides.
+    const before = objs;
+    objs = followAreaEdits(
+      before,
+      objs.map((o) => (o.id === s1.id ? { ...o, points: SECTION1_GROWN } : o)),
+      () => 1,
+    ).objects;
     if (opts.regenerateEdges) {
       // Delete the old edge lines, then "Edge from this area" again on the grown outline.
       objs = objs.filter(
@@ -323,22 +332,16 @@ const blankSaved = (): SavedBidState => ({
   parapetDefaults: { wallType: 4 },
 });
 
-/** src/routes/estimate.tsx:1233-1257 — the NEW-bid branch of the `?takeoff=` handler. */
+/**
+ * The NEW-bid branch of the `?takeoff=` handler: `newBidFromSeed` (seed-to-bid.ts, which the
+ * route calls) with the route's factories, then hydrateSaved (estimate.tsx) normalizing layers.
+ */
 function newBidFromSeed(saved: SavedBidState, seed: ReturnType<typeof bidSeedFromTakeoff>) {
-  const secDefaults = { ...saved.sectionDefaults!, ...seed.sectionDefaults };
-  const merged: SavedBidState = {
-    ...saved,
-    ...(seed.roofSystem ? { roofSystem: seed.roofSystem } : {}),
-    ...(seed.attachment ? { attachment: seed.attachment as SavedBidState["attachment"] } : {}),
-    ...(seed.membraneAdhesiveName ? { membraneAdhesiveName: seed.membraneAdhesiveName } : {}),
-    sections: seed.sections.map((o) => newSection({ ...secDefaults, ...o })),
-    parapets: seed.parapets.map((o) => newParapet(o)),
-    curbs: seed.curbs.map((o) => newCurb(o)),
-    accessoriesCalc: { ...saved.accessoriesCalc, pipeStacks: seed.pipeStacks, drains: seed.drains },
-    sectionDefaults: secDefaults,
-    parapetDefaults: { ...saved.parapetDefaults, ...seed.parapetDefaults },
-  };
-  // hydrateSaved (estimate.tsx:981) normalizes each section's layers.
+  const merged = seedToBid({ ...saved, sectionDefaults: saved.sectionDefaults! }, seed, {
+    newSection,
+    newParapet,
+    newCurb,
+  });
   return { ...merged, sections: merged.sections.map((s) => ({ ...s, layers: sectionLayers(s) })) };
 }
 
@@ -444,7 +447,14 @@ describe("1. Quantities", () => {
     expect(s2.planAreaSqFt).toBe(1200);
     expect(s2.slopeFactor).toBeCloseTo(1.0541, 4);
     expect(s2.areaSqFt).toBeCloseTo(1264.91, 2);
-    expect(s2.perimeterFt).toBe(140); // plan perimeter (rakes not sloped — see check 2)
+    expect(s2.perimeterFt).toBe(140); // plan perimeter
+    // FIXED (#5): the rakes (the two shorter sides of the rectangle, assumed — the takeoff has
+    // no eave direction) run up the 4:12 slope: 30 × 1.0541 = 31.62 ft each.
+    expect(s2.slopedEdgeLengthsFt.map((l) => Math.round(l * 100) / 100)).toEqual([
+      40, 31.62, 40, 31.62,
+    ]);
+    expect(s2.slopedPerimeterFt).toBeCloseTo(143.25, 2);
+    expect(s2.rakeNote).toBe("rakes assumed: the two shorter sides (B, D) run up the slope");
     // Section 3: L-shape, 6 sides.
     const s3 = byName("Section 3");
     expect(s3.areaSqFt).toBe(1400);
@@ -453,6 +463,7 @@ describe("1. Quantities", () => {
     expect(q.totals.roofAreaSqFt).toBeCloseTo(8584.91, 2);
     expect(q.totals.planAreaSqFt).toBe(8520);
     expect(q.totals.perimeterFt).toBe(640);
+    expect(q.totals.slopedPerimeterFt).toBeCloseTo(643.25, 2);
   });
 
   it("linears per role (Edge from this area = one gutter run + one 3-side parapet run)", () => {
@@ -477,9 +488,11 @@ describe("1. Quantities", () => {
       "Line 1",
     ]);
     expect(q.totals.parapetFt).toBe(220);
-    // ESTIMATOR: the penthouse cut-out has 36 ft of wall around it; it is subtracted from the
-    // area but its perimeter is not reported anywhere (no parapet / curb / linear for it).
+    // FIXED (#12): the penthouse cut-out's 36 ft of wall is reported with its section (and not
+    // invented as a parapet or linear).
     expect(q.linears.some((l) => l.lengthFt === 36)).toBe(false);
+    expect(q.sections[0]!.cutoutPerimetersFt).toEqual([36]);
+    expect(q.totals.cutoutWallFt).toBe(36);
   });
 
   it("counts per role (one count session = one row)", () => {
@@ -507,6 +520,12 @@ describe("2. Seed → bid", () => {
   it("three bid sections with the measured layout rectangle and drawn edges", () => {
     expect(bid.sections.map((s) => s.name)).toEqual(["Section 1", "Section 2", "Section 3"]);
     // Section 1: the cut-out shrinks the layout rectangle, not a side: 101.91 × 58.09 = 5920.
+    // FIXED (#13): the bid section has no deduction field (BidSectionInput), so length × width
+    // must carry the net area; the true sides stay and the note says the layout is the net-area
+    // equivalent of the 100 × 60 outline.
+    expect(sec("Section 1").notes).toBe(
+      "Measured in Takeoff: 5920 sq ft (6000 sq ft outline less 80 sq ft of cut-outs; layout 101.9 × 58.1 ft is the net-area equivalent, the sides stay as drawn), 320 ft around, 4 sides; penthouse walls 36 ft (not seeded); parapet wall sides B, C, D; gutter side A.",
+    );
     expect(sec("Section 1").length).toBeCloseTo(101.909, 3);
     expect(sec("Section 1").width).toBeCloseTo(58.091, 3);
     expect(sec("Section 1").length * sec("Section 1").width).toBeCloseTo(5920, 6);
@@ -520,12 +539,15 @@ describe("2. Seed → bid", () => {
     expect(sec("Section 2").length).toBe(40);
     expect(sec("Section 2").width).toBeCloseTo(31.623, 3);
     expect(sec("Section 2").notes).toBe(
-      "Measured in Takeoff: 1264.9 sq ft (1200 sq ft on plan at 4:12, ×1.054), 140 ft around, 4 sides.",
+      "Measured in Takeoff: 1264.9 sq ft (1200 sq ft on plan at 4:12, ×1.054), 143.2 ft around (140 ft on plan; rakes assumed: the two shorter sides (B, D) run up the slope), 4 sides.",
     );
-    // ESTIMATOR: the rake edges of a pitched roof run up the slope (31.62 ft), but the bid's
-    // edges, perimeter and blocking keep the plan length (30 ft) — edge metal short by 5.4%.
-    expect(sec("Section 2").edges!.map((e) => e.lengthFt)).toEqual([40, 30, 40, 30]);
-    expect(sec("Section 2").edges![1]!.blockingFt).toBe(30);
+    // FIXED (#5): the rake edges run up the slope (31.62 ft) — their length, perimeter run and
+    // blocking are sloped; the eaves (A, C) keep the plan length.
+    expect(sec("Section 2").edges!.map((e) => Math.round(e.lengthFt * 1000) / 1000)).toEqual([
+      40, 31.623, 40, 31.623,
+    ]);
+    expect(sec("Section 2").edges![1]!.blockingFt).toBe(31.62);
+    expect(sec("Section 2").edges![1]!.perimLengthFt).toBeCloseTo(31.623, 3);
     // Section 3: the L keeps its six drawn sides; the re-entrant corner is not enhanced.
     expect([sec("Section 3").length, sec("Section 3").width]).toEqual([70, 20]);
     expect(sec("Section 3").edges!.map((e) => e.side)).toEqual(["1", "2", "3", "4", "5", "6"]);
@@ -542,21 +564,31 @@ describe("2. Seed → bid", () => {
       });
   });
 
-  it("linear roles do NOT reach the section edges: every side gets the setup edge default", () => {
-    // ESTIMATOR: Section 1's sides B, C, D are parapet walls and side A carries a gutter, yet
-    // all four keep the setup's '4" Fascia' termination, perimeter flag and wood blocking.
+  it("linear roles reach the section edges: parapet sides and the gutter side", () => {
+    // FIXED (#1): Section 1's sides B, C, D run along the parapet line → no roof-edge
+    // termination and no blocking (the wall is flashed on the Parapets screen; the perimeter
+    // flag stays — the wind zone runs along a walled edge too); side A runs along the gutter
+    // line → the drip edge a gutter hangs from. Matched geometrically, side by side.
     const s1 = sec("Section 1");
     expect(s1.edges!.map((e) => [e.side, e.termination, e.isPerimeter, e.blockingFt])).toEqual([
-      ["A", '4" Fascia', true, 100],
-      ["B", '4" Fascia', true, 60],
-      ["C", '4" Fascia', true, 100],
-      ["D", '4" Fascia', true, 60],
+      ["A", '4" Drip Edge', true, 100],
+      ["B", "No Termination", true, 0],
+      ["C", "No Termination", true, 0],
+      ["D", "No Termination", true, 0],
     ]);
-    // So the bid orders fascia and blocking along the parapet walls too: 640 ft of fascia for a
-    // building with 220 ft of parapet and 100 ft of gutter edge on Section 1.
+    // So the bid no longer orders fascia or blocking along the 220 ft of parapet wall.
     const edgeSum = summarizeEdges(bid.sections.map((s) => s.edges ?? []));
-    expect(edgeSum.terminations).toEqual([{ termination: '4" Fascia', totalFt: 640 }]);
-    expect(edgeSum.blockingFt).toBe(640);
+    expect(
+      edgeSum.terminations.map((t) => [t.termination, Math.round(t.totalFt * 100) / 100]),
+    ).toEqual([
+      ['4" Drip Edge', 100],
+      ['4" Fascia', 323.25],
+    ]);
+    expect(edgeSum.blockingFt).toBeCloseTo(423.24, 2);
+    // Expansion joint / walkway / other lines leave the edges alone (Sections 2 and 3 keep the
+    // setup's fascia everywhere).
+    for (const n of ["Section 2", "Section 3"])
+      expect(sec(n).edges!.every((e) => e.termination === '4" Fascia')).toBe(true);
   });
 
   it("the parapet run becomes one parapet, from the linear (not from the section)", () => {
@@ -577,22 +609,26 @@ describe("2. Seed → bid", () => {
       attachment: "adhered",
       membraneAdhesiveName: "Water Based Adhesive",
     });
-    // ESTIMATOR: … but the seeded wall itself did not: "Add parapet" on the Parapets screen
-    // (estimate.tsx:4379) copies roofSystem / attachment / adhesive from parapetDefaults, the
-    // seed path (estimate.tsx:1247) does not, so this wall prices as the bid's MECHANICAL system
-    // while the Setup says parapets are ADHERED.
-    expect(p.attachment).toBeUndefined();
-    expect(p.roofSystem).toBeUndefined();
-    expect(p.membraneAdhesiveName).toBeUndefined();
+    // FIXED (#3): … and the seeded wall takes them too, exactly as "Add parapet" on the Parapets
+    // screen does (`parapetFromDefaults`): it prices as the Setup's ADHERED parapet system.
+    expect(p.attachment).toBe("adhered");
+    expect(p.roofSystem).toBe("Duro-Last");
+    expect(p.membraneAdhesiveName).toBe("Water Based Adhesive");
+    expect(p.wallType).toBe(4);
   });
 
-  it("curbs: one curb row of 3, with the 1 in × 1 in factory footprint", () => {
+  it("curbs: one curb row of 3 with a BLANK size, and the notice says so", () => {
+    // FIXED (#4): a curb counted without a size is carried with a blank size (the Curbs screen
+    // marks 0 as missing), never the 1" × 1" factory default, and the notice lists it.
     expect(
       bid.curbs!.map((c) => [c.name, c.quantity, c.widthIn, c.lengthIn, c.deckType, c.curbType]),
-    ).toEqual([["Curb 1", 3, 1, 1, "Steel", "Open"]]);
-    // ESTIMATOR: a curb counted without a size (the count tool asks for none) lands as a
-    // 1" × 1" curb — 0.33 lineal ft each — and prices as such, with no warning.
-    expect(curbLinealFt(bid.curbs![0]!)).toBeCloseTo(0.33, 2);
+    ).toEqual([["Curb 1", 3, 0, 0, "Steel", "Open"]]);
+    expect(curbLinealFt(bid.curbs![0]!)).toBe(0);
+    expect(seed.unmapped).toContainEqual({
+      label: "3 curbs, size not measured",
+      detail:
+        '"Curb 1" — on the Curbs screen with a blank size (it prices as almost nothing until one is entered); enter its width × length there.',
+    });
   });
 
   it("drains → one Roof Drains row; pipes without a size, vents, scuppers, other → the notice", () => {
@@ -605,15 +641,23 @@ describe("2. Seed → bid", () => {
         bootSize: '4" Drain Boot',
         ringSize: '4" Clamping Ring',
         adjustPct: 0,
+        takeoffObjectId: "o9",
+        takeoffObjectIds: ["o9"],
       },
     ]);
-    // ESTIMATOR: pipes are drawn without a size (the count tool never asks), so none reach
-    // Accessories › Pipe Stacks.
+    // FIXED (#6): these pipes were counted without a size, so they go to the notice as "size
+    // not measured" (a sized pipe count seeds Pipe Stacks — see the next check).
     expect(bid.accessoriesCalc!.pipeStacks).toEqual([]);
     expect(seed.unmapped).toEqual([
       {
-        label: "6 × Pipe 1",
-        detail: "Pipe stack — add on Accessories › Pipe Stacks (no size was given).",
+        label: "3 curbs, size not measured",
+        detail:
+          '"Curb 1" — on the Curbs screen with a blank size (it prices as almost nothing until one is entered); enter its width × length there.',
+      },
+      {
+        label: "6 pipes, size not measured",
+        detail:
+          '"Pipe 1" — add on Accessories › Pipe Stacks with its size (or give the pipe count a size in the takeoff).',
       },
       { label: "2 × Vent 1", detail: "Vent — add on Accessories › Vents." },
       { label: "2 × Scupper 1", detail: "Scupper — add on Metals or Non-DL, as quoted." },
@@ -625,18 +669,41 @@ describe("2. Seed → bid", () => {
       },
       { label: "Walkway 1: 25 ft", detail: "Walkway pad — add on Accessories › Walk Pads." },
       { label: "Line 1: 12 ft", detail: "Other — add as a Non-DL or custom line." },
+      // FIXED (#12): the penthouse walls are offered, not seeded.
+      {
+        label: "Section 1: 36 ft of penthouse wall (not seeded)",
+        detail:
+          "Cut-out walls (penthouse / well) — flash them as a parapet on the Parapets screen, or a curb, as quoted.",
+      },
     ]);
   });
 
+  it("a pipe count with a size (the Pipe role's quick pick) seeds Accessories › Pipe Stacks", () => {
+    // FIXED (#6): the count tool's Pipe role takes a size (Objects tab, quick picks 2/3/4/6").
+    const sized = objects.map((o) =>
+      o.kind === "count" && o.attrs.role === "pipe"
+        ? { ...o, attrs: { ...o.attrs, sizeIn: 4 } }
+        : o,
+    );
+    const s = bidSeedFromTakeoff(setup, takeoffQuantities([page], sized));
+    const b = newBidFromSeed(blankSaved(), s);
+    expect(b.accessoriesCalc!.pipeStacks!.map((p) => [p.id, p.size, p.quantity, p.usage])).toEqual([
+      ["takeoff-pipe-1", 4, 6, "Plumbing"],
+    ]);
+    expect(s.unmapped.some((u) => u.label.includes("pipe"))).toBe(false);
+  });
+
   it("the summary, the customer link, the setup notes", () => {
-    // ESTIMATOR: the summary lists counts by their default object NAME ("4 Drain 1").
+    // FIXED (#13): the summary counts by role ("4 drains"), not by default object name; the roof
+    // edge is the built one (rakes sloped).
     expect(seed.summary).toBe(
-      'From takeoff "Maple St. warehouse": 3 sections, 8584.9 sq ft, 640 ft of roof edge; 220 ft of parapet; 4 Drain 1, 3 Curb 1, 6 Pipe 1, 2 Vent 1, 2 Scupper 1, 1 Item 1.',
+      'From takeoff "Maple St. warehouse": 3 sections, 8584.9 sq ft, 643.2 ft of roof edge; 220 ft of parapet; 4 drains, 3 curbs, 6 pipes, 2 vents, 2 scuppers, 1 other item.',
     );
     expect(seed.accountId).toBe(ACCOUNT);
     expect(bidAccountFromTakeoff(null, ACCOUNT)).toBe(ACCOUNT);
-    // ESTIMATOR: the setup's free-text notes are not carried to the bid (seed, summary, notes).
-    expect(JSON.stringify(seed)).not.toContain("existing BUR");
+    // FIXED (#10): the setup's free-text notes reach the bid's notes.
+    expect(seed.setupNotes).toBe("Re-roof over existing BUR.");
+    expect(bid.customer.notes).toBe("Takeoff notes: Re-roof over existing BUR.");
   });
 });
 
@@ -659,12 +726,16 @@ describe("3. Engine on the seeded bid", () => {
 
   it("roof area, perimeter and parapet footage match the takeoff", () => {
     expect(est.roofSqFootage).toBeCloseTo(q.totals.roofAreaSqFt, 6);
-    expect(sum(bidInput.sections.flatMap((s) => (s.edges ?? []).map((e) => e.lengthFt)))).toBe(
-      q.totals.perimeterFt,
-    );
+    // The bid's edges are the built roof edge (Section 2's rakes sloped, #5).
+    expect(
+      sum(bidInput.sections.flatMap((s) => (s.edges ?? []).map((e) => e.lengthFt))),
+    ).toBeCloseTo(q.totals.slopedPerimeterFt, 9);
     // Perimeter-enhancement zone length = sides less one 3 ft enhancement width per marked corner
-    // on each side: 640 − 2 × 3 × (4 + 4 + 5) = 562.
-    expect(sum(bidInput.sections.map((s) => resolveSectionZones(s).perimLengthFt))).toBe(562);
+    // on each side: 643.25 − 2 × 3 × (4 + 4 + 5) = 565.25.
+    expect(sum(bidInput.sections.map((s) => resolveSectionZones(s).perimLengthFt))).toBeCloseTo(
+      565.25,
+      2,
+    );
     expect(sum(bidInput.parapets.map((p) => p.lengthFt))).toBe(q.totals.parapetFt);
   });
 
@@ -677,24 +748,37 @@ describe("3. Engine on the seeded bid", () => {
     expect(row("Roof Sections")).toBeCloseTo(13171.66, 2);
     expect(row("Parapets")).toBe(888);
     // Drains sit in accessoriesCalc; they are priced only when the admin data carries the §12
-    // accessories reference lists, which this fixture does not.
-    expect(row("Accessories")).toBe(0);
-    expect(est.money.grandTotal).toBeCloseTo(25827.95, 2);
+    // accessories reference lists, which this fixture does not. The $240 is the wall adhesive
+    // of the ADHERED parapet (#3: the seeded wall takes the Setup's parapet material).
+    expect(row("Accessories")).toBe(240);
+    // Was $25,827.95 before the fixes: the seeded wall now prices as the Setup's adhered system
+    // (+$369.24, #3); the blank curb size (#4) and the edge changes (#1, #5) make up the rest.
+    expect(est.money.grandTotal).toBeCloseTo(26188.86, 2);
   });
 
-  it("the 1 in × 1 in seeded curbs price as almost nothing", () => {
-    // ESTIMATOR: 3 unsized curbs = 0.525 h in all; the same 3 curbs at a typical 48 × 96 in
-    // RTU footprint are 9.4 h. Nothing warns that the curb has no size.
-    expect(est.curbLaborHours).toBeCloseTo(0.525, 6);
-    const sized = buildEstimateInputs(
-      { ...bidInput, curbs: bidInput.curbs.map((c) => ({ ...c, widthIn: 48, lengthIn: 96 })) },
-      admin,
+  it("unsized curbs are flagged; a size measured in the takeoff prices the real curb", () => {
+    // FIXED (#4): 3 unsized curbs carry a blank size (setup time only, 0.4 h) AND are on the
+    // notice ("3 curbs, size not measured"); the count tool's Curb role now takes W × L × H,
+    // and a measured 48 × 96 × 18 in RTU curb reaches the bid: 9.4 h, wrap height 18 in.
+    expect(est.curbLaborHours).toBeCloseTo(0.4, 6);
+    expect(seed.unmapped.map((u) => u.label)).toContain("3 curbs, size not measured");
+    const measured = objects.map((o) =>
+      o.kind === "count" && o.attrs.role === "curb"
+        ? { ...o, attrs: { ...o.attrs, widthIn: 48, lengthIn: 96, heightIn: 18 } }
+        : o,
     );
-    expect(computeEstimate(sized.inputs).curbLaborHours).toBeCloseTo(9.4, 6);
+    const s = bidSeedFromTakeoff(setup, takeoffQuantities([page], measured));
+    const b = buildBidInput(newBidFromSeed(blankSaved(), s));
+    expect(b.curbs.map((c) => [c.widthIn, c.lengthIn, c.dimCIn])).toEqual([[48, 96, 18]]);
+    expect(computeEstimate(buildEstimateInputs(b, admin).inputs).curbLaborHours).toBeCloseTo(
+      9.4,
+      6,
+    );
+    expect(s.unmapped.map((u) => u.label)).not.toContain("3 curbs, size not measured");
     expect(build.warnings).toEqual([]);
   });
 
-  it("a seeded wall and the same wall added by hand price differently", () => {
+  it("a seeded wall and the same wall added by hand price the same", () => {
     // The hand-added wall as the Parapets screen's "Add parapet" builds it (estimate.tsx:4379).
     const { fromTakeoff: _seeded, ...wall } = saved.parapets![0]!;
     const hand = newParapet({
@@ -720,12 +804,13 @@ describe("3. Engine on the seeded bid", () => {
     };
     const seeded = run(saved.parapets![0]!);
     const byHand = run(hand);
-    // ESTIMATOR: same 220 ft wall, same labor, but the seeded wall is billed as the bid's
-    // mechanical system — no wall adhesive ($0 vs $240) and $369.24 less on the bid total.
-    expect([seeded.attachment, byHand.attachment]).toEqual(["mechanical", "adhered"]);
+    // FIXED (#3): same 220 ft wall, same system — the seeded wall is billed as the Setup's
+    // ADHERED parapet system like the hand-added one: same adhesive, same total ($0 gap, was
+    // $369.24).
+    expect([seeded.attachment, byHand.attachment]).toEqual(["adhered", "adhered"]);
     expect(seeded.hours).toBeCloseTo(byHand.hours!, 6);
-    expect([seeded.adhesiveMaterial, byHand.adhesiveMaterial]).toEqual([0, 240]);
-    expect(byHand.grandTotal - seeded.grandTotal).toBeCloseTo(369.24, 2);
+    expect([seeded.adhesiveMaterial, byHand.adhesiveMaterial]).toEqual([240, 240]);
+    expect(byHand.grandTotal - seeded.grandTotal).toBeCloseTo(0, 6);
   });
 });
 
@@ -742,9 +827,14 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
             deckType: "Concrete",
             fastenerOc: 12,
             notes: "Penthouse walls need counterflashing.",
-            // The estimator fixed the parapet sides on the Sections screen.
+            // The estimator changed edge details on the Sections screen: a 2" drip edge on the
+            // gutter side A, 12" ARP along the parapet side B.
             edges: s.edges!.map((e) =>
-              e.side === "A" ? e : { ...e, termination: "No Termination", blockingFt: 0 },
+              e.side === "A"
+                ? { ...e, termination: '2" Drip Edge' }
+                : e.side === "B"
+                  ? { ...e, arpSizeIn: 12 }
+                  : e,
             ),
           }
         : s,
@@ -770,16 +860,19 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
       ],
     },
   };
-  const apply = (objs: TakeoffObject[]) => {
+  const apply = (objs: TakeoffObject[], bid: SavedBidState = edited) => {
     const s2 = bidSeedFromTakeoff(setup, takeoffQuantities([page], objs), { accountId: ACCOUNT });
-    // estimate.tsx:1195 — the update branch.
+    // estimate.tsx — the update branch of the `?takeoff=` handler.
     return applyTakeoffToBid(
       {
-        sections: edited.sections,
-        parapets: edited.parapets,
-        curbs: edited.curbs,
-        pipeStacks: edited.accessoriesCalc!.pipeStacks,
-        drains: edited.accessoriesCalc!.drains,
+        sections: bid.sections,
+        parapets: bid.parapets,
+        curbs: bid.curbs,
+        pipeStacks: bid.accessoriesCalc!.pipeStacks,
+        drains: bid.accessoriesCalc!.drains,
+        notes: bid.customer.notes,
+        parapetDefaults: bid.parapetDefaults,
+        sectionDefaults: bid.sectionDefaults,
       },
       s2,
       { newSection, newParapet, newCurb },
@@ -793,26 +886,38 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     expect(s1.length * s1.width).toBeCloseTo(7120, 6);
     expect(s1.deckType).toBe("Concrete");
     expect(s1.fastenerOc).toBe(12);
-    // ESTIMATOR: the hand-fixed parapet sides are reset to the takeoff's fascia + blocking …
-    expect(s1.edges!.map((e) => e.termination)).toEqual(Array(4).fill('4" Fascia'));
-    // … and the section notes are replaced by the takeoff's measurement line.
-    expect(s1.notes).toBe("Measured in Takeoff: 7120 sq ft, 360 ft around, 4 sides.");
+    // FIXED (#2): the estimator's edge details are kept (the 2" drip edge on A, the ARP on B),
+    // on the re-measured lengths; the parapet sides stay parapet sides …
+    expect(
+      s1.edges!.map((e) => [e.side, e.lengthFt, e.termination, e.arpSizeIn, e.blockingFt]),
+    ).toEqual([
+      ["A", 120, '2" Drip Edge', 0, 120],
+      ["B", 60, "No Termination", 12, 0],
+      ["C", 120, "No Termination", 0, 0],
+      ["D", 60, "No Termination", 0, 0],
+    ]);
+    // … and the section note keeps the estimator's text; only the measurement line is updated.
+    expect(s1.notes).toBe(
+      "Penthouse walls need counterflashing.\nMeasured in Takeoff: 7120 sq ft (7200 sq ft outline less 80 sq ft of cut-outs; layout 121.3 × 58.7 ft is the net-area equivalent, the sides stay as drawn), 360 ft around, 4 sides; penthouse walls 36 ft (not seeded); parapet wall sides B, C, D; gutter side A.",
+    );
     // Curbs keep the hand-set size and style (the takeoff has none), take the count.
     expect(r.curbs.map((c) => [c.quantity, c.widthIn, c.lengthIn, c.curbType])).toEqual([
       [3, 48, 96, "Closed"],
     ]);
   });
 
-  it("the parapet does not follow the grown area unless its edge lines are re-made", () => {
-    // ESTIMATOR: "Edge from this area" lines are independent once made — dragging the area
-    // leaves Parapet 1 at 220 ft while the wall is now 240 ft.
-    const stale = apply(drawTakeoff({ grow: true }));
-    expect(stale.parapets.map((p) => [p.name, p.lengthFt])).toEqual([
-      ["Parapet 1", 220],
-      ["Hand wall", 12],
+  it("the parapet follows the grown area; re-made edge lines keep the wall's edits", () => {
+    // FIXED (#11): dragging the area takes its "Edge from this area" lines along (the editor's
+    // commit), so Parapet 1 is re-measured at 240 ft with its hand-set options.
+    const followed = apply(drawTakeoff({ grow: true }));
+    expect(
+      followed.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId, p.attachment]),
+    ).toEqual([
+      ["Parapet 1", 240, 2, "adhered"],
+      ["Hand wall", 12, undefined, undefined],
     ]);
-    // Re-made (old lines deleted first, so the names come back as "Parapet 1" / "Gutter 1"):
-    // re-measured by name, the wall's hand-set options kept.
+    // Re-made (old lines deleted first — new object ids): FIXED (#7) matched by the area sides
+    // the wall runs along, the wall's hand-set options kept.
     const fresh = apply(drawTakeoff({ grow: true, regenerateEdges: true }));
     expect(fresh.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId, p.attachment])).toEqual([
       ["Parapet 1", 240, 2, "adhered"],
@@ -820,33 +925,41 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
     ]);
   });
 
-  it("drains: the takeoff row is replaced (hand edits on it lost), the hand-added row kept", () => {
+  it("drains: the takeoff row is updated in place (hand edits kept), the hand-added row kept", () => {
     const r = apply(drawTakeoff({ grow: true }));
+    // FIXED (#8): the quantity is updated on the matched row; adjustPct 15 and "reuse rings"
+    // set on the bid stay.
     expect(r.drains.map((d) => [d.id, d.quantity, d.adjustPct, d.reuseRings])).toEqual([
+      ["takeoff-drain-1", 5, 15, true],
       ["manual-drain", 1, 0, false],
-      // ESTIMATOR: adjustPct 15 and "reuse rings" set on the bid are gone.
-      ["takeoff-drain-1", 5, 0, false],
     ]);
   });
 
   it("the change list", () => {
     const r = apply(drawTakeoff({ grow: true }));
-    // ESTIMATOR: every matched item is listed as re-measured whether or not it changed
-    // (Sections 2 and 3, Parapet 1, Curb 1 did not), and the one real count change (4 → 5
-    // drains) reads only as "1 row(s)".
+    // FIXED (#9): only what changed, with old → new (Sections 2 and 3 and Curb 1 did not).
     expect(r.changes).toEqual([
-      'Re-measured section "Section 1".',
-      'Re-measured section "Section 2".',
-      'Re-measured section "Section 3".',
-      'Re-measured parapet "Parapet 1".',
-      'Re-counted curb "Curb 1".',
-      "Drains from the drawing: 1 row(s).",
+      "Section 1: 5,920 → 7,120 sq ft; perimeter 320 → 360 ft.",
+      "Parapet 1: 220 → 240 ft.",
+      "Drains: 4 → 5.",
     ]);
     // Bid-level edits are outside what the update touches.
     expect(edited.markup).toBe(28);
   });
 
-  it("re-made edge lines in the other order (new first, old deleted after) orphan the wall", () => {
+  it("the setup notes are carried once, not duplicated on re-apply", () => {
+    // FIXED (#10).
+    expect(edited.customer.notes).toBe("Takeoff notes: Re-roof over existing BUR.");
+    const r = apply(drawTakeoff({ grow: true }));
+    expect(r.notes).toBe("Takeoff notes: Re-roof over existing BUR.");
+    const again = apply(drawTakeoff({ grow: true }), {
+      ...edited,
+      customer: { ...edited.customer, notes: `Call before 8am.\n${r.notes}` },
+    });
+    expect(again.notes).toBe("Call before 8am.\nTakeoff notes: Re-roof over existing BUR.");
+  });
+
+  it("re-made edge lines in the other order (new first, old deleted after) keep the wall", () => {
     // Make the new lines while the old ones still exist → "Parapet 2"; then delete the old.
     const objs = drawTakeoff({ grow: true });
     const s1 = objs.find((o) => o.kind === "area" && o.attrs.name === "Section 1")!;
@@ -868,13 +981,13 @@ describe("4. Update flow (Section 1 → 120 ft, one more drain)", () => {
       (o) => !(o.kind === "linear" && ["Parapet 1", "Gutter 1"].includes(o.attrs.name)),
     );
     const r = apply(next);
-    // ESTIMATOR: the wall with the hand-set termination / attachment is removed and a bare
-    // "Parapet 2" is added in its place.
+    // FIXED (#7): the new line runs along the same sides of the same area, so it is the same
+    // wall: it keeps the hand-set termination and takes the drawing's new name.
     expect(r.parapets.map((p) => [p.name, p.lengthFt, p.termOptionId])).toEqual([
+      ["Parapet 2", 240, 2],
       ["Hand wall", 12, undefined],
-      ["Parapet 2", 240, undefined],
     ]);
-    expect(r.changes).toContain('Removed parapet "Parapet 1" (no longer in the drawing).');
+    expect(r.changes).toContain('Parapet 1: renamed "Parapet 2"; 220 → 240 ft.');
   });
 });
 
@@ -901,7 +1014,7 @@ describe("5. Names", () => {
     expect(s.sections.map((x) => x.name)).toEqual(["Roof 1", "Section 2", "Section 3"]);
   });
 
-  it("renaming an area in the takeoff replaces the bid section (and its edits)", () => {
+  it("renaming an area in the takeoff keeps the bid section (and its edits)", () => {
     const first = newBidFromSeed(blankSaved(), seed);
     const edited = first.sections.map((x) =>
       x.name === "Section 1" ? { ...x, deckType: "Concrete" } : x,
@@ -916,9 +1029,11 @@ describe("5. Names", () => {
       bidSeedFromTakeoff(setup, takeoffQuantities([page], renamed)),
       { newSection, newParapet, newCurb },
     );
-    // ESTIMATOR: matching is by name only (not by the takeoff object id), so a rename drops the
-    // section with its hand edits and adds a fresh one.
-    expect(r.changes[0]).toBe('Removed section "Section 1" (no longer in the drawing).');
-    expect(r.sections.find((x) => x.name === "Main roof")!.deckType).toBe("Steel");
+    // FIXED (#7): matched by the takeoff object id stored on the section, so a rename keeps the
+    // section with its hand edits and takes the new name.
+    expect(r.changes[0]).toBe('Section 1: renamed "Main roof".');
+    expect(r.changes.some((c) => c.startsWith("Removed section"))).toBe(false);
+    expect(r.sections.find((x) => x.name === "Main roof")!.deckType).toBe("Concrete");
+    expect(r.sections).toHaveLength(3);
   });
 });

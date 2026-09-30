@@ -112,7 +112,9 @@ describe("takeoffQuantities", () => {
       roofAreaSqFt: 4000,
       planAreaSqFt: 4000,
       perimeterFt: 280,
+      slopedPerimeterFt: 280,
       parapetFt: 140,
+      cutoutWallFt: 0,
     });
     expect(s).toMatchObject({ planAreaSqFt: 4000, slopeFactor: 1 });
     expect(s.pitch).toBeUndefined();

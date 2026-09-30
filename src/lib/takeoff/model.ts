@@ -14,7 +14,9 @@
 
 import type { UnderlaymentLayer } from "@/lib/engine/bid-builder";
 import type { Attachment } from "@/lib/engine/estimate";
+import { areaSideRoles, edgeLineSides } from "./edge-lines";
 import {
+  drawnSideLabels,
   edgeLengths,
   equivalentRect as equivalentRectangleOf,
   polygonArea,
@@ -93,15 +95,22 @@ export interface LinearAttrs {
   role: LinearRole;
   /** Parapet wall height (in), when known from the plan. */
   heightIn?: number;
+  /**
+   * Set by "Edge from this area": the area the line was made along. Its sides that the line
+   * still coincides with take the line's role in the bid (./edge-lines.ts).
+   */
+  fromArea?: string;
 }
 export interface CountAttrs {
   name: string;
   role: CountRole;
-  /** Pipe / drain size (in). */
+  /** Pipe / drain size (in). A pipe with a size becomes a Pipe Stacks row in the bid. */
   sizeIn?: number;
-  /** Curb footprint (in). */
+  /** Curb footprint (in); blank = not measured (the bid gets a blank-size curb and a notice). */
   widthIn?: number;
   lengthIn?: number;
+  /** Curb height (in) — the curb's wrap dim C in the bid. */
+  heightIn?: number;
   /**
    * Drain picks (the estimator's Roof Drains & Boots entry needs them): existing roof type,
    * reuse the existing rings, boot and ring descriptions from the reference lists. Prefilled
@@ -177,6 +186,9 @@ export function feetPerPx(scale: PageScale | null | undefined): number | null {
   return px > 0 ? scale.feet / px : null;
 }
 
+/** Common pipe sizes (in) offered as quick picks on a pipe count. */
+export const PIPE_SIZE_PICKS = [2, 3, 4, 6] as const;
+
 /** Rotate page points by `quarterTurns` clockwise inside a page displayed at width × height. */
 export function rotatePoints(
   points: readonly PagePoint[],
@@ -249,10 +261,34 @@ export interface SectionQuantity {
   pitch?: number;
   /** sqrt(1 + (pitch/12)^2); 1 when flat. */
   slopeFactor: number;
-  /** The plan perimeter — pitch never changes edge lengths. */
+  /** The plan perimeter (the outline as drawn, no slope). */
   perimeterFt: number;
-  /** Outer edge lengths (ft), one per drawn side. */
+  /** Outer edge lengths (ft) on plan, one per drawn side. */
   edgeLengthsFt: number[];
+  /**
+   * The same sides as built: a pitched area's rakes (the sides running up the slope) are
+   * × the slope factor, eaves keep their plan length. Equal to `edgeLengthsFt` when flat. The
+   * takeoff has no eave direction, so the rakes are ASSUMED (`rakeNote` says how): a rectangle's
+   * two shorter sides, any other outline's every side but the longest.
+   */
+  slopedEdgeLengthsFt: number[];
+  /** Σ `slopedEdgeLengthsFt`: the roof edge the bid orders metal / blocking for. */
+  slopedPerimeterFt: number;
+  /** Drawn side indexes treated as rakes (empty when flat). */
+  rakeSides: number[];
+  /** How the rakes were picked, for the section's note (absent when flat). */
+  rakeNote?: string;
+  /**
+   * Per bid edge (the order of `section.edges`): the role of the "Edge from this area" line
+   * that runs along that side (parapet / gutter / …), or null.
+   */
+  edgeRoles: Array<LinearRole | null>;
+  /** The outline's own area (before cut-outs), plan. */
+  outlineAreaSqFt: number;
+  /** Area of the cut-outs (wells, penthouses) taken out, plan. */
+  cutoutAreaSqFt: number;
+  /** The wall around each cut-out (its perimeter, ft): penthouse / well walls, not seeded. */
+  cutoutPerimetersFt: number[];
   section: OutlineSection;
 }
 export interface LinearQuantity {
@@ -262,6 +298,11 @@ export interface LinearQuantity {
   role: LinearRole;
   lengthFt: number;
   heightIn?: number;
+  /**
+   * An "Edge from this area" line: its area and the sides (drawn indexes) it coincides with.
+   * Lets the bid recognise a wall re-made along the same sides.
+   */
+  edgeOf?: { areaId: string; sides: number[] };
 }
 export interface CountQuantity {
   name: string;
@@ -270,6 +311,7 @@ export interface CountQuantity {
   sizeIn?: number;
   widthIn?: number;
   lengthIn?: number;
+  heightIn?: number;
   roofType?: string;
   reuseRings?: boolean;
   bootSize?: string;
@@ -282,8 +324,19 @@ export interface TakeoffQuantities {
   counts: CountQuantity[];
   /** Objects on a page with no scale yet: they have no real-world size. */
   unscaled: Array<{ objectId: string; page: number; name: string }>;
-  /** `roofAreaSqFt` is the sloped surface; `planAreaSqFt` the same areas as drawn (flat). */
-  totals: { roofAreaSqFt: number; planAreaSqFt: number; perimeterFt: number; parapetFt: number };
+  /**
+   * `roofAreaSqFt` is the sloped surface; `planAreaSqFt` the same areas as drawn (flat).
+   * `perimeterFt` is the plan perimeter, `slopedPerimeterFt` the roof edge with rakes sloped;
+   * `cutoutWallFt` the walls around cut-outs (penthouses, wells).
+   */
+  totals: {
+    roofAreaSqFt: number;
+    planAreaSqFt: number;
+    perimeterFt: number;
+    slopedPerimeterFt: number;
+    parapetFt: number;
+    cutoutWallFt: number;
+  };
 }
 
 /**
@@ -301,7 +354,14 @@ export function takeoffQuantities(
     linears: [],
     counts: [],
     unscaled: [],
-    totals: { roofAreaSqFt: 0, planAreaSqFt: 0, perimeterFt: 0, parapetFt: 0 },
+    totals: {
+      roofAreaSqFt: 0,
+      planAreaSqFt: 0,
+      perimeterFt: 0,
+      slopedPerimeterFt: 0,
+      parapetFt: 0,
+      cutoutWallFt: 0,
+    },
   };
   const countGroups = new Map<string, CountQuantity>();
   for (const o of objects) {
@@ -314,6 +374,7 @@ export function takeoffQuantities(
         a.sizeIn ?? "",
         a.widthIn ?? "",
         a.lengthIn ?? "",
+        a.heightIn ?? "",
         a.roofType ?? "",
         a.reuseRings ? "reuse" : "",
         a.bootSize ?? "",
@@ -326,6 +387,7 @@ export function takeoffQuantities(
           if (a.sizeIn !== undefined) n.sizeIn = a.sizeIn;
           if (a.widthIn !== undefined) n.widthIn = a.widthIn;
           if (a.lengthIn !== undefined) n.lengthIn = a.lengthIn;
+          if (a.heightIn !== undefined) n.heightIn = a.heightIn;
           if (a.roofType !== undefined) n.roofType = a.roofType;
           if (a.reuseRings !== undefined) n.reuseRings = a.reuseRings;
           if (a.bootSize !== undefined) n.bootSize = a.bootSize;
@@ -354,17 +416,33 @@ export function takeoffQuantities(
         lengthFt: len,
       };
       if (o.attrs.heightIn !== undefined) q.heightIn = o.attrs.heightIn;
+      const edgeOf = edgeLineSides(o, objects);
+      if (edgeOf) q.edgeOf = edgeOf;
       out.linears.push(q);
       if (o.attrs.role === "parapet") out.totals.parapetFt += len;
       continue;
     }
     if (o.points.length < 3) continue;
     const outer = toFeet(o.points, fpp);
-    const cutoutArea = (o.attrs.cutouts ?? []).reduce((s, c) => s + polygonArea(toFeet(c, fpp)), 0);
-    const section = sectionFromOutline(outer, o.attrs.edges ?? []);
+    const cutoutRings = (o.attrs.cutouts ?? []).map((c) => toFeet(c, fpp));
+    const cutoutArea = cutoutRings.reduce((s, c) => s + polygonArea(c), 0);
+    const cutoutPerimetersFt = cutoutRings.filter((c) => c.length >= 3).map(polygonPerimeter);
+    // The "Edge from this area" lines along this outline set their sides' edge details
+    // (`edgeOptionsForRole`): matched geometrically, side by side (./edge-lines.ts).
+    const sideRoles = areaSideRoles(o, objects);
+    const edgeOpts: OutlineEdgeOptions[] = o.points.map((_, i) =>
+      edgeOptionsForRole(
+        o.attrs.edges?.[i] ?? {},
+        sideRoles.roles[i] ?? null,
+        sideRoles.heightIn[i],
+      ),
+    );
+    const section = sectionFromOutline(outer, edgeOpts);
+    const outlineAreaSqFt = section.measured.areaSqFt;
     if (cutoutArea > 0) {
       // A well or penthouse: less membrane, same outer edges. Re-derive the layout rectangle for
-      // the reduced area on the unchanged outer perimeter.
+      // the reduced area on the unchanged outer perimeter (the bid section has no deduction
+      // field, so length × width must carry the net area; the edges stay the true sides).
       const areaSqFt = Math.max(0, section.measured.areaSqFt - cutoutArea);
       const { length, width } = equivalentRectangleOf(areaSqFt, section.measured.perimeterFt);
       section.length = length;
@@ -373,14 +451,31 @@ export function takeoffQuantities(
     }
     const planAreaSqFt = section.measured.areaSqFt;
     const factor = slopeFactor(o.attrs.pitch);
+    const planLens = edgeLengths(outer);
+    // Bid edge k is drawn side `drawnOf[k]` (a four-sided outline is re-labelled from its
+    // longest side, like a typed rectangle).
+    const labels = drawnSideLabels(outer);
+    const drawnOf = section.edges.map((e) => labels.indexOf(e.side));
+    const rakes: { sides: number[]; note?: string } =
+      factor !== 1 ? rakeSidesOf(outer) : { sides: [] };
     if (factor !== 1) {
       // A pitched roof: the drawing is its plan (horizontal) projection. The slope runs across
       // the layout rectangle's width (the shorter run, like rafters on a gable), so the width
-      // grows by the factor and length × width stays the true surface area; the edges and the
-      // perimeter are the plan's (pitch never changes an edge length along the eave).
+      // grows by the factor and length × width stays the true surface area. The rakes (the
+      // sides that run up the slope) grow by the same factor, with their perimeter run and
+      // blocking; the eaves keep their plan length.
       section.width *= factor;
       section.measured = { ...section.measured, areaSqFt: planAreaSqFt * factor };
+      section.edges = section.edges.map((e, k) => {
+        if (!rakes.sides.includes(drawnOf[k]!)) return e;
+        const ne = { ...e, lengthFt: e.lengthFt * factor };
+        if (e.perimLengthFt !== undefined) ne.perimLengthFt = e.perimLengthFt * factor;
+        if (e.blockingFt > 0) ne.blockingFt = Math.round(e.blockingFt * factor * 100) / 100;
+        return ne;
+      });
     }
+    const slopedEdgeLengthsFt = planLens.map((l, i) => (rakes.sides.includes(i) ? l * factor : l));
+    const slopedPerimeterFt = slopedEdgeLengthsFt.reduce((t, l) => t + l, 0);
     const sq: SectionQuantity = {
       objectId: o.id,
       name: o.attrs.name,
@@ -389,17 +484,95 @@ export function takeoffQuantities(
       planAreaSqFt,
       slopeFactor: factor,
       perimeterFt: polygonPerimeter(outer),
-      edgeLengthsFt: edgeLengths(outer),
+      edgeLengthsFt: planLens,
+      slopedEdgeLengthsFt,
+      slopedPerimeterFt,
+      rakeSides: rakes.sides,
+      edgeRoles: drawnOf.map((i) => sideRoles.roles[i] ?? null),
+      outlineAreaSqFt,
+      cutoutAreaSqFt: cutoutArea,
+      cutoutPerimetersFt,
       section,
     };
     if (factor !== 1) sq.pitch = o.attrs.pitch!;
+    if (rakes.note) sq.rakeNote = rakes.note;
     out.sections.push(sq);
     out.totals.roofAreaSqFt += section.measured.areaSqFt;
     out.totals.planAreaSqFt += planAreaSqFt;
     out.totals.perimeterFt += polygonPerimeter(outer);
+    out.totals.slopedPerimeterFt += slopedPerimeterFt;
+    out.totals.cutoutWallFt += cutoutPerimetersFt.reduce((t, l) => t + l, 0);
   }
   out.counts = [...countGroups.values()];
   return out;
+}
+
+/** The termination a gutter side takes: the setup's own drip edge, else a 4" drip edge. */
+export const GUTTER_SIDE_TERMINATION = '4" Drip Edge';
+
+/**
+ * A side's edge options given the role of the "Edge from this area" line along it (`base` =
+ * the side's own options, from the setup's edge answers or the Objects tab):
+ *  - parapet: no termination and no blocking (the wall carries its own flashing on the Parapets
+ *    screen — the same fix an estimator makes by hand on the Sections screen), "w/ Wall > 2ft"
+ *    when the wall is taller than 24 in; the perimeter flag and ARP stay (the wind zone runs
+ *    along a walled edge too);
+ *  - gutter: the drip edge a gutter hangs from (the setup's drip edge when it names one);
+ *  - expansion joint / walkway / other / none: the side as it is.
+ */
+export function edgeOptionsForRole(
+  base: OutlineEdgeOptions,
+  role: LinearRole | null,
+  wallHeightIn?: number,
+): OutlineEdgeOptions {
+  if (role === "parapet") {
+    const o: OutlineEdgeOptions = { ...base, termination: "No Termination", blockingFt: 0 };
+    delete o.hasTallWall;
+    if ((base.isPerimeter ?? false) && (wallHeightIn ?? 0) > 24) o.hasTallWall = true;
+    return o;
+  }
+  if (role === "gutter") {
+    const t = base.termination ?? "";
+    return { ...base, termination: /drip edge/i.test(t) ? t : GUTTER_SIDE_TERMINATION };
+  }
+  return base;
+}
+
+/**
+ * The sides of a pitched outline that run up the slope. The takeoff records no eave direction,
+ * so: a rectangle's two shorter sides (the gable ends; for a square, the two sides after and
+ * before the first), any other outline's every side but the longest.
+ */
+export function rakeSidesOf(points: readonly Pt[]): { sides: number[]; note: string } {
+  const n = points.length;
+  const lens = edgeLengths(points);
+  const labels = drawnSideLabels(points);
+  let longest = 0;
+  for (let i = 1; i < n; i++) if (lens[i]! > lens[longest]! + 1e-9) longest = i;
+  const isRect =
+    n === 4 &&
+    points.every((_, i) => {
+      const a = points[i]!;
+      const b = points[(i + 1) % n]!;
+      const c = points[(i + 2) % n]!;
+      const ux = b[0] - a[0];
+      const uy = b[1] - a[1];
+      const vx = c[0] - b[0];
+      const vy = c[1] - b[1];
+      return Math.abs(ux * vx + uy * vy) <= 1e-3 * Math.hypot(ux, uy) * Math.hypot(vx, vy);
+    });
+  if (isRect) {
+    const sides = [(longest + 1) % 4, (longest + 3) % 4].sort((a, b) => a - b);
+    return {
+      sides,
+      note: `rakes assumed: the two shorter sides (${sides.map((i) => labels[i]).join(", ")}) run up the slope`,
+    };
+  }
+  const sides = lens.map((_, i) => i).filter((i) => i !== longest);
+  return {
+    sides,
+    note: `rakes assumed: every side but the longest (${labels[longest]}) runs up the slope`,
+  };
 }
 
 /** A new object's colour, cycling a small legible palette per kind (PlanSwift colours items). */

@@ -23,6 +23,7 @@ import {
   COUNT_ROLE_LABELS,
   LINEAR_ROLES,
   LINEAR_ROLE_LABELS,
+  PIPE_SIZE_PICKS,
   feetPerPx,
   slopeFactor,
   slopeFactorLabel,
@@ -381,7 +382,8 @@ function SelectedEditor(props: {
                   if (role !== "curb") {
                     attrs = withAttr(attrs, "widthIn", undefined);
                     attrs = withAttr(attrs, "lengthIn", undefined);
-                  }
+                    attrs = withAttr(attrs, "heightIn", undefined);
+                  } else attrs = withAttr(attrs, "sizeIn", undefined);
                   if (role !== "drain") attrs = withoutDrainPicks(attrs);
                   else if (x.attrs.role !== "drain")
                     attrs = { ...attrs, ...drainDefaults(props.setup) };
@@ -419,17 +421,50 @@ function SelectedEditor(props: {
               )}
             </div>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Size (in)</Label>
-            <Num
-              value={o.attrs.sizeIn}
-              onChange={(v) =>
-                update((x) =>
-                  x.kind === "count" ? { ...x, attrs: withAttr(x.attrs, "sizeIn", v) } : x,
-                )
-              }
-            />
-          </div>
+          {o.attrs.role !== "curb" && (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                {o.attrs.role === "pipe" ? "Pipe size (in)" : "Size (in)"}
+              </Label>
+              <Num
+                value={o.attrs.sizeIn}
+                onChange={(v) =>
+                  update((x) =>
+                    x.kind === "count" ? { ...x, attrs: withAttr(x.attrs, "sizeIn", v) } : x,
+                  )
+                }
+              />
+            </div>
+          )}
+          {o.attrs.role === "pipe" && (
+            <div className="col-span-2 space-y-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <span className="text-xs text-muted-foreground">Quick pick:</span>
+                {PIPE_SIZE_PICKS.map((sz) => (
+                  <Button
+                    key={sz}
+                    size="sm"
+                    variant={o.attrs.sizeIn === sz ? "secondary" : "outline"}
+                    className="h-7 px-2 text-xs"
+                    aria-pressed={o.attrs.sizeIn === sz}
+                    onClick={() =>
+                      update((x) =>
+                        x.kind === "count" ? { ...x, attrs: withAttr(x.attrs, "sizeIn", sz) } : x,
+                      )
+                    }
+                  >
+                    {sz}&quot;
+                  </Button>
+                ))}
+              </div>
+              {!o.attrs.sizeIn && (
+                <p className="flex items-center gap-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  Give the pipes a size so they go into the bid&apos;s Pipe Stacks
+                </p>
+              )}
+            </div>
+          )}
           {o.attrs.role === "drain" && (
             <>
               <DrainFields
@@ -451,7 +486,9 @@ function SelectedEditor(props: {
           )}
           {o.attrs.role === "curb" && (
             <div className="col-span-2 space-y-1">
-              <Label className="text-xs text-muted-foreground">Curb width × length (in)</Label>
+              <Label className="text-xs text-muted-foreground">
+                Curb width × length × height (in)
+              </Label>
               <div className="flex items-center gap-2">
                 <Num
                   value={o.attrs.widthIn}
@@ -470,7 +507,22 @@ function SelectedEditor(props: {
                     )
                   }
                 />
+                <span className="text-muted-foreground">×</span>
+                <Num
+                  value={o.attrs.heightIn}
+                  onChange={(v) =>
+                    update((x) =>
+                      x.kind === "count" ? { ...x, attrs: withAttr(x.attrs, "heightIn", v) } : x,
+                    )
+                  }
+                />
               </div>
+              {(!o.attrs.widthIn || !o.attrs.lengthIn) && (
+                <p className="flex items-center gap-1 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  No size yet — the bid gets these curbs with a blank size to fill in
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -53,6 +53,7 @@ import {
   takeoffChangeList,
   TAKEOFF_LOCKED,
 } from "@/lib/takeoff/lock";
+import { followAreaEdits } from "@/lib/takeoff/edge-lines";
 import {
   feetPerPx,
   rotatePoints,
@@ -238,8 +239,18 @@ function LoadedEditor({ row }: { row: TakeoffWithBid }) {
   const commit = (fn: (os: TakeoffObject[]) => TakeoffObject[], mergeKey?: string) => {
     if (lockedRef.current) return;
     const prev = objectsRef.current;
-    const next = fn(prev);
-    if (next === prev) return;
+    const edited = fn(prev);
+    if (edited === prev) return;
+    // An area whose points changed (vertex drag, move, edit) takes its "Edge from this area"
+    // lines along: the lines that ran on its sides are re-derived on the same sides, in the
+    // same undo step. A changed side count cannot be mapped: the lines stay, and we say so.
+    const { objects: next, stale } = followAreaEdits(prev, edited, (i) =>
+      feetPerPx(pages.find((p) => p.index === i)?.scale),
+    );
+    for (const name of stale)
+      toast.warning(
+        `The edge lines of ${name} no longer match its sides — re-make them with "Edge from this area".`,
+      );
     const h = history.current;
     const now = Date.now();
     if (!(mergeKey && h.mergeKey === mergeKey && now - h.at < MERGE_MS)) {
