@@ -333,6 +333,17 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
   }));
 }
 
+/** A List preset from the URL (?bucket=today|overdue — the Owner view's links). */
+export type BucketPreset = "today" | "overdue";
+
+export const parseBucketPreset = (v: unknown): BucketPreset | undefined =>
+  v === "today" || v === "overdue" ? v : undefined;
+
+/** The List's groups under a preset: only that bucket's group (none when it is empty). */
+export function presetGroups(groups: WorkGroup[], preset?: BucketPreset | null): WorkGroup[] {
+  return preset ? groups.filter((g) => g.bucket === preset) : groups;
+}
+
 // ---- calendar ------------------------------------------------------------------------------
 
 /**

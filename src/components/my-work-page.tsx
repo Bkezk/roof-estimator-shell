@@ -27,10 +27,12 @@ import {
   ListTodo,
   Loader2,
   Plus,
+  Users,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { seesEveryone } from "@/lib/access";
+import { isAdmin, seesEveryone } from "@/lib/access";
 import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
 import {
@@ -42,13 +44,18 @@ import {
   mergeWork,
   monthGrid,
   compareWork,
+  presetGroups,
   ymdParts,
+  BUCKET_LABELS,
+  type BucketPreset,
   type WorkFollowup,
   type WorkItem,
   type WorkKind,
 } from "@/lib/my-work";
+import { effectiveView, type MyWorkView } from "@/lib/owner-view";
 import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
 import { useFollowupActions } from "@/components/followups-shared";
+import { OwnerView } from "@/components/owner-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TaskDialog } from "@/components/tasks/task-dialog";
@@ -180,15 +187,36 @@ function ListView({
   today,
   showWho,
   manage,
+  preset,
+  onClearPreset,
 }: {
   items: WorkItem[];
   today: string;
   showWho: boolean;
   manage: ManageFollowup | null;
+  /** ?bucket=today|overdue: only that group (the Owner view's links). */
+  preset: BucketPreset | null;
+  onClearPreset: () => void;
 }) {
-  const groups = useMemo(() => groupWork(items, today), [items, today]);
+  const groups = useMemo(
+    () => presetGroups(groupWork(items, today), preset),
+    [items, today, preset],
+  );
   return (
     <div className="space-y-6">
+      {preset && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">
+            Showing {BUCKET_LABELS[preset]} only
+            {groups.length === 0
+              ? ` — nothing ${preset === "today" ? "due today" : "overdue"}.`
+              : "."}
+          </span>
+          <Button size="sm" variant="outline" onClick={onClearPreset}>
+            <X className="h-4 w-4" /> Show all
+          </Button>
+        </div>
+      )}
       {groups.map((g) => (
         <section key={g.bucket} className="space-y-2">
           <h2
@@ -359,19 +387,25 @@ function CalendarView({
 }
 
 export function MyWorkPage(props: {
-  view: "list" | "calendar";
+  view: MyWorkView;
   who: string;
-  onView: (v: "list" | "calendar") => void;
+  bucket: BucketPreset | null;
+  onView: (v: MyWorkView) => void;
   onWho: (who: string) => void;
+  onBucket: (b: BucketPreset | null) => void;
 }) {
   const { session, profile } = useAuth();
   const qc = useQueryClient();
   const [newTask, setNewTask] = useState(false);
+  // ?view=owner is honoured for admins only; anyone else gets the list.
+  const view = effectiveView(props.view, profile);
+  // The Owner toggle: admins only (the server's listOwnerView refuses anyone else too).
+  const ownerToggle = isAdmin(profile);
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
     queryKey: ["my-work", props.who],
     queryFn: () => listFn({ data: { who: props.who } }),
-    enabled: !!session,
+    enabled: !!session && view !== "owner",
   });
 
   // Errors toast the server's message (and stay on the page until the next try).
@@ -424,9 +458,11 @@ export function MyWorkPage(props: {
           <ListTodo className="h-6 w-6" /> My Work
         </h1>
         <p className="text-sm text-muted-foreground">
-          {mineOnly || !scope
-            ? "Your tickets, tasks and follow-ups, by date."
-            : `${whoName ?? "Someone else"}: tickets, tasks and follow-ups, by date.`}
+          {view === "owner"
+            ? "Everyone: what is due today, what is overdue, what got done this week."
+            : mineOnly || !scope
+              ? "Your tickets, tasks and follow-ups, by date."
+              : `${whoName ?? "Someone else"}: tickets, tasks and follow-ups, by date.`}
         </p>
       </div>
 
@@ -442,22 +478,32 @@ export function MyWorkPage(props: {
         <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="View">
           <Button
             size="sm"
-            variant={props.view === "list" ? "default" : "ghost"}
-            aria-pressed={props.view === "list"}
+            variant={view === "list" ? "default" : "ghost"}
+            aria-pressed={view === "list"}
             onClick={() => props.onView("list")}
           >
             <List className="h-4 w-4" /> List
           </Button>
           <Button
             size="sm"
-            variant={props.view === "calendar" ? "default" : "ghost"}
-            aria-pressed={props.view === "calendar"}
+            variant={view === "calendar" ? "default" : "ghost"}
+            aria-pressed={view === "calendar"}
             onClick={() => props.onView("calendar")}
           >
             <CalendarDays className="h-4 w-4" /> Calendar
           </Button>
+          {ownerToggle && (
+            <Button
+              size="sm"
+              variant={view === "owner" ? "default" : "ghost"}
+              aria-pressed={view === "owner"}
+              onClick={() => props.onView("owner")}
+            >
+              <Users className="h-4 w-4" /> Owner
+            </Button>
+          )}
         </div>
-        {canPick && (
+        {canPick && view !== "owner" && (
           <Select value={props.who} onValueChange={props.onWho}>
             <SelectTrigger className="h-9 w-[220px]" aria-label="Show">
               <span className="mr-1 text-muted-foreground">Show:</span>
@@ -485,14 +531,18 @@ export function MyWorkPage(props: {
             </SelectContent>
           </Select>
         )}
-        {q.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {q.isFetching && view !== "owner" && (
+          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+        )}
       </div>
 
-      {!canManage && hasFollowups && !errMsg && (
+      {!canManage && hasFollowups && !errMsg && view !== "owner" && (
         <p className="text-xs text-muted-foreground">Follow-ups are managed by your manager.</p>
       )}
 
-      {q.isLoading ? (
+      {view === "owner" && ownerToggle ? (
+        <OwnerView />
+      ) : q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : errMsg ? (
         <div className="space-y-2">
@@ -501,14 +551,21 @@ export function MyWorkPage(props: {
             Try again
           </Button>
         </div>
-      ) : props.view === "calendar" ? (
+      ) : view === "calendar" ? (
         <CalendarView items={items} today={today} showWho={showWho} manage={manage} />
       ) : items.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
           Nothing assigned{mineOnly ? " to you" : ""} right now.
         </p>
       ) : (
-        <ListView items={items} today={today} showWho={showWho} manage={manage} />
+        <ListView
+          items={items}
+          today={today}
+          showWho={showWho}
+          manage={manage}
+          preset={props.bucket}
+          onClearPreset={() => props.onBucket(null)}
+        />
       )}
 
       {canManage && (
