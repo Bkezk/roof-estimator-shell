@@ -299,9 +299,11 @@ function OfficeActions({
   const navigate = useNavigate();
   const createFn = useServerFn(createRepairFromInspection);
   const [type, setType] = useState<"leak" | "other">("leak");
+  // Every ticket has a date (owner, Oct 1): the repair ticket gets its day here.
+  const [date, setDate] = useState("");
   const complete = inspectionComplete(job.stage);
   const create = useMutation({
-    mutationFn: () => createFn({ data: { id: job.id, service_type: type } }),
+    mutationFn: () => createFn({ data: { id: job.id, service_type: type, scheduled_date: date } }),
     onSuccess: (row) => {
       void qc.invalidateQueries({ queryKey: inspectionKey(job.id) });
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
@@ -343,11 +345,18 @@ function OfficeActions({
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
+            <Input
+              type="date"
+              className="h-10 w-[170px]"
+              aria-label="Repair ticket date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
             <Button
               type="button"
               variant="outline"
               className="h-10"
-              disabled={dirty || create.isPending}
+              disabled={dirty || create.isPending || !date}
               onClick={() => create.mutate()}
             >
               {create.isPending ? (

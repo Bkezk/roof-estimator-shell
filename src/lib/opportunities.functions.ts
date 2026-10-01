@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { opportunityDateProblem } from "@/lib/ticket-date";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
 export const OPP_STATUSES = ["open", "contacted", "quoted", "won", "lost", "no_response"] as const;
@@ -129,6 +130,9 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       throw new Error("Forbidden: Customers access required");
     const sb = context.supabase;
     const { id, ...fields } = data;
+    // Every opportunity keeps a date (owner, Oct 1): an update may not clear it.
+    const dateProblem = opportunityDateProblem({ id, expected_close: fields.expected_close });
+    if (dateProblem) throw new Error(dateProblem);
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
       const { data: s } = await sb

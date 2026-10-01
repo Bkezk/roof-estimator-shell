@@ -14,6 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
+import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 
@@ -211,6 +212,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       fields.site_id = null;
     }
     if (!customer_name.trim()) throw new Error("Pick or add the customer");
+    // Every ticket has a date (owner, Oct 1); a technician's save leaves it as it is.
+    const dateProblem = ticketDateProblem({ id, scheduled_date: fields.scheduled_date });
+    if (dateProblem) throw new Error(dateProblem);
     const stage =
       fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
     if (techMayNotSet(p, stage))
@@ -389,6 +393,8 @@ export const assignServiceJob = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
     if (!isOffice(p)) throw new Error("Only the office can dispatch tickets");
+    const dateProblem = assignDateProblem(data.scheduled_date);
+    if (dateProblem) throw new Error(dateProblem);
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("service_jobs")

@@ -16,6 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
+import { ticketDateProblem } from "@/lib/ticket-date";
 import {
   inspectionComplete,
   inspectionSchema,
@@ -241,7 +242,14 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
 export const createRepairFromInspection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ id: z.string().uuid(), service_type: z.enum(["leak", "other"]) }).parse(d),
+    z
+      .object({
+        id: z.string().uuid(),
+        service_type: z.enum(["leak", "other"]),
+        /** The repair ticket's date (every ticket has one — owner, Oct 1). */
+        scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<{ id: string; number: number }> => {
     const p = await me(context);
@@ -261,6 +269,8 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       throw new Error("The inspection is not done yet; mark it Done first");
     const ins = parseInspection(job.inspection);
     if (!ins) throw new Error("The inspection checklist has not been saved on this ticket");
+    const dateProblem = ticketDateProblem({ scheduled_date: data.scheduled_date });
+    if (dateProblem) throw new Error(dateProblem);
     const text = repairTicketText(job.number, ins);
     const { data: row, error: iErr } = await sb
       .from("service_jobs")
@@ -276,6 +286,7 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
         description: text.description,
         notes: text.notes || null,
         service_type: data.service_type,
+        scheduled_date: data.scheduled_date,
         stage: "open",
         from_job_id: job.id,
         created_by: context.userId,

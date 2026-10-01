@@ -308,12 +308,13 @@ function Board({
     const job = jobs.find((j) => j.id === id);
     if (!job || !movable(job)) return;
     if (job.technician_id === techId && job.scheduled_date === ymd) return;
-    // Onto the rail: unassign fully (no technician, no day).
+    // Onto the rail: unassign (no technician); the ticket keeps its day — every ticket has a
+    // date (owner, Oct 1).
     assign.mutate({
       job,
       technician_id: techId,
       technician_name: techId ? nameOf(techId) : null,
-      scheduled_date: ymd,
+      scheduled_date: ymd ?? job.scheduled_date,
     });
   };
 

@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -777,6 +778,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               value={draft.expected_close}
               onChange={(e) => set("expected_close", e.target.value)}
             />
+            {opp && !draft.expected_close && (
+              <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
+            )}
             {!opp && (
               <p className="text-xs text-muted-foreground">
                 Leave blank for the admin default
@@ -851,7 +855,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="submit" size="lg" disabled={save.isPending || (!!opp && !dirty)}>
+          <Button
+            type="submit"
+            size="lg"
+            disabled={save.isPending || (!!opp && !dirty) || (!!opp && !draft.expected_close)}
+          >
             {save.isPending ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

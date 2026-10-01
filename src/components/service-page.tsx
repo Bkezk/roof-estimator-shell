@@ -61,6 +61,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { isOffice } from "@/lib/access";
+import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   deleteServiceJob,
   getCrewRateDefaults,
@@ -1375,14 +1376,22 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   );
   // A technician sees the crew by name (they answer who is on the job on the close-out).
   const crewNames = (crewQ.data ?? []).filter((r) => r.sort !== 0).map((r) => r.name);
+  // Every ticket has a date (owner, Oct 1): the office cannot create or save one without.
+  const dateMissing = !draft.scheduled_date;
   const dateInput = (
-    <Input
-      id="ticket-date"
-      type="date"
-      value={draft.scheduled_date}
-      disabled={ro}
-      onChange={(e) => set("scheduled_date", e.target.value)}
-    />
+    <div className="space-y-1">
+      <Input
+        id="ticket-date"
+        type="date"
+        required
+        aria-invalid={dateMissing || undefined}
+        className={dateMissing ? "border-destructive" : undefined}
+        value={draft.scheduled_date}
+        disabled={ro}
+        onChange={(e) => set("scheduled_date", e.target.value)}
+      />
+      {dateMissing && !ro && <p className="text-xs text-destructive">{TICKET_DATE_REQUIRED}</p>}
+    </div>
   );
 
   return (
@@ -1836,7 +1845,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <Button
               type="submit"
               size="lg"
-              disabled={save.isPending || (!!job && !dirty && !crewDirty)}
+              disabled={save.isPending || (!!job && !dirty && !crewDirty) || dateMissing}
             >
               {save.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
