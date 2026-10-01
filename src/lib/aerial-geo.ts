@@ -83,6 +83,45 @@ export function panView(v: AerialView, dx: number, dy: number): AerialView {
 export const clampZoom = (z: number): number =>
   Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, Math.round(z)));
 
+// ── Screen ↔ view (the SVG on the page) ───────────────────────────────────────────────────
+
+/** The SVG element's on-screen box (a DOMRect's fields). */
+export interface ScreenRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Screen px per view px for an SVG showing the view with the default preserveAspectRatio
+ * ("xMidYMid meet"): the picture fits the element's box whole, so the smaller ratio wins.
+ * The Aerial picture is capped in height (owner, Oct 1), so it often renders smaller than
+ * the view; this is then below 1. 0 for an element with no size (not laid out).
+ */
+export function screenScale(r: ScreenRect, v: { width: number; height: number }): number {
+  if (!(r.width > 0) || !(r.height > 0)) return 0;
+  return Math.min(r.width / v.width, r.height / v.height);
+}
+
+/**
+ * A pointer at (clientX, clientY) → view px, for the SVG whose box is `r`. Any letterbox
+ * band (a box not exactly the view's shape) is allowed for, so a point on the picture maps
+ * to the same view px at any rendered size.
+ */
+export function screenToView(
+  r: ScreenRect,
+  v: { width: number; height: number },
+  clientX: number,
+  clientY: number,
+): [number, number] {
+  const k = screenScale(r, v);
+  if (k === 0) return [0, 0];
+  const padX = (r.width - v.width * k) / 2;
+  const padY = (r.height - v.height * k) / 2;
+  return [(clientX - r.left - padX) / k, (clientY - r.top - padY) / k];
+}
+
 // ── Ground scale (the tech's drawn areas) ─────────────────────────────────────────────────
 
 /** Square feet in a square metre. */

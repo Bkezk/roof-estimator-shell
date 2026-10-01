@@ -99,8 +99,10 @@ describe("the tighter layout (owner, Oct 1): two columns for the office, one for
   };
   const form = src.slice(src.indexOf("<form"), src.indexOf("</form>"));
 
-  it("the form widens to max-w-5xl for the office and stays max-w-3xl for a technician", () => {
-    expect(form).toContain('className={`${isTech ? "max-w-3xl" : "max-w-5xl"} space-y-5`}');
+  it("the form widens to max-w-5xl for the office (the pane's width beside the sections) and stays max-w-3xl for a technician", () => {
+    expect(form).toContain(
+      'className={`${isTech ? "max-w-3xl" : twoPane ? "max-w-5xl xl:max-w-none" : "max-w-5xl"} space-y-5`}',
+    );
   });
 
   it("an md:grid-cols-2 grid holds the customer (left) and type / date / labor / technician (right)", () => {
@@ -176,5 +178,98 @@ describe("the tighter layout (owner, Oct 1): two columns for the office, one for
     ].map((p) => tech.indexOf(p));
     expect(seq.every((i) => i > 0)).toBe(true);
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+  });
+});
+
+describe("the folding sections on the right (owner, Oct 1: 'the menus that open … would go on the right')", () => {
+  const src = read("../components/service-page.tsx");
+  const fieldSrc = read("../components/service/ticket-field-sections.tsx");
+  const at = src.indexOf("{twoPane && job ? (");
+  const panes = src.slice(at, src.indexOf(") : (", at));
+
+  it("only the office on a saved ticket gets two panes", () => {
+    expect(src).toContain("const twoPane = officeOrAdmin && !!job;");
+    expect(at).toBeGreaterThan(0);
+  });
+
+  it("an xl: two-pane grid: the form in the first pane, the sections column (≥ 380 px) in the second", () => {
+    const grid = panes.match(/<div className="([^"]*xl:grid[^"]*)">/);
+    expect(grid).not.toBeNull();
+    expect(grid![1]).toContain("xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)]");
+    expect(grid![1]).toContain("xl:items-start");
+    const formAt = panes.indexOf("{ticketForm}");
+    const asideAt = panes.indexOf("<aside");
+    expect(formAt).toBeGreaterThan(0);
+    expect(asideAt).toBeGreaterThan(formAt);
+    const aside = panes.slice(asideAt, panes.indexOf("</aside>"));
+    expect(aside).toContain("xl:sticky xl:top-4 xl:min-w-[380px]");
+    expect(aside).not.toContain("{ticketForm}");
+  });
+
+  it("the column's order: Aerial, Inspection, Repairs, Materials, the rest of the field sections, Invoice", () => {
+    const aside = panes.slice(panes.indexOf("<aside"), panes.indexOf("</aside>"));
+    const seq = [
+      "<AerialSection",
+      "<InspectionSection",
+      "<TicketRepairs",
+      "{materials}",
+      "<TicketFieldSections",
+      "<InvoiceBlock",
+    ].map((p) => aside.indexOf(p));
+    expect(seq.every((i) => i > 0)).toBe(true);
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+    // Repairs (with the photos) is not repeated by TicketFieldSections in the column.
+    expect(aside).toContain("repairs={false}");
+    expect(fieldSrc).toContain("{repairs && <RepairsReadOnly jobId={job.id} />}");
+    expect(fieldSrc).toContain("export function TicketRepairs(");
+    // Materials is the section the materials const renders.
+    const materials = src.slice(
+      src.indexOf("const materials ="),
+      src.indexOf("return (", src.indexOf("const materials =")),
+    );
+    expect(materials).toContain("<MaterialsSection");
+  });
+
+  it("Close out stays a header button, not in the column", () => {
+    expect(panes).not.toContain("closeout: 1");
+    expect(src.indexOf("closeout: 1")).toBeLessThan(at);
+  });
+
+  it("a technician keeps the stack below the form", () => {
+    const rest = src.slice(src.indexOf(") : (", at), src.indexOf("<AlertDialog", at));
+    const seq = ["{ticketForm}", "<TicketExtras", "{materials}", "<TicketFieldSections"].map((p) =>
+      rest.indexOf(p),
+    );
+    expect(seq.every((i) => i > 0)).toBe(true);
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+  });
+});
+
+describe("the Aerial picture is capped at about half the screen (owner, Oct 1)", () => {
+  const src = read("../components/service/aerial-markup.tsx");
+  const stage = src.slice(src.indexOf("function Stage("), src.indexOf("function AreaDraft("));
+
+  it("the picture's container has max-h-[min(60vh,560px)] on the dark ground", () => {
+    const box = stage.match(/<div className="([^"]*)">\s*<svg/);
+    expect(box).not.toBeNull();
+    expect(box![1]).toContain("max-h-[min(60vh,560px)]");
+    expect(box![1]).toContain("overflow-hidden");
+    expect(box![1]).toContain("bg-neutral-800");
+  });
+
+  it("the SVG keeps the view's 4:3 shape, centred, its width capped to the cap height × 4 / 3", () => {
+    expect(stage).toContain(
+      'className="mx-auto block h-auto max-h-full w-full touch-none select-none"',
+    );
+    expect(stage).toContain("aspectRatio: `${view.width} / ${view.height}`");
+    expect(stage).toContain(
+      "maxWidth: `min(100%, calc((min(60vh, 560px) - 2px) * ${view.width / view.height}))`",
+    );
+  });
+
+  it("pointer math goes through screenToView / screenScale", () => {
+    expect(stage).toContain("return screenToView(r, view, e.clientX, e.clientY);");
+    expect(stage).toContain("const k = screenScale(r, view);");
+    expect(stage).not.toContain("/ r.width");
   });
 });

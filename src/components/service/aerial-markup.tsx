@@ -67,6 +67,8 @@ import {
   viewAreaSqFt,
   panView,
   project,
+  screenScale,
+  screenToView,
   tilesForView,
   unproject,
   viewFor,
@@ -859,12 +861,9 @@ function Stage({
 
   const toView = (e: React.PointerEvent): Pt => {
     const r = svg.current!.getBoundingClientRect();
-    const k = r.width / view.width;
+    const k = screenScale(r, view);
     if (k > 0 && Math.abs(k - scale) > 1e-6) setScale(k);
-    return [
-      ((e.clientX - r.left) * view.width) / r.width,
-      ((e.clientY - r.top) * view.height) / r.height,
-    ];
+    return screenToView(r, view, e.clientX, e.clientY);
   };
   const down = (e: React.PointerEvent<SVGSVGElement>) => {
     if (tool === "area" && e.button === 2) {
@@ -912,7 +911,7 @@ function Stage({
       return;
     }
     const r = svg.current?.getBoundingClientRect();
-    const k = r && r.width > 0 ? r.width / view.width : scale;
+    const k = (r && screenScale(r, view)) || scale;
     onArea({ type: "up", p: toView(e), scale: k, touch: e.pointerType === "touch", links });
   };
 
@@ -940,12 +939,20 @@ function Stage({
   const halo = { paintOrder: "stroke" as const, stroke: "rgba(0,0,0,0.85)", strokeWidth: 4 };
 
   return (
-    <div className="overflow-hidden rounded-md border bg-neutral-800">
+    // Owner, Oct 1: the picture is capped at about half the screen's height and letterboxed
+    // (4:3 kept, centred on the dark ground); zoom and Move work inside it. The SVG's own box
+    // keeps the view's shape (its width is capped at the cap height, less the 2 px border,
+    // × 4 / 3), so screenToView maps a pointer to view px at any rendered size.
+    <div className="max-h-[min(60vh,560px)] overflow-hidden rounded-md border bg-neutral-800">
       <svg
         ref={svg}
         viewBox={`0 0 ${view.width} ${view.height}`}
-        className="block h-auto w-full touch-none select-none"
-        style={{ cursor }}
+        className="mx-auto block h-auto max-h-full w-full touch-none select-none"
+        style={{
+          cursor,
+          aspectRatio: `${view.width} / ${view.height}`,
+          maxWidth: `min(100%, calc((min(60vh, 560px) - 2px) * ${view.width / view.height}))`,
+        }}
         role="img"
         aria-label="Aerial view of the property"
         onPointerDown={down}

@@ -148,17 +148,23 @@ export function ContactSelect({
 
 const hoursText = (h: number) => `${Number(h.toFixed(2))} h`;
 
-/** Repairs, close-out, time and timeline of a ticket, below its Materials used. */
+/**
+ * Repairs, close-out, time and timeline of a ticket, below its Materials used. The office's
+ * right-hand column (owner, Oct 1) puts Repairs (with the ticket's photos) above Materials, so
+ * it renders <TicketRepairs> itself and passes `repairs={false}` here.
+ */
 export function TicketFieldSections({
   job,
   officeOrAdmin,
+  repairs = true,
 }: {
   job: ServiceJobWithTech;
   officeOrAdmin: boolean;
+  repairs?: boolean;
 }) {
   return (
     <>
-      <RepairsReadOnly jobId={job.id} />
+      {repairs && <RepairsReadOnly jobId={job.id} />}
       <CloseoutSummary job={job} />
       <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
       <Timeline jobId={job.id} />
@@ -204,6 +210,11 @@ function TimeSection({ job, officeOrAdmin }: { job: ServiceJobWithTech; officeOr
       />
     </Box>
   );
+}
+
+/** The Repairs section on its own (repairs, their photos and the ticket's other photos). */
+export function TicketRepairs({ jobId }: { jobId: string }) {
+  return <RepairsReadOnly jobId={jobId} />;
 }
 
 function RepairsReadOnly({ jobId }: { jobId: string }) {

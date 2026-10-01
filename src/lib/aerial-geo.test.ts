@@ -16,6 +16,8 @@ import {
   lngLatToWorld,
   panView,
   project,
+  screenScale,
+  screenToView,
   tilesForView,
   unproject,
   viewFor,
@@ -201,5 +203,48 @@ describe("imagery", () => {
     const tn = tilesForView({ ...v, center: [-86.78, 36.16], zoom: 21 }, TN_SOURCE);
     expect(tn.length).toBeGreaterThan(0);
     expect(tn.every((t) => t.size === 1024 && t.url.includes("/tile/19/"))).toBe(true);
+  });
+});
+
+describe("screenToView — a pointer on the capped Aerial picture (owner, Oct 1)", () => {
+  const v = { width: VIEW_W, height: VIEW_H };
+  it("full size: screen px are view px", () => {
+    const r = { left: 10, top: 20, width: 800, height: 600 };
+    expect(screenScale(r, v)).toBe(1);
+    expect(screenToView(r, v, 10, 20)).toEqual([0, 0]);
+    expect(screenToView(r, v, 410, 320)).toEqual([400, 300]);
+  });
+  it("capped at 560 px high (746.67 × 560): the corners and the centre still land right", () => {
+    const r = { left: 100, top: 50, width: (560 * 4) / 3, height: 560 };
+    const k = screenScale(r, v);
+    expect(k).toBeCloseTo(560 / 600, 10);
+    const [x0, y0] = screenToView(r, v, 100, 50);
+    expect(x0).toBeCloseTo(0, 9);
+    expect(y0).toBeCloseTo(0, 9);
+    const [x1, y1] = screenToView(r, v, 100 + r.width, 50 + 560);
+    expect(x1).toBeCloseTo(800, 9);
+    expect(y1).toBeCloseTo(600, 9);
+    const [xc, yc] = screenToView(r, v, 100 + r.width / 2, 50 + 280);
+    expect(xc).toBeCloseTo(400, 9);
+    expect(yc).toBeCloseTo(300, 9);
+  });
+  it("a phone-width picture (360 × 270) scales up by 800 / 360", () => {
+    const r = { left: 16, top: 0, width: 360, height: 270 };
+    expect(screenScale(r, v)).toBeCloseTo(0.45, 10);
+    const [x, y] = screenToView(r, v, 16 + 90, 135);
+    expect(x).toBeCloseTo(200, 9);
+    expect(y).toBeCloseTo(300, 9);
+  });
+  it("a box not exactly 4:3 is letterboxed: the band is allowed for", () => {
+    // 900 × 600 box: the 800 × 600 picture is centred with 50 px bands left and right.
+    const r = { left: 0, top: 0, width: 900, height: 600 };
+    expect(screenScale(r, v)).toBe(1);
+    expect(screenToView(r, v, 50, 0)).toEqual([0, 0]);
+    expect(screenToView(r, v, 850, 600)).toEqual([800, 600]);
+  });
+  it("an element with no size gives 0 and the origin, never NaN", () => {
+    const r = { left: 0, top: 0, width: 0, height: 0 };
+    expect(screenScale(r, v)).toBe(0);
+    expect(screenToView(r, v, 5, 5)).toEqual([0, 0]);
   });
 });

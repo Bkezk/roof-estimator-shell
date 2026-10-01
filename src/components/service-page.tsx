@@ -99,8 +99,14 @@ import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
+import {
+  ContactSelect,
+  TicketFieldSections,
+  TicketRepairs,
+} from "@/components/service/ticket-field-sections";
 import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-extras";
+import { AerialSection } from "@/components/service/aerial-markup";
+import { InspectionSection } from "@/components/service/inspection-section";
 import {
   LatestContact,
   LogContactButtons,
@@ -1705,6 +1711,84 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     </div>
   );
 
+  // The office on a saved ticket (owner, Oct 1): on xl and up the page is two panes, the form
+  // on the left and the folding sections in a column on the right. A technician, and a new
+  // ticket (no sections yet), keep one column.
+  const twoPane = officeOrAdmin && !!job;
+
+  const ticketForm = (
+    <form
+      className={`${isTech ? "max-w-3xl" : twoPane ? "max-w-5xl xl:max-w-none" : "max-w-5xl"} space-y-5`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      {isTech ? (
+        // A technician: one column, customer → description → PO # → type and date →
+        // technician and crew → CenterPoint (folded) → notes.
+        <>
+          {customerField}
+          {customerContact}
+          {descriptionAndNumbers}
+          {whatAndWhen}
+          {centerPointNumbers}
+          {notesField}
+        </>
+      ) : (
+        // The office (owner, Oct 1): who and where on the left, what and when on the right,
+        // stacking to one column under md; the rest full width below.
+        <>
+          <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
+            <div className="min-w-0">{customerField}</div>
+            <div className="min-w-0">{whatAndWhen}</div>
+          </div>
+          {customerContact}
+          {descriptionAndNumbers}
+          {notesField}
+          {centerPointNumbers}
+        </>
+      )}
+
+      {!ro && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="submit"
+            size="lg"
+            disabled={
+              save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
+            }
+          >
+            {save.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            {job ? "Save" : "Create ticket"}
+          </Button>
+          {job && (dirty || crewDirty) && (
+            <span className="text-sm text-muted-foreground">Unsaved changes</span>
+          )}
+          {!job && <span className="text-xs text-muted-foreground">{TICKET_STAGE_HINT}</span>}
+        </div>
+      )}
+    </form>
+  );
+
+  // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
+  // Open for a technician on an Open / Scheduled ticket (they log here), else folded.
+  const materials =
+    job &&
+    (can("service") || can("inventory") || can("estimate") ? (
+      <MaterialsSection
+        jobId={job.id}
+        collapsible
+        defaultOpen={isTech && (jobStage === "open" || jobStage === "scheduled")}
+      />
+    ) : (
+      <MaterialsUsed jobId={job.id} canLog={false} />
+    ));
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -1821,84 +1905,39 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         </p>
       )}
 
-      <form
-        className={`${isTech ? "max-w-3xl" : "max-w-5xl"} space-y-5`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        {isTech ? (
-          // A technician: one column, customer → description → PO # → type and date →
-          // technician and crew → CenterPoint (folded) → notes.
-          <>
-            {customerField}
-            {customerContact}
-            {descriptionAndNumbers}
-            {whatAndWhen}
-            {centerPointNumbers}
-            {notesField}
-          </>
-        ) : (
-          // The office (owner, Oct 1): who and where on the left, what and when on the right,
-          // stacking to one column under md; the rest full width below.
-          <>
-            <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
-              <div className="min-w-0">{customerField}</div>
-              <div className="min-w-0">{whatAndWhen}</div>
-            </div>
-            {customerContact}
-            {descriptionAndNumbers}
-            {notesField}
-            {centerPointNumbers}
-          </>
-        )}
-
-        {!ro && (
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="submit"
-              size="lg"
-              disabled={
-                save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
-              }
-            >
-              {save.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
-              {job ? "Save" : "Create ticket"}
-            </Button>
-            {job && (dirty || crewDirty) && (
-              <span className="text-sm text-muted-foreground">Unsaved changes</span>
-            )}
-            {!job && <span className="text-xs text-muted-foreground">{TICKET_STAGE_HINT}</span>}
-          </div>
-        )}
-      </form>
-
-      {job && (
-        // Owner, Sep 28 ("so much crap on it"): the sections below the form fold away with a
-        // one-line summary each; the open state is remembered per section.
-        <div className="space-y-4">
-          <TicketExtras job={job} canEdit={canEdit} />
-          {officeOrAdmin && <InvoiceBlock job={job} />}
-
-          {can("service") || can("inventory") || can("estimate") ? (
-            // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
-            // Open for a technician on an Open / Scheduled ticket (they log here), else folded.
-            <MaterialsSection
-              jobId={job.id}
-              collapsible
-              defaultOpen={isTech && (jobStage === "open" || jobStage === "scheduled")}
-            />
-          ) : (
-            <MaterialsUsed jobId={job.id} canLog={false} />
-          )}
-
-          <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+      {twoPane && job ? (
+        // Owner, Oct 1 ("the menus that open like aerial, materials, repairs … would go on the
+        // right"): on xl and up, the form (left, ~60%) and the folding sections (right, ~40%,
+        // at least 380 px; its top stays in view while the form scrolls, and it scrolls with
+        // the page). Below xl they stack, the form first. Each section keeps its one-line
+        // summary and remembered open state; Close out stays a header button.
+        <div className="space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0">
+          <div className="min-w-0">{ticketForm}</div>
+          <aside
+            className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]"
+            aria-label="Ticket sections"
+          >
+            <AerialSection job={job} canEdit={canEdit} />
+            <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
+            <TicketRepairs jobId={job.id} />
+            {materials}
+            <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
+            <InvoiceBlock job={job} />
+          </aside>
         </div>
+      ) : (
+        <>
+          {ticketForm}
+          {job && (
+            // A technician (one column). Owner, Sep 28 ("so much crap on it"): the sections below
+            // the form fold away with a one-line summary each; the open state is remembered.
+            <div className="space-y-4">
+              <TicketExtras job={job} canEdit={canEdit} />
+              {materials}
+              <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+            </div>
+          )}
+        </>
       )}
 
       {job && (
