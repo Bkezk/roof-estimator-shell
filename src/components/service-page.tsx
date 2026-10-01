@@ -23,8 +23,12 @@
  * invoice's labor lines bill (lib/invoice-labor.ts). An old ticket with unnamed helpers keeps
  * them until the office names the crew.
  *
- * Fewer clicks (owner, Sep 27): the office sets technician + day with one click on a week grid
- * (components/service/assign-grid.tsx); the list header links the Done tickets waiting to be
+ * Owner, Oct 1: the form is one column — the customer block (name with × to change, the site
+ * box, the site contact), Description, PO # / Job #, Type / Labor rate / Date, the technician
+ * and crew, CenterPoint (folded), Notes. The week grid lives on the Board only; a customer with
+ * several sites needs the site picked (lib/ticket-form.ts, also enforced by saveServiceJob).
+ *
+ * Fewer clicks (owner, Sep 27): the list header links the Done tickets waiting to be
  * invoiced ("N to invoice"); `?new=1&from=<ticket id>` starts a ticket with an earlier ticket's
  * customer side ("New ticket for this site") and `?new=1&account=<id>&site=<id>` with a
  * customer picked (the Customers page).
@@ -88,7 +92,9 @@ import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.function
 import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
-import { AssignGrid } from "@/components/service/assign-grid";
+import { SiteSelect } from "@/components/crm/site-select";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
+import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -126,7 +132,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { RateBox } from "@/components/service/rate-box";
 import { fieldKeys } from "@/components/service/field-utils";
 import { defaultBillRate, MAX_HELPERS, othersOf } from "@/lib/service-crew";
@@ -847,7 +852,10 @@ function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: stri
       </p>
     );
   const a = detail.data.account;
-  const site = siteId ? detail.data.sites.find((x) => x.id === siteId) : undefined;
+  // No site asked for: a customer with one site gets it (owner, Oct 1).
+  const sites = detail.data.sites;
+  const pickId = siteId ?? autoSiteId(sites);
+  const site = pickId ? sites.find((x) => x.id === pickId) : undefined;
   const seed: Seed = {
     draft: {
       customer: {
@@ -862,6 +870,7 @@ function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: stri
         site_id: site?.id ?? null,
         site_name: site?.name ?? null,
         site_address: site ? siteAddressLine(site) : "",
+        site_count: sites.length,
         contact_name: a.contact_name,
         phone: a.phone,
       },
@@ -970,6 +979,8 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
           site_id: j.site_id,
           site_name: j.site_name,
           site_address: j.site_address ?? "",
+          // Not known here; the customer's sites load with the block.
+          site_count: 0,
           contact_name: null,
           phone: null,
         }
@@ -1108,10 +1119,24 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     dropFromCrew(techId);
   };
 
-  // A ticket that already has its technician and day keeps the week grid folded away (the plain
-  // fields below it still show both); a new or unassigned one opens it. Not remembered.
-  const hasSlot = !!job?.technician_id && !!job.scheduled_date;
-  const [gridOpen, setGridOpen] = useState(() => !hasSlot);
+  // The customer's sites (the same query the customer block reads): a customer with more than
+  // one needs the site picked before the ticket is created or saved (owner, Oct 1).
+  const accountFn = useServerFn(getAccount);
+  const accountId = draft.customer?.account_id ?? null;
+  const accountQ = useQuery({
+    queryKey: ["account", accountId],
+    queryFn: () => accountFn({ data: { id: accountId! } }),
+    enabled: !!session && !!accountId,
+  });
+  const siteCount =
+    accountQ.data?.account.id === accountId
+      ? accountQ.data.sites.length
+      : (draft.hit?.site_count ?? 0);
+  const siteMessage = draft.customer
+    ? siteProblem({ siteCount, site_id: draft.customer.site_id })
+    : null;
+  // The × on the customer block: the search box comes back, focused.
+  const [changingCustomer, setChangingCustomer] = useState(false);
 
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -1225,6 +1250,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     if (!canEdit || save.isPending) return;
     if (!draft.customer && !job?.customer_name) {
       toast.error("Pick or add the customer first");
+      return;
+    }
+    if (siteMessage) {
+      toast.error(siteMessage);
       return;
     }
     save.mutate();
@@ -1342,10 +1371,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       )}
     </div>
   );
+  // The $ / hour box and the "+" wait for a technician (owner, Oct 1).
+  const showRate = !!crew && !!draft.technician_id;
   const techRow = (
     <div className="flex items-center gap-2">
       <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
-      {crew && (
+      {crew && showRate && (
         <>
           <div className="w-28 shrink-0">
             <RateBox
@@ -1354,7 +1385,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               className="h-9"
               placeholder={ratePlaceholder(draft.technician_id, true)}
               value={crew.lead_rate}
-              disabled={ro || !draft.technician_id}
+              disabled={ro}
               onChange={(v) => setCrew((c) => (c ? { ...c, lead_rate: v } : c))}
             />
           </div>
@@ -1365,7 +1396,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             className="h-9 w-9 shrink-0"
             aria-label="Add another technician"
             title="Add another technician to this ticket"
-            disabled={ro || !draft.technician_id || crew.others.length >= MAX_HELPERS}
+            disabled={ro || crew.others.length >= MAX_HELPERS}
             onClick={addOther}
           >
             <Plus className="h-4 w-4" />
@@ -1511,142 +1542,30 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       )}
 
       <form
-        className="space-y-5"
+        className="max-w-3xl space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
           submit();
         }}
       >
-        {/* 1. Customer, description, PO and rate on the left; the customer's card, site
-            contact and contact log on the right (owner, Sep 28: no empty left column). */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label htmlFor="ticket-customer">Customer</Label>
-              <AccountPicker
-                id="ticket-customer"
-                value={draft.customer}
-                autoFocus={!job}
-                disabled={ro}
-                placeholder="Search a customer or site (e.g. yellow creek)…"
-                onChange={(hit) =>
-                  setDraft((d) => ({
-                    ...d,
-                    hit,
-                    // Another customer's contacts do not apply.
-                    contact_id:
-                      hit && d.customer && hit.account_id === d.customer.account_id
-                        ? d.contact_id
-                        : "",
-                    customer: hit
-                      ? {
-                          account_id: hit.account_id,
-                          site_id: hit.site_id,
-                          label: hit.site_name
-                            ? `${hit.site_name} — ${hit.account_name}`
-                            : hit.account_name,
-                        }
-                      : null,
-                  }))
-                }
-              />
-              {!draft.customer && job?.customer_name && (
-                <p className="text-xs text-muted-foreground">
-                  Not linked to a customer profile: “{job.customer_name}”. Pick or add one to link
-                  it.
-                </p>
-              )}
-            </div>
-            <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-              <div className="space-y-1">
-                <Label htmlFor="ticket-description">Description</Label>
-                <Input
-                  id="ticket-description"
-                  value={draft.description}
-                  disabled={ro}
-                  maxLength={500}
-                  placeholder="e.g. Leak over the gym, north wall"
-                  onChange={(e) => set("description", e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="ticket-type">Type</Label>
-                <Select
-                  value={draft.service_type}
-                  disabled={ro}
-                  onValueChange={(v) => set("service_type", v as ServiceType)}
-                >
-                  <SelectTrigger id="ticket-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SERVICE_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {TYPE_LABELS[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor="ticket-po">PO #</Label>
-                <Input
-                  id="ticket-po"
-                  value={draft.po_number}
-                  disabled={ro}
-                  maxLength={60}
-                  onChange={(e) => set("po_number", e.target.value)}
-                />
-                <BillingNote accountId={draft.customer?.account_id ?? null} />
-              </div>
-              {officeOrAdmin && (
-                <div className="space-y-1">
-                  <Label htmlFor="ticket-job-number">Job #</Label>
-                  <Input
-                    id="ticket-job-number"
-                    value={draft.job_number}
-                    disabled={ro}
-                    maxLength={60}
-                    title="Printed on this ticket's invoices as the Job #"
-                    onChange={(e) => set("job_number", e.target.value)}
-                  />
-                </div>
-              )}
-              {officeOrAdmin && (
-                <div className="space-y-1">
-                  <Label htmlFor="ticket-rate">Labor rate</Label>
-                  <Select
-                    value={draft.labor_rate_kind}
-                    disabled={ro}
-                    onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
-                  >
-                    <SelectTrigger
-                      id="ticket-rate"
-                      className="sm:max-w-[220px]"
-                      title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RATE_KINDS.map((k) => (
-                        <SelectItem key={k} value={k}>
-                          {RATE_KIND_LABELS[k]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="space-y-3">
-            <CustomerCard
-              accountId={draft.customer?.account_id ?? null}
-              siteId={draft.customer?.site_id ?? null}
+        {/* One column (owner, Oct 1): customer block → description → PO / Job # → type, labor
+            rate and date → technician and crew → CenterPoint (folded) → notes → Create. */}
+        {/* 1. The customer: the search box until one is picked, then one block with the name
+            (× to change), the site and the site contact. */}
+        <div className="space-y-1">
+          <Label htmlFor={draft.customer ? undefined : "ticket-customer"}>Customer</Label>
+          {draft.customer ? (
+            <CustomerBlock
+              accountId={draft.customer.account_id}
+              siteId={draft.customer.site_id}
               hit={draft.hit}
+              contactId={draft.contact_id}
+              siteMessage={siteMessage}
               disabled={ro}
+              onChangeCustomer={() => {
+                setChangingCustomer(true);
+                setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "" }));
+              }}
               onPickSite={(site, accountName) =>
                 setDraft((d) => ({
                   ...d,
@@ -1659,104 +1578,175 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                     : d.customer,
                 }))
               }
+              onContact={(v) => set("contact_id", v)}
             />
-            {draft.customer && (
-              <ContactSelect
-                accountId={draft.customer.account_id}
-                siteId={draft.customer.site_id}
-                value={draft.contact_id}
+          ) : (
+            <>
+              <AccountPicker
+                id="ticket-customer"
+                value={null}
+                autoFocus={!job || changingCustomer}
                 disabled={ro}
-                onChange={(v) => set("contact_id", v)}
+                placeholder="Search a customer (e.g. bell county)…"
+                onChange={(hit) =>
+                  setDraft((d) => ({
+                    ...d,
+                    hit,
+                    // Another customer's contacts do not apply.
+                    contact_id:
+                      hit && job?.account_id === hit.account_id ? (job.contact_id ?? "") : "",
+                    // A customer with one site comes with it (lib/account-search.ts).
+                    customer: hit
+                      ? {
+                          account_id: hit.account_id,
+                          site_id: hit.site_id,
+                          label: hit.site_name
+                            ? `${hit.site_name} — ${hit.account_name}`
+                            : hit.account_name,
+                        }
+                      : null,
+                  }))
+                }
               />
-            )}
-            {job && (
-              // Owner, Sep 28: log each call / text / email / visit so the office sees the
-              // customer has been reached (and the ticket leaves the untouched list).
-              <section
-                className="space-y-2 rounded-lg border p-3 text-sm"
-                aria-label="Customer contact"
-              >
-                <p className="flex items-center gap-1.5 font-medium">
-                  <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Customer contact
+              {job?.customer_name && !job.account_id && (
+                <p className="text-xs text-muted-foreground">
+                  Not linked to a customer profile: “{job.customer_name}”. Pick or add one to link
+                  it.
                 </p>
-                <LogContactButtons kind="ticket" itemId={job.id} />
-                <LatestContact kind="ticket" itemId={job.id} />
-              </section>
-            )}
+              )}
+            </>
+          )}
+        </div>
+        {job && (
+          // Owner, Sep 28: log each call / text / email / visit so the office sees the
+          // customer has been reached (and the ticket leaves the untouched list).
+          <section
+            className="space-y-2 rounded-lg border p-3 text-sm"
+            aria-label="Customer contact"
+          >
+            <p className="flex items-center gap-1.5 font-medium">
+              <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Customer contact
+            </p>
+            <LogContactButtons kind="ticket" itemId={job.id} />
+            <LatestContact kind="ticket" itemId={job.id} />
+          </section>
+        )}
+
+        {/* 2. Description */}
+        <div className="space-y-1">
+          <Label htmlFor="ticket-description">Description</Label>
+          <Input
+            id="ticket-description"
+            value={draft.description}
+            disabled={ro}
+            maxLength={500}
+            placeholder="e.g. Leak over the gym, north wall"
+            onChange={(e) => set("description", e.target.value)}
+          />
+        </div>
+
+        {/* 3. PO # and Job # */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="ticket-po">PO #</Label>
+            <Input
+              id="ticket-po"
+              value={draft.po_number}
+              disabled={ro}
+              maxLength={60}
+              onChange={(e) => set("po_number", e.target.value)}
+            />
+            <BillingNote accountId={draft.customer?.account_id ?? null} />
+          </div>
+          {officeOrAdmin && (
+            <div className="space-y-1">
+              <Label htmlFor="ticket-job-number">Job #</Label>
+              <Input
+                id="ticket-job-number"
+                value={draft.job_number}
+                disabled={ro}
+                maxLength={60}
+                title="Printed on this ticket's invoices as the Job #"
+                onChange={(e) => set("job_number", e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 4. Type, labor rate and date on one row (owner, Oct 1) */}
+        <div className={`grid gap-4 ${officeOrAdmin ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+          <div className="space-y-1">
+            <Label htmlFor="ticket-type">Type</Label>
+            <Select
+              value={draft.service_type}
+              disabled={ro}
+              onValueChange={(v) => set("service_type", v as ServiceType)}
+            >
+              <SelectTrigger id="ticket-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SERVICE_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {TYPE_LABELS[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {officeOrAdmin && (
+            <div className="space-y-1">
+              <Label htmlFor="ticket-rate">Labor rate</Label>
+              <Select
+                value={draft.labor_rate_kind}
+                disabled={ro}
+                onValueChange={(v) => set("labor_rate_kind", asRateKind(v))}
+              >
+                <SelectTrigger
+                  id="ticket-rate"
+                  title={`Sets the hourly rates on the invoice${job?.invoice_id ? " (rebuild a draft invoice after changing it)" : ""}.`}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RATE_KINDS.map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {RATE_KIND_LABELS[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <div className="space-y-1">
+            <Label htmlFor="ticket-date">Date</Label>
+            {dateInput}
           </div>
         </div>
 
-        {/* 4. Technician, helpers and day. The office picks both in one click on the grid; a
-            technician (who can only assign themselves) keeps the plain fields. */}
+        {/* 5. Technician and crew. The Board keeps the week grid; here the select and the date
+            above set them (owner, Oct 1). */}
         {officeOrAdmin ? (
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium leading-none">Technician and day</p>
-                {hasSlot && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs"
-                    aria-expanded={gridOpen}
-                    aria-controls="ticket-assign-grid"
-                    onClick={() => setGridOpen((v) => !v)}
-                  >
-                    <ChevronRight
-                      className={`mr-1 h-3.5 w-3.5 transition-transform ${gridOpen ? "rotate-90" : ""}`}
-                    />
-                    {gridOpen ? "Hide the week grid" : "Change on the week grid"}
-                  </Button>
-                )}
-              </div>
-              {gridOpen && (
-                <div id="ticket-assign-grid">
-                  <AssignGrid
-                    jobId={job?.id ?? null}
-                    techs={techOptions}
-                    techsLoading={techs.isLoading}
-                    technicianId={draft.technician_id}
-                    date={draft.scheduled_date}
-                    meId={profile?.id ?? null}
-                    disabled={ro}
-                    onPick={(technician_id, scheduled_date) => {
-                      setDraft((d) => ({ ...d, technician_id, scheduled_date }));
-                      dropFromCrew(technician_id);
-                    }}
-                  />
-                </div>
+          <div className="space-y-2 sm:max-w-[460px]">
+            <div className="flex items-end justify-between gap-2">
+              <Label htmlFor="ticket-tech">
+                Technician{crew && crew.others.length > 0 ? "s" : ""}
+              </Label>
+              {showRate && (
+                <span className="mr-11 w-28 text-xs text-muted-foreground">$ / hour</span>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,460px)_170px]">
-              <div className="space-y-2">
-                <div className="flex items-end justify-between gap-2">
-                  <Label htmlFor="ticket-tech" className="text-xs">
-                    Technician{crew && crew.others.length > 0 ? "s" : ""}
-                  </Label>
-                  {crew && (
-                    <span className="mr-11 w-28 text-xs text-muted-foreground">$ / hour</span>
-                  )}
-                </div>
-                {techRow}
-                {crewRows}
-                {crewQ.error && (
-                  <p className="text-xs text-destructive">
-                    Could not load the crew: {errText(crewQ.error)}
-                  </p>
-                )}
-                {techError}
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="ticket-date" className="text-xs">
-                  Date (any day)
-                </Label>
-                {dateInput}
-              </div>
-            </div>
+            {techRow}
+            {crewRows}
+            {crewQ.error && (
+              <p className="text-xs text-destructive">
+                Could not load the crew: {errText(crewQ.error)}
+              </p>
+            )}
+            {techError}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-[1fr_auto_200px]">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="ticket-tech">Technician</Label>
               {techSelect()}
@@ -1775,14 +1765,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               </p>
               <p className="text-xs text-muted-foreground">Change it on the close-out.</p>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="ticket-date">Scheduled date</Label>
-              {dateInput}
-            </div>
           </div>
         )}
 
-        {/* 5. CenterPoint numbers: folded away unless the ticket carries one */}
+        {/* 6. CenterPoint numbers: folded away unless the ticket carries one */}
         <Collapsible
           defaultOpen={!!(draft.centerpoint_ticket || draft.centerpoint_invoice)}
           className="space-y-2"
@@ -1828,12 +1814,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </CollapsibleContent>
         </Collapsible>
 
-        {/* 6. Notes */}
+        {/* 7. Notes: two rows to start, growing as they are typed (owner, Oct 1) */}
         <div className="space-y-1">
           <Label htmlFor="ticket-notes">Notes</Label>
-          <Textarea
+          <AutoTextarea
             id="ticket-notes"
-            rows={4}
+            rows={2}
             value={draft.notes}
             disabled={ro}
             onChange={(e) => set("notes", e.target.value)}
@@ -1845,7 +1831,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <Button
               type="submit"
               size="lg"
-              disabled={save.isPending || (!!job && !dirty && !crewDirty) || dateMissing}
+              disabled={
+                save.isPending || (!!job && !dirty && !crewDirty) || dateMissing || !!siteMessage
+              }
             >
               {save.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1857,11 +1845,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {job && (dirty || crewDirty) && (
               <span className="text-sm text-muted-foreground">Unsaved changes</span>
             )}
-            {!job && (
-              <span className="text-xs text-muted-foreground">
-                Saved as Scheduled when a technician and a date are set, otherwise Open.
-              </span>
-            )}
+            {!job && <span className="text-xs text-muted-foreground">{TICKET_STAGE_HINT}</span>}
           </div>
         )}
       </form>
@@ -1948,114 +1932,118 @@ function TicketNumberHelp() {
   );
 }
 
-/** The account (contact, phone) and site (address, instructions) the ticket is for. */
-function CustomerCard(props: {
-  accountId: string | null;
+/**
+ * The picked customer as one block (owner, Oct 1): the name (opens the customer) with an × to
+ * change it, then the site box (required when the customer has several sites; one site comes
+ * with the pick), the site's technician instructions, and the site contact with their phone.
+ */
+function CustomerBlock(props: {
+  accountId: string;
   siteId: string | null;
   hit: AccountHit | null;
+  contactId: string;
+  /** Why the site still needs picking (lib/ticket-form.ts siteProblem), or null. */
+  siteMessage: string | null;
   disabled: boolean;
+  onChangeCustomer: () => void;
   onPickSite: (site: { id: string; name: string }, accountName: string) => void;
+  onContact: (id: string) => void;
 }) {
   const { session } = useAuth();
   const getFn = useServerFn(getAccount);
   const accountId = props.accountId;
   const detail = useQuery({
     queryKey: ["account", accountId],
-    queryFn: () => getFn({ data: { id: accountId! } }),
-    enabled: !!session && !!accountId,
+    queryFn: () => getFn({ data: { id: accountId } }),
+    enabled: !!session,
   });
-  if (!accountId)
-    return (
-      <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-        Pick a site or customer to see the address and contact here.
-      </div>
-    );
   const a = detail.data?.account;
-  const sites = detail.data?.sites ?? [];
-  const site = props.siteId ? sites.find((s) => s.id === props.siteId) : undefined;
-  const hit = props.hit;
-  const name = a?.name ?? hit?.account_name ?? "";
-  const contact = a?.contact_name ?? hit?.contact_name ?? null;
-  const phone = a?.phone ?? hit?.phone ?? null;
-  const siteName = site?.name ?? hit?.site_name ?? null;
-  const address = site ? siteAddressLine(site) : (hit?.site_address ?? "");
+  const site = props.siteId ? detail.data?.sites.find((s) => s.id === props.siteId) : undefined;
+  const name = a?.name ?? props.hit?.account_name ?? "";
   return (
-    <div className="space-y-1.5 rounded-lg border bg-muted/30 p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
         <Link
           to="/customers"
           search={{ id: accountId }}
-          className="font-medium underline-offset-2 hover:underline"
+          className="min-w-0 truncate text-base font-medium underline-offset-2 hover:underline"
           title="Open this customer"
         >
           {name || "Customer"}
         </Link>
-        {detail.isLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        <div className="flex shrink-0 items-center gap-1">
+          {detail.isLoading && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+          {!props.disabled && (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-8 w-8 text-muted-foreground"
+              title="Change the customer"
+              aria-label="Change the customer"
+              onClick={props.onChangeCustomer}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
       </div>
       {detail.error && (
         <p className="text-xs text-destructive">
           Could not load the customer: {errText(detail.error)}
         </p>
       )}
-      {props.siteId ? (
-        <p className="flex items-start gap-1.5">
-          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span>
-            {siteName && <span className="font-medium">{siteName}</span>}
-            {address ? (
-              <span className="text-muted-foreground">
-                {siteName ? ", " : ""}
-                {address}
-              </span>
-            ) : (
-              <span className="text-muted-foreground"> (no address on file)</span>
-            )}
-          </span>
-        </p>
-      ) : sites.length > 0 ? (
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Which site?</p>
-          <Select
-            value=""
-            disabled={props.disabled}
-            onValueChange={(v) => {
-              const s = sites.find((x) => x.id === v);
-              if (s) props.onPickSite(s, name);
-            }}
-          >
-            <SelectTrigger className="h-8 bg-background">
-              <SelectValue placeholder="Pick the site…" />
-            </SelectTrigger>
-            <SelectContent>
-              {sites.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                  {siteAddressLine(s) ? ` — ${siteAddressLine(s)}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : detail.data ? (
-        <p className="text-xs text-muted-foreground">No sites on file for this customer.</p>
-      ) : null}
-      {(contact || phone) && (
-        <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
-          {contact && <span>{contact}</span>}
-          {phone && (
-            <a href={`tel:${phone}`} className="inline-flex items-center gap-1 hover:underline">
-              <Phone className="h-3.5 w-3.5" />
-              {phone}
-            </a>
-          )}
-        </p>
-      )}
-      {site?.technician_instructions && (
-        <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
-          <span className="font-medium">Technician instructions: </span>
-          {site.technician_instructions}
-        </p>
-      )}
+      {(() => {
+        // The customer's own contact and numbers (the site contact is picked below).
+        const who = a?.contact_name ?? props.hit?.contact_name ?? null;
+        const phones = [a?.mobile ?? null, a?.phone ?? props.hit?.phone ?? null].filter(Boolean);
+        if (!who && !phones.length) return null;
+        return (
+          <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            {who && <span className="text-foreground">{who}</span>}
+            {phones.map((ph) => (
+              <a key={ph} href={`tel:${ph}`} className="inline-flex items-center gap-1">
+                <Phone className="h-3 w-3" /> {ph}
+              </a>
+            ))}
+          </p>
+        );
+      })()}
+      <div className="space-y-1">
+        <label htmlFor="ticket-site" className="text-xs font-medium">
+          Site
+        </label>
+        <SiteSelect
+          id="ticket-site"
+          accountId={accountId}
+          value={props.siteId}
+          required
+          invalid={!!props.siteMessage}
+          disabled={props.disabled}
+          className="bg-background"
+          onChange={(s) => {
+            if (s) props.onPickSite(s, name);
+          }}
+        />
+        {props.siteMessage && !props.disabled && (
+          <p className="text-xs text-destructive">{props.siteMessage}</p>
+        )}
+        {site?.technician_instructions && (
+          <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
+            <span className="font-medium">Technician instructions: </span>
+            {site.technician_instructions}
+          </p>
+        )}
+      </div>
+      <ContactSelect
+        accountId={accountId}
+        siteId={props.siteId}
+        value={props.contactId}
+        disabled={props.disabled}
+        onChange={props.onContact}
+      />
     </div>
   );
 }

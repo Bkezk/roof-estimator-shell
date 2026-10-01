@@ -15,6 +15,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
+import { siteProblem } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 
@@ -176,7 +177,8 @@ export type ServiceJobInput = z.input<typeof jobSchema>;
 /**
  * Create (no id) or update a ticket. The customer / site names and the site address are
  * snapshotted from the linked account so the list reads without joins. A missing stage on
- * create is Scheduled when a tech and a date are set, else Open.
+ * create is Scheduled when a tech and a date are set, else Open. A customer with more than one
+ * live site needs the site picked (lib/ticket-form.ts siteProblem).
  */
 export const saveServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -207,6 +209,16 @@ export const saveServiceJob = createServerFn({ method: "POST" })
           throw new Error("That site does not belong to the customer");
         site_name = s.name;
         site_address = siteAddressLine(s) || null;
+      } else {
+        // A customer with more than one site: the ticket names which (owner, Oct 1).
+        const { count, error: cErr } = await sb
+          .from("crm_sites")
+          .select("id", { count: "exact", head: true })
+          .eq("account_id", fields.account_id)
+          .is("deleted_at", null);
+        if (cErr) throw new Error(cErr.message);
+        const problem = siteProblem({ siteCount: count ?? 0, site_id: null });
+        if (problem) throw new Error(problem);
       }
     } else {
       fields.site_id = null;

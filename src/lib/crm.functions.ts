@@ -22,6 +22,7 @@ import {
   type QuickAccountInput,
 } from "@/lib/crm-account";
 import { namesLookAlike } from "@/lib/name-match";
+import { SEARCH_LIMIT, shapeAccountHits, type SearchSiteRow } from "@/lib/account-search";
 
 export type { AccountInput, QuickAccountInput };
 
@@ -66,7 +67,11 @@ export function siteAddressLine(
   return [street, cityLine].filter(Boolean).join(", ");
 }
 
-/** A typeahead hit: an account, or one of its sites (with the account named). */
+/**
+ * A typeahead hit: one customer (owner, Oct 1: the search lists customers only, never sites). A
+ * customer with exactly one live site carries it in the site fields, so a pick selects it;
+ * otherwise they are null and the form's site box picks one.
+ */
 export interface AccountHit {
   account_id: string;
   account_name: string;
@@ -74,11 +79,17 @@ export interface AccountHit {
   site_id: string | null;
   site_name: string | null;
   site_address: string;
+  /** The customer's live sites. */
+  site_count: number;
   contact_name: string | null;
   phone: string | null;
 }
 
-/** Accounts and sites whose name matches `q` (prefix or word match), for the typeaheads. */
+/**
+ * Customers whose name matches `q` — or who have a live site whose name or address matches it
+ * (typing a site still finds its customer; the row is always the customer, never the site) — for
+ * the typeaheads (lib/account-search.ts shapes the rows).
+ */
 export const searchAccounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ q: z.string().trim().max(120) }).parse(d))
@@ -87,66 +98,59 @@ export const searchAccounts = createServerFn({ method: "GET" })
     const sb = context.supabase;
     const q = data.q.replace(/[%_,]/g, " ").trim();
     const like = q ? `%${q}%` : "%";
-    const [{ data: accounts, error: aErr }, { data: sites, error: sErr }] = await Promise.all([
-      sb
-        .from("crm_accounts")
-        .select("id, name, kind, contact_name, phone")
-        .is("deleted_at", null)
-        .ilike("name", like)
-        .order("name")
-        .limit(25),
-      sb
-        .from("crm_sites")
-        .select(
-          "id, name, address1, address2, city, state, zip, account:crm_accounts!crm_sites_account_id_fkey(id, name, kind, contact_name, phone, deleted_at)",
-        )
-        .is("deleted_at", null)
-        .ilike("name", like)
-        .order("name")
-        .limit(25),
-    ]);
+    const { data: accounts, error: aErr } = await sb
+      .from("crm_accounts")
+      .select("id, name, kind, contact_name, phone")
+      .is("deleted_at", null)
+      .ilike("name", like)
+      .order("name")
+      .limit(SEARCH_LIMIT);
     if (aErr) throw new Error(aErr.message);
-    if (sErr) throw new Error(sErr.message);
-    const hits: AccountHit[] = (accounts ?? []).map((a) => ({
-      account_id: a.id,
-      account_name: a.name,
-      kind: a.kind === "individual" ? "individual" : "company",
-      site_id: null,
-      site_name: null,
-      site_address: "",
-      contact_name: a.contact_name,
-      phone: a.phone,
-    }));
-    for (const s of sites ?? []) {
-      const a = s.account as unknown as {
-        id: string;
-        name: string;
-        kind: string;
-        contact_name: string | null;
-        phone: string | null;
-        deleted_at: string | null;
-      } | null;
-      if (!a || a.deleted_at) continue;
-      hits.push({
-        account_id: a.id,
-        account_name: a.name,
-        kind: a.kind === "individual" ? "individual" : "company",
-        site_id: s.id,
-        site_name: s.name,
-        site_address: siteAddressLine(s),
-        contact_name: a.contact_name,
-        phone: a.phone,
-      });
+    // Customers found through a site (its name or street): the search box used to list the site
+    // itself; now the site only leads to its customer.
+    let viaSite: typeof accounts = [];
+    if (q) {
+      const { data: siteHits, error: shErr } = await sb
+        .from("crm_sites")
+        .select("account_id")
+        .is("deleted_at", null)
+        .or(`name.ilike.${like},address1.ilike.${like}`)
+        .limit(SEARCH_LIMIT * 4);
+      if (shErr) throw new Error(shErr.message);
+      const known = new Set((accounts ?? []).map((a) => a.id));
+      const extra = [...new Set((siteHits ?? []).map((s) => s.account_id))].filter(
+        (id) => !known.has(id),
+      );
+      if (extra.length) {
+        const { data: more, error: mErr } = await sb
+          .from("crm_accounts")
+          .select("id, name, kind, contact_name, phone")
+          .is("deleted_at", null)
+          .in("id", extra.slice(0, SEARCH_LIMIT))
+          .order("name");
+        if (mErr) throw new Error(mErr.message);
+        viaSite = more ?? [];
+      }
     }
-    // Prefix matches first, then the rest alphabetically.
-    const lq = q.toLowerCase();
-    const key = (h: AccountHit) => (h.site_name ?? h.account_name).toLowerCase();
-    hits.sort((x, y) => {
-      const px = lq && key(x).startsWith(lq) ? 0 : 1;
-      const py = lq && key(y).startsWith(lq) ? 0 : 1;
-      return px - py || key(x).localeCompare(key(y));
-    });
-    return hits.slice(0, 30);
+    const found = [...(accounts ?? []), ...viaSite];
+    // The live sites of those customers: counted per customer, and the only one carried.
+    const ids = found.map((a) => a.id);
+    let sites: SearchSiteRow[] = [];
+    if (ids.length) {
+      const { data: rows, error: sErr } = await sb
+        .from("crm_sites")
+        .select("id, account_id, name, address1, address2, city, state, zip")
+        .in("account_id", ids)
+        .is("deleted_at", null);
+      if (sErr) throw new Error(sErr.message);
+      sites = (rows ?? []).map((s) => ({
+        id: s.id,
+        account_id: s.account_id,
+        name: s.name,
+        address: siteAddressLine(s),
+      }));
+    }
+    return shapeAccountHits(q, found, sites);
   });
 
 export interface AccountListRow extends AccountRow {
@@ -338,6 +342,7 @@ export const quickCreateAccount = createServerFn({ method: "POST" })
       site_id: null,
       site_name: null,
       site_address: "",
+      site_count: 0,
       contact_name: account.contact_name,
       phone: account.phone ?? account.mobile,
     };

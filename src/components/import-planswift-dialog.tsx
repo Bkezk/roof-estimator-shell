@@ -37,6 +37,7 @@ import {
 } from "@/lib/planswift/to-seed";
 import { stashPlanSwiftHandoff } from "@/lib/planswift/handoff";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
+import { SiteSelect } from "@/components/crm/site-select";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -103,6 +104,8 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
   const [readError, setReadError] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const [account, setAccount] = useState<AccountPickerValue | null>(null);
+  // The picked customer, kept so the site box can re-pick it with a site.
+  const [hit, setHit] = useState<AccountHit | null>(null);
   const [bidName, setBidName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -113,6 +116,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     setRows([]);
     setReadError(null);
     setAccount(null);
+    setHit(null);
     setBidName("");
     setNameTouched(false);
     setBusy(false);
@@ -158,6 +162,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
         }
       : null;
     setAccount(v);
+    setHit(hit);
     if (!nameTouched)
       setBidName(fileName || v ? suggestPlanSwiftBidName(v?.label ?? null, fileName) : "");
   };
@@ -286,12 +291,31 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                   id="planswift-customer"
                   value={account}
                   disabled={busy}
-                  placeholder="Start typing a customer or site name…"
+                  placeholder="Start typing a customer name…"
                   onChange={pickAccount}
                 />
                 <p className="text-xs text-muted-foreground">
                   Required. The bid is filed under this customer.
                 </p>
+              </div>
+            )}
+            {canPickCustomer && hit && (
+              <div className="space-y-1">
+                <Label htmlFor="planswift-site">Site (optional)</Label>
+                <SiteSelect
+                  id="planswift-site"
+                  accountId={hit.account_id}
+                  value={hit.site_id}
+                  disabled={busy}
+                  onChange={(s) =>
+                    pickAccount({
+                      ...hit,
+                      site_id: s?.id ?? null,
+                      site_name: s?.name ?? null,
+                      site_address: "",
+                    })
+                  }
+                />
               </div>
             )}
             <div className="space-y-1">

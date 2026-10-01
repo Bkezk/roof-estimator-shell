@@ -174,7 +174,7 @@ function CustomerGroup(props: {
         <AccountPicker
           value={null}
           disabled={link.isPending}
-          placeholder="Search customers and sites…"
+          placeholder="Search customers…"
           onChange={(hit) => {
             if (hit) link.mutate({ id: hit.account_id, name: hit.account_name });
           }}

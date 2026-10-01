@@ -53,7 +53,7 @@ import {
 } from "@/components/service/field-utils";
 
 // ---------------------------------------------------------------------------------------------
-// Contact select (under the site card)
+// Contact select (in the ticket's customer block, under the site)
 
 /**
  * The ticket's site contact: the account's contacts, the site's own first. "" = none. The phone
@@ -84,9 +84,19 @@ export function ContactSelect({
   const sorted = [...all].sort((a, b) => Number(here(b)) - Number(here(a)));
   const picked = all.find((c) => c.id === value);
   const phoneOf = (c: (typeof all)[number]) => c.mobile || c.office_phone || "";
+  // A customer with no contacts at all: one line instead of an empty select (owner, Oct 1).
+  if (!q.isLoading && !q.error && all.length === 0 && !value)
+    return (
+      <div className="space-y-1">
+        <p className="text-xs font-medium">Site contact</p>
+        <p className="text-xs text-muted-foreground">
+          No contacts on this customer yet; add them on the customer's page.
+        </p>
+      </div>
+    );
   return (
     <div className="space-y-1">
-      <label htmlFor="ticket-contact" className="text-sm font-medium">
+      <label htmlFor="ticket-contact" className="text-xs font-medium">
         Site contact
       </label>
       <Select
@@ -94,7 +104,7 @@ export function ContactSelect({
         disabled={disabled || q.isLoading}
         onValueChange={(v) => onChange(v === "none" ? "" : v)}
       >
-        <SelectTrigger id="ticket-contact">
+        <SelectTrigger id="ticket-contact" className="bg-background">
           <SelectValue placeholder={q.isLoading ? "Loading contacts…" : "No contact"} />
         </SelectTrigger>
         <SelectContent>

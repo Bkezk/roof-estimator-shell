@@ -1,11 +1,13 @@
 /**
- * The customer typeahead (docs/service-module-design.md §5.1, §11): one search box over accounts
- * and their sites. Picking a site row sets account + site in one click; the last row adds the
+ * The customer typeahead (docs/service-module-design.md §5.1, §11): one search box over the
+ * customers (owner, Oct 1: customers only, no site rows; the form's site box picks the site
+ * afterwards). A customer with exactly one site arrives with that site on the hit, so the form
+ * selects it without another click. The last row adds the
  * typed name as a new customer through a small inline dialog (quickCreateAccount: the account
  * only, no site — sites are added on the Customers page afterwards) and selects it,
  * then offers to link saved bids that look like the new customer (LinkBidsDialog) — after the
  * pick, so the surrounding form (a ticket) keeps its state.
- * Used by the service ticket form and the Customers page's "New customer".
+ * Used by tickets, bids, takeoffs, opportunities, the PlanSwift import and tasks.
  *
  * `allowFreeText` (the estimator's Setup › Customer Name and Job Name): the input is a plain text
  * field whose value the parent owns (`text` / `onText`); the dropdown only offers profiles to
@@ -16,7 +18,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { Building2, Loader2, MapPin, Plus, User, X } from "lucide-react";
+import { Building2, Loader2, Plus, User, X } from "lucide-react";
 
 import { quickCreateAccount, searchAccounts, type AccountHit } from "@/lib/crm.functions";
 import { CONTACT_REQUIRED, hasContactMethod } from "@/lib/crm-account";
@@ -121,7 +123,7 @@ export function AccountPicker(props: {
           value={shown}
           autoFocus={props.autoFocus}
           disabled={props.disabled}
-          placeholder={props.placeholder ?? (free ? undefined : "Search customers and sites…")}
+          placeholder={props.placeholder ?? (free ? undefined : "Search customers…")}
           autoComplete="off"
           role="combobox"
           aria-expanded={open}
@@ -217,7 +219,7 @@ export function AccountPicker(props: {
           ) : null}
           {hits.map((h, i) => (
             <div
-              key={`${h.account_id}:${h.site_id ?? ""}`}
+              key={h.account_id}
               role="option"
               aria-selected={i === active}
               className={`flex cursor-pointer items-start gap-2 rounded-sm px-2 py-1.5 text-sm ${
@@ -227,28 +229,18 @@ export function AccountPicker(props: {
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => pick(h)}
             >
-              {h.site_id ? (
-                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              ) : h.kind === "individual" ? (
+              {h.kind === "individual" ? (
                 <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               ) : (
                 <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               )}
-              {h.site_id ? (
-                <span className="min-w-0">
-                  <span className="font-medium">{h.site_name}</span>
-                  <span className="text-muted-foreground">
-                    {" — "}
-                    {h.account_name}
-                    {h.site_address ? `, ${h.site_address}` : ""}
-                  </span>
+              <span className="min-w-0">
+                <span className="font-medium">{h.account_name}</span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  ({h.kind}){h.site_count > 1 ? ` · ${h.site_count} sites` : ""}
                 </span>
-              ) : (
-                <span className="min-w-0">
-                  <span className="font-medium">{h.account_name}</span>
-                  <span className="text-muted-foreground"> ({h.kind})</span>
-                </span>
-              )}
+              </span>
             </div>
           ))}
           {addLabel && (

@@ -756,7 +756,7 @@ function NewTakeoffDialog(props: {
                 value={account}
                 disabled={!!busy}
                 autoFocus
-                placeholder="Start typing a customer or site name…"
+                placeholder="Start typing a customer name…"
                 onChange={pickAccount}
               />
               <p className="text-xs text-muted-foreground">

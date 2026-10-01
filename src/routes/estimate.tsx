@@ -148,6 +148,7 @@ import { countNonDlOverrides, pinNonDlToRef } from "@/lib/engine/nondl";
 import { listEstimatorNames } from "@/lib/auth.functions";
 import { AccountPicker } from "@/components/crm/account-picker";
 import { LinkedAccountChip } from "@/components/crm/linked-account-chip";
+import { SiteSelect } from "@/components/crm/site-select";
 import { getAccount, saveAccount, type AccountHit } from "@/lib/crm.functions";
 import {
   FILL_LABELS,
@@ -866,6 +867,29 @@ function EstimatePage() {
       setUpdatingProfile(false);
     }
   };
+  // The search lists customers only (owner, Oct 1); a customer with several sites picks the
+  // bid's site here (one site comes with the pick). Optional, as before.
+  const siteBox =
+    linkedAccountId && linkedDetail && linkedDetail.sites.length > 0 ? (
+      <SiteSelect
+        accountId={linkedAccountId}
+        value={linkedSiteId}
+        className="h-8 text-xs"
+        onChange={(s) =>
+          void pickAccount({
+            account_id: linkedDetail.account.id,
+            account_name: linkedDetail.account.name,
+            kind: linkedDetail.account.kind === "individual" ? "individual" : "company",
+            site_id: s?.id ?? null,
+            site_name: s?.name ?? null,
+            site_address: "",
+            site_count: linkedDetail.sites.length,
+            contact_name: null,
+            phone: null,
+          })
+        }
+      />
+    ) : null;
   const accountChip = linkedAccountId ? (
     <LinkedAccountChip
       accountId={linkedAccountId}
@@ -2562,6 +2586,7 @@ function EstimatePage() {
                           onChange={(hit) => void pickAccount(hit)}
                         />
                         {accountChip}
+                        {siteBox}
                       </Field>
                       {/* Portalled: takes no grid cell. Closing it any other way keeps the bid's text. */}
                       <AlertDialog
