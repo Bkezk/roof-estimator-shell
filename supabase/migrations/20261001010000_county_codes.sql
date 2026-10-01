@@ -1,8 +1,9 @@
 -- JBK county codes (owner, Sep 30 item 4, answered Oct 1): a custom county code per site, picked
 -- from a list that filters as you type. Idempotent.
 --
--- A code is NOT unique: the owner's list gives 0106 twice (Cumberland, TN and Putman, TN), and
--- both are kept as given, so the key is a uuid and `code` has a plain index. Any signed-in user
+-- A code is NOT unique across states (0108 is Kenton, KY and Putnam, TN), so the key is a uuid
+-- and `code` has a plain index. (Putnam, TN was first listed as 0106; the owner corrected it to
+-- 0108 on Oct 1 and the live row was updated by hand.) Any signed-in user
 -- reads the list (the site form, the ticket); admins and Estimate Pricing edit it
 -- (Settings › General › County codes). A site points at one code; deleting a code clears it on
 -- the site (the app refuses the delete while a site still uses it).
@@ -80,7 +81,7 @@ select v.code, v.county, v.state
   ('0109', 'Montgomery', 'TN'),
   ('0030', 'Morgan', 'TN'),
   ('0049', 'Polk', 'TN'),
-  ('0106', 'Putman', 'TN'),
+  ('0108', 'Putnam', 'TN'),
   ('0050', 'Rhea', 'TN'),
   ('0011', 'Roane', 'TN'),
   ('0124', 'Robertson', 'TN'),

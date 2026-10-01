@@ -40,19 +40,22 @@ describe("countyCodeLabel", () => {
 });
 
 describe("the owner's list", () => {
-  it("has every row as given: 43 TN, 90 KY, 0106 twice, spelling kept", () => {
+  it("has every row as given: 43 TN, 90 KY, 0108 in both states, spelling kept", () => {
     const rows = countyCodeSeedRows();
     expect(rows).toHaveLength(133);
     expect(COUNTY_CODE_SEED).toHaveLength(133);
     expect(rows.filter((r) => r.state === "TN")).toHaveLength(43);
     expect(rows.filter((r) => r.state === "KY")).toHaveLength(90);
+    expect(rows.filter((r) => r.code === "0108").map(countyCodeLabel)).toEqual([
+      "0108 · Putnam, TN",
+      "0108 · Kenton, KY",
+    ]);
     expect(rows.filter((r) => r.code === "0106").map(countyCodeLabel)).toEqual([
       "0106 · Cumberland, TN",
-      "0106 · Putman, TN",
     ]);
     const names = rows.map((r) => `${r.county} ${r.state}`);
     for (const n of [
-      "Putman TN",
+      "Putnam TN",
       "Penleton KY",
       "Elliot KY",
       "McMinn TN",
@@ -106,9 +109,10 @@ describe("filterCountyCodes", () => {
 
   it("prefix on the code", () => {
     expect(labels(filterCountyCodes(LIST, "0022"))).toEqual(["0022 · Anderson, TN"]);
-    expect(labels(filterCountyCodes(LIST, "0106"))).toEqual([
-      "0106 · Cumberland, TN",
-      "0106 · Putman, TN",
+    expect(labels(filterCountyCodes(LIST, "0106"))).toEqual(["0106 · Cumberland, TN"]);
+    expect(labels(filterCountyCodes(LIST, "0108"))).toEqual([
+      "0108 · Kenton, KY",
+      "0108 · Putnam, TN",
     ]);
     expect(filterCountyCodes(LIST, "000")).toHaveLength(9);
   });

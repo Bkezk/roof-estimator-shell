@@ -5,10 +5,10 @@
  * (crm_sites.county_code_id).
  *
  * COUNTY_CODE_SEED is the owner's list exactly as given (code, county, state), spelling kept
- * ("PUTMAN", "PENLETON", "ELLIOT"). The migration 20261001010000_county_codes.sql seeds
- * countyCodeSeedRows() — the same list with the county in Title Case — and a test checks the
- * file holds every row. Code 0106 is in the list twice (Cumberland, TN and Putman, TN): both are
- * kept, so a code is not unique.
+ * ("PENLETON", "ELLIOT"); Putnam, TN was listed as "0106 PUTMAN" and corrected by the owner to
+ * 0108 (Oct 1). The migration 20261001010000_county_codes.sql seeds countyCodeSeedRows() — the
+ * same list with the county in Title Case — and a test checks the file holds every row. A code
+ * is not unique across states (0108 is Kenton, KY and Putnam, TN).
  */
 
 export type CountyState = "KY" | "TN";
@@ -52,7 +52,7 @@ export const COUNTY_CODE_SEED: readonly (readonly [string, string, CountyState])
   ["0109", "MONTGOMERY", "TN"],
   ["0030", "MORGAN", "TN"],
   ["0049", "POLK", "TN"],
-  ["0106", "PUTMAN", "TN"],
+  ["0108", "PUTNAM", "TN"],
   ["0050", "RHEA", "TN"],
   ["0011", "ROANE", "TN"],
   ["0124", "ROBERTSON", "TN"],
