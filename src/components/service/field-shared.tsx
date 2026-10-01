@@ -3,7 +3,7 @@
  * (docs/service-module-design.md §5.3): photo thumbnails, the time-entry editor and the ticket
  * page's section box (optionally collapsible, its open state remembered per section).
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  PenLine,
   Plus,
   Trash2,
   X,
@@ -20,6 +21,8 @@ import {
 } from "lucide-react";
 
 import type { AutosaveState } from "@/lib/autosave";
+import { marksSummary, parsePhotoMarks, photoOrdinals } from "@/lib/photo-annotations";
+import { MarksOverlay, PhotoLightbox } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
 import {
@@ -193,31 +196,63 @@ const ROLE_LABEL: Record<string, string> = {
   signature: "Signature",
 };
 
-/** A square thumbnail; a tap opens the full photo. Delete asks first. */
+/**
+ * A square thumbnail with the photo's marks drawn over it (and a "Marked" badge); a tap opens
+ * the lightbox (photo-markup.tsx): the photo with its marks, Mark up when `canAnnotate`, and
+ * Download. Delete asks first.
+ */
 export function PhotoThumb({
   photo,
   onDelete,
   deleting,
   size = "md",
+  canAnnotate = false,
+  ticketNumber,
+  ordinal,
 }: {
   photo: JobPhotoRow;
   onDelete?: (() => void) | undefined;
   deleting?: boolean | undefined;
   size?: "sm" | "md" | undefined;
+  /** The lightbox offers Mark up (the ticket's editors: the tech's close-out, the office). */
+  canAnnotate?: boolean | undefined;
+  /** The ticket's number, for the downloaded file's name ("6012-before-1.png"). */
+  ticketNumber?: string | number | null | undefined;
+  /** The photo's number among the ticket's photos of its role (else read from the list). */
+  ordinal?: number | undefined;
 }) {
   const url = useSignedUrl(photo.storage_path);
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+  const marks = useMemo(() => parsePhotoMarks(photo.annotations), [photo.annotations]);
   const box = size === "sm" ? "h-16 w-16" : "h-20 w-20";
+  const n =
+    ordinal ??
+    photoOrdinals(
+      qc.getQueryData<JobPhotoRow[]>(fieldKeys.photos(photo.service_job_id)) ?? [photo],
+    ).get(photo.id) ??
+    1;
   return (
     <div className={`relative ${box} shrink-0 overflow-hidden rounded-md border bg-muted`}>
       {url.data ? (
-        <a href={url.data} target="_blank" rel="noreferrer" title="Open the full photo">
+        <button
+          type="button"
+          className="block h-full w-full"
+          title={marks.length ? "Open the photo (marked)" : "Open the photo"}
+          onClick={() => setOpen(true)}
+        >
           <img
             src={url.data}
             alt={`${ROLE_LABEL[photo.role] ?? "Photo"} photo`}
             className="h-full w-full object-cover"
             loading="lazy"
+            onLoad={(e) =>
+              setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
+            }
           />
-        </a>
+          {natural && <MarksOverlay marks={marks} w={natural.w} h={natural.h} fit="cover" />}
+        </button>
       ) : url.error ? (
         <span className="flex h-full items-center justify-center p-1 text-center text-[10px] text-destructive">
           Could not load
@@ -230,6 +265,25 @@ export function PhotoThumb({
       <span className="pointer-events-none absolute bottom-0 left-0 rounded-tr bg-black/60 px-1 text-[10px] font-medium text-white">
         {ROLE_LABEL[photo.role] ?? photo.role}
       </span>
+      {marks.length > 0 && (
+        <span
+          className="pointer-events-none absolute left-0 top-0 inline-flex items-center gap-0.5 rounded-br bg-red-600 px-1 text-[10px] font-medium text-white"
+          title={marksSummary(marks)}
+        >
+          <PenLine className="h-2.5 w-2.5" aria-hidden /> Marked
+        </span>
+      )}
+      {open && url.data && (
+        <PhotoLightbox
+          photo={photo}
+          url={url.data}
+          open={open}
+          onOpenChange={setOpen}
+          canAnnotate={canAnnotate}
+          ticketNumber={ticketNumber}
+          ordinal={n}
+        />
+      )}
       {onDelete && (
         <button
           type="button"

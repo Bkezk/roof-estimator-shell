@@ -220,7 +220,7 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
     // Repairs (with the photos) is not repeated by TicketFieldSections in the column.
     expect(aside).toContain("repairs={false}");
-    expect(fieldSrc).toContain("{repairs && <RepairsReadOnly jobId={job.id} />}");
+    expect(fieldSrc).toContain("{repairs && <RepairsReadOnly jobId={job.id}");
     expect(fieldSrc).toContain("export function TicketRepairs(");
     // Materials is the section the materials const renders.
     const materials = src.slice(

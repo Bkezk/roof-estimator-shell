@@ -2031,7 +2031,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           >
             <AerialSection job={job} canEdit={canEdit} />
             <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
-            <TicketRepairs jobId={job.id} />
+            <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
             {materials}
             <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
             <PurchaseOrdersSection jobId={job.id} />

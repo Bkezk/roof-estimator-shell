@@ -43,7 +43,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { photoOrdinals } from "@/lib/photo-annotations";
 import { Box, PhotoThumb, TimeEntries } from "@/components/service/field-shared";
+import { DownloadAllPhotos } from "@/components/service/photo-markup";
 import {
   errText,
   fieldKeys,
@@ -157,14 +159,22 @@ export function TicketFieldSections({
   job,
   officeOrAdmin,
   repairs = true,
+  canEdit,
 }: {
   job: ServiceJobWithTech;
   officeOrAdmin: boolean;
   repairs?: boolean;
+  /**
+   * The ticket's photos can be marked up; by default the office and the ticket's own
+   * technician (the server's rule, savePhotoAnnotations → ownJob).
+   */
+  canEdit?: boolean;
 }) {
+  const { profile } = useAuth();
+  const markup = canEdit ?? (officeOrAdmin || (!!profile && job.technician_id === profile.id));
   return (
     <>
-      {repairs && <RepairsReadOnly jobId={job.id} />}
+      {repairs && <RepairsReadOnly jobId={job.id} ticketNumber={job.number} canEdit={markup} />}
       <CloseoutSummary job={job} />
       <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
       <Timeline jobId={job.id} />
@@ -212,12 +222,31 @@ function TimeSection({ job, officeOrAdmin }: { job: ServiceJobWithTech; officeOr
   );
 }
 
-/** The Repairs section on its own (repairs, their photos and the ticket's other photos). */
-export function TicketRepairs({ jobId }: { jobId: string }) {
-  return <RepairsReadOnly jobId={jobId} />;
+/**
+ * The Repairs section on its own (repairs, their photos and the ticket's other photos). A photo
+ * opens in the lightbox with its marks; `canEdit` offers Mark up there (owner, Oct 1).
+ */
+export function TicketRepairs({
+  jobId,
+  ticketNumber,
+  canEdit = false,
+}: {
+  jobId: string;
+  ticketNumber?: number | string | null;
+  canEdit?: boolean;
+}) {
+  return <RepairsReadOnly jobId={jobId} ticketNumber={ticketNumber} canEdit={canEdit} />;
 }
 
-function RepairsReadOnly({ jobId }: { jobId: string }) {
+function RepairsReadOnly({
+  jobId,
+  ticketNumber,
+  canEdit,
+}: {
+  jobId: string;
+  ticketNumber?: number | string | null | undefined;
+  canEdit: boolean;
+}) {
   const { session } = useAuth();
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
@@ -234,6 +263,17 @@ function RepairsReadOnly({ jobId }: { jobId: string }) {
   const rows = repairs.data ?? [];
   const pics = (photos.data ?? []).filter((p) => p.role !== "signature");
   const loose = pics.filter((p) => !p.repair_id || !rows.some((r) => r.id === p.repair_id));
+  const ord = photoOrdinals(pics);
+  const thumb = (p: (typeof pics)[number]) => (
+    <PhotoThumb
+      key={p.id}
+      photo={p}
+      size="sm"
+      canAnnotate={canEdit}
+      ticketNumber={ticketNumber}
+      ordinal={ord.get(p.id)}
+    />
+  );
   // Nothing recorded (and nothing wrong): no section at all. Also nothing while loading, so a
   // ticket without repairs does not flash an empty box.
   if (!repairs.error && repairs.isLoading) return null;
@@ -282,11 +322,7 @@ function RepairsReadOnly({ jobId }: { jobId: string }) {
                   </p>
                 )}
                 {mine.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {mine.map((p) => (
-                      <PhotoThumb key={p.id} photo={p} size="sm" />
-                    ))}
-                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">{mine.map(thumb)}</div>
                 )}
               </li>
             );
@@ -301,11 +337,15 @@ function RepairsReadOnly({ jobId }: { jobId: string }) {
       {loose.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-xs text-muted-foreground">Other photos</p>
-          <div className="flex flex-wrap gap-2">
-            {loose.map((p) => (
-              <PhotoThumb key={p.id} photo={p} size="sm" />
-            ))}
-          </div>
+          <div className="flex flex-wrap gap-2">{loose.map(thumb)}</div>
+        </div>
+      )}
+      {pics.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <DownloadAllPhotos photos={pics} ticketNumber={ticketNumber} />
+          <span className="text-xs text-muted-foreground">
+            One file per photo, with its marks drawn in.
+          </span>
         </div>
       )}
     </Box>

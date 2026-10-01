@@ -18,6 +18,7 @@ import { canAccess, isOffice, managesTickets } from "@/lib/access";
 import { templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
+import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -622,6 +623,48 @@ export const deleteJobPhoto = createServerFn({ method: "POST" })
     await context.supabase.storage.from(SERVICE_BUCKET).remove([row.storage_path]);
     const { error } = await context.supabase.from("service_job_photos").delete().eq("id", data.id);
     if (error) throw new Error(error.message);
+  });
+
+/** The save of a photo's marks: the photo, its ticket, and the marks (null = none). */
+export const savePhotoAnnotationsInput = z.object({
+  id: z.string().uuid(),
+  service_job_id: z.string().uuid(),
+  annotations: photoMarksSchema.nullable(),
+});
+/**
+ * Save the marks drawn over a ticket photo (owner, Oct 1: "issues circled, text added etc").
+ * The same rules as recording a photo: Service access, and a technician only on their own
+ * ticket (ownJob). Only a Before / After / other photo of this ticket takes marks (a signature
+ * never; an aerial keeps its own markup). The image is never touched: the marks are JSON on the
+ * row, rounded, and null when the last one is removed. The close-out and the ticket page
+ * auto-save here as the marks change.
+ */
+export const savePhotoAnnotations = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => savePhotoAnnotationsInput.parse(d))
+  .handler(async ({ data, context }): Promise<JobPhotoRow> => {
+    const job = await ownJob(context, data.service_job_id);
+    const sb = context.supabase;
+    const { data: photo, error: pErr } = await sb
+      .from("service_job_photos")
+      .select("id, role")
+      .eq("id", data.id)
+      .eq("service_job_id", job.id)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!photo) throw new Error("That photo is not on this ticket (it may have been deleted)");
+    if (!isAnnotatableRole(photo.role))
+      throw new Error("Only a Before, After or other photo can be marked up");
+    const value = serializePhotoMarks(data.annotations?.marks ?? []);
+    const { data: row, error } = await sb
+      .from("service_job_photos")
+      .update({ annotations: value as unknown as Json })
+      .eq("id", photo.id)
+      .eq("service_job_id", job.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    return row;
   });
 
 const closeoutSchema = z.object({

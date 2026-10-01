@@ -16,6 +16,7 @@ import {
   type PDFFont,
   type PDFImage,
   type PDFPage,
+  type RGB,
 } from "pdf-lib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -29,6 +30,25 @@ import {
   unitText,
   type CatalogData,
 } from "@/lib/invoice-materials";
+import {
+  chosenPhotoIds,
+  invoicePhotoCaption,
+  invoicePhotoRoleLabel,
+  planInvoicePhotos,
+  storedPhotoIds,
+} from "@/lib/invoice-photos";
+import {
+  arrowGeom,
+  ellipseGeom,
+  parsePhotoMarks,
+  photoColorRgb,
+  photoTagNumbers,
+  rectGeom,
+  strokeFor,
+  tagGeom,
+  textSizeFor,
+  type PhotoMark,
+} from "@/lib/photo-annotations";
 import { pieceFromCountedNotes, type PieceDef } from "@/lib/stock-units";
 import { timeLines, type RateTable } from "@/lib/invoice-labor";
 import { toBase64 } from "@/lib/webpush";
@@ -423,7 +443,11 @@ type BillTo = {
 };
 type Property = { name?: string; address?: string };
 
-/** Page 1 + one Work Completed page per printed repair. Returns the PDF bytes. */
+/**
+ * Page 1 + one Work Completed page per printed repair (with its chosen photos) + a closing
+ * Photos page when other photos were chosen (invoice-photos.ts); photos carry their marks.
+ * Returns the PDF bytes.
+ */
 export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Uint8Array> {
   const doc = await Doc.create();
   const { invoice, job, company, settings } = b;
@@ -561,7 +585,13 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     doc.paragraph(invoice.description, M, right - M, 10);
   }
 
-  // Work Completed pages
+  // Work Completed pages. The photos are the invoice's chosen ones (invoices.photo_ids, or the
+  // default: each printed repair's first Before and After), with their marks.
+  const photoPlan = planInvoicePhotos(
+    chosenPhotoIds(storedPhotoIds(invoice), b.repairs, b.photos),
+    b.repairs,
+    b.photos,
+  );
   const sig = job.signature_path ? await download(sb, job.signature_path) : null;
   const sigImg = sig ? await embed(doc, sig, "signature") : null;
   for (const rep of b.repairs.filter((x) => x.print_on_invoice)) {
@@ -593,14 +623,13 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       doc.paragraph(rep.resolution_text, M, 250, 9);
     }
     const textBottom = doc.y;
-    // Photos on the right: Before over After, 200 px wide.
+    // Photos on the right: the chosen ones of this repair (Before over After), 200 px wide,
+    // each with its marks drawn over it.
     let py = textTop;
-    for (const role of ["before", "after"] as const) {
-      const p = b.photos.find((x) => x.repair_id === rep.id && x.role === role);
-      if (!p) continue;
+    for (const p of photoPlan.byRepair.get(rep.id) ?? []) {
       const bytes = await download(sb, p.storage_path);
       const img = bytes ? await embed(doc, bytes, p.file_name) : null;
-      doc.page.drawText(role === "before" ? "Before:" : "After:", {
+      doc.page.drawText(`${invoicePhotoRoleLabel(p.role)}:`, {
         x: M + 300,
         y: py,
         size: 9,
@@ -610,9 +639,10 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       if (img) {
         const w = 200;
         const h = Math.min(160, (img.height / img.width) * w);
-        const dw = (img.width / img.height) * h;
+        const dw = Math.min(w, (img.width / img.height) * h);
         py -= h;
-        doc.page.drawImage(img, { x: M + 300, y: py, width: Math.min(w, dw), height: h });
+        doc.page.drawImage(img, { x: M + 300, y: py, width: dw, height: h });
+        drawPhotoMarks(doc, parsePhotoMarks(p.annotations), { x: M + 300, y: py, w: dw, h });
         py -= 12;
       } else {
         doc.page.drawText("(photo not embeddable)", { x: M + 300, y: py, size: 8, font: doc.font });
@@ -643,7 +673,150 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     const w = Math.min(200, (sigImg.width / sigImg.height) * h);
     doc.page.drawImage(sigImg, { x: M, y: doc.y, width: w, height: h });
   }
+
+  // The closing "Photos" page(s): chosen photos of no printed repair (and a repair's overflow),
+  // two to a row, each captioned and with its marks.
+  if (photoPlan.extra.length) {
+    const GAP = 20;
+    const cellW = (doc.W - 2 * M - GAP) / 2;
+    const CELL_H = 165;
+    const ROW_H = 12 + CELL_H + 18;
+    const photosPage = () => {
+      doc.newPage();
+      header("Photos");
+      doc.y -= 4;
+    };
+    photosPage();
+    for (let i = 0; i < photoPlan.extra.length; i += 2) {
+      if (doc.y - ROW_H < M) photosPage();
+      const rowTop = doc.y;
+      for (const [k, p] of photoPlan.extra.slice(i, i + 2).entries()) {
+        const x = M + k * (cellW + GAP);
+        doc.y = rowTop;
+        doc.text(
+          doc.wrap(invoicePhotoCaption(p, b.repairs), cellW, 9, doc.bold)[0] ?? "",
+          x,
+          9,
+          true,
+        );
+        const bytes = await download(sb, p.storage_path);
+        const img = bytes ? await embed(doc, bytes, p.file_name) : null;
+        if (!img) {
+          doc.page.drawText("(photo not embeddable)", {
+            x,
+            y: rowTop - 24,
+            size: 8,
+            font: doc.font,
+          });
+          continue;
+        }
+        const scale = Math.min(cellW / img.width, CELL_H / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        const y = rowTop - 12 - h;
+        doc.page.drawImage(img, { x, y, width: w, height: h });
+        drawPhotoMarks(doc, parsePhotoMarks(p.annotations), { x, y, w, h });
+      }
+      doc.y = rowTop - ROW_H;
+    }
+  }
   return doc.pdf.save();
+}
+
+/**
+ * Draw a photo's marks over it on the PDF: the photo's box is (x, y) its bottom-left corner,
+ * w × h points. Marks are 0..1 from the picture's top-left (photo-annotations.ts); the line
+ * width and the lettering scale with the box as on screen. Circles are ellipses, arrows a line
+ * with a filled triangle head, boxes rectangles, text and tags words on a dark band so they read
+ * on any roof. Returns how many marks were drawn.
+ */
+export function drawPhotoMarks(
+  doc: { page: PDFPage; bold: PDFFont },
+  marks: PhotoMark[],
+  box: { x: number; y: number; w: number; h: number },
+): number {
+  if (!marks.length || !(box.w > 0) || !(box.h > 0)) return 0;
+  const { page, bold } = doc;
+  const sw = strokeFor(box.w, box.h);
+  // Image px (top-left origin, the box's own size) → PDF points.
+  const X = (x: number) => box.x + x;
+  const Y = (y: number) => box.y + box.h - y;
+  const halo = rgb(0, 0, 0);
+  const tags = photoTagNumbers(marks);
+  const words = (text: string, x: number, yMid: number, size: number, color: RGB) => {
+    const t = clean(text);
+    const w = bold.widthOfTextAtSize(t, size);
+    page.drawRectangle({
+      x: X(x) - 1.5,
+      y: Y(yMid) - size * 0.6,
+      width: w + 3,
+      height: size * 1.2,
+      color: halo,
+      opacity: 0.55,
+    });
+    page.drawText(t, { x: X(x), y: Y(yMid) - size * 0.35, size, font: bold, color });
+  };
+  for (const m of marks) {
+    const color = rgb(...photoColorRgb(m.color));
+    if (m.kind === "ellipse") {
+      const g = ellipseGeom(m, box.w, box.h);
+      page.drawEllipse({
+        x: X(g.cx),
+        y: Y(g.cy),
+        xScale: Math.max(g.rx, 0.5),
+        yScale: Math.max(g.ry, 0.5),
+        borderColor: color,
+        borderWidth: sw,
+      });
+    } else if (m.kind === "rect") {
+      const g = rectGeom(m, box.w, box.h);
+      page.drawRectangle({
+        x: X(g.x),
+        y: Y(g.y + g.h),
+        width: g.w,
+        height: g.h,
+        borderColor: color,
+        borderWidth: sw,
+      });
+    } else if (m.kind === "arrow") {
+      const g = arrowGeom(m, box.w, box.h, sw);
+      page.drawLine({
+        start: { x: X(g.tail[0]), y: Y(g.tail[1]) },
+        end: { x: X(g.base[0]), y: Y(g.base[1]) },
+        thickness: sw,
+        color,
+      });
+      // drawSvgPath flips y about its origin: a point (px, py) lands at (px, -py).
+      const head = [g.tip, g.left, g.right]
+        .map(([x, y], i) => `${i ? "L" : "M"}${X(x).toFixed(2)} ${(-Y(y)).toFixed(2)}`)
+        .join(" ");
+      page.drawSvgPath(`${head} Z`, { x: 0, y: 0, color });
+    } else if (m.kind === "text") {
+      const [x, y] = [m.at[0] * box.w, m.at[1] * box.h];
+      words(m.text, x, y, textSizeFor(box.w, box.h), color);
+    } else {
+      const g = tagGeom(m, box.w, box.h);
+      page.drawCircle({
+        x: X(g.x),
+        y: Y(g.y),
+        size: g.r,
+        color,
+        borderColor: halo,
+        borderWidth: 0.5,
+      });
+      const n = String(tags.get(m.id) ?? "");
+      const ns = g.r * 1.1;
+      page.drawText(n, {
+        x: X(g.x) - bold.widthOfTextAtSize(n, ns) / 2,
+        y: Y(g.y) - ns * 0.35,
+        size: ns,
+        font: bold,
+        color: m.color === "red" ? rgb(1, 1, 1) : halo,
+      });
+      words(m.label, g.label.x, g.y, g.labelSize, rgb(1, 1, 1));
+    }
+  }
+  return marks.length;
 }
 
 /** Email the invoice PDF through Resend (attachments are base64). */

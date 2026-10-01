@@ -59,6 +59,7 @@ import { useVendors } from "@/components/crm/use-vendors";
 import { BillToChoice, VendorBilledBadge } from "@/components/service/bill-to-picker";
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { fieldKeys } from "@/components/service/field-utils";
+import { InvoicePhotos } from "@/components/service/invoice-photos";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -390,6 +391,8 @@ export function InvoiceEditorPage({ id }: { id: string }) {
       ) : (
         <FinalInvoice key={inv.id} ctx={ctx} data={data} />
       )}
+      {/* Which of the ticket's photos (with their marks) print on this invoice (owner, Oct 1). */}
+      <InvoicePhotos invoiceId={inv.id} ticketNumber={job.number} editable={status === "draft"} />
       <AuditHistory entity="invoice" entityId={data.invoice.id} />
     </div>
   );

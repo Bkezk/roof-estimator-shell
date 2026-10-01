@@ -340,7 +340,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
           <TicketExtras job={job} canEdit />
 
           {/* (b) Repairs */}
-          <RepairsSection jobId={job.id} />
+          <RepairsSection jobId={job.id} ticketNumber={job.number} />
 
           {/* (c) Materials */}
           <MaterialsSection jobId={job.id} />
@@ -473,7 +473,7 @@ function Chip({
   );
 }
 
-function RepairsSection({ jobId }: { jobId: string }) {
+function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: number }) {
   const { session } = useAuth();
   const qc = useQueryClient();
   const repairsFn = useServerFn(listJobRepairs);
@@ -576,6 +576,7 @@ function RepairsSection({ jobId }: { jobId: string }) {
             <RepairCard
               key={r.id}
               jobId={jobId}
+              ticketNumber={ticketNumber}
               repair={r}
               photos={allPhotos.filter((p) => p.repair_id === r.id)}
             />
@@ -700,10 +701,12 @@ const repairVals = (r: JobRepairRow): RepairVals => ({
 
 function RepairCard({
   jobId,
+  ticketNumber,
   repair,
   photos,
 }: {
   jobId: string;
+  ticketNumber: number;
   repair: JobRepairRow;
   photos: JobPhotoRow[];
 }) {
@@ -876,6 +879,9 @@ function RepairCard({
               photo={p}
               deleting={delPhoto.isPending && delPhoto.variables === p.id}
               onDelete={() => delPhoto.mutate(p.id)}
+              // Tap a photo to circle the problem, add an arrow or words (owner, Oct 1).
+              canAnnotate
+              ticketNumber={ticketNumber}
             />
           ))}
         </div>
