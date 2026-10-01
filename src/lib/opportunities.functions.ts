@@ -110,6 +110,29 @@ export const getOpportunity = createServerFn({ method: "GET" })
     return r as OpportunityWithNames;
   });
 
+export type OppEventRow = Database["public"]["Tables"]["crm_opportunity_events"]["Row"];
+
+/**
+ * The opportunity's log, oldest first: 'created', every change of status and of assignee —
+ * written by the database (trigger crm_opportunities_log,
+ * 20261001130000_opened_and_stage_dates.sql). Read under the opportunity's own rule (the table's
+ * RLS: whoever reads the opportunity), so someone who cannot read it gets nothing.
+ */
+export const listOpportunityEvents = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<OppEventRow[]> => {
+    const { data: rows, error } = await context.supabase
+      .from("crm_opportunity_events")
+      .select("*")
+      .eq("opportunity_id", data.id)
+      .order("at", { ascending: true })
+      .order("id", { ascending: true })
+      .limit(500);
+    if (error) throw new Error(error.message);
+    return rows ?? [];
+  });
+
 const optText = (max: number) =>
   z
     .string()

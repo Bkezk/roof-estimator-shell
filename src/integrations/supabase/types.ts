@@ -765,6 +765,47 @@ export type Database = {
           },
         ];
       };
+      crm_opportunity_events: {
+        Row: {
+          assignee: string | null;
+          at: string;
+          by_name: string | null;
+          by_user: string | null;
+          id: number;
+          kind: string;
+          opportunity_id: string;
+          status: string | null;
+        };
+        Insert: {
+          assignee?: string | null;
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          id?: number;
+          kind: string;
+          opportunity_id: string;
+          status?: string | null;
+        };
+        Update: {
+          assignee?: string | null;
+          at?: string;
+          by_name?: string | null;
+          by_user?: string | null;
+          id?: number;
+          kind?: string;
+          opportunity_id?: string;
+          status?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "crm_opportunity_events_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_opportunities";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       crm_site_contacts: {
         Row: {
           contact_id: string;

@@ -39,7 +39,7 @@
  * Delete / Restore are `managesTickets` (admin or manager). Everyone else reads the technician
  * and crew by name. `isOffice` / `officeOrAdmin` decide only what is seen and the layout.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
@@ -97,6 +97,9 @@ import {
 } from "@/lib/service.functions";
 import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { listTechnicians } from "@/lib/auth.functions";
+import { listJobEvents } from "@/lib/service-field.functions";
+import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";
+import { StageStrip } from "@/components/stage-strip";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
@@ -1260,6 +1263,27 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     return all;
   }, [techs.data, job?.technician_id, job?.technician_name]);
 
+  // Owner, Oct 1: "Opened <date> by <name>" under the title and the stage strip, each stage with
+  // the date it was last entered — from the timeline's 'stage' rows, which the database writes
+  // on every change (lib/stage-dates.ts). The same query (and cache) as the Timeline section.
+  const eventsFn = useServerFn(listJobEvents);
+  const eventsQ = useQuery({
+    queryKey: fieldKeys.events(job?.id ?? "new"),
+    queryFn: () => eventsFn({ data: { id: job!.id } }),
+    enabled: !!session && !!job,
+  });
+  // A stage set elsewhere (the close-out, an invoice) arrives with the ticket: re-read its dates.
+  const seenStage = useRef(job?.stage);
+  useEffect(() => {
+    if (!job || seenStage.current === job.stage) return;
+    seenStage.current = job.stage;
+    void qc.invalidateQueries({ queryKey: fieldKeys.events(job.id) });
+  }, [job, qc]);
+  const stageCells = job ? ticketStageStrip(asStage(job.stage), eventsQ.data ?? []) : [];
+  const opened = job
+    ? openedLine(job.created_at, openerName(job.created_by, techs.data, eventsQ.data ?? []))
+    : "";
+
   const save = useMutation({
     mutationFn: () => {
       const stage = job ? asStage(job.stage) : undefined;
@@ -1315,6 +1339,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       }
       if (job) {
         qc.setQueryData(["service-job", row.id], row);
+        // A save can move the stage (Open → Scheduled): its date on the strip.
+        void qc.invalidateQueries({ queryKey: fieldKeys.events(row.id) });
         setSavedKey(draftKey(draft));
         toast.success(`Ticket #${row.number} saved`);
       } else {
@@ -1331,6 +1357,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     onSuccess: (_r, stage) => {
       toast.success(`Stage: ${STAGE_LABELS[stage]}`);
       void qc.invalidateQueries({ queryKey: ["service-job", job!.id] });
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(job!.id) });
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
       void qc.invalidateQueries({ queryKey: ["accounts"] });
     },
@@ -1969,6 +1996,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             </div>
           )}
         </div>
+        {job && opened && (
+          <p className="text-sm text-muted-foreground" data-line="opened">
+            {opened}
+          </p>
+        )}
         {job && (
           <p className="flex flex-wrap gap-x-4 text-sm" aria-label="Ticket numbers">
             <span>
@@ -2006,6 +2038,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         {isTech && jobStage === "done" && (
           <p className="text-sm text-muted-foreground">Done — the office invoices and closes it.</p>
         )}
+        {job && <StageStrip cells={stageCells} label="Stages" />}
       </div>
 
       {ro && (

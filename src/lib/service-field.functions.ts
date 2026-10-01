@@ -59,12 +59,16 @@ export function quarterHours(from: string | Date, to: string | Date): number {
   const q = Math.round(ms / (15 * 60 * 1000)) / 4;
   return Math.max(0.25, q);
 }
+/**
+ * The timeline rows the app writes. Not 'stage': the database writes those itself on every change
+ * of stage (trigger service_jobs_stage_log, 20261001130000_opened_and_stage_dates.sql).
+ */
+export type AppEventKind = "field" | "note" | "assign" | "photo" | "signature" | "edit";
 async function logEvent(
   ctx: Ctx,
   jobId: string,
   ev: {
-    kind: JobEventRow["kind"];
-    stage?: string | null;
+    kind: AppEventKind;
     field_status?: string | null;
     note?: string | null;
     meta?: Record<string, unknown>;
@@ -74,7 +78,6 @@ async function logEvent(
   await ctx.supabase.from("service_job_events").insert({
     service_job_id: jobId,
     kind: ev.kind,
-    stage: ev.stage ?? null,
     field_status: ev.field_status ?? null,
     note: ev.note ?? null,
     by_user: ctx.userId,
@@ -251,7 +254,8 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           created_by: context.userId,
         });
       }
-      await logEvent(context, job.id, { kind: "stage", stage: "done" }, who);
+      // The timeline's 'stage' row is the database's (trigger service_jobs_stage_log,
+      // 20261001130000_opened_and_stage_dates.sql): every change of stage, logged once.
     } else {
       // undo: step back one stamp and drop the entry it created.
       if (job.stage === "done" && job.completed_at) {

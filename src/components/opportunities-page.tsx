@@ -51,6 +51,7 @@ import {
   deleteOpportunity,
   getOpportunity,
   listOpportunities,
+  listOpportunityEvents,
   OPP_CLOSING,
   OPP_STATUS_LABELS,
   OPP_STATUSES,
@@ -62,6 +63,8 @@ import {
 } from "@/lib/opportunities.functions";
 import { getCrmSettings, listFollowups } from "@/lib/followups.functions";
 import { listTechnicians } from "@/lib/auth.functions";
+import { oppStatusStrip, openedLine, openerName } from "@/lib/stage-dates";
+import { StageStrip } from "@/components/stage-strip";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
 import { SiteSelect } from "@/components/crm/site-select";
@@ -605,6 +608,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const techFn = useServerFn(listTechnicians);
   const settingsFn = useServerFn(getCrmSettings);
   const accountFn = useServerFn(getAccount);
+  const eventsFn = useServerFn(listOpportunityEvents);
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(opp));
   const [savedKey, setSavedKey] = useState(() => draftKey(draft));
@@ -637,6 +641,18 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       });
     return all;
   }, [techs.data, opp?.assignee_id, opp?.assignee_name]);
+  // Owner, Oct 1: "Opened <date> by <name>" under the title and the status strip, each status
+  // with the date it was last entered — from the opportunity's log, which the database writes
+  // (crm_opportunity_events; lib/stage-dates.ts).
+  const events = useQuery({
+    queryKey: ["opportunity-events", opp?.id ?? "new"],
+    queryFn: () => eventsFn({ data: { id: opp!.id } }),
+    enabled: !!session && !!opp,
+  });
+  const statusCells = opp ? oppStatusStrip(asStatus(opp.status), events.data ?? []) : [];
+  const opened = opp
+    ? openedLine(opp.created_at, openerName(opp.created_by, techs.data, events.data ?? []))
+    : "";
   const settings = useQuery({
     queryKey: ["crm-settings"],
     queryFn: () => settingsFn(),
@@ -663,6 +679,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const invalidate = (id: string) => {
     void qc.invalidateQueries({ queryKey: ["opportunities"] });
     void qc.invalidateQueries({ queryKey: ["opportunity", id] });
+    void qc.invalidateQueries({ queryKey: ["opportunity-events", id] });
     void qc.invalidateQueries({ queryKey: ["followups"] });
   };
 
@@ -1009,6 +1026,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )}
           </div>
         </div>
+        {opp && opened && (
+          <p className="text-sm text-muted-foreground" data-line="opened">
+            {opened}
+          </p>
+        )}
         {opp && (
           <p className="text-xs text-muted-foreground">
             {[opp.account_name, opp.site_name ? `Site: ${opp.site_name}` : null]
@@ -1019,6 +1041,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             {opp.updated_by_name ? ` by ${opp.updated_by_name}` : ""}
           </p>
         )}
+        {opp && <StageStrip cells={statusCells} label="Status history" />}
       </div>
 
       {opp ? (
