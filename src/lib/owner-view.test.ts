@@ -383,8 +383,14 @@ describe("Source: admin-only on the client and the server", () => {
     expect(src).toMatch(
       /if \(!me \|\| !visibleToOwner\(me\)\) throw new Error\("Forbidden: admin only"\);/,
     );
-    // No client input decides it: no validator / data.
-    expect(src).not.toContain(".validator(");
+    // No client input decides it: no validator / data (getOwnerPersonDetail, below it, takes
+    // only whose detail to read — owner-person-detail.test.ts).
+    const list = src.slice(
+      src.indexOf("export const listOwnerView"),
+      src.indexOf("export const getOwnerPersonDetail"),
+    );
+    expect(list).toContain("Forbidden: admin only");
+    expect(list).not.toContain(".validator(");
     // The check comes before any team read.
     expect(src.indexOf("Forbidden: admin only")).toBeLessThan(src.indexOf('from("service_jobs")'));
   });

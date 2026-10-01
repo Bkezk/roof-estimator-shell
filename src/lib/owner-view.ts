@@ -23,8 +23,16 @@
  *                   for admins).
  */
 import { isAdmin, isSalesPm, type AccessLike } from "@/lib/access";
-import { addDays, bucketOf, weekday, type WorkItem, type WorkKind } from "@/lib/my-work";
-import { localYmd as easternYmd } from "@/lib/tasks";
+import {
+  KIND_LABELS,
+  addDays,
+  bucketOf,
+  ticketKind,
+  weekday,
+  type WorkItem,
+  type WorkKind,
+} from "@/lib/my-work";
+import { TASK_TZ, localYmd as easternYmd } from "@/lib/tasks";
 import { isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
 
 // ---- who may see it -----------------------------------------------------------------------
@@ -176,6 +184,19 @@ export interface DoneTaskIn {
 
 const toEastern = (iso: string) => easternYmd(new Date(iso));
 
+type Week = { start: string; end: string };
+const inWeek = (iso: string | null, week: Week, toYmd: (iso: string) => string) => {
+  if (!iso) return false;
+  const d = toYmd(iso);
+  return d >= week.start && d <= week.end;
+};
+/** A ticket counted in Done this week (the summary number and the detail list share it). */
+const doneTicketInWeek = (t: DoneTicketIn, week: Week, toYmd: (iso: string) => string) =>
+  (DONE_TICKET_STAGES as readonly string[]).includes(t.stage) &&
+  inWeek(t.completed_at, week, toYmd);
+const doneTaskInWeek = (t: DoneTaskIn, week: Week, toYmd: (iso: string) => string) =>
+  t.status === "done" && inWeek(t.done_at, week, toYmd);
+
 /**
  * Done this week per person: tickets in done / invoiced / closed completed (completed_at) in the
  * Mon–Sun week of `today`, plus tasks done (done_at) in it. Days are Eastern.
@@ -186,23 +207,13 @@ export function doneThisWeek(
   today: string,
   toYmd: (iso: string) => string = toEastern,
 ): Record<string, number> {
-  const { start, end } = weekRange(today);
-  const inWeek = (iso: string | null) => {
-    if (!iso) return false;
-    const d = toYmd(iso);
-    return d >= start && d <= end;
-  };
+  const week = weekRange(today);
   const out: Record<string, number> = {};
   for (const t of tickets)
-    if (
-      t.technician_id &&
-      (DONE_TICKET_STAGES as readonly string[]).includes(t.stage) &&
-      inWeek(t.completed_at)
-    )
+    if (t.technician_id && doneTicketInWeek(t, week, toYmd))
       out[t.technician_id] = (out[t.technician_id] ?? 0) + 1;
   for (const t of tasks)
-    if (t.assignee && t.status === "done" && inWeek(t.done_at))
-      out[t.assignee] = (out[t.assignee] ?? 0) + 1;
+    if (t.assignee && doneTaskInWeek(t, week, toYmd)) out[t.assignee] = (out[t.assignee] ?? 0) + 1;
   return out;
 }
 
@@ -373,4 +384,364 @@ export function myWorkHref(
     to: "/my-work",
     search: { who, ...(cell === "done" ? {} : { bucket: cell }) },
   };
+}
+
+// ---- one person's detail (owner, Oct 1: "a bit more detail per person") -------------------
+//
+// Clicking a row on the Owner view opens that person's actual items, grouped Today / Overdue /
+// Done this week, and their last five actions. The groups hold exactly the items the row's
+// numbers count: Today and Overdue go through the same `bucketOf` as `bucketCounts` (plus the
+// overdue opportunities `oppCounts` adds to Overdue), Done this week through the same week test
+// as `doneThisWeek`.
+
+export type DetailKind = WorkKind | "opportunity";
+
+export const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
+  ...KIND_LABELS,
+  opportunity: "Opportunity",
+};
+
+/** A My Work item, or an opportunity past expected close (Overdue only). */
+export type DetailItem = Omit<WorkItem, "kind"> & { kind: DetailKind };
+
+export interface DetailOppIn extends OppIn {
+  id: string;
+  title: string;
+  /** The customer (account) name, when known. */
+  customer?: string | null;
+}
+
+export function oppItem(o: DetailOppIn): DetailItem {
+  return {
+    key: `opportunity:${o.id}`,
+    kind: "opportunity",
+    title: o.title,
+    where: (o.customer ?? "").trim() || null,
+    date: o.expected_close,
+    status: o.status.charAt(0).toUpperCase() + o.status.slice(1),
+    done: false,
+    href: `/opportunities?id=${o.id}`,
+    assigneeId: o.assignee_id,
+    assigneeName: null,
+    followup: null,
+  };
+}
+
+const DETAIL_ORDER: Record<DetailKind, number> = {
+  ticket: 0,
+  inspection: 1,
+  task: 2,
+  followup: 3,
+  opportunity: 4,
+};
+
+/** Oldest date first (no date last), then kind, then title. */
+function compareDetail(a: DetailItem, b: DetailItem): number {
+  if (a.date !== b.date) {
+    if (a.date === null) return 1;
+    if (b.date === null) return -1;
+    return a.date < b.date ? -1 : 1;
+  }
+  return DETAIL_ORDER[a.kind] - DETAIL_ORDER[b.kind] || a.title.localeCompare(b.title);
+}
+
+/**
+ * One person's Today and Overdue items: their My Work items (`mergeWork`) bucketed by `bucketOf`
+ * exactly as `bucketCounts` does, plus their open opportunities past expected close in Overdue
+ * (`isOverdueOpp`, as `oppCounts`). So today.length = the row's Due today and overdue.length =
+ * the row's Overdue.
+ */
+export function detailGroups(
+  userId: string,
+  items: WorkItem[],
+  opps: DetailOppIn[],
+  today: string,
+): { today: DetailItem[]; overdue: DetailItem[] } {
+  const due: DetailItem[] = [];
+  const late: DetailItem[] = [];
+  for (const it of items) {
+    if (it.assigneeId !== userId) continue;
+    const b = bucketOf(it, today);
+    if (b === "today") due.push(it);
+    else if (b === "overdue") late.push(it);
+  }
+  for (const o of opps)
+    if (o.assignee_id === userId && isOverdueOpp(o, today)) late.push(oppItem(o));
+  return { today: due.sort(compareDetail), overdue: late.sort(compareDetail) };
+}
+
+export interface DoneItem {
+  kind: WorkKind;
+  id: string;
+  title: string;
+  /** Customer / property (a ticket) or building (a task). */
+  customer: string | null;
+  /** When it was done (ISO): completed_at / done_at. */
+  when: string;
+  href: string;
+}
+
+export interface DoneTicketRow extends DoneTicketIn {
+  id: string;
+  number: number;
+  description: string | null;
+  customer_name: string | null;
+  site_name: string | null;
+  service_type: string;
+}
+
+export interface DoneTaskRow extends DoneTaskIn {
+  id: string;
+  title: string;
+  building_id: string | null;
+  building_label?: string | null;
+}
+
+const joinParts = (...parts: (string | null | undefined)[]) =>
+  parts
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .join(" · ") || null;
+
+/**
+ * One person's Done this week: their tickets in done / invoiced / closed completed in `week` and
+ * their tasks done in it — the same test as `doneThisWeek` — newest first.
+ */
+export function doneItemsFor(
+  userId: string,
+  tickets: DoneTicketRow[],
+  tasks: DoneTaskRow[],
+  week: { start: string; end: string },
+  toYmd: (iso: string) => string = toEastern,
+): DoneItem[] {
+  const out: DoneItem[] = [];
+  for (const t of tickets) {
+    if (t.technician_id !== userId || !t.completed_at || !doneTicketInWeek(t, week, toYmd))
+      continue;
+    const what = (t.description ?? "").trim();
+    out.push({
+      kind: ticketKind(t.service_type),
+      id: t.id,
+      title: `#${t.number}${what ? ` ${what}` : ""}`,
+      customer: joinParts(t.customer_name, t.site_name),
+      when: t.completed_at,
+      href: `/service?id=${t.id}`,
+    });
+  }
+  for (const t of tasks) {
+    if (t.assignee !== userId || !t.done_at || !doneTaskInWeek(t, week, toYmd)) continue;
+    out.push({
+      kind: "task",
+      id: t.id,
+      title: t.title,
+      customer: joinParts(t.building_label),
+      when: t.done_at,
+      href: t.building_id ? `/prospect?building=${t.building_id}` : "/prospect",
+    });
+  }
+  return out.sort((a, b) => Date.parse(b.when) - Date.parse(a.when));
+}
+
+// ---- last five actions ---------------------------------------------------------------------
+
+/** A ticket as an activity line names it ("#6012"); null when it could not be read. */
+export interface TicketRef {
+  id: string;
+  number: number;
+}
+export interface OppRef {
+  id: string;
+  title: string;
+}
+
+/** One activity row from one source, with what its line needs. */
+export type ActivityRow =
+  | {
+      source: "event";
+      at: string;
+      kind: string;
+      stage: string | null;
+      field_status: string | null;
+      note: string | null;
+      ticketId: string;
+      ticket: TicketRef | null;
+    }
+  | {
+      source: "contact";
+      at: string;
+      kind: string;
+      method: string;
+      itemId: string;
+      ticket?: TicketRef | null;
+      opportunity?: OppRef | null;
+    }
+  | { source: "task"; at: string; title: string; building_id: string | null }
+  | {
+      source: "time";
+      at: string;
+      kind: string;
+      hours: number;
+      /** 'buttons' = made by the En route / On site / Done buttons (their event says it). */
+      origin: string;
+      /** Did the person log it (created_by), or were they only the technician on it? */
+      loggedByThem: boolean;
+      ticketId: string;
+      ticket: TicketRef | null;
+    }
+  | {
+      source: "audit";
+      at: string;
+      entity: string;
+      entity_id: string | null;
+      action: string;
+      summary: string | null;
+    };
+
+export interface ActivityItem {
+  at: string;
+  text: string;
+  href?: string;
+}
+
+const TICKET_STAGE_LABELS: Record<string, string> = {
+  open: "Open",
+  scheduled: "Scheduled",
+  done: "Done",
+  invoiced: "Invoiced",
+  closed: "Closed",
+};
+
+const ticketName = (t: TicketRef | null | undefined) => (t ? `#${t.number}` : "a ticket");
+const ticketHref = (id: string) => `/service?id=${id}`;
+
+const CONTACT_WORDS: Record<string, string> = {
+  called: "Logged a call",
+  texted: "Logged a text",
+  emailed: "Logged an email",
+  visited: "Logged a visit",
+  other: "Logged a contact",
+  note: "Added a note",
+};
+
+const hoursText = (h: number) => `${Math.round(Number(h) * 100) / 100} h`;
+
+function eventText(
+  kind: string,
+  r: { stage: string | null; field_status: string | null; note: string | null },
+  on: string,
+): string | null {
+  switch (kind) {
+    case "contact":
+      return null; // the contact-log row says it
+    case "field":
+      if (r.field_status === "en_route") return `Headed to ${on}`;
+      if (r.field_status === "on_site") return `Checked in on ${on}`;
+      if (r.note === "undo") return `Undid a field step on ${on}`;
+      return `Updated ${on}`;
+    case "stage":
+      return `Moved ${on} to ${TICKET_STAGE_LABELS[r.stage ?? ""] ?? r.stage ?? "a new stage"}`;
+    case "note":
+      return `Added a note on ${on}`;
+    case "photo":
+      return `Added a photo on ${on}`;
+    case "signature":
+      return `Captured a signature on ${on}`;
+    case "assign":
+      return `Assigned ${on}`;
+    case "edit":
+      return `Edited ${on}`;
+    default:
+      return `Updated ${on}`;
+  }
+}
+
+/**
+ * One line for one activity row (null = not shown: a ticket event of kind 'contact' repeats a
+ * contact-log row, and a time entry made by the field buttons repeats that button's event).
+ *
+ *   event    "Headed to #6012", "Checked in on #6010", "Undid a field step on #6012",
+ *            "Moved #6012 to Done", "Added a note on #6012", "Added a photo on #6012",
+ *            "Captured a signature on #6012", "Assigned #6012", "Edited #6012"
+ *   contact  "Logged a call on #6012", "Logged an email on 'Roof replacement'"
+ *   task     "Marked Task 'Send warranty' done"
+ *   time     "Logged 2.5 h labor on #6012" (they logged it), "Credited 2.5 h labor on #6012"
+ *            (logged by someone else with them as the technician)
+ *   audit    "Edited invoice 6012 line 'Labor' rate 85 → 95" (an update), otherwise the
+ *            logged summary as is ("Invoice 6012 marked paid: …")
+ */
+export function activityText(row: ActivityRow): ActivityItem | null {
+  const at = row.at;
+  switch (row.source) {
+    case "event": {
+      const text = eventText(row.kind, row, ticketName(row.ticket));
+      return text ? { at, text, href: ticketHref(row.ticketId) } : null;
+    }
+    case "contact": {
+      const verb = CONTACT_WORDS[row.method] ?? "Logged a contact";
+      if (row.kind === "opportunity")
+        return {
+          at,
+          text: `${verb} on ${row.opportunity ? `'${row.opportunity.title}'` : "an opportunity"}`,
+          href: `/opportunities?id=${row.itemId}`,
+        };
+      return { at, text: `${verb} on ${ticketName(row.ticket)}`, href: ticketHref(row.itemId) };
+    }
+    case "task":
+      return {
+        at,
+        text: `Marked Task '${row.title}' done`,
+        href: row.building_id ? `/prospect?building=${row.building_id}` : "/prospect",
+      };
+    case "time": {
+      if (row.origin === "buttons") return null;
+      const what = `${hoursText(row.hours)} ${row.kind} on ${ticketName(row.ticket)}`;
+      return {
+        at,
+        text: row.loggedByThem ? `Logged ${what}` : `Credited ${what}`,
+        href: ticketHref(row.ticketId),
+      };
+    }
+    case "audit": {
+      const summary = (row.summary ?? "").trim();
+      const said = summary || `${row.entity.replace(/_/g, " ")} ${row.action}`;
+      const text =
+        row.action === "update" ? `Edited ${said.charAt(0).toLowerCase()}${said.slice(1)}` : said;
+      const href =
+        row.entity === "account" && row.entity_id
+          ? `/customers?id=${row.entity_id}`
+          : row.entity === "invoice" || row.entity === "invoice_line"
+            ? "/service/invoices"
+            : undefined;
+      return href ? { at, text, href } : { at, text };
+    }
+  }
+}
+
+/** The newest `n` lines (newest first) of the rows that have one. */
+export function recentActivity(rows: ActivityRow[], n = 5): ActivityItem[] {
+  const out: ActivityItem[] = [];
+  for (const r of rows) {
+    const a = activityText(r);
+    if (a && !Number.isNaN(Date.parse(a.at))) out.push(a);
+  }
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, n);
+}
+
+/** "9:14 AM" today, "Sep 28, 9:14 AM" this year, "Sep 28, 2025, 9:14 AM" before (Eastern). */
+export function activityWhen(at: string, now: Date, tz: string = TASK_TZ): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const time = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: tz,
+  })
+    .format(d)
+    .replace(/\s/g, " ");
+  const day = easternYmd(d, tz);
+  const today = easternYmd(now, tz);
+  if (day === today) return time;
+  const [y, m, dd] = day.split("-").map(Number) as [number, number, number];
+  const md = `${MONTHS[m - 1]} ${dd}`;
+  return `${day.slice(0, 4) === today.slice(0, 4) ? md : `${md}, ${y}`}, ${time}`;
 }

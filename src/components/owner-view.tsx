@@ -8,25 +8,37 @@
  * Each number links into My Work for that person (`who`) with the List preset (`bucket`);
  * opportunity numbers link to the Opportunities list's open / overdue filter. Refreshes when the
  * window regains focus, every 60 s and on mount, like the counts strip.
+ *
+ * Clicking a person's row (or its chevron) expands it in place (owner, Oct 1: "a bit more detail
+ * per person"): their Today / Overdue / Done this week items — exactly the ones the numbers
+ * count — and their last five actions, loaded on demand per person (`getOwnerPersonDetail`,
+ * cached 60 s). "Expand all / Collapse all" above the table. On a phone the detail sits under
+ * its row inside the table and scrolls with it.
  */
-import { useEffect } from "react";
+import { Fragment, useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
-import { listOwnerView } from "@/lib/owner-view.functions";
+import { ymdParts } from "@/lib/my-work";
+import { getOwnerPersonDetail, listOwnerView } from "@/lib/owner-view.functions";
 import {
+  DETAIL_KIND_LABELS,
   activityLabel,
+  activityWhen,
   digestLine,
   dueTotal,
   myWorkHref,
   ownerTotals,
   visibleToOwner,
+  type DetailKind,
   type DueCounts,
 } from "@/lib/owner-view";
 import { OPP_ALL_OPEN } from "@/lib/work-counts";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -39,6 +51,9 @@ import {
 } from "@/components/ui/table";
 
 export const OWNER_VIEW_KEY = ["owner-view"] as const;
+/** One person's expanded detail (cached 60 s per person). */
+const ownerPersonKey = (userId: string) => ["owner-view-person", userId] as const;
+const DETAIL_STALE_MS = 60_000;
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -75,10 +90,37 @@ export function OwnerView() {
   const totals = data ? ownerTotals(data.rows) : null;
   const now = new Date();
 
+  // Expanded rows by person id; one row's expansion leaves the others as they are.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allOpen = !!data && data.rows.length > 0 && data.rows.every((r) => open.has(r.id));
+  // A click on the row toggles it, except on its links and buttons (they do their own thing).
+  const onRowClick = (id: string) => (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    toggle(id);
+  };
+
   return (
     <div className="space-y-3">
-      {/* Blank until the numbers arrive (never a placeholder 0). */}
-      <p className="min-h-5 text-sm font-medium">{totals ? digestLine(totals) : ""}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {/* Blank until the numbers arrive (never a placeholder 0). */}
+        <p className="min-h-5 text-sm font-medium">{totals ? digestLine(totals) : ""}</p>
+        {data && data.rows.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setOpen(allOpen ? new Set() : new Set(data.rows.map((r) => r.id)))}
+          >
+            {allOpen ? "Collapse all" : "Expand all"}
+          </Button>
+        )}
+      </div>
 
       {errMsg && !data ? (
         <div className="space-y-2">
@@ -111,62 +153,93 @@ export function OwnerView() {
               ) : (
                 data.rows.map((r) => {
                   const due = dueTotal(r.dueToday);
+                  const isOpen = open.has(r.id);
+                  const detailId = `owner-detail-${r.id}`;
                   return (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{r.role}</TableCell>
-                      <TableCell className="text-right" title={dueParts(r.dueToday)}>
-                        <Link {...myWorkHref(r.id, "today")} className={linkCls}>
-                          {due}
-                        </Link>
-                        {due > 0 && (
-                          <div className="text-xs text-muted-foreground">
-                            {dueParts(r.dueToday)}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className={`text-right ${r.overdue > 0 ? "text-destructive" : ""}`}
+                    <Fragment key={r.id}>
+                      <TableRow
+                        className="cursor-pointer"
+                        aria-expanded={isOpen}
+                        onClick={onRowClick(r.id)}
                       >
-                        <Link {...myWorkHref(r.id, "overdue")} className={linkCls}>
-                          {r.overdue}
-                        </Link>
-                        {r.overdueOpps > 0 && (
-                          <div className="text-xs">
-                            <Link
-                              to="/opportunities"
-                              search={{ status: OPP_ALL_OPEN, overdue: 1 }}
-                              className="underline-offset-4 hover:underline"
-                            >
-                              incl. {r.overdueOpps} opportunit{r.overdueOpps === 1 ? "y" : "ies"}
-                            </Link>
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link {...myWorkHref(r.id, "done")} className={linkCls}>
-                          {r.doneThisWeek}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link
-                          to="/opportunities"
-                          search={{ status: OPP_ALL_OPEN }}
-                          className={linkCls}
+                        <TableCell className="font-medium">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-left font-medium hover:underline"
+                            aria-expanded={isOpen}
+                            aria-controls={isOpen ? detailId : undefined}
+                            aria-label={`${isOpen ? "Hide" : "Show"} ${r.name}'s items`}
+                            onClick={() => toggle(r.id)}
+                          >
+                            {isOpen ? (
+                              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+                            )}
+                            {r.name}
+                          </button>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{r.role}</TableCell>
+                        <TableCell className="text-right" title={dueParts(r.dueToday)}>
+                          <Link {...myWorkHref(r.id, "today")} className={linkCls}>
+                            {due}
+                          </Link>
+                          {due > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              {dueParts(r.dueToday)}
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right ${r.overdue > 0 ? "text-destructive" : ""}`}
                         >
-                          {r.openOpps}
-                        </Link>
-                        {r.oppValue > 0 && (
-                          <div className="text-xs text-muted-foreground">{usd(r.oppValue)}</div>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className={r.stale ? "font-medium text-destructive" : ""}
-                        title={r.lastActivity ? new Date(r.lastActivity).toLocaleString() : ""}
-                      >
-                        {activityLabel(r.lastActivity, now)}
-                      </TableCell>
-                    </TableRow>
+                          <Link {...myWorkHref(r.id, "overdue")} className={linkCls}>
+                            {r.overdue}
+                          </Link>
+                          {r.overdueOpps > 0 && (
+                            <div className="text-xs">
+                              <Link
+                                to="/opportunities"
+                                search={{ status: OPP_ALL_OPEN, overdue: 1 }}
+                                className="underline-offset-4 hover:underline"
+                              >
+                                incl. {r.overdueOpps} opportunit{r.overdueOpps === 1 ? "y" : "ies"}
+                              </Link>
+                            </div>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link {...myWorkHref(r.id, "done")} className={linkCls}>
+                            {r.doneThisWeek}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link
+                            to="/opportunities"
+                            search={{ status: OPP_ALL_OPEN }}
+                            className={linkCls}
+                          >
+                            {r.openOpps}
+                          </Link>
+                          {r.oppValue > 0 && (
+                            <div className="text-xs text-muted-foreground">{usd(r.oppValue)}</div>
+                          )}
+                        </TableCell>
+                        <TableCell
+                          className={r.stale ? "font-medium text-destructive" : ""}
+                          title={r.lastActivity ? new Date(r.lastActivity).toLocaleString() : ""}
+                        >
+                          {activityLabel(r.lastActivity, now)}
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <TableRow id={detailId} className="hover:bg-transparent">
+                          <TableCell colSpan={7} className="bg-muted/30 p-3 align-top">
+                            <PersonDetail userId={r.id} name={r.name} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
                   );
                 })
               )}
@@ -213,6 +286,170 @@ export function OwnerView() {
           Last activity: tickets, contact log, tasks and time entries (no audit log yet).
         </p>
       )}
+    </div>
+  );
+}
+
+const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
+  ticket:
+    "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
+  inspection:
+    "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200",
+  task: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  followup:
+    "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+  opportunity:
+    "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
+};
+
+/** "Wed, Sep 30" for a YYYY-MM-DD day (a calendar day, no time zone shift). */
+const dayLabel = (ymd: string) => {
+  const [y, m, d] = ymdParts(ymd);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+};
+
+/** An in-app link (a plain href such as "/service?id=…"), opened by the router. */
+function ItemLink({ href, children }: { href: string; children: ReactNode }) {
+  const navigate = useNavigate();
+  return (
+    <a
+      href={href}
+      className="font-medium underline-offset-4 hover:underline"
+      onClick={(e) => {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        e.preventDefault();
+        void navigate({ href });
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+interface DetailLine {
+  key: string;
+  kind: DetailKind;
+  title: string;
+  where: string | null;
+  when: string;
+  href: string;
+}
+
+function DetailGroup({
+  title,
+  empty,
+  lines,
+}: {
+  title: string;
+  empty: string;
+  lines: DetailLine[];
+}) {
+  return (
+    <section className="min-w-0 space-y-2">
+      <h4 className="text-sm font-semibold">
+        {title} <span className="font-normal text-muted-foreground">({lines.length})</span>
+      </h4>
+      {lines.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <ul className="space-y-2">
+          {lines.map((l) => (
+            <li key={l.key} className="text-sm">
+              <div className="flex items-start gap-2">
+                <Badge variant="outline" className={`shrink-0 ${DETAIL_KIND_CLASS[l.kind]}`}>
+                  {DETAIL_KIND_LABELS[l.kind]}
+                </Badge>
+                <span className="min-w-0 break-words leading-snug">
+                  <ItemLink href={l.href}>{l.title}</ItemLink>
+                </span>
+              </div>
+              <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                {l.where && <span className="break-words">{l.where}</span>}
+                <span>{l.when}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** The expanded row: one person's items (what the numbers count) and last five actions. */
+function PersonDetail({ userId, name }: { userId: string; name: string }) {
+  const fn = useServerFn(getOwnerPersonDetail);
+  const q = useQuery({
+    queryKey: ownerPersonKey(userId),
+    queryFn: () => fn({ data: { userId } }),
+    staleTime: DETAIL_STALE_MS,
+  });
+  // Errors toast the server's message.
+  const errMsg = q.error ? errText(q.error) : null;
+  useEffect(() => {
+    if (errMsg)
+      toast.error(`Could not load ${name}'s items: ${errMsg}`, { id: `owner-person-${userId}` });
+  }, [errMsg, name, userId]);
+
+  const d = q.data;
+  if (!d) {
+    return errMsg ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm text-destructive">
+          Could not load {name}'s items: {errMsg}
+        </p>
+        <Button size="sm" variant="outline" onClick={() => void q.refetch()}>
+          Try again
+        </Button>
+      </div>
+    ) : (
+      <p className="text-sm text-muted-foreground">Loading…</p>
+    );
+  }
+  const now = new Date();
+  const dated = (date: string | null) => (date ? dayLabel(date) : "No date");
+  return (
+    <div className="grid gap-4 whitespace-normal md:grid-cols-2 xl:grid-cols-4">
+      <DetailGroup
+        title="Today"
+        empty="Nothing due today"
+        lines={d.today.map((i) => ({ ...i, when: dated(i.date) }))}
+      />
+      <DetailGroup
+        title="Overdue"
+        empty="Nothing overdue"
+        lines={d.overdue.map((i) => ({ ...i, when: dated(i.date) }))}
+      />
+      <DetailGroup
+        title="Done this week"
+        empty="Nothing done this week"
+        lines={d.doneThisWeek.map((i) => ({
+          key: `${i.kind}:${i.id}`,
+          kind: i.kind,
+          title: i.title,
+          where: i.customer,
+          when: activityWhen(i.when, now),
+          href: i.href,
+        }))}
+      />
+      <section className="min-w-0 space-y-2">
+        <h4 className="text-sm font-semibold">Last activity</h4>
+        {d.recent.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No activity yet</p>
+        ) : (
+          <ul className="space-y-1.5 text-sm">
+            {d.recent.map((a, i) => (
+              <li key={`${a.at}-${i}`} className="break-words">
+                {a.href ? <ItemLink href={a.href}>{a.text}</ItemLink> : a.text}
+                <span className="text-muted-foreground"> · {activityWhen(a.at, now)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
