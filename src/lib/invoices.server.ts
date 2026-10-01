@@ -22,6 +22,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
 import { invoiceLabel } from "@/lib/invoice-numbering";
+import {
+  materialLineFor,
+  pieceFromCatalog,
+  rateText,
+  unitText,
+  type CatalogData,
+} from "@/lib/invoice-materials";
+import { pieceFromCountedNotes, type PieceDef } from "@/lib/stock-units";
 import { timeLines, type RateTable } from "@/lib/invoice-labor";
 import { toBase64 } from "@/lib/webpush";
 
@@ -96,6 +104,23 @@ export async function cellCost(
   return typeof v === "number" ? v : v != null && Number.isFinite(Number(v)) ? Number(v) : null;
 }
 
+/**
+ * The pieces one pack of a stock cell holds, from the catalog: the row's "Fasteners/Box" /
+ * "Parts/Bag" / "Parts/Package", or the adhesive's unit type ("4-Cartridge Case"). Null when
+ * the catalog does not say.
+ */
+export async function cellPiece(
+  sb: Client,
+  cell: { screen_id: string; row_label: string; price_col: string },
+): Promise<PieceDef | null> {
+  const { data: screen } = await sb
+    .from("pricing_catalog")
+    .select("data")
+    .eq("id", cell.screen_id)
+    .maybeSingle();
+  return screen ? pieceFromCatalog(screen.data as CatalogData, cell) : null;
+}
+
 /** Build the lines a ticket's time entries and materials produce today. */
 export async function buildLinesFromJob(sb: Client, jobId: string): Promise<LineInsert[]> {
   const { data: job, error } = await sb
@@ -124,7 +149,9 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
       .order("id"),
     sb
       .from("inventory_movements")
-      .select("id, screen_id, row_label, price_col, item_no, qty, unit, reason, created_at")
+      .select(
+        "id, screen_id, row_label, price_col, item_no, qty, unit, reason, counted_note, created_at",
+      )
       .eq("service_job_id", jobId)
       .in("reason", ["consumed", "released"]),
     sb.rpc("technician_options"),
@@ -167,6 +194,7 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
       unit: string;
       qty: number;
       last: string;
+      notes: { qty: number; counted_note: string | null }[];
     }
   >();
   for (const m of moves ?? []) {
@@ -179,26 +207,24 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
       unit: m.unit,
       qty: 0,
       last: m.created_at,
+      notes: [],
     };
     cur.qty += -Number(m.qty);
+    if (m.counted_note) cur.notes.push({ qty: Number(m.qty), counted_note: m.counted_note });
     if (m.created_at > cur.last) cur.last = m.created_at;
     byCell.set(key, cur);
   }
   const markup = Number(settings.material_markup);
   for (const c of byCell.values()) {
     if (!(c.qty > 0)) continue;
-    const cost = (await cellCost(sb, c)) ?? 0;
-    const rate = r2(cost * (1 + markup));
+    const [cost, catalogPiece] = await Promise.all([cellCost(sb, c), cellPiece(sb, c)]);
+    // Counted in pieces when the catalog says how many a pack holds (else what the tech's
+    // counted_note "50 fasteners" beside -0.05 box says); otherwise in packs as before.
+    const piece = catalogPiece ?? pieceFromCountedNotes(c.notes);
     lines.push({
       sort: sort++,
       kind: "material",
-      description: `${c.row_label}${c.price_col && c.price_col !== c.row_label ? ` (${c.price_col})` : ""}${c.item_no ? ` #${c.item_no}` : ""}`,
-      qty: r2(c.qty),
-      unit: c.unit,
-      rate,
-      total: r2(c.qty * rate),
-      cost_rate: cost,
-      cost_total: r2(c.qty * cost),
+      ...materialLineFor(c, c.qty, cost ?? 0, markup, piece),
       on_date: c.last.slice(0, 10),
       source: `cell:${c.screen_id}|${c.row_label}|${c.price_col}`,
       taxable: true,
@@ -481,8 +507,8 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     doc.ensure(14);
     const desc = doc.wrap(l.description + (l.on_date ? `  (${fmtDate(l.on_date)})` : ""), 280, 9);
     doc.text(desc[0] ?? "", cols.desc, 9);
-    doc.text(`${Number(l.qty)} ${l.unit}`, cols.qty, 9);
-    doc.text(money(Number(l.rate)), cols.rate, 9);
+    doc.text(`${Number(l.qty)} ${unitText(Number(l.qty), l.unit)}`, cols.qty, 9);
+    doc.text(rateText(Number(l.rate)), cols.rate, 9);
     doc.textRight(money(Number(l.total)), cols.total, 9);
     doc.y -= 12;
     for (const extra of desc.slice(1)) {

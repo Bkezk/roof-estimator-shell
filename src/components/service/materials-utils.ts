@@ -8,7 +8,7 @@
  * PIECES when the catalog says how many one pack holds (cartridges, fasteners), else in the
  * pack unit. "Units" below means whichever of the two the tech counts in.
  */
-import { plural, type PieceDef } from "@/lib/stock-units";
+import { pieceFromCountedNotes, plural, type PieceDef } from "@/lib/stock-units";
 
 export interface CatalogCell {
   screen_id: string;
@@ -112,23 +112,7 @@ export function usedPacks(rows: readonly LedgerRow[], cell: LocatedCell): number
  * qty −0.25, so one pack holds 3 / 0.25 = 12.
  */
 export function pieceFromLedger(rows: readonly LedgerRow[], cell: LocatedCell): PieceDef | null {
-  for (const r of rows) {
-    if (!sameCell(r, cell) || !r.counted_note) continue;
-    const m = /^(\d+(?:\.\d+)?)\s+([A-Za-z][A-Za-z -]*)$/.exec(r.counted_note.trim());
-    const qty = Math.abs(Number(r.qty));
-    if (!m || !(qty > 0)) continue;
-    const n = Number(m[1]);
-    if (!(n > 0)) continue;
-    let name = (m[2] ?? "").trim();
-    if (Math.abs(n - 1) > EPS) name = name.replace(/s$/i, "");
-    let perPack = n / qty;
-    // The ledger keeps a few decimals of the pack; snap 12.048 back to 12.
-    const whole = Math.round(perPack);
-    if (whole > 0 && Math.abs(perPack - whole) / whole < 0.02) perPack = whole;
-    if (!name || !Number.isFinite(perPack) || perPack <= 0) continue;
-    return { name, perPack };
-  }
-  return null;
+  return pieceFromCountedNotes(rows.filter((r) => sameCell(r, cell)));
 }
 
 /** Usual-for-this-repair suggestion in units: the average rounded UP, at least one. */

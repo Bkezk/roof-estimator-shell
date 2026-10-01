@@ -61,6 +61,32 @@ export function pieceDefFromPack(
   return { name, perPack: packQty };
 }
 
+/**
+ * The piece definition read back from ledger entries of ONE cell when the catalog no longer
+ * says: a piece count is written as counted_note "3 cartridges" beside qty −0.25, so one pack
+ * holds 3 / 0.25 = 12. The ledger keeps a few decimals of the pack; 12.048 snaps back to 12.
+ */
+export function pieceFromCountedNotes(
+  rows: readonly { qty: number | string; counted_note: string | null }[],
+): PieceDef | null {
+  for (const r of rows) {
+    if (!r.counted_note) continue;
+    const m = /^(\d+(?:\.\d+)?)\s+([A-Za-z][A-Za-z -]*)$/.exec(r.counted_note.trim());
+    const qty = Math.abs(Number(r.qty));
+    if (!m || !(qty > 0)) continue;
+    const n = Number(m[1]);
+    if (!(n > 0)) continue;
+    let name = (m[2] ?? "").trim();
+    if (Math.abs(n - 1) > 1e-6) name = name.replace(/s$/i, "");
+    let perPack = n / qty;
+    const whole = Math.round(perPack);
+    if (whole > 0 && Math.abs(perPack - whole) / whole < 0.02) perPack = whole;
+    if (!name || !Number.isFinite(perPack) || perPack <= 0) continue;
+    return { name, perPack };
+  }
+  return null;
+}
+
 export const packsFromPieces = (pieces: number, def: PieceDef): number => pieces / def.perPack;
 
 export const plural = (n: number, name: string): string => `${name}${Math.abs(n) === 1 ? "" : "s"}`;

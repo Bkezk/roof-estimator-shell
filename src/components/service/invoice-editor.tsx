@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Ban,
+  ChevronRight,
   CircleDollarSign,
   Download,
   Eye,
@@ -44,6 +45,7 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
+import { rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
   createAnotherInvoice,
@@ -395,6 +397,8 @@ interface LineDraft {
   on_date: string | null;
   taxable: boolean;
   source: string | null;
+  /** The saved line's rate and cost per unit (null on a new line): rescaleCost's base. */
+  orig: { rate: number; cost_rate: number } | null;
 }
 interface HeadDraft {
   invoice_date: string;
@@ -418,6 +422,7 @@ const lineFrom = (l: InvoiceLineRow): LineDraft => ({
   on_date: l.on_date,
   taxable: l.taxable,
   source: l.source,
+  orig: { rate: Number(l.rate), cost_rate: Number(l.cost_rate) },
 });
 const headFrom = (inv: InvoiceRow): HeadDraft => ({
   invoice_date: inv.invoice_date,
@@ -544,7 +549,17 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const setH = <K extends keyof HeadDraft>(k: K, v: HeadDraft[K]) =>
     setHead((h) => ({ ...h, [k]: v }));
   const setLine = (key: string, patch: Partial<LineDraft>) =>
-    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+    setLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const next = { ...l, ...patch };
+        // A ticket material line's qty / unit / rate edited by hand: its (hidden) cost per unit
+        // moves with the rate, so Cost and Margin stay truthful (owner, Oct 1: the $273).
+        if (l.orig && ("qty" in patch || "unit" in patch || "rate" in patch))
+          next.cost_rate = rescaleCost({ source: l.source, ...l.orig }, next.rate);
+        return next;
+      }),
+    );
   const [newKey, setNewKey] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<
@@ -720,6 +735,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         on_date: null,
         taxable: true,
         source: null,
+        orig: null,
       },
     ]);
     setNewKey(key);
@@ -1119,7 +1135,30 @@ function BillTo({ inv }: { inv: InvoiceRow }) {
   );
 }
 
+const INTERNAL_OPEN_KEY = "invoiceInternalOpen";
+
 function Totals({ t, taxPct }: { t: ReturnType<typeof computeTotals>; taxPct: number }) {
+  const { profile } = useAuth();
+  // Cost and margin are internal (owner, Oct 1: the invoice goes out to a customer): folded,
+  // closed by default, and only for admins and managers.
+  const internal = managesTickets(profile);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(INTERNAL_OPEN_KEY) === "1") setOpen(true);
+    } catch {
+      /* storage blocked: stays closed */
+    }
+  }, []);
+  const toggle = () => {
+    const o = !open;
+    setOpen(o);
+    try {
+      localStorage.setItem(INTERNAL_OPEN_KEY, o ? "1" : "0");
+    } catch {
+      /* storage blocked: not remembered */
+    }
+  };
   const hrs = Number(t.hours.toFixed(2));
   return (
     <div className="space-y-3 self-start rounded-md border bg-muted/30 p-3 text-sm">
@@ -1137,22 +1176,40 @@ function Totals({ t, taxPct }: { t: ReturnType<typeof computeTotals>; taxPct: nu
           <dd className="tabular-nums">{money(t.total)}</dd>
         </div>
       </dl>
-      <dl className="space-y-1 border-t pt-2 text-xs text-muted-foreground">
-        <div className="flex justify-between gap-2">
-          <dt>Cost</dt>
-          <dd className="tabular-nums">{money(t.cost_total)}</dd>
+      {internal && (
+        <div className="border-t pt-2 text-xs text-muted-foreground">
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 text-left hover:text-foreground"
+            aria-expanded={open}
+            aria-controls="invoice-internal"
+            onClick={toggle}
+          >
+            <ChevronRight
+              className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-90" : ""}`}
+            />
+            Internal — cost and margin
+          </button>
+          {open && (
+            <dl id="invoice-internal" className="mt-1.5 space-y-1">
+              <div className="flex justify-between gap-2">
+                <dt>Cost</dt>
+                <dd className="tabular-nums">{money(t.cost_total)}</dd>
+              </div>
+              <div
+                className={`flex justify-between gap-2 font-medium ${t.margin < 0 ? "text-destructive" : "text-foreground"}`}
+              >
+                <dt>Margin</dt>
+                <dd className="tabular-nums">{money(t.margin)}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt>Margin / hour{hrs > 0 ? ` (${hrs} h travel + labor)` : ""}</dt>
+                <dd className="tabular-nums">{t.perHour === null ? "—" : money(t.perHour)}</dd>
+              </div>
+            </dl>
+          )}
         </div>
-        <div
-          className={`flex justify-between gap-2 font-medium ${t.margin < 0 ? "text-destructive" : "text-foreground"}`}
-        >
-          <dt>Margin</dt>
-          <dd className="tabular-nums">{money(t.margin)}</dd>
-        </div>
-        <div className="flex justify-between gap-2">
-          <dt>Margin / hour{hrs > 0 ? ` (${hrs} h travel + labor)` : ""}</dt>
-          <dd className="tabular-nums">{t.perHour === null ? "—" : money(t.perHour)}</dd>
-        </div>
-      </dl>
+      )}
     </div>
   );
 }
@@ -1294,8 +1351,8 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                   )}
                 </td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{Number(l.qty)}</td>
-                <td className="py-1.5 pr-2">{l.unit}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums">{money(l.rate)}</td>
+                <td className="py-1.5 pr-2">{unitText(Number(l.qty), l.unit)}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">{rateText(l.rate)}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{money(l.total)}</td>
                 <td className="py-1.5 text-center">{l.taxable ? "✓" : ""}</td>
               </tr>
