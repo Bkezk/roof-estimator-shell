@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 
 import {
-  GRANTABLE_PAGES,
   PAGES,
   canAccess,
   homeFor,
@@ -41,7 +40,7 @@ describe("per-page access", () => {
     expect(pageForPath("/admin/price-import")).toBe("pricing");
     expect(pageForPath("/admin/users")).toBe("admin");
     expect(pageForPath("/admin/reminders")).toBe("admin");
-    expect(pageForPath("/admin/service-rates")).toBe("pricing");
+    expect(pageForPath("/admin/service-rates")).toBe("admin");
     expect(pageForPath("/account")).toBeNull();
   });
 
@@ -63,9 +62,11 @@ describe("per-page access", () => {
     expect(pageForPath("/followups")).toBeNull();
   });
 
-  it("a manager reaches every page, pricing included (owner, Oct 1), and no admin page", () => {
+  it("a manager reaches every page, Estimate Pricing included (owner, Oct 1), and no admin page", () => {
     const manager = { role: "manager", access: [] };
     for (const page of PAGES) expect(canAccess(manager, page)).toBe(true);
+    // Estimate Pricing stays a grantable page: anyone with the tick sees it.
+    expect(canAccess({ role: "user", access: ["pricing"] }, "pricing")).toBe(true);
     expect(isAdmin(manager)).toBe(false);
     expect(pageForPath("/admin/users")).toBe("admin");
     expect(pageForPath("/admin/settings")).toBe("pricing");
@@ -116,25 +117,5 @@ describe("every technician check goes through isOffice (manager clean-up, Oct 1)
     };
     for (const r of roots) if (fs.existsSync(r)) walk(r);
     expect(offenders).toEqual([]);
-  });
-});
-
-describe("Estimate Pricing is for managers and admins only (owner, Oct 1)", () => {
-  it("a plain user never reaches pricing, even with a stale grant; other grants still work", () => {
-    const stale = { role: "user", access: ["pricing", "estimate"] };
-    expect(canAccess(stale, "pricing")).toBe(false);
-    expect(canAccess(stale, "estimate")).toBe(true);
-    expect(canAccess({ role: "manager", access: [] }, "pricing")).toBe(true);
-    expect(canAccess({ role: "admin", access: [] }, "pricing")).toBe(true);
-  });
-  it("Admin › Users cannot tick pricing for a user, and a saved grant is stripped", () => {
-    expect(GRANTABLE_PAGES).not.toContain("pricing");
-    expect(GRANTABLE_PAGES).toHaveLength(PAGES.length - 1);
-    expect(normalizeAccess(["pricing", "service", "junk"])).toEqual(["service"]);
-  });
-  it("Service rates are a pricing page (managers edit them too)", () => {
-    expect(pageForPath("/admin/service-rates")).toBe("pricing");
-    expect(pageForPath("/admin/users")).toBe("admin");
-    expect(pageForPath("/admin/reminders")).toBe("admin");
   });
 });

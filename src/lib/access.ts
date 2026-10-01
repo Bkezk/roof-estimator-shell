@@ -6,12 +6,10 @@
  * Roles (owner, 2026-09-30: "users should only see their own stuff except for managers who see
  * everything"):
  * - admin: every page, plus the Admin pages (users, reminders, service rates).
- * - manager: every page including Estimate Pricing (owner, Oct 1: "managers and admins can edit
- *   pricing"), but not the Admin pages (users, reminders); sees everyone's tickets, tasks and
- *   follow-ups (also when ticked Technician), may dispatch, move dates and snooze / close
- *   follow-ups.
- * - user: only the pages in `access`, never Estimate Pricing ("reps cannot edit pricing nor do
- *   they need to see it"); a Technician user sees and edits only their own tickets.
+ * - manager: every page, Estimate Pricing included (owner, Oct 1), but not the Admin pages
+ *   (users, reminders); sees everyone's tickets, tasks and follow-ups (also when ticked
+ *   Technician) and may dispatch.
+ * - user: only the pages in `access`; a Technician user sees and edits only their own tickets.
  *
  * `profiles.role` is 'admin' | 'manager' | 'user'; `profiles.access` is the granted pages (empty
  * for admins and managers). Enforcement is RLS (`public.has_access(page)`, `public.is_admin()`,
@@ -41,8 +39,7 @@ export const PAGE_LABELS: Record<Page, string> = {
 
 export const PAGE_HELP: Record<Page, string> = {
   estimate: "Bids and the estimator — and listed as an estimator on Setup",
-  pricing:
-    "Labor, Duro-Last and Non-DL pricing, service rates, price list import — managers and admins only",
+  pricing: "Labor, Duro-Last and Non-DL pricing, price list import",
   inventory: "Stock ledger (leftovers only, unless Estimate is granted too)",
   prospect: "Buildings, roofs and tasks — the territory roof database",
   takeoff: "Measure plan sheets and aerial screenshots; create a bid from the drawing",
@@ -63,8 +60,8 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_HELP: Record<Role, string> = {
   admin: "Everything, plus Users & access",
   manager:
-    "Sees everyone's tickets, tasks and customers; edits pricing; no Users or Reminders pages",
-  user: "Only the pages ticked below (never pricing); a technician sees only their own tickets",
+    "Sees everyone's tickets, tasks and customers, and Estimate Pricing; no Users or Reminders pages",
+  user: "Only the pages ticked below; a technician sees only their own tickets",
 };
 
 /** A stored role string as a Role (anything unknown is a plain user). */
@@ -78,17 +75,11 @@ export interface AccessLike {
 }
 
 /**
- * Admins and managers reach every page; others only the pages granted, and Estimate Pricing is
- * never granted to a plain user (owner, Oct 1). The twin of `public.has_access(page)`.
+ * Admins and managers reach every page; others only the pages granted (Estimate Pricing is one
+ * of them: anyone with the tick sees it — owner, Oct 1). The twin of `public.has_access(page)`.
  */
 export const canAccess = (p: AccessLike | null | undefined, page: Page): boolean =>
-  !!p &&
-  (p.role === "admin" ||
-    p.role === "manager" ||
-    (page !== "pricing" && (p.access ?? []).includes(page)));
-
-/** The pages Admin › Users may tick for a plain user: everything but Estimate Pricing. */
-export const GRANTABLE_PAGES: readonly Page[] = PAGES.filter((p) => p !== "pricing");
+  !!p && (p.role === "admin" || p.role === "manager" || (p.access ?? []).includes(page));
 
 export const isAdmin = (p: AccessLike | null | undefined): boolean => p?.role === "admin";
 
@@ -114,9 +105,12 @@ export function pageForPath(pathname: string): Page | "admin" | null {
   if (pathname.startsWith("/my-work")) return null;
   // "/" only redirects to My Work.
   if (pathname === "/") return null;
-  if (pathname.startsWith("/admin/users") || pathname.startsWith("/admin/reminders"))
+  if (
+    pathname.startsWith("/admin/users") ||
+    pathname.startsWith("/admin/reminders") ||
+    pathname.startsWith("/admin/service-rates")
+  )
     return "admin";
-  // Service rates are pricing (managers edit them too).
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";
@@ -142,4 +136,4 @@ export function homeFor(_p?: AccessLike | null): string {
 }
 
 export const normalizeAccess = (v: unknown): Page[] =>
-  Array.isArray(v) ? (GRANTABLE_PAGES.filter((p) => v.includes(p)) as Page[]) : [];
+  Array.isArray(v) ? (PAGES.filter((p) => v.includes(p)) as Page[]) : [];
