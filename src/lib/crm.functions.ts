@@ -5,6 +5,9 @@
  *
  * Reading needs Customers, Service or Estimate access (the typeahead on a ticket or a bid);
  * writing needs Customers or Service (an office user creating a ticket can add the customer).
+ * Every write to a customer, a site or a contact is logged (logAudit → audit_log; owner, Oct 1:
+ * "whatever is changed needs to be logged somewhere showing what they did, when, and who"),
+ * by everyone; admins and managers read it in the customer's History.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -13,6 +16,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import {
+  ACCOUNT_FIELDS,
+  CONTACT_FIELDS,
+  SITE_FIELDS,
+  auditActor,
+  diffForAudit,
+  type AuditActor,
+  type AuditEntry,
+} from "@/lib/audit";
 import {
   accountSchema,
   optText,
@@ -35,10 +47,19 @@ type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 async function me(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
-    .select("role, access, full_name, email")
+    .select("role, access, technician, full_name, email")
     .eq("id", ctx.userId)
     .maybeSingle();
   return data;
+}
+/** Write the audit rows (audit.server.ts; never throws). */
+async function logAudit(
+  sb: SupabaseClient<Database>,
+  actor: AuditActor,
+  e: AuditEntry | AuditEntry[],
+) {
+  const audit = await import("@/lib/audit.server");
+  await audit.logAudit(sb, actor, e);
 }
 async function readAccess(ctx: Ctx) {
   const p = await me(ctx);
@@ -257,7 +278,9 @@ export const saveAccount = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { id, source, ...fields } = data;
     const patch = { ...defined(fields), updated_by_name: nameOf(p) };
+    const actor = auditActor(context.userId, p);
     if (id) {
+      const { data: before } = await sb.from("crm_accounts").select("*").eq("id", id).maybeSingle();
       const { data: row, error } = await sb
         .from("crm_accounts")
         .update(patch)
@@ -265,6 +288,13 @@ export const saveAccount = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      await logAudit(sb, actor, {
+        entity: "account",
+        entity_id: row.id,
+        action: "update",
+        label: `Customer '${before?.name ?? row.name}'`,
+        changes: diffForAudit(before, row, ACCOUNT_FIELDS),
+      });
       return row;
     }
     const { data: row, error } = await sb
@@ -273,6 +303,13 @@ export const saveAccount = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await logAudit(sb, actor, {
+      entity: "account",
+      entity_id: row.id,
+      action: "create",
+      label: `Customer '${row.name}'`,
+      changes: diffForAudit(null, row, ACCOUNT_FIELDS),
+    });
     return row;
   });
 
@@ -296,12 +333,14 @@ export const saveSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => siteSchema.parse(d))
   .handler(async ({ data, context }): Promise<SiteRow> => {
-    await writeAccess(context);
+    const p = await writeAccess(context);
     const sb = context.supabase;
+    const actor = auditActor(context.userId, p);
     const { id, ...rest } = data;
     // A county code left out stays as it is.
     const fields = defined(rest);
     if (id) {
+      const { data: before } = await sb.from("crm_sites").select("*").eq("id", id).maybeSingle();
       const { data: row, error } = await sb
         .from("crm_sites")
         .update(fields)
@@ -309,10 +348,24 @@ export const saveSite = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      await logAudit(sb, actor, {
+        entity: "site",
+        entity_id: row.id,
+        action: "update",
+        label: `Site '${before?.name ?? row.name}'`,
+        changes: diffForAudit(before, row, SITE_FIELDS),
+      });
       return row;
     }
     const { data: row, error } = await sb.from("crm_sites").insert(fields).select("*").single();
     if (error) throw new Error(error.message);
+    await logAudit(sb, actor, {
+      entity: "site",
+      entity_id: row.id,
+      action: "create",
+      label: `Site '${row.name}'`,
+      changes: diffForAudit(null, row, SITE_FIELDS),
+    });
     return row;
   });
 
@@ -339,6 +392,13 @@ export const quickCreateAccount = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await logAudit(sb, auditActor(context.userId, p), {
+      entity: "account",
+      entity_id: account.id,
+      action: "create",
+      label: `Customer '${account.name}'`,
+      changes: diffForAudit(null, account, ACCOUNT_FIELDS),
+    });
     return {
       account_id: account.id,
       account_name: account.name,
@@ -376,24 +436,40 @@ export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    await writeAccess(context);
-    const { error } = await context.supabase
+    const p = await writeAccess(context);
+    const { data: row, error } = await context.supabase
       .from("crm_accounts")
       .update({ deleted_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("id, name")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    await logAudit(context.supabase, auditActor(context.userId, p), {
+      entity: "account",
+      entity_id: data.id,
+      action: "delete",
+      label: `Customer '${row?.name ?? data.id}'`,
+    });
   });
 
 export const deleteSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    await writeAccess(context);
-    const { error } = await context.supabase
+    const p = await writeAccess(context);
+    const { data: row, error } = await context.supabase
       .from("crm_sites")
       .update({ deleted_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("id, name")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    await logAudit(context.supabase, auditActor(context.userId, p), {
+      entity: "site",
+      entity_id: data.id,
+      action: "delete",
+      label: `Site '${row?.name ?? data.id}'`,
+    });
   });
 
 /** Link a saved bid to an account (and optionally a site) — the reverse of the Setup typeahead. */
@@ -537,11 +613,20 @@ export const saveContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => contactSchema.parse(d))
   .handler(async ({ data, context }): Promise<ContactWithSites> => {
-    await writeAccess(context);
+    const p = await writeAccess(context);
     const sb = context.supabase;
     const { id, site_ids, ...fields } = data;
     const row = { ...fields, is_billing: fields.is_billing ?? false };
     let saved: ContactRow;
+    // The contact as it was, with its sites, for the audit diff.
+    let before: (ContactRow & { site_ids: string[] }) | null = null;
+    if (id) {
+      const [{ data: old }, { data: oldLinks }] = await Promise.all([
+        sb.from("crm_contacts").select("*").eq("id", id).maybeSingle(),
+        sb.from("crm_site_contacts").select("site_id").eq("contact_id", id),
+      ]);
+      if (old) before = { ...old, site_ids: (oldLinks ?? []).map((l) => l.site_id).sort() };
+    }
     if (id) {
       const { data: r, error } = await sb
         .from("crm_contacts")
@@ -565,6 +650,17 @@ export const saveContact = createServerFn({ method: "POST" })
         if (lErr) throw new Error(lErr.message);
       }
     }
+    await logAudit(sb, auditActor(context.userId, p), {
+      entity: "contact",
+      entity_id: saved.id,
+      action: id ? "update" : "create",
+      label: `Contact '${before?.name ?? saved.name}'`,
+      changes: diffForAudit(
+        before,
+        { ...saved, site_ids: site_ids ? [...site_ids].sort() : (before?.site_ids ?? []) },
+        CONTACT_FIELDS,
+      ),
+    });
     return { ...saved, site_ids: site_ids ?? [] };
   });
 
@@ -572,10 +668,18 @@ export const deleteContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    await writeAccess(context);
-    const { error } = await context.supabase
+    const p = await writeAccess(context);
+    const { data: row, error } = await context.supabase
       .from("crm_contacts")
       .update({ deleted_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .select("id, name")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    await logAudit(context.supabase, auditActor(context.userId, p), {
+      entity: "contact",
+      entity_id: data.id,
+      action: "delete",
+      label: `Contact '${row?.name ?? data.id}'`,
+    });
   });

@@ -263,23 +263,25 @@ describe("ticket money is a manager's", () => {
       `if (!managesTickets(p)) throw new Error("Rates are a manager's");`,
     );
   });
+  // Owner, Oct 1 (later): sales / project managers see and edit invoices too, every change
+  // logged — the invoice gates are `seesInvoices` now (sales-invoices-audit.test.ts).
   it("invoices: the server, the block on the ticket, the Invoices page and tab", () => {
     const inv = read("src/lib/invoices.functions.ts");
     expect(inv).toContain(
-      `if (!managesTickets(data)) throw new Error("Invoices are a manager's");`,
+      `if (!seesInvoices(data)) throw new Error("Invoices are a manager's or sales'");`,
     );
     expect(inv).not.toContain("Invoices are the office's");
     const block = read("src/components/service/invoice-block.tsx");
     expect(block).toMatch(
-      /export function InvoiceBlock[\s\S]*?if \(!profile \|\| !managesTickets\(profile\)\) return null;/,
+      /export function InvoiceBlock[\s\S]*?if \(!profile \|\| !seesInvoices\(profile\)\) return null;/,
     );
     const page = read("src/components/service/invoices-page.tsx");
     expect(page).toMatch(
-      /export function InvoicesPage[\s\S]*?if \(!managesTickets\(profile\)\)\s*return \(/,
+      /export function InvoicesPage[\s\S]*?if \(!seesInvoices\(profile\)\)\s*return \(/,
     );
     const tabs = read("src/components/service/service-tabs.tsx");
     expect(tabs).toMatch(
-      /const manager = managesTickets\(profile\);\s*const tabs = TABS\.filter\(\(t\) => !t\.office \|\| manager\);/,
+      /const invoices = seesInvoices\(profile\);\s*const tabs = TABS\.filter\(\(t\) => !t\.office \|\| invoices\);/,
     );
   });
   it("Service Rates: read and saved by admins and managers only", () => {

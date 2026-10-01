@@ -119,6 +119,26 @@ export const isOffice = (p: AccessLike | null | undefined): boolean =>
 export const managesTickets = (p: AccessLike | null | undefined): boolean => seesEveryone(p);
 
 /**
+ * A sales / project manager (owner, Oct 1): a plain user, not ticked Technician, with Estimate
+ * access — they build bids, know costs and oversee jobs. A technician with Estimate is not one;
+ * a manager or an admin is not one either (they are more). The twin of `public.is_sales_pm()`.
+ */
+export const isSalesPm = (p: AccessLike | null | undefined): boolean =>
+  !!p && p.role === "user" && !p.technician && canAccess(p, "estimate");
+
+/**
+ * Who sees and edits invoices (owner, Oct 1: "Sales and PMs should be able to see customers and
+ * invoices. However whatever is changed needs to be logged somewhere showing what they did,
+ * when, and who."): admins, managers and sales / project managers. The Invoice block on a
+ * ticket, the Invoices page, invoice PDFs and every invoice server function; every write is
+ * logged (audit_log). Creating and dispatching tickets, crew rates, repair prices and Service
+ * Rates stay `managesTickets`. The twin of RLS
+ * `public.is_admin() or public.is_manager() or public.is_sales_pm()`.
+ */
+export const seesInvoices = (p: AccessLike | null | undefined): boolean =>
+  managesTickets(p) || isSalesPm(p);
+
+/**
  * The page a route belongs to; null for routes every signed-in user may open (/account).
  * "admin": admins only; "manager": admins and managers (`managesTickets`).
  */

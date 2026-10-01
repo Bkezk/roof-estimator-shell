@@ -8,7 +8,8 @@
  * stage Done, which is exactly "waiting to be invoiced" (finalising moves a ticket to
  * Invoiced), longest waiting first; a row opens the ticket, where its invoice block is.
  *
- * Office users and admins only: technicians never see money (the server refuses them too).
+ * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); technicians
+ * never see money (the server refuses them too). Every change is logged (audit_log).
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +20,7 @@ import { FileDown, Loader2, Receipt } from "lucide-react";
 import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
+import { seesInvoices } from "@/lib/access";
 import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
 import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
 import {
@@ -54,10 +55,10 @@ import { Label } from "@/components/ui/label";
 
 export function InvoicesPage({ toInvoice = false }: { toInvoice?: boolean }) {
   const { profile } = useAuth();
-  if (!managesTickets(profile))
+  if (!seesInvoices(profile))
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
-        <p className="font-medium">Invoices are a manager's.</p>
+        <p className="font-medium">Invoices are for managers and sales.</p>
         <p className="text-sm text-muted-foreground">Your tickets are on Today.</p>
         <Button asChild>
           <Link to="/service/today">Go to Today</Link>

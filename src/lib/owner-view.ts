@@ -22,7 +22,7 @@
  *                   entries and audit-log entries; red when older than 3 working days (never
  *                   for admins).
  */
-import { isAdmin, type AccessLike } from "@/lib/access";
+import { isAdmin, isSalesPm, type AccessLike } from "@/lib/access";
 import { addDays, bucketOf, weekday, type WorkItem, type WorkKind } from "@/lib/my-work";
 import { localYmd as easternYmd } from "@/lib/tasks";
 import { isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
@@ -49,18 +49,19 @@ export function effectiveView(
 export type RoleLabel = "Admin" | "Manager" | "Technician" | "Sales-PM" | "User";
 
 /**
- * A person's role as one word: Admin, Manager, Sales-PM (a `sales_pm` role, however spelled),
- * Technician (any other user ticked Technician), otherwise User.
+ * A person's role as one word: Admin, Manager, Sales-PM (the owner's sales / project managers:
+ * a plain user, not a technician, with Estimate access — access.ts isSalesPm), Technician (a
+ * user ticked Technician), otherwise User.
  */
 export function roleLabel(p: {
   role: string | null | undefined;
   technician?: boolean | null;
+  access?: readonly string[] | null;
 }): RoleLabel {
-  const r = (p.role ?? "").toLowerCase().replace(/[^a-z]/g, "");
-  if (r === "admin") return "Admin";
-  if (r === "manager") return "Manager";
-  if (r === "salespm") return "Sales-PM";
+  if (p.role === "admin") return "Admin";
+  if (p.role === "manager") return "Manager";
   if (p.technician) return "Technician";
+  if (isSalesPm(p)) return "Sales-PM";
   return "User";
 }
 

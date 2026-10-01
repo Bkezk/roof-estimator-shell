@@ -78,7 +78,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
     const since = new Date(now.getTime() - ACTIVITY_DAYS * 86_400_000).toISOString();
 
     const [profiles, tickets, tasks, followups, opps, doneTickets, doneTasks] = await Promise.all([
-      sb.from("profiles").select("id, full_name, email, role, technician"),
+      sb.from("profiles").select("id, full_name, email, role, technician, access"),
       sb
         .from("service_jobs")
         .select(

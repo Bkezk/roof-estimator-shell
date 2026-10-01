@@ -3,7 +3,10 @@
  * first "6012", further invoices on the same ticket "6012.2", "6012.3", a deleted or voided one
  * freeing its number (owner, Sep 30; invoice-numbering.ts) — built from time entries and
  * materials (invoices.server.ts), reviewed and sent by the office, marked paid by hand, exported
- * for Sage as CSV. Only managers and admins see or touch them (RLS: invoices_office).
+ * for Sage as CSV. Admins, managers and sales / project managers see and edit them
+ * (`seesInvoices`; RLS: invoices_office) — owner, Oct 1: "Sales and PMs should be able to see
+ * customers and invoices. However whatever is changed needs to be logged somewhere showing what
+ * they did, when, and who." Every write here is logged (logAudit → audit_log), by everyone.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -11,7 +14,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, managesTickets } from "@/lib/access";
+import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
+import {
+  INVOICE_FIELDS,
+  auditActor,
+  diffForAudit,
+  diffInvoiceLines,
+  type AuditActor,
+  type AuditEntry,
+} from "@/lib/audit";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { toBase64 } from "@/lib/webpush";
@@ -38,12 +49,25 @@ async function office(ctx: Ctx) {
     .maybeSingle();
   if (!data || !(canAccess(data, "service") || canAccess(data, "customers")))
     throw new Error("Forbidden: Service access required");
-  // Owner, Oct 1: "only the managers / admins can see and edit the prices on invoices".
-  if (!managesTickets(data)) throw new Error("Invoices are a manager's");
+  // Owner, Oct 1: managers / admins, and sales / project managers ("Sales and PMs should be
+  // able to see customers and invoices"); every change is logged below.
+  if (!seesInvoices(data)) throw new Error("Invoices are a manager's or sales'");
   return data;
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
+/** "Invoice 6012" for the audit summaries. */
+const invName = (inv: Pick<InvoiceRow, "display_number" | "number">) =>
+  `Invoice ${invoiceLabel(inv)}`.trim();
+/** Write the audit rows (audit.server.ts; never throws). */
+async function logAudit(
+  sb: SupabaseClient<Database>,
+  actor: AuditActor,
+  e: AuditEntry | AuditEntry[],
+) {
+  const audit = await import("@/lib/audit.server");
+  await audit.logAudit(sb, actor, e);
+}
 /** Re-read the ticket after a stage change and run the stage automation (ticket-events). */
 async function stageEvent(
   sb: SupabaseClient<Database>,
@@ -103,7 +127,7 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const [existing] = await liveInvoices(sb, data.job_id);
     if (existing) return withLines(sb, existing);
-    return createInvoiceFor(sb, data.job_id, context.userId, nameOf(p), true);
+    return createInvoiceFor(sb, data.job_id, auditActor(context.userId, p), true);
   });
 
 /** Another invoice on the same ticket ("6012.2", "6012.3", …), a draft from the ticket. */
@@ -112,7 +136,7 @@ export const createAnotherInvoice = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
-    return createInvoiceFor(context.supabase, data.job_id, context.userId, nameOf(p));
+    return createInvoiceFor(context.supabase, data.job_id, auditActor(context.userId, p));
   });
 
 /** A ticket's invoices for the chips on the ticket (void ones too, greyed). */
@@ -155,11 +179,12 @@ const numberTaken = (e: { code?: string; message: string }) =>
 async function createInvoiceFor(
   sb: SupabaseClient<Database>,
   jobId: string,
-  userId: string,
-  byName: string,
+  actor: AuditActor,
   /** getOrCreate: a draft made meanwhile by another tab is the one to open, not a ".2". */
   onlyIfNone = false,
 ): Promise<InvoiceWithLines> {
+  const userId = actor.id;
+  const byName = actor.name;
   const { data: job, error } = await sb
     .from("service_jobs")
     .select("*")
@@ -234,6 +259,16 @@ async function createInvoiceFor(
       .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
     if (lErr) throw new Error(lErr.message);
   }
+  await logAudit(sb, actor, {
+    entity: "invoice",
+    entity_id: inv.id,
+    action: "create",
+    label: invName(inv),
+    changes: {
+      ...diffForAudit(null, inv, ["subtotal", "tax_rate", "tax_amount", "total", "cost_total"]),
+      lines: { from: null, to: lines.length },
+    },
+  });
   await sb.from("service_jobs").update({ invoice_id: inv.id }).eq("id", job.id);
   return withLines(sb, inv);
 }
@@ -270,6 +305,10 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
     const lines = await buildLinesFromJob(sb, inv.service_job_id);
+    const { count: oldCount } = await sb
+      .from("invoice_lines")
+      .select("id", { count: "exact", head: true })
+      .eq("invoice_id", inv.id);
     await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
     if (lines.length) {
       const { error: lErr } = await sb
@@ -285,6 +324,24 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (uErr) throw new Error(uErr.message);
+    // The lines are thrown away and made again (new ids): logged as one entry on the invoice,
+    // the line count and the totals before → after.
+    const changes = {
+      ...(oldCount !== lines.length ? { lines: { from: oldCount ?? 0, to: lines.length } } : {}),
+      ...diffForAudit(inv, updated, INVOICE_FIELDS),
+    };
+    await logAudit(sb, auditActor(context.userId, p), {
+      entity: "invoice",
+      entity_id: inv.id,
+      action: "update",
+      label: `${invName(inv)} lines rebuilt from the ticket:`,
+      changes,
+      ...(Object.keys(changes).length
+        ? {}
+        : {
+            summary: `${invName(inv)} lines rebuilt from the ticket (no change in lines or totals)`,
+          }),
+    });
     return withLines(sb, updated);
   });
 
@@ -341,7 +398,14 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("This invoice is final; void it to change it");
     const { totals } = await import("@/lib/invoices.server");
+    const audit: AuditEntry[] = [];
     if (data.lines) {
+      const { data: oldLines, error: oErr } = await sb
+        .from("invoice_lines")
+        .select("*")
+        .eq("invoice_id", inv.id)
+        .order("sort");
+      if (oErr) throw new Error(oErr.message);
       await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
       const rows = data.lines.map((l, i) => ({
         invoice_id: inv.id,
@@ -362,6 +426,17 @@ export const saveInvoice = createServerFn({ method: "POST" })
         const { error: lErr } = await sb.from("invoice_lines").insert(rows);
         if (lErr) throw new Error(lErr.message);
       }
+      // Each saved line carries its old id (the editor sends it): added / edited / removed.
+      const sent = data.lines;
+      const saved = rows.map((r, i) => ({ ...r, id: sent[i]?.id ?? null }));
+      for (const c of diffInvoiceLines(oldLines ?? [], saved))
+        audit.push({
+          entity: "invoice_line",
+          entity_id: inv.id,
+          action: c.action,
+          label: `${invName(inv)} line '${c.description}'`,
+          changes: c.changes,
+        });
     }
     const { data: lines } = await sb.from("invoice_lines").select("*").eq("invoice_id", inv.id);
     const taxRate = data.tax_rate ?? Number(inv.tax_rate);
@@ -385,6 +460,14 @@ export const saveInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (uErr) throw new Error(uErr.message);
+    audit.push({
+      entity: "invoice",
+      entity_id: inv.id,
+      action: "update",
+      label: invName(inv),
+      changes: diffForAudit(inv, updated, INVOICE_FIELDS),
+    });
+    await logAudit(sb, auditActor(context.userId, p), audit);
     return withLines(sb, updated);
   });
 
@@ -432,6 +515,13 @@ export const finalizeInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await logAudit(sb, auditActor(context.userId, p), {
+      entity: "invoice",
+      entity_id: updated.id,
+      action: "finalize",
+      label: invName(updated),
+      changes: diffForAudit(b.invoice, updated, INVOICE_FIELDS),
+    });
     await sb
       .from("service_jobs")
       .update({ stage: "invoiced", invoice_id: updated.id, updated_by_name: nameOf(p) })
@@ -475,6 +565,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
+    const actor = auditActor(context.userId, p);
     const { loadBundle, renderInvoicePdf, emailInvoice } = await import("@/lib/invoices.server");
     let b = await loadBundle(sb, data.id);
     if (b.invoice.status === "draft") {
@@ -484,10 +575,18 @@ export const sendInvoice = createServerFn({ method: "POST" })
         .from("service")
         .upload(path, pdf, { contentType: "application/pdf", upsert: true });
       if (upErr) throw new Error(`Could not store the PDF: ${upErr.message}`);
-      await sb
+      const { error: fErr } = await sb
         .from("invoices")
         .update({ status: "final", finalized_at: new Date().toISOString(), pdf_path: path })
         .eq("id", b.invoice.id);
+      if (!fErr)
+        await logAudit(sb, actor, {
+          entity: "invoice",
+          entity_id: b.invoice.id,
+          action: "finalize",
+          label: invName(b.invoice),
+          changes: { status: { from: b.invoice.status, to: "final" } },
+        });
       await sb
         .from("service_jobs")
         .update({ stage: "invoiced", invoice_id: b.invoice.id })
@@ -523,6 +622,16 @@ export const sendInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await logAudit(sb, actor, {
+      entity: "invoice",
+      entity_id: updated.id,
+      action: "send",
+      label: invName(updated),
+      changes: {
+        ...diffForAudit(b.invoice, updated, ["status"]),
+        sent_to: { from: b.invoice.sent_to ?? null, to: data.to },
+      },
+    });
     return withLines(sb, updated);
   });
 
@@ -543,6 +652,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
+    const { data: before } = await sb.from("invoices").select("*").eq("id", data.id).maybeSingle();
     const { data: inv, error } = await sb
       .from("invoices")
       .update({
@@ -559,6 +669,13 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
+    await logAudit(sb, auditActor(context.userId, p), {
+      entity: "invoice",
+      entity_id: inv.id,
+      action: "paid",
+      label: invName(inv),
+      changes: diffForAudit(before, inv, INVOICE_FIELDS),
+    });
     await sb
       .from("service_jobs")
       .update({ stage: "closed", updated_by_name: nameOf(p) })
@@ -585,6 +702,13 @@ export const voidInvoice = createServerFn({ method: "POST" })
       // A draft is deleted outright; its number is free for the next invoice on the ticket.
       const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
       if (dErr) throw new Error(dErr.message);
+      await logAudit(sb, auditActor(context.userId, p), {
+        entity: "invoice",
+        entity_id: inv.id,
+        action: "delete",
+        label: `Draft ${invName(inv)}`,
+        changes: diffForAudit(inv, null, ["status", "total"]),
+      });
     } else {
       // Release the number: the void stays on record under it (a legacy integer number is kept
       // as a negative), and the next invoice on the ticket takes it again. If this one was
@@ -599,6 +723,13 @@ export const voidInvoice = createServerFn({ method: "POST" })
         })
         .eq("id", inv.id);
       if (vErr) throw new Error(vErr.message);
+      await logAudit(sb, auditActor(context.userId, p), {
+        entity: "invoice",
+        entity_id: inv.id,
+        action: "void",
+        label: invName(inv),
+        changes: { status: { from: inv.status, to: "void" } },
+      });
     }
     // Another live invoice on the ticket keeps it where it is; the last one sends it back to Done.
     const [other] = await liveInvoices(sb, inv.service_job_id);
@@ -672,7 +803,7 @@ export const exportSageCsv = createServerFn({ method: "POST" })
   )
   .handler(
     async ({ data, context }): Promise<{ csv: string; count: number; file_name: string }> => {
-      await office(context);
+      const p = await office(context);
       const sb = context.supabase;
       let q = sb
         .from("invoices")
@@ -696,11 +827,25 @@ export const exportSageCsv = createServerFn({ method: "POST" })
           lines: (lines ?? []).filter((l) => l.invoice_id === invoice.id),
         })),
       );
-      if (ids.length)
-        await sb
+      if (ids.length) {
+        const now = new Date().toISOString();
+        const { error: xErr } = await sb
           .from("invoices")
-          .update({ sage_exported_at: new Date().toISOString() })
+          .update({ sage_exported_at: now })
           .in("id", ids);
+        if (!xErr)
+          await logAudit(
+            sb,
+            auditActor(context.userId, p),
+            (invs ?? []).map((i) => ({
+              entity: "invoice" as const,
+              entity_id: i.id,
+              action: "update" as const,
+              summary: `${invName(i)} exported to Sage`,
+              changes: { sage_exported_at: { from: i.sage_exported_at, to: now } },
+            })),
+          );
+      }
       return { csv, count: ids.length, file_name: `sage-invoices-${data.from}-to-${data.to}.csv` };
     },
   );

@@ -47,6 +47,45 @@ export type Database = {
         };
         Relationships: [];
       };
+      audit_log: {
+        Row: {
+          action: string;
+          at: string;
+          by_name: string | null;
+          by_role: string | null;
+          by_user: string | null;
+          changes: Json | null;
+          entity: string;
+          entity_id: string | null;
+          id: number;
+          summary: string | null;
+        };
+        Insert: {
+          action: string;
+          at?: string;
+          by_name?: string | null;
+          by_role?: string | null;
+          by_user?: string | null;
+          changes?: Json | null;
+          entity: string;
+          entity_id?: string | null;
+          id?: number;
+          summary?: string | null;
+        };
+        Update: {
+          action?: string;
+          at?: string;
+          by_name?: string | null;
+          by_role?: string | null;
+          by_user?: string | null;
+          changes?: Json | null;
+          entity?: string;
+          entity_id?: string | null;
+          id?: number;
+          summary?: string | null;
+        };
+        Relationships: [];
+      };
       address_points: {
         Row: {
           address: string;
@@ -3712,6 +3751,7 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean };
       is_technician: { Args: never; Returns: boolean };
       is_manager: { Args: never; Returns: boolean };
+      is_sales_pm: { Args: never; Returns: boolean };
       stamp_dispatch: { Args: never; Returns: undefined };
       building_county_counts_storm: {
         Args: never;

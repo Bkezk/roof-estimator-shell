@@ -70,7 +70,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice, managesTickets, seesEveryone } from "@/lib/access";
+import { isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   deleteServiceJob,
@@ -336,7 +336,7 @@ function ServiceList({
   // A technician (not admin) receives only their own tickets from the server.
   const isTech = !isOffice(profile);
   // Owner, Oct 1: "The manager creates the tickets": New ticket, the Board (dispatch), delete
-  // and restore, and the to-invoice count are a manager's.
+  // and restore are a manager's; the to-invoice count shows to whoever sees invoices.
   const manager = managesTickets(profile);
   const BOARD_OPEN_KEY = "bid-o-matic:service-board-open";
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => {
@@ -471,7 +471,7 @@ function ServiceList({
             ticket itself.
           </p>
           <div className="mt-2">
-            <ServiceTabs toInvoice={manager ? toInvoiceCount : 0} />
+            <ServiceTabs toInvoice={seesInvoices(profile) ? toInvoiceCount : 0} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

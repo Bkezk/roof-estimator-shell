@@ -9,8 +9,9 @@
  * numbered "<ticket>.2", ".3", …; a deleted or voided one frees its number for the next
  * (invoice-numbering.ts). The ticket's invoices show as chips to switch between.
  *
- * Office users and admins only: technicians never see money (RLS invoices_office), so the
- * block renders nothing for them.
+ * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); everyone else
+ * — technicians above all — never sees it (RLS invoices_office), so the block renders nothing
+ * for them. Every change is logged (audit_log); admins and managers see it in the History fold.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,7 +33,8 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
+import { managesTickets, seesInvoices } from "@/lib/access";
+import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
@@ -153,8 +155,8 @@ function KindBadge({ kind }: { kind: LineKind }) {
 /** Mounted on every ticket; decides whether the invoice applies here. */
 export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
   const { profile } = useAuth();
-  // Invoices are a manager's (owner, Oct 1): nobody else sees the block.
-  if (!profile || !managesTickets(profile)) return null;
+  // Invoices are a manager's and sales' / PMs' (owner, Oct 1): nobody else sees the block.
+  if (!profile || !seesInvoices(profile)) return null;
   if (!INVOICE_STAGES.includes(job.stage) && !job.invoice_id) return null;
   return <InvoiceLoader job={job} />;
 }
@@ -199,6 +201,7 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
   const refreshLists = () => {
     void qc.invalidateQueries({ queryKey: ["invoices"] });
     void qc.invalidateQueries({ queryKey: ticketInvoicesKey(job.id) });
+    void qc.invalidateQueries({ queryKey: ["audit"] });
   };
   const ctx: Ctx = {
     job,
@@ -336,6 +339,7 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
       ) : (
         <FinalInvoice ctx={ctx} data={data} />
       )}
+      {data && <AuditHistory entity="invoice" entityId={data.invoice.id} />}
     </section>
   );
 }
@@ -475,6 +479,8 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       payment_terms: head.payment_terms.trim() || null,
       tax_rate: fromPct(head.tax_pct),
       lines: lines.map((l) => ({
+        // A saved line's id (its key is "l<id>"); new lines have none. The audit log uses it.
+        ...(l.key.startsWith("l") ? { id: Number(l.key.slice(1)) } : {}),
         kind: l.kind,
         description: l.description.trim(),
         qty: l.qty,
@@ -1326,7 +1332,7 @@ function SendDialog(props: {
   onClose: () => void;
   onSend: (to: string[], message: string) => void;
 }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const contactsFn = useServerFn(listContacts);
   const ratesFn = useServerFn(getServiceRates);
   const accountId = props.accountId;
@@ -1338,7 +1344,9 @@ function SendDialog(props: {
   const ratesQ = useQuery({
     queryKey: ["service-rates"],
     queryFn: () => ratesFn(),
-    enabled: !!session,
+    // Service Rates (the default message) are a manager's; for sales the box starts blank and
+    // the server uses the default message.
+    enabled: !!session && managesTickets(profile),
   });
 
   // Contacts with an email, billing contacts first (the server orders them so).

@@ -40,6 +40,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
+import { AuditHistory } from "@/components/audit-history";
 import {
   deleteAccount,
   deleteContact,
@@ -351,6 +352,8 @@ function AccountDetailPane({ id }: { id: string }) {
       <TicketsSection jobs={d.jobs} />
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} />}
       {can("takeoff") && <TakeoffsSection accountId={id} />}
+      {/* Admins and managers: who changed the customer, its sites and contacts (audit_log). */}
+      <AuditHistory entity="account" entityId={id} className="rounded-lg border p-4" />
 
       <AlertDialog
         open={confirmDelete}
@@ -602,6 +605,7 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
       void qc.invalidateQueries({ queryKey: ["account-search"] });
       // A new name may match other saved bids.
       void qc.invalidateQueries({ queryKey: ["bid-suggestions", row.id] });
+      void qc.invalidateQueries({ queryKey: ["audit"] });
       onDone();
     },
     onError: (e) => toast.error(`Could not save the customer: ${errText(e)}`),
@@ -828,6 +832,7 @@ function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteR
     void qc.invalidateQueries({ queryKey: ["contacts", accountId] });
     void qc.invalidateQueries({ queryKey: ["account", accountId] });
     void qc.invalidateQueries({ queryKey: ["account-search"] });
+    void qc.invalidateQueries({ queryKey: ["audit"] });
   };
   const remove = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
@@ -1199,6 +1204,7 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
     void qc.invalidateQueries({ queryKey: ["account", accountId] });
     void qc.invalidateQueries({ queryKey: ["accounts"] });
     void qc.invalidateQueries({ queryKey: ["account-search"] });
+    void qc.invalidateQueries({ queryKey: ["audit"] });
   };
   const remove = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
