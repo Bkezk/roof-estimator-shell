@@ -70,7 +70,7 @@ describe("the ticket form (service-page.tsx) after the Oct 1 clean-up", () => {
     expect(src).toContain("const showRate = !!crew && !!draft.technician_id;");
     expect(src).toContain("{crew && showRate && (");
   });
-  it("B5/B8: Type, Labor rate and Date share one row; the label is plain 'Date'", () => {
+  it("B5/B8: Type, Date and Labor rate sit together above the technician; the label is plain 'Date'", () => {
     const row = src.slice(src.indexOf('<Label htmlFor="ticket-type">'));
     const end = row.indexOf('<Label htmlFor="ticket-tech">');
     const between = row.slice(0, end);
@@ -87,5 +87,94 @@ describe("the ticket form (service-page.tsx) after the Oct 1 clean-up", () => {
   });
   it("keeps the folded CenterPoint numbers", () => {
     expect(src).toContain("CenterPoint numbers");
+  });
+});
+
+describe("the tighter layout (owner, Oct 1): two columns for the office, one for a technician", () => {
+  const src = read("../components/service-page.tsx");
+  const constBody = (name: string) => {
+    const start = src.indexOf(`const ${name} = `);
+    expect(start).toBeGreaterThan(0);
+    return src.slice(start, src.indexOf("\n  );\n", start));
+  };
+  const form = src.slice(src.indexOf("<form"), src.indexOf("</form>"));
+
+  it("the form widens to max-w-5xl for the office and stays max-w-3xl for a technician", () => {
+    expect(form).toContain('className={`${isTech ? "max-w-3xl" : "max-w-5xl"} space-y-5`}');
+  });
+
+  it("an md:grid-cols-2 grid holds the customer (left) and type / date / labor / technician (right)", () => {
+    const at = form.indexOf('<div className="grid gap-5 md:grid-cols-2');
+    expect(at).toBeGreaterThan(0);
+    const grid = form.slice(at, form.indexOf("{customerContact}", at));
+    expect(grid.indexOf("{customerField}")).toBeGreaterThan(0);
+    expect(grid.indexOf("{whatAndWhen}")).toBeGreaterThan(grid.indexOf("{customerField}"));
+    // Description, PO / Job #, notes and CenterPoint are outside it.
+    for (const piece of [
+      "{descriptionAndNumbers}",
+      "{notesField}",
+      "{centerPointNumbers}",
+      "ticket-description",
+      "ticket-po",
+      "ticket-notes",
+    ]) {
+      expect(grid).not.toContain(piece);
+    }
+  });
+
+  it("the left column is the customer block only; the right is Type, Date, Labor rate, Technician", () => {
+    const customer = constBody("customerField");
+    expect(customer).toContain("<CustomerBlock");
+    expect(customer).toContain('id="ticket-customer"');
+    for (const id of [
+      "ticket-type",
+      "ticket-date",
+      "ticket-tech",
+      "ticket-description",
+      "ticket-po",
+    ]) {
+      expect(customer).not.toContain(`"${id}"`);
+    }
+    const right = constBody("whatAndWhen");
+    const order = [
+      '<Label htmlFor="ticket-type">',
+      '<Label htmlFor="ticket-date">',
+      '<Label htmlFor="ticket-rate">',
+      '<Label htmlFor="ticket-tech">',
+    ].map((l) => right.indexOf(l));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(right).toContain("{crewRows}");
+    expect(right).not.toContain("ticket-description");
+    expect(right).not.toContain("ticket-notes");
+  });
+
+  it("below the columns, full width: description and PO / Job #, notes, CenterPoint, then Create", () => {
+    const office = form.slice(form.indexOf("md:grid-cols-2"));
+    const seq = [
+      "{descriptionAndNumbers}",
+      "{notesField}",
+      "{centerPointNumbers}",
+      "{TICKET_STAGE_HINT}",
+    ].map((p) => office.indexOf(p));
+    expect(seq.every((i) => i > 0)).toBe(true);
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
+    const desc = constBody("descriptionAndNumbers");
+    expect(desc.indexOf('id="ticket-po"')).toBeGreaterThan(desc.indexOf('id="ticket-description"'));
+  });
+
+  it("a technician keeps the single column in the old order", () => {
+    const tech = form.slice(form.indexOf("{isTech ? ("), form.indexOf(") : ("));
+    expect(tech).not.toContain("grid-cols");
+    const seq = [
+      "{customerField}",
+      "{customerContact}",
+      "{descriptionAndNumbers}",
+      "{whatAndWhen}",
+      "{centerPointNumbers}",
+      "{notesField}",
+    ].map((p) => tech.indexOf(p));
+    expect(seq.every((i) => i > 0)).toBe(true);
+    expect([...seq].sort((a, b) => a - b)).toEqual(seq);
   });
 });
