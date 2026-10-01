@@ -12,7 +12,6 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Building2,
-  CheckSquare,
   CloudLightning,
   ExternalLink,
   FilePlus2,
@@ -50,19 +49,18 @@ import {
   PROSPECT_STAGE_LABELS,
   type ProspectStage,
   listCounties,
-  listOpenTasks,
   listRefreshes,
   listWarrantyLeads,
   addBuildingAtPoint,
   saveBuilding,
   saveRoof,
-  saveTask,
   setTaskDone,
   type BuildingDetail,
   type BuildingInput,
   type BuildingRow,
   type RoofInput,
   type RoofRow,
+  type TaskRow,
   imageryYearAt,
 } from "@/lib/prospect.functions";
 import {
@@ -76,6 +74,8 @@ import type { StormArea } from "@/components/prospect-map";
 import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel";
 import { stormDay, stormRadius } from "@/components/prospect/storm-format";
 import { mergeEdits } from "@/components/prospect/form-merge";
+import { TaskDialog } from "@/components/tasks/task-dialog";
+import { TasksPanel } from "@/components/tasks/tasks-panel";
 
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Badge } from "@/components/ui/badge";
@@ -295,9 +295,7 @@ export function ProspectPage(props: {
   const saveFn = useServerFn(saveBuilding);
   const saveRoofFn = useServerFn(saveRoof);
   const deleteRoofFn = useServerFn(deleteRoof);
-  const saveTaskFn = useServerFn(saveTask);
   const doneFn = useServerFn(setTaskDone);
-  const openTasksFn = useServerFn(listOpenTasks);
   const prospectsFn = useServerFn(listProspects);
   const stageFn = useServerFn(setProspectStage);
   const leadsFn = useServerFn(listWarrantyLeads);
@@ -330,8 +328,8 @@ export function ProspectPage(props: {
   const [selectedId, setSelectedId] = useState<string | null>(props.initialBuildingId ?? null);
   const [form, setForm] = useState<BuildingInput | null>(null);
   const [roofForm, setRoofForm] = useState<RoofInput | null>(null);
-  const [taskTitle, setTaskTitle] = useState("");
-  const [taskDue, setTaskDue] = useState("");
+  // The task dialog on the building's Tasks card: a new task (building prefilled) or one to edit.
+  const [taskDialog, setTaskDialog] = useState<{ task?: TaskRow } | null>(null);
   // Salesperson-first (owner rule, Sep 24): the map, the search panel and the prospects list
   // are the whole page; the state's data arrives by the monthly workflow, not by hand.
   const [showMap, setShowMap] = useState(() => {
@@ -460,7 +458,6 @@ export function ProspectPage(props: {
         id: "counties-error",
       });
   }, [counties.error]);
-  const openTasks = useQuery({ queryKey: ["open-tasks"], queryFn: () => openTasksFn() });
   // The working list: flagged buildings, newest first (listProspects).
   const prospects = useQuery({ queryKey: ["prospects"], queryFn: () => prospectsFn() });
   // The search panel over the map can be tucked away to see the whole map.
@@ -592,22 +589,6 @@ export function ProspectPage(props: {
   const deleteRoofM = useMutation({
     mutationFn: (id: string) => deleteRoofFn({ data: { id } }),
     onSuccess: invalidate,
-    onError: fail,
-  });
-  const addTask = useMutation({
-    mutationFn: () =>
-      saveTaskFn({
-        data: {
-          title: taskTitle.trim(),
-          due_date: taskDue || null,
-          building_id: selectedId,
-        },
-      }),
-    onSuccess: () => {
-      setTaskTitle("");
-      setTaskDue("");
-      invalidate();
-    },
     onError: fail,
   });
   const toggleTask = useMutation({
@@ -1244,26 +1225,10 @@ export function ProspectPage(props: {
                     </ul>
                   </div>
                 )}
-                {(openTasks.data?.length ?? 0) > 0 && (
-                  <div>
-                    <p className="mb-1 font-medium text-foreground">Open tasks</p>
-                    <ul className="space-y-1">
-                      {(openTasks.data ?? []).map((t) => (
-                        <li key={t.id} className="flex items-center gap-2">
-                          <CheckSquare className="h-3.5 w-3.5" />
-                          <button
-                            type="button"
-                            className="underline underline-offset-2"
-                            onClick={() => t.building_id && setSelectedId(t.building_id)}
-                          >
-                            {t.title}
-                          </button>
-                          {t.due_date && <span className="text-xs">due {t.due_date}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {/* Tasks (owner, Sep 30, item 11): list or calendar, New task. */}
+                <div className="border-t pt-3 text-foreground">
+                  <TasksPanel />
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -1689,10 +1654,15 @@ export function ProspectPage(props: {
                                 toggleTask.mutate({ id: t.id, done: v === true })
                               }
                             />
-                            <span
-                              className={
+                            <button
+                              type="button"
+                              className={`text-left ${
                                 t.status === "done" ? "line-through text-muted-foreground" : ""
-                              }
+                              }`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setTaskDialog({ task: t });
+                              }}
                             >
                               {t.title}
                               {t.due_date && (
@@ -1700,40 +1670,23 @@ export function ProspectPage(props: {
                                   due {t.due_date}
                                 </span>
                               )}
-                            </span>
+                            </button>
                           </label>
                         ))}
                         {canWrite && (
-                          <div className="flex flex-wrap items-end gap-2 pt-1">
-                            <div className="min-w-[180px] flex-1">
-                              <Label className="text-xs text-muted-foreground">New task</Label>
-                              <Input
-                                className="h-8"
-                                value={taskTitle}
-                                onChange={(e) => setTaskTitle(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && taskTitle.trim()) addTask.mutate();
-                                }}
-                              />
-                            </div>
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Due</Label>
-                              <Input
-                                className="h-8"
-                                type="date"
-                                value={taskDue}
-                                onChange={(e) => setTaskDue(e.target.value)}
-                              />
-                            </div>
-                            <Button
-                              size="sm"
-                              onClick={() => addTask.mutate()}
-                              disabled={!taskTitle.trim()}
-                            >
-                              Add
-                            </Button>
-                          </div>
+                          <Button size="sm" variant="outline" onClick={() => setTaskDialog({})}>
+                            <Plus className="mr-1 h-4 w-4" /> New task
+                          </Button>
                         )}
+                        <TaskDialog
+                          open={!!taskDialog}
+                          onOpenChange={(o) => {
+                            if (!o) setTaskDialog(null);
+                          }}
+                          task={taskDialog?.task}
+                          defaults={{ building_id: selectedId }}
+                          onSaved={invalidate}
+                        />
                       </CardContent>
                     </Card>
                     <Card>

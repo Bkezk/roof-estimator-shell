@@ -3320,48 +3320,84 @@ export type Database = {
       };
       tasks: {
         Row: {
+          account_id: string | null;
+          account_name: string | null;
+          all_day: boolean;
           assignee: string | null;
           assignee_name: string | null;
+          attendees: string[];
           building_id: string | null;
           created_at: string;
           created_by: string | null;
           created_by_name: string | null;
           details: string | null;
           done_at: string | null;
+          due_at: string | null;
           due_date: string | null;
+          external_emails: string[];
           id: string;
+          notified_created_at: string | null;
+          notified_morning_at: string | null;
+          notified_overdue_at: string | null;
+          notify_error: string | null;
+          site_id: string | null;
+          site_name: string | null;
           source: string;
           status: string;
           title: string;
           updated_at: string;
         };
         Insert: {
+          account_id?: string | null;
+          account_name?: string | null;
+          all_day?: boolean;
           assignee?: string | null;
           assignee_name?: string | null;
+          attendees?: string[];
           building_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           created_by_name?: string | null;
           details?: string | null;
           done_at?: string | null;
+          due_at?: string | null;
           due_date?: string | null;
+          external_emails?: string[];
           id?: string;
+          notified_created_at?: string | null;
+          notified_morning_at?: string | null;
+          notified_overdue_at?: string | null;
+          notify_error?: string | null;
+          site_id?: string | null;
+          site_name?: string | null;
           source?: string;
           status?: string;
           title: string;
           updated_at?: string;
         };
         Update: {
+          account_id?: string | null;
+          account_name?: string | null;
+          all_day?: boolean;
           assignee?: string | null;
           assignee_name?: string | null;
+          attendees?: string[];
           building_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           created_by_name?: string | null;
           details?: string | null;
           done_at?: string | null;
+          due_at?: string | null;
           due_date?: string | null;
+          external_emails?: string[];
           id?: string;
+          notified_created_at?: string | null;
+          notified_morning_at?: string | null;
+          notified_overdue_at?: string | null;
+          notify_error?: string | null;
+          site_id?: string | null;
+          site_name?: string | null;
           source?: string;
           status?: string;
           title?: string;
@@ -3369,10 +3405,24 @@ export type Database = {
         };
         Relationships: [
           {
+            foreignKeyName: "tasks_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
             foreignKeyName: "tasks_building_id_fkey";
             columns: ["building_id"];
             isOneToOne: false;
             referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "tasks_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_sites";
             referencedColumns: ["id"];
           },
         ];
@@ -3630,6 +3680,14 @@ export type Database = {
         Args: never;
         Returns: {
           default_bill_rate: number;
+          id: string;
+        }[];
+      };
+      assignable_users: {
+        Args: never;
+        Returns: {
+          email: string;
+          full_name: string | null;
           id: string;
         }[];
       };
