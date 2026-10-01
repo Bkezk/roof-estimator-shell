@@ -493,3 +493,11 @@ describe("detail layout is standardized (owner, Oct 1: 'so the text isn't so up 
     expect(detail).toContain("grid-cols-[auto_minmax(0,1fr)_auto]");
   });
 });
+
+describe("the Owner view uses the whole width (owner, Oct 1)", () => {
+  it("My Work drops its reading-width cap only in the Owner view", async () => {
+    const fs = await import("node:fs");
+    const page = fs.readFileSync("src/components/my-work-page.tsx", "utf8");
+    expect(page).toContain('view === "owner" ? "max-w-none" : "max-w-5xl"');
+  });
+});

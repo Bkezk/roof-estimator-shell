@@ -452,7 +452,9 @@ export function MyWorkPage(props: {
         : (people.find((p) => p.id === props.who)?.name ?? null);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5">
+    // Owner (Oct 1): the Owner view uses the whole width ("a lot of unused whitespace"); the
+    // personal List and Calendar keep their reading width.
+    <div className={`mx-auto space-y-5 ${view === "owner" ? "max-w-none" : "max-w-5xl"}`}>
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <ListTodo className="h-6 w-6" /> My Work
