@@ -3,8 +3,13 @@
  * one, assigned to a user with an expected close date. Without an id the page lists them
  * grouped by status (Open → No response) like the Tickets page; `?new=1` opens a blank one and
  * `?id=<uuid>` an existing one. Saving (or a status change) syncs the follow-up timer on the
- * server; its state shows under the header with Snooze / Close. Won, Lost and No response stop
- * the reminders.
+ * server; its state shows with Snooze / Close beside the form (a right-hand column on xl, below
+ * the form otherwise), with the contact log. Won, Lost and No response stop the reminders.
+ *
+ * Owner, Oct 1: the status lives in the header only (a new one starts Open); the assignee is
+ * required; a customer is optional, but once set the opportunity names its site
+ * (lib/opportunity-form.ts); the lead source picks from a maintained list (Settings › General ›
+ * Lead sources, type-to-add); "Start a bid" opens /estimate prefilled at any status.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,16 +23,25 @@ import {
   ChevronDown,
   ChevronRight,
   FilePlus2,
+  FileText,
   Loader2,
   Phone,
   Plus,
   Save,
   Target,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
+import {
+  assigneeProblem,
+  autoSiteId,
+  bidPrefillFromOpportunity,
+  opportunitySiteProblem,
+} from "@/lib/opportunity-form";
+import { getAccount } from "@/lib/crm.functions";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -44,6 +58,8 @@ import {
 import { getCrmSettings, listFollowups } from "@/lib/followups.functions";
 import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
+import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
+import { SiteSelect } from "@/components/crm/site-select";
 import { CloseFollowupDialog, SnoozeMenu } from "@/components/followups-page";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
 import {
@@ -78,7 +94,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { AutoTextarea } from "@/components/ui/auto-textarea";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -200,7 +216,14 @@ function OppList() {
     if (mine && o.assignee_id !== profile?.id) return false;
     if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
     if (q) {
-      const hay = [o.title, o.account_name, o.assignee_name, o.lead_source, o.description]
+      const hay = [
+        o.title,
+        o.account_name,
+        o.site_name,
+        o.assignee_name,
+        o.lead_source,
+        o.description,
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -368,6 +391,7 @@ function OppListRow({
   const navigate = useNavigate();
   const status = asStatus(o.status);
   const meta = [
+    o.site_name ? `Site: ${o.site_name}` : null,
     o.assignee_name ?? "Unassigned",
     o.expected_close ? `Expected close ${day(o.expected_close)}` : "No close date",
     o.est_value != null ? money(o.est_value) : null,
@@ -455,12 +479,19 @@ function BackToList() {
   );
 }
 
+/** The picked customer: the site (null until picked) and the hit's site count (a fallback until
+ * the customer's detail loads). */
+interface OppCustomer extends AccountPickerValue {
+  site_count?: number;
+}
+
 interface Draft {
   title: string;
-  customer: AccountPickerValue | null;
-  /** "" = unassigned. */
+  customer: OppCustomer | null;
+  /** "" = not picked yet (required, no default). */
   assignee_id: string;
   expected_close: string;
+  /** A new opportunity's status (the header select; Open to start). */
   status: OppStatus;
   lead_source: string;
   /** 0 = blank (no estimate). */
@@ -469,12 +500,16 @@ interface Draft {
   notes: string;
 }
 
-const draftFrom = (o: OpportunityWithNames | null, meId: string | null): Draft =>
+const draftFrom = (o: OpportunityWithNames | null): Draft =>
   o
     ? {
         title: o.title,
         customer: o.account_id
-          ? { account_id: o.account_id, site_id: null, label: o.account_name ?? "Customer" }
+          ? {
+              account_id: o.account_id,
+              site_id: o.site_id,
+              label: o.account_name ?? "Customer",
+            }
           : null,
         assignee_id: o.assignee_id ?? "",
         expected_close: o.expected_close ?? "",
@@ -487,7 +522,8 @@ const draftFrom = (o: OpportunityWithNames | null, meId: string | null): Draft =
     : {
         title: "",
         customer: null,
-        assignee_id: meId ?? "",
+        // Owner, Oct 1: no default — the office creates opportunities for others.
+        assignee_id: "",
         expected_close: "",
         status: "open",
         lead_source: "",
@@ -496,7 +532,11 @@ const draftFrom = (o: OpportunityWithNames | null, meId: string | null): Draft =
         notes: "",
       };
 const draftKey = (d: Draft) =>
-  JSON.stringify({ ...d, customer: d.customer?.account_id ?? null, status: null });
+  JSON.stringify({
+    ...d,
+    customer: d.customer ? [d.customer.account_id, d.customer.site_id] : null,
+    status: null,
+  });
 
 function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const { session, profile, can } = useAuth();
@@ -507,12 +547,15 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const deleteFn = useServerFn(deleteOpportunity);
   const techFn = useServerFn(listTechnicians);
   const settingsFn = useServerFn(getCrmSettings);
+  const accountFn = useServerFn(getAccount);
 
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(opp, profile?.id ?? null));
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(opp));
   const [savedKey, setSavedKey] = useState(() => draftKey(draft));
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // The × on the customer block: the search box comes back, focused.
+  const [changingCustomer, setChangingCustomer] = useState(false);
   const status = opp ? asStatus(opp.status) : draft.status;
 
   const techs = useQuery({
@@ -541,6 +584,22 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     staleTime: 5 * 60_000,
   });
 
+  // The customer's sites (the same query the site box reads): with a customer, the opportunity
+  // names the site — one is picked without asking, several need a pick (owner, Oct 1).
+  const accountId = draft.customer?.account_id ?? null;
+  const accountQ = useQuery({
+    queryKey: ["account", accountId],
+    queryFn: () => accountFn({ data: { id: accountId! } }),
+    enabled: !!session && !!accountId,
+  });
+  const liveSites = accountQ.data?.account.id === accountId ? accountQ.data.sites : null;
+  const siteCount = liveSites ? liveSites.length : (draft.customer?.site_count ?? 0);
+  const siteId = draft.customer
+    ? (draft.customer.site_id ?? (liveSites ? autoSiteId(liveSites) : null))
+    : null;
+  const siteMessage = opportunitySiteProblem({ account_id: accountId, site_id: siteId, siteCount });
+  const assigneeMessage = assigneeProblem({ id: opp?.id, assignee_id: draft.assignee_id || null });
+
   const invalidate = (id: string) => {
     void qc.invalidateQueries({ queryKey: ["opportunities"] });
     void qc.invalidateQueries({ queryKey: ["opportunity", id] });
@@ -550,9 +609,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const save = useMutation({
     mutationFn: () => {
       const input: OpportunityInput = {
+        // A new one carries the header's status (Open to start).
         ...(opp ? { id: opp.id } : { status: draft.status }),
         title: draft.title.trim(),
         account_id: draft.customer?.account_id ?? null,
+        site_id: siteId,
         assignee_id: draft.assignee_id || null,
         expected_close: draft.expected_close || null,
         lead_source: draft.lead_source,
@@ -607,6 +668,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       toast.error("Give the opportunity a title first");
       return;
     }
+    if (assigneeMessage || siteMessage) {
+      toast.error(assigneeMessage ?? siteMessage);
+      return;
+    }
     save.mutate();
   };
 
@@ -618,94 +683,86 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       </SelectItem>
     ));
 
-  return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <BackToList />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight">
-            <Target className="h-6 w-6 shrink-0" />
-            <span className="truncate">{opp ? opp.title : "New opportunity"}</span>
-          </h1>
-          {opp && (
-            <div className="flex items-center gap-2">
-              <Select
-                value={status}
-                disabled={statusMut.isPending}
-                onValueChange={(v) => statusMut.mutate(v as OppStatus)}
-              >
-                <SelectTrigger className="w-[150px]" aria-label="Status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {OPP_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {OPP_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {can("customers") && (
-                <Button
-                  variant="outline"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 className="mr-1 h-4 w-4" /> Delete
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-        {opp && (
-          <p className="text-xs text-muted-foreground">
-            {opp.account_name ? `${opp.account_name} · ` : ""}Updated {when(opp.updated_at)}
-            {opp.updated_by_name ? ` by ${opp.updated_by_name}` : ""}
-          </p>
-        )}
-        {opp && status === "quoted" && (
-          <p className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
-            <FilePlus2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-            Quoted — ready to price it?
-            <Link
-              to="/estimate"
-              search={{
-                pfName: opp.title,
-                ...(opp.account_name ? { pfOwner: opp.account_name } : {}),
-              }}
-              className="font-medium underline underline-offset-2"
-            >
-              Start a bid
-            </Link>
-          </p>
-        )}
-        {opp && <FollowupStrip opp={opp} status={status} />}
-        {opp && (
-          // Owner, Sep 28: log each call / text / email / visit. The first one moves an Open
-          // opportunity to Contacted (server side); the buttons refetch this opportunity so the
-          // status select shows it.
-          <section className="space-y-2 rounded-md border px-3 py-2 text-sm" aria-label="Contact">
-            <p className="flex items-center gap-1.5 font-medium">
-              <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Contact
-            </p>
-            <LogContactButtons
-              kind="opportunity"
-              itemId={opp.id}
-              onLogged={() => invalidate(opp.id)}
-            />
-            <ContactLogList kind="opportunity" itemId={opp.id} />
-          </section>
-        )}
-      </div>
+  // Owner, Oct 1: the status lives in the header only — a new opportunity's select sets the
+  // status it is created with (Open to start); a saved one's changes it at once.
+  const statusSelect = (
+    <Select
+      value={status}
+      disabled={statusMut.isPending}
+      onValueChange={(v) =>
+        opp ? statusMut.mutate(v as OppStatus) : set("status", v as OppStatus)
+      }
+    >
+      <SelectTrigger className="w-[150px]" aria-label="Status">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {OPP_STATUSES.map((s) => (
+          <SelectItem key={s} value={s}>
+            {OPP_STATUS_LABELS[s]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
-      <form
-        className="space-y-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          submit();
-        }}
-      >
-        <div className="grid gap-4 md:grid-cols-2">
+  // The customer: the search box until one is picked, then one block with the name (× to
+  // change) and the site, as on a ticket. Optional (a prospect may not be a customer yet).
+  const customerField = (
+    <div className="space-y-1">
+      <Label htmlFor={draft.customer ? undefined : "opp-customer"}>Customer</Label>
+      {draft.customer ? (
+        <OppCustomerBlock
+          accountId={draft.customer.account_id}
+          name={accountQ.data?.account.name ?? draft.customer.label}
+          siteId={siteId}
+          siteMessage={siteMessage}
+          onChangeCustomer={() => {
+            setChangingCustomer(true);
+            set("customer", null);
+          }}
+          onPickSite={(id) =>
+            setDraft((d) => (d.customer ? { ...d, customer: { ...d.customer, site_id: id } } : d))
+          }
+        />
+      ) : (
+        <AccountPicker
+          id="opp-customer"
+          value={null}
+          autoFocus={changingCustomer}
+          placeholder="Search or add a customer (optional)…"
+          onChange={(hit) =>
+            set(
+              "customer",
+              hit
+                ? {
+                    account_id: hit.account_id,
+                    // A customer with one site comes with it (lib/account-search.ts).
+                    site_id: hit.site_id,
+                    label: hit.account_name,
+                    site_count: hit.site_count,
+                  }
+                : null,
+            )
+          }
+        />
+      )}
+    </div>
+  );
+
+  // Owner, Oct 1 ("the tighter layout"): who / where / what on the left, the four short fields
+  // on the right (one row of four when the column is wide enough, else two by two), Notes and
+  // Create / Save below.
+  const oppForm = (
+    <form
+      className="space-y-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
+        <div className="min-w-0 space-y-4">
           <div className="space-y-1">
             <Label htmlFor="opp-title">Title</Label>
             <Input
@@ -717,164 +774,219 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               onChange={(e) => set("title", e.target.value)}
             />
           </div>
+          {customerField}
           <div className="space-y-1">
-            <Label htmlFor="opp-customer">Customer</Label>
-            <AccountPicker
-              id="opp-customer"
-              value={draft.customer}
-              placeholder="Search or add a customer (optional)…"
-              onChange={(hit) =>
-                set(
-                  "customer",
-                  hit
-                    ? { account_id: hit.account_id, site_id: null, label: hit.account_name }
-                    : null,
-                )
-              }
+            <Label htmlFor="opp-description">Description</Label>
+            <AutoTextarea
+              id="opp-description"
+              rows={2}
+              value={draft.description}
+              maxLength={2000}
+              placeholder="What the job is"
+              onChange={(e) => set("description", e.target.value)}
             />
           </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-          <div className="space-y-1">
-            <Label htmlFor="opp-assignee">Assignee</Label>
-            <Select
-              value={draft.assignee_id || "none"}
-              onValueChange={(v) => set("assignee_id", v === "none" ? "" : v)}
-            >
-              <SelectTrigger id="opp-assignee">
-                <SelectValue placeholder="Unassigned" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {techOptions.some((t) => !t.technician) && (
-                  <SelectGroup>
-                    <SelectLabel>Office</SelectLabel>
-                    {assigneeItems(techOptions.filter((t) => !t.technician))}
-                  </SelectGroup>
-                )}
-                {techOptions.some((t) => t.technician) && (
-                  <SelectGroup>
-                    <SelectLabel>Technicians</SelectLabel>
-                    {assigneeItems(techOptions.filter((t) => t.technician))}
-                  </SelectGroup>
-                )}
-              </SelectContent>
-            </Select>
-            {techs.error && (
-              <p className="text-xs text-destructive">
-                Could not load the users: {errText(techs.error)}
-              </p>
-            )}
-            {!draft.assignee_id && (
-              <p className="text-xs text-muted-foreground">Unassigned: no follow-up reminders.</p>
-            )}
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="opp-close">Expected close</Label>
-            <Input
-              id="opp-close"
-              type="date"
-              value={draft.expected_close}
-              onChange={(e) => set("expected_close", e.target.value)}
-            />
-            {opp && !draft.expected_close && (
-              <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
-            )}
-            {!opp && (
-              <p className="text-xs text-muted-foreground">
-                Leave blank for the admin default
-                {settings.data ? ` (${settings.data.opportunity_close_days} days from today)` : ""}.
-              </p>
-            )}
-          </div>
-          {!opp && (
-            <div className="space-y-1">
-              <Label htmlFor="opp-status">Status</Label>
-              <Select value={draft.status} onValueChange={(v) => set("status", v as OppStatus)}>
-                <SelectTrigger id="opp-status">
-                  <SelectValue />
+        <div className="@container min-w-0">
+          <div className="grid grid-cols-2 gap-4 @2xl:grid-cols-4" data-row="opp-four-fields">
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="opp-assignee">Assignee</Label>
+              <Select value={draft.assignee_id} onValueChange={(v) => set("assignee_id", v)}>
+                <SelectTrigger
+                  id="opp-assignee"
+                  aria-invalid={!!assigneeMessage || undefined}
+                  className={assigneeMessage ? "border-destructive" : ""}
+                >
+                  <SelectValue placeholder="Pick someone…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {OPP_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {OPP_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
+                  {techOptions.some((t) => !t.technician) && (
+                    <SelectGroup>
+                      <SelectLabel>Office</SelectLabel>
+                      {assigneeItems(techOptions.filter((t) => !t.technician))}
+                    </SelectGroup>
+                  )}
+                  {techOptions.some((t) => t.technician) && (
+                    <SelectGroup>
+                      <SelectLabel>Technicians</SelectLabel>
+                      {assigneeItems(techOptions.filter((t) => t.technician))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
+              {techs.error && (
+                <p className="text-xs text-destructive">
+                  Could not load the users: {errText(techs.error)}
+                </p>
+              )}
+              {assigneeMessage && <p className="text-xs text-destructive">{assigneeMessage}</p>}
             </div>
-          )}
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
-          <div className="space-y-1">
-            <Label htmlFor="opp-source">Lead source</Label>
-            <Input
-              id="opp-source"
-              value={draft.lead_source}
-              maxLength={120}
-              placeholder="e.g. Referral, website, cold call"
-              onChange={(e) => set("lead_source", e.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="opp-value">Est. value ($)</Label>
-            <div id="opp-value">
-              <NumberField
-                value={draft.est_value}
-                min={0}
-                step="any"
-                inputMode="decimal"
-                onChange={(v) => set("est_value", v)}
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="opp-close">Expected close</Label>
+              <Input
+                id="opp-close"
+                type="date"
+                value={draft.expected_close}
+                onChange={(e) => set("expected_close", e.target.value)}
+              />
+              {opp && !draft.expected_close && (
+                <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
+              )}
+              {!opp && (
+                <p className="text-xs text-muted-foreground">
+                  Blank = the admin default
+                  {settings.data ? ` (${settings.data.opportunity_close_days} days)` : ""}.
+                </p>
+              )}
+            </div>
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="opp-source">Lead source</Label>
+              <LeadSourcePicker
+                id="opp-source"
+                value={draft.lead_source}
+                onChange={(v) => set("lead_source", v)}
               />
             </div>
+            <div className="min-w-0 space-y-1">
+              <Label htmlFor="opp-value">Est. value ($)</Label>
+              <div id="opp-value">
+                <NumberField
+                  value={draft.est_value}
+                  min={0}
+                  step="any"
+                  inputMode="decimal"
+                  onChange={(v) => set("est_value", v)}
+                />
+              </div>
+            </div>
           </div>
         </div>
+      </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="opp-description">Description</Label>
-          <Textarea
-            id="opp-description"
-            rows={2}
-            value={draft.description}
-            maxLength={2000}
-            onChange={(e) => set("description", e.target.value)}
-          />
-        </div>
+      <div className="space-y-1">
+        <Label htmlFor="opp-notes">Notes</Label>
+        <AutoTextarea
+          id="opp-notes"
+          rows={2}
+          value={draft.notes}
+          maxLength={10000}
+          onChange={(e) => set("notes", e.target.value)}
+        />
+      </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="opp-notes">Notes</Label>
-          <Textarea
-            id="opp-notes"
-            rows={4}
-            value={draft.notes}
-            maxLength={10000}
-            onChange={(e) => set("notes", e.target.value)}
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="submit"
-            size="lg"
-            disabled={save.isPending || (!!opp && !dirty) || (!!opp && !draft.expected_close)}
-          >
-            {save.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-4 w-4" />
-            )}
-            {opp ? "Save" : "Create opportunity"}
-          </Button>
-          {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-          {!opp && draft.assignee_id && (
-            <span className="text-xs text-muted-foreground">
-              Creating it starts the assignee&apos;s follow-up reminders.
-            </span>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          size="lg"
+          disabled={
+            save.isPending ||
+            (!!opp && !dirty) ||
+            (!!opp && !draft.expected_close) ||
+            !!assigneeMessage ||
+            !!siteMessage
+          }
+        >
+          {save.isPending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="mr-2 h-4 w-4" />
           )}
+          {opp ? "Save" : "Create opportunity"}
+        </Button>
+        {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
+        {!opp && draft.assignee_id && (
+          <span className="text-xs text-muted-foreground">
+            Creating it starts the assignee&apos;s follow-up reminders.
+          </span>
+        )}
+      </div>
+    </form>
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="space-y-2">
+        <BackToList />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight">
+            <Target className="h-6 w-6 shrink-0" />
+            <span className="truncate">{opp ? opp.title : "New opportunity"}</span>
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            {statusSelect}
+            {opp &&
+              // Owner, Oct 1: at every status. A linked bid shows instead (opens it).
+              (opp.bid_id ? (
+                <Button asChild variant="outline">
+                  <Link to="/estimate" search={{ bid: opp.bid_id }} title="Open the linked bid">
+                    <FileText className="mr-1 h-4 w-4" /> Bid: {opp.bid_name ?? "open it"}
+                  </Link>
+                </Button>
+              ) : (
+                <Button asChild variant="outline">
+                  <Link
+                    to="/estimate"
+                    search={bidPrefillFromOpportunity(opp)}
+                    title="A new bid for this opportunity's customer and site"
+                  >
+                    <FilePlus2 className="mr-1 h-4 w-4" /> Start a bid
+                  </Link>
+                </Button>
+              ))}
+            {opp && can("customers") && (
+              <Button
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 className="mr-1 h-4 w-4" /> Delete
+              </Button>
+            )}
+          </div>
         </div>
-      </form>
+        {opp && (
+          <p className="text-xs text-muted-foreground">
+            {[opp.account_name, opp.site_name ? `Site: ${opp.site_name}` : null]
+              .filter(Boolean)
+              .map((s) => `${s} · `)
+              .join("")}
+            Updated {when(opp.updated_at)}
+            {opp.updated_by_name ? ` by ${opp.updated_by_name}` : ""}
+          </p>
+        )}
+      </div>
+
+      {opp ? (
+        // Owner, Oct 1 (as the ticket): on xl and up, the form on the left and a column on the
+        // right with the follow-up and the contact log (its top stays in view while the form
+        // scrolls). Below xl they stack, the form first.
+        <div className="space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0">
+          <div className="min-w-0">{oppForm}</div>
+          <aside
+            className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]"
+            aria-label="Follow-up and contact"
+          >
+            <FollowupStrip opp={opp} status={status} />
+            {/* Owner, Sep 28: log each call / text / email / visit. The first one moves an Open
+                opportunity to Contacted (server side); the buttons refetch this opportunity so
+                the status select shows it. */}
+            <section className="space-y-2 rounded-md border px-3 py-2 text-sm" aria-label="Contact">
+              <p className="flex items-center gap-1.5 font-medium">
+                <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Contact
+              </p>
+              <LogContactButtons
+                kind="opportunity"
+                itemId={opp.id}
+                onLogged={() => invalidate(opp.id)}
+              />
+              <ContactLogList kind="opportunity" itemId={opp.id} />
+            </section>
+          </aside>
+        </div>
+      ) : (
+        oppForm
+      )}
 
       {opp && (
         <AlertDialog
@@ -906,6 +1018,64 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           </AlertDialogContent>
         </AlertDialog>
       )}
+    </div>
+  );
+}
+
+/**
+ * The picked customer as one block (as the ticket's): the name (opens the customer) with an ×
+ * to change it, then the site box — required when the customer has several sites; one site
+ * comes with the pick.
+ */
+function OppCustomerBlock(props: {
+  accountId: string;
+  name: string;
+  siteId: string | null;
+  /** Why the site still needs picking (lib/opportunity-form.ts), or null. */
+  siteMessage: string | null;
+  onChangeCustomer: () => void;
+  onPickSite: (siteId: string) => void;
+}) {
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-3 text-sm">
+      <div className="flex items-center justify-between gap-2">
+        <Link
+          to="/customers"
+          search={{ id: props.accountId }}
+          className="min-w-0 truncate text-base font-medium underline-offset-2 hover:underline"
+          title="Open this customer"
+        >
+          {props.name || "Customer"}
+        </Link>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="h-8 w-8 shrink-0 text-muted-foreground"
+          title="Change the customer"
+          aria-label="Change the customer"
+          onClick={props.onChangeCustomer}
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="opp-site" className="text-xs font-medium">
+          Site
+        </label>
+        <SiteSelect
+          id="opp-site"
+          accountId={props.accountId}
+          value={props.siteId}
+          required
+          invalid={!!props.siteMessage}
+          className="bg-background"
+          onChange={(s) => {
+            if (s) props.onPickSite(s.id);
+          }}
+        />
+        {props.siteMessage && <p className="text-xs text-destructive">{props.siteMessage}</p>}
+      </div>
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
+import { assigneeProblem, opportunitySiteProblem } from "@/lib/opportunity-form";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
 export const OPP_STATUSES = ["open", "contacted", "quoted", "won", "lost", "no_response"] as const;
@@ -28,6 +29,9 @@ export const OPP_CLOSING: readonly OppStatus[] = ["won", "lost", "no_response"];
 export type OpportunityWithNames = OpportunityRow & {
   assignee_name: string | null;
   account_name: string | null;
+  site_name: string | null;
+  /** The linked bid's name (bid_id), when the caller may read it. */
+  bid_name: string | null;
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
@@ -45,20 +49,34 @@ const nameOf = (p: { full_name: string | null; email: string }) =>
 
 async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   const accountIds = [...new Set(rows.map((r) => r.account_id).filter((x): x is string => !!x))];
-  const [{ data: techs }, { data: accounts }] = await Promise.all([
+  const siteIds = [...new Set(rows.map((r) => r.site_id).filter((x): x is string => !!x))];
+  const bidIds = [...new Set(rows.map((r) => r.bid_id).filter((x): x is string => !!x))];
+  const [{ data: techs }, { data: accounts }, { data: sites }, { data: bids }] = await Promise.all([
     sb.rpc("technician_options"),
     accountIds.length
       ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    siteIds.length
+      ? sb.from("crm_sites").select("id, name").in("id", siteIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    bidIds.length
+      ? sb.from("bids").select("id, name").in("id", bidIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
   ]);
   const names = new Map<string, string>();
   for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
   const accs = new Map<string, string>();
   for (const a of accounts ?? []) accs.set(a.id, a.name);
+  const siteNames = new Map<string, string>();
+  for (const x of sites ?? []) siteNames.set(x.id, x.name);
+  const bidNames = new Map<string, string>();
+  for (const b of bids ?? []) bidNames.set(b.id, b.name);
   return rows.map((r) => ({
     ...r,
     assignee_name: r.assignee_id ? (names.get(r.assignee_id) ?? null) : null,
     account_name: r.account_id ? (accs.get(r.account_id) ?? null) : null,
+    site_name: r.site_id ? (siteNames.get(r.site_id) ?? null) : null,
+    bid_name: r.bid_id ? (bidNames.get(r.bid_id) ?? null) : null,
   })) as OpportunityWithNames[];
 }
 
@@ -101,6 +119,8 @@ const optText = (max: number) =>
 const oppSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid().nullable().optional(),
+  /** The customer's site; required once a customer with several sites is set. */
+  site_id: z.string().uuid().nullable().optional(),
   title: z.string().trim().min(1, "Title is required").max(200),
   description: optText(2000),
   assignee_id: z.string().uuid().nullable().optional(),
@@ -119,7 +139,10 @@ export type OpportunityInput = z.input<typeof oppSchema>;
 
 /**
  * Create (no id) or update. A new opportunity with no expected close gets today +
- * crm_settings.opportunity_close_days. The follow-up timer is synced after every save.
+ * crm_settings.opportunity_close_days. The assignee is required (lib/opportunity-form.ts
+ * assigneeProblem). With a customer, the site is the customer's: one live site is filled in,
+ * several need one picked (opportunitySiteProblem); without a customer there is no site. The
+ * follow-up timer is synced after every save.
  */
 export const saveOpportunity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -133,6 +156,42 @@ export const saveOpportunity = createServerFn({ method: "POST" })
     // Every opportunity keeps a date (owner, Oct 1): an update may not clear it.
     const dateProblem = opportunityDateProblem({ id, expected_close: fields.expected_close });
     if (dateProblem) throw new Error(dateProblem);
+    // Owner, Oct 1: someone always follows an opportunity up; an update may not clear it.
+    const whoProblem = assigneeProblem({ id, assignee_id: fields.assignee_id });
+    if (whoProblem) throw new Error(whoProblem);
+    const account_id = fields.account_id ?? null;
+    let site_id: string | null = null;
+    if (account_id) {
+      if (fields.site_id) {
+        const { data: s, error: sErr } = await sb
+          .from("crm_sites")
+          .select("account_id")
+          .eq("id", fields.site_id)
+          .maybeSingle();
+        if (sErr) throw new Error(sErr.message);
+        if (!s || s.account_id !== account_id)
+          throw new Error("That site does not belong to the customer");
+        site_id = fields.site_id;
+      } else {
+        // The customer's live sites (the count is all of them; two rows are enough to read).
+        const {
+          data: live,
+          count,
+          error: lErr,
+        } = await sb
+          .from("crm_sites")
+          .select("id", { count: "exact" })
+          .eq("account_id", account_id)
+          .is("deleted_at", null)
+          .limit(2);
+        if (lErr) throw new Error(lErr.message);
+        const siteCount = count ?? live?.length ?? 0;
+        const siteProblem = opportunitySiteProblem({ account_id, site_id: null, siteCount });
+        if (siteProblem) throw new Error(siteProblem);
+        // One site: it is the one (the form picks it too).
+        site_id = siteCount === 1 && live?.[0] ? live[0].id : null;
+      }
+    }
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
       const { data: s } = await sb
@@ -144,10 +203,11 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       expected = d.toISOString().slice(0, 10);
     }
     const patch = {
-      account_id: fields.account_id ?? null,
+      account_id,
+      site_id,
       title: fields.title,
       description: fields.description ?? null,
-      assignee_id: fields.assignee_id ?? null,
+      ...(fields.assignee_id ? { assignee_id: fields.assignee_id } : {}),
       expected_close: expected,
       ...(fields.status ? { status: fields.status } : {}),
       lead_source: fields.lead_source ?? null,

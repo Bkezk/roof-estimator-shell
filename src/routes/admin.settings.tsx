@@ -19,6 +19,7 @@ import {
   type HighWindUpcharge,
 } from "@/lib/admin-settings.functions";
 import { CountyCodesSettings } from "@/components/crm/county-codes-settings";
+import { LeadSourcesSettings } from "@/components/crm/lead-sources-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +51,7 @@ const SETTINGS_TABS = [
   "markup",
   "warranties",
   "countycodes",
+  "leadsources",
 ] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -83,8 +85,9 @@ function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">General</h1>
         <p className="text-sm text-muted-foreground">
-          Company defaults, shipping, labor &amp; markup, warranty pricing, and the JBK county codes
-          sites are tagged with. Values are pre-filled from your current system.
+          Company defaults, shipping, labor &amp; markup, warranty pricing, the JBK county codes
+          sites are tagged with, and the lead sources opportunities pick from. Values are pre-filled
+          from your current system.
         </p>
       </div>
 
@@ -101,6 +104,7 @@ function SettingsPage() {
           <TabsTrigger value="markup">Labor &amp; Markup Options</TabsTrigger>
           <TabsTrigger value="warranties">Warranties</TabsTrigger>
           <TabsTrigger value="countycodes">County codes</TabsTrigger>
+          <TabsTrigger value="leadsources">Lead sources</TabsTrigger>
         </TabsList>
 
         <TabsContent value="contractor">
@@ -143,6 +147,9 @@ function SettingsPage() {
         </TabsContent>
         <TabsContent value="countycodes">
           <CountyCodesSettings />
+        </TabsContent>
+        <TabsContent value="leadsources">
+          <LeadSourcesSettings />
         </TabsContent>
       </Tabs>
     </div>

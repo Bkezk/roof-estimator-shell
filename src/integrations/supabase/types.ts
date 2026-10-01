@@ -641,6 +641,7 @@ export type Database = {
           id: string;
           lead_source: string | null;
           notes: string | null;
+          site_id: string | null;
           status: string;
           title: string;
           updated_at: string;
@@ -661,6 +662,7 @@ export type Database = {
           id?: string;
           lead_source?: string | null;
           notes?: string | null;
+          site_id?: string | null;
           status?: string;
           title: string;
           updated_at?: string;
@@ -681,6 +683,7 @@ export type Database = {
           id?: string;
           lead_source?: string | null;
           notes?: string | null;
+          site_id?: string | null;
           status?: string;
           title?: string;
           updated_at?: string;
@@ -706,6 +709,13 @@ export type Database = {
             columns: ["bid_id"];
             isOneToOne: false;
             referencedRelation: "bids";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_opportunities_site_id_fkey";
+            columns: ["site_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_sites";
             referencedColumns: ["id"];
           },
         ];
@@ -1194,6 +1204,30 @@ export type Database = {
           created_at?: string;
           id?: string;
           state?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      lead_sources: {
+        Row: {
+          created_at: string;
+          id: string;
+          name: string;
+          sort: number;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          name: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          name?: string;
+          sort?: number;
           updated_at?: string;
         };
         Relationships: [];
@@ -3617,6 +3651,8 @@ export type Database = {
       };
       current_user_role: { Args: never; Returns: string };
       county_code_site_count: { Args: { p_id: string }; Returns: number };
+      lead_source_use_count: { Args: { p_name: string }; Returns: number };
+      rename_lead_source: { Args: { p_id: string; p_name: string }; Returns: number };
       estimator_names: { Args: never; Returns: string[] };
       classify_place: {
         Args: { place_type: string; landmark: string };
