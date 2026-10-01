@@ -4,9 +4,10 @@
  * lib/contact-log.functions.ts; these are its shared pieces for the ticket, opportunity and
  * follow-up pages:
  *
- * - LogContactButtons: one tap = one contact logged (Called / Texted / Emailed / Visited, with an
- *   optional note). The database stamps the item, moves an Open opportunity to Contacted and
- *   writes the ticket timeline entry, so every list that shows the item is refreshed after it.
+ * - LogContactButtons: tap Called / Texted / Emailed / Visited, the note opens (owner, Oct 1: to
+ *   encourage one), Save logs the contact with the note. The database stamps the item, moves an
+ *   Open opportunity to Contacted and writes the ticket timeline entry, so every list that shows
+ *   the item is refreshed after it.
  * - ContactLogList: the item's past contacts, newest first.
  * - LatestContact: only the most recent contact on one line, with "Show all (N)" for the list.
  * - UntouchedBadge: muted before the admin limit, red at or past it.
@@ -20,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  Check,
   ChevronDown,
   ChevronRight,
   Loader2,
@@ -27,7 +29,6 @@ import {
   MapPin,
   MessageSquare,
   Phone,
-  Plus,
   X,
 } from "lucide-react";
 
@@ -72,6 +73,14 @@ const BUTTONS: { method: ContactMethod; icon: typeof Phone }[] = [
   { method: "visited", icon: MapPin },
 ];
 
+/** The note box's hint per method (owner, Oct 1: encourage a note). */
+const NOTE_HINTS: Partial<Record<ContactMethod, string>> = {
+  called: "e.g. Left a voicemail, will call back Tuesday",
+  texted: "e.g. Texted the ETA; they will leave the gate open",
+  emailed: "e.g. Emailed the quote and photos; waiting on the PO",
+  visited: "e.g. Met the manager on site; leak is over the loading dock",
+};
+
 /**
  * Every list that shows a ticket or an opportunity, the ticket timeline, the follow-ups and the
  * untouched strip: a logged contact changes all of them.
@@ -102,7 +111,9 @@ export function LogContactButtons({
 }) {
   const qc = useQueryClient();
   const logFn = useServerFn(logContact);
-  const [noteOpen, setNoteOpen] = useState(false);
+  // Owner (Oct 1): a tap on Called / Texted / Emailed / Visited opens the note first, to
+  // encourage one; "Save" (or Ctrl/⌘+Enter) logs the contact, with the note when there is one.
+  const [picked, setPicked] = useState<ContactMethod | null>(null);
   const [note, setNote] = useState("");
 
   const log = useMutation({
@@ -113,12 +124,15 @@ export function LogContactButtons({
     onSuccess: (_row, method) => {
       toast.success(`Logged: ${CONTACT_METHOD_LABELS[method]}`);
       setNote("");
-      setNoteOpen(false);
+      setPicked(null);
       for (const queryKey of REFRESH_KEYS) void qc.invalidateQueries({ queryKey });
       onLogged?.(method);
     },
     onError: (e) => toast.error(`Could not log the contact: ${errText(e)}`, { duration: 12_000 }),
   });
+  const save = () => {
+    if (picked && !log.isPending) log.mutate(picked);
+  };
 
   return (
     <div className="space-y-2">
@@ -126,17 +140,19 @@ export function LogContactButtons({
         {BUTTONS.map(({ method, icon: Icon }) => {
           const label = CONTACT_METHOD_LABELS[method];
           const busy = log.isPending && log.variables === method;
+          const on = picked === method;
           return (
             <Button
               key={method}
               type="button"
               size="sm"
-              variant="outline"
+              variant={on ? "default" : "outline"}
               className={compact ? "h-8 w-8 p-0" : "h-8"}
               disabled={log.isPending}
-              title={`Log: ${label}${note.trim() ? " (with the note)" : ""}`}
-              aria-label={`Log: ${label}`}
-              onClick={() => log.mutate(method)}
+              aria-pressed={on}
+              title={on ? `${label} — add a note, then Save` : `${label}: add a note, then Save`}
+              aria-label={on ? `${label} (picked)` : label}
+              onClick={() => setPicked(on ? null : method)}
             >
               {busy ? (
                 <Loader2 className={`h-4 w-4 animate-spin${compact ? "" : " mr-1"}`} />
@@ -147,33 +163,51 @@ export function LogContactButtons({
             </Button>
           );
         })}
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-xs text-muted-foreground"
-          aria-expanded={noteOpen}
-          disabled={log.isPending}
-          onClick={() => setNoteOpen((v) => !v)}
-        >
-          {noteOpen ? <X className="mr-1 h-3.5 w-3.5" /> : <Plus className="mr-1 h-3.5 w-3.5" />}
-          {noteOpen ? "No note" : "note"}
-        </Button>
       </div>
-      {noteOpen && (
-        <div className="space-y-1">
+      {picked && (
+        <div className="space-y-1.5">
           <Textarea
             rows={2}
             value={note}
             maxLength={2000}
             autoFocus
-            placeholder="e.g. Left a voicemail, will call back Tuesday"
-            aria-label="Note for the contact"
+            placeholder={NOTE_HINTS[picked] ?? "What was said or learned"}
+            aria-label={`Note for ${CONTACT_METHOD_LABELS[picked]}`}
             onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                save();
+              }
+            }}
           />
-          <p className="text-xs text-muted-foreground">
-            Then pick how you reached them; the note is saved with it.
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" className="h-8" disabled={log.isPending} onClick={save}>
+              {log.isPending ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Check className="mr-1 h-4 w-4" />
+              )}
+              Save {CONTACT_METHOD_LABELS[picked]}
+              {note.trim() ? "" : " without a note"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              disabled={log.isPending}
+              onClick={() => {
+                setPicked(null);
+                setNote("");
+              }}
+            >
+              <X className="mr-1 h-3.5 w-3.5" /> Cancel
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              What was said or learned helps the next person. Ctrl+Enter saves.
+            </span>
+          </div>
         </div>
       )}
     </div>

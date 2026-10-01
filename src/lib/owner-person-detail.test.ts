@@ -459,11 +459,11 @@ describe("Source: getOwnerPersonDetail is admin-only; the component expands rows
     expect(block).toContain("z.object({ userId: z.string().uuid() })");
     expect(block).not.toMatch(/data\.(role|admin)/);
   });
-  it("the component: every person's detail under their row (nothing folds), the three groups, 60 s cache", () => {
+  it("the component: Expand all / Collapse all, aria-expanded, the three groups, 60 s cache", () => {
     const view = read("src/components/owner-view.tsx");
-    expect(view).toContain("<PersonDetail userId={r.id} name={r.name} />");
-    expect(view).not.toContain("Expand all");
-    expect(view).not.toContain("aria-expanded");
+    expect(view).toContain('{allOpen ? "Collapse all" : "Expand all"}');
+    expect(view).toContain("aria-expanded={isOpen}");
+    expect(view).toContain("onClick={onRowClick(r.id)}");
     for (const [title, empty] of [
       ["Today", "Nothing due today"],
       ["Overdue", "Nothing overdue"],

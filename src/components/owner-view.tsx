@@ -9,17 +9,27 @@
  * opportunity numbers link to the Opportunities list's open / overdue filter. Refreshes when the
  * window regains focus, every 60 s and on mount, like the counts strip.
  *
- * Under each person's row sits their detail (owner, Oct 1: "a bit more detail per person", then
- * "one size, the larger size, instead of expanding and contracting"): their Today / Overdue /
- * Done this week items — exactly the ones the numbers count — and their last five actions,
- * loaded per person (`getOwnerPersonDetail`, cached 60 s) with a skeleton of the four cards
- * while it loads, so the table is always its full height. Nothing folds and nothing opens or
- * closes. On a phone the detail sits under its row inside the table and scrolls with it.
+ * Rows start collapsed; clicking a person's row (or its chevron) expands it in place (owner,
+ * Oct 1: "a bit more detail per person"): their Today / Overdue / Done this week items — exactly
+ * the ones the numbers count — and their last five actions, loaded on demand per person
+ * (`getOwnerPersonDetail`, cached 60 s). The detail slides open and closed (height and opacity,
+ * 200 ms, none under prefers-reduced-motion) with a skeleton of its cards while it loads —
+ * `DetailRow` below — and never changes the table's width (owner, Oct 1: "collapsed but take
+ * up the same width"). "Expand all / Collapse all" above the table. On a phone the detail sits
+ * under its row inside the table and scrolls with it.
  */
-import { Fragment, useEffect, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
@@ -52,7 +62,7 @@ import {
 } from "@/components/ui/table";
 
 export const OWNER_VIEW_KEY = ["owner-view"] as const;
-/** One person's detail (cached 60 s per person). */
+/** One person's expanded detail (cached 60 s per person). */
 const ownerPersonKey = (userId: string) => ["owner-view-person", userId] as const;
 const DETAIL_STALE_MS = 60_000;
 
@@ -91,11 +101,36 @@ export function OwnerView() {
   const totals = data ? ownerTotals(data.rows) : null;
   const now = new Date();
 
+  // Expanded rows by person id; one row's expansion leaves the others as they are.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allOpen = !!data && data.rows.length > 0 && data.rows.every((r) => open.has(r.id));
+  // A click on the row toggles it, except on its links and buttons (they do their own thing).
+  const onRowClick = (id: string) => (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    toggle(id);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {/* Blank until the numbers arrive (never a placeholder 0). */}
         <p className="min-h-5 text-sm font-medium">{totals ? digestLine(totals) : ""}</p>
+        {data && data.rows.length > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setOpen(allOpen ? new Set() : new Set(data.rows.map((r) => r.id)))}
+          >
+            {allOpen ? "Collapse all" : "Expand all"}
+          </Button>
+        )}
       </div>
 
       {errMsg && !data ? (
@@ -129,10 +164,33 @@ export function OwnerView() {
               ) : (
                 data.rows.map((r) => {
                   const due = dueTotal(r.dueToday);
+                  const isOpen = open.has(r.id);
+                  const detailId = `owner-detail-${r.id}`;
                   return (
                     <Fragment key={r.id}>
-                      <TableRow className="border-0">
-                        <TableCell className="font-medium">{r.name}</TableCell>
+                      <TableRow
+                        className="cursor-pointer"
+                        aria-expanded={isOpen}
+                        onClick={onRowClick(r.id)}
+                      >
+                        <TableCell className="font-medium">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-left font-medium hover:underline"
+                            aria-expanded={isOpen}
+                            aria-controls={detailId}
+                            aria-label={`${isOpen ? "Hide" : "Show"} ${r.name}'s items`}
+                            onClick={() => toggle(r.id)}
+                          >
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                                isOpen ? "rotate-90" : ""
+                              }`}
+                              aria-hidden
+                            />
+                            {r.name}
+                          </button>
+                        </TableCell>
                         <TableCell className="text-muted-foreground">{r.role}</TableCell>
                         <TableCell className="text-right" title={dueParts(r.dueToday)}>
                           <Link {...myWorkHref(r.id, "today")} className={linkCls}>
@@ -186,13 +244,9 @@ export function OwnerView() {
                           {activityLabel(r.lastActivity, now)}
                         </TableCell>
                       </TableRow>
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={7} className="p-0">
-                          <div className="bg-muted/30 p-3 align-top">
-                            <PersonDetail userId={r.id} name={r.name} />
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <DetailRow id={detailId} open={isOpen}>
+                        <PersonDetail userId={r.id} name={r.name} />
+                      </DetailRow>
                     </Fragment>
                   );
                 })
@@ -244,12 +298,76 @@ export function OwnerView() {
   );
 }
 
+// ---- the expand / collapse animation (owner, Oct 1: "jarring") -----------------------------
+//
+// The detail <tr> is always there; what opens is a one-row CSS grid inside it whose track goes
+// from 0fr (no height) to 1fr (the content's height), with the opacity alongside — 200 ms,
+// ease-out, both ways, every row at once under "Expand all". The summary row above never moves.
+// Under prefers-reduced-motion there is no transition (motion-reduce:transition-none) and the
+// content unmounts at once on collapse. The content (and its query) is mounted only while the
+// row is open or collapsing.
+
+/** Expand / collapse time; the classes below say the same (duration-200). */
+const EXPAND_MS = 200;
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const m = window.matchMedia(REDUCED_MOTION);
+  m.addEventListener("change", onChange);
+  return () => m.removeEventListener("change", onChange);
+}
+
+/** The viewer's prefers-reduced-motion (false on the server). */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => false,
+  );
+}
+
+/** One person's detail row: animates its height and opacity open and closed. */
+function DetailRow({ id, open, children }: { id: string; open: boolean; children: ReactNode }) {
+  const reduce = usePrefersReducedMotion();
+  // Keep the content mounted while it collapses, then drop it (and its query).
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [collapsing, setCollapsing] = useState(false);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setCollapsing(!open && !reduce);
+  }
+  useEffect(() => {
+    if (!collapsing) return;
+    const t = setTimeout(() => setCollapsing(false), EXPAND_MS);
+    return () => clearTimeout(t);
+  }, [collapsing]);
+  return (
+    <TableRow id={id} aria-hidden={!open} inert={!open} className="border-0 hover:bg-transparent">
+      <TableCell colSpan={7} className="p-0">
+        <div
+          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+            open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {/* w-0 min-w-full: the detail never widens the table (owner, Oct 1: "one size" —
+                collapsed and expanded rows take the same width). */}
+            {(open || collapsing) && (
+              <div className="w-0 min-w-full border-b bg-muted/30 p-3 align-top">{children}</div>
+            )}
+          </div>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 const DETAIL_TITLES = ["Today", "Overdue", "Done this week", "Last activity"] as const;
 
 /**
  * While a person's detail loads: the four cards, three placeholder lines each. Every card here
- * and in the loaded detail is at least min-h-48 (this skeleton's height), so the table is its
- * full height from the first paint and loading never changes it.
+ * and in the loaded detail is at least min-h-48 (this skeleton's height), so the row opens once
+ * to its full height and loading never shrinks it.
  */
 function DetailSkeleton() {
   return (
@@ -380,7 +498,7 @@ function DetailGroup({
   );
 }
 
-/** One person's detail row: their items (what the numbers count) and last five actions. */
+/** The expanded row: one person's items (what the numbers count) and last five actions. */
 function PersonDetail({ userId, name }: { userId: string; name: string }) {
   const fn = useServerFn(getOwnerPersonDetail);
   const q = useQuery({

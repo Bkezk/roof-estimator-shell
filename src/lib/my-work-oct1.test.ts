@@ -1,8 +1,8 @@
 /**
  * My Work, owner's asks of Oct 1: Everyone by default for admins and managers, all six List
- * headings always — then, later the same day: the headings as a row of tabs across the top, a
- * Calendar that fits one screen (the day's items beside it), and an Owner table that is always
- * its full size (every person's detail shown, nothing expanding or contracting).
+ * headings always — then, later the same day: the headings across the top (columns on a desktop,
+ * tabs on a phone), a Calendar that fits one screen (the day's items beside it), and an Owner
+ * table whose rows start collapsed and keep one width when they open.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -271,32 +271,26 @@ describe("Calendar: whole width, one screen, the day's items beside it, five ite
   });
 });
 
-describe("Owner view: one size, every person's detail always shown", () => {
+describe("Owner view: the detail row animates open and closed", () => {
   const view = read("src/components/owner-view.tsx");
-  it("no expand / collapse: no open state, chevron, Expand all, animation or reduced-motion hook", () => {
-    for (const gone of [
-      "useState",
-      "ChevronRight",
-      "Expand all",
-      "Collapse all",
-      "aria-expanded",
-      "DetailRow",
-      "grid-rows-[",
-      "EXPAND_MS",
-      "prefers-reduced-motion",
-      "usePrefersReducedMotion",
-      "onRowClick",
-      "cursor-pointer",
-      "inert=",
-    ])
-      expect(view, gone).not.toContain(gone);
+  const row = view.slice(view.indexOf("function DetailRow"), view.indexOf("const DETAIL_TITLES"));
+  it("a grid-rows 0fr → 1fr transition with opacity, 200 ms ease-out", () => {
+    expect(row).toContain("transition-[grid-template-rows,opacity] duration-200 ease-out");
+    expect(row).toContain('open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"');
+    expect(row).toContain('<div className="min-h-0 overflow-hidden">');
+    expect(view).toContain("const EXPAND_MS = 200;");
   });
-  it("each summary row is followed by its detail row, the detail always mounted", () => {
-    expect(view).toContain('<TableCell className="font-medium">{r.name}</TableCell>');
-    expect(view).toContain("<PersonDetail userId={r.id} name={r.name} />");
-    expect(view).toContain('<TableRow className="hover:bg-transparent">');
-    expect(view).toContain('<TableCell colSpan={7} className="p-0">');
-    expect(view).toContain('<div className="bg-muted/30 p-3 align-top">');
+  it("honours prefers-reduced-motion: no transition, and no delayed unmount", () => {
+    expect(row).toContain("motion-reduce:transition-none");
+    expect(view).toContain('const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";');
+    expect(row).toContain("const reduce = usePrefersReducedMotion();");
+    expect(row).toContain("setCollapsing(!open && !reduce);");
+  });
+  it("the row is always mounted (so collapse animates); the content only while open or collapsing", () => {
+    expect(view).not.toContain("{isOpen && (");
+    expect(view).toContain("<DetailRow id={detailId} open={isOpen}>");
+    expect(row).toContain("{(open || collapsing) && (");
+    expect(row).toContain("inert={!open}");
   });
   it("a fixed-height skeleton, three placeholder lines per card, while the detail loads", () => {
     const skel = view.slice(view.indexOf("function DetailSkeleton"));
@@ -306,5 +300,15 @@ describe("Owner view: one size, every person's detail always shown", () => {
     expect(view).not.toContain('<p className="text-sm text-muted-foreground">Loading…</p>');
     // The skeleton's cards and the loaded cards share the same minimum height.
     expect(view.match(/min-h-48 min-w-0 overflow-hidden rounded-md border/g)?.length).toBe(3);
+  });
+  it("Expand all opens every row at once (no stagger)", () => {
+    expect(view).toContain("setOpen(allOpen ? new Set() : new Set(data.rows.map((r) => r.id)))");
+    expect(view).not.toMatch(/transition-delay|delay-\d|stagger/);
+  });
+  it("rows start collapsed, and an open row never widens the table (owner, Oct 1: same width)", () => {
+    expect(view).toContain("useState<ReadonlySet<string>>(() => new Set())");
+    expect(row).toContain(
+      '<div className="w-0 min-w-full border-b bg-muted/30 p-3 align-top">{children}</div>',
+    );
   });
 });
