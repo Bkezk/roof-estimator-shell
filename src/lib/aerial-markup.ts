@@ -1,18 +1,26 @@
 /**
  * The ticket's Aerial markup (owner, Sep 30): the tech's annotations on the property's aerial —
- * freehand, straight lines, tags (a pin with a label and a note) and text — as vector JSON that
+ * measured areas, tags (a pin with a label and a note) and text — as vector JSON that
  * is stored on the aerial photo row (service_job_photos.annotations) and re-opened for editing,
  * plus the canvas painter that draws the same picture into the saved PNG. Pure: no I/O, no DOM.
  *
  * Positions are lng/lat, so a saved markup redraws on the roof at any zoom and screen size.
  * Nothing here creates repairs or bids: a tag marks what the tech saw, nothing more.
+ *
+ * Owner, Oct 1: the Area tool (src/lib/aerial-area.ts, the takeoff's area drawer) replaced Draw
+ * and Line. An `area` mark is a closed outline whose sq ft is measured with the imagery's own
+ * Web Mercator scale (aerial-geo's metresPerPixel). `free` and `line` marks stay in the schema so
+ * markups saved before then still load, draw and save; no tool makes new ones.
  */
 import { z } from "zod";
 
+import { areaLabel, labelAt } from "@/lib/aerial-area";
 import {
+  MAX_VIEW_ZOOM,
   footprintAreaSqFt,
   footprintLabel,
   footprintPolygons,
+  lngLatAreaSqFt,
   project,
   type AerialView,
   type LngLat,
@@ -30,6 +38,14 @@ export type MarkupColor = (typeof MARKUP_COLORS)[number]["id"];
 const COLOR_IDS = MARKUP_COLORS.map((c) => c.id) as [MarkupColor, ...MarkupColor[]];
 export const colorHex = (id: string): string =>
   MARKUP_COLORS.find((c) => c.id === id)?.hex ?? MARKUP_COLORS[0].hex;
+/** A colour of the set at `alpha` (an area's fill). */
+export function colorFill(id: string, alpha: number): string {
+  const h = colorHex(id);
+  const n = (i: number) => parseInt(h.slice(i, i + 2), 16);
+  return `rgba(${n(1)},${n(3)},${n(5)},${alpha})`;
+}
+/** An area's fill opacity, on screen and in the PNG. */
+export const AREA_FILL_ALPHA = 0.25;
 
 /** Quick labels for a tag; free text is always allowed. */
 export const TAG_PRESETS = [
@@ -67,6 +83,13 @@ export const annotationSchema = z.discriminatedUnion("kind", [
     id: idSchema,
     color: colorSchema,
     points: z.array(lngLat).length(2),
+  }),
+  z.object({
+    kind: z.literal("area"),
+    id: idSchema,
+    color: colorSchema,
+    /** Corners in order, closed implicitly (the last joins the first). */
+    points: z.array(lngLat).min(3).max(500),
   }),
   z.object({
     kind: z.literal("pin"),
@@ -122,8 +145,14 @@ export function parseMarkup(raw: unknown): AerialMarkup | null {
 
 const r7 = (n: number) => Math.round(n * 1e7) / 1e7;
 const roundLL = (p: LngLat): LngLat => [r7(p[0]), r7(p[1])];
+const r8 = (n: number) => Math.round(n * 1e8) / 1e8;
+const roundLL8 = (p: LngLat): LngLat => [r8(p[0]), r8(p[1])];
 
-/** The JSON stored for a markup: validated, positions rounded to 1 cm (7 decimals). */
+/**
+ * The JSON stored for a markup: validated, positions rounded to 1 cm (7 decimals); an area's
+ * corners to 1 mm (8 decimals), so its sq ft reads the same after saving as while drawing (1 cm
+ * on each side of a 23 × 18 m box moves it by about a sq ft).
+ */
 export function serializeMarkup(m: AerialMarkup): AerialMarkup {
   const out: AerialMarkup = {
     v: MARKUP_VERSION,
@@ -131,9 +160,11 @@ export function serializeMarkup(m: AerialMarkup): AerialMarkup {
     zoom: m.zoom,
     building: m.building,
     annotations: m.annotations.map((a) =>
-      a.kind === "free" || a.kind === "line"
-        ? { ...a, points: a.points.map(roundLL) }
-        : { ...a, at: roundLL(a.at) },
+      a.kind === "area"
+        ? { ...a, points: a.points.map(roundLL8) }
+        : a.kind === "free" || a.kind === "line"
+          ? { ...a, points: a.points.map(roundLL) }
+          : { ...a, at: roundLL(a.at) },
     ),
   };
   return markupSchema.parse(out);
@@ -233,20 +264,54 @@ export function tagNumbers(annotations: Annotation[]): Map<string, number> {
   return out;
 }
 
-/** "1. Ponding — 3 in. deep at the NE drain" per tag, for the list and the PNG's legend. */
-export function legendLines(annotations: Annotation[]): string[] {
+// ── Areas: numbering, sq ft and the total ──────────────────────────────────────────────────
+
+export type AreaMark = Extract<Annotation, { kind: "area" }>;
+export const isAreaMark = (a: Annotation): a is AreaMark => a.kind === "area";
+
+/**
+ * An area mark's sq ft, rounded: its corners in Web Mercator pixels × (metres per pixel at its
+ * latitude)². `zoom` is the view's; the result is the same at any zoom (see lngLatAreaSqFt).
+ */
+export const areaMarkSqFt = (a: AreaMark, zoom: number = MAX_VIEW_ZOOM): number =>
+  Math.round(lngLatAreaSqFt(a.points, zoom));
+
+/** Every area, numbered 1, 2, … in the order drawn, with its sq ft; and the total. */
+export function areaRows(
+  annotations: Annotation[],
+  zoom: number = MAX_VIEW_ZOOM,
+): { rows: { mark: AreaMark; n: number; sqft: number }[]; total: number } {
+  const rows = annotations.filter(isAreaMark).map((mark, i) => ({
+    mark,
+    n: i + 1,
+    sqft: areaMarkSqFt(mark, zoom),
+  }));
+  return { rows, total: rows.reduce((s, r) => s + r.sqft, 0) };
+}
+
+/**
+ * The PNG's legend: "1. Ponding — 3 in. deep at the NE drain" per tag, then
+ * "Area 1 — 2,340 sq ft" per area and "Areas total — 4,680 sq ft".
+ */
+export function legendLines(annotations: Annotation[], zoom: number = MAX_VIEW_ZOOM): string[] {
   const n = tagNumbers(annotations);
-  return annotations.flatMap((a) =>
+  const tags = annotations.flatMap((a) =>
     a.kind === "pin" ? [`${n.get(a.id)}. ${a.label}${a.note ? ` — ${a.note}` : ""}`] : [],
   );
+  const { rows, total } = areaRows(annotations, zoom);
+  const areas = rows.map((r) => `Area ${r.n} — ${areaLabel(r.sqft)}`);
+  if (rows.length) areas.push(`Areas total — ${areaLabel(total)}`);
+  return [...tags, ...areas];
 }
 
 /** One-line summary for the section header. */
 export function markupSummary(annotations: Annotation[]): string {
   const tags = annotations.filter((a) => a.kind === "pin").length;
-  const marks = annotations.length - tags;
+  const areas = annotations.filter((a) => a.kind === "area").length;
+  const marks = annotations.length - tags - areas;
   const parts = [
     tags ? `${tags} ${tags === 1 ? "tag" : "tags"}` : null,
+    areas ? `${areas} ${areas === 1 ? "area" : "areas"}` : null,
     marks ? `${marks} ${marks === 1 ? "mark" : "marks"}` : null,
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : "no marks";
@@ -281,12 +346,13 @@ export interface Paint2D {
 
 export const FOOTPRINT_STROKE = "#22d3ee";
 const STROKE_W = 4;
+const AREA_STROKE_W = 3;
 const PIN_R = 13;
 const LEGEND_LINE = 22;
 const LEGEND_PAD = 10;
 const LEGEND_MAX_LINES = 12;
 
-/** Extra pixels under the picture for the tags' legend in the PNG. */
+/** Extra pixels under the picture for the legend (tags, areas) in the PNG. */
 export function legendHeight(annotations: Annotation[]): number {
   const n = Math.min(LEGEND_MAX_LINES, legendLines(annotations).length);
   return n ? n * LEGEND_LINE + 2 * LEGEND_PAD : 0;
@@ -333,13 +399,31 @@ export function paintOverlay(
       ctx.stroke();
     }
 
-  // Lines first, then text, then tags on top.
-  const order = { free: 0, line: 0, text: 1, pin: 2 } as const;
+  // Areas at the bottom, then lines, then text, then tags on top.
+  const order = { area: -1, free: 0, line: 0, text: 1, pin: 2 } as const;
   const sorted = [...markup.annotations].sort((a, b) => order[a.kind] - order[b.kind]);
   const numbers = tagNumbers(markup.annotations);
   for (const a of sorted) {
     const color = colorHex(a.color);
-    if (a.kind === "free" || a.kind === "line") {
+    if (a.kind === "area") {
+      const pts = a.points.map(at);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = colorFill(a.color, AREA_FILL_ALPHA);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.55)";
+      ctx.lineWidth = AREA_STROKE_W + 3;
+      ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = AREA_STROKE_W;
+      ctx.stroke();
+      const [lx, ly] = labelAt(pts);
+      ctx.font = "bold 16px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      outlinedText(ctx, areaLabel(areaMarkSqFt(a, view.zoom)), lx, ly, "#ffffff");
+    } else if (a.kind === "free" || a.kind === "line") {
       ctx.strokeStyle = "rgba(0,0,0,0.55)";
       ctx.lineWidth = STROKE_W + 3;
       ctx.beginPath();
@@ -393,7 +477,7 @@ export function paintOverlay(
   }
 
   // Legend under the picture.
-  const lines = legendLines(markup.annotations);
+  const lines = legendLines(markup.annotations, view.zoom);
   if (lines.length) {
     const top = view.height;
     ctx.fillStyle = "#ffffff";
@@ -404,7 +488,7 @@ export function paintOverlay(
     ctx.textBaseline = "top";
     const shown = lines.slice(0, LEGEND_MAX_LINES);
     if (lines.length > LEGEND_MAX_LINES)
-      shown[LEGEND_MAX_LINES - 1] = `… and ${lines.length - LEGEND_MAX_LINES + 1} more tags`;
+      shown[LEGEND_MAX_LINES - 1] = `… and ${lines.length - LEGEND_MAX_LINES + 1} more`;
     shown.forEach((t, i) => {
       const max = view.width - 2 * LEGEND_PAD;
       let s = t;

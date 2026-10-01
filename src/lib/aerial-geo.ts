@@ -14,6 +14,7 @@
 import { KY_IMAGERY_PHASE3_SERVICE, pointInFootprint, tileUrlTemplate } from "@/lib/gis/ky-layers";
 import { TN_IMAGERY_MAX_ZOOM, TN_IMAGERY_MIN_ZOOM, TN_IMAGERY_TILES } from "@/lib/gis/tn-layers";
 import { nearKyTnLine, stateCode, stateForPoint } from "@/lib/prospect";
+import { polygonArea } from "@/lib/takeoff/geometry";
 
 export const TILE = 256;
 /** [lng, lat] in degrees. */
@@ -81,6 +82,71 @@ export function panView(v: AerialView, dx: number, dy: number): AerialView {
 
 export const clampZoom = (z: number): number =>
   Math.max(MIN_VIEW_ZOOM, Math.min(MAX_VIEW_ZOOM, Math.round(z)));
+
+// ── Ground scale (the tech's drawn areas) ─────────────────────────────────────────────────
+
+/** Square feet in a square metre. */
+export const SQFT_PER_M2 = 10.76391;
+/** Web Mercator's equatorial radius (EPSG:3857), metres. */
+const MERCATOR_R = 6378137;
+/**
+ * Metres per world pixel at zoom 0 on the equator with 256-px tiles: 2πR / 256 =
+ * 156543.03392… The view's pixels are world pixels at the view's integer zoom (tiles are drawn
+ * at TILE px, never resampled), so this is the scale of the view's own coordinates.
+ */
+export const M_PER_PX_Z0 = (2 * Math.PI * MERCATOR_R) / TILE;
+
+/** Ground metres per view pixel at latitude `lat` and integer zoom `zoom`. */
+export function metresPerPixel(lat: number, zoom: number): number {
+  const phi = (Math.max(-MAX_LAT, Math.min(MAX_LAT, lat)) * Math.PI) / 180;
+  return (M_PER_PX_Z0 * Math.cos(phi)) / 2 ** zoom;
+}
+
+/**
+ * Sq ft (unrounded) of a polygon in view / world pixels at `zoom` whose middle is at latitude
+ * `lat`: the shoelace area in px² × (metres per pixel)². A building is small enough that the
+ * Mercator stretch across it does not matter at the nearest sq ft.
+ */
+export function pixelAreaSqFt(points: [number, number][], lat: number, zoom: number): number {
+  if (points.length < 3) return 0;
+  const m = metresPerPixel(lat, zoom);
+  return polygonArea(points) * m * m * SQFT_PER_M2;
+}
+
+/** Sq ft (unrounded) of a polygon drawn on the view, in the view's pixels. */
+export function viewAreaSqFt(v: AerialView, points: [number, number][]): number {
+  if (points.length < 3) return 0;
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const mid = unproject(
+    v,
+    (Math.min(...xs) + Math.max(...xs)) / 2,
+    (Math.min(...ys) + Math.max(...ys)) / 2,
+  );
+  return pixelAreaSqFt(points, mid[1], v.zoom);
+}
+
+/**
+ * Sq ft (unrounded) of a lng/lat polygon, measured in world pixels at `zoom` (relative to its
+ * first corner, so the numbers stay small). The zoom cancels out — pixels² grow by 4 per level
+ * and (metres per pixel)² shrink by 4 — so the stored area reads the same at every zoom.
+ */
+export function lngLatAreaSqFt(points: LngLat[], zoom: number): number {
+  if (points.length < 3) return 0;
+  const [x0, y0] = lngLatToWorld(points[0]![0], points[0]![1], zoom);
+  const px = points.map(([lng, lat]) => {
+    const [x, y] = lngLatToWorld(lng, lat, zoom);
+    return [x - x0, y - y0] as [number, number];
+  });
+  const xs = px.map((p) => p[0]);
+  const ys = px.map((p) => p[1]);
+  const lat = worldToLngLat(
+    x0 + (Math.min(...xs) + Math.max(...xs)) / 2,
+    y0 + (Math.min(...ys) + Math.max(...ys)) / 2,
+    zoom,
+  )[1];
+  return pixelAreaSqFt(px, lat, zoom);
+}
 
 // ── Footprints ─────────────────────────────────────────────────────────────────────────────
 
@@ -181,7 +247,7 @@ export function footprintAreaSqFt(polys: LngLat[][][]): number | null {
     const holes = poly.slice(1).reduce((s, r) => s + ringAreaM2(r, lat0), 0);
     m2 += (insideAnother(i) ? -1 : 1) * (outer - holes);
   });
-  return m2 > 0 ? Math.round(m2 * 10.76391) : null;
+  return m2 > 0 ? Math.round(m2 * SQFT_PER_M2) : null;
 }
 
 /** "12,340 sq ft footprint". */

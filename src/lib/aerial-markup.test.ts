@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import type { AerialView, LngLat } from "./aerial-geo";
+import { unproject, type AerialView, type LngLat } from "./aerial-geo";
 import {
+  AREA_FILL_ALPHA,
   annotationSchema,
+  areaMarkSqFt,
+  areaRows,
+  colorFill,
   emptyHistory,
   legendHeight,
   legendLines,
@@ -239,5 +243,95 @@ describe("the PNG painter (smoke)", () => {
     paintOverlay(ctx, view, { annotations: [], building: null });
     expect(texts).toEqual([]);
     expect(calls.filter((c) => c === "stroke")).toHaveLength(0);
+  });
+});
+
+// ── Owner, Oct 1: the Area tool replaced Draw and Line ─────────────────────────────────────
+
+/** A 200 × 150 view-px box in the middle of a Louisville view at zoom 20: 4,438 sq ft. */
+const areaView: AerialView = { center: at, zoom: 20, width: 800, height: 600 };
+const boxLL = (
+  [
+    [300, 225],
+    [500, 225],
+    [500, 375],
+    [300, 375],
+  ] as [number, number][]
+).map(([x, y]) => unproject(areaView, x, y));
+const area1: Annotation = { id: "a1", kind: "area", color: "green", points: boxLL };
+const area2: Annotation = {
+  id: "a2",
+  kind: "area",
+  color: "blue",
+  points: [near(0, 0), near(4, 0), near(4, 3)],
+};
+
+describe("area marks", () => {
+  it("the schema takes an area of 3+ lng/lat corners and refuses fewer or bad ones", () => {
+    expect(annotationSchema.safeParse(area1).success).toBe(true);
+    expect(annotationSchema.safeParse({ ...area1, points: boxLL.slice(0, 2) }).success).toBe(false);
+    expect(annotationSchema.safeParse({ ...area1, points: [[0, 95], ...boxLL] }).success).toBe(
+      false,
+    );
+    expect(annotationSchema.safeParse({ ...area1, color: "purple" }).success).toBe(false);
+  });
+
+  it("round-trips through the stored JSON beside old freehand / line marks", () => {
+    const m: AerialMarkup = { ...markup, annotations: [free, line, area1, pin1, area2] };
+    const back = parseMarkup(JSON.parse(JSON.stringify(serializeMarkup(m))))!;
+    expect(back).not.toBeNull();
+    expect(back.annotations.map((a) => a.kind)).toEqual(["free", "line", "area", "pin", "area"]);
+    const a = back.annotations[2]!;
+    expect(a.kind === "area" && a.points.length).toBe(4);
+    // Corners rounded to 1 mm (8 decimals), so the sq ft is the same after the round trip.
+    expect(a.kind === "area" && a.points[0]![0]).toBe(Math.round(boxLL[0]![0] * 1e8) / 1e8);
+    expect(a.kind === "area" && areaMarkSqFt(a, 20)).toBe(4438);
+  });
+
+  it("measures each area, numbers them in the order drawn and totals them", () => {
+    expect(area1.kind === "area" && areaMarkSqFt(area1, 20)).toBe(4438);
+    // The zoom cancels out: the same figure at any zoom.
+    expect(area1.kind === "area" && areaMarkSqFt(area1, 17)).toBe(4438);
+    const { rows, total } = areaRows([pin1, area1, free, area2], 20);
+    expect(rows.map((r) => [r.mark.id, r.n])).toEqual([
+      ["a1", 1],
+      ["a2", 2],
+    ]);
+    expect(total).toBe(rows[0]!.sqft + rows[1]!.sqft);
+    expect(areaRows([free, pin1]).rows).toEqual([]);
+  });
+
+  it("the legend lists the areas with the total, after the tags", () => {
+    const lines = legendLines([pin1, area1, area2], 20);
+    const { rows, total } = areaRows([area1, area2], 20);
+    expect(lines).toEqual([
+      "1. Ponding — 3 in. deep at the NE drain",
+      "Area 1 — 4,438 sq ft",
+      `Area 2 — ${rows[1]!.sqft.toLocaleString("en-US")} sq ft`,
+      `Areas total — ${total.toLocaleString("en-US")} sq ft`,
+    ]);
+    expect(legendHeight([area1])).toBeGreaterThan(0);
+    expect(markupSummary([pin1, area1, area2, free])).toBe("1 tag, 2 areas, 1 mark");
+  });
+
+  it("the PNG draws the area filled, outlined and labelled with its sq ft", () => {
+    const { ctx, calls, texts } = recorder();
+    const fills: unknown[] = [];
+    const rec = new Proxy(ctx, {
+      set(t, k, v) {
+        if (k === "fillStyle") fills.push(v);
+        return Reflect.set(t, k, v);
+      },
+    });
+    paintOverlay(rec, areaView, { annotations: [area1], building: null });
+    // One closed outline, filled semi-transparent in its colour, stroked twice (halo + colour).
+    expect(calls.filter((c) => c === "closePath")).toHaveLength(1);
+    expect(calls.filter((c) => c === "fill")).toHaveLength(1);
+    expect(calls.filter((c) => c === "stroke")).toHaveLength(2);
+    expect(fills).toContain(colorFill("green", AREA_FILL_ALPHA));
+    expect(colorFill("green", AREA_FILL_ALPHA)).toBe("rgba(34,197,94,0.25)");
+    expect(texts).toContain("4,438 sq ft");
+    expect(texts).toContain("Area 1 — 4,438 sq ft");
+    expect(texts).toContain("Areas total — 4,438 sq ft");
   });
 });

@@ -2,18 +2,25 @@
  * The ticket's Aerial section (owner, Sep 30), on the office ticket page and the tech's
  * close-out: the property on our own aerial imagery (Kentucky's KyFromAbove, Tennessee's TDOT)
  * with its building outline and the outline's area ("footprint" — not a roof measurement), and
- * the tech's markup on top: freehand, straight lines, tags (a numbered pin with a label and a
- * note) and text, in a small fixed set of colours, with Undo and Clear. Pointer events, so a
- * finger and a mouse both draw.
+ * the tech's markup on top: measured areas, tags (a numbered pin with a label and a note) and
+ * text, in a small fixed set of colours, with Undo and Clear. Pointer events, so a finger and a
+ * mouse both draw.
  *
- * "Save markup" stores a PNG of the picture (imagery + outline + marks + the tags' legend) on
+ * Owner, Oct 1: the takeoff's area drawer replaced Draw and Line — the Area tool
+ * (src/lib/aerial-area.ts): tap corners, or hold and drag a rectangle; sides snap square to the
+ * previous side or level / plumb within 7°; the target marker shows the live end; tap the first
+ * corner, double-tap / double-click, right-click or Enter closes; Esc cancels. Each area shows
+ * its sq ft (the imagery's Web Mercator scale at the view's zoom and latitude) and the section
+ * lists them with a total. Saved freehand / line marks from before still draw.
+ *
+ * "Save markup" stores a PNG of the picture (imagery + outline + marks + the legend) on
  * the ticket as its aerial photo and the vector JSON beside it; re-opening the section loads the
  * last saved markup for editing. No auto-save. Nothing here creates repairs or bids.
  *
  * Geometry and the PNG painter are pure (src/lib/aerial-geo.ts, src/lib/aerial-markup.ts); the
  * server side is src/lib/service-aerial.functions.ts.
  */
-import { Suspense, lazy, useMemo, useReducer, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -24,10 +31,9 @@ import {
   Loader2,
   Map as MapIcon,
   MapPin,
-  Pencil,
+  Pentagon,
   Save,
   Scan,
-  Slash,
   Trash2,
   Type,
   Undo2,
@@ -54,6 +60,7 @@ import {
   footprintLabel,
   footprintPolygons,
   imageryFor,
+  viewAreaSqFt,
   panView,
   project,
   tilesForView,
@@ -64,12 +71,16 @@ import {
   type LngLat,
 } from "@/lib/aerial-geo";
 import {
+  AREA_FILL_ALPHA,
   FOOTPRINT_STROKE,
   MARKUP_COLORS,
   TAG_LABEL_MAX,
   TAG_NOTE_MAX,
   TAG_PRESETS,
   TEXT_MAX,
+  areaMarkSqFt,
+  areaRows,
+  colorFill,
   colorHex,
   emptyHistory,
   legendHeight,
@@ -79,7 +90,6 @@ import {
   paintOverlay,
   pathD,
   serializeMarkup,
-  simplifyStroke,
   tagNumbers,
   type AerialBuilding,
   type AerialMarkup,
@@ -87,6 +97,20 @@ import {
   type MarkupAction,
   type MarkupColor,
 } from "@/lib/aerial-markup";
+import {
+  areaLabel,
+  drawing,
+  emptyAreaDraw,
+  labelAt,
+  liveEnd,
+  liveRect,
+  stepArea,
+  type AreaDraw,
+  type AreaDrawAction,
+  type Pt,
+} from "@/lib/aerial-area";
+import { isTypingTarget } from "@/components/takeoff/shapes";
+import { TargetMarker } from "@/components/takeoff/overlay";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -112,11 +136,11 @@ const ProspectMap = lazy(() => import("@/components/prospect-map"));
 
 const aerialKey = (jobId: string) => ["service-aerial", jobId] as const;
 
-type Tool = "move" | "free" | "line" | "pin" | "text";
+/** Owner, Oct 1: Area replaced Draw and Line (old free / line marks still draw). */
+type Tool = "move" | "area" | "pin" | "text";
 const TOOLS: { id: Tool; label: string; icon: typeof Hand }[] = [
   { id: "move", label: "Move", icon: Hand },
-  { id: "free", label: "Draw", icon: Pencil },
-  { id: "line", label: "Line", icon: Slash },
+  { id: "area", label: "Area", icon: Pentagon },
   { id: "pin", label: "Tag", icon: MapPin },
   { id: "text", label: "Text", icon: Type },
 ];
@@ -206,7 +230,7 @@ function AerialEditor({
   const [building, setBuilding] = useState<AerialBuilding | null>(
     () => data.saved?.markup.building ?? buildingOf(data.found),
   );
-  const [view, setView] = useState<AerialView | null>(() => initialView(data));
+  const [view, setViewRaw] = useState<AerialView | null>(() => initialView(data));
   const [history, dispatchRaw] = useReducer(
     markupReducer,
     data.saved?.markup.annotations ?? [],
@@ -217,10 +241,61 @@ function AerialEditor({
     dispatchRaw(a);
     setDirty(true);
   };
-  const [tool, setTool] = useState<Tool>(canEdit ? "free" : "move");
+  const [tool, setTool] = useState<Tool>(canEdit ? "area" : "move");
   const [color, setColor] = useState<MarkupColor>("red");
+  // The area in progress (view px). A ref mirrors it so pointer events that arrive before a
+  // re-render (a move then a release) step from the latest shape.
+  const [areaDraw, setAreaDrawState] = useState<AreaDraw>(emptyAreaDraw);
+  const areaRef = useRef<AreaDraw>(areaDraw);
+  const setAreaDraw = (d: AreaDraw) => {
+    areaRef.current = d;
+    setAreaDrawState(d);
+  };
+  /** One input to the Area tool; a closed shape becomes an area mark. */
+  const areaInput = (a: AreaDrawAction) => {
+    const r = stepArea(areaRef.current, a);
+    setAreaDraw(r.draw);
+    if (r.hint) toast.info(r.hint);
+    if (r.done && view)
+      dispatch({
+        type: "add",
+        annotation: {
+          id: newAnnotationId(),
+          kind: "area",
+          color,
+          points: r.done.map(([x, y]) => unproject(view, x, y)),
+        },
+      });
+  };
+  /** A new view; an area in progress is carried onto it (its corners stay on the roof). */
+  const setView = (v: AerialView) => {
+    if (view && drawing(areaRef.current)) {
+      const from = view;
+      areaInput({ type: "remap", f: ([x, y]) => project(v, unproject(from, x, y)) });
+    }
+    setViewRaw(v);
+  };
   const [pending, setPending] = useState<{ kind: "pin" | "text"; at: LngLat } | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
+
+  // Esc cancels the area in progress; Enter closes it (as the takeoff). Keys in a text field
+  // (the tag form) are left alone.
+  const areaKeys = useRef<(e: KeyboardEvent) => void>(() => {});
+  areaKeys.current = (e: KeyboardEvent) => {
+    if (tool !== "area" || isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape" && drawing(areaRef.current)) {
+      e.preventDefault();
+      areaInput({ type: "cancel" });
+    } else if (e.key === "Enter" && areaRef.current.points.length > 0) {
+      e.preventDefault();
+      areaInput({ type: "close" });
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => areaKeys.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const polys = useMemo(() => footprintPolygons(building?.footprint ?? null), [building]);
   const area = useMemo(() => footprintAreaSqFt(polys), [polys]);
@@ -336,6 +411,7 @@ function AerialEditor({
     (a): a is Extract<Annotation, { kind: "pin" }> => a.kind === "pin",
   );
   const numbers = tagNumbers(history.annotations);
+  const areas = areaRows(history.annotations, view.zoom);
   const how =
     building?.how === "picked"
       ? "picked on the map"
@@ -354,17 +430,35 @@ function AerialEditor({
           onTool={(t) => {
             setTool(t);
             setPending(null);
+            areaInput({ type: "cancel" });
           }}
           color={color}
           onColor={setColor}
-          canUndo={history.past.length > 0}
-          onUndo={() => dispatch({ type: "undo" })}
-          canClear={history.annotations.length > 0}
+          canUndo={history.past.length > 0 || areaDraw.points.length > 0}
+          onUndo={() =>
+            // A corner of the area in progress first, then the marks.
+            areaRef.current.points.length > 0
+              ? areaInput({ type: "undo" })
+              : dispatch({ type: "undo" })
+          }
+          canClear={history.annotations.length > 0 || drawing(areaDraw)}
           onClear={() => {
-            if (window.confirm("Clear every mark and tag? (Undo brings them back.)"))
+            if (!history.annotations.length) {
+              areaInput({ type: "cancel" });
+              return;
+            }
+            if (window.confirm("Clear every mark and tag? (Undo brings them back.)")) {
+              areaInput({ type: "cancel" });
               dispatch({ type: "clear" });
+            }
           }}
         />
+      )}
+      {canEdit && tool === "area" && (
+        <p className="text-xs text-muted-foreground">
+          Tap each corner, or hold and drag for a rectangle. Tap the first corner, double-tap or
+          right-click to finish · Esc cancels.
+        </p>
       )}
       <Stage
         view={view}
@@ -373,8 +467,9 @@ function AerialEditor({
         annotations={history.annotations}
         tool={canEdit ? tool : "move"}
         color={color}
+        areaDraw={areaDraw}
+        onArea={areaInput}
         onView={setView}
-        onAdd={(a) => dispatch({ type: "add", annotation: a })}
         onPlace={(kind, at) => setPending({ kind, at })}
       />
       <div className="flex flex-wrap items-center gap-2">
@@ -430,6 +525,43 @@ function AerialEditor({
         )}
         {how && <span className="text-muted-foreground"> · Building {how}.</span>}
       </p>
+
+      {areas.rows.length > 0 && (
+        <div className="space-y-1 text-sm">
+          <ol className="space-y-1" aria-label="Areas">
+            {areas.rows.map((r) => (
+              <li key={r.mark.id} className="flex items-center gap-2 rounded-md border px-2 py-1.5">
+                <span
+                  className="h-4 w-4 shrink-0 rounded-sm border-2"
+                  style={{
+                    borderColor: colorHex(r.mark.color),
+                    background: colorFill(r.mark.color, AREA_FILL_ALPHA),
+                  }}
+                />
+                <span className="flex-1 font-medium">Area {r.n}</span>
+                <span className="tabular-nums">{areaLabel(r.sqft)}</span>
+                {canEdit && (
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-muted"
+                    aria-label={`Remove area ${r.n}`}
+                    onClick={() => dispatch({ type: "remove", id: r.mark.id })}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+          <p className={`flex items-center gap-2 px-2 font-medium ${canEdit ? "pr-11" : ""}`}>
+            <span className="flex-1">Total</span>
+            <span className="tabular-nums">{areaLabel(areas.total)}</span>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Measured on the aerial: flat, as seen from above (no pitch).
+          </p>
+        </div>
+      )}
 
       {pending && canEdit && (
         <PlaceForm
@@ -587,8 +719,9 @@ function Stage({
   annotations,
   tool,
   color,
+  areaDraw,
+  onArea,
   onView,
-  onAdd,
   onPlace,
 }: {
   view: AerialView;
@@ -597,25 +730,38 @@ function Stage({
   annotations: Annotation[];
   tool: Tool;
   color: MarkupColor;
+  areaDraw: AreaDraw;
+  onArea: (a: AreaDrawAction) => void;
   onView: (v: AerialView) => void;
-  onAdd: (a: Annotation) => void;
   onPlace: (kind: "pin" | "text", at: LngLat) => void;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; view: AerialView } | null>(null);
-  const [draft, setDraft] = useState<[number, number][] | null>(null);
+  /** The pointer holding an Area press (a second finger is ignored). */
+  const areaPointer = useRef<number | null>(null);
+  /** Screen px per view px (the SVG is stretched to the screen): on-screen tolerances. */
+  const [scale, setScale] = useState(1);
+  const [touch, setTouch] = useState(false);
   const tiles = sources.flatMap((s) => tilesForView(view, s));
   const px = (p: LngLat) => project(view, p);
   const numbers = tagNumbers(annotations);
 
-  const toView = (e: React.PointerEvent): [number, number] => {
+  const toView = (e: React.PointerEvent): Pt => {
     const r = svg.current!.getBoundingClientRect();
+    const k = r.width / view.width;
+    if (k > 0 && Math.abs(k - scale) > 1e-6) setScale(k);
     return [
       ((e.clientX - r.left) * view.width) / r.width,
       ((e.clientY - r.top) * view.height) / r.height,
     ];
   };
   const down = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (tool === "area" && e.button === 2) {
+      // Right-click: finish the area (the takeoff's "Stop").
+      e.preventDefault();
+      onArea({ type: "close" });
+      return;
+    }
     if (e.button !== 0) return;
     e.preventDefault();
     const p = toView(e);
@@ -623,9 +769,16 @@ function Stage({
       onPlace(tool, unproject(view, p[0], p[1]));
       return;
     }
+    if (tool === "area") {
+      if (areaPointer.current !== null) return;
+      areaPointer.current = e.pointerId;
+      setTouch(e.pointerType === "touch");
+      svg.current?.setPointerCapture(e.pointerId);
+      onArea({ type: "down", p, sx: e.clientX, sy: e.clientY });
+      return;
+    }
     svg.current?.setPointerCapture(e.pointerId);
-    if (tool === "move") drag.current = { x: p[0], y: p[1], view };
-    else setDraft(tool === "line" ? [p, p] : [p]);
+    drag.current = { x: p[0], y: p[1], view };
   };
   const move = (e: React.PointerEvent<SVGSVGElement>) => {
     const p = toView(e);
@@ -634,27 +787,22 @@ function Stage({
       onView(panView(d.view, p[0] - d.x, p[1] - d.y));
       return;
     }
-    if (!draft) return;
-    if (tool === "line") setDraft([draft[0]!, p]);
-    else {
-      const last = draft[draft.length - 1]!;
-      if (Math.hypot(p[0] - last[0], p[1] - last[1]) >= 2) setDraft([...draft, p]);
-    }
+    if (tool !== "area") return;
+    if (areaPointer.current !== null && e.pointerId !== areaPointer.current) return;
+    if (areaPointer.current === null && e.pointerType === "touch") return;
+    onArea({ type: "move", p, sx: e.clientX, sy: e.clientY });
   };
-  const up = () => {
+  const up = (e: React.PointerEvent<SVGSVGElement>) => {
     drag.current = null;
-    if (!draft) return;
-    const pts = tool === "free" ? simplifyStroke(draft, 1.5) : draft;
-    setDraft(null);
-    const [a, b] = [pts[0]!, pts[pts.length - 1]!];
-    const long = pts.length >= 2 && (pts.length > 2 || Math.hypot(b[0] - a[0], b[1] - a[1]) >= 4);
-    if (!long) return;
-    const ll = pts.map(([x, y]) => unproject(view, x, y));
-    onAdd(
-      tool === "line"
-        ? { id: newAnnotationId(), kind: "line", color, points: [ll[0]!, ll[ll.length - 1]!] }
-        : { id: newAnnotationId(), kind: "free", color, points: ll },
-    );
+    if (areaPointer.current === null || e.pointerId !== areaPointer.current) return;
+    areaPointer.current = null;
+    if (e.type === "pointercancel") {
+      onArea({ type: "lift" });
+      return;
+    }
+    const r = svg.current?.getBoundingClientRect();
+    const k = r && r.width > 0 ? r.width / view.width : scale;
+    onArea({ type: "up", p: toView(e), scale: k, touch: e.pointerType === "touch" });
   };
 
   const cursor = tool === "move" ? "grab" : tool === "text" ? "text" : "crosshair";
@@ -694,6 +842,13 @@ function Stage({
         onPointerMove={move}
         onPointerUp={up}
         onPointerCancel={up}
+        onPointerLeave={() => {
+          if (tool === "area" && areaPointer.current === null) onArea({ type: "leave" });
+        }}
+        onContextMenu={(e) => {
+          // Right-click finishes an area: no browser menu over the picture.
+          if (tool === "area") e.preventDefault();
+        }}
       >
         {tiles.map((t) => (
           <image
@@ -716,6 +871,41 @@ function Stage({
             strokeLinejoin="round"
           />
         )}
+        {annotations.map((a) => {
+          if (a.kind !== "area") return null;
+          const pts = a.points.map(px);
+          const [lx, ly] = labelAt(pts);
+          return (
+            <g key={a.id}>
+              <path
+                d={`${pathD(pts)} Z`}
+                fill={colorFill(a.color, AREA_FILL_ALPHA)}
+                stroke="rgba(0,0,0,0.55)"
+                strokeWidth={6}
+                strokeLinejoin="round"
+              />
+              <path
+                d={`${pathD(pts)} Z`}
+                fill="none"
+                stroke={colorHex(a.color)}
+                strokeWidth={3}
+                strokeLinejoin="round"
+              />
+              <text
+                x={lx}
+                y={ly}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={16}
+                fontWeight={700}
+                fill="#fff"
+                style={{ ...halo, pointerEvents: "none" }}
+              >
+                {areaLabel(areaMarkSqFt(a, view.zoom))}
+              </text>
+            </g>
+          );
+        })}
         {annotations
           .filter((a) => a.kind === "free" || a.kind === "line")
           .map((a) =>
@@ -773,9 +963,115 @@ function Stage({
             </g>
           );
         })}
-        {draft && lineOf("draft", draft, colorHex(color))}
+        {tool === "area" && (
+          <AreaDraft view={view} draw={areaDraw} scale={scale} touch={touch} color={color} />
+        )}
       </svg>
     </div>
+  );
+}
+
+/**
+ * The area in progress: the drag-a-box rectangle, or the corners so far with the live side to
+ * the target marker and the closing side dashed, its sq ft once it has three corners, and a ring
+ * on the first corner when the next tap would close it.
+ */
+function AreaDraft({
+  view,
+  draw,
+  scale,
+  touch,
+  color,
+}: {
+  view: AerialView;
+  draw: AreaDraw;
+  scale: number;
+  touch: boolean;
+  color: MarkupColor;
+}) {
+  const c = colorHex(color);
+  const rect = liveRect(draw, scale);
+  const end = liveEnd(draw, scale, touch);
+  const k = 1 / scale; // view px for one screen px
+  const label = (pts: Pt[]) => {
+    const [x, y] = labelAt(pts);
+    return (
+      <text
+        x={x}
+        y={y}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        fontSize={16}
+        fontWeight={700}
+        fill="#fff"
+        style={{
+          paintOrder: "stroke",
+          stroke: "rgba(0,0,0,0.85)",
+          strokeWidth: 4,
+          pointerEvents: "none",
+        }}
+      >
+        {areaLabel(viewAreaSqFt(view, pts))}
+      </text>
+    );
+  };
+  if (rect)
+    return (
+      <g style={{ pointerEvents: "none" }}>
+        <path
+          d={`${pathD(rect)} Z`}
+          fill={colorFill(color, AREA_FILL_ALPHA)}
+          stroke={c}
+          strokeWidth={3}
+          strokeDasharray="8 5"
+        />
+        {label(rect)}
+      </g>
+    );
+  const pts = draw.points;
+  const shape = end && !(pts.length > 0 && end === pts[0]) ? [...pts, end] : pts;
+  // liveEnd returns the first corner itself when the next tap would close the shape.
+  const closes = pts.length >= 3 && end === pts[0];
+  return (
+    <g style={{ pointerEvents: "none" }}>
+      {shape.length >= 3 && (
+        <path d={`${pathD(shape)} Z`} fill={colorFill(color, AREA_FILL_ALPHA)} stroke="none" />
+      )}
+      {shape.length >= 2 && (
+        <path
+          d={pathD(shape)}
+          fill="none"
+          stroke={c}
+          strokeWidth={3}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      )}
+      {shape.length >= 3 && (
+        <path
+          d={pathD([shape[shape.length - 1]!, shape[0]!])}
+          fill="none"
+          stroke={c}
+          strokeWidth={2}
+          strokeDasharray="6 5"
+        />
+      )}
+      {pts.map(([x, y], i) => (
+        <circle key={i} cx={x} cy={y} r={3.5 * k} fill={c} stroke="#000" strokeWidth={1 * k} />
+      ))}
+      {closes && pts[0] && (
+        <circle
+          cx={pts[0][0]}
+          cy={pts[0][1]}
+          r={10 * k}
+          fill="none"
+          stroke="#fff"
+          strokeWidth={2 * k}
+        />
+      )}
+      {shape.length >= 3 && label(shape)}
+      {end && <TargetMarker at={end} zoom={scale} color={c} />}
+    </g>
   );
 }
 
@@ -870,7 +1166,7 @@ function loadTile(url: string): Promise<HTMLImageElement | null> {
   });
 }
 
-/** The saved picture: the imagery, then the outline, marks, caption and tags' legend. */
+/** The saved picture: the imagery, then the outline, marks, caption and the legend. */
 async function renderAerialPng(
   view: AerialView,
   sources: ImagerySource[],
