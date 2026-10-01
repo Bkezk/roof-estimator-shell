@@ -34,6 +34,9 @@ export async function crmSettings(admin: Client): Promise<Settings> {
 }
 
 const days = (n: number) => n * 86400000;
+/** PostgREST's "column not in the schema cache" (a migration not applied yet). */
+const isMissingColumn = (e: { code?: string; message?: string }) =>
+  e.code === "PGRST204" || /closed_by_sync/.test(e.message ?? "");
 /** A calendar date as 08:00 local-ish (12:00 UTC keeps it on the same day across US zones). */
 const dateAtNoonUtc = (ymd: string) => new Date(`${ymd}T12:00:00Z`);
 
@@ -72,12 +75,19 @@ export async function syncFollowup(
     .maybeSingle();
   if (error) throw new Error(error.message);
   const now = new Date();
+  // System behaviour, for every user (owner, Oct 1): the item was finished, unassigned or
+  // reassigned. Marked closed_by_sync so the database's manager-only rule
+  // (crm_followups_manager_only) lets it through; it never goes through canManageFollowup.
   const close = async (reason: string) => {
     if (!open) return;
-    await admin
+    const closed = { status: "closed", closed_at: now.toISOString(), closed_reason: reason };
+    const r = await admin
       .from("crm_followups")
-      .update({ status: "closed", closed_at: now.toISOString(), closed_reason: reason })
+      .update({ ...closed, closed_by_sync: true })
       .eq("id", open.id);
+    // Before 20261001030000_followups_manager_only.sql is applied the column is not there yet.
+    if (r.error && isMissingColumn(r.error))
+      await admin.from("crm_followups").update(closed).eq("id", open.id);
   };
   if (a.closing || !a.assigneeId) {
     if (!open) return "unchanged";

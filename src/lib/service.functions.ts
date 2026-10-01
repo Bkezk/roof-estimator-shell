@@ -15,6 +15,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
+import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { siteProblem } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
@@ -249,7 +250,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       ...(fields.job_number !== undefined ? { job_number: fields.job_number || null } : {}),
       technician_id: fields.technician_id ?? null,
       ...(fields.helper_count !== undefined ? { helper_count: fields.helper_count } : {}),
-      scheduled_date: fields.scheduled_date ?? null,
+      // An update that leaves the date out keeps it (ticketDateProblem: never cleared).
+      ...(fields.scheduled_date !== undefined || !id
+        ? { scheduled_date: fields.scheduled_date ?? null }
+        : {}),
       stage,
       notes: fields.notes ?? null,
       centerpoint_ticket: fields.centerpoint_ticket ?? null,
@@ -259,7 +263,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (id) {
       const { data: cur } = await sb
         .from("service_jobs")
-        .select("technician_id, stage")
+        .select("technician_id, stage, scheduled_date")
         .eq("id", id)
         .maybeSingle();
       // A technician edits only their own ticket (RLS says the same; this gives a clear message).
@@ -267,6 +271,13 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         throw new Error(
           "Only the assigned technician, the office or an admin can edit this ticket",
         );
+      // Owner, Oct 1: once a ticket has a date, only an admin or a manager moves it.
+      const moveProblem = dateMoveProblem({
+        profile: p,
+        oldYmd: cur?.scheduled_date,
+        newYmd: fields.scheduled_date,
+      });
+      if (moveProblem) throw new Error(moveProblem);
       const { data: row, error } = await sb
         .from("service_jobs")
         .update(patch)
@@ -274,6 +285,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      await logTicketDateMove(sb, row.id, cur?.scheduled_date, row.scheduled_date, {
+        id: context.userId,
+        name: nameOf(p),
+      });
       const saved = await saveCrew(sb, row, crew);
       await syncTicketFollowup(
         saved,
@@ -313,6 +328,30 @@ async function saveCrew(
   const rows = planCrew(row.technician_id, crew.lead_rate, crew.others);
   const helper_count = await writeCrew(sb, row.id, rows);
   return { ...row, helper_count };
+}
+
+/**
+ * A moved date goes on the ticket's timeline ("Date moved from Oct 3, 2026 to Oct 10, 2026"), so
+ * every push is on record (owner, Oct 1). Best effort: the move itself is already saved.
+ */
+async function logTicketDateMove(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  oldYmd: string | null | undefined,
+  newYmd: string | null | undefined,
+  actor: { id: string; name: string | null },
+): Promise<void> {
+  const note = dateMoveNote("Date", oldYmd, newYmd);
+  if (!note) return;
+  const { error } = await sb.from("service_job_events").insert({
+    service_job_id: jobId,
+    kind: "note",
+    note,
+    by_user: actor.id,
+    by_name: actor.name,
+    meta: { date_from: oldYmd ?? null, date_to: newYmd ?? null },
+  });
+  if (error) console.error("Could not log the date move", error.message);
 }
 
 /** The stages a technician may set; Invoiced and Closed belong to the office (owner, Sep 27). */
@@ -410,11 +449,19 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("service_jobs")
-      .select("stage")
+      .select("stage, scheduled_date")
       .eq("id", data.id)
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Ticket not found");
+    // A drop onto another day moves the date: an admin's or a manager's (owner, Oct 1). A drop
+    // that only changes the technician on the same day is anyone's in the office.
+    const moveProblem = dateMoveProblem({
+      profile: p,
+      oldYmd: cur.scheduled_date,
+      newYmd: data.scheduled_date,
+    });
+    if (moveProblem) throw new Error(moveProblem);
     const stage =
       cur.stage === "open" || cur.stage === "scheduled"
         ? data.technician_id && data.scheduled_date
@@ -433,6 +480,10 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    await logTicketDateMove(sb, row.id, cur.scheduled_date, row.scheduled_date, {
+      id: context.userId,
+      name: nameOf(p),
+    });
     // Row 0 of a named crew mirrors the technician (the board shows and moves the lead).
     const { syncCrewLead } = await import("@/lib/service-crew.server");
     await syncCrewLead(sb, row.id, row.technician_id);

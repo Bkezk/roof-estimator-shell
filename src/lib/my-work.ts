@@ -92,7 +92,29 @@ export interface FollowupIn {
   item_id: string;
   assignee_id: string;
   account_name?: string | null;
+  /** Reminder cadence and a running snooze (My Work's follow-up state line). */
+  every_days?: number | null;
+  snoozed_until?: string | null;
 }
+
+/** The open follow-up behind a row: its state line, and Snooze / Close for managers. */
+export interface WorkFollowup {
+  id: string;
+  title: string;
+  due_at: string;
+  status: string;
+  every_days: number | null;
+  snoozed_until: string | null;
+}
+
+const workFollowup = (f: FollowupIn): WorkFollowup => ({
+  id: f.id,
+  title: f.title,
+  due_at: f.due_at,
+  status: f.status,
+  every_days: f.every_days ?? null,
+  snoozed_until: f.snoozed_until ?? null,
+});
 
 export interface WorkRows {
   tickets: TicketIn[];
@@ -119,6 +141,8 @@ export interface WorkItem {
   href: string;
   assigneeId: string | null;
   assigneeName: string | null;
+  /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
+  followup: WorkFollowup | null;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -162,7 +186,11 @@ const joinWhere = (...parts: (string | null | undefined)[]) =>
     .filter(Boolean)
     .join(" · ") || null;
 
-export function ticketItem(t: TicketIn, names: Record<string, string> = {}): WorkItem {
+export function ticketItem(
+  t: TicketIn,
+  names: Record<string, string> = {},
+  followup: FollowupIn | null = null,
+): WorkItem {
   const what = t.description.trim();
   return {
     key: `ticket:${t.id}`,
@@ -175,6 +203,7 @@ export function ticketItem(t: TicketIn, names: Record<string, string> = {}): Wor
     href: `/service?id=${t.id}`,
     assigneeId: t.technician_id,
     assigneeName: t.technician_id ? (names[t.technician_id] ?? null) : null,
+    followup: followup ? workFollowup(followup) : null,
   };
 }
 
@@ -190,6 +219,7 @@ export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkIte
     href: t.building_id ? `/prospect?building=${t.building_id}` : "/prospect",
     assigneeId: t.assignee,
     assigneeName: (t.assignee ? names[t.assignee] : null) ?? t.assignee_name ?? null,
+    followup: null,
   };
 }
 
@@ -206,10 +236,11 @@ export function followupItem(
     date: toYmd(f.due_at),
     status: "Open",
     done: false,
-    // Only an in-app path (the follow-up's own link); anything else goes to the Follow-ups page.
-    href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/followups",
+    // Only an in-app path (the follow-up's own link); anything else stays on My Work.
+    href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/my-work",
     assigneeId: f.assignee_id,
     assigneeName: names[f.assignee_id] ?? null,
+    followup: workFollowup(f),
   };
 }
 
@@ -225,14 +256,20 @@ export function compareWork(a: WorkItem, b: WorkItem): number {
 
 /**
  * Every row as one sorted list. A ticket's follow-up timer is dropped when that ticket is already
- * on the list for the same person (the ticket row says it once).
+ * on the list for the same person: the ticket row carries it (its state line, Snooze / Close).
  */
 export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = localYmd): WorkItem[] {
   const names = rows.names ?? {};
   const listedTickets = rows.tickets.filter((t) =>
     (WORK_TICKET_STAGES as readonly string[]).includes(t.stage),
   );
-  const tickets = listedTickets.map((t) => ticketItem(t, names));
+  const ticketTimers = new Map<string, FollowupIn>();
+  for (const f of rows.followups)
+    if (f.kind === "ticket" && f.status === "open")
+      ticketTimers.set(`${f.item_id}|${f.assignee_id}`, f);
+  const tickets = listedTickets.map((t) =>
+    ticketItem(t, names, ticketTimers.get(`${t.id}|${t.technician_id ?? ""}`) ?? null),
+  );
   const listed = new Set(listedTickets.map((t) => `${t.id}|${t.technician_id ?? ""}`));
   const tasks = rows.tasks.filter((t) => t.status !== "done").map((t) => taskItem(t, names));
   const followups = rows.followups

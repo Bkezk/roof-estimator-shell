@@ -11,6 +11,8 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
+import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
+import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
 import { assigneeProblem, opportunitySiteProblem } from "@/lib/opportunity-form";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
@@ -192,6 +194,23 @@ export const saveOpportunity = createServerFn({ method: "POST" })
         site_id = siteCount === 1 && live?.[0] ? live[0].id : null;
       }
     }
+    // The stored expected close: once set, only an admin or a manager moves it (owner, Oct 1).
+    let oldClose: string | null = null;
+    if (id) {
+      const { data: cur, error: cErr } = await sb
+        .from("crm_opportunities")
+        .select("expected_close")
+        .eq("id", id)
+        .maybeSingle();
+      if (cErr) throw new Error(cErr.message);
+      oldClose = cur?.expected_close ?? null;
+      const moveProblem = dateMoveProblem({
+        profile: p,
+        oldYmd: oldClose,
+        newYmd: fields.expected_close,
+      });
+      if (moveProblem) throw new Error(moveProblem);
+    }
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
       const { data: s } = await sb
@@ -208,7 +227,8 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       title: fields.title,
       description: fields.description ?? null,
       ...(fields.assignee_id ? { assignee_id: fields.assignee_id } : {}),
-      expected_close: expected,
+      // An update that leaves the date out keeps it (opportunityDateProblem: never cleared).
+      ...(id && fields.expected_close === undefined ? {} : { expected_close: expected }),
       ...(fields.status ? { status: fields.status } : {}),
       lead_source: fields.lead_source ?? null,
       est_value: fields.est_value ?? null,
@@ -226,6 +246,20 @@ export const saveOpportunity = createServerFn({ method: "POST" })
         .single();
       if (error) throw new Error(error.message);
       row = r;
+      // Every move goes in the contact log as a plain note (not a contact: it does not stamp
+      // contacted_at — 20261001030000_followups_manager_only.sql). Best effort: already saved.
+      const note = dateMoveNote("Expected close", oldClose, row.expected_close);
+      if (note) {
+        const { error: logErr } = await sb.from("crm_contact_log").insert({
+          kind: "opportunity",
+          item_id: row.id,
+          method: LOG_NOTE_METHOD,
+          note,
+          by_user: context.userId,
+          by_name: nameOf(p),
+        });
+        if (logErr) console.error("Could not log the expected close move", logErr.message);
+      }
     } else {
       const { data: r, error } = await sb
         .from("crm_opportunities")

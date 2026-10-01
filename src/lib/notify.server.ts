@@ -266,7 +266,7 @@ export async function dispatchDueReminders(
       {
         kind: "followup",
         title: `Follow up: ${f.title}`,
-        body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until you close it.`,
+        body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
         url: f.url,
         followup_id: f.id,
       },

@@ -34,7 +34,7 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import {
   CONTACT_METHOD_LABELS,
-  CONTACT_METHODS,
+  contactMethodLabel,
   daysSince,
   isPastLimit,
   listContactLog,
@@ -56,8 +56,6 @@ const whenShort = (iso: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
-const asMethod = (s: string): ContactMethod =>
-  (CONTACT_METHODS as readonly string[]).includes(s) ? (s as ContactMethod) : "other";
 
 /**
  * Map key of an untouched row: `${kind}:${id}`. The pages load listUntouched under the query key
@@ -207,7 +205,7 @@ export function ContactLogList({ kind, itemId }: { kind: ContactKind; itemId: st
     <ul className="space-y-1 text-xs">
       {q.data.map((r) => (
         <li key={r.id}>
-          <span className="font-medium">{CONTACT_METHOD_LABELS[asMethod(r.method)]}</span>
+          <span className="font-medium">{contactMethodLabel(r.method)}</span>
           <span className="text-muted-foreground">
             {" "}
             · {whenShort(r.at)}
@@ -254,7 +252,7 @@ export function LatestContact({ kind, itemId }: { kind: ContactKind; itemId: str
         {!showAll && (
           <p className="min-w-0 truncate text-xs" title={last.note ?? undefined}>
             <span className="text-muted-foreground">Last: </span>
-            <span className="font-medium">{CONTACT_METHOD_LABELS[asMethod(last.method)]}</span>
+            <span className="font-medium">{contactMethodLabel(last.method)}</span>
             <span className="text-muted-foreground">
               {" "}
               · {whenShort(last.at)}

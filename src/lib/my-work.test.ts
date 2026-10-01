@@ -152,14 +152,17 @@ describe("My Work items", () => {
           // The timer of an invoiced ticket that is not listed: kept.
           followup({ id: "f3", kind: "ticket", item_id: "t4", url: "/service?id=t4" }),
           followup({ id: "f4", status: "closed" }),
-          // Not an in-app path: the link falls back to the Follow-ups page.
+          // Not an in-app path: the link stays on My Work (the Follow-ups page is folded in).
           followup({ id: "f5", url: "https://evil.example" }),
         ],
       },
       utcDay,
     );
     expect(items.map((i) => i.key).sort()).toEqual(["followup:f3", "followup:f5", "ticket:t1"]);
-    expect(items.find((i) => i.key === "followup:f5")?.href).toBe("/followups");
+    expect(items.find((i) => i.key === "followup:f5")?.href).toBe("/my-work");
+    // The listed ticket carries its own timer (state line, Snooze / Close on My Work).
+    expect(items.find((i) => i.key === "ticket:t1")?.followup?.id).toBe("f2");
+    expect(items.find((i) => i.key === "followup:f3")?.followup?.id).toBe("f3");
   });
 
   it("shows whose item it is from the names map", () => {

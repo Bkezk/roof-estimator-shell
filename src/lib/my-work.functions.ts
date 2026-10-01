@@ -83,9 +83,11 @@ export const listMyWork = createServerFn({ method: "GET" })
       .limit(LIMIT);
     kq = scope === "all" ? kq.not("assignee", "is", null) : kq.in("assignee", scope);
 
+    // Every column: snoozed_until arrives with 20261001030000_followups_manager_only.sql, and a
+    // named list would fail until that migration is applied.
     let fq = sb
       .from("crm_followups")
-      .select("id, title, url, due_at, status, kind, item_id, assignee_id, account_id")
+      .select("*")
       .eq("status", "open")
       .order("due_at", { ascending: true })
       .limit(LIMIT);
@@ -131,9 +133,18 @@ export const listMyWork = createServerFn({ method: "GET" })
         ...t,
         building_label: t.building_id ? (buildingLabel.get(t.building_id) ?? null) : null,
       })),
-      followups: (followups.data ?? []).map(({ account_id, ...f }) => ({
-        ...f,
-        account_name: account_id ? (accountName.get(account_id) ?? null) : null,
+      followups: (followups.data ?? []).map((f) => ({
+        id: f.id,
+        title: f.title,
+        url: f.url,
+        due_at: f.due_at,
+        status: f.status,
+        kind: f.kind,
+        item_id: f.item_id,
+        assignee_id: f.assignee_id,
+        every_days: f.every_days,
+        snoozed_until: f.snoozed_until ?? null,
+        account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
       })),
       names,
       people,

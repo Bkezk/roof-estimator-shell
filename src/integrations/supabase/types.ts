@@ -552,6 +552,7 @@ export type Database = {
           account_id: string | null;
           assignee_id: string;
           closed_at: string | null;
+          closed_by_sync: boolean;
           closed_reason: string | null;
           created_at: string;
           created_by: string | null;
@@ -563,6 +564,7 @@ export type Database = {
           last_reminded_at: string | null;
           next_remind_at: string;
           reminders_sent: number;
+          snoozed_until: string | null;
           status: string;
           title: string;
           updated_at: string;
@@ -572,6 +574,7 @@ export type Database = {
           account_id?: string | null;
           assignee_id: string;
           closed_at?: string | null;
+          closed_by_sync?: boolean;
           closed_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
@@ -583,6 +586,7 @@ export type Database = {
           last_reminded_at?: string | null;
           next_remind_at: string;
           reminders_sent?: number;
+          snoozed_until?: string | null;
           status?: string;
           title: string;
           updated_at?: string;
@@ -592,6 +596,7 @@ export type Database = {
           account_id?: string | null;
           assignee_id?: string;
           closed_at?: string | null;
+          closed_by_sync?: boolean;
           closed_reason?: string | null;
           created_at?: string;
           created_by?: string | null;
@@ -603,6 +608,7 @@ export type Database = {
           last_reminded_at?: string | null;
           next_remind_at?: string;
           reminders_sent?: number;
+          snoozed_until?: string | null;
           status?: string;
           title?: string;
           updated_at?: string;

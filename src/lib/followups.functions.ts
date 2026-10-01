@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
 
 export type FollowupRow = Database["public"]["Tables"]["crm_followups"]["Row"];
 export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
@@ -51,13 +52,19 @@ export const listFollowups = createServerFn({ method: "GET" })
     }));
   });
 
-/** Close a follow-up by hand (the item itself keeps its status). */
+/**
+ * Close a follow-up by hand (the item itself keeps its status). Admins and managers only (owner,
+ * Oct 1); the database trigger crm_followups_manager_only says the same. The automatic close
+ * when an item is finished is syncFollowup's (followups.server.ts), not this.
+ */
 export const closeFollowup = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), reason: z.string().trim().max(200).optional() }).parse(d),
   )
   .handler(async ({ data, context }): Promise<void> => {
+    const p = await me(context);
+    if (!canManageFollowup(p)) throw new Error(FOLLOWUP_MANAGER_ONLY);
     const { error, count } = await context.supabase
       .from("crm_followups")
       .update(
@@ -71,24 +78,34 @@ export const closeFollowup = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .eq("status", "open");
     if (error) throw new Error(error.message);
-    if (!count) throw new Error("That follow-up is not open, or is not yours to close");
+    if (!count) throw new Error("That follow-up is not open, or you may not close it");
   });
 
-/** Push the next reminder out by N days (the item stays open). */
+/**
+ * Push the next reminder out by N days (the item stays open; My Work shows "Snoozed until …").
+ * Admins and managers only (owner, Oct 1), like closeFollowup.
+ */
 export const snoozeFollowup = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), days: z.number().int().min(1).max(60) }).parse(d),
   )
   .handler(async ({ data, context }): Promise<void> => {
+    const p = await me(context);
+    if (!canManageFollowup(p)) throw new Error(FOLLOWUP_MANAGER_ONLY);
     const next = new Date(Date.now() + data.days * 86400000).toISOString();
-    const { error, count } = await context.supabase
-      .from("crm_followups")
-      .update({ next_remind_at: next }, { count: "exact" })
-      .eq("id", data.id)
-      .eq("status", "open");
+    const snooze = (patch: { next_remind_at: string; snoozed_until?: string }) =>
+      context.supabase
+        .from("crm_followups")
+        .update(patch, { count: "exact" })
+        .eq("id", data.id)
+        .eq("status", "open");
+    let { error, count } = await snooze({ next_remind_at: next, snoozed_until: next });
+    // Before 20261001030000_followups_manager_only.sql is applied there is no snoozed_until.
+    if (error && (error.code === "PGRST204" || /snoozed_until/.test(error.message)))
+      ({ error, count } = await snooze({ next_remind_at: next }));
     if (error) throw new Error(error.message);
-    if (!count) throw new Error("That follow-up is not open, or is not yours");
+    if (!count) throw new Error("That follow-up is not open, or you may not snooze it");
   });
 
 /** The signed-in user's inbox, newest first. */

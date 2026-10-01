@@ -29,6 +29,21 @@ export const CONTACT_METHOD_LABELS: Record<ContactMethod, string> = {
   visited: "Visited",
   other: "Other",
 };
+/**
+ * A plain log note that is not a contact ("Expected close moved from … to …", owner, Oct 1): it
+ * is listed with the contacts but does not stamp contacted_at or move an Open opportunity to
+ * Contacted (crm_contact_log_apply skips it). Not one of the one-tap buttons.
+ */
+export const LOG_NOTE_METHOD = "note";
+/** The label a logged row shows: the contact method, or "Note" for a plain note. */
+export const contactMethodLabel = (method: string): string =>
+  method === LOG_NOTE_METHOD
+    ? "Note"
+    : CONTACT_METHOD_LABELS[
+        (CONTACT_METHODS as readonly string[]).includes(method)
+          ? (method as ContactMethod)
+          : "other"
+      ];
 export const CONTACT_KINDS = ["ticket", "opportunity"] as const;
 export type ContactKind = (typeof CONTACT_KINDS)[number];
 

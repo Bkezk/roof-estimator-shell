@@ -5,8 +5,13 @@
  * Every signed-in user lands here. Admins and managers also get a "Show" picker (Mine /
  * Everyone / one person); the server returns only the caller's own items to anyone else.
  *
- * Read-only: each row links to the ticket, the task's building or the follow-up's item. The
- * rules (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts.
+ * Each row links to the ticket, the task's building or the follow-up's item. The Follow-ups page
+ * is folded in here (owner, Oct 1): a ticket, opportunity or follow-up row shows its follow-up
+ * state (Due / Overdue N days / Snoozed until / Reminders every N days). Snooze and Close are
+ * for admins and managers only (seesEveryone; the server and the database refuse anyone else);
+ * everyone else sees the state with one line saying their manager manages follow-ups. The rules
+ * (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts, the follow-up
+ * state in src/lib/followup-rules.ts.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -15,6 +20,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   CalendarDays,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   List,
@@ -24,6 +30,8 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { seesEveryone } from "@/lib/access";
+import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
 import {
   KIND_LABELS,
@@ -35,9 +43,12 @@ import {
   monthGrid,
   compareWork,
   ymdParts,
+  type WorkFollowup,
   type WorkItem,
   type WorkKind,
 } from "@/lib/my-work";
+import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
+import { useFollowupActions } from "@/components/followups-shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TaskDialog } from "@/components/tasks/task-dialog";
@@ -84,36 +95,83 @@ const monthLabel = (month: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 };
 
-/** One item: type badge, title, customer / property, date, status (and whose, when not mine). */
-function WorkRow({ item, showWho }: { item: WorkItem; showWho: boolean }) {
-  const navigate = useNavigate();
+/** Snooze / Close for one row's follow-up: admins and managers only (null for everyone else). */
+type ManageFollowup = (f: WorkFollowup) => React.ReactNode;
+
+/** A row's follow-up state: "Overdue 3 days · Snoozed until Fri, Oct 3 · Reminders every 3 days". */
+function FollowupState({ f, today }: { f: WorkFollowup; today: string }) {
+  const parts = followupStateText(f, today);
   return (
-    <a
-      href={item.href}
-      className={`block rounded-lg border bg-card p-3 transition-colors hover:bg-muted/50 ${
+    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs">
+      {parts.map((p, i) => (
+        <span
+          key={p.text}
+          className={
+            p.tone === "overdue" ? "font-medium text-destructive" : "text-muted-foreground"
+          }
+        >
+          {i > 0 && <span className="mr-2 text-muted-foreground">·</span>}
+          {p.text}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One item: type badge, title, customer / property, date, status (and whose, when not mine), the
+ * follow-up state, and — for admins and managers — Snooze / Close under the link.
+ */
+function WorkRow({
+  item,
+  showWho,
+  today,
+  manage,
+}: {
+  item: WorkItem;
+  showWho: boolean;
+  today: string;
+  manage: ManageFollowup | null;
+}) {
+  const navigate = useNavigate();
+  const f = item.followup && item.followup.status === "open" ? item.followup : null;
+  return (
+    <div
+      className={`rounded-lg border bg-card transition-colors hover:bg-muted/50 ${
         item.done ? "opacity-70" : ""
       }`}
-      onClick={(e) => {
-        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        void navigate({ href: item.href });
-      }}
     >
-      <div className="flex items-start gap-2">
-        <Badge variant="outline" className={`shrink-0 ${KIND_CLASS[item.kind]}`}>
-          {KIND_LABELS[item.kind]}
-        </Badge>
-        <span className="min-w-0 flex-1 break-words font-medium leading-snug">{item.title}</span>
-      </div>
-      {item.where && (
-        <div className="mt-1 break-words text-sm text-muted-foreground">{item.where}</div>
+      <a
+        href={item.href}
+        className="block p-3"
+        onClick={(e) => {
+          if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          void navigate({ href: item.href });
+        }}
+      >
+        <div className="flex items-start gap-2">
+          <Badge variant="outline" className={`shrink-0 ${KIND_CLASS[item.kind]}`}>
+            {KIND_LABELS[item.kind]}
+          </Badge>
+          <span className="min-w-0 flex-1 break-words font-medium leading-snug">{item.title}</span>
+        </div>
+        {item.where && (
+          <div className="mt-1 break-words text-sm text-muted-foreground">{item.where}</div>
+        )}
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          <span>{item.date ? dayLabel(item.date) : "No date"}</span>
+          <span>{item.status}</span>
+          {showWho && <span>{item.assigneeName ?? "(unknown)"}</span>}
+        </div>
+        {f && <FollowupState f={f} today={today} />}
+      </a>
+      {f && manage && (
+        <div className="flex flex-wrap items-center justify-end gap-1 border-t px-3 py-2">
+          {manage(f)}
+        </div>
       )}
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        <span>{item.date ? dayLabel(item.date) : "No date"}</span>
-        <span>{item.status}</span>
-        {showWho && <span>{item.assigneeName ?? "(unknown)"}</span>}
-      </div>
-    </a>
+    </div>
   );
 }
 
@@ -121,10 +179,12 @@ function ListView({
   items,
   today,
   showWho,
+  manage,
 }: {
   items: WorkItem[];
   today: string;
   showWho: boolean;
+  manage: ManageFollowup | null;
 }) {
   const groups = useMemo(() => groupWork(items, today), [items, today]);
   return (
@@ -138,7 +198,7 @@ function ListView({
           </h2>
           <div className="grid gap-2 lg:grid-cols-2">
             {g.items.map((it) => (
-              <WorkRow key={it.key} item={it} showWho={showWho} />
+              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
             ))}
           </div>
         </section>
@@ -151,10 +211,12 @@ function CalendarView({
   items,
   today,
   showWho,
+  manage,
 }: {
   items: WorkItem[];
   today: string;
   showWho: boolean;
+  manage: ManageFollowup | null;
 }) {
   const [month, setMonth] = useState(() => today.slice(0, 7));
   const [day, setDay] = useState(today);
@@ -282,7 +344,7 @@ function CalendarView({
         ) : (
           <div className="grid gap-2 lg:grid-cols-2">
             {dayItems.map((it) => (
-              <WorkRow key={it.key} item={it} showWho={showWho} />
+              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
             ))}
           </div>
         )}
@@ -320,6 +382,29 @@ export function MyWorkPage(props: {
 
   const items = useMemo(() => (q.data ? mergeWork(q.data) : []), [q.data]);
   const today = localYmd(new Date());
+
+  // Follow-ups are management's (owner, Oct 1): Snooze / Close only under seesEveryone (admin or
+  // manager); the server (canManageFollowup) and the database trigger refuse anyone else.
+  const canManage = seesEveryone(profile);
+  const { snooze, close } = useFollowupActions();
+  const [closing, setClosing] = useState<WorkFollowup | null>(null);
+  const manage: ManageFollowup | null = canManage
+    ? (f) => {
+        const busy =
+          (snooze.isPending && snooze.variables?.id === f.id) ||
+          (close.isPending && close.variables?.id === f.id);
+        return (
+          <>
+            {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            <SnoozeMenu disabled={busy} onSnooze={(days) => snooze.mutate({ id: f.id, days })} />
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => setClosing(f)}>
+              <CheckCircle2 className="mr-1 h-4 w-4" /> Close
+            </Button>
+          </>
+        );
+      }
+    : null;
+  const hasFollowups = items.some((i) => i.followup?.status === "open");
   const canPick = !!q.data?.canPick;
   const scope = q.data?.scope;
   const mineOnly = scope !== "all" && scope?.length === 1 && scope[0] === profile?.id;
@@ -403,6 +488,10 @@ export function MyWorkPage(props: {
         {q.isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
+      {!canManage && hasFollowups && !errMsg && (
+        <p className="text-xs text-muted-foreground">Follow-ups are managed by your manager.</p>
+      )}
+
       {q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : errMsg ? (
@@ -413,13 +502,28 @@ export function MyWorkPage(props: {
           </Button>
         </div>
       ) : props.view === "calendar" ? (
-        <CalendarView items={items} today={today} showWho={showWho} />
+        <CalendarView items={items} today={today} showWho={showWho} manage={manage} />
       ) : items.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
           Nothing assigned{mineOnly ? " to you" : ""} right now.
         </p>
       ) : (
-        <ListView items={items} today={today} showWho={showWho} />
+        <ListView items={items} today={today} showWho={showWho} manage={manage} />
+      )}
+
+      {canManage && (
+        <CloseFollowupDialog
+          target={closing}
+          pending={close.isPending}
+          onCancel={() => setClosing(null)}
+          onConfirm={(reason) => {
+            if (!closing) return;
+            close.mutate(
+              { id: closing.id, ...(reason ? { reason } : {}) },
+              { onSuccess: () => setClosing(null) },
+            );
+          }}
+        />
       )}
     </div>
   );

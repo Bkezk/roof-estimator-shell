@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { seesEveryone } from "@/lib/access";
+import { canManageFollowup } from "@/lib/followup-rules";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   assigneeProblem,
@@ -63,7 +65,7 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { LeadSourcePicker } from "@/components/crm/lead-source-picker";
 import { SiteSelect } from "@/components/crm/site-select";
-import { CloseFollowupDialog, SnoozeMenu } from "@/components/followups-page";
+import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
 import {
   ContactLogList,
@@ -606,6 +608,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(opp));
   const [savedKey, setSavedKey] = useState(() => draftKey(draft));
+  // Once an opportunity has an expected close, only an admin or a manager moves it (owner, Oct 1;
+  // the server refuses anyone else with "Only a manager can move the date").
+  const closeLocked = !!opp?.expected_close && !seesEveryone(profile);
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -883,8 +888,12 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                 id="opp-close"
                 type="date"
                 value={draft.expected_close}
-                onChange={(e) => set("expected_close", e.target.value)}
+                readOnly={closeLocked}
+                onChange={(e) => {
+                  if (!closeLocked) set("expected_close", e.target.value);
+                }}
               />
+              {closeLocked && <p className="text-xs text-muted-foreground">Managers move dates</p>}
               {opp && !draft.expected_close && (
                 <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
               )}
@@ -1137,7 +1146,9 @@ function OppCustomerBlock(props: {
 
 /** The opportunity's open follow-up (if any) with Snooze / Close. */
 function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: OppStatus }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
+  // Snooze / Close are a manager's (owner, Oct 1); everyone else sees the state only.
+  const canManage = canManageFollowup(profile);
   const listFn = useServerFn(listFollowups);
   const followups = useQuery({
     queryKey: followupsKey(false),
@@ -1186,29 +1197,33 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
           · due {whenDay(f.due_at)} · {f.reminders_sent} sent
         </span>
       </span>
-      <SnoozeMenu
-        disabled={snooze.isPending || close.isPending}
-        onSnooze={(days) => snooze.mutate({ id: f.id, days })}
-      />
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={snooze.isPending || close.isPending}
-        onClick={() => setClosing(true)}
-      >
-        <CheckCircle2 className="mr-1 h-4 w-4" /> Close
-      </Button>
-      <CloseFollowupDialog
-        target={closing ? { id: f.id, title: f.title } : null}
-        pending={close.isPending}
-        onCancel={() => setClosing(false)}
-        onConfirm={(reason) =>
-          close.mutate(
-            { id: f.id, ...(reason ? { reason } : {}) },
-            { onSuccess: () => setClosing(false) },
-          )
-        }
-      />
+      {canManage && (
+        <>
+          <SnoozeMenu
+            disabled={snooze.isPending || close.isPending}
+            onSnooze={(days) => snooze.mutate({ id: f.id, days })}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={snooze.isPending || close.isPending}
+            onClick={() => setClosing(true)}
+          >
+            <CheckCircle2 className="mr-1 h-4 w-4" /> Close
+          </Button>
+          <CloseFollowupDialog
+            target={closing ? { id: f.id, title: f.title } : null}
+            pending={close.isPending}
+            onCancel={() => setClosing(false)}
+            onConfirm={(reason) =>
+              close.mutate(
+                { id: f.id, ...(reason ? { reason } : {}) },
+                { onSuccess: () => setClosing(false) },
+              )
+            }
+          />
+        </>
+      )}
     </div>
   );
 }

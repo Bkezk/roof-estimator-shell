@@ -56,8 +56,9 @@ const estimatorItems = [
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
 // Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
-// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities, Follow-ups
-// (page null = every signed-in user has some). Today sits first, for technicians only: it is
+// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities. Follow-ups
+// live on My Work (owner, Oct 1; /followups redirects there). Today sits first, for technicians
+// only: it is
 // the field day for the signed-in tech, so an office login never sees it. `exact`: active only
 // on that path.
 type ServiceItem = {
@@ -78,7 +79,6 @@ const customerItems: ServiceItem[] = [
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
   { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
-  { title: "Follow-ups", url: "/followups", icon: BellRing, page: null },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [

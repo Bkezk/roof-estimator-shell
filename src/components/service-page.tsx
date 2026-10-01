@@ -64,7 +64,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice } from "@/lib/access";
+import { isOffice, seesEveryone } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   deleteServiceJob,
@@ -1470,6 +1470,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const crewNames = (crewQ.data ?? []).filter((r) => r.sort !== 0).map((r) => r.name);
   // Every ticket has a date (owner, Oct 1): the office cannot create or save one without.
   const dateMissing = !draft.scheduled_date;
+  // Once a ticket has a date, only an admin or a manager moves it (owner, Oct 1; the server
+  // refuses anyone else with "Only a manager can move the date").
+  const dateLocked = !!job?.scheduled_date && !seesEveryone(profile);
   const dateInput = (
     <div className="space-y-1">
       <Input
@@ -1480,8 +1483,12 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         className={dateMissing ? "border-destructive" : undefined}
         value={draft.scheduled_date}
         disabled={ro}
-        onChange={(e) => set("scheduled_date", e.target.value)}
+        readOnly={dateLocked}
+        onChange={(e) => {
+          if (!dateLocked) set("scheduled_date", e.target.value);
+        }}
       />
+      {dateLocked && !ro && <p className="text-xs text-muted-foreground">Managers move dates</p>}
       {dateMissing && !ro && <p className="text-xs text-destructive">{TICKET_DATE_REQUIRED}</p>}
     </div>
   );
