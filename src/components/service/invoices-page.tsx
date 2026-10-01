@@ -1,12 +1,14 @@
 /**
  * The Invoices list (docs/service-module-design.md §5.4–§5.5): every ticket invoice, filtered by
- * status and invoice date, with footer totals for the rows shown; a row opens its ticket (where
- * the invoice is edited). **Export to Sage** writes the bookkeeper's CSV for a date range
- * (final, sent and paid invoices) and stamps them exported.
+ * status and invoice date, with footer totals for the rows shown; a row opens the invoice on its
+ * own full-width page (`?id=<invoice uuid>`, invoice-editor.tsx; owner, Oct 1), where it is
+ * edited. **Export to Sage** writes the bookkeeper's CSV for a date range (final, sent and paid
+ * invoices) and stamps them exported.
  *
- * The first chip, **To invoice** (`?tab=to-invoice`), is the queue before that: the tickets at
- * stage Done, which is exactly "waiting to be invoiced" (finalising moves a ticket to
- * Invoiced), longest waiting first; a row opens the ticket, where its invoice block is.
+ * The first chip, **Awaiting invoice** (`?tab=to-invoice`; owner, Oct 1, asked what "To
+ * invoice" meant), is the queue before that: the tickets at stage Done, which is exactly
+ * "marked Done with no finalised invoice yet" (finalising moves a ticket to Invoiced), longest
+ * waiting first; a row opens the ticket, where its invoice card is.
  *
  * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); technicians
  * never see money (the server refuses them too). Every change is logged (audit_log).
@@ -21,6 +23,7 @@ import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
+import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
 import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
 import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
 import {
@@ -29,7 +32,7 @@ import {
   listInvoices,
   type InvoiceStatus,
 } from "@/lib/invoices.functions";
-import { InvoiceStatusBadge } from "@/components/service/invoice-block";
+import { InvoiceEditorPage, InvoiceStatusBadge } from "@/components/service/invoice-editor";
 import {
   asInvoiceStatus,
   downloadBlob,
@@ -53,7 +56,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function InvoicesPage({ toInvoice = false }: { toInvoice?: boolean }) {
+export function InvoicesPage({
+  toInvoice = false,
+  invoiceId,
+}: {
+  toInvoice?: boolean;
+  /** ?id=: that invoice, full width. */
+  invoiceId?: string | undefined;
+}) {
   const { profile } = useAuth();
   if (!seesInvoices(profile))
     return (
@@ -65,12 +75,18 @@ export function InvoicesPage({ toInvoice = false }: { toInvoice?: boolean }) {
         </Button>
       </div>
     );
+  if (invoiceId) return <InvoiceEditorPage id={invoiceId} />;
   return <InvoiceList toInvoice={toInvoice} />;
 }
 
 type StatusFilter = "all" | InvoiceStatus;
 
-function Chip(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip(props: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
     <Button
       type="button"
@@ -78,6 +94,7 @@ function Chip(props: { active: boolean; onClick: () => void; children: React.Rea
       variant={props.active ? "default" : "outline"}
       className="h-7 rounded-full px-3 text-xs"
       aria-pressed={props.active}
+      title={props.title}
       onClick={props.onClick}
     >
       {props.children}
@@ -90,8 +107,8 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const navigate = useNavigate();
   const listFn = useServerFn(listInvoices);
   const jobsFn = useServerFn(listServiceJobs);
-  // The invoice status chips; the To invoice chip is the URL's (?tab=to-invoice) so the
-  // Tickets list's "N to invoice" badge lands on it.
+  // The invoice status chips; the Awaiting invoice chip is the URL's (?tab=to-invoice) so the
+  // Invoices tab's count lands on it.
   const [status, setStatusState] = useState<StatusFilter>("all");
   const setStatus = (s: StatusFilter) => {
     setStatusState(s);
@@ -132,6 +149,8 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const anyFilter = status !== "all" || !!from || !!to;
   const open = (serviceJobId: string) =>
     void navigate({ to: "/service", search: { id: serviceJobId } });
+  const openInvoice = (invoiceId: string) =>
+    void navigate({ to: "/service/invoices", search: { id: invoiceId } });
 
   return (
     <div className="space-y-6">
@@ -140,9 +159,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Receipt className="h-6 w-6" /> Invoices
           </h1>
-          <p className="text-sm text-muted-foreground">
-            One per ticket; open a row to edit, send or mark it paid on its ticket.
-          </p>
+          <p className="text-sm text-muted-foreground">Open a row to edit, send or mark it paid.</p>
           <div className="mt-2">
             <ServiceTabs />
           </div>
@@ -154,8 +171,12 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
 
       <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Chip active={toInvoice} onClick={toInvoice ? () => setStatus("all") : showToInvoice}>
-            To invoice{jobsQ.data ? ` (${waiting.length})` : ""}
+          <Chip
+            active={toInvoice}
+            title={AWAITING_INVOICE_TITLE}
+            onClick={toInvoice ? () => setStatus("all") : showToInvoice}
+          >
+            Awaiting invoice{jobsQ.data ? ` (${waiting.length})` : ""}
           </Chip>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
           <Chip active={!toInvoice && status === "all"} onClick={() => setStatus("all")}>
@@ -237,7 +258,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
           {anyFilter
             ? "No invoices match these filters."
-            : "No invoices yet. A ticket's invoice is drafted when the office opens a Done ticket."}
+            : "No invoices yet. Make one from a Done ticket's invoice card (Make the invoice)."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -262,12 +283,12 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
                   <tr
                     key={r.id}
                     className={`cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/40 ${s === "void" ? "text-muted-foreground" : ""}`}
-                    onClick={() => open(r.service_job_id)}
+                    onClick={() => openInvoice(r.id)}
                   >
                     <td className="px-3 py-2 font-medium tabular-nums">
                       <Link
-                        to="/service"
-                        search={{ id: r.service_job_id }}
+                        to="/service/invoices"
+                        search={{ id: r.id }}
                         className="underline-offset-2 hover:underline"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -327,7 +348,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   );
 }
 
-/** The To invoice queue: Done tickets, longest waiting first; a row opens its ticket. */
+/** The Awaiting invoice queue: Done tickets, longest waiting first; a row opens its ticket. */
 function ToInvoiceTable(props: {
   rows: ServiceJobWithTech[];
   loading: boolean;
@@ -407,7 +428,7 @@ function ToInvoiceTable(props: {
         <tfoot>
           <tr className="border-t bg-muted/40 text-sm font-medium">
             <td className="px-3 py-2" colSpan={6}>
-              {props.rows.length} ticket{props.rows.length === 1 ? "" : "s"} to invoice
+              {props.rows.length} ticket{props.rows.length === 1 ? "" : "s"} awaiting invoice
             </td>
           </tr>
         </tfoot>

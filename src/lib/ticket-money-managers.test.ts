@@ -119,6 +119,7 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
     // Today first and no Board items for a technician.
     "src/components/app-sidebar.tsx": ["const isTech = !!profile && !isOffice(profile);"],
     "src/components/service/invoice-block.tsx": [],
+    "src/components/service/invoice-editor.tsx": [],
     "src/components/service/invoices-page.tsx": [],
     "src/components/service/board-page.tsx": [],
     "src/components/service/service-tabs.tsx": [],

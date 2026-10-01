@@ -9,6 +9,7 @@ import { Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
+import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -41,7 +42,12 @@ export function ServiceTabs({ toInvoice }: { toInvoice?: number }) {
             <t.icon className="h-4 w-4" />
             {t.title}
             {t.to === "/service/invoices" && toInvoice ? (
-              <span className="ml-1 rounded-full bg-primary px-1.5 text-[11px] text-primary-foreground">
+              // Awaiting invoice (owner, Oct 1: the plainer name for "to invoice").
+              <span
+                className="ml-1 rounded-full bg-primary px-1.5 text-[11px] text-primary-foreground"
+                title={AWAITING_INVOICE_TITLE}
+                aria-label={`${toInvoice} awaiting invoice`}
+              >
                 {toInvoice}
               </span>
             ) : null}

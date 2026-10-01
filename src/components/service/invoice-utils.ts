@@ -1,9 +1,23 @@
 /**
- * Small helpers shared by the invoice block on a ticket (invoice-block.tsx) and the Invoices
- * list (invoices-page.tsx): money, local calendar days, status labels and turning the server's
- * base64 PDF / CSV into something the browser opens or saves.
+ * Small helpers shared by the invoice card on a ticket (invoice-block.tsx), the invoice page
+ * (invoice-editor.tsx) and the Invoices list (invoices-page.tsx): the query keys, money, local
+ * calendar days, status labels and turning the server's base64 PDF / CSV into something the
+ * browser opens or saves.
  */
 import { INVOICE_STATUSES, type InvoiceStatus } from "@/lib/invoices.functions";
+
+/** Every invoice query of a ticket on its card (the prefix). */
+export const invoiceKey = (jobId: string) => ["ticket-invoice", jobId] as const;
+/** One invoice as the ticket's card shows it. */
+export const oneInvoiceKey = (jobId: string, id: string) => ["ticket-invoice", jobId, id] as const;
+/** A ticket's invoices (the chips). */
+export const ticketInvoicesKey = (jobId: string) => ["ticket-invoices", jobId] as const;
+/** One invoice on the full-width page. */
+export const invoicePageKey = (id: string) => ["invoice-page", id] as const;
+
+/** The Delete draft confirmation's text (the page and the ticket's card say the same). */
+export const deleteDraftNote = (ticketNumber: number, label: string) =>
+  `The draft and its lines are removed. The next invoice made for ticket #${ticketNumber} takes number ${label}.`;
 
 export const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

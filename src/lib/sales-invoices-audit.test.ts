@@ -324,7 +324,7 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
     );
   });
   it("the send dialog reads Service Rates (the default message) only for a manager", () => {
-    expect(read("src/components/service/invoice-block.tsx")).toMatch(
+    expect(read("src/components/service/invoice-editor.tsx")).toMatch(
       /queryKey: \["service-rates"\],\s*queryFn: \(\) => ratesFn\(\),(?:\s*\/\/[^\n]*)*\s*enabled: !!session && managesTickets\(profile\),/,
     );
   });
@@ -437,8 +437,8 @@ describe("History folds and listAudit: admins and managers only", () => {
     expect(seesEveryone(sales)).toBe(false);
     expect(seesEveryone(manager)).toBe(true);
   });
-  it("is on the invoice block and the customer profile", () => {
-    expect(read("src/components/service/invoice-block.tsx")).toMatch(
+  it("is on the invoice page (invoice-editor.tsx, moved from the ticket block) and the customer profile", () => {
+    expect(read("src/components/service/invoice-editor.tsx")).toMatch(
       /<AuditHistory entity="invoice" entityId=\{data\.invoice\.id\}/,
     );
     expect(read("src/components/customers-page.tsx")).toMatch(
