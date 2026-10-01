@@ -6,7 +6,12 @@
  * for Sage as CSV. Admins, managers and sales / project managers see and edit them
  * (`seesInvoices`; RLS: invoices_office) — owner, Oct 1: "Sales and PMs should be able to see
  * customers and invoices. However whatever is changed needs to be logged somewhere showing what
- * they did, when, and who." Every write here is logged (logAudit → audit_log), by everyone.
+ * they did, when, and who." Every write to an invoice or its lines is logged by the database
+ * (trigger audit_row → audit_log, migration 20261001080000), by everyone; nothing here logs.
+ *
+ * The ticket's stage: finalising (or sending a draft) marks it Invoiced, marking the invoice paid
+ * marks it Closed. Those two stages are a manager's (ticket-stage.ts), so the invoice path sets
+ * them through `set_ticket_stage_from_invoice` (ticketStageFromInvoice below).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -15,14 +20,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
-import {
-  INVOICE_FIELDS,
-  auditActor,
-  diffForAudit,
-  diffInvoiceLines,
-  type AuditActor,
-  type AuditEntry,
-} from "@/lib/audit";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { toBase64 } from "@/lib/webpush";
@@ -50,23 +47,38 @@ async function office(ctx: Ctx) {
   if (!data || !(canAccess(data, "service") || canAccess(data, "customers")))
     throw new Error("Forbidden: Service access required");
   // Owner, Oct 1: managers / admins, and sales / project managers ("Sales and PMs should be
-  // able to see customers and invoices"); every change is logged below.
+  // able to see customers and invoices"); every change is logged by the database.
   if (!seesInvoices(data)) throw new Error("Invoices are a manager's or sales'");
   return data;
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
-/** "Invoice 6012" for the audit summaries. */
-const invName = (inv: Pick<InvoiceRow, "display_number" | "number">) =>
-  `Invoice ${invoiceLabel(inv)}`.trim();
-/** Write the audit rows (audit.server.ts; never throws). */
-async function logAudit(
+/** Who is making the invoice (created_by, updated_by_name). */
+type Actor = { id: string; name: string };
+
+/**
+ * Mark the invoice's ticket Invoiced (finalised; the ticket then points at this invoice) or
+ * Closed (paid). Those stages are a manager's (ticket-stage.ts; trigger service_jobs_stage_rule),
+ * but whoever may finalise an invoice (`seesInvoices`, a sales / project manager too) sets them
+ * this one way: `public.set_ticket_stage_from_invoice` is SECURITY DEFINER, re-checks that the
+ * caller sees invoices and that the ticket has such an invoice, and is the path the trigger lets
+ * through. A refusal is reported (the invoice itself is already saved).
+ */
+async function ticketStageFromInvoice(
   sb: SupabaseClient<Database>,
-  actor: AuditActor,
-  e: AuditEntry | AuditEntry[],
+  jobId: string,
+  stage: "invoiced" | "closed",
+  invoiceId: string,
 ) {
-  const audit = await import("@/lib/audit.server");
-  await audit.logAudit(sb, actor, e);
+  const { error } = await sb.rpc("set_ticket_stage_from_invoice", {
+    p_job: jobId,
+    p_stage: stage,
+    p_invoice: invoiceId,
+  });
+  if (error)
+    throw new Error(
+      `The invoice is saved, but the ticket was not marked ${stage === "invoiced" ? "Invoiced" : "Closed"}: ${error.message}`,
+    );
 }
 /** Re-read the ticket after a stage change and run the stage automation (ticket-events). */
 async function stageEvent(
@@ -100,6 +112,31 @@ async function withLines(
   if (error) throw new Error(error.message);
   return { invoice: shown(invoice), lines: lines ?? [] };
 }
+type LineWrite = Database["public"]["Tables"]["invoice_lines"]["Insert"];
+const LINE_COLS = [
+  "sort",
+  "kind",
+  "description",
+  "qty",
+  "unit",
+  "rate",
+  "total",
+  "cost_rate",
+  "cost_total",
+  "on_date",
+  "source",
+  "taxable",
+] as const;
+/** Does the line as saved differ from the stored one (numbers compared as numbers)? */
+function lineChanged(prev: InvoiceLineRow, next: LineWrite): boolean {
+  return LINE_COLS.some((k) => {
+    const a = prev[k] ?? null;
+    const b = next[k] ?? null;
+    if (typeof a === "number" || typeof b === "number") return Number(a) !== Number(b);
+    return a !== b;
+  });
+}
+
 /** A voided legacy invoice keeps its number as a negative; the screens show the original. */
 const shown = (inv: InvoiceRow): InvoiceRow => ({
   ...inv,
@@ -127,7 +164,7 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const [existing] = await liveInvoices(sb, data.job_id);
     if (existing) return withLines(sb, existing);
-    return createInvoiceFor(sb, data.job_id, auditActor(context.userId, p), true);
+    return createInvoiceFor(sb, data.job_id, { id: context.userId, name: nameOf(p) }, true);
   });
 
 /** Another invoice on the same ticket ("6012.2", "6012.3", …), a draft from the ticket. */
@@ -136,7 +173,10 @@ export const createAnotherInvoice = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
-    return createInvoiceFor(context.supabase, data.job_id, auditActor(context.userId, p));
+    return createInvoiceFor(context.supabase, data.job_id, {
+      id: context.userId,
+      name: nameOf(p),
+    });
   });
 
 /** A ticket's invoices for the chips on the ticket (void ones too, greyed). */
@@ -179,7 +219,7 @@ const numberTaken = (e: { code?: string; message: string }) =>
 async function createInvoiceFor(
   sb: SupabaseClient<Database>,
   jobId: string,
-  actor: AuditActor,
+  actor: Actor,
   /** getOrCreate: a draft made meanwhile by another tab is the one to open, not a ".2". */
   onlyIfNone = false,
 ): Promise<InvoiceWithLines> {
@@ -259,16 +299,6 @@ async function createInvoiceFor(
       .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
     if (lErr) throw new Error(lErr.message);
   }
-  await logAudit(sb, actor, {
-    entity: "invoice",
-    entity_id: inv.id,
-    action: "create",
-    label: invName(inv),
-    changes: {
-      ...diffForAudit(null, inv, ["subtotal", "tax_rate", "tax_amount", "total", "cost_total"]),
-      lines: { from: null, to: lines.length },
-    },
-  });
   await sb.from("service_jobs").update({ invoice_id: inv.id }).eq("id", job.id);
   return withLines(sb, inv);
 }
@@ -305,10 +335,7 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
     const lines = await buildLinesFromJob(sb, inv.service_job_id);
-    const { count: oldCount } = await sb
-      .from("invoice_lines")
-      .select("id", { count: "exact", head: true })
-      .eq("invoice_id", inv.id);
+    // The lines are thrown away and made again (new ids): the log shows each removed and added.
     await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
     if (lines.length) {
       const { error: lErr } = await sb
@@ -324,24 +351,6 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (uErr) throw new Error(uErr.message);
-    // The lines are thrown away and made again (new ids): logged as one entry on the invoice,
-    // the line count and the totals before → after.
-    const changes = {
-      ...(oldCount !== lines.length ? { lines: { from: oldCount ?? 0, to: lines.length } } : {}),
-      ...diffForAudit(inv, updated, INVOICE_FIELDS),
-    };
-    await logAudit(sb, auditActor(context.userId, p), {
-      entity: "invoice",
-      entity_id: inv.id,
-      action: "update",
-      label: `${invName(inv)} lines rebuilt from the ticket:`,
-      changes,
-      ...(Object.keys(changes).length
-        ? {}
-        : {
-            summary: `${invName(inv)} lines rebuilt from the ticket (no change in lines or totals)`,
-          }),
-    });
     return withLines(sb, updated);
   });
 
@@ -398,45 +407,62 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("This invoice is final; void it to change it");
     const { totals } = await import("@/lib/invoices.server");
-    const audit: AuditEntry[] = [];
     if (data.lines) {
       const { data: oldLines, error: oErr } = await sb
         .from("invoice_lines")
         .select("*")
-        .eq("invoice_id", inv.id)
-        .order("sort");
+        .eq("invoice_id", inv.id);
       if (oErr) throw new Error(oErr.message);
-      await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
-      const rows = data.lines.map((l, i) => ({
-        invoice_id: inv.id,
-        sort: i,
-        kind: l.kind,
-        description: l.description,
-        qty: l.qty,
-        unit: l.unit,
-        rate: l.rate,
-        total: Math.round(l.qty * l.rate * 100) / 100,
-        cost_rate: l.cost_rate,
-        cost_total: Math.round(l.qty * l.cost_rate * 100) / 100,
-        on_date: l.on_date ?? null,
-        source: l.source ?? null,
-        taxable: l.taxable,
-      }));
-      if (rows.length) {
-        const { error: lErr } = await sb.from("invoice_lines").insert(rows);
+      // Each saved line carries its old id (the editor sends it): a kept line is updated in
+      // place (only if it changed), a new one inserted, a dropped one deleted. The database's
+      // audit log (audit_row) then records each line that changed, not every line removed and
+      // added again. An id that is not this invoice's counts as a new line.
+      const old = new Map((oldLines ?? []).map((l) => [l.id, l]));
+      const kept = new Set<number>();
+      const fresh: LineWrite[] = [];
+      const edits: { id: number; row: LineWrite }[] = [];
+      data.lines.forEach((l, i) => {
+        const row: LineWrite = {
+          invoice_id: inv.id,
+          sort: i,
+          kind: l.kind,
+          description: l.description,
+          qty: l.qty,
+          unit: l.unit,
+          rate: l.rate,
+          total: Math.round(l.qty * l.rate * 100) / 100,
+          cost_rate: l.cost_rate,
+          cost_total: Math.round(l.qty * l.cost_rate * 100) / 100,
+          on_date: l.on_date ?? null,
+          source: l.source ?? null,
+          taxable: l.taxable,
+        };
+        const prev = l.id != null ? old.get(l.id) : undefined;
+        if (prev && !kept.has(prev.id)) {
+          kept.add(prev.id);
+          if (lineChanged(prev, row)) edits.push({ id: prev.id, row });
+        } else fresh.push(row);
+      });
+      const removed = (oldLines ?? []).filter((l) => !kept.has(l.id)).map((l) => l.id);
+      if (removed.length) {
+        const { error: dErr } = await sb
+          .from("invoice_lines")
+          .delete()
+          .in("id", removed)
+          .eq("invoice_id", inv.id);
+        if (dErr) throw new Error(dErr.message);
+      }
+      const updates = await Promise.all(
+        edits.map((e) =>
+          sb.from("invoice_lines").update(e.row).eq("id", e.id).eq("invoice_id", inv.id),
+        ),
+      );
+      const upErr = updates.find((r) => r.error)?.error;
+      if (upErr) throw new Error(upErr.message);
+      if (fresh.length) {
+        const { error: lErr } = await sb.from("invoice_lines").insert(fresh);
         if (lErr) throw new Error(lErr.message);
       }
-      // Each saved line carries its old id (the editor sends it): added / edited / removed.
-      const sent = data.lines;
-      const saved = rows.map((r, i) => ({ ...r, id: sent[i]?.id ?? null }));
-      for (const c of diffInvoiceLines(oldLines ?? [], saved))
-        audit.push({
-          entity: "invoice_line",
-          entity_id: inv.id,
-          action: c.action,
-          label: `${invName(inv)} line '${c.description}'`,
-          changes: c.changes,
-        });
     }
     const { data: lines } = await sb.from("invoice_lines").select("*").eq("invoice_id", inv.id);
     const taxRate = data.tax_rate ?? Number(inv.tax_rate);
@@ -460,14 +486,6 @@ export const saveInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (uErr) throw new Error(uErr.message);
-    audit.push({
-      entity: "invoice",
-      entity_id: inv.id,
-      action: "update",
-      label: invName(inv),
-      changes: diffForAudit(inv, updated, INVOICE_FIELDS),
-    });
-    await logAudit(sb, auditActor(context.userId, p), audit);
     return withLines(sb, updated);
   });
 
@@ -515,17 +533,8 @@ export const finalizeInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await logAudit(sb, auditActor(context.userId, p), {
-      entity: "invoice",
-      entity_id: updated.id,
-      action: "finalize",
-      label: invName(updated),
-      changes: diffForAudit(b.invoice, updated, INVOICE_FIELDS),
-    });
-    await sb
-      .from("service_jobs")
-      .update({ stage: "invoiced", invoice_id: updated.id, updated_by_name: nameOf(p) })
-      .eq("id", b.invoice.service_job_id);
+    // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc).
+    await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
     await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
       id: context.userId,
       name: nameOf(p),
@@ -565,7 +574,6 @@ export const sendInvoice = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
-    const actor = auditActor(context.userId, p);
     const { loadBundle, renderInvoicePdf, emailInvoice } = await import("@/lib/invoices.server");
     let b = await loadBundle(sb, data.id);
     if (b.invoice.status === "draft") {
@@ -579,18 +587,8 @@ export const sendInvoice = createServerFn({ method: "POST" })
         .from("invoices")
         .update({ status: "final", finalized_at: new Date().toISOString(), pdf_path: path })
         .eq("id", b.invoice.id);
-      if (!fErr)
-        await logAudit(sb, actor, {
-          entity: "invoice",
-          entity_id: b.invoice.id,
-          action: "finalize",
-          label: invName(b.invoice),
-          changes: { status: { from: b.invoice.status, to: "final" } },
-        });
-      await sb
-        .from("service_jobs")
-        .update({ stage: "invoiced", invoice_id: b.invoice.id })
-        .eq("id", b.invoice.service_job_id);
+      if (fErr) throw new Error(fErr.message);
+      await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", b.invoice.id);
       await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
         id: context.userId,
         name: nameOf(p),
@@ -622,16 +620,6 @@ export const sendInvoice = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await logAudit(sb, actor, {
-      entity: "invoice",
-      entity_id: updated.id,
-      action: "send",
-      label: invName(updated),
-      changes: {
-        ...diffForAudit(b.invoice, updated, ["status"]),
-        sent_to: { from: b.invoice.sent_to ?? null, to: data.to },
-      },
-    });
     return withLines(sb, updated);
   });
 
@@ -652,7 +640,6 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
-    const { data: before } = await sb.from("invoices").select("*").eq("id", data.id).maybeSingle();
     const { data: inv, error } = await sb
       .from("invoices")
       .update({
@@ -669,17 +656,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
-    await logAudit(sb, auditActor(context.userId, p), {
-      entity: "invoice",
-      entity_id: inv.id,
-      action: "paid",
-      label: invName(inv),
-      changes: diffForAudit(before, inv, INVOICE_FIELDS),
-    });
-    await sb
-      .from("service_jobs")
-      .update({ stage: "closed", updated_by_name: nameOf(p) })
-      .eq("id", inv.service_job_id);
+    await ticketStageFromInvoice(sb, inv.service_job_id, "closed", inv.id);
     await stageEvent(sb, inv.service_job_id, null, { id: context.userId, name: nameOf(p) });
     return withLines(sb, inv);
   });
@@ -702,13 +679,6 @@ export const voidInvoice = createServerFn({ method: "POST" })
       // A draft is deleted outright; its number is free for the next invoice on the ticket.
       const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
       if (dErr) throw new Error(dErr.message);
-      await logAudit(sb, auditActor(context.userId, p), {
-        entity: "invoice",
-        entity_id: inv.id,
-        action: "delete",
-        label: `Draft ${invName(inv)}`,
-        changes: diffForAudit(inv, null, ["status", "total"]),
-      });
     } else {
       // Release the number: the void stays on record under it (a legacy integer number is kept
       // as a negative), and the next invoice on the ticket takes it again. If this one was
@@ -723,13 +693,6 @@ export const voidInvoice = createServerFn({ method: "POST" })
         })
         .eq("id", inv.id);
       if (vErr) throw new Error(vErr.message);
-      await logAudit(sb, auditActor(context.userId, p), {
-        entity: "invoice",
-        entity_id: inv.id,
-        action: "void",
-        label: invName(inv),
-        changes: { status: { from: inv.status, to: "void" } },
-      });
     }
     // Another live invoice on the ticket keeps it where it is; the last one sends it back to Done.
     const [other] = await liveInvoices(sb, inv.service_job_id);
@@ -803,7 +766,7 @@ export const exportSageCsv = createServerFn({ method: "POST" })
   )
   .handler(
     async ({ data, context }): Promise<{ csv: string; count: number; file_name: string }> => {
-      const p = await office(context);
+      await office(context);
       const sb = context.supabase;
       let q = sb
         .from("invoices")
@@ -829,22 +792,12 @@ export const exportSageCsv = createServerFn({ method: "POST" })
       );
       if (ids.length) {
         const now = new Date().toISOString();
+        // Logged by the database as "Invoice 6012 exported to Sage".
         const { error: xErr } = await sb
           .from("invoices")
           .update({ sage_exported_at: now })
           .in("id", ids);
-        if (!xErr)
-          await logAudit(
-            sb,
-            auditActor(context.userId, p),
-            (invs ?? []).map((i) => ({
-              entity: "invoice" as const,
-              entity_id: i.id,
-              action: "update" as const,
-              summary: `${invName(i)} exported to Sage`,
-              changes: { sage_exported_at: { from: i.sage_exported_at, to: now } },
-            })),
-          );
+        if (xErr) console.error("Could not stamp the Sage export", xErr.message);
       }
       return { csv, count: ids.length, file_name: `sage-invoices-${data.from}-to-${data.to}.csv` };
     },

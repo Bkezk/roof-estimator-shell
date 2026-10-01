@@ -3752,6 +3752,10 @@ export type Database = {
       is_technician: { Args: never; Returns: boolean };
       is_manager: { Args: never; Returns: boolean };
       is_sales_pm: { Args: never; Returns: boolean };
+      set_ticket_stage_from_invoice: {
+        Args: { p_job: string; p_stage: string; p_invoice?: string | null };
+        Returns: undefined;
+      };
       stamp_dispatch: { Args: never; Returns: undefined };
       building_county_counts_storm: {
         Args: never;

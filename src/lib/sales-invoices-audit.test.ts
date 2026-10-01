@@ -2,27 +2,21 @@
  * Owner, Oct 1: "Sales and PMs should be able to see customers and invoices. However whatever is
  * changed needs to be logged somewhere showing what they did, when, and who."
  *
- * `isSalesPm` / `seesInvoices` (access.ts), the pure audit helpers (audit.ts), source checks that
+ * Owner, Oct 1 (later): "it's essential we record all actions accurately and durably." The log
+ * is written by database triggers (migration 20261001080000_audit_triggers_stage_rule.sql), so a
+ * direct database write is logged too; no server function writes it any more.
+ *
+ * `isSalesPm` / `seesInvoices` (access.ts), the History line (audit.ts), source checks that
  * invoice gates use `seesInvoices` while ticket creation / dispatch / rates keep `managesTickets`,
- * that every invoice and customer write path calls `logAudit`, the History folds, and the
- * migration 20261001070000_sales_invoices_audit.sql.
+ * that no server code calls `logAudit` (the database logs), the History folds, the migration
+ * 20261001070000_sales_invoices_audit.sql and the triggers in 20261001080000.
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { isSalesPm, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
-import {
-  ACCOUNT_FIELDS,
-  AUDIT_ACTIONS,
-  AUDIT_ENTITIES,
-  INVOICE_LINE_FIELDS,
-  auditActor,
-  auditLine,
-  auditRole,
-  auditSummary,
-  diffForAudit,
-  diffInvoiceLines,
-} from "@/lib/audit";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, auditLine } from "@/lib/audit";
 
 const read = (p: string) => readFileSync(p, "utf8");
 function serverFn(src: string, name: string): string {
@@ -69,185 +63,7 @@ describe("isSalesPm / seesInvoices", () => {
   });
 });
 
-describe("diffForAudit (pure)", () => {
-  it("lists only the fields that changed, old → new, money included", () => {
-    expect(
-      diffForAudit(
-        { rate: 85, qty: 2, description: "Labor", total: 170 },
-        { rate: 95, qty: 2, description: "Labor", total: 190 },
-        ["rate", "qty", "description", "total"],
-      ),
-    ).toEqual({ rate: { from: 85, to: 95 }, total: { from: 170, to: 190 } });
-  });
-  it("ignores fields not listed", () => {
-    expect(diffForAudit({ a: 1, updated_at: "x" }, { a: 1, updated_at: "y" }, ["a"])).toEqual({});
-  });
-  it("treats null, undefined and blank text alike; numeric strings equal their numbers", () => {
-    expect(
-      diffForAudit({ po: null, note: "", rate: "85.00" }, { po: undefined, note: "  ", rate: 85 }, [
-        "po",
-        "note",
-        "rate",
-      ]),
-    ).toEqual({});
-  });
-  it("compares objects by value regardless of key order", () => {
-    expect(
-      diffForAudit({ bill_to: { name: "A", city: "B" } }, { bill_to: { city: "B", name: "A" } }, [
-        "bill_to",
-      ]),
-    ).toEqual({});
-    expect(diffForAudit({ ids: ["a"] }, { ids: ["a", "b"] }, ["ids"])).toEqual({
-      ids: { from: ["a"], to: ["a", "b"] },
-    });
-  });
-  it("a create (no before) lists the set fields from null; a delete (no after) to null", () => {
-    expect(diffForAudit(null, { name: "Acme", phone: null }, ["name", "phone"])).toEqual({
-      name: { from: null, to: "Acme" },
-    });
-    expect(diffForAudit({ name: "Acme" }, null, ["name"])).toEqual({
-      name: { from: "Acme", to: null },
-    });
-  });
-  it("an empty list is nothing (a new contact with no sites)", () => {
-    expect(diffForAudit(null, { site_ids: [] }, ["site_ids"])).toEqual({});
-    expect(diffForAudit({ site_ids: ["s1"] }, { site_ids: [] }, ["site_ids"])).toEqual({
-      site_ids: { from: ["s1"], to: [] },
-    });
-  });
-  it("never stores undefined (jsonb-safe)", () => {
-    const d = diffForAudit({ a: undefined }, { a: 1 }, ["a"]);
-    expect(d).toEqual({ a: { from: null, to: 1 } });
-    expect(JSON.parse(JSON.stringify(d))).toEqual(d);
-  });
-});
-
-describe("auditSummary (pure)", () => {
-  it("the owner's example: a line's rate", () => {
-    expect(
-      auditSummary(
-        "invoice_line",
-        "update",
-        { rate: { from: 85, to: 95 } },
-        "Invoice 6012 line 'Labor'",
-      ),
-    ).toBe("Invoice 6012 line 'Labor' rate 85 → 95");
-  });
-  it("names fields in words and quotes text; blanks show as —", () => {
-    expect(
-      auditSummary(
-        "account",
-        "update",
-        { contact_name: { from: null, to: "Ann" }, tax_exempt: { from: false, to: true } },
-        "Customer 'Acme'",
-      ),
-    ).toBe("Customer 'Acme' contact name — → 'Ann'; tax exempt no → yes");
-  });
-  it("verbs per action; a create lists values, a delete none", () => {
-    expect(
-      auditSummary("invoice", "create", { total: { from: null, to: 450 } }, "Invoice 6012"),
-    ).toBe("Invoice 6012 created: total 450");
-    expect(
-      auditSummary(
-        "invoice_line",
-        "create",
-        { qty: { from: null, to: 2 } },
-        "Invoice 6012 line 'Labor'",
-      ),
-    ).toBe("Invoice 6012 line 'Labor' added: qty 2");
-    expect(
-      auditSummary(
-        "invoice_line",
-        "delete",
-        { qty: { from: 2, to: null } },
-        "Invoice 6012 line 'Labor'",
-      ),
-    ).toBe("Invoice 6012 line 'Labor' removed");
-    expect(auditSummary("contact", "delete", {}, "Contact 'Bob'")).toBe("Contact 'Bob' deleted");
-    expect(auditSummary("invoice", "finalize", {}, "Invoice 6012")).toBe("Invoice 6012 finalized");
-    expect(
-      auditSummary("invoice", "send", { sent_to: { from: null, to: ["a@b.co"] } }, "Invoice 6012"),
-    ).toBe("Invoice 6012 sent: sent to a@b.co");
-    expect(
-      auditSummary("invoice", "paid", { paid_amount: { from: 0, to: 450.5 } }, "Invoice 6012"),
-    ).toBe("Invoice 6012 marked paid: paid amount 0 → 450.5");
-    expect(auditSummary("invoice", "void", {}, "Invoice 6012")).toBe("Invoice 6012 voided");
-  });
-  it("falls back to the entity's name and caps a long list", () => {
-    expect(auditSummary("site", "update", { name: { from: "A", to: "B" } })).toBe(
-      "Site name 'A' → 'B'",
-    );
-    const many = Object.fromEntries(
-      ["a", "b", "c", "d", "e", "f", "g", "h"].map((k, i) => [k, { from: i, to: i + 1 }]),
-    );
-    expect(auditSummary("account", "update", many, "Customer 'X'")).toBe(
-      "Customer 'X' a 0 → 1; b 1 → 2; c 2 → 3; d 3 → 4; e 4 → 5; f 5 → 6; +2 more",
-    );
-  });
-});
-
-describe("diffInvoiceLines (pure)", () => {
-  const line = (id: number, description: string, rate: number, qty = 1) => ({
-    id,
-    kind: "labor",
-    description,
-    qty,
-    unit: "hr",
-    rate,
-    total: qty * rate,
-    cost_rate: 40,
-    cost_total: qty * 40,
-    on_date: null,
-    taxable: true,
-    source: null,
-  });
-  it("matches kept lines by id; reports added, edited and removed lines", () => {
-    const before = [line(1, "Labor", 85, 2), line(2, "Travel", 60), line(3, "Caulk", 10)];
-    const { id: _drop, ...fresh } = line(0, "Membrane", 5, 10);
-    const after = [{ ...line(1, "Labor", 95, 2) }, line(2, "Travel", 60), fresh];
-    const d = diffInvoiceLines(before, after);
-    expect(d).toEqual([
-      {
-        action: "update",
-        description: "Labor",
-        changes: { rate: { from: 85, to: 95 }, total: { from: 170, to: 190 } },
-      },
-      {
-        action: "create",
-        description: "Membrane",
-        changes: diffForAudit(null, fresh, INVOICE_LINE_FIELDS),
-      },
-      {
-        action: "delete",
-        description: "Caulk",
-        changes: diffForAudit(before[2]!, null, INVOICE_LINE_FIELDS),
-      },
-    ]);
-  });
-  it("an unchanged line is not reported; an id from another invoice counts as new", () => {
-    expect(diffInvoiceLines([line(1, "Labor", 85)], [line(1, "Labor", 85)])).toEqual([]);
-    expect(diffInvoiceLines([], [line(9, "X", 1)]).map((x) => x.action)).toEqual(["create"]);
-  });
-});
-
-describe("auditRole / auditActor / auditLine (pure)", () => {
-  it("labels the actor's role", () => {
-    expect(auditRole(admin)).toBe("admin");
-    expect(auditRole(managerTech)).toBe("manager");
-    expect(auditRole(sales)).toBe("sales");
-    expect(auditRole(techWithEstimate)).toBe("technician");
-    expect(auditRole(office)).toBe("user");
-  });
-  it("names the actor by full name, else email", () => {
-    expect(auditActor("u1", { ...sales, full_name: " RoAnna Sims ", email: "r@jbk.co" })).toEqual({
-      id: "u1",
-      name: "RoAnna Sims",
-      role: "sales",
-    });
-    expect(auditActor("u2", { ...manager, full_name: null, email: "m@jbk.co" }).name).toBe(
-      "m@jbk.co",
-    );
-  });
+describe("auditLine (pure)", () => {
   it("one History line: when · who (role) · what", () => {
     expect(
       auditLine(
@@ -272,7 +88,19 @@ describe("auditRole / auditActor / auditLine (pure)", () => {
       "paid",
       "void",
     ]);
-    expect(ACCOUNT_FIELDS).toContain("tax_exempt");
+  });
+  it("a row written by the system (no signed-in user) reads 'system'", () => {
+    expect(
+      auditLine(
+        {
+          at: "2026-10-01T14:14:00Z",
+          by_name: "system",
+          by_role: null,
+          summary: "Customer 'Acme' phone '555' → '556'",
+        },
+        "America/Chicago",
+      ),
+    ).toBe("Oct 1, 9:14 AM · system · Customer 'Acme' phone '555' → '556'");
   });
 });
 
@@ -351,76 +179,124 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
   });
 });
 
-/**
- * Every function in a file that writes (insert / update / delete / upsert) one of the audited
- * tables must call logAudit after its last such write.
- */
-const AUDITED = ["invoices", "invoice_lines", "crm_accounts", "crm_sites", "crm_contacts"];
-function chunks(src: string): { name: string; body: string }[] {
-  const re = /\n(?:export const (\w+) = createServerFn|async function (\w+)\()/g;
-  const starts: { name: string; at: number }[] = [];
-  for (let m = re.exec(src); m; m = re.exec(src)) starts.push({ name: m[1] ?? m[2]!, at: m.index });
-  return starts.map((s, i) => ({
-    name: s.name,
-    body: src.slice(s.at, starts[i + 1]?.at ?? src.length),
-  }));
-}
-function lastWrite(body: string): number {
-  let last = -1;
-  const re = /\.from\("(\w+)"\)\s*\.(insert|update|delete|upsert)\(/g;
-  for (let m = re.exec(body); m; m = re.exec(body)) if (AUDITED.includes(m[1]!)) last = m.index;
-  return last;
+/** Every non-test .ts / .tsx file under a directory. */
+function sources(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...sources(p));
+    else if (/\.(ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name)) out.push(p);
+  }
+  return out;
 }
 
-describe("every invoice and customer write calls logAudit", () => {
-  const expected: Record<string, string[]> = {
-    "src/lib/invoices.functions.ts": [
-      "createInvoiceFor",
-      "rebuildInvoiceLines",
-      "saveInvoice",
-      "finalizeInvoice",
-      "sendInvoice",
-      "markInvoicePaid",
-      "voidInvoice",
-      "exportSageCsv",
-    ],
-    "src/lib/crm.functions.ts": [
-      "saveAccount",
-      "saveSite",
-      "quickCreateAccount",
-      "deleteAccount",
-      "deleteSite",
-      "saveContact",
-      "deleteContact",
-    ],
-  };
-  for (const [file, names] of Object.entries(expected)) {
-    const src = read(file);
-    const writers = chunks(src).filter((c) => lastWrite(c.body) >= 0);
-    it(`${file}: the writers are exactly the expected ones`, () => {
-      expect(writers.map((c) => c.name).sort()).toEqual([...names].sort());
-    });
-    for (const c of writers)
-      it(`${file} ${c.name} logs after its last write`, () => {
-        expect(c.body.indexOf("logAudit(", lastWrite(c.body)), c.name).toBeGreaterThan(0);
-      });
-  }
-  it("no other server code writes those tables", () => {
-    for (const f of [
-      "src/lib/service.functions.ts",
-      "src/lib/service-field.functions.ts",
-      "src/lib/opportunities.functions.ts",
-      "src/lib/takeoff.functions.ts",
-      "src/lib/invoices.server.ts",
-    ])
-      expect(lastWrite(read(f)), f).toBe(-1);
+describe("the database logs: no server code calls logAudit", () => {
+  it("audit.server.ts (logAudit) is gone", () => {
+    expect(existsSync("src/lib/audit.server.ts")).toBe(false);
   });
-  it("logAudit never throws: it catches and console-logs", () => {
-    const src = read("src/lib/audit.server.ts");
-    expect(src).toMatch(
-      /export async function logAudit\([\s\S]*?try \{[\s\S]*?\} catch \(e\) \{\s*console\.error\(/,
+  it("no source file calls logAudit, imports audit.server or writes audit_log", () => {
+    for (const f of sources("src")) {
+      const src = read(f);
+      expect(src, f).not.toContain("logAudit(");
+      expect(src, f).not.toContain("audit.server");
+      expect(src, f).not.toMatch(/\.from\("audit_log"\)\s*\.(insert|update|delete|upsert)\(/);
+    }
+  });
+  it("the invoice and customer functions no longer build audit entries", () => {
+    for (const f of ["src/lib/invoices.functions.ts", "src/lib/crm.functions.ts"]) {
+      const src = read(f);
+      for (const word of ["auditActor", "diffForAudit", "diffInvoiceLines", "AuditEntry"])
+        expect(src, `${f} ${word}`).not.toContain(word);
+    }
+  });
+  it("a saved invoice keeps its lines' ids (edited in place), so the line log is per change", () => {
+    const fn = serverFn(read("src/lib/invoices.functions.ts"), "saveInvoice");
+    expect(fn).toMatch(/\.from\("invoice_lines"\)\s*\.update\(/);
+    expect(fn).toMatch(/\.from\("invoice_lines"\)\s*\.delete\(\)\s*\.in\("id", removed\)/);
+    expect(fn).not.toMatch(/\.from\("invoice_lines"\)\.delete\(\)\.eq\("invoice_id", inv\.id\)/);
+  });
+  it("a saved contact links and unlinks only the sites that changed", () => {
+    const fn = serverFn(read("src/lib/crm.functions.ts"), "saveContact");
+    expect(fn).toMatch(
+      /\.from\("crm_site_contacts"\)\s*\.delete\(\)\s*\.eq\("contact_id", saved\.id\)\s*\.in\("site_id", unlink\)/,
     );
-    expect(src).toMatch(/if \(error\)\s*console\.error\(/);
+    expect(fn).not.toMatch(
+      /\.from\("crm_site_contacts"\)\.delete\(\)\.eq\("contact_id", saved\.id\);/,
+    );
+  });
+});
+
+describe("migration 20261001080000: audit triggers", () => {
+  const sql = read("supabase/migrations/20261001080000_audit_triggers_stage_rule.sql");
+  const flat = sql.replace(/--[^\n]*/g, "").replace(/\s+/g, " ");
+  it("a row trigger on each of the five tables (and the contact ↔ site links)", () => {
+    for (const t of ["invoices", "invoice_lines", "crm_accounts", "crm_sites", "crm_contacts"])
+      expect(flat, t).toContain(
+        `drop trigger if exists ${t}_audit on public.${t}; create trigger ${t}_audit after insert or update or delete on public.${t} for each row execute function public.audit_row();`,
+      );
+    expect(flat).toContain(
+      "drop trigger if exists crm_site_contacts_audit on public.crm_site_contacts; create trigger crm_site_contacts_audit after insert or delete on public.crm_site_contacts for each row execute function public.audit_row();",
+    );
+  });
+  it("audit_row is security definer with a fixed search_path", () => {
+    expect(flat).toContain(
+      "create or replace function public.audit_row() returns trigger language plpgsql security definer set search_path = public as $$",
+    );
+    expect(flat).toContain("revoke all on function public.audit_row() from public;");
+  });
+  it("entity per table; an invoice line is logged on its invoice", () => {
+    for (const [t, e] of [
+      ["invoices", "invoice"],
+      ["invoice_lines", "invoice_line"],
+      ["crm_accounts", "account"],
+      ["crm_sites", "site"],
+      ["crm_contacts", "contact"],
+    ])
+      expect(flat, t).toContain(`when '${t}' then v_entity := '${e}';`);
+    expect(flat).toContain("v_entity_id := (v_row ->> 'invoice_id')::uuid;");
+  });
+  it("detects finalize / send / paid / void from the invoice's transition", () => {
+    expect(flat).toContain(
+      "if v_new ->> 'status' = 'void' and v_old ->> 'status' is distinct from 'void' then v_action := 'void';",
+    );
+    expect(flat).toContain(
+      "elsif (v_old ->> 'paid_on' is null and v_new ->> 'paid_on' is not null) or (v_new ->> 'status' = 'paid' and v_old ->> 'status' is distinct from 'paid') then v_action := 'paid';",
+    );
+    expect(flat).toContain(
+      "elsif v_new ->> 'sent_at' is not null and v_new ->> 'sent_at' is distinct from v_old ->> 'sent_at' then v_action := 'send';",
+    );
+    expect(flat).toContain(
+      "elsif v_old ->> 'status' = 'draft' and v_new ->> 'status' = 'final' then v_action := 'finalize';",
+    );
+  });
+  it("a soft delete is a delete; a restore an update 'restored'", () => {
+    expect(flat).toContain(
+      "elsif v_old ? 'deleted_at' and v_old ->> 'deleted_at' is null and v_new ->> 'deleted_at' is not null then v_action := 'delete';",
+    );
+    expect(flat).toContain(
+      "elsif v_old ? 'deleted_at' and v_old ->> 'deleted_at' is not null and v_new ->> 'deleted_at' is null then v_action := 'update'; v_restored := true;",
+    );
+    expect(flat).toContain("v_summary := v_label || ' restored';");
+  });
+  it("leaves the bookkeeping columns out of the diff", () => {
+    expect(flat).toContain(
+      "v_skip constant text[] := array['id', 'created_at', 'created_by', 'updated_at', 'updated_by_name', 'pdf_path', 'sage_exported_at', 'sort'];",
+    );
+  });
+  it("who: the signed-in user from profiles (sales for a sales / PM), else 'system'", () => {
+    expect(flat).toContain("if v_uid is null then v_name := 'system'; v_role := null;");
+    expect(flat).toContain("when public.is_sales_pm() then 'sales'");
+    expect(flat).toContain(
+      "insert into public.audit_log (by_user, by_name, by_role, entity, entity_id, action, summary, changes) values (v_uid, v_name, v_role, v_entity, v_entity_id, v_action, v_summary, v_changes);",
+    );
+  });
+  it("append-only: no app insert policy, no update / delete policy, writes revoked", () => {
+    expect(flat).toContain("drop policy if exists audit_log_insert on public.audit_log;");
+    expect(flat).not.toContain("create policy audit_log_insert");
+    expect(flat).not.toMatch(/on public\.audit_log for (insert|update|delete|all)/);
+    expect(flat).toContain(
+      "revoke insert, update, delete, truncate on public.audit_log from anon, authenticated, service_role;",
+    );
   });
 });
 

@@ -95,7 +95,10 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
     // Who sees every ticket, and whether a technician edits only their own.
     "src/lib/service.functions.ts": [
       "if (!isOffice(p) && cur && cur.technician_id !== context.userId)",
-      "!isOffice(p) && !TECH_STAGES.includes(stage);",
+    ],
+    // The stage rule: a technician sets Open / Scheduled / Done (Invoiced / Closed: managesTickets).
+    "src/lib/ticket-stage.ts": [
+      "if (!isOffice(p)) return TECH_STAGES.includes(stage) ? null : TECH_STAGE_MESSAGE;",
     ],
     "src/lib/service-field.functions.ts": [
       "if (!isOffice(p) && job.technician_id !== ctx.userId)",

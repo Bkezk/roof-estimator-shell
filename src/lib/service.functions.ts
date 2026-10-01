@@ -6,7 +6,8 @@
  *
  * Access: Service. A technician (profiles.technician) may edit only jobs assigned to them —
  * RLS enforces the same rule; office users and admins edit any. Creating, dispatching, deleting
- * and every rate are a manager's or an admin's (`managesTickets`; owner, Oct 1).
+ * and every rate are a manager's or an admin's (`managesTickets`; owner, Oct 1), and so are the
+ * stages Invoiced and Closed (`stageProblem`, ticket-stage.ts; owner, Oct 1).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -20,6 +21,10 @@ import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { siteProblem } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
+import { stageProblem } from "@/lib/ticket-stage";
+
+/** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
+export { TECH_STAGES } from "@/lib/ticket-stage";
 
 export type ServiceJobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
 
@@ -234,8 +239,6 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     if (dateProblem) throw new Error(dateProblem);
     const stage =
       fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
-    if (techMayNotSet(p, stage))
-      throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
     // The crew and its rates are dispatch and money: a manager's (owner, Oct 1). A technician
     // answers "who is on this job" on the close-out (setJobCrew) instead; anyone else's save
     // leaves the crew, the technician and the labor rate as they are.
@@ -275,6 +278,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         throw new Error(
           "Only the assigned technician, the office or an admin can edit this ticket",
         );
+      // Invoiced and Closed are a manager's (owner, Oct 1); keeping the ticket's stage is fine.
+      const problem = stageProblem(p, stage, cur?.stage);
+      if (problem) throw new Error(problem);
       // Owner, Oct 1: once a ticket has a date, only an admin or a manager moves it.
       const moveProblem = dateMoveProblem({
         profile: p,
@@ -306,6 +312,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       );
       return withTechName(sb, saved);
     }
+    const createProblem = stageProblem(p, stage);
+    if (createProblem) throw new Error(createProblem);
     const { data: row, error } = await sb
       .from("service_jobs")
       .insert({ ...patch, created_by: context.userId })
@@ -362,11 +370,6 @@ async function logTicketDateMove(
   if (error) console.error("Could not log the date move", error.message);
 }
 
-/** The stages a technician may set; Invoiced and Closed belong to the office (owner, Sep 27). */
-export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
-const techMayNotSet = (p: { technician: boolean; role: string }, stage: ServiceStage) =>
-  !isOffice(p) && !TECH_STAGES.includes(stage);
-
 /** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
 const TICKET_CLOSING: readonly ServiceStage[] = ["done", "invoiced", "closed"];
 /** Keep the ticket's follow-up timer in step with its technician and stage (design §11). */
@@ -405,13 +408,15 @@ export const setServiceStage = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
-    if (techMayNotSet(p, data.stage))
-      throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
     const { data: prev } = await context.supabase
       .from("service_jobs")
       .select("stage")
       .eq("id", data.id)
       .maybeSingle();
+    // A technician: Open / Scheduled / Done; Invoiced and Closed: a manager's (ticket-stage.ts;
+    // the database trigger service_jobs_stage_rule says the same).
+    const problem = stageProblem(p, data.stage, prev?.stage);
+    if (problem) throw new Error(problem);
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ stage: data.stage, updated_by_name: nameOf(p) })

@@ -6,9 +6,9 @@
  * ticket carries its CenterPoint ticket / invoice numbers from the legacy system (folded away unless set).
  *
  * A technician (profiles.technician, not admin) receives only their own tickets (RLS), edits
- * them, sets the stage Open / Scheduled / Done only (TECH_STAGES; the office invoices and
- * closes) and never deletes; the server and RLS enforce the same, this only hides what would be
- * refused.
+ * them, sets the stage Open / Scheduled / Done only (TECH_STAGES) and never deletes; Invoiced
+ * and Closed are a manager's or an admin's (ticket-stage.ts; owner, Oct 1). The server, RLS and
+ * a database trigger enforce the same, this only hides what would be refused.
  *
  * The field side (§5.3): `?id=<uuid>&closeout=1` opens the ticket's close-out
  * (components/service/closeout.tsx); the ticket shows its site contact, the repairs, time,
@@ -72,6 +72,7 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
+import { stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
   deleteServiceJob,
   getCrewRateDefaults,
@@ -1135,9 +1136,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // server refuses a technician's save of those stages).
   const officeStage = isTech && !!jobStage && !TECH_STAGES.includes(jobStage);
   const canEdit = !job || officeOrAdmin || (job.technician_id === profile?.id && !officeStage);
-  const stageOptions: readonly ServiceStage[] = isTech
-    ? SERVICE_STAGES.filter((s) => TECH_STAGES.includes(s) || s === jobStage)
-    : SERVICE_STAGES;
+  // Owner, Oct 1: Invoiced and Closed are a manager's. Anyone else is offered them only as the
+  // ticket's current stage, and then the picker is read-only (the server and the database
+  // refuse the same; an invoice sets them through its own path).
+  const stageOptions: readonly ServiceStage[] = stageChoices(profile, jobStage);
+  const lockedStage = stageLocked(profile, jobStage);
 
   // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD.
   const prefill: { tech?: string; date?: string } = useSearch({ strict: false });
@@ -1925,7 +1928,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               )}
               <Select
                 value={asStage(job.stage)}
-                disabled={ro || stageMut.isPending}
+                disabled={ro || lockedStage || stageMut.isPending}
                 onValueChange={(v) => stageMut.mutate(v as ServiceStage)}
               >
                 <SelectTrigger className="w-[150px]" aria-label="Stage">
