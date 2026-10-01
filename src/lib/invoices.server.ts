@@ -432,9 +432,22 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   const M = doc.M;
   const right = doc.W - M;
 
+  // The logo (owner, Oct 1: "the logo we have on the site instead of just text") at the top
+  // left of every page, the company name and address beside it.
+  const { jbkLogoPng, JBK_LOGO_PNG_WIDTH, JBK_LOGO_PNG_HEIGHT } =
+    await import("@/lib/jbk-logo.server");
+  const logo = await embed(doc, jbkLogoPng(), "jbk-logo.png");
+  const LOGO_H = 44;
+  const LOGO_W = Math.round((LOGO_H * JBK_LOGO_PNG_WIDTH) / JBK_LOGO_PNG_HEIGHT);
   const header = (title: string) => {
-    doc.y = doc.H - M;
-    doc.text(company?.company_name ?? "Bid-O-Matic", M, 14, true);
+    const top = doc.H - M;
+    let textX = M;
+    if (logo) {
+      doc.page.drawImage(logo, { x: M, y: top - LOGO_H + 12, width: LOGO_W, height: LOGO_H });
+      textX = M + LOGO_W + 10;
+    }
+    doc.y = top;
+    doc.text(company?.company_name ?? "JBK Commercial Roofing", textX, 14, true);
     doc.y -= 14;
     for (const l of [
       company?.address,
@@ -442,11 +455,10 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       company?.phone,
     ]) {
       if (l) {
-        doc.text(l, M, 9);
+        doc.text(l, textX, 9);
         doc.y -= 11;
       }
     }
-    const top = doc.H - M;
     doc.y = top;
     doc.textRight(title, right, 20, true);
     doc.y -= 22;

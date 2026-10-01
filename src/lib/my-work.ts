@@ -211,6 +211,7 @@ export function ticketItem(
   t: TicketIn,
   names: Record<string, string> = {},
   followup: FollowupIn | null = null,
+  toYmd: (iso: string) => string = localYmd,
 ): WorkItem {
   const what = t.description.trim();
   return {
@@ -218,7 +219,11 @@ export function ticketItem(
     kind: ticketKind(t.service_type),
     title: `#${t.number}${what ? ` ${what}` : ""}`,
     where: joinWhere(t.customer_name, t.site_name, t.site_address),
-    date: t.scheduled_date,
+    // The ticket's day; an undated ticket (from before dates were required) takes its open
+    // follow-up's due day, so a row whose state line reads "Overdue 3 days" sits under Overdue,
+    // not under No date (owner, Oct 1: "why does this show no date but overdue?").
+    date:
+      t.scheduled_date ?? (followup && followup.status === "open" ? toYmd(followup.due_at) : null),
     status: STAGE_LABELS[t.stage] ?? t.stage,
     done: t.stage === "done",
     href: `/service?id=${t.id}`,
@@ -289,7 +294,7 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
     if (f.kind === "ticket" && f.status === "open")
       ticketTimers.set(`${f.item_id}|${f.assignee_id}`, f);
   const tickets = listedTickets.map((t) =>
-    ticketItem(t, names, ticketTimers.get(`${t.id}|${t.technician_id ?? ""}`) ?? null),
+    ticketItem(t, names, ticketTimers.get(`${t.id}|${t.technician_id ?? ""}`) ?? null, toYmd),
   );
   const listed = new Set(listedTickets.map((t) => `${t.id}|${t.technician_id ?? ""}`));
   const tasks = rows.tasks.filter((t) => t.status !== "done").map((t) => taskItem(t, names));

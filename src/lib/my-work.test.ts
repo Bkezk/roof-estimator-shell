@@ -8,6 +8,7 @@ import {
   itemsByDay,
   mergeWork,
   monthGrid,
+  ticketItem,
   ticketKind,
   visibleUserIds,
   type FollowupIn,
@@ -173,6 +174,41 @@ describe("My Work items", () => {
       names: { [BOB]: "Bob" },
     });
     expect(items[0]?.assigneeName).toBe("Bob");
+  });
+});
+
+describe("An undated ticket with an overdue follow-up (owner, Oct 1)", () => {
+  // Ticket #6001 had no scheduled day (made before dates were required) but a follow-up three
+  // days overdue: its state line read "Overdue 3 days" while it sat under No date.
+  it("takes its open follow-up's due day, so it groups under Overdue", () => {
+    const items = mergeWork(
+      {
+        tickets: [ticket({ id: "t9", number: 6001, scheduled_date: null })],
+        tasks: [],
+        followups: [
+          followup({
+            id: "f9",
+            kind: "ticket",
+            item_id: "t9",
+            title: "Ticket #6001",
+            due_at: "2026-09-28T12:00:00Z",
+          }),
+        ],
+      },
+      utcDay,
+    );
+    expect(items.map((i) => [i.key, i.date])).toEqual([["ticket:t9", "2026-09-28"]]);
+    expect(bucketOf(items[0]!, "2026-10-01")).toBe("overdue");
+  });
+  it("a scheduled day still wins over the follow-up's day; a closed follow-up gives no day", () => {
+    const f = followup({ kind: "ticket", item_id: "t1", due_at: "2026-09-28T12:00:00Z" });
+    expect(ticketItem(ticket({ scheduled_date: "2026-10-03" }), {}, f, utcDay).date).toBe(
+      "2026-10-03",
+    );
+    expect(
+      ticketItem(ticket({ scheduled_date: null }), {}, { ...f, status: "done" }, utcDay).date,
+    ).toBeNull();
+    expect(ticketItem(ticket({ scheduled_date: null }), {}, null, utcDay).date).toBeNull();
   });
 });
 
