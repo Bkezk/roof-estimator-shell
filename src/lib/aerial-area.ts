@@ -51,9 +51,20 @@ export interface AreaDraw {
    * screen point it went down at, and `active` once it has moved past RECT_DRAG_PX on screen.
    */
   press: { a: Pt; b: Pt; sx: number; sy: number; active: boolean } | null;
+  /**
+   * Snap on: each new side squares to the previous side / level / plumb within 7°. Off (the
+   * toolbar's Snap toggle — owner, Oct 1: a slightly angled house kept snapping vertical), every
+   * corner lands exactly where it was tapped.
+   */
+  snap: boolean;
 }
 
-export const emptyAreaDraw = (): AreaDraw => ({ points: [], cursor: null, press: null });
+export const emptyAreaDraw = (): AreaDraw => ({
+  points: [],
+  cursor: null,
+  press: null,
+  snap: true,
+});
 
 export type AreaDrawAction =
   /** Left press at view point `p`, screen point (sx, sy). */
@@ -70,6 +81,8 @@ export type AreaDrawAction =
   | { type: "cancel" }
   /** Take back the last corner. */
   | { type: "undo" }
+  /** The Snap toggle: square-up new sides (on) or place corners exactly as tapped (off). */
+  | { type: "snap"; on: boolean }
   /** The pointer left the picture. */
   | { type: "leave" }
   /** The view moved under the shape (zoom): every point through `f`. */
@@ -105,7 +118,7 @@ export function nearFirst(d: AreaDraw, p: Pt, scale: number, touch = false): boo
 export function resolveCorner(d: AreaDraw, p: Pt, scale: number, touch = false): Pt {
   if (nearFirst(d, p, scale, touch)) return d.points[0]!;
   const last = d.points[d.points.length - 1];
-  if (!last) return p;
+  if (!last || !d.snap) return p;
   const prev2 = d.points[d.points.length - 2];
   return lockPoint(prev2, last, p) as Pt;
 }
@@ -178,10 +191,13 @@ export function stepArea(d: AreaDraw, a: AreaDrawAction): AreaStep {
       return same({ ...d, points: [], press: null });
     case "undo":
       return same({ ...d, points: d.points.slice(0, -1), press: null });
+    case "snap":
+      return same({ ...d, snap: a.on });
     case "leave":
       return same({ ...d, cursor: null });
     case "remap":
       return same({
+        ...d,
         points: d.points.map(a.f),
         cursor: d.cursor && a.f(d.cursor),
         press: d.press && { ...d.press, a: a.f(d.press.a), b: a.f(d.press.b) },

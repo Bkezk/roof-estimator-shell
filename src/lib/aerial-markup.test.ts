@@ -225,8 +225,9 @@ describe("the PNG painter (smoke)", () => {
     paintOverlay(ctx, view, markup, { caption: "123 Main St, Louisville, KY" });
     expect(calls[0]).toBe("save");
     expect(calls[calls.length - 1]).toBe("restore");
-    // One closed ring for the outline.
-    expect(calls.filter((c) => c === "closePath")).toHaveLength(1);
+    // The building outline is not drawn (owner, Oct 1: it muddles the picture); with no area
+    // marks nothing closes a path. The footprint area still reaches the caption below.
+    expect(calls.filter((c) => c === "closePath")).toHaveLength(0);
     // Two pins drawn as circles.
     expect(calls.filter((c) => c === "arc")).toHaveLength(2);
     expect(texts).toContain("1");
@@ -238,7 +239,7 @@ describe("the PNG painter (smoke)", () => {
     expect(texts).toContain("1. Ponding — 3 in. deep at the NE drain");
     expect(texts).toContain("2. Open seam");
   });
-  it("draws nothing but the caption-free outline when there are no marks", () => {
+  it("draws nothing when there are no marks and no building (no outline, no caption)", () => {
     const { ctx, texts, calls } = recorder();
     paintOverlay(ctx, view, { annotations: [], building: null });
     expect(texts).toEqual([]);

@@ -291,3 +291,42 @@ describe("the Area tool (the takeoff's area drawer on the aerial)", () => {
     ]);
   });
 });
+
+describe("the Snap toggle (owner, Oct 1: an angled house kept snapping vertical)", () => {
+  it("snap off: corners land exactly where they were tapped, even 3° off plumb", () => {
+    const { d } = run([
+      { type: "snap", on: false },
+      ...tap([100, 100]),
+      ...tap([200, 105]),
+      ...tap([206, 200]),
+    ]);
+    expect(d.snap).toBe(false);
+    expect(d.points).toEqual([
+      [100, 100],
+      [200, 105],
+      [206, 200],
+    ]);
+  });
+
+  it("snap on again mid-shape squares the next side; the toggle survives a zoom (remap)", () => {
+    const { d } = run([
+      { type: "snap", on: false },
+      ...tap([100, 100]),
+      ...tap([200, 100]),
+      { type: "snap", on: true },
+      { type: "remap", f: ([x, y]) => [x * 2, y * 2] },
+      ...tap([412, 400]),
+    ]);
+    expect(d.snap).toBe(true);
+    // 12 px over 200 is 3.4° off square to the (remapped) level first side → square.
+    expect(d.points).toEqual([
+      [200, 200],
+      [400, 200],
+      [400, 400],
+    ]);
+  });
+
+  it("a fresh shape starts with snap on", () => {
+    expect(emptyAreaDraw().snap).toBe(true);
+  });
+});

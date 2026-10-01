@@ -29,6 +29,7 @@ import {
   Eraser,
   Hand,
   Loader2,
+  Magnet,
   Map as MapIcon,
   MapPin,
   Pentagon,
@@ -72,7 +73,6 @@ import {
 } from "@/lib/aerial-geo";
 import {
   AREA_FILL_ALPHA,
-  FOOTPRINT_STROKE,
   MARKUP_COLORS,
   TAG_LABEL_MAX,
   TAG_NOTE_MAX,
@@ -432,6 +432,8 @@ function AerialEditor({
             setPending(null);
             areaInput({ type: "cancel" });
           }}
+          snap={areaDraw.snap}
+          onSnap={(on) => areaInput({ type: "snap", on })}
           color={color}
           onColor={setColor}
           canUndo={history.past.length > 0 || areaDraw.points.length > 0}
@@ -463,7 +465,6 @@ function AerialEditor({
       <Stage
         view={view}
         sources={imagery.sources}
-        polys={polys}
         annotations={history.annotations}
         tool={canEdit ? tool : "move"}
         color={color}
@@ -647,6 +648,9 @@ function AerialEditor({
 function Toolbar(props: {
   tool: Tool;
   onTool: (t: Tool) => void;
+  /** The Area tool's Snap: sides square up within 7° (on) or land as tapped (off). */
+  snap: boolean;
+  onSnap: (on: boolean) => void;
   color: MarkupColor;
   onColor: (c: MarkupColor) => void;
   canUndo: boolean;
@@ -670,6 +674,23 @@ function Toolbar(props: {
             <t.icon className="mr-1 h-4 w-4" /> {t.label}
           </Button>
         ))}
+        {props.tool === "area" && (
+          <Button
+            type="button"
+            size="sm"
+            variant={props.snap ? "default" : "outline"}
+            aria-pressed={props.snap}
+            className="h-10 px-3"
+            title={
+              props.snap
+                ? "Snap on: sides square up within 7°. Turn off for a building that sits at a slight angle."
+                : "Snap off: corners land exactly where you tap."
+            }
+            onClick={() => props.onSnap(!props.snap)}
+          >
+            <Magnet className="mr-1 h-4 w-4" /> Snap {props.snap ? "on" : "off"}
+          </Button>
+        )}
       </div>
       <div className="flex gap-1" role="group" aria-label="Colour">
         {MARKUP_COLORS.map((c) => (
@@ -715,7 +736,6 @@ function Toolbar(props: {
 function Stage({
   view,
   sources,
-  polys,
   annotations,
   tool,
   color,
@@ -726,7 +746,6 @@ function Stage({
 }: {
   view: AerialView;
   sources: ImagerySource[];
-  polys: LngLat[][][];
   annotations: Annotation[];
   tool: Tool;
   color: MarkupColor;
@@ -806,7 +825,6 @@ function Stage({
   };
 
   const cursor = tool === "move" ? "grab" : tool === "text" ? "text" : "crosshair";
-  const footD = polys.flatMap((poly) => poly.map((ring) => `${pathD(ring.map(px))} Z`)).join(" ");
   const lineOf = (key: string, pts: [number, number][], c: string) => (
     <g key={key}>
       <path
@@ -861,16 +879,6 @@ function Stage({
             preserveAspectRatio="none"
           />
         ))}
-        {footD && (
-          <path
-            d={footD}
-            fill="rgba(34,211,238,0.10)"
-            fillRule="evenodd"
-            stroke={FOOTPRINT_STROKE}
-            strokeWidth={3}
-            strokeLinejoin="round"
-          />
-        )}
         {annotations.map((a) => {
           if (a.kind !== "area") return null;
           const pts = a.points.map(px);

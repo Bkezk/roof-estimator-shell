@@ -383,21 +383,8 @@ export function paintOverlay(
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
-  // The footprint.
-  const polys = footprintPolygons(markup.building?.footprint ?? null);
-  ctx.strokeStyle = FOOTPRINT_STROKE;
-  ctx.lineWidth = 3;
-  for (const poly of polys)
-    for (const ring of poly) {
-      ctx.beginPath();
-      ring.forEach((p, i) => {
-        const [x, y] = at(p);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.closePath();
-      ctx.stroke();
-    }
+  // The matched building's outline is not drawn (owner, Oct 1: "we don't need the box around
+  // the property, it just muddles the picture"); its footprint area stays in the caption.
 
   // Areas at the bottom, then lines, then text, then tags on top.
   const order = { area: -1, free: 0, line: 0, text: 1, pin: 2 } as const;
@@ -462,8 +449,10 @@ export function paintOverlay(
     }
   }
 
-  // Caption, top left.
-  const area = footprintLabel(footprintAreaSqFt(polys));
+  // Caption, top left (the footprint's area stays in words; the outline itself is not drawn).
+  const area = footprintLabel(
+    footprintAreaSqFt(footprintPolygons(markup.building?.footprint ?? null)),
+  );
   const caption = [opts.caption, area].filter(Boolean).join(" · ");
   if (caption) {
     ctx.font = "bold 15px sans-serif";
