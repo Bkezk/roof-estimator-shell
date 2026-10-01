@@ -380,16 +380,27 @@ describe("listOpportunityEvents: the log, oldest first, under the table's RLS", 
   });
 });
 
-describe("StageStrip: the cells, the current one highlighted, dates underneath", () => {
+describe("StageStrip: a compact stepper — dots on a line, label and date beneath", () => {
   const src = read("src/components/stage-strip.tsx");
-  it("wraps to two rows on a phone, one row from sm up", () => {
-    expect(src).toContain('"grid-cols-3 sm:grid-cols-5"');
-    expect(src).toContain('"grid-cols-2 sm:grid-cols-4"');
+  it("left-aligned and capped in width, wrapping on a phone; no full-width boxes", () => {
+    expect(src).toContain('className="flex max-w-3xl flex-wrap gap-y-3 text-xs"');
+    expect(src).not.toContain("grid-cols-");
+    expect(src).not.toContain("rounded-md border px-2 py-1.5");
   });
-  it("marks the current cell and shows each date (blank when never reached)", () => {
+  it("the current step is the primary ringed dot with a bold label; reached steps filled; ahead hollow", () => {
     expect(src).toContain('aria-current={c.current ? "step" : undefined}');
-    expect(src).toContain("border-primary bg-primary text-primary-foreground");
-    expect(src).toContain('{c.at ? shortDate(c.at) : "\\u00a0"}');
+    expect(src).toContain("bg-primary ring-2 ring-primary ring-offset-2 ring-offset-background");
+    expect(src).toContain("const past = !!c.at && !c.current;");
+    expect(src).toContain('? "bg-foreground/60"');
+    expect(src).toContain('"border border-muted-foreground/40 bg-background"');
+    expect(src).toContain(
+      'c.current ? "font-semibold" : past ? "font-medium" : "text-muted-foreground"',
+    );
+  });
+  it("a connector line after every step but the last; each date, blank when never reached", () => {
+    expect(src).toContain("const last = i === cells.length - 1;");
+    expect(src).toContain("{!last && (");
+    expect(src).toContain('{c.at ? shortDate(c.at) : "\u00a0"}');
   });
 });
 
