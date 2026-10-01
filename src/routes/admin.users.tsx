@@ -15,6 +15,7 @@ import {
 } from "@/lib/auth.functions";
 import { RateBox } from "@/components/service/rate-box";
 import {
+  EVERYONE_PAGES,
   PAGES,
   PAGE_HELP,
   PAGE_LABELS,
@@ -94,8 +95,12 @@ function AccessPicker(props: {
           <input
             type="checkbox"
             className="h-4 w-4"
-            checked={byRole ? canAccess({ role: props.role }, p) : props.access.includes(p)}
-            disabled={props.disabled || byRole}
+            checked={
+              byRole || EVERYONE_PAGES.includes(p)
+                ? canAccess({ role: props.role }, p)
+                : props.access.includes(p)
+            }
+            disabled={props.disabled || byRole || EVERYONE_PAGES.includes(p)}
             onChange={(e) =>
               props.onChange(
                 "user",

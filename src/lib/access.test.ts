@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  EVERYONE_PAGES,
   PAGES,
   canAccess,
   homeFor,
@@ -23,8 +24,12 @@ describe("per-page access", () => {
     expect(canAccess(admin, "estimate")).toBe(true);
     expect(canAccess(admin, "pricing")).toBe(true);
     expect(canAccess(estimator, "estimate")).toBe(true);
-    expect(canAccess(estimator, "inventory")).toBe(false);
+    // Inventory is everyone's (owner, Oct 1), tick or no tick.
+    expect(canAccess(estimator, "inventory")).toBe(true);
     expect(canAccess(field, "inventory")).toBe(true);
+    expect(canAccess({ role: "user", access: [] }, "inventory")).toBe(true);
+    expect(canAccess(null, "inventory")).toBe(false);
+    expect(EVERYONE_PAGES).toEqual(["inventory"]);
     expect(canAccess(field, "estimate")).toBe(false);
     expect(canAccess(null, "estimate")).toBe(false);
     expect(isAdmin(admin)).toBe(true);

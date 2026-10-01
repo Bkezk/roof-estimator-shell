@@ -40,7 +40,7 @@ export const PAGE_LABELS: Record<Page, string> = {
 export const PAGE_HELP: Record<Page, string> = {
   estimate: "Bids and the estimator — and listed as an estimator on Setup",
   pricing: "Labor, Duro-Last and Non-DL pricing, price list import",
-  inventory: "Stock ledger (leftovers only, unless Estimate is granted too)",
+  inventory: "Stock ledger — every signed-in user has it (owner, Oct 1)",
   prospect: "Buildings, roofs and tasks — the territory roof database",
   takeoff: "Measure plan sheets and aerial screenshots; create a bid from the drawing",
   service:
@@ -78,8 +78,15 @@ export interface AccessLike {
  * Admins and managers reach every page; others only the pages granted (Estimate Pricing is one
  * of them: anyone with the tick sees it — owner, Oct 1). The twin of `public.has_access(page)`.
  */
+/** Pages every signed-in user has without a tick (owner, Oct 1: "all should have access to inventory"). */
+export const EVERYONE_PAGES: readonly Page[] = ["inventory"];
+
 export const canAccess = (p: AccessLike | null | undefined, page: Page): boolean =>
-  !!p && (p.role === "admin" || p.role === "manager" || (p.access ?? []).includes(page));
+  !!p &&
+  (p.role === "admin" ||
+    p.role === "manager" ||
+    EVERYONE_PAGES.includes(page) ||
+    (p.access ?? []).includes(page));
 
 export const isAdmin = (p: AccessLike | null | undefined): boolean => p?.role === "admin";
 
