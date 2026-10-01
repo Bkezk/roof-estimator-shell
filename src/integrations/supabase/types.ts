@@ -1357,6 +1357,30 @@ export type Database = {
           },
         ];
       };
+      inspection_checklist_items: {
+        Row: {
+          created_at: string;
+          id: string;
+          label: string;
+          sort: number;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          id?: string;
+          label: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          id?: string;
+          label?: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       inventory_locations: {
         Row: {
           active: boolean;
@@ -2471,6 +2495,7 @@ export type Database = {
       };
       service_job_photos: {
         Row: {
+          annotations: Json | null;
           by_user: string | null;
           created_at: string;
           file_name: string | null;
@@ -2485,6 +2510,7 @@ export type Database = {
           taken_at: string | null;
         };
         Insert: {
+          annotations?: Json | null;
           by_user?: string | null;
           created_at?: string;
           file_name?: string | null;
@@ -2499,6 +2525,7 @@ export type Database = {
           taken_at?: string | null;
         };
         Update: {
+          annotations?: Json | null;
           by_user?: string | null;
           created_at?: string;
           file_name?: string | null;
@@ -2657,8 +2684,10 @@ export type Database = {
           description: string;
           en_route_at: string | null;
           field_status: string | null;
+          from_job_id: string | null;
           helper_count: number;
           id: string;
+          inspection: Json | null;
           invoice_id: string | null;
           job_number: string | null;
           labor_rate_kind: string;
@@ -2699,8 +2728,10 @@ export type Database = {
           description?: string;
           en_route_at?: string | null;
           field_status?: string | null;
+          from_job_id?: string | null;
           helper_count?: number;
           id?: string;
+          inspection?: Json | null;
           invoice_id?: string | null;
           job_number?: string | null;
           labor_rate_kind?: string;
@@ -2741,8 +2772,10 @@ export type Database = {
           description?: string;
           en_route_at?: string | null;
           field_status?: string | null;
+          from_job_id?: string | null;
           helper_count?: number;
           id?: string;
+          inspection?: Json | null;
           invoice_id?: string | null;
           job_number?: string | null;
           labor_rate_kind?: string;
@@ -2765,6 +2798,13 @@ export type Database = {
           updated_by_name?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "service_jobs_from_job_id_fkey";
+            columns: ["from_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "service_jobs_contact_id_fkey";
             columns: ["contact_id"];
@@ -3608,6 +3648,34 @@ export type Database = {
           full_name: string | null;
           id: string;
           technician: boolean;
+        }[];
+      };
+      service_aerial_address_candidates: {
+        Args: { p_house: string; p_street_word: string; p_limit?: number };
+        Returns: {
+          address: string;
+          building_id: string | null;
+          city: string | null;
+          id: string;
+          lat: number | null;
+          lng: number | null;
+          source: string;
+          state: string | null;
+          zip: string | null;
+        }[];
+      };
+      service_aerial_buildings_near: {
+        Args: { p_lat: number; p_lng: number; p_radius_m?: number };
+        Returns: {
+          address1: string;
+          centroid_lat: number | null;
+          centroid_lng: number | null;
+          city: string | null;
+          footprint: Json | null;
+          id: string;
+          roof_sqft: number | null;
+          state: string;
+          zip: string | null;
         }[];
       };
       work_people: {

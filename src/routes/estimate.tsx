@@ -65,6 +65,7 @@ import {
   type MilBidState,
 } from "@/lib/bid-mils";
 import { readPlanSwiftHandoff } from "@/lib/planswift/handoff";
+import { parseEstimateSearch, type EstimateSearch } from "@/lib/estimate-search";
 import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
@@ -198,60 +199,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/** /estimate search params: a saved bid, a combine list, or a prefill for a new bid. */
-export interface EstimateSearch {
-  bid?: string;
-  combine?: string;
-  /** A takeoff id: a NEW bid seeded from that drawing (docs/planswift-research.md §4.6). */
-  takeoff?: string;
-  /** A PlanSwift import hand-off id: a NEW bid seeded from the export (src/lib/planswift). */
-  planswift?: string;
-  building?: string;
-  pfName?: string;
-  pfOwner?: string;
-  pfAddr?: string;
-  pfAddr2?: string;
-  pfCity?: string;
-  pfState?: string;
-  pfZip?: string;
-  pfW?: number;
-  pfL?: number;
-}
+/** /estimate search params: parsed in src/lib/estimate-search.ts (tested there). */
+export type { EstimateSearch };
 
 export const Route = createFileRoute("/estimate")({
   head: () => ({ meta: [{ title: "Estimator — JBK Portal" }] }),
-  validateSearch: (s: Record<string, unknown>): EstimateSearch => {
-    const b = s["bid"];
-    const c = s["combine"];
-    const str = (k: keyof EstimateSearch) => {
-      const v = s[k];
-      return typeof v === "string" && v ? { [k]: v } : {};
-    };
-    const num = (k: "pfW" | "pfL") => {
-      const v = Number(s[k]);
-      return Number.isFinite(v) && v > 0 ? { [k]: v } : {};
-    };
-    return {
-      ...(typeof b === "string" ? { bid: b } : {}),
-      // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
-      ...(typeof c === "string" && c ? { combine: c } : {}),
-      ...str("takeoff"),
-      ...str("planswift"),
-      // Generic prefill for a NEW bid (another module hands the estimator plain values in the
-      // URL — the estimator imports nothing from it): the linked building id (bids.building_id),
-      // client / job-site fields, and one section's width × length.
-      ...str("building"),
-      ...str("pfName"),
-      ...str("pfOwner"),
-      ...str("pfAddr"),
-      ...str("pfAddr2"),
-      ...str("pfCity"),
-      ...str("pfState"),
-      ...str("pfZip"),
-      ...num("pfW"),
-      ...num("pfL"),
-    };
-  },
+  validateSearch: parseEstimateSearch,
   component: EstimatePage,
 });
 
@@ -937,7 +890,15 @@ function EstimatePage() {
   useEffect(() => {
     if (bidParam || prefillApplied.current) return;
     const p = search;
-    const has = p.building || p.pfName || p.pfAddr || p.pfCity || p.pfOwner || (p.pfW && p.pfL);
+    const has =
+      p.building ||
+      p.pfName ||
+      p.pfAddr ||
+      p.pfCity ||
+      p.pfOwner ||
+      (p.pfW && p.pfL) ||
+      p.pfAccount ||
+      p.pfNotes;
     if (!has) return;
     prefillApplied.current = true;
     if (p.building) setLinkedBuildingId(p.building);
@@ -950,6 +911,7 @@ function EstimatePage() {
       ...(p.pfCity ? { jobCity: p.pfCity } : {}),
       ...(p.pfState ? { jobState: p.pfState } : {}),
       ...(p.pfZip ? { jobZip: p.pfZip } : {}),
+      ...(p.pfNotes ? { notes: p.pfNotes } : {}),
       ...(p.pfCity || p.pfState || p.pfZip
         ? {
             jobCityStZip: [p.pfCity, [p.pfState, p.pfZip].filter(Boolean).join(" ")]
@@ -958,6 +920,9 @@ function EstimatePage() {
           }
         : {}),
     }));
+    // The customer profile (and site) to link, as a takeoff's customer is linked: blank client
+    // fields are then filled from the profile (e.g. "Create bid" from an inspection ticket).
+    if (p.pfAccount) linkFromTakeoff(p.pfAccount, p.pfOwner || p.pfName || "", p.pfSite ?? null);
     // One section with the given width × length — the engine prices it as any typed section.
     if (p.pfW && p.pfL) {
       setSections([newSection({ ...sectionDefaults, name: "Roof", width: p.pfW, length: p.pfL })]);

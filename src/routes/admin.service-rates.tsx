@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Receipt } from "lucide-react";
 
 import { ServiceRatesSettings } from "@/components/service-rates-settings";
+import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
 
 // Owner, Sep 28: Service Rates is its own Admin page (it used to be a tab of Estimate Pricing ›
 // General). Access is the central gate's (pageForPath: /admin/service-rates → admin).
@@ -23,6 +24,7 @@ function ServiceRatesPage() {
         </p>
       </div>
       <ServiceRatesSettings />
+      <InspectionChecklistSettings />
     </div>
   );
 }

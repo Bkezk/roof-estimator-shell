@@ -70,6 +70,7 @@ import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/fi
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
+import { TicketExtras } from "@/components/service/ticket-extras";
 import {
   clock,
   errText,
@@ -332,6 +333,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
         </p>
       ) : (
         <>
+          {/* Inspection checklist (Inspection tickets) and the Aerial markup */}
+          <TicketExtras job={job} canEdit />
+
           {/* (b) Repairs */}
           <RepairsSection jobId={job.id} />
 

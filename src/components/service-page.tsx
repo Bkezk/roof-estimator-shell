@@ -91,6 +91,7 @@ import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ContactSelect, TicketFieldSections } from "@/components/service/ticket-field-sections";
+import { FromInspectionNote, TicketExtras } from "@/components/service/ticket-extras";
 import {
   LatestContact,
   LogContactButtons,
@@ -1473,6 +1474,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {job.updated_by_name ? ` by ${job.updated_by_name}` : ""}
           </p>
         )}
+        {job && <FromInspectionNote job={job} />}
         {!job && seed?.note && (
           <p
             className={
@@ -1858,6 +1860,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         // Owner, Sep 28 ("so much crap on it"): the sections below the form fold away with a
         // one-line summary each; the open state is remembered per section.
         <div className="space-y-4">
+          <TicketExtras job={job} canEdit={canEdit} />
           {officeOrAdmin && <InvoiceBlock job={job} />}
 
           {can("service") || can("inventory") || can("estimate") ? (
