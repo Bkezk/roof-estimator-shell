@@ -28,7 +28,6 @@ import {
   Loader2,
   Plus,
   Users,
-  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -46,11 +45,12 @@ import {
   mergeWork,
   monthGrid,
   compareWork,
-  presetGroups,
+  defaultBucket,
   ymdParts,
   BUCKET_EMPTY,
   BUCKET_LABELS,
   type BucketPreset,
+  type WorkBucket,
   type WorkFollowup,
   type WorkItem,
   type WorkKind,
@@ -204,50 +204,77 @@ function ListView({
   today: string;
   showWho: boolean;
   manage: ManageFollowup | null;
-  /** ?bucket=today|overdue: only that group (the Owner view's links). */
+  /** ?bucket=today|overdue: the tab to open on (the Owner view's links). */
   preset: BucketPreset | null;
   onClearPreset: () => void;
 }) {
-  // Owner (Oct 1): all six headings, always, in the same order — an empty one shows "(0)" and a
-  // muted line. A preset (?bucket=) shows only its own heading.
-  const groups = useMemo(
-    () => presetGroups(listGroups(items, today), preset),
-    [items, today, preset],
-  );
-  const presetEmpty = !!preset && groups.every((g) => g.items.length === 0);
+  // Owner (Oct 1): all six headings, always, in the same order, as a row of tabs across the top
+  // ("horizontally across the top instead of vertically"); the selected tab's items show below,
+  // an empty one its muted line. A preset (?bucket=) picks the tab; picking another clears it.
+  const groups = useMemo(() => listGroups(items, today), [items, today]);
+  const [picked, setPicked] = useState<WorkBucket | null>(null);
+  // A new preset (an Owner-view link while already here) wins over an earlier pick.
+  const [prevPreset, setPrevPreset] = useState(preset);
+  if (prevPreset !== preset) {
+    setPrevPreset(preset);
+    setPicked(null);
+  }
+  const bucket = picked ?? defaultBucket(groups, preset);
+  // listGroups always has all six, so the find never misses; the fallback is for the types.
+  const group = groups.find((g) => g.bucket === bucket) ?? {
+    bucket,
+    label: BUCKET_LABELS[bucket],
+    items: [],
+  };
+  const pick = (b: WorkBucket) => {
+    setPicked(b);
+    if (preset && b !== preset) onClearPreset();
+  };
   return (
-    <div className="space-y-6">
-      {preset && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">
-            Showing {BUCKET_LABELS[preset]} only
-            {presetEmpty ? ` — nothing ${preset === "today" ? "due today" : "overdue"}.` : "."}
-          </span>
-          <Button size="sm" variant="outline" onClick={onClearPreset}>
-            <X className="h-4 w-4" /> Show all
-          </Button>
-        </div>
-      )}
-      {groups.map((g) => (
-        <section key={g.bucket} className="space-y-2">
-          <h2
-            className={`text-sm font-semibold ${
-              g.bucket === "overdue" && g.items.length > 0 ? "text-destructive" : ""
-            }`}
-          >
-            {g.label} <span className="font-normal text-muted-foreground">({g.items.length})</span>
-          </h2>
-          {g.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>
-          ) : (
-            <div className="grid gap-2 lg:grid-cols-2">
-              {g.items.map((it) => (
-                <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
-              ))}
-            </div>
-          )}
-        </section>
-      ))}
+    <div className="space-y-4">
+      <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
+        {groups.map((g) => {
+          const selected = g.bucket === bucket;
+          const alert = g.bucket === "overdue" && g.items.length > 0;
+          return (
+            <button
+              key={g.bucket}
+              type="button"
+              role="tab"
+              id={`work-tab-${g.bucket}`}
+              aria-selected={selected}
+              aria-controls="work-tab-panel"
+              onClick={() => pick(g.bucket)}
+              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
+                selected
+                  ? "border-primary font-semibold"
+                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+              } ${alert ? "text-destructive" : ""}`}
+            >
+              {g.label}{" "}
+              <span className={`font-normal tabular-nums ${alert ? "" : "text-muted-foreground"}`}>
+                ({g.items.length})
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <section
+        id="work-tab-panel"
+        role="tabpanel"
+        aria-labelledby={`work-tab-${group.bucket}`}
+        className="space-y-2"
+      >
+        {group.items.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[group.bucket]}</p>
+        ) : (
+          <div className="grid gap-2 lg:grid-cols-2">
+            {group.items.map((it) => (
+              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -271,141 +298,152 @@ function CalendarView({
   const undated = items.filter((i) => !i.date).length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label="Previous month"
-          onClick={() => setMonth((m) => addMonths(m, -1))}
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex items-center gap-2">
-          <span className="font-semibold">{monthLabel(month)}</span>
-          {(month !== today.slice(0, 7) || day !== today) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setMonth(today.slice(0, 7));
-                setDay(today);
-              }}
-            >
-              Today
-            </Button>
-          )}
+    // Owner (Oct 1): "a tad smaller so I don't have to scroll": on a desktop the month and the
+    // day's items share one screen — the grid is sized to the viewport (the 15rem is the shell
+    // header, the page title and toolbar, this row of month buttons and the paddings), the weeks
+    // divide that height, and the day's items sit beside the grid on xl and up, scrolling inside.
+    <div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[30rem] xl:flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+        <div className="flex items-center justify-between gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Previous month"
+            onClick={() => setMonth((m) => addMonths(m, -1))}
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{monthLabel(month)}</span>
+            {(month !== today.slice(0, 7) || day !== today) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setMonth(today.slice(0, 7));
+                  setDay(today);
+                }}
+              >
+                Today
+              </Button>
+            )}
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Next month"
+            onClick={() => setMonth((m) => addMonths(m, 1))}
+          >
+            <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label="Next month"
-          onClick={() => setMonth((m) => addMonths(m, 1))}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
 
-      {/* Owner (Oct 1): "a bigger calendar" — the whole width, and on a desktop the month fills
-          the viewport height with the weeks sharing it; it scrolls inside only if it overflows. */}
-      <div className="flex flex-col overflow-hidden rounded-lg border lg:h-[calc(100vh-14rem)]">
-        <div className="grid shrink-0 grid-cols-7 border-b bg-muted/40 text-center text-xs font-medium text-muted-foreground">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="py-1.5">
-              <span className="sm:hidden">{d[0]}</span>
-              <span className="hidden sm:inline">{d}</span>
-            </div>
-          ))}
-        </div>
-        <div className="grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto">
-          {weeks.map((week) => (
-            <div key={week[0]} className="grid grid-cols-7 border-b last:border-b-0">
-              {week.map((d) => {
-                const list = byDay.get(d) ?? [];
-                const { shown, more } = cellItems(list);
-                const inMonth = d.slice(0, 7) === month;
-                const overdue = d < today && list.some((i) => !i.done);
-                return (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDay(d)}
-                    aria-pressed={d === day}
-                    aria-label={`${dayLabel(d)}: ${list.length} item${list.length === 1 ? "" : "s"}`}
-                    className={`flex min-h-28 min-w-0 flex-col items-stretch gap-1 border-r p-1 text-left last:border-r-0 lg:min-h-36 ${
-                      inMonth ? "" : "bg-muted/30 text-muted-foreground"
-                    } ${d === day ? "bg-primary/10 ring-2 ring-inset ring-primary" : "hover:bg-muted/50"}`}
-                  >
-                    <span
-                      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-xs ${
-                        d === today ? "bg-primary font-semibold text-primary-foreground" : ""
-                      } ${overdue && d !== today ? "text-destructive" : ""}`}
-                    >
-                      {Number(d.slice(8))}
-                    </span>
-                    {/* Phone: coloured dots; wider screens: up to five titles, each with its
-                        kind's colour as a left bar (and whose, in the Everyone view). */}
-                    {list.length > 0 && (
-                      <>
-                        <span className="flex flex-wrap gap-0.5 sm:hidden">
-                          {shown.map((i) => (
-                            <span
-                              key={i.key}
-                              className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[i.kind]}`}
-                            />
-                          ))}
-                          {more > 0 && <span className="text-[10px] leading-none">+{more}</span>}
-                        </span>
-                        <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
-                          {shown.map((i) => (
-                            <span
-                              key={i.key}
-                              title={showWho ? `${i.title} — ${i.assigneeName ?? ""}` : i.title}
-                              className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
-                                i.done ? "opacity-60" : ""
-                              }`}
-                            >
-                              <span className="min-w-0 flex-1 truncate">{i.title}</span>
-                              {showWho && (
-                                <span className="shrink-0 rounded bg-background px-1 text-[9px] font-semibold leading-3 text-muted-foreground">
-                                  {initials(i.assigneeName)}
-                                </span>
-                              )}
-                            </span>
-                          ))}
-                          {more > 0 && (
-                            <span className="text-[11px] text-muted-foreground">+{more} more</span>
-                          )}
-                        </span>
-                      </>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold">
-          {dayLabel(day)}{" "}
-          <span className="font-normal text-muted-foreground">({dayItems.length})</span>
-        </h2>
-        {dayItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing on this day.</p>
-        ) : (
-          <div className="grid gap-2 lg:grid-cols-2">
-            {dayItems.map((it) => (
-              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+        {/* The whole width (owner: "a bigger calendar", then "wider but shorter"); on xl the weeks
+          share the height above, each day clipping past its "+N more" line. */}
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border xl:flex-1">
+          <div className="grid shrink-0 grid-cols-7 border-b bg-muted/40 text-center text-xs font-medium text-muted-foreground">
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+              <div key={d} className="py-1.5">
+                <span className="sm:hidden">{d[0]}</span>
+                <span className="hidden sm:inline">{d}</span>
+              </div>
             ))}
           </div>
-        )}
-        {undated > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {undated} item{undated === 1 ? " has" : "s have"} no date — see the List.
-          </p>
-        )}
+          <div className="grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto">
+            {weeks.map((week) => (
+              <div key={week[0]} className="grid grid-cols-7 border-b last:border-b-0">
+                {week.map((d) => {
+                  const list = byDay.get(d) ?? [];
+                  const { shown, more } = cellItems(list);
+                  const inMonth = d.slice(0, 7) === month;
+                  const overdue = d < today && list.some((i) => !i.done);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDay(d)}
+                      aria-pressed={d === day}
+                      aria-label={`${dayLabel(d)}: ${list.length} item${list.length === 1 ? "" : "s"}`}
+                      className={`flex min-h-24 min-w-0 flex-col items-stretch gap-1 overflow-hidden border-r p-1 text-left last:border-r-0 xl:min-h-0 ${
+                        inMonth ? "" : "bg-muted/30 text-muted-foreground"
+                      } ${d === day ? "bg-primary/10 ring-2 ring-inset ring-primary" : "hover:bg-muted/50"}`}
+                    >
+                      <span
+                        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-xs ${
+                          d === today ? "bg-primary font-semibold text-primary-foreground" : ""
+                        } ${overdue && d !== today ? "text-destructive" : ""}`}
+                      >
+                        {Number(d.slice(8))}
+                      </span>
+                      {/* Phone: coloured dots; wider screens: up to five titles, each with its
+                        kind's colour as a left bar (and whose, in the Everyone view). */}
+                      {list.length > 0 && (
+                        <>
+                          <span className="flex flex-wrap gap-0.5 sm:hidden">
+                            {shown.map((i) => (
+                              <span
+                                key={i.key}
+                                className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[i.kind]}`}
+                              />
+                            ))}
+                            {more > 0 && <span className="text-[10px] leading-none">+{more}</span>}
+                          </span>
+                          <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
+                            {shown.map((i) => (
+                              <span
+                                key={i.key}
+                                title={showWho ? `${i.title} — ${i.assigneeName ?? ""}` : i.title}
+                                className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
+                                  i.done ? "opacity-60" : ""
+                                }`}
+                              >
+                                <span className="min-w-0 flex-1 truncate">{i.title}</span>
+                                {showWho && (
+                                  <span className="shrink-0 rounded bg-background px-1 text-[9px] font-semibold leading-3 text-muted-foreground">
+                                    {initials(i.assigneeName)}
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                            {more > 0 && (
+                              <span className="text-[11px] text-muted-foreground">
+                                +{more} more
+                              </span>
+                            )}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* The day's items: under the grid, or beside it on xl and up (a 20rem column). */}
+      <section className="flex min-h-0 flex-col gap-2 xl:w-80 xl:shrink-0">
+        <h2 className="flex h-10 shrink-0 items-center text-sm font-semibold">
+          {dayLabel(day)}{" "}
+          <span className="ml-1 font-normal text-muted-foreground">({dayItems.length})</span>
+        </h2>
+        <div className="min-h-0 flex-1 space-y-2 xl:overflow-y-auto xl:pr-1">
+          {dayItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing on this day.</p>
+          ) : (
+            <div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-1">
+              {dayItems.map((it) => (
+                <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+              ))}
+            </div>
+          )}
+          {undated > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {undated} item{undated === 1 ? " has" : "s have"} no date — see the List.
+            </p>
+          )}
+        </div>
       </section>
     </div>
   );

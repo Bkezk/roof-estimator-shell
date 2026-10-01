@@ -386,6 +386,17 @@ export function presetGroups(groups: WorkGroup[], preset?: BucketPreset | null):
   return preset ? groups.filter((g) => g.bucket === preset) : groups;
 }
 
+/**
+ * The List's headings run across the top (owner, Oct 1: "the categories horizontally across the
+ * top instead of vertically"); one is selected and its items show below. The tab to start on:
+ * the preset (?bucket=, the Owner view's links) when there is one, else the first group in
+ * order with anything in it (Overdue before Today…), else Today.
+ */
+export function defaultBucket(groups: WorkGroup[], preset?: BucketPreset | null): WorkBucket {
+  if (preset) return preset;
+  return groups.find((g) => g.items.length > 0)?.bucket ?? "today";
+}
+
 // ---- calendar ------------------------------------------------------------------------------
 
 /**

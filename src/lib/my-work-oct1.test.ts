@@ -1,6 +1,8 @@
 /**
- * My Work, owner's asks of Oct 1: a smooth expand on the Owner view, Everyone by default for
- * admins and managers, a bigger Calendar, and all six List headings always.
+ * My Work, owner's asks of Oct 1: Everyone by default for admins and managers, all six List
+ * headings always — then, later the same day: the headings as a row of tabs across the top, a
+ * Calendar that fits one screen (the day's items beside it), and an Owner table that is always
+ * its full size (every person's detail shown, nothing expanding or contracting).
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -9,6 +11,7 @@ import {
   BUCKET_EMPTY,
   CALENDAR_CELL_MAX,
   cellItems,
+  defaultBucket,
   defaultWho,
   initials,
   listGroups,
@@ -125,24 +128,88 @@ describe("List: all six headings, always, in the same order", () => {
       ["done", 0],
     ]);
   });
-  it("the page renders listGroups, the (count) and the muted empty line for every group", () => {
+  it("the tab to start on: the preset, else the first group with anything, else Today", () => {
+    const empty = listGroups([], today);
+    expect(defaultBucket(empty, null)).toBe("today");
+    expect(defaultBucket(empty, "overdue")).toBe("overdue");
+    const items = mergeWork({
+      tickets: [],
+      tasks: [
+        {
+          id: "a",
+          title: "Later one",
+          due_date: "2026-11-20",
+          status: "open",
+          building_id: null,
+          assignee: "me",
+          assignee_name: null,
+        },
+      ],
+      followups: [],
+    });
+    expect(defaultBucket(listGroups(items, today), null)).toBe("later");
+    expect(defaultBucket(listGroups(items, today), "today")).toBe("today");
+    const late = mergeWork({
+      tickets: [],
+      tasks: [
+        {
+          id: "b",
+          title: "Late",
+          due_date: "2026-09-20",
+          status: "open",
+          building_id: null,
+          assignee: "me",
+          assignee_name: null,
+        },
+        {
+          id: "c",
+          title: "Now",
+          due_date: today,
+          status: "open",
+          building_id: null,
+          assignee: "me",
+          assignee_name: null,
+        },
+      ],
+      followups: [],
+    });
+    expect(defaultBucket(listGroups(late, today), null)).toBe("overdue");
+  });
+  it("the page: the six groups are a row of tabs across the top; the picked one's items below", () => {
     const page = read("src/components/my-work-page.tsx");
     const list = page.slice(
       page.indexOf("function ListView"),
       page.indexOf("function CalendarView"),
     );
-    expect(list).toContain("presetGroups(listGroups(items, today), preset)");
+    expect(list).toContain("listGroups(items, today)");
     expect(list).not.toContain("groupWork(");
-    expect(list).toContain("({g.items.length})");
+    expect(list).not.toContain("presetGroups(");
     expect(list).toContain(
-      '<p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>',
+      '<div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">',
     );
-    // No "Nothing assigned" box in place of the headings.
+    expect(list).toContain('role="tab"');
+    expect(list).toContain("aria-selected={selected}");
+    expect(list).toContain("({g.items.length})");
+    expect(list).toContain("const bucket = picked ?? defaultBucket(groups, preset);");
+    // One panel, the selected group's items or its muted empty line — not six stacked sections.
+    expect(list).toContain('role="tabpanel"');
+    expect(list).toContain(
+      '<p className="text-sm text-muted-foreground">{BUCKET_EMPTY[group.bucket]}</p>',
+    );
+    expect(list).not.toContain("{groups.map((g) => (\n        <section");
+    expect(list).not.toContain("<h2");
+    // Overdue reads red when there is anything in it.
+    expect(list).toContain('const alert = g.bucket === "overdue" && g.items.length > 0;');
+    // Picking another tab drops a ?bucket= preset; a new preset wins over an earlier pick.
+    expect(list).toContain("if (preset && b !== preset) onClearPreset();");
+    expect(list).toContain("if (prevPreset !== preset) {");
+    // No "Nothing assigned" box in place of the headings; no "Show all" button any more.
     expect(page).not.toContain("Nothing assigned");
+    expect(page).not.toContain("Show all");
   });
 });
 
-describe("Calendar: whole width, fills the viewport, five items per day", () => {
+describe("Calendar: whole width, one screen, the day's items beside it, five items per day", () => {
   it("caps a day at five, then +N more", () => {
     expect(CALENDAR_CELL_MAX).toBe(5);
     const seven = [1, 2, 3, 4, 5, 6, 7];
@@ -158,15 +225,29 @@ describe("Calendar: whole width, fills the viewport, five items per day", () => 
     expect(initials("")).toBe("?");
     expect(initials(null)).toBe("?");
   });
-  it("the page: max-w-none outside the List; the grid's sizing classes; bars and chips", () => {
+  it("the page: max-w-none outside the List; sized to the viewport on xl; bars and chips", () => {
     const page = read("src/components/my-work-page.tsx");
     expect(page).toContain('view === "list" ? "max-w-5xl" : "max-w-none"');
     const cal = page.slice(page.indexOf("function CalendarView"), page.indexOf("export function"));
-    expect(cal).toContain("lg:h-[calc(100vh-14rem)]");
+    // The whole thing (month buttons, grid, the day's items) is one viewport tall on xl and up,
+    // the weeks dividing the grid's height; nothing to scroll to. Below xl it flows as before.
+    expect(cal).toContain(
+      '<div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[30rem] xl:flex-row">',
+    );
+    expect(cal).not.toContain("lg:h-[calc(100vh-14rem)]");
     expect(cal).toContain("grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto");
-    expect(cal).toContain("min-h-28");
-    expect(cal).toContain("lg:min-h-36");
-    expect(cal).not.toContain("sm:min-h-24");
+    expect(cal).toContain("min-h-24");
+    expect(cal).toContain("xl:min-h-0");
+    expect(cal).not.toContain("lg:min-h-36");
+    expect(cal).not.toContain("min-h-28");
+    // A day clips past its lines rather than pushing the week taller.
+    expect(cal).toMatch(
+      /flex min-h-24 min-w-0 flex-col items-stretch gap-1 overflow-hidden border-r/,
+    );
+    // The day's items: a 20rem column beside the grid on xl, scrolling inside; under it below xl.
+    expect(cal).toContain('<section className="flex min-h-0 flex-col gap-2 xl:w-80 xl:shrink-0">');
+    expect(cal).toContain("xl:overflow-y-auto");
+    expect(cal).toContain('<div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-1">');
     expect(cal).toContain("const { shown, more } = cellItems(list);");
     expect(cal).not.toMatch(/list\.slice\(0, [0-9]\)/);
     expect(cal).toContain("+{more} more");
@@ -174,32 +255,38 @@ describe("Calendar: whole width, fills the viewport, five items per day", () => 
     expect(cal).toContain("${KIND_BAR[i.kind]}");
     expect(cal).toContain('<span className="min-w-0 flex-1 truncate">{i.title}</span>');
     expect(cal).toMatch(/\{showWho && \(\s*<span[^>]*>\s*\{initials\(i\.assigneeName\)\}/);
-    // Today stays highlighted; the day list under the grid stays.
+    // Today stays highlighted; the day list stays.
     expect(cal).toContain('d === today ? "bg-primary font-semibold text-primary-foreground" : ""');
     expect(cal).toContain("Nothing on this day.");
   });
 });
 
-describe("Owner view: the detail row animates open and closed", () => {
+describe("Owner view: one size, every person's detail always shown", () => {
   const view = read("src/components/owner-view.tsx");
-  const row = view.slice(view.indexOf("function DetailRow"), view.indexOf("const DETAIL_TITLES"));
-  it("a grid-rows 0fr → 1fr transition with opacity, 200 ms ease-out", () => {
-    expect(row).toContain("transition-[grid-template-rows,opacity] duration-200 ease-out");
-    expect(row).toContain('open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"');
-    expect(row).toContain('<div className="min-h-0 overflow-hidden">');
-    expect(view).toContain("const EXPAND_MS = 200;");
+  it("no expand / collapse: no open state, chevron, Expand all, animation or reduced-motion hook", () => {
+    for (const gone of [
+      "useState",
+      "ChevronRight",
+      "Expand all",
+      "Collapse all",
+      "aria-expanded",
+      "DetailRow",
+      "grid-rows-[",
+      "EXPAND_MS",
+      "prefers-reduced-motion",
+      "usePrefersReducedMotion",
+      "onRowClick",
+      "cursor-pointer",
+      "inert=",
+    ])
+      expect(view, gone).not.toContain(gone);
   });
-  it("honours prefers-reduced-motion: no transition, and no delayed unmount", () => {
-    expect(row).toContain("motion-reduce:transition-none");
-    expect(view).toContain('const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";');
-    expect(row).toContain("const reduce = usePrefersReducedMotion();");
-    expect(row).toContain("setCollapsing(!open && !reduce);");
-  });
-  it("the row is always mounted (so collapse animates); the content only while open or collapsing", () => {
-    expect(view).not.toContain("{isOpen && (");
-    expect(view).toContain("<DetailRow id={detailId} open={isOpen}>");
-    expect(row).toContain("{(open || collapsing) && (");
-    expect(row).toContain("inert={!open}");
+  it("each summary row is followed by its detail row, the detail always mounted", () => {
+    expect(view).toContain('<TableCell className="font-medium">{r.name}</TableCell>');
+    expect(view).toContain("<PersonDetail userId={r.id} name={r.name} />");
+    expect(view).toContain('<TableRow className="hover:bg-transparent">');
+    expect(view).toContain('<TableCell colSpan={7} className="p-0">');
+    expect(view).toContain('<div className="bg-muted/30 p-3 align-top">');
   });
   it("a fixed-height skeleton, three placeholder lines per card, while the detail loads", () => {
     const skel = view.slice(view.indexOf("function DetailSkeleton"));
@@ -209,9 +296,5 @@ describe("Owner view: the detail row animates open and closed", () => {
     expect(view).not.toContain('<p className="text-sm text-muted-foreground">Loading…</p>');
     // The skeleton's cards and the loaded cards share the same minimum height.
     expect(view.match(/min-h-48 min-w-0 overflow-hidden rounded-md border/g)?.length).toBe(3);
-  });
-  it("Expand all opens every row at once (no stagger)", () => {
-    expect(view).toContain("setOpen(allOpen ? new Set() : new Set(data.rows.map((r) => r.id)))");
-    expect(view).not.toMatch(/transition-delay|delay-\d|stagger/);
   });
 });
