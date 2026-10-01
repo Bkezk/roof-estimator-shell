@@ -14,7 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, isOffice } from "@/lib/access";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 
@@ -47,7 +47,7 @@ async function ownJob(ctx: Ctx, id: string): Promise<ServiceJobRow> {
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!job) throw new Error("Ticket not found");
-  if (p.technician && p.role !== "admin" && job.technician_id !== ctx.userId)
+  if (!isOffice(p) && job.technician_id !== ctx.userId)
     throw new Error("This ticket is assigned to someone else");
   return job;
 }
@@ -105,7 +105,7 @@ export const myDay = createServerFn({ method: "GET" })
       .order("scheduled_date", { ascending: true, nullsFirst: false })
       .limit(100);
     // Office users see the whole board here; a technician their own (RLS also filters).
-    if (p.technician && p.role !== "admin") q = q.eq("technician_id", context.userId);
+    if (!isOffice(p)) q = q.eq("technician_id", context.userId);
     const { data: jobs, error } = await q;
     if (error) throw new Error(error.message);
     const siteIds = [

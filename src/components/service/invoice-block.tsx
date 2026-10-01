@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isOffice } from "@/lib/access";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { invoiceLabel } from "@/lib/invoice-numbering";
 import {
@@ -152,7 +153,7 @@ function KindBadge({ kind }: { kind: LineKind }) {
 /** Mounted on every ticket; decides whether the invoice applies here. */
 export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
   const { profile } = useAuth();
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  const isTech = !isOffice(profile);
   if (!profile || isTech) return null;
   if (!INVOICE_STAGES.includes(job.stage) && !job.invoice_id) return null;
   return <InvoiceLoader job={job} />;

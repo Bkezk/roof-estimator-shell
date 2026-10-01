@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, isOffice } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { toBase64 } from "@/lib/webpush";
@@ -38,7 +38,7 @@ async function office(ctx: Ctx) {
     .maybeSingle();
   if (!data || !(canAccess(data, "service") || canAccess(data, "customers")))
     throw new Error("Forbidden: Service access required");
-  if (data.technician && data.role !== "admin") throw new Error("Invoices are the office's");
+  if (!isOffice(data)) throw new Error("Invoices are the office's");
   return data;
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>

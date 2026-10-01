@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, isOffice } from "@/lib/access";
 import {
   inspectionComplete,
   inspectionSchema,
@@ -40,7 +40,7 @@ async function me(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
-const isTech = (p: { technician: boolean; role: string }) => p.technician && p.role !== "admin";
+const isTech = (p: { technician: boolean; role: string }) => !isOffice(p);
 
 // ── The checklist ─────────────────────────────────────────────────────────────────────────
 

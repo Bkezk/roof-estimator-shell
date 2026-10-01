@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isOffice } from "@/lib/access";
 import {
   TECH_STAGES,
   type ServiceJobRow,
@@ -166,7 +167,7 @@ async function shrinkPhoto(file: File): Promise<{ blob: Blob; type: string; name
 
 export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
   const { profile } = useAuth();
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  const isTech = !isOffice(profile);
   const stage = job.stage as ServiceStage;
   const officeStage = isTech && !TECH_STAGES.includes(stage);
   const canEdit = (!isTech || job.technician_id === profile?.id) && !officeStage;

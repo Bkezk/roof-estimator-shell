@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { AlarmClockOff, BellRing, CheckCircle2, Loader2, Users } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { seesEveryone } from "@/lib/access";
 import { listFollowups, type FollowupWithName } from "@/lib/followups.functions";
 import { isPastLimit, listUntouched } from "@/lib/contact-log.functions";
 import { followupsKey, useFollowupActions, whenDay, whenTime } from "@/components/followups-shared";
@@ -207,7 +208,8 @@ function Chip(props: { active: boolean; onClick: () => void; children: React.Rea
 export function FollowupsPage() {
   const { session, profile } = useAuth();
   const listFn = useServerFn(listFollowups);
-  const isAdmin = profile?.role === "admin";
+  // Admins and managers see everyone's follow-ups ("Mine" off by default); the rest their own.
+  const isAdmin = seesEveryone(profile);
   const [showClosed, setShowClosed] = useState(false);
   // "Mine" defaults on for everyone but admins; null = not touched yet (follow the role).
   const [mineOverride, setMineOverride] = useState<boolean | null>(null);

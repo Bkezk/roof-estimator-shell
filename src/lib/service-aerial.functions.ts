@@ -19,7 +19,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, isOffice } from "@/lib/access";
 import {
   buildingForPoint,
   parseStreetAddress,
@@ -351,7 +351,7 @@ export const saveTicketAerial = createServerFn({ method: "POST" })
     if (!canAccess(p, "service")) throw new Error("Forbidden: Service access required");
     const sb = context.supabase;
     const job = await readJob(context, data.service_job_id);
-    if (p.technician && p.role !== "admin" && job.technician_id !== context.userId)
+    if (!isOffice(p) && job.technician_id !== context.userId)
       throw new Error("This ticket is assigned to someone else");
     if (!data.storage_path.startsWith(`${job.id}/`))
       throw new Error("The picture must be stored under the ticket's own folder");

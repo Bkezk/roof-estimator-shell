@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isOffice } from "@/lib/access";
 import {
   assignServiceJob,
   listServiceJobs,
@@ -114,7 +115,7 @@ export function EmbeddedBoard() {
 
 export function BoardPage({ week }: { week?: string | undefined }) {
   const { profile } = useAuth();
-  if (profile?.technician && profile.role !== "admin")
+  if (!isOffice(profile))
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
         <p className="font-medium">The board is for the office.</p>

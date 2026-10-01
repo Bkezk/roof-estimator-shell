@@ -9,11 +9,19 @@
  * rules (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { CalendarDays, ChevronLeft, ChevronRight, List, ListTodo, Loader2 } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  List,
+  ListTodo,
+  Loader2,
+  Plus,
+} from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listMyWork } from "@/lib/my-work.functions";
@@ -32,6 +40,7 @@ import {
 } from "@/lib/my-work";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TaskDialog } from "@/components/tasks/task-dialog";
 import {
   Select,
   SelectContent,
@@ -294,6 +303,8 @@ export function MyWorkPage(props: {
   onWho: (who: string) => void;
 }) {
   const { session, profile } = useAuth();
+  const qc = useQueryClient();
+  const [newTask, setNewTask] = useState(false);
   const listFn = useServerFn(listMyWork);
   const q = useQuery({
     queryKey: ["my-work", props.who],
@@ -335,6 +346,14 @@ export function MyWorkPage(props: {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={() => setNewTask(true)}>
+          <Plus className="h-4 w-4" /> New task
+        </Button>
+        <TaskDialog
+          open={newTask}
+          onOpenChange={setNewTask}
+          onSaved={() => void qc.invalidateQueries({ queryKey: ["my-work"] })}
+        />
         <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="View">
           <Button
             size="sm"

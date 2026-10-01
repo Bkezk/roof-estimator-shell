@@ -60,6 +60,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isOffice } from "@/lib/access";
 import {
   deleteServiceJob,
   getCrewRateDefaults,
@@ -273,7 +274,7 @@ function ServiceList() {
   }, [untouchedQ.data]);
 
   // A technician (not admin) receives only their own tickets from the server.
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  const isTech = !isOffice(profile);
   const officeOrAdmin = !isTech;
   const BOARD_OPEN_KEY = "bid-o-matic:service-board-open";
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => {
@@ -1017,7 +1018,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const deleteFn = useServerFn(deleteServiceJob);
   const techFn = useServerFn(listTechnicians);
 
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  const isTech = !isOffice(profile);
   const officeOrAdmin = !isTech;
   const jobStage = job ? asStage(job.stage) : null;
   // Invoiced / Closed are the office's; a technician's ticket there is read-only for them (the

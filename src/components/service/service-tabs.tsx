@@ -7,6 +7,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { isOffice } from "@/lib/access";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -17,7 +18,7 @@ const TABS = [
 export function ServiceTabs({ toInvoice }: { toInvoice?: number }) {
   const { profile } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isTech = !!profile?.technician && profile.role !== "admin";
+  const isTech = !isOffice(profile);
   const tabs = TABS.filter((t) => !(t.office && isTech));
   if (tabs.length < 2) return null;
   return (

@@ -217,7 +217,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
     // The crew's rates are money: the office sets them. A technician answers "who is on this
     // job" on the close-out (setJobCrew) instead.
-    const isTechUser = p.technician && p.role !== "admin";
+    const isTechUser = !isOffice(p);
     const crew = isTechUser ? undefined : fields.crew;
     const patch = {
       account_id: fields.account_id ?? null,
@@ -518,7 +518,7 @@ export const listJobCrew = createServerFn({ method: "GET" })
     ]);
     const names = new Map<string, string>();
     for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    const noMoney = p.technician && p.role !== "admin";
+    const noMoney = !isOffice(p);
     return rows.map((r) => ({
       ...r,
       bill_rate: noMoney ? null : r.bill_rate,
@@ -541,7 +541,7 @@ export const getCrewRateDefaults = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }): Promise<CrewRateDefaults> => {
     const p = await serviceAccess(context);
-    if (p.technician && p.role !== "admin") throw new Error("Rates are the office's");
+    if (!isOffice(p)) throw new Error("Rates are the office's");
     const sb = context.supabase;
     const [{ data: rates, error }, { data: prof, error: pErr }] = await Promise.all([
       sb

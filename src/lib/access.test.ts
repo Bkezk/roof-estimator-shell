@@ -94,3 +94,26 @@ describe("per-page access", () => {
     expect(normalizeAccess(null)).toEqual([]);
   });
 });
+
+describe("every technician check goes through isOffice (manager clean-up, Oct 1)", () => {
+  it('no service, invoice or task code tests `technician && role !== "admin"` by hand', async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const roots = ["src/lib", "src/components/service", "src/components", "src/routes"];
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (!["src/components/service"].includes(f)) walk(f);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(e.name) || /\.test\.tsx?$/.test(e.name)) continue;
+        const src = fs.readFileSync(f, "utf8");
+        if (/technician\s*&&\s*[\w.?]*role\s*!==\s*"admin"/.test(src)) offenders.push(f);
+      }
+    };
+    for (const r of roots) if (fs.existsSync(r)) walk(r);
+    expect(offenders).toEqual([]);
+  });
+});
