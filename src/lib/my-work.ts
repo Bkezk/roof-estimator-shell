@@ -55,6 +55,27 @@ export function visibleUserIds(
   return [caller.id];
 }
 
+type RoleLike = { role: string | null | undefined } | null | undefined;
+
+/**
+ * Whose work the page shows when the URL names nobody (owner, Oct 1: "default to Everyone"):
+ * everyone's for admins and managers (seesEveryone), the caller's own for anyone else — the
+ * server ignores `who` for them anyway (visibleUserIds). An explicit ?who=mine still wins.
+ */
+export const defaultWho = (profile: RoleLike): "mine" | "all" =>
+  seesEveryone(profile) ? "all" : "mine";
+
+/** The `who` the page uses: the URL's, else the caller's default. */
+export const resolveWho = (who: string | null | undefined, profile: RoleLike): WorkWho =>
+  who || defaultWho(profile);
+
+/**
+ * The `who` to put in the URL: nothing when it is the caller's default, so Everyone is the bare
+ * URL for an admin or manager and ?who=mine stays when they pick Mine.
+ */
+export const whoParam = (who: string, profile: RoleLike): string | undefined =>
+  !who || who === defaultWho(profile) ? undefined : who;
+
 // ---- rows in -------------------------------------------------------------------------------
 
 export interface TicketIn {
@@ -333,6 +354,27 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
   }));
 }
 
+/**
+ * The List's headings (owner, Oct 1: "how many sub headings are there? I see Later and No date
+ * only"): all six groups, always, in the same order — an empty one shows "(0)" and this line.
+ */
+export const BUCKET_EMPTY: Record<WorkBucket, string> = {
+  overdue: "Nothing overdue.",
+  today: "Nothing due today.",
+  week: "Nothing else this week.",
+  later: "Nothing scheduled later.",
+  nodate: "Everything has a date.",
+  done: "Nothing waiting on the office.",
+};
+
+/** All six List groups in order, empty ones included, each sorted by `compareWork`. */
+export function listGroups(items: WorkItem[], today: string): WorkGroup[] {
+  const filled = new Map(groupWork(items, today).map((g) => [g.bucket, g]));
+  return BUCKET_ORDER.map(
+    (b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] },
+  );
+}
+
 /** A List preset from the URL (?bucket=today|overdue — the Owner view's links). */
 export type BucketPreset = "today" | "overdue";
 
@@ -379,4 +421,20 @@ export function itemsByDay(items: WorkItem[]): Map<string, WorkItem[]> {
     m.set(it.date, list);
   }
   return m;
+}
+
+/** A calendar day shows at most this many items, then "+N more" (owner, Oct 1). */
+export const CALENDAR_CELL_MAX = 5;
+
+/** A day's items for its calendar cell: the first `max`, and how many more there are. */
+export function cellItems<T>(list: T[], max: number = CALENDAR_CELL_MAX) {
+  return { shown: list.slice(0, max), more: Math.max(0, list.length - max) };
+}
+
+/** A person's initials chip: "Bob Smith" → "BS", "Cher" → "C", "Mary Jo van Dyke" → "MD". */
+export function initials(name: string | null | undefined): string {
+  const words = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  const first = words[0]?.charAt(0) ?? "";
+  const last = words.length > 1 ? (words.at(-1)?.charAt(0) ?? "") : "";
+  return (first + last).toUpperCase() || "?";
 }

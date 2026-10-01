@@ -38,14 +38,17 @@ import { listMyWork } from "@/lib/my-work.functions";
 import {
   KIND_LABELS,
   addMonths,
-  groupWork,
+  cellItems,
+  initials,
   itemsByDay,
+  listGroups,
   localYmd,
   mergeWork,
   monthGrid,
   compareWork,
   presetGroups,
   ymdParts,
+  BUCKET_EMPTY,
   BUCKET_LABELS,
   type BucketPreset,
   type WorkFollowup,
@@ -86,6 +89,13 @@ const KIND_DOT: Record<WorkKind, string> = {
   inspection: "bg-violet-500",
   task: "bg-amber-500",
   followup: "bg-emerald-500",
+};
+/** A calendar item's left bar: its kind's badge colour. */
+const KIND_BAR: Record<WorkKind, string> = {
+  ticket: "border-l-blue-500",
+  inspection: "border-l-violet-500",
+  task: "border-l-amber-500",
+  followup: "border-l-emerald-500",
 };
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (read as a calendar day, no time zone shift). */
@@ -198,19 +208,20 @@ function ListView({
   preset: BucketPreset | null;
   onClearPreset: () => void;
 }) {
+  // Owner (Oct 1): all six headings, always, in the same order — an empty one shows "(0)" and a
+  // muted line. A preset (?bucket=) shows only its own heading.
   const groups = useMemo(
-    () => presetGroups(groupWork(items, today), preset),
+    () => presetGroups(listGroups(items, today), preset),
     [items, today, preset],
   );
+  const presetEmpty = !!preset && groups.every((g) => g.items.length === 0);
   return (
     <div className="space-y-6">
       {preset && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">
             Showing {BUCKET_LABELS[preset]} only
-            {groups.length === 0
-              ? ` — nothing ${preset === "today" ? "due today" : "overdue"}.`
-              : "."}
+            {presetEmpty ? ` — nothing ${preset === "today" ? "due today" : "overdue"}.` : "."}
           </span>
           <Button size="sm" variant="outline" onClick={onClearPreset}>
             <X className="h-4 w-4" /> Show all
@@ -220,15 +231,21 @@ function ListView({
       {groups.map((g) => (
         <section key={g.bucket} className="space-y-2">
           <h2
-            className={`text-sm font-semibold ${g.bucket === "overdue" ? "text-destructive" : ""}`}
+            className={`text-sm font-semibold ${
+              g.bucket === "overdue" && g.items.length > 0 ? "text-destructive" : ""
+            }`}
           >
             {g.label} <span className="font-normal text-muted-foreground">({g.items.length})</span>
           </h2>
-          <div className="grid gap-2 lg:grid-cols-2">
-            {g.items.map((it) => (
-              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
-            ))}
-          </div>
+          {g.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>
+          ) : (
+            <div className="grid gap-2 lg:grid-cols-2">
+              {g.items.map((it) => (
+                <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+              ))}
+            </div>
+          )}
         </section>
       ))}
     </div>
@@ -289,8 +306,10 @@ function CalendarView({
         </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border">
-        <div className="grid grid-cols-7 border-b bg-muted/40 text-center text-xs font-medium text-muted-foreground">
+      {/* Owner (Oct 1): "a bigger calendar" — the whole width, and on a desktop the month fills
+          the viewport height with the weeks sharing it; it scrolls inside only if it overflows. */}
+      <div className="flex flex-col overflow-hidden rounded-lg border lg:h-[calc(100vh-14rem)]">
+        <div className="grid shrink-0 grid-cols-7 border-b bg-muted/40 text-center text-xs font-medium text-muted-foreground">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
             <div key={d} className="py-1.5">
               <span className="sm:hidden">{d[0]}</span>
@@ -298,68 +317,74 @@ function CalendarView({
             </div>
           ))}
         </div>
-        {weeks.map((week) => (
-          <div key={week[0]} className="grid grid-cols-7 border-b last:border-b-0">
-            {week.map((d) => {
-              const list = byDay.get(d) ?? [];
-              const inMonth = d.slice(0, 7) === month;
-              const overdue = d < today && list.some((i) => !i.done);
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDay(d)}
-                  aria-pressed={d === day}
-                  aria-label={`${dayLabel(d)}: ${list.length} item${list.length === 1 ? "" : "s"}`}
-                  className={`flex min-h-14 flex-col items-stretch gap-1 border-r p-1 text-left last:border-r-0 sm:min-h-24 ${
-                    inMonth ? "" : "bg-muted/30 text-muted-foreground"
-                  } ${d === day ? "bg-primary/10 ring-2 ring-inset ring-primary" : "hover:bg-muted/50"}`}
-                >
-                  <span
-                    className={`inline-flex h-6 w-6 items-center justify-center self-start rounded-full text-xs ${
-                      d === today ? "bg-primary font-semibold text-primary-foreground" : ""
-                    } ${overdue && d !== today ? "text-destructive" : ""}`}
+        <div className="grid min-h-0 flex-1 auto-rows-[1fr] overflow-y-auto">
+          {weeks.map((week) => (
+            <div key={week[0]} className="grid grid-cols-7 border-b last:border-b-0">
+              {week.map((d) => {
+                const list = byDay.get(d) ?? [];
+                const { shown, more } = cellItems(list);
+                const inMonth = d.slice(0, 7) === month;
+                const overdue = d < today && list.some((i) => !i.done);
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDay(d)}
+                    aria-pressed={d === day}
+                    aria-label={`${dayLabel(d)}: ${list.length} item${list.length === 1 ? "" : "s"}`}
+                    className={`flex min-h-28 min-w-0 flex-col items-stretch gap-1 border-r p-1 text-left last:border-r-0 lg:min-h-36 ${
+                      inMonth ? "" : "bg-muted/30 text-muted-foreground"
+                    } ${d === day ? "bg-primary/10 ring-2 ring-inset ring-primary" : "hover:bg-muted/50"}`}
                   >
-                    {Number(d.slice(8))}
-                  </span>
-                  {/* Phone: coloured dots; wider screens: the first titles. */}
-                  {list.length > 0 && (
-                    <>
-                      <span className="flex flex-wrap gap-0.5 sm:hidden">
-                        {list.slice(0, 4).map((i) => (
-                          <span
-                            key={i.key}
-                            className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[i.kind]}`}
-                          />
-                        ))}
-                        {list.length > 4 && (
-                          <span className="text-[10px] leading-none">+{list.length - 4}</span>
-                        )}
-                      </span>
-                      <span className="hidden flex-col gap-0.5 sm:flex">
-                        {list.slice(0, 2).map((i) => (
-                          <span
-                            key={i.key}
-                            className={`truncate rounded px-1 text-[11px] leading-4 ${KIND_CLASS[i.kind]} ${
-                              i.done ? "opacity-60" : ""
-                            }`}
-                          >
-                            {i.title}
-                          </span>
-                        ))}
-                        {list.length > 2 && (
-                          <span className="text-[11px] text-muted-foreground">
-                            +{list.length - 2} more
-                          </span>
-                        )}
-                      </span>
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+                    <span
+                      className={`inline-flex h-6 w-6 shrink-0 items-center justify-center self-start rounded-full text-xs ${
+                        d === today ? "bg-primary font-semibold text-primary-foreground" : ""
+                      } ${overdue && d !== today ? "text-destructive" : ""}`}
+                    >
+                      {Number(d.slice(8))}
+                    </span>
+                    {/* Phone: coloured dots; wider screens: up to five titles, each with its
+                        kind's colour as a left bar (and whose, in the Everyone view). */}
+                    {list.length > 0 && (
+                      <>
+                        <span className="flex flex-wrap gap-0.5 sm:hidden">
+                          {shown.map((i) => (
+                            <span
+                              key={i.key}
+                              className={`h-1.5 w-1.5 rounded-full ${KIND_DOT[i.kind]}`}
+                            />
+                          ))}
+                          {more > 0 && <span className="text-[10px] leading-none">+{more}</span>}
+                        </span>
+                        <span className="hidden min-w-0 flex-col gap-0.5 sm:flex">
+                          {shown.map((i) => (
+                            <span
+                              key={i.key}
+                              title={showWho ? `${i.title} — ${i.assigneeName ?? ""}` : i.title}
+                              className={`flex min-w-0 items-center gap-1 rounded-sm border-l-4 bg-muted/60 pl-1 pr-0.5 text-[11px] leading-4 ${KIND_BAR[i.kind]} ${
+                                i.done ? "opacity-60" : ""
+                              }`}
+                            >
+                              <span className="min-w-0 flex-1 truncate">{i.title}</span>
+                              {showWho && (
+                                <span className="shrink-0 rounded bg-background px-1 text-[9px] font-semibold leading-3 text-muted-foreground">
+                                  {initials(i.assigneeName)}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                          {more > 0 && (
+                            <span className="text-[11px] text-muted-foreground">+{more} more</span>
+                          )}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
 
       <section className="space-y-2">
@@ -452,9 +477,9 @@ export function MyWorkPage(props: {
         : (people.find((p) => p.id === props.who)?.name ?? null);
 
   return (
-    // Owner (Oct 1): the Owner view uses the whole width ("a lot of unused whitespace"); the
-    // personal List and Calendar keep their reading width.
-    <div className={`mx-auto space-y-5 ${view === "owner" ? "max-w-none" : "max-w-5xl"}`}>
+    // Owner (Oct 1): the Owner view and the Calendar use the whole width ("a lot of unused
+    // whitespace"; "a bigger calendar"); the List keeps its reading width.
+    <div className={`mx-auto space-y-5 ${view === "list" ? "max-w-5xl" : "max-w-none"}`}>
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <ListTodo className="h-6 w-6" /> My Work
@@ -555,11 +580,8 @@ export function MyWorkPage(props: {
         </div>
       ) : view === "calendar" ? (
         <CalendarView items={items} today={today} showWho={showWho} manage={manage} />
-      ) : items.length === 0 ? (
-        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Nothing assigned{mineOnly ? " to you" : ""} right now.
-        </p>
       ) : (
+        // Nothing at all still shows the six headings, each "(0)" with its empty line.
         <ListView
           items={items}
           today={today}

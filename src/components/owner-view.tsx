@@ -12,14 +12,23 @@
  * Clicking a person's row (or its chevron) expands it in place (owner, Oct 1: "a bit more detail
  * per person"): their Today / Overdue / Done this week items — exactly the ones the numbers
  * count — and their last five actions, loaded on demand per person (`getOwnerPersonDetail`,
- * cached 60 s). "Expand all / Collapse all" above the table. On a phone the detail sits under
+ * cached 60 s). The detail slides open and closed (height and opacity, 200 ms, none under
+ * prefers-reduced-motion) with a skeleton of its cards while it loads — `DetailRow` below.
+ * "Expand all / Collapse all" above the table. On a phone the detail sits under
  * its row inside the table and scrolls with it.
  */
-import { Fragment, useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
@@ -40,6 +49,7 @@ import {
 import { OPP_ALL_OPEN } from "@/lib/work-counts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -167,15 +177,16 @@ export function OwnerView() {
                             type="button"
                             className="inline-flex items-center gap-1 text-left font-medium hover:underline"
                             aria-expanded={isOpen}
-                            aria-controls={isOpen ? detailId : undefined}
+                            aria-controls={detailId}
                             aria-label={`${isOpen ? "Hide" : "Show"} ${r.name}'s items`}
                             onClick={() => toggle(r.id)}
                           >
-                            {isOpen ? (
-                              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
-                            )}
+                            <ChevronRight
+                              className={`h-4 w-4 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                                isOpen ? "rotate-90" : ""
+                              }`}
+                              aria-hidden
+                            />
                             {r.name}
                           </button>
                         </TableCell>
@@ -232,13 +243,9 @@ export function OwnerView() {
                           {activityLabel(r.lastActivity, now)}
                         </TableCell>
                       </TableRow>
-                      {isOpen && (
-                        <TableRow id={detailId} className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="bg-muted/30 p-3 align-top">
-                            <PersonDetail userId={r.id} name={r.name} />
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      <DetailRow id={detailId} open={isOpen}>
+                        <PersonDetail userId={r.id} name={r.name} />
+                      </DetailRow>
                     </Fragment>
                   );
                 })
@@ -286,6 +293,104 @@ export function OwnerView() {
           Last activity: tickets, contact log, tasks and time entries (no audit log yet).
         </p>
       )}
+    </div>
+  );
+}
+
+// ---- the expand / collapse animation (owner, Oct 1: "jarring") -----------------------------
+//
+// The detail <tr> is always there; what opens is a one-row CSS grid inside it whose track goes
+// from 0fr (no height) to 1fr (the content's height), with the opacity alongside — 200 ms,
+// ease-out, both ways, every row at once under "Expand all". The summary row above never moves.
+// Under prefers-reduced-motion there is no transition (motion-reduce:transition-none) and the
+// content unmounts at once on collapse. The content (and its query) is mounted only while the
+// row is open or collapsing.
+
+/** Expand / collapse time; the classes below say the same (duration-200). */
+const EXPAND_MS = 200;
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const m = window.matchMedia(REDUCED_MOTION);
+  m.addEventListener("change", onChange);
+  return () => m.removeEventListener("change", onChange);
+}
+
+/** The viewer's prefers-reduced-motion (false on the server). */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => false,
+  );
+}
+
+/** One person's detail row: animates its height and opacity open and closed. */
+function DetailRow({ id, open, children }: { id: string; open: boolean; children: ReactNode }) {
+  const reduce = usePrefersReducedMotion();
+  // Keep the content mounted while it collapses, then drop it (and its query).
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [collapsing, setCollapsing] = useState(false);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setCollapsing(!open && !reduce);
+  }
+  useEffect(() => {
+    if (!collapsing) return;
+    const t = setTimeout(() => setCollapsing(false), EXPAND_MS);
+    return () => clearTimeout(t);
+  }, [collapsing]);
+  return (
+    <TableRow id={id} aria-hidden={!open} inert={!open} className="border-0 hover:bg-transparent">
+      <TableCell colSpan={7} className="p-0">
+        <div
+          className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+            open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+          }`}
+        >
+          <div className="min-h-0 overflow-hidden">
+            {(open || collapsing) && (
+              <div className="border-b bg-muted/30 p-3 align-top">{children}</div>
+            )}
+          </div>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+const DETAIL_TITLES = ["Today", "Overdue", "Done this week", "Last activity"] as const;
+
+/**
+ * While a person's detail loads: the four cards, three placeholder lines each. Every card here
+ * and in the loaded detail is at least min-h-48 (this skeleton's height), so the row opens once
+ * to its full height and loading never shrinks it.
+ */
+function DetailSkeleton() {
+  return (
+    <div
+      className="grid gap-4 whitespace-normal md:grid-cols-2 xl:grid-cols-4"
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      {DETAIL_TITLES.map((title) => (
+        <section key={title} className="min-h-48 min-w-0 overflow-hidden rounded-md border">
+          <h4 className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
+            {title}
+          </h4>
+          <ul className="divide-y">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="flex items-center gap-2 px-3 py-2">
+                <Skeleton className="h-5 w-14 shrink-0 motion-reduce:animate-none" />
+                <span className="min-w-0 flex-1 space-y-1">
+                  <Skeleton className="h-4 w-4/5 motion-reduce:animate-none" />
+                  <Skeleton className="h-3 w-1/2 motion-reduce:animate-none" />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }
@@ -352,7 +457,7 @@ function DetailGroup({
   // bordered card with a header bar, and every line is the same three cells — badge, title with
   // the customer / property under it, the date right-aligned — divided by rules.
   return (
-    <section className="min-w-0 overflow-hidden rounded-md border">
+    <section className="min-h-48 min-w-0 overflow-hidden rounded-md border">
       <h4 className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
         {title}
         <span className="font-normal tabular-nums text-muted-foreground">{lines.length}</span>
@@ -417,7 +522,7 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
         </Button>
       </div>
     ) : (
-      <p className="text-sm text-muted-foreground">Loading…</p>
+      <DetailSkeleton />
     );
   }
   const now = new Date();
@@ -446,7 +551,7 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
           href: i.href,
         }))}
       />
-      <section className="min-w-0 overflow-hidden rounded-md border">
+      <section className="min-h-48 min-w-0 overflow-hidden rounded-md border">
         <h4 className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
           Last activity
           <span className="font-normal tabular-nums text-muted-foreground">{d.recent.length}</span>

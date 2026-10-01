@@ -495,9 +495,9 @@ describe("detail layout is standardized (owner, Oct 1: 'so the text isn't so up 
 });
 
 describe("the Owner view uses the whole width (owner, Oct 1)", () => {
-  it("My Work drops its reading-width cap only in the Owner view", async () => {
+  it("My Work drops its reading-width cap in the Owner view and the Calendar", async () => {
     const fs = await import("node:fs");
     const page = fs.readFileSync("src/components/my-work-page.tsx", "utf8");
-    expect(page).toContain('view === "owner" ? "max-w-none" : "max-w-5xl"');
+    expect(page).toContain('view === "list" ? "max-w-5xl" : "max-w-none"');
   });
 });
