@@ -42,6 +42,9 @@ import {
   opportunitySiteProblem,
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
+import type { StatusFilter } from "@/lib/opportunities-search";
+import { localYmd } from "@/lib/tasks";
+import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN } from "@/lib/work-counts";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -132,10 +135,29 @@ const STATUS_BADGE: Record<OppStatus, "default" | "secondary" | "outline"> = {
   no_response: "outline",
 };
 
-export function OpportunitiesPage({ id, isNew }: { id?: string | undefined; isNew?: boolean }) {
+export function OpportunitiesPage({
+  id,
+  isNew,
+  status,
+  overdue,
+}: {
+  id?: string | undefined;
+  isNew?: boolean;
+  /** The list: preset the status chip (`?status=`; "allopen" = every non-closing status). */
+  status?: Exclude<StatusFilter, "all"> | undefined;
+  /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
+  overdue?: boolean | undefined;
+}) {
   if (id) return <OppLoader id={id} />;
   if (isNew) return <OppEditor opp={null} />;
-  return <OppList />;
+  // Keyed on the preset so following another counts-strip link re-applies it.
+  return (
+    <OppList
+      key={`${status ?? ""}|${overdue ? 1 : 0}`}
+      presetStatus={status}
+      presetOverdue={!!overdue}
+    />
+  );
 }
 
 /** A small round toggle button for the filter row. */
@@ -173,9 +195,13 @@ const writeCollapsed = (statuses: OppStatus[]) => {
   }
 };
 
-type StatusFilter = "all" | OppStatus;
-
-function OppList() {
+function OppList({
+  presetStatus,
+  presetOverdue,
+}: {
+  presetStatus?: Exclude<StatusFilter, "all"> | undefined;
+  presetOverdue: boolean;
+}) {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listOpportunities);
@@ -200,7 +226,11 @@ function OppList() {
   }, [untouchedQ.data]);
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(presetStatus ?? "all");
+  // Overdue: open opportunities past their expected close (lib/work-counts.ts isOverdueOpp),
+  // preset by ?overdue=1 from the Customers page counts strip; cleared from its chip.
+  const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
+  const today = localYmd(new Date());
   const [mine, setMine] = useState(false);
   const [collapsed, setCollapsed] = useState<OppStatus[]>(readCollapsed);
   const toggleGroup = (status: OppStatus) =>
@@ -214,7 +244,10 @@ function OppList() {
   const q = search.trim().toLowerCase();
   const filtered = opps.filter((o) => {
     if (mine && o.assignee_id !== profile?.id) return false;
-    if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
+    if (statusFilter === OPP_ALL_OPEN) {
+      if (!isOpenOppStatus(asStatus(o.status))) return false;
+    } else if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
+    if (overdueOnly && !isOverdueOpp({ ...o, status: asStatus(o.status) }, today)) return false;
     if (q) {
       const hay = [
         o.title,
@@ -239,10 +272,11 @@ function OppList() {
       rows.sort((a, b) => (a.expected_close ?? "9999").localeCompare(b.expected_close ?? "9999"));
     return { status, rows };
   }).filter((g) => g.rows.length > 0);
-  const anyFilter = q !== "" || statusFilter !== "all" || mine;
+  const anyFilter = q !== "" || statusFilter !== "all" || mine || overdueOnly;
   const clearFilters = () => {
     setSearch("");
     setStatusFilter("all");
+    setOverdueOnly(false);
     setMine(false);
   };
   const newOpp = () => void navigate({ to: "/opportunities", search: { new: 1 } });
@@ -292,6 +326,14 @@ function OppList() {
                 <Chip active={statusFilter === "all"} onClick={() => setStatusFilter("all")}>
                   All statuses
                 </Chip>
+                <Chip
+                  active={statusFilter === OPP_ALL_OPEN}
+                  onClick={() =>
+                    setStatusFilter(statusFilter === OPP_ALL_OPEN ? "all" : OPP_ALL_OPEN)
+                  }
+                >
+                  All open
+                </Chip>
                 {OPP_STATUSES.map((s) => (
                   <Chip
                     key={s}
@@ -301,6 +343,19 @@ function OppList() {
                     {OPP_STATUS_LABELS[s]}
                   </Chip>
                 ))}
+                {overdueOnly && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="h-7 rounded-full px-3 text-xs"
+                    title="Only open opportunities past their expected close. Click to show all."
+                    onClick={() => setOverdueOnly(false)}
+                  >
+                    Overdue <X className="ml-1 h-3 w-3" aria-hidden />
+                    <span className="sr-only">(clear)</span>
+                  </Button>
+                )}
                 <span className="mx-1 h-5 w-px bg-border" aria-hidden />
                 <Chip active={mine} onClick={() => setMine(!mine)}>
                   Mine

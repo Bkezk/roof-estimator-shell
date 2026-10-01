@@ -96,6 +96,9 @@ import { SiteSelect } from "@/components/crm/site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
+import type { StageFilter } from "@/lib/service-search";
+import { localYmd } from "@/lib/tasks";
+import { isOpenTicketStage, isOverdueTicket, SERVICE_OPEN_WORK } from "@/lib/work-counts";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -192,6 +195,8 @@ export function ServicePage({
   from,
   account,
   site,
+  stage,
+  overdue,
 }: {
   id?: string | undefined;
   isNew?: boolean;
@@ -201,6 +206,10 @@ export function ServicePage({
   /** New ticket: start with this customer (and site) picked (from the Customers page). */
   account?: string | undefined;
   site?: string | undefined;
+  /** The list: preset the stage chip (`?stage=`; "openwork" = open + scheduled + done). */
+  stage?: Exclude<StageFilter, "all"> | undefined;
+  /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
+  overdue?: boolean | undefined;
 }) {
   if (id) return <TicketLoader id={id} closeout={!!closeout} />;
   if (isNew) {
@@ -209,7 +218,14 @@ export function ServicePage({
       return <NewForAccount key={`${account}|${site ?? ""}`} accountId={account} siteId={site} />;
     return <TicketEditor job={null} />;
   }
-  return <ServiceList />;
+  // Keyed on the preset so following another counts-strip link re-applies it.
+  return (
+    <ServiceList
+      key={`${stage ?? ""}|${overdue ? 1 : 0}`}
+      presetStage={stage}
+      presetOverdue={!!overdue}
+    />
+  );
 }
 
 /** A small round toggle button for the filter row. */
@@ -247,10 +263,15 @@ const writeCollapsed = (stages: ServiceStage[]) => {
   }
 };
 
-type StageFilter = "all" | ServiceStage;
 type TypeFilter = "all" | ServiceType;
 
-function ServiceList() {
+function ServiceList({
+  presetStage,
+  presetOverdue,
+}: {
+  presetStage?: Exclude<StageFilter, "all"> | undefined;
+  presetOverdue: boolean;
+}) {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -308,11 +329,18 @@ function ServiceList() {
       return next;
     });
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<StageFilter>("all");
+  const [stageFilter, setStageFilter] = useState<StageFilter>(presetStage ?? "all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  // Overdue: open tickets whose day has passed (lib/work-counts.ts isOverdueTicket), preset by
+  // ?overdue=1 from the Customers page counts strip; cleared from its chip.
+  const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
+  const today = localYmd(new Date());
   // "Mine" defaults on for a technician admin; null = not touched yet (follow the profile). A
-  // plain technician has no Mine filter: the list is already only theirs.
-  const [mineOverride, setMineOverride] = useState<boolean | null>(null);
+  // plain technician has no Mine filter: the list is already only theirs. A counts-strip link
+  // starts with Mine off, so the list shows what the tile counted.
+  const [mineOverride, setMineOverride] = useState<boolean | null>(
+    presetStage || presetOverdue ? false : null,
+  );
   const mine = !isTech && (mineOverride ?? !!profile?.technician);
   const [showDeleted, setShowDeleted] = useState(false);
   const [toDelete, setToDelete] = useState<ServiceJobWithTech | null>(null);
@@ -347,7 +375,10 @@ function ServiceList() {
   const q = search.trim().toLowerCase();
   const filtered = jobs.filter((j) => {
     if (mine && j.technician_id !== profile?.id) return false;
-    if (stageFilter !== "all" && asStage(j.stage) !== stageFilter) return false;
+    if (stageFilter === SERVICE_OPEN_WORK) {
+      if (!isOpenTicketStage(asStage(j.stage))) return false;
+    } else if (stageFilter !== "all" && asStage(j.stage) !== stageFilter) return false;
+    if (overdueOnly && !isOverdueTicket({ ...j, stage: asStage(j.stage) }, today)) return false;
     if (typeFilter !== "all" && asType(j.service_type) !== typeFilter) return false;
     if (q) {
       const hay = [
@@ -385,10 +416,12 @@ function ServiceList() {
         (s) => TECH_STAGES.includes(s) || jobs.some((j) => asStage(j.stage) === s),
       )
     : SERVICE_STAGES;
-  const anyFilter = q !== "" || stageFilter !== "all" || typeFilter !== "all" || mine;
+  const anyFilter =
+    q !== "" || stageFilter !== "all" || typeFilter !== "all" || mine || overdueOnly;
   const clearFilters = () => {
     setSearch("");
     setStageFilter("all");
+    setOverdueOnly(false);
     setTypeFilter("all");
     setMineOverride(false);
   };
@@ -496,6 +529,14 @@ function ServiceList() {
                 <Chip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
                   All stages
                 </Chip>
+                <Chip
+                  active={stageFilter === SERVICE_OPEN_WORK}
+                  onClick={() =>
+                    setStageFilter(stageFilter === SERVICE_OPEN_WORK ? "all" : SERVICE_OPEN_WORK)
+                  }
+                >
+                  Open work
+                </Chip>
                 {stageChips.map((s) => (
                   <Chip
                     key={s}
@@ -505,6 +546,19 @@ function ServiceList() {
                     {STAGE_LABELS[s]}
                   </Chip>
                 ))}
+                {overdueOnly && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="h-7 rounded-full px-3 text-xs"
+                    title="Only open tickets whose day has passed. Click to show all."
+                    onClick={() => setOverdueOnly(false)}
+                  >
+                    Overdue <X className="ml-1 h-3 w-3" aria-hidden />
+                    <span className="sr-only">(clear)</span>
+                  </Button>
+                )}
                 {!isTech && (
                   <>
                     <span className="mx-1 h-5 w-px bg-border" aria-hidden />

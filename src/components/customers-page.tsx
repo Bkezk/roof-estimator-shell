@@ -79,6 +79,7 @@ import {
 } from "@/components/crm/account-fields";
 import { useCrmUsers } from "@/lib/use-crm-users";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
+import { WorkCountsStrip } from "@/components/work-counts-strip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -143,6 +144,9 @@ export function CustomersPage({ id }: { id?: string | undefined }) {
           <Plus className="mr-2 h-5 w-5" /> New customer
         </Button>
       </div>
+
+      {/* Open / overdue tickets and opportunities, each a link to that list (owner, Oct 1). */}
+      <WorkCountsStrip />
 
       <div className="grid gap-6 md:grid-cols-[minmax(260px,340px)_1fr]">
         <div className={id ? "hidden md:block" : ""}>
