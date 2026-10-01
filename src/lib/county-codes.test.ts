@@ -47,7 +47,7 @@ describe("the owner's list", () => {
     expect(rows.filter((r) => r.state === "TN")).toHaveLength(43);
     expect(rows.filter((r) => r.state === "KY")).toHaveLength(90);
     expect(rows.filter((r) => r.code === "0108").map(countyCodeLabel)).toEqual([
-      "0108 · Putnam, TN",
+      "0108 · Putman, TN",
       "0108 · Kenton, KY",
     ]);
     expect(rows.filter((r) => r.code === "0106").map(countyCodeLabel)).toEqual([
@@ -55,7 +55,7 @@ describe("the owner's list", () => {
     ]);
     const names = rows.map((r) => `${r.county} ${r.state}`);
     for (const n of [
-      "Putnam TN",
+      "Putman TN",
       "Penleton KY",
       "Elliot KY",
       "McMinn TN",
@@ -112,7 +112,7 @@ describe("filterCountyCodes", () => {
     expect(labels(filterCountyCodes(LIST, "0106"))).toEqual(["0106 · Cumberland, TN"]);
     expect(labels(filterCountyCodes(LIST, "0108"))).toEqual([
       "0108 · Kenton, KY",
-      "0108 · Putnam, TN",
+      "0108 · Putman, TN",
     ]);
     expect(filterCountyCodes(LIST, "000")).toHaveLength(9);
   });
