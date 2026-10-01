@@ -5,7 +5,8 @@ import { ServiceRatesSettings } from "@/components/service-rates-settings";
 import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
 
 // Owner, Sep 28: Service Rates is its own Admin page (it used to be a tab of Estimate Pricing ›
-// General). Access is the central gate's (pageForPath: /admin/service-rates → admin).
+// General). Access is the central gate's (pageForPath: /admin/service-rates → pricing: managers
+// and admins, owner Oct 1).
 export const Route = createFileRoute("/admin/service-rates")({
   head: () => ({ meta: [{ title: "Service Rates — JBK Portal" }] }),
   component: ServiceRatesPage,

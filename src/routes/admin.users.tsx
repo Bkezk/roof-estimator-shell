@@ -15,7 +15,7 @@ import {
 } from "@/lib/auth.functions";
 import { RateBox } from "@/components/service/rate-box";
 import {
-  PAGES,
+  GRANTABLE_PAGES,
   PAGE_HELP,
   PAGE_LABELS,
   ROLES,
@@ -85,7 +85,7 @@ function AccessPicker(props: {
         </select>
       </label>
       {!props.compact && <p className="text-xs text-muted-foreground">{ROLE_HELP[props.role]}</p>}
-      {PAGES.map((p) => (
+      {GRANTABLE_PAGES.map((p) => (
         <label
           key={p}
           className={`flex items-center gap-1.5 text-sm ${byRole ? "text-muted-foreground" : ""}`}

@@ -94,7 +94,6 @@ const prospectItems = [
 const adminOnlyItems = [
   { title: "Users & access", url: "/admin/users", icon: Users },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing },
-  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
@@ -210,6 +209,8 @@ const adminItems: {
     url: "/admin/price-import",
     icon: FileSpreadsheet,
   },
+  // Owner, Oct 1: managers edit pricing, service rates included.
+  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt },
 ];
 
 /** Which menu groups the user folded up, remembered per browser. */

@@ -163,7 +163,7 @@ export const createUser = createServerFn({ method: "POST" })
         email: data.email,
         full_name: data.full_name ?? null,
         role: data.role,
-        access: data.role === "user" ? data.access : [],
+        access: data.role === "user" ? normalizeAccess(data.access) : [],
         technician: data.technician,
       })
       .select(PROFILE_COLS)
@@ -208,7 +208,7 @@ export const updateUserAccess = createServerFn({ method: "POST" })
       .from("profiles")
       .update({
         role: data.role,
-        access: data.role === "user" ? data.access : [],
+        access: data.role === "user" ? normalizeAccess(data.access) : [],
         ...(data.technician === undefined ? {} : { technician: data.technician }),
       })
       .eq("id", data.id)
