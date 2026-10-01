@@ -34,7 +34,7 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import { getAccount, listContacts } from "@/lib/crm.functions";
-import { invoiceLabel } from "@/lib/invoice-numbering";
+import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -164,7 +164,7 @@ interface Ctx {
   job: ServiceJobWithTech;
   /** Put the server's answer in the cache; `stageChanged` also refreshes the ticket. */
   applied: (r: InvoiceWithLines, stageChanged?: boolean) => void;
-  onVoided: () => void;
+  onVoided: (voidedId: string) => void;
 }
 
 function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
@@ -207,12 +207,33 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
       refreshLists();
       if (stageChanged) refreshTicket();
     },
-    onVoided: () => {
-      setVoided(true);
-      setSelected(null);
+    onVoided: (voidedId) => {
+      // Owner (Oct 1): deleting "6000.2" looked as if "6000" were gone too. Show the ticket's
+      // remaining live invoice when there is one; only an empty ticket waits for a new draft.
       qc.removeQueries({ queryKey: invoiceKey(job.id) });
-      refreshLists();
       refreshTicket();
+      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      void qc
+        .fetchQuery({
+          queryKey: ticketInvoicesKey(job.id),
+          queryFn: () => listFn({ data: { job_id: job.id } }),
+          staleTime: 0,
+        })
+        .then((list) => {
+          const next = remainingInvoiceAfterVoid(list, voidedId);
+          if (next) {
+            setSelected(next.id);
+            setVoided(false);
+          } else {
+            setSelected(null);
+            setVoided(true);
+          }
+        })
+        .catch((e: unknown) => {
+          setSelected(null);
+          setVoided(true);
+          toast.error(`Could not reload this ticket's invoices: ${errText(e)}`);
+        });
     },
   };
   const another = useMutation({
@@ -556,7 +577,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       await deleteFn({ data: { id: inv.id } });
       setConfirm(null);
       toast.success(`Draft invoice #${no} deleted; its number is free for the next invoice`);
-      ctx.onVoided();
+      ctx.onVoided(inv.id);
     });
 
   const addLine = () => {
@@ -1099,7 +1120,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       toast.success(
         `Invoice #${invoiceLabel(inv)} voided; its number is free for the next invoice`,
       );
-      ctx.onVoided();
+      ctx.onVoided(inv.id);
     },
     onError: (e) => toast.error(`Could not void the invoice: ${errText(e)}`),
   });

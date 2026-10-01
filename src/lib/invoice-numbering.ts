@@ -70,3 +70,17 @@ export function invoiceLabel(inv: NumberedInvoice): string {
 export function invoiceFileStem(inv: NumberedInvoice): string {
   return invoiceLabel(inv).replace(/[^0-9A-Za-z.-]/g, "-") || "invoice";
 }
+
+/**
+ * After an invoice is voided or deleted: the ticket's remaining live invoice to show (the
+ * earliest one, i.e. the bare number first), or null when none is left. Owner (Oct 1): deleting
+ * a "6000.2" draft made the block look as if "6000" were gone too until the page was reopened.
+ */
+export function remainingInvoiceAfterVoid<
+  T extends { id: string; status: string; created_at: string },
+>(invoices: readonly T[], voidedId: string): T | null {
+  const live = invoices
+    .filter((i) => i.id !== voidedId && i.status !== "void")
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return live[0] ?? null;
+}
