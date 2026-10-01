@@ -175,7 +175,7 @@ describe("List: all six headings, always, in the same order", () => {
     });
     expect(defaultBucket(listGroups(late, today), null)).toBe("overdue");
   });
-  it("the page: the six groups are a row of tabs across the top; the picked one's items below", () => {
+  it("the page: six columns across on a desktop, a row of tabs on a phone", () => {
     const page = read("src/components/my-work-page.tsx");
     const list = page.slice(
       page.indexOf("function ListView"),
@@ -184,6 +184,12 @@ describe("List: all six headings, always, in the same order", () => {
     expect(list).toContain("listGroups(items, today)");
     expect(list).not.toContain("groupWork(");
     expect(list).not.toContain("presetGroups(");
+    // Desktop (lg+): every group a column, all in view at once — no clicking between them.
+    expect(list).toContain('<div className="hidden gap-3 lg:grid lg:grid-cols-3 xl:grid-cols-6">');
+    expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
+    expect(list).toContain('preset === g.bucket ? "ring-2 ring-primary" : ""');
+    // Phone: tabs, the picked one's items below.
+    expect(list).toContain('<div className="space-y-4 lg:hidden">');
     expect(list).toContain(
       '<div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">',
     );
@@ -191,19 +197,23 @@ describe("List: all six headings, always, in the same order", () => {
     expect(list).toContain("aria-selected={selected}");
     expect(list).toContain("({g.items.length})");
     expect(list).toContain("const bucket = picked ?? defaultBucket(groups, preset);");
-    // One panel, the selected group's items or its muted empty line — not six stacked sections.
     expect(list).toContain('role="tabpanel"');
+    // Each group's items, or its muted empty line, come from one place for both layouts.
     expect(list).toContain(
-      '<p className="text-sm text-muted-foreground">{BUCKET_EMPTY[group.bucket]}</p>',
+      '<p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>',
     );
-    expect(list).not.toContain("{groups.map((g) => (\n        <section");
-    expect(list).not.toContain("<h2");
+    expect(list).toContain("{rows(g)}");
+    expect(list).toContain("{rows(group)}");
     // Overdue reads red when there is anything in it.
-    expect(list).toContain('const alert = g.bucket === "overdue" && g.items.length > 0;');
+    expect(list).toContain(
+      'const isAlert = (g: WorkGroup) => g.bucket === "overdue" && g.items.length > 0;',
+    );
     // Picking another tab drops a ?bucket= preset; a new preset wins over an earlier pick.
     expect(list).toContain("if (preset && b !== preset) onClearPreset();");
     expect(list).toContain("if (prevPreset !== preset) {");
-    // No "Nothing assigned" box in place of the headings; no "Show all" button any more.
+    // The List uses the whole width like the other views; no "Nothing assigned" or "Show all".
+    expect(page).toContain('<div className="mx-auto max-w-none space-y-5">');
+    expect(page).not.toContain("max-w-5xl");
     expect(page).not.toContain("Nothing assigned");
     expect(page).not.toContain("Show all");
   });
@@ -225,9 +235,9 @@ describe("Calendar: whole width, one screen, the day's items beside it, five ite
     expect(initials("")).toBe("?");
     expect(initials(null)).toBe("?");
   });
-  it("the page: max-w-none outside the List; sized to the viewport on xl; bars and chips", () => {
+  it("the page: the whole width; sized to the viewport on xl; bars and chips", () => {
     const page = read("src/components/my-work-page.tsx");
-    expect(page).toContain('view === "list" ? "max-w-5xl" : "max-w-none"');
+    expect(page).toContain('<div className="mx-auto max-w-none space-y-5">');
     const cal = page.slice(page.indexOf("function CalendarView"), page.indexOf("export function"));
     // The whole thing (month buttons, grid, the day's items) is one viewport tall on xl and up,
     // the weeks dividing the grid's height; nothing to scroll to. Below xl it flows as before.

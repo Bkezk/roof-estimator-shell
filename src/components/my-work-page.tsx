@@ -52,6 +52,7 @@ import {
   type BucketPreset,
   type WorkBucket,
   type WorkFollowup,
+  type WorkGroup,
   type WorkItem,
   type WorkKind,
 } from "@/lib/my-work";
@@ -208,9 +209,11 @@ function ListView({
   preset: BucketPreset | null;
   onClearPreset: () => void;
 }) {
-  // Owner (Oct 1): all six headings, always, in the same order, as a row of tabs across the top
-  // ("horizontally across the top instead of vertically"); the selected tab's items show below,
-  // an empty one its muted line. A preset (?bucket=) picks the tab; picking another clears it.
+  // Owner (Oct 1): all six headings, always, in the same order, across the top. On a desktop
+  // (lg and up) all six are columns side by side, each with its items under it ("all 6 across
+  // the top instead of having to click each one"); on a phone they are a row of tabs and the
+  // selected tab's items show below. An empty group shows its muted line. A preset (?bucket=)
+  // picks the tab and marks the column; picking another tab clears it.
   const groups = useMemo(() => listGroups(items, today), [items, today]);
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
@@ -230,52 +233,84 @@ function ListView({
     setPicked(b);
     if (preset && b !== preset) onClearPreset();
   };
+  const isAlert = (g: WorkGroup) => g.bucket === "overdue" && g.items.length > 0;
+  const rows = (g: WorkGroup) =>
+    g.items.length === 0 ? (
+      <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>
+    ) : (
+      g.items.map((it) => (
+        <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+      ))
+    );
   return (
-    <div className="space-y-4">
-      <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
-        {groups.map((g) => {
-          const selected = g.bucket === bucket;
-          const alert = g.bucket === "overdue" && g.items.length > 0;
-          return (
-            <button
-              key={g.bucket}
-              type="button"
-              role="tab"
-              id={`work-tab-${g.bucket}`}
-              aria-selected={selected}
-              aria-controls="work-tab-panel"
-              onClick={() => pick(g.bucket)}
-              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
-                selected
-                  ? "border-primary font-semibold"
-                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-              } ${alert ? "text-destructive" : ""}`}
+    <>
+      {/* Desktop: six columns across, every group's items in view at once. */}
+      <div className="hidden gap-3 lg:grid lg:grid-cols-3 xl:grid-cols-6">
+        {groups.map((g) => (
+          <section
+            key={g.bucket}
+            aria-labelledby={`work-col-${g.bucket}`}
+            className={`min-w-0 space-y-2 rounded-lg border p-2 ${
+              preset === g.bucket ? "ring-2 ring-primary" : ""
+            }`}
+          >
+            <h2
+              id={`work-col-${g.bucket}`}
+              className={`flex items-baseline justify-between gap-2 border-b px-1 pb-2 text-sm font-semibold ${
+                isAlert(g) ? "text-destructive" : ""
+              }`}
             >
-              {g.label}{" "}
-              <span className={`font-normal tabular-nums ${alert ? "" : "text-muted-foreground"}`}>
-                ({g.items.length})
+              <span className="min-w-0 break-words">{g.label}</span>
+              <span className="shrink-0 font-normal tabular-nums text-muted-foreground">
+                {g.items.length}
               </span>
-            </button>
-          );
-        })}
+            </h2>
+            {rows(g)}
+          </section>
+        ))}
       </div>
-      <section
-        id="work-tab-panel"
-        role="tabpanel"
-        aria-labelledby={`work-tab-${group.bucket}`}
-        className="space-y-2"
-      >
-        {group.items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[group.bucket]}</p>
-        ) : (
-          <div className="grid gap-2 lg:grid-cols-2">
-            {group.items.map((it) => (
-              <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
+
+      {/* Phone and tablet: a row of tabs, the selected group's items below. */}
+      <div className="space-y-4 lg:hidden">
+        <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
+          {groups.map((g) => {
+            const selected = g.bucket === bucket;
+            const alert = isAlert(g);
+            return (
+              <button
+                key={g.bucket}
+                type="button"
+                role="tab"
+                id={`work-tab-${g.bucket}`}
+                aria-selected={selected}
+                aria-controls="work-tab-panel"
+                onClick={() => pick(g.bucket)}
+                className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm transition-colors ${
+                  selected
+                    ? "border-primary font-semibold"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                } ${alert ? "text-destructive" : ""}`}
+              >
+                {g.label}{" "}
+                <span
+                  className={`font-normal tabular-nums ${alert ? "" : "text-muted-foreground"}`}
+                >
+                  ({g.items.length})
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <section
+          id="work-tab-panel"
+          role="tabpanel"
+          aria-labelledby={`work-tab-${group.bucket}`}
+          className="space-y-2"
+        >
+          {rows(group)}
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -515,9 +550,9 @@ export function MyWorkPage(props: {
         : (people.find((p) => p.id === props.who)?.name ?? null);
 
   return (
-    // Owner (Oct 1): the Owner view and the Calendar use the whole width ("a lot of unused
-    // whitespace"; "a bigger calendar"); the List keeps its reading width.
-    <div className={`mx-auto space-y-5 ${view === "list" ? "max-w-5xl" : "max-w-none"}`}>
+    // Owner (Oct 1): every view uses the whole width ("a lot of unused whitespace"; "a bigger
+    // calendar"; the List's six columns across).
+    <div className="mx-auto max-w-none space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <ListTodo className="h-6 w-6" /> My Work
