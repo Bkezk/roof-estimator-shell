@@ -276,7 +276,8 @@ export const saveAccount = createServerFn({ method: "POST" })
     return row;
   });
 
-const siteSchema = z.object({
+/** A site's fields. county_code_id: null clears the JBK county code; left out keeps it. */
+export const siteSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid(),
   name: z.string().trim().min(1, "Site name is required").max(200),
@@ -287,6 +288,7 @@ const siteSchema = z.object({
   zip: optText(20),
   technician_instructions: optText(2000),
   notes: optText(5000),
+  county_code_id: z.string().uuid().nullable().optional(),
 });
 export type SiteInput = z.input<typeof siteSchema>;
 
@@ -296,7 +298,9 @@ export const saveSite = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<SiteRow> => {
     await writeAccess(context);
     const sb = context.supabase;
-    const { id, ...fields } = data;
+    const { id, ...rest } = data;
+    // A county code left out stays as it is.
+    const fields = defined(rest);
     if (id) {
       const { data: row, error } = await sb
         .from("crm_sites")

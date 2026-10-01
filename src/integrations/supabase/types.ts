@@ -747,6 +747,7 @@ export type Database = {
           address2: string | null;
           centerpoint_property_id: string | null;
           city: string | null;
+          county_code_id: string | null;
           created_at: string;
           deleted_at: string | null;
           id: string;
@@ -763,6 +764,7 @@ export type Database = {
           address2?: string | null;
           centerpoint_property_id?: string | null;
           city?: string | null;
+          county_code_id?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;
@@ -779,6 +781,7 @@ export type Database = {
           address2?: string | null;
           centerpoint_property_id?: string | null;
           city?: string | null;
+          county_code_id?: string | null;
           created_at?: string;
           deleted_at?: string | null;
           id?: string;
@@ -795,6 +798,13 @@ export type Database = {
             columns: ["account_id"];
             isOneToOne: false;
             referencedRelation: "crm_accounts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "crm_sites_county_code_id_fkey";
+            columns: ["county_code_id"];
+            isOneToOne: false;
+            referencedRelation: "county_codes";
             referencedColumns: ["id"];
           },
         ];
@@ -1158,6 +1168,33 @@ export type Database = {
           state?: string | null;
           updated_at?: string;
           zip?: string | null;
+        };
+        Relationships: [];
+      };
+      county_codes: {
+        Row: {
+          code: string;
+          county: string;
+          created_at: string;
+          id: string;
+          state: string;
+          updated_at: string;
+        };
+        Insert: {
+          code: string;
+          county: string;
+          created_at?: string;
+          id?: string;
+          state: string;
+          updated_at?: string;
+        };
+        Update: {
+          code?: string;
+          county?: string;
+          created_at?: string;
+          id?: string;
+          state?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -3579,6 +3616,7 @@ export type Database = {
         }[];
       };
       current_user_role: { Args: never; Returns: string };
+      county_code_site_count: { Args: { p_id: string }; Returns: number };
       estimator_names: { Args: never; Returns: string[] };
       classify_place: {
         Args: { place_type: string; landmark: string };

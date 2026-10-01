@@ -9,6 +9,7 @@ import { useServerFn } from "@tanstack/react-start";
 
 import { useAuth } from "@/lib/auth-store";
 import { getAccount, siteAddressLine, type SiteRow } from "@/lib/crm.functions";
+import { useCountyCodes } from "@/components/crm/use-county-codes";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,9 @@ export function SiteSelect(props: {
     enabled: !!session,
   });
   const sites = detail.data?.sites ?? [];
+  // The site's JBK county code after the address (the shared, cached list).
+  const codes = useCountyCodes().data;
+  const codeOf = (id: string | null) => (id ? codes?.find((c) => c.id === id)?.code : undefined);
   if (detail.error)
     return (
       <p className="text-xs text-destructive">Could not load the sites: {errText(detail.error)}</p>
@@ -63,10 +67,12 @@ export function SiteSelect(props: {
         {!props.required && <SelectItem value="none">No site</SelectItem>}
         {sites.map((s) => {
           const address = siteAddressLine(s);
+          const code = codeOf(s.county_code_id);
           return (
             <SelectItem key={s.id} value={s.id}>
               {s.name}
               {address ? ` — ${address}` : ""}
+              {code ? ` · County code ${code}` : ""}
             </SelectItem>
           );
         })}

@@ -93,6 +93,7 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
+import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import { CloseoutScreen } from "@/components/service/closeout";
@@ -2030,6 +2031,7 @@ function CustomerBlock(props: {
         {props.siteMessage && !props.disabled && (
           <p className="text-xs text-destructive">{props.siteMessage}</p>
         )}
+        <CountyCodeLine id={site?.county_code_id} className="text-xs" />
         {site?.technician_instructions && (
           <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
             <span className="font-medium">Technician instructions: </span>

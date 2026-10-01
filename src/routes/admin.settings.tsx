@@ -18,6 +18,7 @@ import {
   type Warranty,
   type HighWindUpcharge,
 } from "@/lib/admin-settings.functions";
+import { CountyCodesSettings } from "@/components/crm/county-codes-settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,6 +49,7 @@ const SETTINGS_TABS = [
   "basiclabor",
   "markup",
   "warranties",
+  "countycodes",
 ] as const;
 type SettingsTab = (typeof SETTINGS_TABS)[number];
 
@@ -81,8 +83,8 @@ function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">General</h1>
         <p className="text-sm text-muted-foreground">
-          Company defaults, shipping, labor &amp; markup, and warranty pricing. These feed every
-          bid. Values are pre-filled from your current system.
+          Company defaults, shipping, labor &amp; markup, warranty pricing, and the JBK county codes
+          sites are tagged with. Values are pre-filled from your current system.
         </p>
       </div>
 
@@ -98,6 +100,7 @@ function SettingsPage() {
           <TabsTrigger value="basiclabor">Basic Labor Settings</TabsTrigger>
           <TabsTrigger value="markup">Labor &amp; Markup Options</TabsTrigger>
           <TabsTrigger value="warranties">Warranties</TabsTrigger>
+          <TabsTrigger value="countycodes">County codes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="contractor">
@@ -137,6 +140,9 @@ function SettingsPage() {
             initialWind={data.highWind}
             onSaved={() => qc.invalidateQueries({ queryKey: ["general-settings"] })}
           />
+        </TabsContent>
+        <TabsContent value="countycodes">
+          <CountyCodesSettings />
         </TabsContent>
       </Tabs>
     </div>

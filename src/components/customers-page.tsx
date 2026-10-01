@@ -70,6 +70,7 @@ import {
 import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
+import { CountyCodeLine, CountyCodePicker } from "@/components/crm/county-code-picker";
 import {
   AccountManagerSelect,
   AddressInputs,
@@ -761,6 +762,8 @@ type SiteFields = {
   state: string;
   zip: string;
   technician_instructions: string;
+  /** The JBK county code (county_codes.id), or none. */
+  county_code_id: string | null;
 };
 const siteFields = (s: SiteRow | null): SiteFields => ({
   name: s?.name ?? "",
@@ -770,6 +773,7 @@ const siteFields = (s: SiteRow | null): SiteFields => ({
   state: s ? (s.state ?? "") : "KY",
   zip: s?.zip ?? "",
   technician_instructions: s?.technician_instructions ?? "",
+  county_code_id: s?.county_code_id ?? null,
 });
 
 // ---- Contacts ----------------------------------------------------------------------------------
@@ -1237,6 +1241,7 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
                 <p className="text-sm text-muted-foreground">
                   {siteAddressLine(s) || "No address on file"}
                 </p>
+                <CountyCodeLine id={s.county_code_id} className="mt-1 text-xs" />
                 {s.technician_instructions && (
                   <p className="mt-1 whitespace-pre-line text-xs">
                     <span className="font-medium">Technician instructions: </span>
@@ -1404,6 +1409,14 @@ function SiteForm(props: {
           inputMode="numeric"
           value={f.zip}
           onChange={(e) => set("zip", e.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={`site-${idp}-county`}>County code</Label>
+        <CountyCodePicker
+          id={`site-${idp}-county`}
+          value={f.county_code_id}
+          onChange={(v) => set("county_code_id", v)}
         />
       </div>
       <div className="space-y-1">
