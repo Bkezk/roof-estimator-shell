@@ -14,7 +14,7 @@
  */
 import { z } from "zod";
 
-import { areaLabel, labelAt } from "@/lib/aerial-area";
+import { areaLabel, labelAt, type Pt } from "@/lib/aerial-area";
 import {
   MAX_VIEW_ZOOM,
   footprintAreaSqFt,
@@ -22,6 +22,7 @@ import {
   footprintPolygons,
   lngLatAreaSqFt,
   project,
+  unproject,
   type AerialView,
   type LngLat,
 } from "@/lib/aerial-geo";
@@ -264,6 +265,27 @@ export function tagNumbers(annotations: Annotation[]): Map<string, number> {
   return out;
 }
 
+export type TagMark = Extract<Annotation, { kind: "pin" }>;
+export type TextMark = Extract<Annotation, { kind: "text" }>;
+
+/**
+ * The Tags list under the picture (owner, Oct 1) and the PNG legend: one row per tag, numbered
+ * as on the picture, with "1. Ponding — 3 in. deep at the NE drain".
+ */
+export function tagRows(annotations: Annotation[]): { mark: TagMark; n: number; line: string }[] {
+  const n = tagNumbers(annotations);
+  return annotations.flatMap((a) => {
+    if (a.kind !== "pin") return [];
+    const k = n.get(a.id)!;
+    return [{ mark: a, n: k, line: `${k}. ${a.label}${a.note ? ` — ${a.note}` : ""}` }];
+  });
+}
+
+/** The Text list under the picture (owner, Oct 1): every text mark's words, in drawing order. */
+export function textRows(annotations: Annotation[]): { mark: TextMark; text: string }[] {
+  return annotations.flatMap((a) => (a.kind === "text" ? [{ mark: a, text: a.text }] : []));
+}
+
 // ── Areas: numbering, sq ft and the total ──────────────────────────────────────────────────
 
 export type AreaMark = Extract<Annotation, { kind: "area" }>;
@@ -290,14 +312,43 @@ export function areaRows(
 }
 
 /**
+ * The saved areas' corners projected onto `view` (view px): what a new area's corners link to
+ * (src/lib/aerial-area.ts, linkPoint).
+ */
+export function areaLinkPolys(annotations: Annotation[], view: AerialView): Pt[][] {
+  return annotations.filter(isAreaMark).map((a) => a.points.map((p) => project(view, p)));
+}
+
+/** View px this close count as the same point (float noise from projecting / re-projecting). */
+const SAME_PX = 1e-6;
+
+/**
+ * A finished area's corners (view px) as lng/lat. A corner that sits on a saved area's corner
+ * (linked) takes that corner's stored lng/lat exactly, so the two areas share the corner — and a
+ * side between two linked corners is the same edge — to the last digit, not merely close.
+ */
+export function areaCornersLngLat(
+  view: AerialView,
+  points: Pt[],
+  annotations: Annotation[],
+): LngLat[] {
+  const corners = annotations
+    .filter(isAreaMark)
+    .flatMap((a) => a.points.map((ll) => ({ ll, px: project(view, ll) })));
+  return points.map(([x, y]) => {
+    const hit = corners.find(
+      (c) => Math.abs(c.px[0] - x) <= SAME_PX && Math.abs(c.px[1] - y) <= SAME_PX,
+    );
+    return hit ? hit.ll : unproject(view, x, y);
+  });
+}
+
+/**
  * The PNG's legend: "1. Ponding — 3 in. deep at the NE drain" per tag, then
  * "Area 1 — 2,340 sq ft" per area and "Areas total — 4,680 sq ft".
  */
 export function legendLines(annotations: Annotation[], zoom: number = MAX_VIEW_ZOOM): string[] {
-  const n = tagNumbers(annotations);
-  const tags = annotations.flatMap((a) =>
-    a.kind === "pin" ? [`${n.get(a.id)}. ${a.label}${a.note ? ` — ${a.note}` : ""}`] : [],
-  );
+  const tags = tagRows(annotations).map((r) => r.line);
   const { rows, total } = areaRows(annotations, zoom);
   const areas = rows.map((r) => `Area ${r.n} — ${areaLabel(r.sqft)}`);
   if (rows.length) areas.push(`Areas total — ${areaLabel(total)}`);

@@ -11,7 +11,10 @@
  * previous side or level / plumb within 7°; the target marker shows the live end; tap the first
  * corner, double-tap / double-click, right-click or Enter closes; Esc cancels. Each area shows
  * its sq ft (the imagery's Web Mercator scale at the view's zoom and latitude) and the section
- * lists them with a total. Saved freehand / line marks from before still draw.
+ * lists them with a total. Saved freehand / line marks from before still draw. A new corner
+ * within 8 screen px of an existing area's corner or side links onto it (whatever the Snap
+ * toggle), so adjoining sections share corners and edges. Under the Areas list, the Tags and the
+ * Text marks are listed too; clicking a row pulses that mark on the picture.
  *
  * "Save markup" stores a PNG of the picture (imagery + outline + marks + the legend) on
  * the ticket as its aerial photo and the vector JSON beside it; re-opening the section loads the
@@ -78,6 +81,8 @@ import {
   TAG_NOTE_MAX,
   TAG_PRESETS,
   TEXT_MAX,
+  areaCornersLngLat,
+  areaLinkPolys,
   areaMarkSqFt,
   areaRows,
   colorFill,
@@ -91,6 +96,8 @@ import {
   pathD,
   serializeMarkup,
   tagNumbers,
+  tagRows,
+  textRows,
   type AerialBuilding,
   type AerialMarkup,
   type Annotation,
@@ -103,9 +110,11 @@ import {
   emptyAreaDraw,
   labelAt,
   liveEnd,
+  liveLinked,
   liveRect,
   stepArea,
   type AreaDraw,
+  type AreaLinks,
   type AreaDrawAction,
   type Pt,
 } from "@/lib/aerial-area";
@@ -263,7 +272,8 @@ function AerialEditor({
           id: newAnnotationId(),
           kind: "area",
           color,
-          points: r.done.map(([x, y]) => unproject(view, x, y)),
+          // A corner linked to a saved area's corner keeps that corner's exact lng/lat.
+          points: areaCornersLngLat(view, r.done, history.annotations),
         },
       });
   };
@@ -277,6 +287,27 @@ function AerialEditor({
   };
   const [pending, setPending] = useState<{ kind: "pin" | "text"; at: LngLat } | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
+  // A tag / text row clicked in the lists under the picture: that mark pulses for FLASH_MS.
+  const [flash, setFlash] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stageBox = useRef<HTMLDivElement>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+  /** Show where a mark is: bring the picture on screen (and the mark into it), pulse it. */
+  const showMark = (m: { id: string; at: LngLat }) => {
+    if (view) {
+      const [x, y] = project(view, m.at);
+      if (x < 0 || y < 0 || x > view.width || y > view.height) setView({ ...view, center: m.at });
+    }
+    stageBox.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    setFlash(m.id);
+    flashTimer.current = setTimeout(() => setFlash(null), FLASH_MS);
+  };
 
   // Esc cancels the area in progress; Enter closes it (as the takeoff). Keys in a text field
   // (the tag form) are left alone.
@@ -407,10 +438,8 @@ function AerialEditor({
       </div>
     );
 
-  const tags = history.annotations.filter(
-    (a): a is Extract<Annotation, { kind: "pin" }> => a.kind === "pin",
-  );
-  const numbers = tagNumbers(history.annotations);
+  const tags = tagRows(history.annotations);
+  const texts = textRows(history.annotations);
   const areas = areaRows(history.annotations, view.zoom);
   const how =
     building?.how === "picked"
@@ -462,17 +491,20 @@ function AerialEditor({
           right-click to finish · Esc cancels.
         </p>
       )}
-      <Stage
-        view={view}
-        sources={imagery.sources}
-        annotations={history.annotations}
-        tool={canEdit ? tool : "move"}
-        color={color}
-        areaDraw={areaDraw}
-        onArea={areaInput}
-        onView={setView}
-        onPlace={(kind, at) => setPending({ kind, at })}
-      />
+      <div ref={stageBox}>
+        <Stage
+          view={view}
+          sources={imagery.sources}
+          annotations={history.annotations}
+          tool={canEdit ? tool : "move"}
+          color={color}
+          areaDraw={areaDraw}
+          onArea={areaInput}
+          onView={setView}
+          onPlace={(kind, at) => setPending({ kind, at })}
+          flash={flash}
+        />
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -583,35 +615,62 @@ function AerialEditor({
       )}
 
       {tags.length > 0 && (
-        <ol className="space-y-1 text-sm" aria-label="Tags">
-          {tags.map((t) => (
-            <li key={t.id} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
-              <span
-                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-black text-[11px] font-bold"
-                style={{
-                  background: colorHex(t.color),
-                  color: t.color === "white" || t.color === "yellow" ? "#000" : "#fff",
-                }}
-              >
-                {numbers.get(t.id)}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="font-medium">{t.label}</span>
-                {t.note && <span className="text-muted-foreground"> — {t.note}</span>}
-              </span>
-              {canEdit && (
+        <div className="space-y-1 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">Tags</p>
+          <ol className="space-y-1" aria-label="Tags">
+            {tags.map((r) => (
+              <li key={r.mark.id} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
                 <button
                   type="button"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-muted"
-                  aria-label={`Remove tag ${t.label}`}
-                  onClick={() => dispatch({ type: "remove", id: t.id })}
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                  title="Show it on the picture"
+                  onClick={() => showMark(r.mark)}
                 >
-                  <X className="h-4 w-4" />
+                  <MarkDot color={r.mark.color} />
+                  <span className="min-w-0 flex-1 break-words">
+                    <span className="font-medium">
+                      {r.n}. {r.mark.label}
+                    </span>
+                    {r.mark.note && <span className="text-muted-foreground"> — {r.mark.note}</span>}
+                  </span>
                 </button>
-              )}
-            </li>
-          ))}
-        </ol>
+                {canEdit && (
+                  <RemoveButton
+                    label={`Remove tag ${r.n}`}
+                    onClick={() => dispatch({ type: "remove", id: r.mark.id })}
+                  />
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {texts.length > 0 && (
+        <div className="space-y-1 text-sm">
+          <p className="text-xs font-medium text-muted-foreground">Text</p>
+          <ul className="space-y-1" aria-label="Text">
+            {texts.map((r) => (
+              <li key={r.mark.id} className="flex items-start gap-2 rounded-md border px-2 py-1.5">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                  title="Show it on the picture"
+                  onClick={() => showMark(r.mark)}
+                >
+                  <MarkDot color={r.mark.color} />
+                  <span className="min-w-0 flex-1 break-words">{r.text}</span>
+                </button>
+                {canEdit && (
+                  <RemoveButton
+                    label={`Remove text ${r.text}`}
+                    onClick={() => dispatch({ type: "remove", id: r.mark.id })}
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-3">
@@ -642,6 +701,33 @@ function AerialEditor({
       </div>
       {pickDialog}
     </div>
+  );
+}
+
+/** How long a mark pulses after its row is clicked. */
+const FLASH_MS = 1500;
+
+/** A mark's colour, as a dot beside its row. */
+function MarkDot({ color }: { color: MarkupColor }) {
+  return (
+    <span
+      className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-black/60"
+      style={{ background: colorHex(color) }}
+    />
+  );
+}
+
+/** The × on a row of the lists under the picture (through the history: Undo brings it back). */
+function RemoveButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded hover:bg-muted"
+      aria-label={label}
+      onClick={onClick}
+    >
+      <X className="h-4 w-4" />
+    </button>
   );
 }
 
@@ -683,8 +769,8 @@ function Toolbar(props: {
             className="h-10 px-3"
             title={
               props.snap
-                ? "Snap on: sides square up within 7°. Turn off for a building that sits at a slight angle."
-                : "Snap off: corners land exactly where you tap."
+                ? "Snap on: sides square up within 7°. Turn off for a building that sits at a slight angle. Corners always link to existing areas."
+                : "Snap off: sides keep the angle you tap. Corners always link to existing areas."
             }
             onClick={() => props.onSnap(!props.snap)}
           >
@@ -743,6 +829,7 @@ function Stage({
   onArea,
   onView,
   onPlace,
+  flash,
 }: {
   view: AerialView;
   sources: ImagerySource[];
@@ -753,6 +840,8 @@ function Stage({
   onArea: (a: AreaDrawAction) => void;
   onView: (v: AerialView) => void;
   onPlace: (kind: "pin" | "text", at: LngLat) => void;
+  /** The mark to pulse (its row was clicked), or null. */
+  flash: string | null;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; view: AerialView } | null>(null);
@@ -764,6 +853,9 @@ function Stage({
   const tiles = sources.flatMap((s) => tilesForView(view, s));
   const px = (p: LngLat) => project(view, p);
   const numbers = tagNumbers(annotations);
+  // What a new area's corners link to: the saved areas' corners on this view.
+  const links = useMemo(() => areaLinkPolys(annotations, view), [annotations, view]);
+  const flashed = flash ? annotations.find((a) => a.id === flash) : undefined;
 
   const toView = (e: React.PointerEvent): Pt => {
     const r = svg.current!.getBoundingClientRect();
@@ -821,7 +913,7 @@ function Stage({
     }
     const r = svg.current?.getBoundingClientRect();
     const k = r && r.width > 0 ? r.width / view.width : scale;
-    onArea({ type: "up", p: toView(e), scale: k, touch: e.pointerType === "touch" });
+    onArea({ type: "up", p: toView(e), scale: k, touch: e.pointerType === "touch", links });
   };
 
   const cursor = tool === "move" ? "grab" : tool === "text" ? "text" : "crosshair";
@@ -972,7 +1064,17 @@ function Stage({
           );
         })}
         {tool === "area" && (
-          <AreaDraft view={view} draw={areaDraw} scale={scale} touch={touch} color={color} />
+          <AreaDraft
+            view={view}
+            draw={areaDraw}
+            scale={scale}
+            touch={touch}
+            color={color}
+            links={links}
+          />
+        )}
+        {flashed && (flashed.kind === "pin" || flashed.kind === "text") && (
+          <FlashRing mark={flashed} at={px(flashed.at)} />
         )}
       </svg>
     </div>
@@ -990,16 +1092,21 @@ function AreaDraft({
   scale,
   touch,
   color,
+  links,
 }: {
   view: AerialView;
   draw: AreaDraw;
   scale: number;
   touch: boolean;
   color: MarkupColor;
+  /** The saved areas (view px) a corner links to. */
+  links: AreaLinks;
 }) {
   const c = colorHex(color);
-  const rect = liveRect(draw, scale);
-  const end = liveEnd(draw, scale, touch);
+  const rect = liveRect(draw, scale, links);
+  const end = liveEnd(draw, scale, touch, links);
+  // On an existing area's corner or side: a filled ring on the target marker says so.
+  const linked = liveLinked(draw, scale, touch, links);
   const k = 1 / scale; // view px for one screen px
   const label = (pts: Pt[]) => {
     const [x, y] = labelAt(pts);
@@ -1078,8 +1185,41 @@ function AreaDraft({
         />
       )}
       {shape.length >= 3 && label(shape)}
+      {end && linked && (
+        <circle
+          cx={end[0]}
+          cy={end[1]}
+          r={5 * k}
+          fill={colorFill(color, 0.6)}
+          stroke={c}
+          strokeWidth={2 * k}
+        />
+      )}
       {end && <TargetMarker at={end} zoom={scale} color={c} />}
     </g>
+  );
+}
+
+/**
+ * The pulse on a tag or a text mark whose row was clicked (shown for FLASH_MS): a ring that
+ * swells around a tag's pin, a blinking box around a text mark's words.
+ */
+function FlashRing({ mark, at: [x, y] }: { mark: Annotation; at: [number, number] }) {
+  const ring = { fill: "none", stroke: "#fff", strokeWidth: 3, pointerEvents: "none" as const };
+  if (mark.kind === "text") {
+    // The words are bold 20px from (x, y), vertically centred: about 0.62em per character.
+    const w = Math.max(24, mark.text.length * 12.4) + 12;
+    return (
+      <rect x={x - 6} y={y - 16} width={w} height={32} rx={6} style={ring}>
+        <animate attributeName="opacity" values="1;0.15;1" dur="0.5s" repeatCount="indefinite" />
+      </rect>
+    );
+  }
+  return (
+    <circle cx={x} cy={y} r={18} style={ring}>
+      <animate attributeName="r" values="16;30;16" dur="0.75s" repeatCount="indefinite" />
+      <animate attributeName="opacity" values="1;0.3;1" dur="0.75s" repeatCount="indefinite" />
+    </circle>
   );
 }
 

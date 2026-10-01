@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { unproject, type AerialView, type LngLat } from "./aerial-geo";
+import { stepArea, emptyAreaDraw, type AreaDrawAction, type Pt } from "./aerial-area";
+import { project, unproject, type AerialView, type LngLat } from "./aerial-geo";
 import {
   AREA_FILL_ALPHA,
   annotationSchema,
+  areaCornersLngLat,
+  areaLinkPolys,
   areaMarkSqFt,
   areaRows,
   colorFill,
@@ -19,6 +22,8 @@ import {
   serializeMarkup,
   simplifyStroke,
   tagNumbers,
+  tagRows,
+  textRows,
   type AerialMarkup,
   type Annotation,
   type Paint2D,
@@ -334,5 +339,104 @@ describe("area marks", () => {
     expect(texts).toContain("4,438 sq ft");
     expect(texts).toContain("Area 1 — 4,438 sq ft");
     expect(texts).toContain("Areas total — 4,438 sq ft");
+  });
+});
+
+// ── Owner, Oct 1: tags and text listed under the picture; linked areas ─────────────────────
+
+describe("the Tags and Text lists under the picture", () => {
+  it("lists tags numbered as on the picture, with label and note", () => {
+    const rows = tagRows(markup.annotations);
+    expect(rows.map((r) => [r.mark.id, r.n, r.line])).toEqual([
+      ["p1", 1, "1. Ponding — 3 in. deep at the NE drain"],
+      ["p2", 2, "2. Open seam"],
+    ]);
+    // The same numbers the picture draws on the pins.
+    const n = tagNumbers(markup.annotations);
+    for (const r of rows) expect(r.n).toBe(n.get(r.mark.id));
+    // The PNG legend keeps reading the same lines.
+    expect(legendLines(markup.annotations)).toEqual(rows.map((r) => r.line));
+    expect(tagRows([free, text, area1])).toEqual([]);
+  });
+
+  it("lists text marks' words in drawing order, unnumbered", () => {
+    const text2: Annotation = {
+      id: "t2",
+      kind: "text",
+      color: "red",
+      at: near(2, 2),
+      text: "Skylight",
+    };
+    const rows = textRows([text2, pin1, free, text]);
+    expect(rows.map((r) => [r.mark.id, r.text])).toEqual([
+      ["t2", "Skylight"],
+      ["t1", "HVAC"],
+    ]);
+    expect(rows[0]!.mark).toBe(text2);
+    expect(textRows([pin1, area1])).toEqual([]);
+  });
+
+  it("removing a row's mark goes through the history (Undo brings it back)", () => {
+    let s = emptyHistory([pin1, text, pin2]);
+    s = markupReducer(s, { type: "remove", id: "t1" });
+    expect(textRows(s.annotations)).toEqual([]);
+    s = markupReducer(s, { type: "remove", id: "p1" });
+    expect(tagRows(s.annotations).map((r) => r.line)).toEqual(["1. Open seam"]);
+    s = markupReducer(s, { type: "undo" });
+    s = markupReducer(s, { type: "undo" });
+    expect(s.annotations).toEqual([pin1, text, pin2]);
+  });
+});
+
+describe("linked areas share corners to the last digit", () => {
+  it("projects the saved areas onto the view as the Area tool's links", () => {
+    const [poly] = areaLinkPolys([pin1, area1, text], areaView);
+    expect(areaLinkPolys([pin1, text], areaView)).toEqual([]);
+    expect(poly!.map(([x, y]) => [Math.round(x * 1e6) / 1e6, Math.round(y * 1e6) / 1e6])).toEqual([
+      [300, 225],
+      [500, 225],
+      [500, 375],
+      [300, 375],
+    ]);
+  });
+
+  it("a second area drawn on the first's right side keeps the first's stored lng/lat exactly", () => {
+    const links = areaLinkPolys([area1], areaView);
+    const t = (p: Pt): AreaDrawAction[] => [
+      { type: "down", p, sx: p[0], sy: p[1] },
+      { type: "up", p, scale: 1, links },
+    ];
+    let d = emptyAreaDraw();
+    let done: Pt[] | null = null;
+    for (const a of [...t([504, 228]), ...t([497, 371]), ...t([650, 375]), ...t([650, 225])])
+      d = stepArea(d, a).draw;
+    done = stepArea(d, { type: "close" }).done;
+    const ll = areaCornersLngLat(areaView, done!, [area1]);
+    // The shared side: the same two lng/lat pairs as the first area's right side.
+    expect(ll[0]).toBe(boxLL[1]);
+    expect(ll[1]).toBe(boxLL[2]);
+    expect(ll[0]![0]).toBe(boxLL[1]![0]);
+    expect(ll[1]![1]).toBe(boxLL[2]![1]);
+    // An unlinked corner is read off the view as before.
+    expect(ll[2]).toEqual(unproject(areaView, done![2]![0], done![2]![1]));
+    expect(project(areaView, ll[2]!)[0]).toBeCloseTo(650, 6);
+  });
+
+  it("a saved (rounded) area, re-opened on another view: the linked corners are its own values", () => {
+    const saved = serializeMarkup({ ...markup, annotations: [area1] }).annotations[0]!;
+    const stored = saved.kind === "area" ? saved.points : [];
+    const v: AerialView = { ...areaView, zoom: 21, center: near(3, -2) };
+    const links = areaLinkPolys([saved], v);
+    const p = links[0]![1]!;
+    let d = emptyAreaDraw();
+    for (const a of [
+      { type: "down", p: [p[0] + 3, p[1] + 2], sx: 0, sy: 0 },
+      { type: "up", p: [p[0] + 3, p[1] + 2], scale: 1, links },
+    ] as AreaDrawAction[])
+      d = stepArea(d, a).draw;
+    const ll = areaCornersLngLat(v, d.points, [saved]);
+    expect(ll[0]).toEqual(stored[1]);
+    expect(ll[0]![0]).toBe(stored[1]![0]);
+    expect(ll[0]![1]).toBe(stored[1]![1]);
   });
 });

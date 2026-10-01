@@ -7,8 +7,12 @@ import {
   drawing,
   emptyAreaDraw,
   labelAt,
+  linkPoint,
   liveEnd,
+  liveLinked,
   liveRect,
+  resolveCorner,
+  snapToSides,
   stepArea,
   type AreaDraw,
   type AreaDrawAction,
@@ -328,5 +332,128 @@ describe("the Snap toggle (owner, Oct 1: an angled house kept snapping vertical)
 
   it("a fresh shape starts with snap on", () => {
     expect(emptyAreaDraw().snap).toBe(true);
+  });
+});
+
+describe("linking to existing areas (owner, Oct 1: the edge of one section can become the edge of another)", () => {
+  /** An existing 100 × 100 area (view px). */
+  const sq: Pt[] = [
+    [0, 0],
+    [100, 0],
+    [100, 100],
+    [0, 100],
+  ];
+  const links = [sq];
+  const tapL = (p: Pt, scale = 1): AreaDrawAction[] => [
+    { type: "down", p, sx: p[0] * scale, sy: p[1] * scale },
+    { type: "up", p, scale, links },
+  ];
+  const snapOff: AreaDrawAction = { type: "snap", on: false };
+
+  it("a corner within 8 screen px of an existing corner lands exactly on it", () => {
+    const { d } = run(tapL([105, 3]));
+    // 5.8 px away: the existing corner itself.
+    expect(d.points[0]).toBe(sq[1]);
+    expect(resolveCorner(emptyAreaDraw(), [96, 104], 1, false, links)).toBe(sq[2]);
+  });
+
+  it("a corner within 8 screen px of an existing side lands on the side (perpendicular foot)", () => {
+    expect(run(tapL([106, 50])).d.points[0]).toEqual([100, 50]);
+    expect(run(tapL([40, -7])).d.points[0]).toEqual([40, 0]);
+    expect(snapToSides([106, 50], links, 1)).toEqual([100, 50]);
+  });
+
+  it("9 screen px away does not link; the tolerance is on screen (scale = screen px per view px)", () => {
+    expect(run([snapOff, ...tapL([109, 50])]).d.points[0]).toEqual([109, 50]);
+    expect(run([snapOff, ...tapL([109, 0])]).d.points[0]).toEqual([109, 0]);
+    expect(linkPoint([109, 50], links, 1)).toBeNull();
+    // At 2 screen px per view px: 4 view px is 8 on screen (links), 4.5 is 9 (does not).
+    expect(linkPoint([104, 50], links, 2)).toEqual([100, 50]);
+    expect(linkPoint([104.5, 50], links, 2)).toBeNull();
+    expect(linkPoint([104, 50], undefined, 1)).toBeNull();
+  });
+
+  it("linking wins over the 7° squaring", () => {
+    // From (300, 3), a tap at (106, 5) squares level to (106, 3) — but it is 7.8 px from the
+    // corner (100, 0), so it lands there.
+    const a = run([...tapL([300, 3]), ...tapL([106, 5])]).d;
+    expect(a.snap).toBe(true);
+    expect(a.points[1]).toBe(sq[1]);
+    // And a side: level would be (104, 52); the right side's foot is (100, 50).
+    const b = run([...tapL([300, 52]), ...tapL([104, 50])]).d;
+    expect(b.points[1]).toEqual([100, 50]);
+    // Without links the same taps square as before.
+    expect(run([...tap([300, 3]), ...tap([106, 5])]).d.points[1]).toEqual([106, 3]);
+  });
+
+  it("works with Snap off (linking is independent of the squaring toggle)", () => {
+    const { d } = run([snapOff, ...tapL([300, 140]), ...tapL([95, 104]), ...tapL([60, 106])]);
+    expect(d.snap).toBe(false);
+    expect(d.points).toEqual([
+      [300, 140],
+      [100, 100],
+      [60, 100],
+    ]);
+    expect(d.points[1]).toBe(sq[2]);
+  });
+
+  it("the live end (target marker) links too and says so", () => {
+    const d = run(tapL([300, 3])).d;
+    const hover = (p: Pt) => stepArea(d, { type: "move", p, sx: p[0], sy: p[1] }).draw;
+    expect(liveEnd(hover([105, 4]), 1, false, links)).toBe(sq[1]);
+    expect(liveLinked(hover([105, 4]), 1, false, links)).toBe(true);
+    expect(liveEnd(hover([106, 60]), 1, false, links)).toEqual([100, 60]);
+    expect(liveLinked(hover([150, 60]), 1, false, links)).toBe(false);
+    expect(liveLinked(hover([105, 4]), 1, false)).toBe(false);
+    // Nothing placed yet: the first corner's marker links as well.
+    const first = stepArea(emptyAreaDraw(), { type: "move", p: [3, 103], sx: 3, sy: 103 }).draw;
+    expect(liveEnd(first, 1, false, links)).toBe(sq[3]);
+  });
+
+  it("a dragged rectangle's two dragged corners link", () => {
+    const { done } = run([
+      { type: "down", p: [103, -3], sx: 103, sy: -3 },
+      { type: "move", p: [205, 96], sx: 205, sy: 96 },
+      { type: "up", p: [205, 96], scale: 1, links },
+    ]);
+    expect(done[0]).toEqual([
+      [100, 0],
+      [205, 0],
+      [205, 96],
+      [100, 96],
+    ]);
+    const live = run([
+      { type: "down", p: [103, -3], sx: 103, sy: -3 },
+      { type: "move", p: [205, 96], sx: 205, sy: 96 },
+    ]).d;
+    expect(liveRect(live, 1, links)![0]).toEqual([100, 0]);
+  });
+
+  it("a shared edge: a second area started on the first's right side at its two corners", () => {
+    const first = run([...tap([0, 0]), ...tap([100, 0]), ...tap([100, 100]), ...tap([0, 100])]);
+    const a1 = run([{ type: "close" }], first.d).done[0]!;
+    // (The squaring leaves the last corner a float hair off 100; the right side is exact.)
+    expect(a1.slice(0, 3)).toEqual(sq.slice(0, 3));
+    const L = [a1];
+    const t = (p: Pt): AreaDrawAction[] => [
+      { type: "down", p, sx: p[0], sy: p[1] },
+      { type: "up", p, scale: 1, links: L },
+    ];
+    const second = run([...t([103, 2]), ...t([102, 97]), ...t([200, 100]), ...t([200, 0])]);
+    const a2 = run([{ type: "close" }], second.d).done[0]!;
+    // The second area's first two corners are the first area's corners themselves: the side
+    // between them is the first area's right side exactly.
+    expect(a2[0]).toBe(a1[1]);
+    expect(a2[1]).toBe(a1[2]);
+    expect(a2.slice(0, 2)).toEqual([
+      [100, 0],
+      [100, 100],
+    ]);
+    // Two corners on the same side (mid-side feet) share that stretch of it.
+    const mid = run([...t([104, 20]), ...t([97, 80])]).d.points;
+    expect(mid).toEqual([
+      [100, 20],
+      [100, 80],
+    ]);
   });
 });
