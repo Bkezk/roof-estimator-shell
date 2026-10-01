@@ -108,6 +108,7 @@ import { localYmd } from "@/lib/tasks";
 import { isOpenTicketStage, isOverdueTicket, SERVICE_OPEN_WORK } from "@/lib/work-counts";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
+import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   ContactSelect,
@@ -2033,6 +2034,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <TicketRepairs jobId={job.id} />
             {materials}
             <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
+            <PurchaseOrdersSection jobId={job.id} />
             <InvoiceBlock job={job} />
           </aside>
         </div>
@@ -2046,6 +2048,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               <TicketExtras job={job} canEdit={canEdit} />
               {materials}
               <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
+              <PurchaseOrdersSection jobId={job.id} />
             </div>
           )}
         </>

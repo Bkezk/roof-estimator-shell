@@ -47,6 +47,10 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
+import { computeTotals, storedTotals, type InvoiceTotals } from "@/lib/invoice-totals";
+import { approvedPoTotal } from "@/lib/purchase-orders";
+import { listPurchaseOrders } from "@/lib/service-pos.functions";
+import { fieldKeys } from "@/components/service/field-utils";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -436,45 +440,6 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
 const editKey = (h: HeadDraft, lines: LineDraft[]) =>
   JSON.stringify([h, lines.map(({ key: _k, ...rest }) => rest)]);
 
-/** Live totals as the server computes them (invoices.server.ts totals()); a blank box is 0. */
-function computeTotals(
-  lines: {
-    kind: string;
-    qty: number | null;
-    rate: number | null;
-    cost_rate: number;
-    taxable: boolean;
-  }[],
-  taxRate: number,
-) {
-  let subtotal = 0;
-  let taxable = 0;
-  let cost = 0;
-  let hours = 0;
-  for (const l of lines) {
-    const qty = l.qty ?? 0;
-    const amount = r2(qty * (l.rate ?? 0));
-    subtotal += amount;
-    if (l.taxable) taxable += amount;
-    cost += r2(qty * l.cost_rate);
-    if (l.kind === "labor" || l.kind === "travel") hours += qty;
-  }
-  subtotal = r2(subtotal);
-  const tax = r2(r2(taxable) * taxRate);
-  const total = r2(subtotal + tax);
-  const cost_total = r2(cost);
-  const margin = r2(total - cost_total);
-  return {
-    subtotal,
-    tax,
-    total,
-    cost_total,
-    margin,
-    hours,
-    perHour: hours > 0 ? margin / hours : null,
-  };
-}
-
 /**
  * A number box that can be blank (null): a new line's quantity and rate start empty, and a
  * line is not saved until both are filled in. Keeps its own text while focused so a partial
@@ -573,7 +538,8 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const dateUntouched = (ymd: string) =>
     ymd === toYmd(new Date(inv.created_at)) || ymd === inv.created_at.slice(0, 10);
   const taxExempt = !!account?.tax_exempt;
-  const t = computeTotals(lines, fromPct(head.tax_pct));
+  const po = useApprovedPoCost(job.id);
+  const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
 
   /** The save payload, or an error message when a line is incomplete. */
   const payload = (forFinal: boolean): InvoiceSaveInput | string => {
@@ -985,7 +951,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           </Button>
         </section>
         <div className="xl:sticky xl:top-4">
-          <Totals t={t} taxPct={head.tax_pct} />
+          <Totals t={t} taxPct={head.tax_pct} poError={po.error} />
         </div>
       </div>
 
@@ -1137,7 +1103,31 @@ function BillTo({ inv }: { inv: InvoiceRow }) {
 
 const INTERNAL_OPEN_KEY = "invoiceInternalOpen";
 
-function Totals({ t, taxPct }: { t: ReturnType<typeof computeTotals>; taxPct: number }) {
+/**
+ * The ticket's approved purchase-order total (purchase-orders.ts): an internal cost, read for
+ * admins and managers only (the Internal fold is theirs). Never an invoice line or on the PDF.
+ */
+function useApprovedPoCost(jobId: string): { cost: number; error: unknown } {
+  const { session, profile } = useAuth();
+  const listFn = useServerFn(listPurchaseOrders);
+  const q = useQuery({
+    queryKey: fieldKeys.pos(jobId),
+    queryFn: () => listFn({ data: { jobId } }),
+    enabled: !!session && managesTickets(profile),
+  });
+  return { cost: approvedPoTotal(q.data?.pos ?? []), error: q.error };
+}
+
+function Totals({
+  t,
+  taxPct,
+  poError,
+}: {
+  t: InvoiceTotals;
+  taxPct: number;
+  /** The purchase orders could not be read: Cost and Margin leave them out, and say so. */
+  poError?: unknown;
+}) {
   const { profile } = useAuth();
   // Cost and margin are internal (owner, Oct 1: the invoice goes out to a customer): folded,
   // closed by default, and only for admins and managers.
@@ -1193,6 +1183,16 @@ function Totals({ t, taxPct }: { t: ReturnType<typeof computeTotals>; taxPct: nu
           {open && (
             <dl id="invoice-internal" className="mt-1.5 space-y-1">
               <div className="flex justify-between gap-2">
+                <dt>Purchase orders (approved)</dt>
+                <dd className="tabular-nums">
+                  {poError ? (
+                    <span className="text-destructive">could not load: {errText(poError)}</span>
+                  ) : (
+                    money(t.po_cost)
+                  )}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
                 <dt>Cost</dt>
                 <dd className="tabular-nums">{money(t.cost_total)}</dd>
               </div>
@@ -1227,6 +1227,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const account = useAccount(job.account_id);
   const [dialog, setDialog] = useState<null | "send" | "paid" | "void">(null);
 
+  const po = useApprovedPoCost(job.id);
   const t = computeTotals(
     data.lines.map((l) => ({
       kind: l.kind,
@@ -1236,17 +1237,11 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       taxable: l.taxable,
     })),
     Number(inv.tax_rate),
+    po.cost,
   );
-  // The stored totals are the record; the live figures above only feed the margin per hour.
-  const stored = {
-    ...t,
-    subtotal: Number(inv.subtotal),
-    tax: Number(inv.tax_amount),
-    total: Number(inv.total),
-    cost_total: Number(inv.cost_total),
-    margin: r2(Number(inv.total) - Number(inv.cost_total)),
-  };
-  stored.perHour = t.hours > 0 ? stored.margin / t.hours : null;
+  // The stored totals are the record; the live figures above feed the margin per hour, and the
+  // ticket's approved purchase orders are added to the cost (internal only).
+  const stored = storedTotals(inv, t);
 
   const download = useMutation({
     mutationFn: () => renderFn({ data: { id: inv.id } }),
@@ -1391,7 +1386,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </p>
           )}
         </div>
-        <Totals t={stored} taxPct={toPct(inv.tax_rate)} />
+        <Totals t={stored} taxPct={toPct(inv.tax_rate)} poError={po.error} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">

@@ -4,7 +4,9 @@
  * Every insert, update and delete on invoices, invoice lines, customers, sites and contacts (and
  * a contact's site links) — by anyone, through the app or straight to the database — leaves a
  * row in `public.audit_log`, written by the database itself: the row trigger `public.audit_row()`
- * (migration 20261001080000_audit_triggers_stage_rule.sql). No server function writes it.
+ * (migration 20261001080000_audit_triggers_stage_rule.sql). A ticket's purchase orders too
+ * (entity 'purchase_order', entity_id = the PO's id: "PO 'Jbk24-0255' approved no → yes";
+ * 20261001100000_ticket_purchase_orders.sql). No server function writes it.
  * Admins and managers read it: the History folds on the invoice and the customer profile, and
  * the Owner view's "last activity".
  *
@@ -20,7 +22,14 @@
 import type { Json } from "@/integrations/supabase/types";
 
 /** The audit_log.entity check constraint. */
-export const AUDIT_ENTITIES = ["invoice", "invoice_line", "account", "site", "contact"] as const;
+export const AUDIT_ENTITIES = [
+  "invoice",
+  "invoice_line",
+  "account",
+  "site",
+  "contact",
+  "purchase_order",
+] as const;
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 /** The audit_log.action check constraint. */
 export const AUDIT_ACTIONS = [

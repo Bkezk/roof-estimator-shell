@@ -29,6 +29,8 @@ export const fieldKeys = {
   events: (id: string) => ["service-job-events", id] as const,
   materials: (id: string) => ["service-job-materials", id] as const,
   crew: (id: string) => ["service-job-crew", id] as const,
+  /** The ticket's purchase orders (the section and the invoice's Internal fold share it). */
+  pos: (id: string) => ["service-job-pos", id] as const,
 };
 
 /**

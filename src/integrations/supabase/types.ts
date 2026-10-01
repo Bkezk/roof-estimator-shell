@@ -2672,6 +2672,78 @@ export type Database = {
           },
         ];
       };
+      service_job_purchase_orders: {
+        Row: {
+          approved: boolean;
+          approved_at: string | null;
+          approved_by: string | null;
+          created_at: string;
+          created_by: string | null;
+          id: string;
+          notes: string | null;
+          po_date: string;
+          po_number: string;
+          price: number;
+          receipt_name: string | null;
+          receipt_path: string | null;
+          receipt_size: number | null;
+          service_job_id: string;
+          title: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          approved?: boolean;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          notes?: string | null;
+          po_date?: string;
+          po_number: string;
+          price: number;
+          receipt_name?: string | null;
+          receipt_path?: string | null;
+          receipt_size?: number | null;
+          service_job_id: string;
+          title?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          approved?: boolean;
+          approved_at?: string | null;
+          approved_by?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          id?: string;
+          notes?: string | null;
+          po_date?: string;
+          po_number?: string;
+          price?: number;
+          receipt_name?: string | null;
+          receipt_path?: string | null;
+          receipt_size?: number | null;
+          service_job_id?: string;
+          title?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_purchase_orders_approved_by_fkey";
+            columns: ["approved_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_purchase_orders_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       service_job_repairs: {
         Row: {
           completed_on: string;

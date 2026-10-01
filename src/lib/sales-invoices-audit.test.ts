@@ -78,7 +78,14 @@ describe("auditLine (pure)", () => {
     ).toBe("Oct 1, 9:14 AM · RoAnna Sims (sales) · Invoice 6012 line 'Labor' rate 85 → 95");
   });
   it("the entity and action values the Owner view relies on", () => {
-    expect([...AUDIT_ENTITIES]).toEqual(["invoice", "invoice_line", "account", "site", "contact"]);
+    expect([...AUDIT_ENTITIES]).toEqual([
+      "invoice",
+      "invoice_line",
+      "account",
+      "site",
+      "contact",
+      "purchase_order",
+    ]);
     expect([...AUDIT_ACTIONS]).toEqual([
       "create",
       "update",

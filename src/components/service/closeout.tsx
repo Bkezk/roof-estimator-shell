@@ -2,7 +2,8 @@
  * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3):
  * who is on the job (crew-box.tsx; owner, Sep 30: answered first — the rest opens after — and
  * editable later), repairs from the template chips with before / after photos, materials off
- * the truck (one tap per piece, materials-section.tsx), closing notes, time (fix a forgotten
+ * the truck (one tap per piece, materials-section.tsx), purchase orders for material bought for
+ * the job (purchase-orders-section.tsx; no Approved toggle here), closing notes, time (fix a forgotten
  * button press), the customer's signature, then Complete.
  *
  * Everything saves as it is filled out (owner, Sep 30: no Save button): repairs, photos, time
@@ -71,6 +72,7 @@ import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/fi
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
+import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { TicketExtras } from "@/components/service/ticket-extras";
 import {
   clock,
@@ -342,6 +344,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
           {/* (c) Materials */}
           <MaterialsSection jobId={job.id} />
+
+          {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
+          <PurchaseOrdersSection jobId={job.id} field />
 
           {/* (d) Notes */}
           <Section title="Notes" icon={ClipboardList}>
