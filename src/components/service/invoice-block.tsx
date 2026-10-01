@@ -9,7 +9,10 @@
  * A ticket with no live invoice shows "Make the invoice": the draft is made from the ticket's
  * time and materials (getOrCreateInvoice, §4 rules) and opened. A ticket can carry more than one
  * invoice (owner, Sep 30): "Another invoice" makes the next, numbered "<ticket>.2", ".3", …; a
- * deleted or voided one frees its number for the next (invoice-numbering.ts).
+ * deleted or voided one frees its number for the next (invoice-numbering.ts). "Another invoice"
+ * asks whom to bill first: the customer account or a vendor (owner, Oct 1: "Sometimes it's both
+ * a customer and a vendor, so we could make two invoices for that if needed"); an invoice billed
+ * to a vendor carries the badge "Billed to vendor: <name>".
  *
  * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); everyone else
  * — technicians above all — never sees it (RLS invoices_office), so the card renders nothing
@@ -44,6 +47,7 @@ import {
   ticketInvoicesKey,
 } from "@/components/service/invoice-utils";
 import { InvoiceStatusBadge } from "@/components/service/invoice-editor";
+import { AnotherInvoiceDialog, VendorBilledBadge } from "@/components/service/bill-to-picker";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +83,8 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
   // The chip picked; null = the ticket's current invoice (its newest live one).
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // "Another invoice": whom to bill (the customer account or a vendor) is asked first.
+  const [askAnother, setAskAnother] = useState(false);
 
   const all = useQuery({
     queryKey: ticketInvoicesKey(job.id),
@@ -118,8 +124,12 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
     onError: (e) => toast.error(`Could not make the invoice: ${errText(e)}`),
   });
   const another = useMutation({
-    mutationFn: () => anotherFn({ data: { job_id: job.id } }),
-    onSuccess: (r) => opened(r, "made from the ticket"),
+    mutationFn: (vendorId: string | null) =>
+      anotherFn({ data: { job_id: job.id, bill_to_vendor_id: vendorId } }),
+    onSuccess: (r) => {
+      setAskAnother(false);
+      opened(r, r.invoice.bill_to_vendor_id ? "made for the vendor" : "made from the ticket");
+    },
     onError: (e) => toast.error(`Could not make another invoice: ${errText(e)}`),
   });
   const remove = useMutation({
@@ -174,6 +184,9 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
       </div>
       {inv?.updated_by_name && (
         <p className="-mt-2 text-xs text-muted-foreground">last changed by {inv.updated_by_name}</p>
+      )}
+      {inv?.bill_to_vendor_id && (
+        <VendorBilledBadge name={(inv.bill_to as { name?: string } | null)?.name} />
       )}
       {list.length > 1 && (
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="This ticket's invoices">
@@ -238,8 +251,8 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
             size="sm"
             variant="outline"
             disabled={busy}
-            title={`Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`}
-            onClick={() => another.mutate()}
+            title={`Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …), to the customer or a vendor`}
+            onClick={() => setAskAnother(true)}
           >
             {another.isPending ? (
               <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -263,6 +276,14 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
         </div>
       )}
 
+      <AnotherInvoiceDialog
+        open={askAnother}
+        onOpenChange={setAskAnother}
+        jobNumber={job.number}
+        customerName={job.customer_name}
+        busy={another.isPending}
+        onMake={(vendorId) => another.mutate(vendorId)}
+      />
       <AlertDialog
         open={confirmDelete}
         onOpenChange={(o) => {

@@ -6,9 +6,10 @@
  * row in `public.audit_log`, written by the database itself: the row trigger `public.audit_row()`
  * (migration 20261001080000_audit_triggers_stage_rule.sql). A ticket's purchase orders too
  * (entity 'purchase_order', entity_id = the PO's id: "PO 'Jbk24-0255' approved no → yes";
- * 20261001100000_ticket_purchase_orders.sql). No server function writes it.
- * Admins and managers read it: the History folds on the invoice and the customer profile, and
- * the Owner view's "last activity".
+ * 20261001100000_ticket_purchase_orders.sql), and vendors (entity 'vendor': "Vendor 'ABC Supply'
+ * terms 'Net 30' → 'Net 45'"; 20261001110000_vendors.sql). No server function writes it.
+ * Admins and managers read it: the History folds on the invoice, the customer profile and the
+ * vendor, and the Owner view's "last activity".
  *
  * Row shape: at, by_user (auth.uid(); null for the service role / SQL editor), by_name (the
  * profile's name, or 'system'), by_role ('admin' | 'manager' | 'sales' | 'technician' | 'user';
@@ -29,6 +30,7 @@ export const AUDIT_ENTITIES = [
   "site",
   "contact",
   "purchase_order",
+  "vendor",
 ] as const;
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 /** The audit_log.action check constraint. */

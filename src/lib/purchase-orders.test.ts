@@ -427,9 +427,12 @@ describe("migration 20261001100000_ticket_purchase_orders.sql", () => {
     expect(flat).toContain(
       "drop trigger if exists service_job_purchase_orders_audit on public.service_job_purchase_orders; create trigger service_job_purchase_orders_audit after insert or update or delete on public.service_job_purchase_orders for each row execute function public.audit_row();",
     );
-    // The constraint and AUDIT_ENTITIES agree.
+    // The constraint and AUDIT_ENTITIES agree (less 'vendor', which 20261001110000_vendors.sql
+    // added after this migration; vendors.test.ts checks that one against the whole list).
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
-    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual([...AUDIT_ENTITIES]);
+    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
+      AUDIT_ENTITIES.filter((e) => e !== "vendor"),
+    );
   });
   it("audit_row is 20261001080000's, plus only the PO branch and the approval stamps skipped", () => {
     const fn = (sql: string) =>
@@ -460,7 +463,7 @@ describe("generated types: service_job_purchase_orders", () => {
       types.indexOf("      service_job_purchase_orders: {"),
     );
     expect(block).toContain(
-      "Row: {\n          approved: boolean;\n          approved_at: string | null;\n          approved_by: string | null;\n          created_at: string;\n          created_by: string | null;\n          id: string;\n          notes: string | null;\n          po_date: string;\n          po_number: string;\n          price: number;\n          receipt_name: string | null;\n          receipt_path: string | null;\n          receipt_size: number | null;\n          service_job_id: string;\n          title: string | null;\n          updated_at: string;\n        };",
+      "Row: {\n          approved: boolean;\n          approved_at: string | null;\n          approved_by: string | null;\n          created_at: string;\n          created_by: string | null;\n          id: string;\n          notes: string | null;\n          po_date: string;\n          po_number: string;\n          price: number;\n          receipt_name: string | null;\n          receipt_path: string | null;\n          receipt_size: number | null;\n          service_job_id: string;\n          title: string | null;\n          updated_at: string;\n          vendor_id: string | null;\n        };",
     );
     const insert = block.slice(block.indexOf("Insert: {"), block.indexOf("Update: {"));
     for (const req of ["po_number: string;", "price: number;", "service_job_id: string;"])

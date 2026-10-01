@@ -10,6 +10,11 @@
  * The account and its sites open read-only; Edit switches a block to its form, Cancel puts it
  * back (owner, Sep 27). A new customer is offered the saved bids that look like it
  * (LinkBidsDialog), and the account keeps offering them in "Bids that look like this customer".
+ *
+ * Two tabs under the title: Customers (the above) and Vendors (`?tab=vendors`; owner, Oct 1:
+ * "We need somewhere to add vendor info like name, address etc, then we can select them as a
+ * recipient" — a tab here, not a sidebar entry: the owner wants fewer nav items). The Vendors
+ * tab is vendors-section.tsx.
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +36,7 @@ import {
   Save,
   Sparkles,
   Trash2,
+  Truck,
   Unlink,
   User,
   Users,
@@ -82,6 +88,7 @@ import {
 import { useCrmUsers } from "@/lib/use-crm-users";
 import { OfferBidLinks, type OfferAccount } from "@/components/crm/link-bids-dialog";
 import { WorkCountsStrip } from "@/components/work-counts-strip";
+import { VendorsSection } from "@/components/crm/vendors-section";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -126,11 +133,65 @@ const day = (ymd: string | null) => {
 const stageLabel = (s: string) =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? STAGE_LABELS[s as ServiceStage] : s;
 
-export function CustomersPage({ id }: { id?: string | undefined }) {
+/** The Customers page's tabs (`?tab=`): Customers (no param) and Vendors. */
+const CUSTOMERS_TABS = [
+  { tab: undefined, title: "Customers", icon: Contact },
+  { tab: "vendors", title: "Vendors", icon: Truck },
+] as const;
+export type CustomersTab = "vendors";
+
+function CustomersTabs({ tab }: { tab?: CustomersTab | undefined }) {
+  return (
+    <nav aria-label="Customers views" className="flex flex-wrap gap-1 border-b">
+      {CUSTOMERS_TABS.map((t) => {
+        const active = t.tab === tab;
+        return (
+          <Link
+            key={t.title}
+            to="/customers"
+            search={t.tab ? { tab: t.tab } : {}}
+            aria-current={active ? "page" : undefined}
+            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium ${
+              active
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <t.icon className="h-4 w-4" />
+            {t.title}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+export function CustomersPage({
+  id,
+  tab,
+}: {
+  id?: string | undefined;
+  tab?: CustomersTab | undefined;
+}) {
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   // A customer just added, offered the saved bids that look like it.
   const [offerFor, setOfferFor] = useState<OfferAccount | null>(null);
+  if (tab === "vendors")
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <Contact className="h-6 w-6" /> Customers
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Vendors: the suppliers we buy from, and bill when an invoice goes to a vendor.
+          </p>
+        </div>
+        <CustomersTabs tab={tab} />
+        <VendorsSection />
+      </div>
+    );
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -146,6 +207,8 @@ export function CustomersPage({ id }: { id?: string | undefined }) {
           <Plus className="mr-2 h-5 w-5" /> New customer
         </Button>
       </div>
+
+      <CustomersTabs tab={tab} />
 
       {/* Open / overdue tickets and opportunities, each a link to that list (owner, Oct 1). */}
       <WorkCountsStrip />

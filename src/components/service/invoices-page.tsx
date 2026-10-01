@@ -10,6 +10,10 @@
  * "marked Done with no finalised invoice yet" (finalising moves a ticket to Invoiced), longest
  * waiting first; a row opens the ticket, where its invoice card is.
  *
+ * The Customer column is whom the invoice is billed to; an invoice billed to a vendor shows the
+ * badge "Billed to vendor: <name>" there instead (owner, Oct 1: "Sometimes invoices go to
+ * vendors").
+ *
  * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); technicians
  * never see money (the server refuses them too). Every change is logged (audit_log).
  */
@@ -33,6 +37,7 @@ import {
   type InvoiceStatus,
 } from "@/lib/invoices.functions";
 import { InvoiceEditorPage, InvoiceStatusBadge } from "@/components/service/invoice-editor";
+import { VendorBilledBadge } from "@/components/service/bill-to-picker";
 import {
   asInvoiceStatus,
   downloadBlob,
@@ -296,7 +301,13 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
                       </Link>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2">{shortDay(r.invoice_date)}</td>
-                    <td className="px-3 py-2">{r.customer_name || "—"}</td>
+                    <td className="px-3 py-2">
+                      {r.bill_to_vendor_id ? (
+                        <VendorBilledBadge name={r.customer_name} />
+                      ) : (
+                        r.customer_name || "—"
+                      )}
+                    </td>
                     <td className="px-3 py-2">{r.site_name || "—"}</td>
                     <td
                       className={`px-3 py-2 text-right tabular-nums ${s === "void" ? "line-through" : ""}`}

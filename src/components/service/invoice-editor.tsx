@@ -16,6 +16,11 @@
  * Numbering is invoice-numbering.ts ("<ticket>", "<ticket>.2", …; a deleted or voided invoice
  * frees its number).
  *
+ * Bill to (owner, Oct 1: "Sometimes invoices go to vendors"): a draft is billed to the ticket's
+ * customer account or to a billable vendor (BillToChoice, bill-to-picker.tsx); saving takes the
+ * Send To snapshot again from whoever is picked. A final invoice keeps it; one billed to a vendor
+ * shows "Billed to vendor: <name>", and Send defaults to the vendor's email.
+ *
  * Admins, managers and sales / project managers (`seesInvoices`; the Invoices page gates it);
  * every write is logged on the server (audit_log), and admins and managers see it in History.
  */
@@ -49,6 +54,9 @@ import { rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import { computeTotals, storedTotals, type InvoiceTotals } from "@/lib/invoice-totals";
 import { approvedPoTotal } from "@/lib/purchase-orders";
+import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
+import { useVendors } from "@/components/crm/use-vendors";
+import { BillToChoice, VendorBilledBadge } from "@/components/service/bill-to-picker";
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { fieldKeys } from "@/components/service/field-utils";
 import {
@@ -413,6 +421,8 @@ interface HeadDraft {
   payment_terms: string;
   /** Percent, e.g. 7.5. */
   tax_pct: number;
+  /** Bill to: a vendor's id, or null for the customer account. */
+  bill_to_vendor_id: string | null;
 }
 let lineSeq = 0;
 const lineFrom = (l: InvoiceLineRow): LineDraft => ({
@@ -436,6 +446,7 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
   description: inv.description ?? "",
   payment_terms: inv.payment_terms ?? "",
   tax_pct: toPct(inv.tax_rate),
+  bill_to_vendor_id: inv.bill_to_vendor_id ?? null,
 });
 const editKey = (h: HeadDraft, lines: LineDraft[]) =>
   JSON.stringify([h, lines.map(({ key: _k, ...rest }) => rest)]);
@@ -540,6 +551,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const taxExempt = !!account?.tax_exempt;
   const po = useApprovedPoCost(job.id);
   const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
+  // Bill to changed here and not saved yet: show whom it will be billed to.
+  const vendors = useVendors();
+  const pickedVendor = vendors.data?.find((v) => v.id === head.bill_to_vendor_id) ?? null;
+  const billPreview: BillToSnapshot | null =
+    head.bill_to_vendor_id === (inv.bill_to_vendor_id ?? null)
+      ? null
+      : head.bill_to_vendor_id
+        ? pickedVendor && vendorBillTo(pickedVendor)
+        : accountBillTo(account, job.customer_name);
 
   /** The save payload, or an error message when a line is incomplete. */
   const payload = (forFinal: boolean): InvoiceSaveInput | string => {
@@ -561,6 +581,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       description: head.description.trim() || null,
       payment_terms: head.payment_terms.trim() || null,
       tax_rate: fromPct(head.tax_pct),
+      bill_to_vendor_id: head.bill_to_vendor_id,
       lines: lines.map((l) => ({
         // A saved line's id (its key is "l<id>"); new lines have none. The audit log uses it.
         ...(l.key.startsWith("l") ? { id: Number(l.key.slice(1)) } : {}),
@@ -715,7 +736,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
   return (
     <div className="space-y-5">
-      <BillTo inv={inv} />
+      <BillTo
+        inv={inv}
+        draft={{
+          vendorId: head.bill_to_vendor_id,
+          onChange: (v) => setH("bill_to_vendor_id", v),
+          preview: billPreview,
+          customerName: job.customer_name,
+        }}
+      />
 
       {/* Header fields across the top */}
       <div className="space-y-3 rounded-lg border p-4">
@@ -1050,6 +1079,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           note="The invoice is finalised (the ticket moves to Invoiced) and the PDF emailed."
           inv={inv}
           accountId={job.account_id}
+          vendorId={head.bill_to_vendor_id}
           busy={busy === "send"}
           onClose={() => setSendOpen(false)}
           onSend={(to, message) => void send(to, message)}
@@ -1070,16 +1100,51 @@ function useAccount(accountId: string | null) {
   return q.data?.account ?? null;
 }
 
-function BillTo({ inv }: { inv: InvoiceRow }) {
-  const b = (inv.bill_to ?? {}) as Record<string, string | undefined>;
+/**
+ * Send to / Property. On a draft, the Bill to choice above it (the customer account or a
+ * billable vendor); the block shows whoever is picked (`preview` until it is saved).
+ */
+function BillTo({
+  inv,
+  draft,
+}: {
+  inv: InvoiceRow;
+  draft?: {
+    vendorId: string | null;
+    onChange: (vendorId: string | null) => void;
+    /** Whom it will be billed to once saved (null = as saved). */
+    preview: BillToSnapshot | null;
+    customerName: string | null;
+  };
+}) {
+  const b = (draft?.preview ?? inv.bill_to ?? {}) as Record<string, string | undefined>;
   const p = (inv.property ?? {}) as Record<string, string | undefined>;
   const cityLine = [b["city"], [b["state"], b["zip"]].filter(Boolean).join(" ")]
     .filter(Boolean)
     .join(", ");
+  const savedName = (inv.bill_to as { name?: string } | null)?.name ?? null;
+  const toVendor = draft ? !!draft.vendorId : !!inv.bill_to_vendor_id;
   return (
     <div className="grid gap-3 text-sm sm:grid-cols-2">
       <div>
+        {draft && (
+          <div className="mb-3 space-y-1">
+            <p className="text-xs text-muted-foreground">Bill to</p>
+            <BillToChoice
+              id="inv-bill-to"
+              vendorId={draft.vendorId}
+              onChange={draft.onChange}
+              customerName={draft.customerName}
+              fallbackName={draft.vendorId === inv.bill_to_vendor_id ? savedName : null}
+            />
+          </div>
+        )}
         <p className="text-xs text-muted-foreground">Send to</p>
+        {toVendor && (
+          <div className="my-1">
+            <VendorBilledBadge name={b["name"]} />
+          </div>
+        )}
         <p className="font-medium">{b["name"] || "—"}</p>
         {[b["address1"], b["address2"], cityLine].filter(Boolean).map((x) => (
           <p key={x} className="text-muted-foreground">
@@ -1090,6 +1155,9 @@ function BillTo({ inv }: { inv: InvoiceRow }) {
           <p className="whitespace-pre-line text-xs text-amber-700 dark:text-amber-400">
             Billing: {b["instructions"]}
           </p>
+        )}
+        {draft?.preview && (
+          <p className="mt-1 text-xs text-muted-foreground">Saved with the invoice.</p>
         )}
       </div>
       <div>
@@ -1430,6 +1498,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           note="The final PDF is emailed again."
           inv={inv}
           accountId={job.account_id}
+          vendorId={inv.bill_to_vendor_id}
           busy={send.isPending}
           onClose={() => setDialog(null)}
           onSend={(to, message) => send.mutate({ to, message })}
@@ -1485,6 +1554,8 @@ function SendDialog(props: {
   note: string;
   inv: InvoiceRow;
   accountId: string | null;
+  /** Billed to this vendor: its email is the default recipient (not the billing contacts). */
+  vendorId?: string | null;
   busy: boolean;
   onClose: () => void;
   onSend: (to: string[], message: string) => void;
@@ -1493,6 +1564,11 @@ function SendDialog(props: {
   const contactsFn = useServerFn(listContacts);
   const ratesFn = useServerFn(getServiceRates);
   const accountId = props.accountId;
+  const vendorId = props.vendorId ?? null;
+  const vendorsQ = useVendors(true);
+  const vendorEmail = vendorId
+    ? (vendorsQ.data?.find((v) => v.id === vendorId)?.email ?? "").trim()
+    : "";
   const contactsQ = useQuery({
     queryKey: ["contacts", accountId],
     queryFn: () => contactsFn({ data: { account_id: accountId! } }),
@@ -1523,18 +1599,33 @@ function SendDialog(props: {
   const [extra, setExtra] = useState("");
   const [message, setMessage] = useState("");
   // Prefill once the contacts / settings arrive: the last recipients when it went out before,
-  // else the billing contacts; the message from Service rates.
+  // else the vendor's email when it is billed to a vendor, else the billing contacts; the
+  // message from Service rates.
   const pickedInit = useRef(false);
   useEffect(() => {
     if (pickedInit.current || (accountId && !contactsQ.data && !contactsQ.error)) return;
+    if (vendorId && !vendorsQ.data && !vendorsQ.error) return;
     pickedInit.current = true;
     const known = new Set(contacts.map((c) => c.email.toLowerCase()));
     const last = Array.isArray(props.inv.sent_to) ? (props.inv.sent_to as string[]) : [];
     if (last.length) {
       setPicked(last.filter((e) => known.has(e.toLowerCase())));
       setExtra(last.filter((e) => !known.has(e.toLowerCase())).join(", "));
+    } else if (vendorId) {
+      setPicked([]);
+      setExtra(isEmail(vendorEmail) ? vendorEmail : "");
     } else setPicked(contacts.filter((c) => c.billing).map((c) => c.email));
-  }, [accountId, contacts, contactsQ.data, contactsQ.error, props.inv.sent_to]);
+  }, [
+    accountId,
+    contacts,
+    contactsQ.data,
+    contactsQ.error,
+    props.inv.sent_to,
+    vendorId,
+    vendorEmail,
+    vendorsQ.data,
+    vendorsQ.error,
+  ]);
   const msgInit = useRef(false);
   useEffect(() => {
     if (msgInit.current || !ratesQ.data) return;

@@ -5,6 +5,7 @@
  *
  * An invoice's history includes its lines' rows (entity 'invoice_line', entity_id = the
  * invoice). A customer's history includes the rows of its sites and contacts, deleted ones too.
+ * A vendor's history is its own rows (entity 'vendor').
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -18,7 +19,12 @@ const LIMIT = 300;
 export const listAudit = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z.object({ entity: z.enum(["invoice", "account"]), entity_id: z.string().uuid() }).parse(d),
+    z
+      .object({
+        entity: z.enum(["invoice", "account", "vendor"]),
+        entity_id: z.string().uuid(),
+      })
+      .parse(d),
   )
   .handler(async ({ data, context }): Promise<AuditRow[]> => {
     const sb = context.supabase;
@@ -34,6 +40,18 @@ export const listAudit = createServerFn({ method: "GET" })
         .from("audit_log")
         .select(cols)
         .in("entity", ["invoice", "invoice_line"])
+        .eq("entity_id", data.entity_id)
+        .order("at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(LIMIT);
+      if (error) throw new Error(error.message);
+      return (rows ?? []) as AuditRow[];
+    }
+    if (data.entity === "vendor") {
+      const { data: rows, error } = await sb
+        .from("audit_log")
+        .select(cols)
+        .eq("entity", "vendor")
         .eq("entity_id", data.entity_id)
         .order("at", { ascending: false })
         .order("id", { ascending: false })

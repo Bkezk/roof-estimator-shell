@@ -22,6 +22,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, managesTickets, seesInvoices } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
+import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -167,17 +168,47 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
     return createInvoiceFor(sb, data.job_id, { id: context.userId, name: nameOf(p) }, true);
   });
 
-/** Another invoice on the same ticket ("6012.2", "6012.3", …), a draft from the ticket. */
+/**
+ * Another invoice on the same ticket ("6012.2", "6012.3", …), a draft from the ticket. Billed to
+ * the customer account, or to a vendor picked up front (owner, Oct 1: "Sometimes it's both a
+ * customer and a vendor, so we could make two invoices for that if needed").
+ */
 export const createAnotherInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) =>
+    z
+      .object({
+        job_id: z.string().uuid(),
+        bill_to_vendor_id: z.string().uuid().nullable().optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
-    return createInvoiceFor(context.supabase, data.job_id, {
-      id: context.userId,
-      name: nameOf(p),
-    });
+    return createInvoiceFor(
+      context.supabase,
+      data.job_id,
+      { id: context.userId, name: nameOf(p) },
+      false,
+      data.bill_to_vendor_id ?? null,
+    );
   });
+
+/**
+ * The vendor an invoice may be billed to (owner, Oct 1: "Sometimes invoices go to vendors"):
+ * found, not archived and billable (vendorBillProblem), else a plain message.
+ */
+async function billableVendor(sb: SupabaseClient<Database>, vendorId: string) {
+  const { data: vendor, error } = await sb
+    .from("vendors")
+    .select("*")
+    .eq("id", vendorId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const problem = vendorBillProblem(vendor);
+  if (problem || !vendor) throw new Error(problem ?? "That vendor was not found");
+  return vendor;
+}
 
 /** A ticket's invoices for the chips on the ticket (void ones too, greyed). */
 export interface TicketInvoiceSummary {
@@ -222,6 +253,8 @@ async function createInvoiceFor(
   actor: Actor,
   /** getOrCreate: a draft made meanwhile by another tab is the one to open, not a ".2". */
   onlyIfNone = false,
+  /** Bill a vendor instead of the customer account (invoices.bill_to_vendor_id). */
+  billToVendorId: string | null = null,
 ): Promise<InvoiceWithLines> {
   const userId = actor.id;
   const byName = actor.name;
@@ -241,19 +274,14 @@ async function createInvoiceFor(
       : Promise.resolve({ data: null }),
   ]);
   const { buildLinesFromJob, loadSettings, totals } = await import("@/lib/invoices.server");
+  const vendor = billToVendorId ? await billableVendor(sb, billToVendorId) : null;
   const [lines, settings] = await Promise.all([buildLinesFromJob(sb, job.id), loadSettings(sb)]);
-  const taxRate = account?.tax_exempt ? 0 : Number(settings.tax_rate);
+  // The customer's tax exemption is the customer's: an invoice to a vendor takes the standard
+  // rate (the draft's Tax % can still be changed).
+  const taxRate = !vendor && account?.tax_exempt ? 0 : Number(settings.tax_rate);
   const t = totals(lines, taxRate);
-  const bill_to = {
-    name: account?.name ?? job.customer_name,
-    address1: account?.address1 ?? "",
-    address2: account?.address2 ?? "",
-    city: account?.city ?? "",
-    state: account?.state ?? "",
-    zip: account?.zip ?? "",
-    instructions: account?.billing_instructions ?? "",
-    external_id: account?.external_id ?? "",
-  };
+  // Who it is billed to, snapshotted: the vendor, or the customer account (as always).
+  const bill_to = billToFor(vendor, account, job.customer_name);
   const property = {
     name: site?.name ?? job.site_name ?? "",
     address: site ? siteAddressLine(site) : (job.site_address ?? ""),
@@ -273,6 +301,7 @@ async function createInvoiceFor(
         po_number: job.po_number,
         job_code: job.job_number,
         bill_to: bill_to as unknown as Json,
+        bill_to_vendor_id: vendor?.id ?? null,
         property: property as unknown as Json,
         description: job.closing_notes,
         payment_terms: settings.payment_terms,
@@ -387,6 +416,8 @@ const saveSchema = z.object({
   payment_terms: z.string().trim().max(500).nullable().optional(),
   tax_rate: z.number().min(0).max(1).optional(),
   bill_to: z.record(z.string(), z.string()).optional(),
+  /** Bill To on a draft: a billable vendor's id, or null for the customer account. */
+  bill_to_vendor_id: z.string().uuid().nullable().optional(),
   lines: z.array(lineSchema).max(500).optional(),
 });
 export type InvoiceSaveInput = z.input<typeof saveSchema>;
@@ -479,6 +510,31 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (data.description !== undefined) patch.description = data.description;
     if (data.payment_terms !== undefined) patch.payment_terms = data.payment_terms;
     if (data.bill_to) patch.bill_to = data.bill_to as unknown as Json;
+    // Bill To changed on the draft (account ↔ vendor, or another vendor): the column, and the
+    // snapshot taken again from whoever it is billed to now. A final invoice never gets here.
+    if (
+      data.bill_to_vendor_id !== undefined &&
+      data.bill_to_vendor_id !== (inv.bill_to_vendor_id ?? null)
+    ) {
+      patch.bill_to_vendor_id = data.bill_to_vendor_id;
+      if (data.bill_to_vendor_id) {
+        const vendor = await billableVendor(sb, data.bill_to_vendor_id);
+        patch.bill_to = billToFor(vendor, null, null) as unknown as Json;
+      } else {
+        const { data: job, error: jErr } = await sb
+          .from("service_jobs")
+          .select("account_id, customer_name")
+          .eq("id", inv.service_job_id)
+          .maybeSingle();
+        if (jErr) throw new Error(jErr.message);
+        if (!job) throw new Error("The invoice's ticket is gone");
+        const { data: account, error: aErr } = job.account_id
+          ? await sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()
+          : { data: null, error: null };
+        if (aErr) throw new Error(aErr.message);
+        patch.bill_to = accountBillTo(account, job.customer_name) as unknown as Json;
+      }
+    }
     const { data: updated, error: uErr } = await sb
       .from("invoices")
       .update(patch)

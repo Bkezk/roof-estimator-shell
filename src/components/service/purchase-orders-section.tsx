@@ -6,7 +6,8 @@
  * Delete for whoever may change it. "+ Add PO" opens the form: Date (today), PO #, Title,
  * Price (the box starts blank — owner rule: never a placeholder 0), Notes, Upload Receipt
  * (a photo or a PDF, straight to the private "service" bucket like the photos), Approved? and
- * Submit / Back. The fields stack on a phone.
+ * Submit / Back. The fields stack on a phone. An optional Vendor (the supplier it was bought from,
+ * any vendor not archived; VendorPicker, type to filter) shows on the row after the title.
  *
  * Approval is a manager's: the Approved toggle shows only to admins and managers
  * (`managesTickets`) and never on the technician's close-out (`field`); everyone else sees a
@@ -46,6 +47,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Box } from "@/components/service/field-shared";
+import { VendorPicker } from "@/components/crm/vendor-picker";
 import {
   errText,
   fieldKeys,
@@ -230,6 +232,9 @@ function PoRow({
           {" · "}
           <span className="font-medium">PO {po.po_number}</span>
           {po.title ? <span> · {po.title}</span> : null}
+          {po.vendor_name ? (
+            <span className="text-muted-foreground"> · from {po.vendor_name}</span>
+          ) : null}
         </span>
         <span className="font-medium tabular-nums">{poMoney(Number(po.price))}</span>
       </div>
@@ -327,6 +332,8 @@ function PoForm({
   const approveFn = useServerFn(setPurchaseOrderApproved);
   const [draft, setDraft] = useState<PoDraft>(() => draftOf(po));
   const [approved, setApproved] = useState(po?.approved ?? false);
+  // The supplier (optional): a vendor's id, or null.
+  const [vendorId, setVendorId] = useState<string | null>(po?.vendor_id ?? null);
   const [file, setFile] = useState<File | null>(null);
   // Editing: the stored receipt stays unless removed or replaced.
   const [dropReceipt, setDropReceipt] = useState(false);
@@ -361,6 +368,7 @@ function PoForm({
             title: draft.title.trim() || null,
             price: price ?? 0,
             notes: draft.notes.trim() || null,
+            vendor_id: vendorId,
             ...receipt,
           },
         });
@@ -452,6 +460,17 @@ function PoForm({
             value={draft.price}
             disabled={busy}
             onChange={(e) => set("price", e.target.value)}
+          />
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor={`${idp}-vendor`}>Vendor</Label>
+          <VendorPicker
+            id={`${idp}-vendor`}
+            value={vendorId}
+            fallbackName={po?.vendor_name ?? null}
+            disabled={busy}
+            className="h-11 text-base sm:h-9 sm:text-sm"
+            onChange={(v) => setVendorId(v?.id ?? null)}
           />
         </div>
       </div>

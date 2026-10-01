@@ -1366,6 +1366,7 @@ export type Database = {
       invoices: {
         Row: {
           bill_to: Json;
+          bill_to_vendor_id: string | null;
           cost_total: number;
           created_at: string;
           created_by: string | null;
@@ -1399,6 +1400,7 @@ export type Database = {
         };
         Insert: {
           bill_to?: Json;
+          bill_to_vendor_id?: string | null;
           cost_total?: number;
           created_at?: string;
           created_by?: string | null;
@@ -1432,6 +1434,7 @@ export type Database = {
         };
         Update: {
           bill_to?: Json;
+          bill_to_vendor_id?: string | null;
           cost_total?: number;
           created_at?: string;
           created_by?: string | null;
@@ -1464,6 +1467,13 @@ export type Database = {
           updated_by_name?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "invoices_bill_to_vendor_id_fkey";
+            columns: ["bill_to_vendor_id"];
+            isOneToOne: false;
+            referencedRelation: "vendors";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "invoices_service_job_id_fkey";
             columns: ["service_job_id"];
@@ -2690,6 +2700,7 @@ export type Database = {
           service_job_id: string;
           title: string | null;
           updated_at: string;
+          vendor_id: string | null;
         };
         Insert: {
           approved?: boolean;
@@ -2708,6 +2719,7 @@ export type Database = {
           service_job_id: string;
           title?: string | null;
           updated_at?: string;
+          vendor_id?: string | null;
         };
         Update: {
           approved?: boolean;
@@ -2726,6 +2738,7 @@ export type Database = {
           service_job_id?: string;
           title?: string | null;
           updated_at?: string;
+          vendor_id?: string | null;
         };
         Relationships: [
           {
@@ -2740,6 +2753,13 @@ export type Database = {
             columns: ["service_job_id"];
             isOneToOne: false;
             referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_purchase_orders_vendor_id_fkey";
+            columns: ["vendor_id"];
+            isOneToOne: false;
+            referencedRelation: "vendors";
             referencedColumns: ["id"];
           },
         ];
@@ -3712,6 +3732,69 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      vendors: {
+        Row: {
+          account_number: string | null;
+          address1: string | null;
+          address2: string | null;
+          archived_at: string | null;
+          billable: boolean;
+          city: string | null;
+          contact_name: string | null;
+          created_at: string;
+          created_by: string | null;
+          email: string | null;
+          id: string;
+          name: string;
+          notes: string | null;
+          phone: string | null;
+          state: string | null;
+          terms: string | null;
+          updated_at: string;
+          zip: string | null;
+        };
+        Insert: {
+          account_number?: string | null;
+          address1?: string | null;
+          address2?: string | null;
+          archived_at?: string | null;
+          billable?: boolean;
+          city?: string | null;
+          contact_name?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          email?: string | null;
+          id?: string;
+          name: string;
+          notes?: string | null;
+          phone?: string | null;
+          state?: string | null;
+          terms?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Update: {
+          account_number?: string | null;
+          address1?: string | null;
+          address2?: string | null;
+          archived_at?: string | null;
+          billable?: boolean;
+          city?: string | null;
+          contact_name?: string | null;
+          created_at?: string;
+          created_by?: string | null;
+          email?: string | null;
+          id?: string;
+          name?: string;
+          notes?: string | null;
+          phone?: string | null;
+          state?: string | null;
+          terms?: string | null;
+          updated_at?: string;
+          zip?: string | null;
+        };
+        Relationships: [];
       };
       warranties: {
         Row: {

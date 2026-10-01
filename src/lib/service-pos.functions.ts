@@ -9,6 +9,8 @@
  * - add: Service access and working the ticket (the office, its lead technician, a crew member);
  * - edit / delete: admins and managers any PO; anyone else their own while it is not approved;
  * - approve: admins and managers only.
+ * A PO may name the vendor (supplier) it was bought from (vendor_id → public.vendors; any vendor
+ * not archived; vendors.ts); the list carries the vendor's name.
  * Errors are thrown with a plain message; the screens toast it (owner: bugs announced loudly).
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -32,6 +34,8 @@ export { receiptObjectName };
 export type PurchaseOrderRow = Database["public"]["Tables"]["service_job_purchase_orders"]["Row"];
 /** A PO as the screens show it: the row, who made / approved it, and whether I may change it. */
 export interface PurchaseOrderView extends PurchaseOrderRow {
+  /** The vendor's name (vendor_id), archived or not; null when none is picked. */
+  vendor_name: string | null;
   created_by_name: string | null;
   approved_by_name: string | null;
   can_edit: boolean;
@@ -92,6 +96,18 @@ async function poRow(ctx: Ctx, id: string): Promise<PurchaseOrderRow> {
   return data;
 }
 
+/** A vendor a PO may newly name: one that exists and is not archived. */
+async function pickableVendor(ctx: Ctx, vendorId: string) {
+  const { data: v, error } = await ctx.supabase
+    .from("vendors")
+    .select("id, name, archived_at")
+    .eq("id", vendorId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!v) throw new Error("That vendor was not found");
+  if (v.archived_at) throw new Error(`${v.name} is archived; pick another vendor`);
+}
+
 async function viewsOf(
   ctx: Ctx,
   p: Me,
@@ -109,9 +125,20 @@ async function viewsOf(
       .in("id", ids);
     for (const x of people ?? []) names.set(x.id, (x.full_name ?? "").trim() || x.email);
   }
+  const vendorIds = [...new Set(rows.map((r) => r.vendor_id).filter((x): x is string => !!x))];
+  const vendors = new Map<string, string>();
+  if (vendorIds.length) {
+    const { data: vs, error } = await ctx.supabase
+      .from("vendors")
+      .select("id, name")
+      .in("id", vendorIds);
+    if (error) throw new Error(`Could not read the POs' vendors: ${error.message}`);
+    for (const v of vs ?? []) vendors.set(v.id, v.name);
+  }
   return rows.map((r) => ({
     ...r,
     price: Number(r.price),
+    vendor_name: r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null,
     created_by_name: r.created_by ? (names.get(r.created_by) ?? null) : null,
     approved_by_name: r.approved_by ? (names.get(r.approved_by) ?? null) : null,
     can_edit: canEditPo(p, ctx.userId, r, works),
@@ -164,6 +191,8 @@ const saveSchema = z.object({
     .min(0, "The price cannot be negative")
     .max(9_999_999_999.99, "The price is too large"),
   notes: optText(10_000),
+  /** The supplier (public.vendors); null = none; undefined keeps the stored one. */
+  vendor_id: z.string().uuid().nullable().optional(),
   receipt_path: z.string().min(1).max(300).nullable().optional(),
   receipt_name: z.string().max(200).nullable().optional(),
   receipt_size: z.number().int().nonnegative().nullable().optional(),
@@ -190,6 +219,7 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
       title: data.title,
       price: Math.round(data.price * 100) / 100,
       notes: data.notes,
+      ...(data.vendor_id === undefined ? {} : { vendor_id: data.vendor_id }),
     };
     const receipt =
       data.receipt_path === undefined
@@ -205,6 +235,7 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
     if (!data.id) {
       if (!canAddPo(p, works))
         throw new Error("Only the office or the technicians on this ticket add a PO");
+      if (data.vendor_id) await pickableVendor(context, data.vendor_id);
       const { data: row, error } = await sb
         .from("service_job_purchase_orders")
         .insert({ service_job_id: job.id, ...fields, ...receipt, created_by: context.userId })
@@ -215,6 +246,8 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
     } else {
       const prev = await poRow(context, data.id);
       if (prev.service_job_id !== job.id) throw new Error("That PO is on another ticket");
+      if (data.vendor_id && data.vendor_id !== prev.vendor_id)
+        await pickableVendor(context, data.vendor_id);
       if (!canEditPo(p, context.userId, prev, works))
         throw new Error(
           prev.approved
