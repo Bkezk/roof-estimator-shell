@@ -155,6 +155,11 @@ export function ServiceRatesSettings() {
               Defaults came from the CenterPoint invoices in the report; confirm the helper travel
               rates with the office.
             </p>
+            <p className="text-sm text-muted-foreground">
+              On a ticket with named technicians, each one&apos;s labor bills at the $ typed beside
+              their name, else their default bill rate (Admin › Users), else the Tech / Helper labor
+              rate below. Travel and the cost side always come from this table.
+            </p>
 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">

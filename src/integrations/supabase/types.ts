@@ -1254,12 +1254,13 @@ export type Database = {
           created_at: string;
           created_by: string | null;
           description: string | null;
+          display_number: string | null;
           due_date: string | null;
           finalized_at: string | null;
           id: string;
           invoice_date: string;
           job_code: string | null;
-          number: number;
+          number: number | null;
           paid_amount: number;
           paid_method: string | null;
           paid_on: string | null;
@@ -1286,12 +1287,13 @@ export type Database = {
           created_at?: string;
           created_by?: string | null;
           description?: string | null;
+          display_number?: string | null;
           due_date?: string | null;
           finalized_at?: string | null;
           id?: string;
           invoice_date?: string;
           job_code?: string | null;
-          number: number;
+          number?: number | null;
           paid_amount?: number;
           paid_method?: string | null;
           paid_on?: string | null;
@@ -1318,12 +1320,13 @@ export type Database = {
           created_at?: string;
           created_by?: string | null;
           description?: string | null;
+          display_number?: string | null;
           due_date?: string | null;
           finalized_at?: string | null;
           id?: string;
           invoice_date?: string;
           job_code?: string | null;
-          number?: number;
+          number?: number | null;
           paid_amount?: number;
           paid_method?: string | null;
           paid_on?: string | null;
@@ -2035,6 +2038,7 @@ export type Database = {
           access: string[];
           commission_pct: number;
           created_at: string;
+          default_bill_rate: number | null;
           email: string;
           full_name: string | null;
           id: string;
@@ -2048,6 +2052,7 @@ export type Database = {
           access?: string[];
           commission_pct?: number;
           created_at?: string;
+          default_bill_rate?: number | null;
           email: string;
           full_name?: string | null;
           id: string;
@@ -2061,6 +2066,7 @@ export type Database = {
           access?: string[];
           commission_pct?: number;
           created_at?: string;
+          default_bill_rate?: number | null;
           email?: string;
           full_name?: string | null;
           id?: string;
@@ -2589,6 +2595,48 @@ export type Database = {
           },
         ];
       };
+      service_job_techs: {
+        Row: {
+          bill_rate: number | null;
+          created_at: string | null;
+          id: string;
+          service_job_id: string | null;
+          sort: number;
+          technician_id: string | null;
+        };
+        Insert: {
+          bill_rate?: number | null;
+          created_at?: string | null;
+          id?: string;
+          service_job_id?: string | null;
+          sort?: number;
+          technician_id?: string | null;
+        };
+        Update: {
+          bill_rate?: number | null;
+          created_at?: string | null;
+          id?: string;
+          service_job_id?: string | null;
+          sort?: number;
+          technician_id?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_techs_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_techs_technician_id_fkey";
+            columns: ["technician_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       service_jobs: {
         Row: {
           account_id: string | null;
@@ -2603,6 +2651,7 @@ export type Database = {
           contact_id: string | null;
           created_at: string;
           created_by: string | null;
+          crew_confirmed_at: string | null;
           customer_name: string;
           deleted_at: string | null;
           description: string;
@@ -2611,6 +2660,7 @@ export type Database = {
           helper_count: number;
           id: string;
           invoice_id: string | null;
+          job_number: string | null;
           labor_rate_kind: string;
           notes: string | null;
           number: number;
@@ -2643,6 +2693,7 @@ export type Database = {
           contact_id?: string | null;
           created_at?: string;
           created_by?: string | null;
+          crew_confirmed_at?: string | null;
           customer_name?: string;
           deleted_at?: string | null;
           description?: string;
@@ -2651,6 +2702,7 @@ export type Database = {
           helper_count?: number;
           id?: string;
           invoice_id?: string | null;
+          job_number?: string | null;
           labor_rate_kind?: string;
           notes?: string | null;
           number?: number;
@@ -2683,6 +2735,7 @@ export type Database = {
           contact_id?: string | null;
           created_at?: string;
           created_by?: string | null;
+          crew_confirmed_at?: string | null;
           customer_name?: string;
           deleted_at?: string | null;
           description?: string;
@@ -2691,6 +2744,7 @@ export type Database = {
           helper_count?: number;
           id?: string;
           invoice_id?: string | null;
+          job_number?: string | null;
           labor_rate_kind?: string;
           notes?: string | null;
           number?: number;
@@ -3530,6 +3584,13 @@ export type Database = {
           id: string;
           notify_email: boolean;
           notify_push: boolean;
+        }[];
+      };
+      technician_bill_rates: {
+        Args: never;
+        Returns: {
+          default_bill_rate: number;
+          id: string;
         }[];
       };
       crm_user_options: {

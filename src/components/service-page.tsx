@@ -17,6 +17,12 @@
  * Invoicing (§5.4): once a ticket is Done the office sees its invoice on the ticket
  * (components/service/invoice-block.tsx); the ticket's Labor rate picks the hourly rates.
  *
+ * Owner, Sep 30: the ticket carries a Job # beside its PO # (both in the header, and on the
+ * invoice); the technician select has a "+" to add more named technicians, each with a $ box
+ * (blank = the default: their profile rate, else the rate table) — that crew is what the
+ * invoice's labor lines bill (lib/invoice-labor.ts). An old ticket with unnamed helpers keeps
+ * them until the office names the crew.
+ *
  * Fewer clicks (owner, Sep 27): the office sets technician + day with one click on a week grid
  * (components/service/assign-grid.tsx); the list header links the Done tickets waiting to be
  * invoiced ("N to invoice"); `?new=1&from=<ticket id>` starts a ticket with an earlier ticket's
@@ -42,7 +48,6 @@ import {
   Loader2,
   Lock,
   MapPin,
-  Minus,
   Package,
   Phone,
   Plus,
@@ -51,12 +56,15 @@ import {
   Save,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import {
   deleteServiceJob,
+  getCrewRateDefaults,
   getServiceJob,
+  listJobCrew,
   listDeletedServiceJobs,
   listServiceJobMaterials,
   listServiceJobs,
@@ -68,6 +76,7 @@ import {
   STAGE_LABELS,
   TECH_STAGES,
   TYPE_LABELS,
+  type CrewMemberView,
   type ServiceJobInput,
   type ServiceJobWithTech,
   type ServiceStage,
@@ -104,7 +113,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NumberField } from "@/components/ui/number-field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
@@ -116,6 +124,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { RateBox } from "@/components/service/rate-box";
+import { fieldKeys } from "@/components/service/field-utils";
+import { defaultBillRate, MAX_HELPERS, othersOf } from "@/lib/service-crew";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -332,6 +343,7 @@ function ServiceList() {
         j.site_address,
         j.description,
         j.po_number,
+        j.job_number,
         j.centerpoint_ticket,
         j.centerpoint_invoice,
         j.technician_name,
@@ -879,9 +891,9 @@ interface Draft {
   /** Which hourly rates the invoice uses (service_rates). */
   labor_rate_kind: RateKind;
   po_number: string;
+  job_number: string;
   /** "" = unassigned. */
   technician_id: string;
-  helper_count: number;
   scheduled_date: string;
   centerpoint_ticket: string;
   centerpoint_invoice: string;
@@ -904,8 +916,8 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         service_type: asType(job.service_type),
         labor_rate_kind: asRateKind(job.labor_rate_kind),
         po_number: job.po_number ?? "",
+        job_number: job.job_number ?? "",
         technician_id: job.technician_id ?? "",
-        helper_count: job.helper_count,
         scheduled_date: job.scheduled_date ?? "",
         centerpoint_ticket: job.centerpoint_ticket ?? "",
         centerpoint_invoice: job.centerpoint_invoice ?? "",
@@ -919,8 +931,8 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         service_type: "leak",
         labor_rate_kind: "standard",
         po_number: "",
+        job_number: "",
         technician_id: meId ?? "",
-        helper_count: 0,
         scheduled_date: "",
         centerpoint_ticket: "",
         centerpoint_invoice: "",
@@ -970,6 +982,23 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
     : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, labor rate and type are copied.`,
 });
 
+/** The named crew on the form: the lead's $ and the other technicians (owner, Sep 30). */
+interface CrewDraft {
+  lead_rate: number | null;
+  others: { key: string; technician_id: string; bill_rate: number | null }[];
+}
+let crewSeq = 0;
+const crewFrom = (rows: readonly CrewMemberView[]): CrewDraft => ({
+  lead_rate: rows.find((r) => r.sort === 0)?.bill_rate ?? null,
+  others: othersOf(rows).map((r) => ({
+    key: `c${++crewSeq}`,
+    technician_id: r.technician_id,
+    bill_rate: r.bill_rate,
+  })),
+});
+const crewKey = (c: CrewDraft | null) =>
+  c ? JSON.stringify([c.lead_rate, c.others.map((o) => [o.technician_id, o.bill_rate])]) : "";
+
 /** The fields that decide "unsaved changes" (the card's hit is display only). */
 const draftKey = (d: Draft) =>
   JSON.stringify({
@@ -1014,6 +1043,68 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // The named crew. An existing ticket's rows load after the ticket; until then (and for a
+  // technician, who answers on the close-out instead) nothing about the crew is sent.
+  const crewFn = useServerFn(listJobCrew);
+  const ratesFn = useServerFn(getCrewRateDefaults);
+  const crewQ = useQuery({
+    queryKey: fieldKeys.crew(job?.id ?? "new"),
+    queryFn: () => crewFn({ data: { id: job!.id } }),
+    enabled: !!session && !!job,
+  });
+  const [crew, setCrew] = useState<CrewDraft | null>(() =>
+    job ? null : { lead_rate: null, others: [] },
+  );
+  const [crewSavedKey, setCrewSavedKey] = useState(() => crewKey(crew));
+  useEffect(() => {
+    if (crew || !crewQ.data) return;
+    const c = crewFrom(crewQ.data);
+    setCrew(c);
+    setCrewSavedKey(crewKey(c));
+  }, [crew, crewQ.data]);
+  // An old ticket with unnamed helpers keeps them until the office names the crew.
+  const legacyHelpers = !!job && job.helper_count > 0 && crewQ.data?.length === 0;
+  const crewDirty = !!crew && crewKey(crew) !== crewSavedKey;
+  const sendCrew = officeOrAdmin && !!crew && (!legacyHelpers || crewDirty);
+  const rateDefaults = useQuery({
+    queryKey: ["crew-rate-defaults", draft.labor_rate_kind],
+    queryFn: () => ratesFn({ data: { rate_kind: draft.labor_rate_kind } }),
+    enabled: !!session && officeOrAdmin,
+    staleTime: 5 * 60_000,
+  });
+  const ratePlaceholder = (techId: string, isLead: boolean) => {
+    const d = rateDefaults.data;
+    if (!d) return "default";
+    return defaultBillRate(isLead, techId ? d.profiles[techId] : null, d.table).toFixed(2);
+  };
+  const setOther = (key: string, patch: Partial<CrewDraft["others"][number]>) =>
+    setCrew((c) =>
+      c ? { ...c, others: c.others.map((o) => (o.key === key ? { ...o, ...patch } : o)) } : c,
+    );
+  const addOther = () =>
+    setCrew((c) =>
+      c && c.others.length < MAX_HELPERS
+        ? {
+            ...c,
+            others: [...c.others, { key: `c${++crewSeq}`, technician_id: "", bill_rate: null }],
+          }
+        : c,
+    );
+  const removeOther = (key: string) =>
+    setCrew((c) => (c ? { ...c, others: c.others.filter((o) => o.key !== key) } : c));
+  // The lead is row 0; picking a crew member as the lead takes them out of the others.
+  const dropFromCrew = (techId: string) => {
+    if (techId)
+      setCrew((c) =>
+        c ? { ...c, others: c.others.filter((o) => o.technician_id !== techId) } : c,
+      );
+  };
+  const setLead = (techId: string) => {
+    set("technician_id", techId);
+    dropFromCrew(techId);
+  };
+
   // A ticket that already has its technician and day keeps the week grid folded away (the plain
   // fields below it still show both); a new or unassigned one opens it. Not remembered.
   const hasSlot = !!job?.technician_id && !!job.scheduled_date;
@@ -1054,8 +1145,19 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         // The rate is the office's call; a technician's save leaves it as it is.
         ...(officeOrAdmin ? { labor_rate_kind: draft.labor_rate_kind } : {}),
         po_number: draft.po_number,
+        // The job number is the office's (a technician's save leaves it as it is).
+        ...(officeOrAdmin ? { job_number: draft.job_number.trim() || null } : {}),
         technician_id: draft.technician_id || null,
-        helper_count: draft.helper_count,
+        ...(sendCrew && crew
+          ? {
+              crew: {
+                lead_rate: crew.lead_rate,
+                others: crew.others
+                  .filter((o) => o.technician_id && o.technician_id !== draft.technician_id)
+                  .map((o) => ({ technician_id: o.technician_id, bill_rate: o.bill_rate })),
+              },
+            }
+          : {}),
         scheduled_date: draft.scheduled_date || null,
         // An Open ticket that now has a technician and a day becomes Scheduled; otherwise the
         // stage stays what the header says (a new ticket's stage is the server's call).
@@ -1077,6 +1179,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
       if (row.account_id) void qc.invalidateQueries({ queryKey: ["account", row.account_id] });
       void qc.invalidateQueries({ queryKey: ["accounts"] });
+      if (sendCrew) {
+        setCrewSavedKey(crewKey(crew));
+        void qc.invalidateQueries({ queryKey: fieldKeys.crew(row.id) });
+      }
       if (job) {
         qc.setQueryData(["service-job", row.id], row);
         setSavedKey(draftKey(draft));
@@ -1132,7 +1238,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     <Select
       value={draft.technician_id || "none"}
       disabled={ro}
-      onValueChange={(v) => set("technician_id", v === "none" ? "" : v)}
+      onValueChange={(v) => setLead(v === "none" ? "" : v)}
     >
       <SelectTrigger id="ticket-tech" className={triggerClass}>
         <SelectValue placeholder="Unassigned" />
@@ -1171,43 +1277,102 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const techError = techs.error ? (
     <p className="text-xs text-destructive">Could not load technicians: {errText(techs.error)}</p>
   ) : null;
-  const helpers = (
-    <div className="flex items-center gap-1">
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        className="h-9 w-9"
-        disabled={ro || draft.helper_count <= 0}
-        aria-label="One helper fewer"
-        onClick={() => set("helper_count", Math.max(0, draft.helper_count - 1))}
-      >
-        <Minus className="h-4 w-4" />
-      </Button>
-      <div className="w-14" id="ticket-helpers">
-        <NumberField
-          value={draft.helper_count}
-          min={0}
-          max={9}
-          inputMode="numeric"
-          disabled={ro}
-          className="text-center"
-          onChange={(v) => set("helper_count", Math.min(9, Math.max(0, Math.round(v))))}
-        />
-      </div>
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        className="h-9 w-9"
-        disabled={ro || draft.helper_count >= 9}
-        aria-label="One helper more"
-        onClick={() => set("helper_count", Math.min(9, draft.helper_count + 1))}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
+  // The crew under the technician select (office): each other technician with a $ box and ×.
+  const pickable = (current: string) =>
+    techOptions.filter(
+      (t) =>
+        t.id === current ||
+        (t.id !== draft.technician_id && !crew?.others.some((o) => o.technician_id === t.id)),
+    );
+  const crewRows = crew && (
+    <div className="space-y-2">
+      {crew.others.map((o, i) => (
+        <div key={o.key} className="flex items-center gap-2">
+          <Select
+            value={o.technician_id || "none"}
+            disabled={ro}
+            onValueChange={(v) => setOther(o.key, { technician_id: v === "none" ? "" : v })}
+          >
+            <SelectTrigger className="h-9 min-w-0 flex-1" aria-label={`Technician ${i + 2}`}>
+              <SelectValue placeholder="Pick a technician" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Pick a technician</SelectItem>
+              {pickable(o.technician_id).map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                  {t.technician ? "" : " (office)"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="w-28 shrink-0">
+            <RateBox
+              aria-label={`Bill rate for technician ${i + 2}, dollars per hour`}
+              title="$ per labor hour on this ticket; blank = the default shown"
+              className="h-9"
+              placeholder={ratePlaceholder(o.technician_id, false)}
+              value={o.bill_rate}
+              disabled={ro}
+              onChange={(v) => setOther(o.key, { bill_rate: v })}
+            />
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive"
+            aria-label={`Remove technician ${i + 2}`}
+            title="Remove from the crew"
+            disabled={ro}
+            onClick={() => removeOther(o.key)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      {legacyHelpers && crew.others.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {job?.helper_count} unnamed helper{(job?.helper_count ?? 0) > 1 ? "s" : ""} (an older
+          ticket), billed at the helper rate. Add the technicians with + to name them instead.
+        </p>
+      )}
     </div>
   );
+  const techRow = (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
+      {crew && (
+        <>
+          <div className="w-28 shrink-0">
+            <RateBox
+              aria-label="Bill rate for the technician, dollars per hour"
+              title="$ per labor hour on this ticket; blank = the default shown"
+              className="h-9"
+              placeholder={ratePlaceholder(draft.technician_id, true)}
+              value={crew.lead_rate}
+              disabled={ro || !draft.technician_id}
+              onChange={(v) => setCrew((c) => (c ? { ...c, lead_rate: v } : c))}
+            />
+          </div>
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            className="h-9 w-9 shrink-0"
+            aria-label="Add another technician"
+            title="Add another technician to this ticket"
+            disabled={ro || !draft.technician_id || crew.others.length >= MAX_HELPERS}
+            onClick={addOther}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+  // A technician sees the crew by name (they answer who is on the job on the close-out).
+  const crewNames = (crewQ.data ?? []).filter((r) => r.sort !== 0).map((r) => r.name);
   const dateInput = (
     <Input
       id="ticket-date"
@@ -1286,6 +1451,22 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             </div>
           )}
         </div>
+        {job && (
+          <p className="flex flex-wrap gap-x-4 text-sm" aria-label="Ticket numbers">
+            <span>
+              <span className="text-muted-foreground">Ticket # </span>
+              <span className="tabular-nums">{job.number}</span>
+            </span>
+            <span>
+              <span className="text-muted-foreground">PO # </span>
+              {job.po_number || "—"}
+            </span>
+            <span>
+              <span className="text-muted-foreground">Job # </span>
+              {job.job_number || "—"}
+            </span>
+          </p>
+        )}
         {job && (
           <p className="text-xs text-muted-foreground">
             Updated {when(job.updated_at)}
@@ -1410,6 +1591,19 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               </div>
               {officeOrAdmin && (
                 <div className="space-y-1">
+                  <Label htmlFor="ticket-job-number">Job #</Label>
+                  <Input
+                    id="ticket-job-number"
+                    value={draft.job_number}
+                    disabled={ro}
+                    maxLength={60}
+                    title="Printed on this ticket's invoices as the Job #"
+                    onChange={(e) => set("job_number", e.target.value)}
+                  />
+                </div>
+              )}
+              {officeOrAdmin && (
+                <div className="space-y-1">
                   <Label htmlFor="ticket-rate">Labor rate</Label>
                   <Select
                     value={draft.labor_rate_kind}
@@ -1514,26 +1708,32 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                     date={draft.scheduled_date}
                     meId={profile?.id ?? null}
                     disabled={ro}
-                    onPick={(technician_id, scheduled_date) =>
-                      setDraft((d) => ({ ...d, technician_id, scheduled_date }))
-                    }
+                    onPick={(technician_id, scheduled_date) => {
+                      setDraft((d) => ({ ...d, technician_id, scheduled_date }));
+                      dropFromCrew(technician_id);
+                    }}
                   />
                 </div>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,260px)_auto_170px]">
-              <div className="space-y-1">
-                <Label htmlFor="ticket-tech" className="text-xs">
-                  Technician
-                </Label>
-                {techSelect("h-9")}
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,460px)_170px]">
+              <div className="space-y-2">
+                <div className="flex items-end justify-between gap-2">
+                  <Label htmlFor="ticket-tech" className="text-xs">
+                    Technician{crew && crew.others.length > 0 ? "s" : ""}
+                  </Label>
+                  {crew && (
+                    <span className="mr-11 w-28 text-xs text-muted-foreground">$ / hour</span>
+                  )}
+                </div>
+                {techRow}
+                {crewRows}
+                {crewQ.error && (
+                  <p className="text-xs text-destructive">
+                    Could not load the crew: {errText(crewQ.error)}
+                  </p>
+                )}
                 {techError}
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="ticket-helpers" className="text-xs">
-                  Helpers
-                </Label>
-                {helpers}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="ticket-date" className="text-xs">
@@ -1551,8 +1751,17 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {techError}
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ticket-helpers">Helpers</Label>
-              {helpers}
+              <p className="text-sm font-medium leading-none">Crew</p>
+              <p className="flex min-h-9 items-center text-sm">
+                {crewNames.length
+                  ? crewNames.join(", ")
+                  : job?.crew_confirmed_at
+                    ? "Alone"
+                    : job && job.helper_count > 0
+                      ? `${job.helper_count} helper${job.helper_count > 1 ? "s" : ""}`
+                      : "—"}
+              </p>
+              <p className="text-xs text-muted-foreground">Change it on the close-out.</p>
             </div>
             <div className="space-y-1">
               <Label htmlFor="ticket-date">Scheduled date</Label>
@@ -1621,7 +1830,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
         {!ro && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="submit" size="lg" disabled={save.isPending || (!!job && !dirty)}>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={save.isPending || (!!job && !dirty && !crewDirty)}
+            >
               {save.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
@@ -1629,7 +1842,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               )}
               {job ? "Save" : "Create ticket"}
             </Button>
-            {job && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
+            {job && (dirty || crewDirty) && (
+              <span className="text-sm text-muted-foreground">Unsaved changes</span>
+            )}
             {!job && (
               <span className="text-xs text-muted-foreground">
                 Saved as Scheduled when a technician and a date are set, otherwise Open.

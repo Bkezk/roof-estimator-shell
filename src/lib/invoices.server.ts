@@ -3,10 +3,11 @@
  * `await import("@/lib/invoices.server")`.
  *
  * Rules copied from CenterPoint (docs/service-module-design.md §4): every time entry becomes
- * one line per person — the technician at the ticket's rate kind (Standard / Urgent /
- * Emergency), plus one Helper line per extra tech — travel and labor priced separately; every
- * material used becomes a line at catalog cost × (1 + markup); tax is a rate on the taxable
- * subtotal unless the customer is tax exempt; invoice number = ticket number.
+ * one line per person (invoice-labor.ts: the named crew at each member's rate, or on an
+ * old-style ticket the technician plus one Helper line per helper_count at the ticket's rate
+ * kind) — travel and labor priced separately; every material used becomes a line at catalog
+ * cost × (1 + markup); tax is a rate on the taxable subtotal unless the customer is tax exempt;
+ * invoice number = ticket number, ".2", ".3" for further invoices (invoice-numbering.ts).
  */
 import {
   PDFDocument,
@@ -20,6 +21,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { invoiceLabel } from "@/lib/invoice-numbering";
+import { timeLines, type RateTable } from "@/lib/invoice-labor";
 import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
@@ -32,9 +35,7 @@ export type LineInsert = Omit<
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export interface RateTable {
-  [key: string]: { bill: number; cost: number };
-}
+export type { RateTable } from "@/lib/invoice-labor";
 export async function loadRates(sb: Client, rateKind: string): Promise<RateTable> {
   const { data, error } = await sb.from("service_rates").select("*").eq("rate_kind", rateKind);
   if (error) throw new Error(error.message);
@@ -104,7 +105,15 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!job) throw new Error("Ticket not found");
-  const [rates, settings, { data: times }, { data: moves }, { data: techs }] = await Promise.all([
+  const [
+    rates,
+    settings,
+    { data: times },
+    { data: moves },
+    { data: techs },
+    { data: crew, error: crewErr },
+    { data: profileRates, error: rateErr },
+  ] = await Promise.all([
     loadRates(sb, job.labor_rate_kind),
     loadSettings(sb),
     sb
@@ -119,50 +128,34 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
       .eq("service_job_id", jobId)
       .in("reason", ["consumed", "released"]),
     sb.rpc("technician_options"),
+    sb
+      .from("service_job_techs")
+      .select("technician_id, sort, bill_rate")
+      .eq("service_job_id", jobId)
+      .order("sort"),
+    sb.rpc("technician_bill_rates"),
   ]);
+  if (crewErr) throw new Error(crewErr.message);
+  if (rateErr) throw new Error(`Technicians' bill rates: ${rateErr.message}`);
   const techName = new Map<string, string>();
   for (const t of techs ?? []) techName.set(t.id, (t.full_name ?? "").trim() || t.email);
-  const lines: LineInsert[] = [];
-  let sort = 0;
-  for (const t of times ?? []) {
-    const hours = Number(t.hours);
-    if (!(hours > 0)) continue;
-    const kind = t.kind === "travel" ? "travel" : "labor";
-    const tech = rates[`tech:${kind}`] ?? { bill: 0, cost: 0 };
-    const helper = rates[`helper:${kind}`] ?? { bill: 0, cost: 0 };
-    const who = (t.technician_id && techName.get(t.technician_id)) || "Technician";
-    const label = kind === "travel" ? "Travel" : "Labor";
-    lines.push({
-      sort: sort++,
-      kind,
-      description: `${who} — ${label}`,
-      qty: hours,
-      unit: "hour",
-      rate: tech.bill,
-      total: r2(hours * tech.bill),
-      cost_rate: tech.cost,
-      cost_total: r2(hours * tech.cost),
-      on_date: t.on_date,
-      source: `time:${t.id}`,
-      taxable: false,
-    });
-    for (let h = 0; h < (t.helper_count ?? 0); h++) {
-      lines.push({
-        sort: sort++,
-        kind,
-        description: `Helper — ${label}`,
-        qty: hours,
-        unit: "hour",
-        rate: helper.bill,
-        total: r2(hours * helper.bill),
-        cost_rate: helper.cost,
-        cost_total: r2(hours * helper.cost),
-        on_date: t.on_date,
-        source: `time:${t.id}:helper${h + 1}`,
-        taxable: false,
-      });
-    }
-  }
+  const profileRate = new Map<string, number>();
+  for (const r of profileRates ?? [])
+    if (r.default_bill_rate != null) profileRate.set(r.id, Number(r.default_bill_rate));
+  const lines: LineInsert[] = timeLines({
+    times: times ?? [],
+    rates,
+    crew: (crew ?? [])
+      .filter((c): c is typeof c & { technician_id: string } => !!c.technician_id)
+      .map((c) => ({
+        technician_id: c.technician_id,
+        sort: c.sort,
+        bill_rate: c.bill_rate == null ? null : Number(c.bill_rate),
+      })),
+    techName,
+    profileRates: profileRate,
+  });
+  let sort = lines.length;
   // Materials: net quantity per catalog cell (consumed is negative in the ledger).
   const byCell = new Map<
     string,
@@ -432,7 +425,7 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
     doc.textRight(title, right, 20, true);
     doc.y -= 22;
     const rows: [string, string][] = [
-      ["Invoice #", String(invoice.number)],
+      ["Invoice #", invoiceLabel(invoice)],
       ["Customer PO", invoice.po_number ?? ""],
       ["Invoice Date", fmtDate(invoice.invoice_date)],
       ["Job #", invoice.job_code ?? ""],
@@ -684,7 +677,7 @@ export function sageCsv(bundles: { invoice: InvoiceRow; lines: InvoiceLineRow[] 
     const bt = (invoice.bill_to ?? {}) as BillTo;
     rows.push([
       "INVOICE",
-      String(invoice.number),
+      invoiceLabel(invoice),
       invoice.invoice_date,
       invoice.due_date ?? "",
       bt.external_id ?? "",
@@ -708,7 +701,7 @@ export function sageCsv(bundles: { invoice: InvoiceRow; lines: InvoiceLineRow[] 
     for (const l of lines) {
       rows.push([
         "LINE",
-        String(invoice.number),
+        invoiceLabel(invoice),
         invoice.invoice_date,
         "",
         bt.external_id ?? "",

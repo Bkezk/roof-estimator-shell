@@ -1,8 +1,9 @@
 /**
- * Invoices (phase C, docs/service-module-design.md §5.4–§5.5): one per ticket, numbered like
- * the ticket, built from time entries and materials (invoices.server.ts), reviewed and sent by
- * the office, marked paid by hand, exported for Sage as CSV. Technicians never see money
- * (RLS: invoices_office).
+ * Invoices (phase C, docs/service-module-design.md §5.4–§5.5): numbered like the ticket — the
+ * first "6012", further invoices on the same ticket "6012.2", "6012.3", a deleted or voided one
+ * freeing its number (owner, Sep 30; invoice-numbering.ts) — built from time entries and
+ * materials (invoices.server.ts), reviewed and sent by the office, marked paid by hand, exported
+ * for Sage as CSV. Technicians never see money (RLS: invoices_office).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -11,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { toBase64 } from "@/lib/webpush";
 
@@ -54,6 +56,9 @@ async function stageEvent(
   await afterTicketStage(row, prevStage, actor, sb);
 }
 
+/** Where the final PDF is stored: by number, plus the id so a void keeps its own file. */
+const pdfPath = (inv: InvoiceRow) => `invoices/${invoiceFileStem(inv)}-${inv.id.slice(0, 8)}.pdf`;
+
 export interface InvoiceWithLines {
   invoice: InvoiceRow;
   lines: InvoiceLineRow[];
@@ -70,8 +75,23 @@ async function withLines(
   if (error) throw new Error(error.message);
   return { invoice: shown(invoice), lines: lines ?? [] };
 }
-/** A voided invoice keeps its number as a negative; the screens show the original. */
-const shown = (inv: InvoiceRow): InvoiceRow => ({ ...inv, number: Math.abs(inv.number) });
+/** A voided legacy invoice keeps its number as a negative; the screens show the original. */
+const shown = (inv: InvoiceRow): InvoiceRow => ({
+  ...inv,
+  number: inv.number == null ? null : Math.abs(inv.number),
+});
+
+/** The ticket's live invoices, the newest first. */
+async function liveInvoices(sb: SupabaseClient<Database>, jobId: string) {
+  const { data, error } = await sb
+    .from("invoices")
+    .select("*")
+    .eq("service_job_id", jobId)
+    .neq("status", "void") // a voided invoice has released its number
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
 
 /** The ticket's invoice, created as a draft from its time and materials on first call. */
 export const getOrCreateInvoice = createServerFn({ method: "POST" })
@@ -80,74 +100,142 @@ export const getOrCreateInvoice = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
-    const { data: existing } = await sb
-      .from("invoices")
-      .select("*")
-      .eq("service_job_id", data.job_id)
-      .neq("status", "void") // a voided invoice has released the ticket and its number
-      .maybeSingle();
+    const [existing] = await liveInvoices(sb, data.job_id);
     if (existing) return withLines(sb, existing);
-    const { data: job, error } = await sb
-      .from("service_jobs")
-      .select("*")
-      .eq("id", data.job_id)
-      .maybeSingle();
+    return createInvoiceFor(sb, data.job_id, context.userId, nameOf(p), true);
+  });
+
+/** Another invoice on the same ticket ("6012.2", "6012.3", …), a draft from the ticket. */
+export const createAnotherInvoice = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
+    const p = await office(context);
+    return createInvoiceFor(context.supabase, data.job_id, context.userId, nameOf(p));
+  });
+
+/** A ticket's invoices for the chips on the ticket (void ones too, greyed). */
+export interface TicketInvoiceSummary {
+  id: string;
+  label: string;
+  status: string;
+  total: number;
+  created_at: string;
+}
+export const listTicketInvoices = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ job_id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<TicketInvoiceSummary[]> => {
+    await office(context);
+    const { data: rows, error } = await context.supabase
+      .from("invoices")
+      .select("id, number, display_number, status, total, created_at")
+      .eq("service_job_id", data.job_id)
+      .order("created_at");
     if (error) throw new Error(error.message);
-    if (!job) throw new Error("Ticket not found");
-    const [{ data: account }, { data: site }] = await Promise.all([
-      job.account_id
-        ? sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()
-        : Promise.resolve({ data: null }),
-      job.site_id
-        ? sb.from("crm_sites").select("*").eq("id", job.site_id).maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
-    const { buildLinesFromJob, loadSettings, totals } = await import("@/lib/invoices.server");
-    const [lines, settings] = await Promise.all([buildLinesFromJob(sb, job.id), loadSettings(sb)]);
-    const taxRate = account?.tax_exempt ? 0 : Number(settings.tax_rate);
-    const t = totals(lines, taxRate);
-    const bill_to = {
-      name: account?.name ?? job.customer_name,
-      address1: account?.address1 ?? "",
-      address2: account?.address2 ?? "",
-      city: account?.city ?? "",
-      state: account?.state ?? "",
-      zip: account?.zip ?? "",
-      instructions: account?.billing_instructions ?? "",
-      external_id: account?.external_id ?? "",
-    };
-    const property = {
-      name: site?.name ?? job.site_name ?? "",
-      address: site ? siteAddressLine(site) : (job.site_address ?? ""),
-    };
-    const { data: inv, error: insErr } = await sb
+    return (rows ?? []).map((r) => ({
+      id: r.id,
+      label: invoiceLabel(r),
+      status: r.status,
+      total: Number(r.total),
+      created_at: r.created_at,
+    }));
+  });
+
+/** Postgres unique violation on the live display-number index (two creates at once). */
+const numberTaken = (e: { code?: string; message: string }) =>
+  e.code === "23505" && /display_number/.test(e.message);
+
+/**
+ * Make a new draft invoice for the ticket: the lowest free number (invoice-numbering.ts),
+ * its lines from the ticket's time and materials. A race for the same number trips the live
+ * unique index; the number is worked out again once.
+ */
+async function createInvoiceFor(
+  sb: SupabaseClient<Database>,
+  jobId: string,
+  userId: string,
+  byName: string,
+  /** getOrCreate: a draft made meanwhile by another tab is the one to open, not a ".2". */
+  onlyIfNone = false,
+): Promise<InvoiceWithLines> {
+  const { data: job, error } = await sb
+    .from("service_jobs")
+    .select("*")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!job) throw new Error("Ticket not found");
+  const [{ data: account }, { data: site }] = await Promise.all([
+    job.account_id
+      ? sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    job.site_id
+      ? sb.from("crm_sites").select("*").eq("id", job.site_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+  const { buildLinesFromJob, loadSettings, totals } = await import("@/lib/invoices.server");
+  const [lines, settings] = await Promise.all([buildLinesFromJob(sb, job.id), loadSettings(sb)]);
+  const taxRate = account?.tax_exempt ? 0 : Number(settings.tax_rate);
+  const t = totals(lines, taxRate);
+  const bill_to = {
+    name: account?.name ?? job.customer_name,
+    address1: account?.address1 ?? "",
+    address2: account?.address2 ?? "",
+    city: account?.city ?? "",
+    state: account?.state ?? "",
+    zip: account?.zip ?? "",
+    instructions: account?.billing_instructions ?? "",
+    external_id: account?.external_id ?? "",
+  };
+  const property = {
+    name: site?.name ?? job.site_name ?? "",
+    address: site ? siteAddressLine(site) : (job.site_address ?? ""),
+  };
+  const insert = async () => {
+    const { data: siblings, error: sErr } = await sb
+      .from("invoices")
+      .select("display_number, number, status")
+      .eq("service_job_id", job.id);
+    if (sErr) throw new Error(sErr.message);
+    return sb
       .from("invoices")
       .insert({
         service_job_id: job.id,
-        number: job.number,
+        number: null,
+        display_number: nextInvoiceNumber(job.number, siblings ?? []),
         po_number: job.po_number,
-        job_code: null,
+        job_code: job.job_number,
         bill_to: bill_to as unknown as Json,
         property: property as unknown as Json,
         description: job.closing_notes,
         payment_terms: settings.payment_terms,
         tax_rate: taxRate,
         ...t,
-        created_by: context.userId,
-        updated_by_name: nameOf(p),
+        created_by: userId,
+        updated_by_name: byName,
       })
       .select("*")
       .single();
-    if (insErr) throw new Error(insErr.message);
-    if (lines.length) {
-      const { error: lErr } = await sb
-        .from("invoice_lines")
-        .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
-      if (lErr) throw new Error(lErr.message);
+  };
+  let { data: inv, error: insErr } = await insert();
+  if (insErr && numberTaken(insErr)) {
+    if (onlyIfNone) {
+      const [made] = await liveInvoices(sb, job.id);
+      if (made) return withLines(sb, made);
     }
-    await sb.from("service_jobs").update({ invoice_id: inv.id }).eq("id", job.id);
-    return withLines(sb, inv);
-  });
+    ({ data: inv, error: insErr } = await insert());
+  }
+  if (insErr || !inv) throw new Error(insErr?.message ?? "The invoice was not created");
+  if (lines.length) {
+    const { error: lErr } = await sb
+      .from("invoice_lines")
+      .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
+    if (lErr) throw new Error(lErr.message);
+  }
+  await sb.from("service_jobs").update({ invoice_id: inv.id }).eq("id", job.id);
+  return withLines(sb, inv);
+}
 
 export const getInvoice = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -310,7 +398,7 @@ export const renderInvoice = createServerFn({ method: "POST" })
     const pdf = await renderInvoicePdf(context.supabase, b);
     return {
       base64: toBase64(pdf),
-      file_name: `Invoice-${b.invoice.number}.pdf`,
+      file_name: `Invoice-${invoiceFileStem(b.invoice)}.pdf`,
     };
   });
 
@@ -326,7 +414,7 @@ export const finalizeInvoice = createServerFn({ method: "POST" })
     if (b.invoice.status !== "draft") throw new Error("Already final");
     if (!b.lines.length) throw new Error("The invoice has no lines");
     const pdf = await renderInvoicePdf(sb, b);
-    const path = `invoices/${b.invoice.number}.pdf`;
+    const path = pdfPath(b.invoice);
     const { error: upErr } = await sb.storage
       .from("service")
       .upload(path, pdf, { contentType: "application/pdf", upsert: true });
@@ -390,7 +478,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
     let b = await loadBundle(sb, data.id);
     if (b.invoice.status === "draft") {
       const pdf = await renderInvoicePdf(sb, b);
-      const path = `invoices/${b.invoice.number}.pdf`;
+      const path = pdfPath(b.invoice);
       const { error: upErr } = await sb.storage
         .from("service")
         .upload(path, pdf, { contentType: "application/pdf", upsert: true });
@@ -411,14 +499,15 @@ export const sendInvoice = createServerFn({ method: "POST" })
     }
     if (b.invoice.status === "void") throw new Error("This invoice is void");
     const pdf = await renderInvoicePdf(sb, b);
-    const subject = b.settings.email_subject.replace("{number}", String(b.invoice.number));
-    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${b.invoice.number} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}`;
+    const label = invoiceLabel(b.invoice);
+    const subject = b.settings.email_subject.replace("{number}", label);
+    const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}`;
     const r = await emailInvoice({
       to: data.to,
       subject,
       text,
       pdf,
-      fileName: `Invoice-${b.invoice.number}.pdf`,
+      fileName: `Invoice-${invoiceFileStem(b.invoice)}.pdf`,
     });
     if (!r.ok) throw new Error(`The invoice was not sent: ${r.error}`);
     const { data: updated, error } = await sb
@@ -492,15 +581,32 @@ export const voidInvoice = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
     if (inv.status === "draft") {
-      await sb.from("invoices").delete().eq("id", inv.id);
+      // A draft is deleted outright; its number is free for the next invoice on the ticket.
+      const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
+      if (dErr) throw new Error(dErr.message);
     } else {
-      // Release the ticket and the number (kept as a negative for history); a fresh draft takes
-      // the ticket number again. If this one was already exported to Sage, the bookkeeper needs
-      // a credit there — the list shows the void row with its export stamp.
-      await sb
+      // Release the number: the void stays on record under it (a legacy integer number is kept
+      // as a negative), and the next invoice on the ticket takes it again. If this one was
+      // already exported to Sage, the bookkeeper needs a credit there — the list shows the void
+      // row with its export stamp.
+      const { error: vErr } = await sb
         .from("invoices")
-        .update({ status: "void", number: -Math.abs(inv.number), updated_by_name: nameOf(p) })
+        .update({
+          status: "void",
+          ...(inv.number != null ? { number: -Math.abs(inv.number) } : {}),
+          updated_by_name: nameOf(p),
+        })
         .eq("id", inv.id);
+      if (vErr) throw new Error(vErr.message);
+    }
+    // Another live invoice on the ticket keeps it where it is; the last one sends it back to Done.
+    const [other] = await liveInvoices(sb, inv.service_job_id);
+    if (other) {
+      await sb
+        .from("service_jobs")
+        .update({ invoice_id: other.id, updated_by_name: nameOf(p) })
+        .eq("id", inv.service_job_id);
+      return;
     }
     await sb
       .from("service_jobs")
@@ -512,6 +618,8 @@ export const voidInvoice = createServerFn({ method: "POST" })
 export interface InvoiceListRow extends InvoiceRow {
   customer_name: string;
   site_name: string | null;
+  /** The number as shown: display_number, else the legacy integer. */
+  label: string;
 }
 export const listInvoices = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -530,7 +638,7 @@ export const listInvoices = createServerFn({ method: "GET" })
       .from("invoices")
       .select("*")
       .order("invoice_date", { ascending: false })
-      .order("number", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(1000);
     if (data.status) q = q.eq("status", data.status);
     if (data.from) q = q.gte("invoice_date", data.from);
@@ -540,7 +648,12 @@ export const listInvoices = createServerFn({ method: "GET" })
     return (rows ?? []).map((r) => {
       const bt = (r.bill_to ?? {}) as { name?: string };
       const pr = (r.property ?? {}) as { name?: string };
-      return { ...shown(r), customer_name: bt.name ?? "", site_name: pr.name ?? null };
+      return {
+        ...shown(r),
+        customer_name: bt.name ?? "",
+        site_name: pr.name ?? null,
+        label: invoiceLabel(r),
+      };
     });
   });
 
@@ -566,7 +679,8 @@ export const exportSageCsv = createServerFn({ method: "POST" })
         .in("status", ["final", "sent", "paid"])
         .gte("invoice_date", data.from)
         .lte("invoice_date", data.to)
-        .order("number");
+        .order("invoice_date")
+        .order("created_at");
       if (data.only_unexported) q = q.is("sage_exported_at", null);
       const { data: invs, error } = await q;
       if (error) throw new Error(error.message);

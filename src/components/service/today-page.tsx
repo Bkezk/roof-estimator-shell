@@ -4,7 +4,11 @@
  * En route and On site go straight to setFieldStatus (optimistic; the server stamps the time
  * and writes the travel entry); Done opens the close-out, whose Complete stamps the labor and
  * sets the ticket Done. Office users see every open ticket here (myDay).
+ *
+ * Once a ticket is started, the card asks "Who is on this job with you?" (crew-box.tsx; owner,
+ * Sep 30) until it is answered; after that the card names the crew and "Change" reopens it.
  */
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -24,6 +28,8 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { myDay, setFieldStatus, type TodayJob } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
+import { CrewBox } from "@/components/service/crew-box";
+import { crewQuestionPending } from "@/lib/service-crew";
 import {
   clock,
   errText,
@@ -196,6 +202,14 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
     j.on_site_at ? `On site ${clock(j.on_site_at)}` : null,
   ].filter(Boolean);
   const overdue = !!j.scheduled_date && j.scheduled_date < today;
+  // Started and not yet answered: the crew question shows on the card.
+  const askCrew = !!j.field_status && crewQuestionPending(j);
+  // Once asked, the box stays open on this card (ticking a second tech after the first
+  // answer saved) until the tech closes it with "Done".
+  const [crewOpen, setCrewOpen] = useState(false);
+  useEffect(() => {
+    if (askCrew) setCrewOpen(true);
+  }, [askCrew]);
 
   const press = () => {
     if (step.isPending) return;
@@ -267,13 +281,37 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
             )}
           </span>
         )}
-        {j.helper_count > 0 && (
+        {j.crew_names.length > 0 ? (
           <span className="inline-flex items-center gap-1 text-muted-foreground">
             <Users className="h-4 w-4" />
-            {j.helper_count} helper{j.helper_count > 1 ? "s" : ""}
+            With {j.crew_names.join(", ")}
           </span>
+        ) : j.crew_confirmed_at ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground">
+            <Users className="h-4 w-4" />
+            Alone
+          </span>
+        ) : (
+          j.helper_count > 0 && (
+            <span className="inline-flex items-center gap-1 text-muted-foreground">
+              <Users className="h-4 w-4" />
+              {j.helper_count} helper{j.helper_count > 1 ? "s" : ""}
+            </span>
+          )
+        )}
+        {j.crew_confirmed_at && (
+          <button
+            type="button"
+            className="min-h-9 px-1 text-sm font-medium text-primary underline-offset-2 hover:underline"
+            aria-expanded={crewOpen}
+            onClick={() => setCrewOpen((v) => !v)}
+          >
+            {crewOpen ? "Done" : "Change"}
+          </button>
         )}
       </div>
+
+      {(askCrew || crewOpen) && <CrewBox job={j} />}
 
       <Button
         size="lg"

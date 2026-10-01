@@ -1,13 +1,16 @@
 /**
  * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3):
- * helpers, repairs from the template chips with before / after photos, materials off the truck
- * (one tap per piece, materials-section.tsx),
- * closing notes, time (fix a forgotten button press), the customer's signature, then Complete.
+ * who is on the job (crew-box.tsx; owner, Sep 30: answered first — the rest opens after — and
+ * editable later), repairs from the template chips with before / after photos, materials off
+ * the truck (one tap per piece, materials-section.tsx), closing notes, time (fix a forgotten
+ * button press), the customer's signature, then Complete.
  *
- * Repairs, photos, time and the signature save as they are made. The text fields save with
- * Save / Complete and are also kept in localStorage per ticket (bid-o-matic:closeout:<id>) so a
- * lost signal on the roof does not lose typed notes. Photos are NOT queued offline: an upload
- * without signal fails loudly and the tech takes it again.
+ * Everything saves as it is filled out (owner, Sep 30: no Save button): repairs, photos, time
+ * and the signature as they are made, the text fields a moment after typing stops (a subtle
+ * "Saved", a loud toast when it fails). The text is also kept in localStorage per ticket
+ * (bid-o-matic:closeout:<id>) until the server has it, so a lost signal on the roof does not
+ * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly and
+ * the tech takes it again.
  *
  * Reached from Today's Done button and the ticket page's Close out (/service?id=<id>&closeout=1).
  */
@@ -28,10 +31,8 @@ import {
   Minus,
   PenLine,
   Plus,
-  Save,
   Search,
   Trash2,
-  Users,
   Wrench,
 } from "lucide-react";
 
@@ -65,7 +66,9 @@ import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { SignaturePad } from "@/components/service/signature-pad";
-import { PhotoThumb, TimeEntries } from "@/components/service/field-shared";
+import { PhotoThumb, SavedIndicator, TimeEntries } from "@/components/service/field-shared";
+import { CrewBox } from "@/components/service/crew-box";
+import { crewQuestionPending } from "@/lib/service-crew";
 import { MaterialsSection } from "@/components/service/materials-section";
 import {
   clock,
@@ -75,6 +78,7 @@ import {
   loudError,
   removeFromServiceBucket,
   uploadToServiceBucket,
+  useAutosave,
   useSignedUrl,
   whenShort,
 } from "@/components/service/field-utils";
@@ -83,7 +87,6 @@ import {
 // The text fields and their local draft.
 
 interface TextDraft {
-  helper_count: number;
   closing_notes: string;
   checked_in_with: string;
   checked_out_with: string;
@@ -91,7 +94,6 @@ interface TextDraft {
   signed_by: string;
 }
 const fromJob = (j: ServiceJobRow): TextDraft => ({
-  helper_count: j.helper_count,
   closing_notes: j.closing_notes ?? "",
   checked_in_with: j.checked_in_with ?? "",
   checked_out_with: j.checked_out_with ?? "",
@@ -109,8 +111,6 @@ function readDraft(id: string): TextDraft | null {
     const d = JSON.parse(raw) as Partial<TextDraft>;
     if (typeof d !== "object" || d === null) return null;
     return {
-      helper_count:
-        typeof d.helper_count === "number" ? Math.min(9, Math.max(0, d.helper_count)) : 0,
       closing_notes: typeof d.closing_notes === "string" ? d.closing_notes : "",
       checked_in_with: typeof d.checked_in_with === "string" ? d.checked_in_with : "",
       checked_out_with: typeof d.checked_out_with === "string" ? d.checked_out_with : "",
@@ -246,60 +246,60 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
 
-  const [base, setBase] = useState<TextDraft>(() => fromJob(job));
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
   const [draft, setDraft] = useState<TextDraft>(() => stored ?? fromJob(job));
-  const dirty = !sameDraft(draft, base);
-  const update = (patch: Partial<TextDraft>) =>
-    setDraft((d) => {
-      const next = { ...d, ...patch };
-      writeDraft(job.id, next);
-      return next;
-    });
-  const told = useRef(false);
-  useEffect(() => {
-    if (told.current || !stored) return;
-    told.current = true;
-    if (!sameDraft(stored, fromJob(job)))
-      toast.info("Restored the notes you typed here before; press Save to keep them.");
-  }, [stored, job]);
+  const latest = useRef(draft);
 
-  const input = () => ({
+  const input = (d: TextDraft) => ({
     id: job.id,
-    helper_count: Math.min(9, Math.max(0, Math.round(draft.helper_count))),
-    closing_notes: orNull(draft.closing_notes),
-    checked_in_with: orNull(draft.checked_in_with),
-    checked_out_with: orNull(draft.checked_out_with),
-    recommend_new_roof: draft.recommend_new_roof,
-    signed_by: orNull(draft.signed_by),
+    closing_notes: orNull(d.closing_notes),
+    checked_in_with: orNull(d.checked_in_with),
+    checked_out_with: orNull(d.checked_out_with),
+    recommend_new_roof: d.recommend_new_roof,
+    signed_by: orNull(d.signed_by),
   });
   const keepRow = (row: ServiceJobRow) =>
     qc.setQueryData<ServiceJobWithTech>(fieldKeys.job(job.id), (old) =>
       old ? { ...old, ...row } : old,
     );
 
-  const save = useMutation({
-    mutationFn: () => saveFn({ data: input() }),
-    onSuccess: (row) => {
+  // The text saves itself a moment after typing stops; the phone's copy goes once the server
+  // has the latest.
+  const autosave = useAutosave<TextDraft>(
+    async (d) => {
+      const row = await saveFn({ data: input(d) });
       keepRow(row);
-      clearDraft(job.id);
-      setBase(draft);
-      toast.success("Close-out saved");
+      if (sameDraft(d, latest.current)) clearDraft(job.id);
     },
-    onError: (e) =>
-      loudError("Could not save the close-out (your typing is kept on this phone)", e),
-  });
+    { what: "Your notes" },
+  );
+  const update = (patch: Partial<TextDraft>) => {
+    const next = { ...latest.current, ...patch };
+    latest.current = next;
+    setDraft(next);
+    writeDraft(job.id, next);
+    autosave.push(next);
+  };
+  const told = useRef(false);
+  useEffect(() => {
+    if (told.current || !stored) return;
+    told.current = true;
+    if (!sameDraft(stored, fromJob(job))) {
+      toast.info("Restored the notes you typed here before; saving them now.");
+      autosave.push(stored);
+    }
+  }, [stored, job, autosave]);
 
   const complete = useMutation({
     mutationFn: async () => {
-      const row = await saveFn({ data: input() });
+      autosave.cancel();
+      const row = await saveFn({ data: input(latest.current) });
       if (FINISHED.includes(row.stage)) return row;
       return statusFn({ data: { id: job.id, to: "done" } });
     },
     onSuccess: (row) => {
       keepRow(row);
       clearDraft(job.id);
-      setBase(draft);
       for (const k of [
         fieldKeys.today,
         fieldKeys.job(job.id),
@@ -315,162 +315,122 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       loudError("Could not complete the ticket (your typing is kept on this phone)", e),
   });
 
-  const busy = save.isPending || complete.isPending;
+  const busy = complete.isPending;
   const finished = FINISHED.includes(job.stage);
+  // Owner, Sep 30: "Who is on this job with you?" comes first; the rest opens once answered.
+  const waiting = crewQuestionPending(job);
 
   return (
     <div className="space-y-5">
-      {/* (a) Helpers */}
-      <Section title="Helpers" icon={Users}>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-12 w-12"
-            aria-label="One helper fewer"
-            disabled={draft.helper_count <= 0}
-            onClick={() => update({ helper_count: Math.max(0, draft.helper_count - 1) })}
-          >
-            <Minus className="h-5 w-5" />
-          </Button>
-          <div className="w-20">
-            <NumberField
-              value={draft.helper_count}
-              max={9}
-              inputMode="numeric"
-              className="h-12 text-center text-lg"
-              onChange={(v) => update({ helper_count: Math.min(9, Math.max(0, Math.round(v))) })}
-            />
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="h-12 w-12"
-            aria-label="One helper more"
-            disabled={draft.helper_count >= 9}
-            onClick={() => update({ helper_count: Math.min(9, draft.helper_count + 1) })}
-          >
-            <Plus className="h-5 w-5" />
-          </Button>
-          <span className="text-sm text-muted-foreground">besides you</span>
-        </div>
-      </Section>
+      {/* (a) Who is on the job */}
+      <CrewBox job={job} />
 
-      {/* (b) Repairs */}
-      <RepairsSection jobId={job.id} />
+      {waiting ? (
+        <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
+          Check-in details, photos, repairs and the rest open once you have answered who is on the
+          job.
+        </p>
+      ) : (
+        <>
+          {/* (b) Repairs */}
+          <RepairsSection jobId={job.id} />
 
-      {/* (c) Materials */}
-      <MaterialsSection jobId={job.id} />
+          {/* (c) Materials */}
+          <MaterialsSection jobId={job.id} />
 
-      {/* (d) Notes */}
-      <Section title="Notes" icon={ClipboardList}>
-        <div className="space-y-1">
-          <Label htmlFor="co-notes">Closing notes</Label>
-          <Textarea
-            id="co-notes"
-            rows={5}
-            className="text-base"
-            placeholder="What you found and did (the keyboard's microphone works here)"
-            value={draft.closing_notes}
-            onChange={(e) => update({ closing_notes: e.target.value })}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <Label htmlFor="co-in">Checked in with</Label>
-            <Input
-              id="co-in"
-              className="h-11 text-base"
-              maxLength={200}
-              value={draft.checked_in_with}
-              onChange={(e) => update({ checked_in_with: e.target.value })}
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="co-out">Checked out with</Label>
-            <Input
-              id="co-out"
-              className="h-11 text-base"
-              maxLength={200}
-              value={draft.checked_out_with}
-              onChange={(e) => update({ checked_out_with: e.target.value })}
-            />
-          </div>
-        </div>
-        <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-          <span className="font-medium">Recommend a new roof</span>
-          <Switch
-            checked={draft.recommend_new_roof}
-            onCheckedChange={(v) => update({ recommend_new_roof: v })}
-          />
-        </label>
-      </Section>
+          {/* (d) Notes */}
+          <Section title="Notes" icon={ClipboardList}>
+            <div className="space-y-1">
+              <Label htmlFor="co-notes">Closing notes</Label>
+              <Textarea
+                id="co-notes"
+                rows={5}
+                className="text-base"
+                placeholder="What you found and did (the keyboard's microphone works here)"
+                value={draft.closing_notes}
+                onChange={(e) => update({ closing_notes: e.target.value })}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="co-in">Checked in with</Label>
+                <Input
+                  id="co-in"
+                  className="h-11 text-base"
+                  maxLength={200}
+                  value={draft.checked_in_with}
+                  onChange={(e) => update({ checked_in_with: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="co-out">Checked out with</Label>
+                <Input
+                  id="co-out"
+                  className="h-11 text-base"
+                  maxLength={200}
+                  value={draft.checked_out_with}
+                  onChange={(e) => update({ checked_out_with: e.target.value })}
+                />
+              </div>
+            </div>
+            <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
+              <span className="font-medium">Recommend a new roof</span>
+              <Switch
+                checked={draft.recommend_new_roof}
+                onCheckedChange={(v) => update({ recommend_new_roof: v })}
+              />
+            </label>
+          </Section>
 
-      {/* (e) Time */}
-      <Section title="Time" icon={Clock}>
-        {job.on_site_at && !finished && (
-          <p className="text-sm text-muted-foreground">
-            Labor from On site ({clock(job.on_site_at)}) until now is added when you press Complete.
-          </p>
-        )}
-        <TimeEntries jobId={job.id} editable defaultHelpers={draft.helper_count} />
-      </Section>
-
-      {/* (f) Signature */}
-      <Section title="Signature" icon={PenLine}>
-        <div className="space-y-1">
-          <Label htmlFor="co-signed-by">Signed by</Label>
-          <Input
-            id="co-signed-by"
-            className="h-11 text-base"
-            maxLength={200}
-            placeholder="Customer's name"
-            value={draft.signed_by}
-            onChange={(e) => update({ signed_by: e.target.value })}
-          />
-        </div>
-        <SignatureSection job={job} />
-      </Section>
-
-      {/* (g) Save / Complete */}
-      <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        {dirty && (
-          <p className="mb-2 text-xs text-muted-foreground">
-            Unsaved notes (kept on this phone until saved)
-          </p>
-        )}
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-14 flex-1 text-base"
-            disabled={busy}
-            onClick={() => save.mutate()}
-          >
-            {save.isPending ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-5 w-5" />
+          {/* (e) Time */}
+          <Section title="Time" icon={Clock}>
+            {job.on_site_at && !finished && (
+              <p className="text-sm text-muted-foreground">
+                Labor from On site ({clock(job.on_site_at)}) until now is added when you press
+                Complete.
+              </p>
             )}
-            Save
-          </Button>
-          <Button
-            type="button"
-            className="h-14 flex-[2] text-lg font-semibold"
-            disabled={busy}
-            onClick={() => complete.mutate()}
-          >
-            {complete.isPending ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <CheckCircle2 className="mr-2 h-5 w-5" />
-            )}
-            {finished ? "Save and finish" : "Complete"}
-          </Button>
-        </div>
-      </div>
+            <TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />
+          </Section>
+
+          {/* (f) Signature */}
+          <Section title="Signature" icon={PenLine}>
+            <div className="space-y-1">
+              <Label htmlFor="co-signed-by">Signed by</Label>
+              <Input
+                id="co-signed-by"
+                className="h-11 text-base"
+                maxLength={200}
+                placeholder="Customer's name"
+                value={draft.signed_by}
+                onChange={(e) => update({ signed_by: e.target.value })}
+              />
+            </div>
+            <SignatureSection job={job} />
+          </Section>
+
+          {/* (g) Complete (the rest saves itself) */}
+          <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="mb-2 flex min-h-4 items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>Everything saves as you go.</span>
+              <SavedIndicator state={autosave.state} />
+            </div>
+            <Button
+              type="button"
+              className="h-14 w-full text-lg font-semibold"
+              disabled={busy}
+              onClick={() => complete.mutate()}
+            >
+              {complete.isPending ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="mr-2 h-5 w-5" />
+              )}
+              {finished ? "Finish" : "Complete"}
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

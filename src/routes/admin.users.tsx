@@ -10,8 +10,10 @@ import {
   createUser,
   updateUserAccess,
   deleteUser,
+  setDefaultBillRate,
   type UserProfile,
 } from "@/lib/auth.functions";
+import { RateBox } from "@/components/service/rate-box";
 import {
   PAGES,
   PAGE_HELP,
@@ -42,6 +44,9 @@ export const Route = createFileRoute("/admin/users")({
   head: () => ({ meta: [{ title: "Users & access — JBK Portal" }] }),
   component: UsersPage,
 });
+
+const BILL_RATE_HELP =
+  "What this technician bills per labor hour on a ticket's crew when the ticket's own $ box is blank. Blank here: the rate table (Admin › Service rates; tech rate as the lead, helper rate otherwise).";
 
 const TECHNICIAN_HELP =
   "Appears on the service board, can be assigned tickets and vehicles; edits only their own tickets";
@@ -126,6 +131,7 @@ function UsersPage() {
   const createUserFn = useServerFn(createUser);
   const updateAccessFn = useServerFn(updateUserAccess);
   const deleteUserFn = useServerFn(deleteUser);
+  const rateFn = useServerFn(setDefaultBillRate);
 
   const { data: users, isLoading } = useQuery({
     queryKey: ["users"],
@@ -172,6 +178,20 @@ function UsersPage() {
       if (input.id === me?.id) void refreshProfile();
     },
     onError: (e: Error) => toast.error(e.message || "Could not update access"),
+  });
+
+  const rateMut = useMutation({
+    mutationFn: (input: { id: string; default_bill_rate: number | null }) =>
+      rateFn({ data: input }),
+    onSuccess: (r) => {
+      toast.success(
+        r.default_bill_rate == null
+          ? "Default bill rate cleared (the rate table applies)"
+          : `Default bill rate set to $${r.default_bill_rate.toFixed(2)}/hr`,
+      );
+      invalidate();
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not set the bill rate"),
   });
 
   const deleteMut = useMutation({
@@ -296,6 +316,7 @@ function UsersPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Access</TableHead>
+                  <TableHead title={BILL_RATE_HELP}>Default bill rate</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -324,6 +345,21 @@ function UsersPage() {
                             accessMut.mutate({ id: u.id, role: r, access: a, technician: t })
                           }
                         />
+                      </TableCell>
+                      <TableCell className="w-32 align-top">
+                        {u.technician ? (
+                          <RateBox
+                            aria-label={`Default bill rate for ${u.full_name || u.email}, dollars per hour`}
+                            title={BILL_RATE_HELP}
+                            placeholder="rate table"
+                            className="h-8"
+                            value={u.default_bill_rate ?? null}
+                            disabled={rateMut.isPending}
+                            onCommit={(v) => rateMut.mutate({ id: u.id, default_bill_rate: v })}
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground">technicians only</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

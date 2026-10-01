@@ -15,6 +15,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice } from "@/lib/access";
 import { siteAddressLine } from "@/lib/crm.functions";
+import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 
 export type ServiceJobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
 
@@ -137,8 +138,28 @@ const jobSchema = z.object({
   description: z.string().trim().max(500).default(""),
   service_type: z.enum(SERVICE_TYPES).default("leak"),
   po_number: optText(60),
+  /** The job number (owner, Sep 30), next to PO #; carried to the invoice as job_code. */
+  job_number: z.string().trim().max(60).nullable().optional(),
   technician_id: z.string().uuid().nullable().optional(),
-  helper_count: z.number().int().min(0).max(9).default(0),
+  /** Old-style unnamed helpers; left as it is when not sent (a named crew keeps it in step). */
+  helper_count: z.number().int().min(0).max(9).optional(),
+  /**
+   * The named crew (office): the lead's $ (null = default) and the other technicians with
+   * theirs. Not sent = the crew is left as it is (row 0 still follows technician_id).
+   */
+  crew: z
+    .object({
+      lead_rate: z.number().finite().min(0).max(100000).nullable(),
+      others: z
+        .array(
+          z.object({
+            technician_id: z.string().uuid(),
+            bill_rate: z.number().finite().min(0).max(100000).nullable(),
+          }),
+        )
+        .max(MAX_HELPERS),
+    })
+    .optional(),
   scheduled_date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -194,6 +215,10 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
     if (techMayNotSet(p, stage))
       throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
+    // The crew's rates are money: the office sets them. A technician answers "who is on this
+    // job" on the close-out (setJobCrew) instead.
+    const isTechUser = p.technician && p.role !== "admin";
+    const crew = isTechUser ? undefined : fields.crew;
     const patch = {
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
@@ -205,8 +230,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       description: fields.description,
       service_type: fields.service_type,
       po_number: fields.po_number ?? null,
+      ...(fields.job_number !== undefined ? { job_number: fields.job_number || null } : {}),
       technician_id: fields.technician_id ?? null,
-      helper_count: fields.helper_count,
+      ...(fields.helper_count !== undefined ? { helper_count: fields.helper_count } : {}),
       scheduled_date: fields.scheduled_date ?? null,
       stage,
       notes: fields.notes ?? null,
@@ -232,13 +258,14 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("*")
         .single();
       if (error) throw new Error(error.message);
+      const saved = await saveCrew(sb, row, crew);
       await syncTicketFollowup(
-        row,
+        saved,
         { id: context.userId, name: nameOf(p) },
         sb,
         cur?.stage ?? null,
       );
-      return withTechName(sb, row);
+      return withTechName(sb, saved);
     }
     const { data: row, error } = await sb
       .from("service_jobs")
@@ -246,9 +273,31 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, null);
-    return withTechName(sb, row);
+    const saved = await saveCrew(sb, row, crew);
+    await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, null);
+    return withTechName(sb, saved);
   });
+
+/**
+ * After a ticket save: write the crew the office sent (the lead at row 0 = technician_id), or
+ * make row 0 follow a changed technician. Returns the row as it now is (helper_count in step).
+ */
+async function saveCrew(
+  sb: SupabaseClient<Database>,
+  row: ServiceJobRow,
+  crew:
+    | { lead_rate: number | null; others: { technician_id: string; bill_rate: number | null }[] }
+    | undefined,
+): Promise<ServiceJobRow> {
+  const { writeCrew, syncCrewLead } = await import("@/lib/service-crew.server");
+  if (!crew) {
+    await syncCrewLead(sb, row.id, row.technician_id);
+    return row;
+  }
+  const rows = planCrew(row.technician_id, crew.lead_rate, crew.others);
+  const helper_count = await writeCrew(sb, row.id, rows);
+  return { ...row, helper_count };
+}
 
 /** The stages a technician may set; Invoiced and Closed belong to the office (owner, Sep 27). */
 export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
@@ -366,6 +415,9 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    // Row 0 of a named crew mirrors the technician (the board shows and moves the lead).
+    const { syncCrewLead } = await import("@/lib/service-crew.server");
+    await syncCrewLead(sb, row.id, row.technician_id);
     await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
     return withTechName(sb, row);
   });
@@ -446,4 +498,66 @@ export const listServiceJobMaterials = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return rows ?? [];
+  });
+
+/** A crew member as the ticket shows it. `bill_rate` is null for a technician (no money). */
+export interface CrewMemberView extends CrewRow {
+  name: string;
+}
+/** The ticket's named crew, the lead first. Empty: an old-style ticket (helper_count). */
+export const listJobCrew = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<CrewMemberView[]> => {
+    const p = await serviceAccess(context);
+    const sb = context.supabase;
+    const { readCrew } = await import("@/lib/service-crew.server");
+    const [rows, { data: techs }] = await Promise.all([
+      readCrew(sb, data.id),
+      sb.rpc("technician_options"),
+    ]);
+    const names = new Map<string, string>();
+    for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+    const noMoney = p.technician && p.role !== "admin";
+    return rows.map((r) => ({
+      ...r,
+      bill_rate: noMoney ? null : r.bill_rate,
+      name: names.get(r.technician_id) ?? "Former technician",
+    }));
+  });
+
+/**
+ * What a blank $ box beside a name bills (office only): the rate table's labor bill rates at a
+ * rate kind, and the technicians' profile rates (Admin › Users).
+ */
+export interface CrewRateDefaults {
+  table: { tech: number; helper: number };
+  profiles: Record<string, number>;
+}
+export const getCrewRateDefaults = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ rate_kind: z.enum(["standard", "urgent", "emergency"]) }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<CrewRateDefaults> => {
+    const p = await serviceAccess(context);
+    if (p.technician && p.role !== "admin") throw new Error("Rates are the office's");
+    const sb = context.supabase;
+    const [{ data: rates, error }, { data: prof, error: pErr }] = await Promise.all([
+      sb
+        .from("service_rates")
+        .select("role, time_kind, bill_rate")
+        .eq("rate_kind", data.rate_kind)
+        .eq("time_kind", "labor"),
+      sb.rpc("technician_bill_rates"),
+    ]);
+    if (error) throw new Error(error.message);
+    if (pErr) throw new Error(pErr.message);
+    const table = { tech: 0, helper: 0 };
+    for (const r of rates ?? [])
+      if (r.role === "tech" || r.role === "helper") table[r.role] = Number(r.bill_rate);
+    const profiles: Record<string, number> = {};
+    for (const r of prof ?? [])
+      if (r.default_bill_rate != null) profiles[r.id] = Number(r.default_bill_rate);
+    return { table, profiles };
   });

@@ -16,6 +16,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
 import type { ServiceJobRow } from "@/lib/service.functions";
+import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -86,6 +87,8 @@ export interface TodayJob extends ServiceJobRow {
   contact_name: string | null;
   contact_phone: string | null;
   account_phone: string | null;
+  /** The other technicians of the named crew (not the lead), in order. */
+  crew_names: string[];
 }
 
 /** My tickets that still need me: not Done yet, soonest first (today's on top). */
@@ -114,7 +117,14 @@ export const myDay = createServerFn({ method: "GET" })
     const accountIds = [
       ...new Set((jobs ?? []).map((j) => j.account_id).filter((x): x is string => !!x)),
     ];
-    const [{ data: sites }, { data: contacts }, { data: accounts }] = await Promise.all([
+    const jobIds = (jobs ?? []).map((j) => j.id);
+    const [
+      { data: sites },
+      { data: contacts },
+      { data: accounts },
+      { data: crewRows },
+      { data: techs },
+    ] = await Promise.all([
       siteIds.length
         ? sb.from("crm_sites").select("id, technician_instructions").in("id", siteIds)
         : Promise.resolve({ data: [] as { id: string; technician_instructions: string | null }[] }),
@@ -131,7 +141,31 @@ export const myDay = createServerFn({ method: "GET" })
       accountIds.length
         ? sb.from("crm_accounts").select("id, phone").in("id", accountIds)
         : Promise.resolve({ data: [] as { id: string; phone: string | null }[] }),
+      jobIds.length
+        ? sb
+            .from("service_job_techs")
+            .select("service_job_id, technician_id, sort")
+            .in("service_job_id", jobIds)
+            .gt("sort", 0)
+            .order("sort")
+        : Promise.resolve({
+            data: [] as {
+              service_job_id: string | null;
+              technician_id: string | null;
+              sort: number;
+            }[],
+          }),
+      sb.rpc("technician_options"),
     ]);
+    const techName = new Map<string, string>();
+    for (const t of techs ?? []) techName.set(t.id, (t.full_name ?? "").trim() || t.email);
+    const crewOf = new Map<string, string[]>();
+    for (const r of crewRows ?? []) {
+      if (!r.service_job_id || !r.technician_id) continue;
+      const list = crewOf.get(r.service_job_id) ?? [];
+      list.push(techName.get(r.technician_id) ?? "Former technician");
+      crewOf.set(r.service_job_id, list);
+    }
     const siteMap = new Map((sites ?? []).map((s) => [s.id, s.technician_instructions]));
     const contactMap = new Map((contacts ?? []).map((c) => [c.id, c]));
     const accountMap = new Map((accounts ?? []).map((a) => [a.id, a.phone]));
@@ -143,6 +177,7 @@ export const myDay = createServerFn({ method: "GET" })
         contact_name: c?.name ?? null,
         contact_phone: c?.mobile || c?.office_phone || null,
         account_phone: j.account_id ? (accountMap.get(j.account_id) ?? null) : null,
+        crew_names: crewOf.get(j.id) ?? [],
       };
     });
   });
@@ -621,6 +656,55 @@ export const saveCloseout = createServerFn({ method: "POST" })
       .select("*")
       .single();
     if (error) throw new Error(error.message);
+    return row;
+  });
+
+/**
+ * The technician's answer to "Who is on this job with you?" (owner, Sep 30): alone, or the
+ * other technicians picked. Writes the crew rows (the lead stays row 0; rates the office set on
+ * kept members stay) and stamps crew_confirmed_at the first time; the answer stays editable
+ * (before photos now, after photos later). Auto-saved by the close-out, no Save button.
+ */
+export const setJobCrew = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        others: z.array(z.string().uuid()).max(MAX_HELPERS),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ServiceJobRow> => {
+    const p = await me(context);
+    const job = await ownJob(context, data.id);
+    const sb = context.supabase;
+    const { readCrew, writeCrew } = await import("@/lib/service-crew.server");
+    const rows = confirmedCrew(await readCrew(sb, job.id), job.technician_id, data.others);
+    const helper_count = await writeCrew(sb, job.id, rows);
+    const { data: row, error } = await sb
+      .from("service_jobs")
+      .update({
+        helper_count,
+        crew_confirmed_at: job.crew_confirmed_at ?? new Date().toISOString(),
+        updated_by_name: nameOf(p),
+      })
+      .eq("id", job.id)
+      .select("*")
+      .single();
+    if (error) throw new Error(error.message);
+    await logEvent(
+      context,
+      job.id,
+      {
+        kind: "edit",
+        note: data.others.length
+          ? `Crew: ${data.others.length} other technician${data.others.length > 1 ? "s" : ""} on the job`
+          : "Crew: alone on the job",
+        meta: { crew: data.others },
+      },
+      nameOf(p),
+    );
     return row;
   });
 

@@ -18,6 +18,7 @@ import {
   Phone,
   PhoneCall,
   Truck,
+  Users,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -414,6 +415,9 @@ function eventText(e: JobEventRow): { icon: typeof Wrench; text: string } {
       };
     case "signature":
       return { icon: PenLine, text: "Customer signed" };
+    case "edit":
+      // "Who is on this job" answers (setJobCrew) and other recorded edits.
+      return { icon: /^Crew:/.test(e.note ?? "") ? Users : History, text: e.note ?? "Edited" };
     default:
       return { icon: History, text: [e.kind, e.note].filter(Boolean).join(": ") };
   }

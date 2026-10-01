@@ -3,8 +3,11 @@
  * (docs/service-module-design.md §5.3): query keys, loud errors, dates, GPS with a short
  * timeout, and the private "service" bucket (browser upload, signed URLs).
  */
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+
+import { createAutosave, type AutosaveState } from "@/lib/autosave";
 
 import { supabase } from "@/integrations/supabase/client";
 import { SERVICE_BUCKET } from "@/lib/service-field.functions";
@@ -25,7 +28,41 @@ export const fieldKeys = {
   time: (id: string) => ["service-job-time", id] as const,
   events: (id: string) => ["service-job-events", id] as const,
   materials: (id: string) => ["service-job-materials", id] as const,
+  crew: (id: string) => ["service-job-crew", id] as const,
 };
+
+/**
+ * Save as the tech types or taps (owner, Sep 30: the field side has no Save button): `push`
+ * the latest value; it saves after a short pause, one request at a time (lib/autosave.ts). A
+ * failure is a loud toast with the server's message; the value is kept and tried again on the
+ * next change, on `flush`, and when the screen closes.
+ */
+export function useAutosave<T>(
+  save: (value: T) => Promise<void>,
+  opts: { what: string; delay?: number },
+) {
+  const [state, setState] = useState<AutosaveState>("idle");
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const what = useRef(opts.what);
+  what.current = opts.what;
+  const [saver] = useState(() =>
+    createAutosave<T>({
+      delay: opts.delay ?? 700,
+      save: (v) => saveRef.current(v),
+      onState: setState,
+      onError: (e) => loudError(`${what.current} did not save. Check your signal`, e),
+    }),
+  );
+  // Leaving the screen: save what is still waiting.
+  useEffect(
+    () => () => {
+      void saver.flush();
+    },
+    [saver],
+  );
+  return { push: saver.push, flush: saver.flush, cancel: saver.cancel, state };
+}
 
 /** Today as YYYY-MM-DD on the phone's own calendar (not UTC). */
 export const localYmd = (d: Date = new Date()) =>

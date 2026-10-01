@@ -28,6 +28,8 @@ export interface UserProfile {
   access: Page[];
   technician: boolean;
   created_at?: string;
+  /** Admin › Users only: a technician's default bill rate per labor hour (null = rate table). */
+  default_bill_rate?: number | null;
 }
 const PROFILE_COLS = "id, email, full_name, role, access, technician, created_at";
 const toProfile = (row: {
@@ -38,8 +40,12 @@ const toProfile = (row: {
   access: unknown;
   technician?: boolean | null;
   created_at?: string;
+  default_bill_rate?: number | null;
 }): UserProfile => ({
   ...row,
+  ...(row.default_bill_rate !== undefined
+    ? { default_bill_rate: row.default_bill_rate == null ? null : Number(row.default_bill_rate) }
+    : {}),
   role: normalizeRole(row.role),
   access: normalizeAccess(row.access),
   technician: row.technician === true,
@@ -102,7 +108,7 @@ export const listUsers = createServerFn({ method: "GET" })
     await assertAdmin(context.supabase, context.userId);
     const { data, error } = await context.supabase
       .from("profiles")
-      .select(PROFILE_COLS)
+      .select(`${PROFILE_COLS}, default_bill_rate`)
       .order("created_at", { ascending: true });
     if (error) throw error;
     return (data ?? []).map(toProfile);
@@ -210,6 +216,38 @@ export const updateUserAccess = createServerFn({ method: "POST" })
       .single();
     if (error || !profile) throw new Error(error?.message ?? "Update failed");
     return toProfile(profile);
+  });
+
+/**
+ * A technician's default bill rate (owner, Sep 30): what their name on a ticket's crew bills per
+ * labor hour when the ticket's $ box is blank. null = the rate table (Admin › Service rates).
+ */
+export const setDefaultBillRate = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((data: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        default_bill_rate: z.number().finite().min(0).max(100000).nullable(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }): Promise<{ id: string; default_bill_rate: number | null }> => {
+    await assertAdmin(context.supabase, context.userId);
+    const rate =
+      data.default_bill_rate == null ? null : Math.round(data.default_bill_rate * 100) / 100;
+    const { data: row, error } = await context.supabase
+      .from("profiles")
+      .update({ default_bill_rate: rate })
+      .eq("id", data.id)
+      .select("id, default_bill_rate")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error("User not found");
+    return {
+      id: row.id,
+      default_bill_rate: row.default_bill_rate == null ? null : Number(row.default_bill_rate),
+    };
   });
 
 const deleteUserSchema = z.object({ id: z.string().uuid() });

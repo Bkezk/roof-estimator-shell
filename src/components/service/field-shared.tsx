@@ -7,7 +7,19 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Loader2, Plus, Trash2, X, type LucideIcon } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Plus,
+  Trash2,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+
+import type { AutosaveState } from "@/lib/autosave";
 
 import { useAuth } from "@/lib/auth-store";
 import {
@@ -36,6 +48,36 @@ import {
   shortDay,
   useSignedUrl,
 } from "@/components/service/field-utils";
+
+// ---------------------------------------------------------------------------------------------
+// Auto-save status: subtle while all is well (a failure also raises a loud toast).
+
+export function SavedIndicator({ state }: { state: AutosaveState }) {
+  if (state === "idle") return null;
+  if (state === "error")
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
+        <AlertTriangle className="h-3.5 w-3.5" /> Not saved
+      </span>
+    );
+  if (state === "saved")
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+        aria-live="polite"
+      >
+        <Check className="h-3.5 w-3.5" /> Saved
+      </span>
+    );
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+      aria-live="polite"
+    >
+      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------------------------
 // Section box: a bordered section with a title. Collapsible sections (owner, Sep 28: the ticket

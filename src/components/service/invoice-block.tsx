@@ -2,8 +2,12 @@
  * The invoice on the office's ticket page (docs/service-module-design.md §5.4). Shown once the
  * ticket is Done / Invoiced / Closed, or when it already has an invoice; opening it makes the
  * draft from the ticket's time and materials (getOrCreateInvoice, §4 rules). A draft is edited
- * in place (header, lines, narrative) and then finalised, or finalised and emailed; a final
- * invoice is read-only and can be downloaded, sent again, marked paid or voided.
+ * in place (header, lines, narrative) and then finalised, or finalised and emailed, or deleted;
+ * a final invoice is read-only and can be downloaded, sent again, marked paid or voided.
+ *
+ * A ticket can carry more than one invoice (owner, Sep 30): "Another invoice" makes the next,
+ * numbered "<ticket>.2", ".3", …; a deleted or voided one frees its number for the next
+ * (invoice-numbering.ts). The ticket's invoices show as chips to switch between.
  *
  * Office users and admins only: technicians never see money (RLS invoices_office), so the
  * block renders nothing for them.
@@ -29,10 +33,14 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { getAccount, listContacts } from "@/lib/crm.functions";
+import { invoiceLabel } from "@/lib/invoice-numbering";
 import {
+  createAnotherInvoice,
   finalizeInvoice,
+  getInvoice,
   getOrCreateInvoice,
   getServiceRates,
+  listTicketInvoices,
   markInvoicePaid,
   rebuildInvoiceLines,
   renderInvoice,
@@ -100,7 +108,11 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+/** Every invoice query of a ticket (the prefix); `id` null = the ticket's current invoice. */
 const invoiceKey = (jobId: string) => ["ticket-invoice", jobId] as const;
+const oneInvoiceKey = (jobId: string, id: string | null) =>
+  ["ticket-invoice", jobId, id ?? "current"] as const;
+const ticketInvoicesKey = (jobId: string) => ["ticket-invoices", jobId] as const;
 const INVOICE_STAGES = ["done", "invoiced", "closed"];
 
 const LINE_KINDS = ["travel", "labor", "material", "other"] as const;
@@ -158,13 +170,24 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
   const { session } = useAuth();
   const qc = useQueryClient();
   const getFn = useServerFn(getOrCreateInvoice);
-  // After a void the ticket is back at Done; wait for the office before making a new draft.
+  const oneFn = useServerFn(getInvoice);
+  const listFn = useServerFn(listTicketInvoices);
+  const anotherFn = useServerFn(createAnotherInvoice);
+  // After a void / delete: wait for the office before making a new draft.
   const [voided, setVoided] = useState(false);
+  // The invoice shown; null = the ticket's current one (made on first open).
+  const [selected, setSelected] = useState<string | null>(null);
   const q = useQuery({
-    queryKey: invoiceKey(job.id),
-    queryFn: () => getFn({ data: { job_id: job.id } }),
+    queryKey: oneInvoiceKey(job.id, selected),
+    queryFn: () =>
+      selected ? oneFn({ data: { id: selected } }) : getFn({ data: { job_id: job.id } }),
     enabled: !!session && !voided,
     retry: 1,
+  });
+  const all = useQuery({
+    queryKey: ticketInvoicesKey(job.id),
+    queryFn: () => listFn({ data: { job_id: job.id } }),
+    enabled: !!session && (!!q.data || voided),
   });
 
   const refreshTicket = () => {
@@ -172,29 +195,51 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["accounts"] });
   };
+  const refreshLists = () => {
+    void qc.invalidateQueries({ queryKey: ["invoices"] });
+    void qc.invalidateQueries({ queryKey: ticketInvoicesKey(job.id) });
+  };
   const ctx: Ctx = {
     job,
     applied: (r, stageChanged) => {
-      qc.setQueryData(invoiceKey(job.id), r);
-      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      qc.setQueryData(oneInvoiceKey(job.id, selected), r);
+      refreshLists();
       if (stageChanged) refreshTicket();
     },
     onVoided: () => {
       setVoided(true);
+      setSelected(null);
       qc.removeQueries({ queryKey: invoiceKey(job.id) });
-      void qc.invalidateQueries({ queryKey: ["invoices"] });
+      refreshLists();
       refreshTicket();
     },
+  };
+  const another = useMutation({
+    mutationFn: () => anotherFn({ data: { job_id: job.id } }),
+    onSuccess: (r) => {
+      qc.setQueryData(oneInvoiceKey(job.id, r.invoice.id), r);
+      setSelected(r.invoice.id);
+      setVoided(false);
+      refreshLists();
+      refreshTicket();
+      toast.success(`Invoice #${invoiceLabel(r.invoice)} made from the ticket`);
+    },
+    onError: (e) => toast.error(`Could not make another invoice: ${errText(e)}`),
+  });
+  const pick = (id: string) => {
+    setVoided(false);
+    setSelected(id);
   };
 
   const data = voided ? undefined : q.data;
   const status = data ? asInvoiceStatus(data.invoice.status) : null;
+  const siblings = all.data ?? [];
   return (
     <section className="space-y-4 rounded-lg border p-4" aria-label="Invoice">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="flex items-center gap-2 font-semibold">
           <Receipt className="h-4 w-4" /> Invoice
-          {data && <span className="tabular-nums">#{data.invoice.number}</span>}
+          {data && <span className="tabular-nums">#{invoiceLabel(data.invoice)}</span>}
         </h2>
         {data && <InvoiceStatusBadge status={data.invoice.status} />}
         {data?.invoice.updated_by_name && (
@@ -202,10 +247,52 @@ function InvoiceLoader({ job }: { job: ServiceJobWithTech }) {
             last changed by {data.invoice.updated_by_name}
           </span>
         )}
+        {data && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="ml-auto"
+            disabled={another.isPending}
+            title={`Make another invoice for ticket #${job.number} (numbered ${job.number}.2, ${job.number}.3, …)`}
+            onClick={() => another.mutate()}
+          >
+            {another.isPending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="mr-1 h-4 w-4" />
+            )}
+            Another invoice
+          </Button>
+        )}
       </div>
+      {siblings.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="This ticket's invoices">
+          {siblings.map((x) => {
+            const active = !voided && data?.invoice.id === x.id;
+            return (
+              <Button
+                key={x.id}
+                type="button"
+                size="sm"
+                variant={active ? "secondary" : "ghost"}
+                aria-pressed={active}
+                className={`h-7 gap-1.5 px-2 text-xs ${x.status === "void" ? "text-muted-foreground line-through" : ""}`}
+                onClick={() => pick(x.id)}
+              >
+                <span className="tabular-nums">#{x.label}</span>
+                <InvoiceStatusBadge status={x.status} />
+              </Button>
+            );
+          })}
+        </div>
+      )}
       {voided ? (
         <div className="space-y-3 rounded-md border border-dashed p-4 text-sm">
-          <p>The invoice was voided and the ticket is back at Done.</p>
+          <p>
+            The invoice was voided or deleted; its number is free for the next invoice on this
+            ticket.
+          </p>
           <Button variant="outline" onClick={() => setVoided(false)}>
             <Plus className="mr-1 h-4 w-4" /> Make a new draft
           </Button>
@@ -315,6 +402,8 @@ function computeTotals(
 function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const { job } = ctx;
   const inv = data.invoice;
+  const no = invoiceLabel(inv);
+  const deleteFn = useServerFn(voidInvoice);
   const qc = useQueryClient();
   const saveFn = useServerFn(saveInvoice);
   const rebuildFn = useServerFn(rebuildInvoiceLines);
@@ -332,8 +421,10 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   const [newKey, setNewKey] = useState<string | null>(null);
 
-  const [busy, setBusy] = useState<null | "save" | "rebuild" | "preview" | "final" | "send">(null);
-  const [confirm, setConfirm] = useState<null | "rebuild" | "final">(null);
+  const [busy, setBusy] = useState<
+    null | "save" | "rebuild" | "preview" | "final" | "send" | "delete"
+  >(null);
+  const [confirm, setConfirm] = useState<null | "rebuild" | "final" | "delete">(null);
   const [sendOpen, setSendOpen] = useState(false);
 
   const account = useAccount(job.account_id);
@@ -403,7 +494,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     run("save", "Could not save the invoice", async () => {
       const r = await saveIfNeeded(false);
       if (r) ctx.applied(r);
-      toast.success(`Invoice #${inv.number} saved`);
+      toast.success(`Invoice #${no} saved`);
     });
   const rebuild = () =>
     run("rebuild", "Could not rebuild the invoice", async () => {
@@ -442,7 +533,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         const r = await finalizeFn({ data: { id: inv.id } });
         setConfirm(null);
         ctx.applied(r, true);
-        toast.success(`Invoice #${r.invoice.number} is final; the ticket is Invoiced`);
+        toast.success(`Invoice #${invoiceLabel(r.invoice)} is final; the ticket is Invoiced`);
       },
       true,
     );
@@ -455,10 +546,17 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         const r = await sendFn({ data: { id: inv.id, to, ...(message ? { message } : {}) } });
         setSendOpen(false);
         ctx.applied(r, true);
-        toast.success(`Invoice #${r.invoice.number} sent to ${to.join(", ")}`);
+        toast.success(`Invoice #${invoiceLabel(r.invoice)} sent to ${to.join(", ")}`);
       },
       true,
     );
+  const removeDraft = () =>
+    run("delete", "Could not delete the draft", async () => {
+      await deleteFn({ data: { id: inv.id } });
+      setConfirm(null);
+      toast.success(`Draft invoice #${no} deleted; its number is free for the next invoice`);
+      ctx.onVoided();
+    });
 
   const addLine = () => {
     const key = `n${++lineSeq}`;
@@ -512,7 +610,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="space-y-1">
           <Label className="text-xs">Invoice #</Label>
-          <p className="flex h-9 items-center font-medium tabular-nums">{inv.number}</p>
+          <p className="flex h-9 items-center font-medium tabular-nums">{no}</p>
         </div>
         <div className="space-y-1">
           <Label htmlFor="inv-date" className="text-xs">
@@ -776,6 +874,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           <Send className="mr-2 h-4 w-4" /> Finalise &amp; send
         </Button>
         {dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
+        <Button
+          type="button"
+          variant="ghost"
+          className="ml-auto text-destructive hover:text-destructive"
+          disabled={!!busy}
+          onClick={() => setConfirm("delete")}
+        >
+          <Trash2 className="mr-2 h-4 w-4" /> Delete draft
+        </Button>
       </div>
 
       <AlertDialog
@@ -789,12 +896,16 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             <AlertDialogTitle>
               {confirm === "rebuild"
                 ? "Rebuild the lines from the ticket?"
-                : `Finalise invoice #${inv.number}?`}
+                : confirm === "delete"
+                  ? `Delete draft invoice #${no}?`
+                  : `Finalise invoice #${no}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "rebuild"
                 ? "The lines are thrown away and built again from the ticket's time entries and materials at today's rates. Line edits are lost (the header and description stay)."
-                : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}
+                : confirm === "delete"
+                  ? `The draft and its lines are removed. The next invoice made for ticket #${job.number} takes number ${no}.`
+                  : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}
               {confirm === "final" && dirty ? " Your unsaved changes are saved first." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -804,11 +915,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               disabled={!!busy}
               onClick={(e) => {
                 e.preventDefault();
-                void (confirm === "rebuild" ? rebuild() : finalise());
+                void (confirm === "rebuild"
+                  ? rebuild()
+                  : confirm === "delete"
+                    ? removeDraft()
+                    : finalise());
               }}
             >
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              {confirm === "rebuild" ? "Rebuild" : "Finalise"}
+              {confirm === "rebuild" ? "Rebuild" : confirm === "delete" ? "Delete" : "Finalise"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -816,7 +931,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
       {sendOpen && (
         <SendDialog
-          title={`Finalise & send invoice #${inv.number}`}
+          title={`Finalise & send invoice #${no}`}
           note="The invoice is finalised (the ticket moves to Invoiced) and the PDF emailed."
           inv={inv}
           accountId={job.account_id}
@@ -954,7 +1069,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     onSuccess: (r, v) => {
       setDialog(null);
       ctx.applied(r);
-      toast.success(`Invoice #${r.invoice.number} sent to ${v.to.join(", ")}`);
+      toast.success(`Invoice #${invoiceLabel(r.invoice)} sent to ${v.to.join(", ")}`);
     },
     onError: (e) => toast.error(`Could not send the invoice: ${errText(e)}`),
   });
@@ -972,7 +1087,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     onSuccess: (r) => {
       setDialog(null);
       ctx.applied(r, true);
-      toast.success(`Invoice #${r.invoice.number} marked paid; the ticket is Closed`);
+      toast.success(`Invoice #${invoiceLabel(r.invoice)} marked paid; the ticket is Closed`);
     },
     onError: (e) => toast.error(`Could not mark the invoice paid: ${errText(e)}`),
   });
@@ -980,7 +1095,9 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
     mutationFn: () => voidFn({ data: { id: inv.id } }),
     onSuccess: () => {
       setDialog(null);
-      toast.success(`Invoice #${inv.number} voided; the ticket is back at Done`);
+      toast.success(
+        `Invoice #${invoiceLabel(inv)} voided; its number is free for the next invoice`,
+      );
       ctx.onVoided();
     },
     onError: (e) => toast.error(`Could not void the invoice: ${errText(e)}`),
@@ -1124,7 +1241,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
       {dialog === "send" && (
         <SendDialog
-          title={`Send invoice #${inv.number}`}
+          title={`Send invoice #${invoiceLabel(inv)}`}
           note="The final PDF is emailed again."
           inv={inv}
           accountId={job.account_id}
@@ -1149,10 +1266,11 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Void invoice #{inv.number}?</AlertDialogTitle>
+            <AlertDialogTitle>Void invoice #{invoiceLabel(inv)}?</AlertDialogTitle>
             <AlertDialogDescription>
               Use this for a mistake. The invoice stays on record as Void (it cannot be un-voided)
-              and is left out of the Sage export; the ticket goes back to Done.
+              and is left out of the Sage export; its number is free for the next invoice on this
+              ticket. The ticket goes back to Done unless another of its invoices is still live.
               {inv.sent_at ? " The customer already has the emailed copy; let them know." : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1399,7 +1517,7 @@ function PaidDialog(props: {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {again ? "Edit the payment" : "Mark paid"} · invoice #{inv.number}
+            {again ? "Edit the payment" : "Mark paid"} · invoice #{invoiceLabel(inv)}
           </DialogTitle>
           <DialogDescription>
             Records the payment here (Sage stays the ledger) and closes the ticket. Total{" "}
