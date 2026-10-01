@@ -470,11 +470,26 @@ describe("Source: getOwnerPersonDetail is admin-only; the component expands rows
       ["Done this week", "Nothing done this week"],
     ])
       expect(view).toContain(`title="${title}"\n        empty="${empty}"`);
-    expect(view).toContain('<h4 className="text-sm font-semibold">Last activity</h4>');
+    expect(view).toContain("Last activity\n          <span className=");
     expect(view).toContain("queryFn: () => fn({ data: { userId } })");
     expect(view).toContain("staleTime: DETAIL_STALE_MS");
     expect(view).toContain("const DETAIL_STALE_MS = 60_000;");
     // Errors toast the server's message.
     expect(view).toMatch(/toast\.error\(`Could not load \$\{name\}'s items: \$\{errMsg\}`/);
+  });
+});
+
+describe("detail layout is standardized (owner, Oct 1: 'so the text isn't so up and down')", () => {
+  it("every group is a bordered card with a header bar, divided rows and right-aligned dates", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync("src/components/owner-view.tsx", "utf8");
+    const detail = src.slice(src.indexOf("function DetailGroup"));
+    expect(detail).toContain("rounded-md border");
+    expect(detail).toContain("border-b bg-muted/40");
+    expect((detail.match(/divide-y/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect((detail.match(/text-right text-xs tabular-nums/g) ?? []).length).toBeGreaterThanOrEqual(
+      2,
+    );
+    expect(detail).toContain("grid-cols-[auto_minmax(0,1fr)_auto]");
   });
 });

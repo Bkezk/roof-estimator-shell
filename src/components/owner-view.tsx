@@ -348,29 +348,40 @@ function DetailGroup({
   empty: string;
   lines: DetailLine[];
 }) {
+  // Owner (Oct 1): "a bit more standardized … so the text isn't so up and down": every group is a
+  // bordered card with a header bar, and every line is the same three cells — badge, title with
+  // the customer / property under it, the date right-aligned — divided by rules.
   return (
-    <section className="min-w-0 space-y-2">
-      <h4 className="text-sm font-semibold">
-        {title} <span className="font-normal text-muted-foreground">({lines.length})</span>
+    <section className="min-w-0 overflow-hidden rounded-md border">
+      <h4 className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
+        {title}
+        <span className="font-normal tabular-nums text-muted-foreground">{lines.length}</span>
       </h4>
       {lines.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{empty}</p>
+        <p className="px-3 py-3 text-sm text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="divide-y">
           {lines.map((l) => (
-            <li key={l.key} className="text-sm">
-              <div className="flex items-start gap-2">
-                <Badge variant="outline" className={`shrink-0 ${DETAIL_KIND_CLASS[l.kind]}`}>
-                  {DETAIL_KIND_LABELS[l.kind]}
-                </Badge>
-                <span className="min-w-0 break-words leading-snug">
+            <li
+              key={l.key}
+              className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2 text-sm"
+            >
+              <Badge variant="outline" className={`mt-0.5 shrink-0 ${DETAIL_KIND_CLASS[l.kind]}`}>
+                {DETAIL_KIND_LABELS[l.kind]}
+              </Badge>
+              <span className="min-w-0">
+                <span className="block truncate leading-snug" title={l.title}>
                   <ItemLink href={l.href}>{l.title}</ItemLink>
                 </span>
-              </div>
-              <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                {l.where && <span className="break-words">{l.where}</span>}
-                <span>{l.when}</span>
-              </div>
+                {l.where && (
+                  <span className="block truncate text-xs text-muted-foreground" title={l.where}>
+                    {l.where}
+                  </span>
+                )}
+              </span>
+              <span className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                {l.when}
+              </span>
             </li>
           ))}
         </ul>
@@ -435,16 +446,26 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
           href: i.href,
         }))}
       />
-      <section className="min-w-0 space-y-2">
-        <h4 className="text-sm font-semibold">Last activity</h4>
+      <section className="min-w-0 overflow-hidden rounded-md border">
+        <h4 className="flex items-center justify-between border-b bg-muted/40 px-3 py-1.5 text-sm font-semibold">
+          Last activity
+          <span className="font-normal tabular-nums text-muted-foreground">{d.recent.length}</span>
+        </h4>
         {d.recent.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No activity yet</p>
+          <p className="px-3 py-3 text-sm text-muted-foreground">No activity yet</p>
         ) : (
-          <ul className="space-y-1.5 text-sm">
+          <ul className="divide-y">
             {d.recent.map((a, i) => (
-              <li key={`${a.at}-${i}`} className="break-words">
-                {a.href ? <ItemLink href={a.href}>{a.text}</ItemLink> : a.text}
-                <span className="text-muted-foreground"> · {activityWhen(a.at, now)}</span>
+              <li
+                key={`${a.at}-${i}`}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 px-3 py-2 text-sm"
+              >
+                <span className="min-w-0 break-words leading-snug">
+                  {a.href ? <ItemLink href={a.href}>{a.text}</ItemLink> : a.text}
+                </span>
+                <span className="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                  {activityWhen(a.at, now)}
+                </span>
               </li>
             ))}
           </ul>
