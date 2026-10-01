@@ -19,7 +19,7 @@ import { FileDown, Loader2, Receipt } from "lucide-react";
 import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice } from "@/lib/access";
+import { managesTickets } from "@/lib/access";
 import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
 import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
 import {
@@ -54,10 +54,10 @@ import { Label } from "@/components/ui/label";
 
 export function InvoicesPage({ toInvoice = false }: { toInvoice?: boolean }) {
   const { profile } = useAuth();
-  if (!isOffice(profile))
+  if (!managesTickets(profile))
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
-        <p className="font-medium">Invoices are the office's.</p>
+        <p className="font-medium">Invoices are a manager's.</p>
         <p className="text-sm text-muted-foreground">Your tickets are on Today.</p>
         <Button asChild>
           <Link to="/service/today">Go to Today</Link>

@@ -5,7 +5,8 @@
  * material off a vehicle is logged against (inventory.functions.ts).
  *
  * Access: Service. A technician (profiles.technician) may edit only jobs assigned to them —
- * RLS enforces the same rule; office users and admins edit any.
+ * RLS enforces the same rule; office users and admins edit any. Creating, dispatching, deleting
+ * and every rate are a manager's or an admin's (`managesTickets`; owner, Oct 1).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -13,7 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess, isOffice } from "@/lib/access";
+import { canAccess, isOffice, managesTickets } from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { siteProblem } from "@/lib/ticket-form";
@@ -186,6 +187,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
   .validator((d: unknown) => jobSchema.parse(d))
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
+    // Owner, Oct 1: "The manager creates the tickets; reps do not create tickets".
+    const manager = managesTickets(p);
+    if (!data.id && !manager) throw new Error("Only a manager creates tickets");
     const sb = context.supabase;
     const { id, ...fields } = data;
     let customer_name = fields.customer_name ?? "";
@@ -232,15 +236,15 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
     if (techMayNotSet(p, stage))
       throw new Error("A technician can mark a ticket Done; the office invoices and closes it");
-    // The crew's rates are money: the office sets them. A technician answers "who is on this
-    // job" on the close-out (setJobCrew) instead.
-    const isTechUser = !isOffice(p);
-    const crew = isTechUser ? undefined : fields.crew;
+    // The crew and its rates are dispatch and money: a manager's (owner, Oct 1). A technician
+    // answers "who is on this job" on the close-out (setJobCrew) instead; anyone else's save
+    // leaves the crew, the technician and the labor rate as they are.
+    const crew = manager ? fields.crew : undefined;
     const patch = {
       account_id: fields.account_id ?? null,
       site_id: fields.site_id ?? null,
       contact_id: fields.account_id ? (fields.contact_id ?? null) : null,
-      ...(fields.labor_rate_kind ? { labor_rate_kind: fields.labor_rate_kind } : {}),
+      ...(fields.labor_rate_kind && manager ? { labor_rate_kind: fields.labor_rate_kind } : {}),
       customer_name,
       site_name,
       site_address,
@@ -278,6 +282,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         newYmd: fields.scheduled_date,
       });
       if (moveProblem) throw new Error(moveProblem);
+      // Dispatch is a manager's: anyone else's save keeps the assigned technician.
+      if (!manager && cur) patch.technician_id = cur.technician_id;
       const { data: row, error } = await sb
         .from("service_jobs")
         .update(patch)
@@ -289,7 +295,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         id: context.userId,
         name: nameOf(p),
       });
-      const saved = await saveCrew(sb, row, crew);
+      // Crew rows are a manager's to write (RLS service_job_techs_manage); nobody else's save
+      // touches them (the technician did not change either).
+      const saved = manager ? await saveCrew(sb, row, crew) : row;
       await syncTicketFollowup(
         saved,
         { id: context.userId, name: nameOf(p) },
@@ -425,7 +433,7 @@ export const setServiceStage = createServerFn({ method: "POST" })
 
 /**
  * The Tech Board's drop: assign (or unassign) a technician and a day in one call. Stage moves
- * Open ↔ Scheduled with it; Done and later are left alone. Office / admin only.
+ * Open ↔ Scheduled with it; Done and later are left alone. Managers and admins only.
  */
 export const assignServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -443,7 +451,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
-    if (!isOffice(p)) throw new Error("Only the office can dispatch tickets");
+    if (!managesTickets(p)) throw new Error("Only a manager dispatches tickets");
     const dateProblem = assignDateProblem(data.scheduled_date);
     if (dateProblem) throw new Error(dateProblem);
     const sb = context.supabase;
@@ -455,7 +463,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Ticket not found");
     // A drop onto another day moves the date: an admin's or a manager's (owner, Oct 1). A drop
-    // that only changes the technician on the same day is anyone's in the office.
+    // that only changes the technician on the same day needs no more than dispatching.
     const moveProblem = dateMoveProblem({
       profile: p,
       oldYmd: cur.scheduled_date,
@@ -491,13 +499,13 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     return withTechName(sb, row);
   });
 
-/** Soft delete (office / admin). A technician cannot delete tickets. */
+/** Soft delete (a manager or an admin; owner, Oct 1: the manager runs the tickets). */
 export const deleteServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await serviceWrite(context);
-    if (!isOffice(p)) throw new Error("Ask the office to delete a ticket");
+    if (!managesTickets(p)) throw new Error("Ask a manager to delete a ticket");
     const { data: row, error } = await context.supabase
       .from("service_jobs")
       .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })
@@ -518,7 +526,8 @@ export const restoreServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    await serviceWrite(context);
+    const p = await serviceWrite(context);
+    if (!managesTickets(p)) throw new Error("Ask a manager to restore a ticket");
     const { error } = await context.supabase
       .from("service_jobs")
       .update({ deleted_at: null })
@@ -569,7 +578,7 @@ export const listServiceJobMaterials = createServerFn({ method: "GET" })
     return rows ?? [];
   });
 
-/** A crew member as the ticket shows it. `bill_rate` is null for a technician (no money). */
+/** A crew member as the ticket shows it. `bill_rate` is null for anyone but a manager (no money). */
 export interface CrewMemberView extends CrewRow {
   name: string;
 }
@@ -587,7 +596,7 @@ export const listJobCrew = createServerFn({ method: "GET" })
     ]);
     const names = new Map<string, string>();
     for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    const noMoney = !isOffice(p);
+    const noMoney = !managesTickets(p);
     return rows.map((r) => ({
       ...r,
       bill_rate: noMoney ? null : r.bill_rate,
@@ -596,7 +605,7 @@ export const listJobCrew = createServerFn({ method: "GET" })
   });
 
 /**
- * What a blank $ box beside a name bills (office only): the rate table's labor bill rates at a
+ * What a blank $ box beside a name bills (managers only): the rate table's labor bill rates at a
  * rate kind, and the technicians' profile rates (Admin › Users).
  */
 export interface CrewRateDefaults {
@@ -610,7 +619,7 @@ export const getCrewRateDefaults = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }): Promise<CrewRateDefaults> => {
     const p = await serviceAccess(context);
-    if (!isOffice(p)) throw new Error("Rates are the office's");
+    if (!managesTickets(p)) throw new Error("Rates are a manager's");
     const sb = context.supabase;
     const [{ data: rates, error }, { data: prof, error: pErr }] = await Promise.all([
       sb

@@ -3,7 +3,7 @@
  * first "6012", further invoices on the same ticket "6012.2", "6012.3", a deleted or voided one
  * freeing its number (owner, Sep 30; invoice-numbering.ts) — built from time entries and
  * materials (invoices.server.ts), reviewed and sent by the office, marked paid by hand, exported
- * for Sage as CSV. Technicians never see money (RLS: invoices_office).
+ * for Sage as CSV. Only managers and admins see or touch them (RLS: invoices_office).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, isOffice } from "@/lib/access";
+import { canAccess, managesTickets } from "@/lib/access";
 import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-numbering";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { toBase64 } from "@/lib/webpush";
@@ -38,7 +38,8 @@ async function office(ctx: Ctx) {
     .maybeSingle();
   if (!data || !(canAccess(data, "service") || canAccess(data, "customers")))
     throw new Error("Forbidden: Service access required");
-  if (!isOffice(data)) throw new Error("Invoices are the office's");
+  // Owner, Oct 1: "only the managers / admins can see and edit the prices on invoices".
+  if (!managesTickets(data)) throw new Error("Invoices are a manager's");
   return data;
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
@@ -704,10 +705,25 @@ export const exportSageCsv = createServerFn({ method: "POST" })
     },
   );
 
+/**
+ * The Service Rates page (Admin › Service Rates): ticket money, so an admin's or a manager's
+ * (owner, Oct 1; RLS service_rates_read / service_rates_write). Not Estimate Pricing.
+ */
+async function ratesManager(ctx: Ctx) {
+  const { data } = await ctx.supabase
+    .from("profiles")
+    .select("role, access, technician")
+    .eq("id", ctx.userId)
+    .maybeSingle();
+  if (!managesTickets(data)) throw new Error("Service rates are a manager's");
+  return data;
+}
+
 export const getServiceRates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(
     async ({ context }): Promise<{ rates: ServiceRateRow[]; settings: ServiceSettingsRow }> => {
+      await ratesManager(context);
       const [{ data: rates, error }, { data: settings }] = await Promise.all([
         context.supabase
           .from("service_rates")
@@ -749,13 +765,7 @@ export const setServiceRates = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => ratesSchema.parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    const { data: me } = await context.supabase
-      .from("profiles")
-      .select("role, access")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (!me || !(me.role === "admin" || canAccess(me, "pricing")))
-      throw new Error("Forbidden: Estimate Pricing access required");
+    await ratesManager(context);
     for (const r of data.rates) {
       const { error } = await context.supabase
         .from("service_rates")

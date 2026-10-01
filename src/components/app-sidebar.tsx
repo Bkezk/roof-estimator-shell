@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { PAGE_LABELS, ROLE_LABELS, isOffice, type Page } from "@/lib/access";
+import { PAGE_LABELS, ROLE_LABELS, isOffice, managesTickets, type Page } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -88,13 +88,14 @@ const prospectItems = [
   // Construction leads (owner, Sep 28): state planroom jobs and Louisville commercial permits.
   { title: "Bid Board", url: "/prospect/leads", icon: Radar },
 ];
-// Admin (role) only: who can sign in and which pages each person may open, the reminder and
-// untouched-work rules, and the service labor rates (owner, Sep 28: their own pages under
-// Admin, not tabs of Estimate Pricing › General).
-const adminOnlyItems = [
-  { title: "Users & access", url: "/admin/users", icon: Users },
-  { title: "Reminders", url: "/admin/reminders", icon: BellRing },
-  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt },
+// The Admin group: who can sign in and which pages each person may open, and the reminder and
+// untouched-work rules (admins only), and the service labor rates (admins and managers: ticket
+// money is a manager's, owner, Oct 1). Owner, Sep 28: their own pages under Admin, not tabs of
+// Estimate Pricing › General.
+const adminGroupItems = [
+  { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
+  { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
+  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt, adminOnly: false },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
@@ -513,19 +514,21 @@ export function AppSidebar() {
           </NavGroup>
         )}
 
-        {role === "admin" && (
+        {managesTickets(profile) && (
           <NavGroup label="Admin" id="admin" iconMode={collapsed}>
             <SidebarMenu>
-              {adminOnlyItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
-                    <Link to={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {adminGroupItems
+                .filter((item) => !item.adminOnly || role === "admin")
+                .map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                      <Link to={item.url}>
+                        <item.icon className="h-4 w-4" />
+                        {!collapsed && <span>{item.title}</span>}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </NavGroup>
         )}

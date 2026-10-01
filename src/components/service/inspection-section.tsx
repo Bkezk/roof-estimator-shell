@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { Calculator, ClipboardCheck, Loader2, Save, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { managesTickets } from "@/lib/access";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import {
   createRepairFromInspection,
@@ -294,7 +295,9 @@ function OfficeActions({
   data: TicketInspection;
   dirty: boolean;
 }) {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  // A repair ticket is a new ticket: a manager's (owner, Oct 1). Create bid stays Estimate's.
+  const manager = managesTickets(profile);
   const qc = useQueryClient();
   const navigate = useNavigate();
   const createFn = useServerFn(createRepairFromInspection);
@@ -336,36 +339,46 @@ function OfficeActions({
             <p className="text-amber-700 dark:text-amber-400">Save the inspection first.</p>
           )}
           <div className="flex flex-wrap items-center gap-2">
-            <Select value={type} onValueChange={(v) => setType(v === "other" ? "other" : "leak")}>
-              <SelectTrigger className="h-10 w-[120px]" aria-label="Repair ticket type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="leak">Leak</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-            <Input
-              type="date"
-              className="h-10 w-[170px]"
-              aria-label="Repair ticket date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-10"
-              disabled={dirty || create.isPending || !date}
-              onClick={() => create.mutate()}
-            >
-              {create.isPending ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Wrench className="mr-2 h-4 w-4" />
-              )}
-              Create repair ticket
-            </Button>
+            {manager && (
+              <>
+                <Select
+                  value={type}
+                  onValueChange={(v) => setType(v === "other" ? "other" : "leak")}
+                >
+                  <SelectTrigger className="h-10 w-[120px]" aria-label="Repair ticket type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="leak">Leak</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input
+                  type="date"
+                  className="h-10 w-[170px]"
+                  aria-label="Repair ticket date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10"
+                  disabled={dirty || create.isPending || !date}
+                  onClick={() => create.mutate()}
+                >
+                  {create.isPending ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Wrench className="mr-2 h-4 w-4" />
+                  )}
+                  Create repair ticket
+                </Button>
+              </>
+            )}
+            {!manager && !can("estimate") && (
+              <span className="text-muted-foreground">A manager creates the repair ticket.</span>
+            )}
             {can("estimate") &&
               (dirty ? (
                 <Button type="button" variant="outline" className="h-10" disabled>

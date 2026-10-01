@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, isOffice } from "@/lib/access";
+import { canAccess, isOffice, managesTickets } from "@/lib/access";
 import { ticketDateProblem } from "@/lib/ticket-date";
 import {
   inspectionComplete,
@@ -237,7 +237,8 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
 /**
  * "Create repair ticket" from a completed inspection: a new Open ticket for the same customer,
  * site and contact (PO #, labor rate as on the inspection), its description and notes prefilled
- * from the Issue items, linked back (from_job_id). Office / admin only; unassigned.
+ * from the Issue items, linked back (from_job_id). Managers and admins only (owner, Oct 1: "The
+ * manager creates the tickets"); unassigned.
  */
 export const createRepairFromInspection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -253,8 +254,8 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<{ id: string; number: number }> => {
     const p = await me(context);
-    if (!canAccess(p, "service") || isTech(p))
-      throw new Error("Only the office creates a repair ticket from an inspection");
+    if (!canAccess(p, "service") || !managesTickets(p))
+      throw new Error("Only a manager creates a repair ticket");
     const sb = context.supabase;
     const { data: src, error } = await sb
       .from("service_jobs")

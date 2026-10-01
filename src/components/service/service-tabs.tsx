@@ -1,13 +1,13 @@
 /**
  * The Service page's views as tabs (owner, Sep 28: one menu entry, not four): Tickets, Board and
- * Invoices are views of the same work, so they sit on one row under the page title. A
- * technician sees Tickets only (the board and money are the office's).
+ * Invoices are views of the same work, so they sit on one row under the page title. Anyone but
+ * a manager or an admin sees Tickets only (the board and money are a manager's; owner, Oct 1).
  */
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice } from "@/lib/access";
+import { managesTickets } from "@/lib/access";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -18,8 +18,9 @@ const TABS = [
 export function ServiceTabs({ toInvoice }: { toInvoice?: number }) {
   const { profile } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isTech = !isOffice(profile);
-  const tabs = TABS.filter((t) => !(t.office && isTech));
+  // Invoices are a manager's (owner, Oct 1).
+  const manager = managesTickets(profile);
+  const tabs = TABS.filter((t) => !t.office || manager);
   if (tabs.length < 2) return null;
   return (
     <nav aria-label="Service views" className="flex flex-wrap gap-1 border-b">

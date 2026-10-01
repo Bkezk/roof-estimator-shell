@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { managesTickets } from "@/lib/access";
 import {
   deleteAccount,
   deleteContact,
@@ -442,7 +443,9 @@ function AccountBlock({ account, onDelete }: { account: AccountRow; onDelete: ()
 }
 
 function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDelete: () => void }) {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  // Only a manager creates tickets (owner, Oct 1).
+  const canNewTicket = can("service") && managesTickets(profile);
   const users = useCrmUsers();
   const a = props.account;
   const physical = addressLines(a);
@@ -490,7 +493,7 @@ function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDele
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {can("service") && (
+          {canNewTicket && (
             <Button asChild size="sm">
               <Link to="/service" search={{ new: 1, account: a.id }}>
                 <Plus className="mr-1 h-4 w-4" /> New ticket
@@ -1184,7 +1187,9 @@ function ContactForm(props: {
 }
 
 function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  // Only a manager creates tickets (owner, Oct 1).
+  const canNewTicket = can("service") && managesTickets(profile);
   const qc = useQueryClient();
   const deleteFn = useServerFn(deleteSite);
   // "new" = the add form is open; an id = that site is being edited.
@@ -1254,7 +1259,7 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {can("service") && (
+                {canNewTicket && (
                   <Button
                     asChild
                     size="sm"

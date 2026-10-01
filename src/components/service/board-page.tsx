@@ -5,8 +5,8 @@
  * open it. Colour = stage. The rail lists Open / Scheduled tickets missing a technician or a
  * day, oldest first.
  *
- * Office users and admins only: assignServiceJob refuses a technician, so a technician is sent
- * to /service/today instead. Drag and drop is native HTML5 (desktop); on a phone the grid
+ * Managers and admins only (owner, Oct 1: the manager dispatches; `managesTickets`):
+ * assignServiceJob refuses anyone else, who is sent to /service/today instead. Drag and drop is native HTML5 (desktop); on a phone the grid
  * scrolls sideways and a tap opens the ticket.
  */
 import { useMemo, useState, type DragEvent } from "react";
@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice } from "@/lib/access";
+import { managesTickets } from "@/lib/access";
 import {
   assignServiceJob,
   listServiceJobs,
@@ -115,10 +115,10 @@ export function EmbeddedBoard() {
 
 export function BoardPage({ week }: { week?: string | undefined }) {
   const { profile } = useAuth();
-  if (!isOffice(profile))
+  if (!managesTickets(profile))
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
-        <p className="font-medium">The board is for the office.</p>
+        <p className="font-medium">The board is for managers.</p>
         <p className="text-sm text-muted-foreground">Your tickets for the day are on Today.</p>
         <Button asChild>
           <Link to={TODAY_URL}>Go to Today</Link>

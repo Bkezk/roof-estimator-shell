@@ -14,7 +14,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { canAccess, isOffice } from "@/lib/access";
+import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import { templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 
@@ -390,7 +391,7 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
       .parse(d ?? {}),
   )
   .handler(async ({ data, context }): Promise<RepairTemplateRow[]> => {
-    await me(context);
+    const p = await me(context);
     let q = context.supabase
       .from("repair_templates")
       .select("*")
@@ -402,7 +403,8 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
     if (data.q) q = q.ilike("name", `%${data.q.replace(/[%_,]/g, " ")}%`);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    // Prices are a manager's (owner, Oct 1); a rep gets the names without them.
+    return templatesForViewer(rows ?? [], managesTickets(p));
   });
 
 const templateSchema = z.object({
@@ -422,8 +424,8 @@ export const saveRepairTemplate = createServerFn({ method: "POST" })
   .validator((d: unknown) => templateSchema.parse(d))
   .handler(async ({ data, context }): Promise<RepairTemplateRow> => {
     const p = await me(context);
-    if (!(canAccess(p, "customers") || p.role === "admin"))
-      throw new Error("Forbidden: Customers access required to edit templates");
+    // A template carries a price: a manager's (owner, Oct 1; RLS repair_templates_write).
+    if (!managesTickets(p)) throw new Error("Only a manager edits repair templates");
     const { id, ...fields } = data;
     const row = {
       name: fields.name,
@@ -678,7 +680,13 @@ export const setJobCrew = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<ServiceJobRow> => {
     const p = await me(context);
     const job = await ownJob(context, data.id);
+    // The lead technician answers; a manager may too. Anyone else in the office asks a manager
+    // (RLS service_job_techs_lead lets only the lead write besides a manager).
+    if (!managesTickets(p) && job.technician_id !== context.userId)
+      throw new Error("Only the technician on this ticket or a manager says who is on the job");
     const sb = context.supabase;
+    // Kept members keep the rate a manager set; new ones get none (the trigger
+    // service_job_techs_rate_guard refuses anything else from a non-manager).
     const { readCrew, writeCrew } = await import("@/lib/service-crew.server");
     const rows = confirmedCrew(await readCrew(sb, job.id), job.technician_id, data.others);
     const helper_count = await writeCrew(sb, job.id, rows);
@@ -740,7 +748,7 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<RepairTemplateRow[]> => {
-    await me(context);
+    const p = await me(context);
     const sb = context.supabase;
     const { data: job } = await sb
       .from("service_jobs")
@@ -778,7 +786,11 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
       .in("id", seen.slice(0, 12))
       .eq("active", true);
     const order = new Map(seen.map((id, i) => [id, i]));
-    return (templates ?? []).sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+    const sorted = (templates ?? []).sort(
+      (a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99),
+    );
+    // Prices are a manager's (owner, Oct 1); a rep gets the names without them.
+    return templatesForViewer(sorted, managesTickets(p));
   });
 
 /**

@@ -6,9 +6,9 @@
  * Roles (owner, 2026-09-30: "users should only see their own stuff except for managers who see
  * everything"):
  * - admin: every page, plus the Admin pages (users, reminders, service rates).
- * - manager: every page, Estimate Pricing included (owner, Oct 1), but not the Admin pages
- *   (users, reminders); sees everyone's tickets, tasks and follow-ups (also when ticked
- *   Technician) and may dispatch.
+ * - manager: every page, Estimate Pricing included (owner, Oct 1), and Admin › Service Rates,
+ *   but not Users or Reminders; sees everyone's tickets, tasks and follow-ups (also when ticked
+ *   Technician); creates and dispatches tickets and owns their money (`managesTickets`).
  * - user: only the pages in `access`; a Technician user sees and edits only their own tickets.
  *
  * `profiles.role` is 'admin' | 'manager' | 'user'; `profiles.access` is the granted pages (empty
@@ -60,7 +60,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_HELP: Record<Role, string> = {
   admin: "Everything, plus Users & access",
   manager:
-    "Sees everyone's tickets, tasks and customers, and Estimate Pricing; no Users or Reminders pages",
+    "Sees everyone's tickets, tasks and customers; creates and dispatches tickets and sets their prices (Service Rates); Estimate Pricing; no Users or Reminders pages",
   user: "Only the pages ticked below; a technician sees only their own tickets",
 };
 
@@ -90,27 +90,42 @@ export const seesEveryone = (p: AccessLike | null | undefined): boolean =>
   isAdmin(p) || isManager(p);
 
 /**
- * The office: sees every ticket and may dispatch. Everyone except a technician who is neither an
- * admin nor a manager (that technician sees and edits only their own tickets). The twin of RLS
+ * The office: sees every ticket (visibility only — creating, dispatching and money are
+ * `managesTickets`). Everyone except a technician who is neither an admin nor a manager (that
+ * technician sees and edits only their own tickets). The twin of RLS
  * `not is_technician() or is_admin() or is_manager()`.
  */
 export const isOffice = (p: AccessLike | null | undefined): boolean =>
   !!p && (!p.technician || seesEveryone(p));
 
-/** The page a route belongs to; null for routes every signed-in user may open (/account). */
-export function pageForPath(pathname: string): Page | "admin" | null {
+/**
+ * Who runs the tickets and their money: admins and managers only (owner, Oct 1: "only the
+ * managers / admins can see and edit the prices on invoices / repairs / inspections etc."; "The
+ * manager creates the tickets; reps do not create tickets, the reps are just responding to what
+ * is assigned to them."; "the per-technician charge is separate from estimate pricing and can be
+ * edited per job"). Creating a ticket, dispatching it (technician, crew, the Board), every price
+ * on a ticket (crew $/hour, invoices, repair template prices, the Service Rates page) and
+ * deleting a ticket. `isOffice` stays for visibility only (who sees every ticket). Estimate
+ * Pricing is not this: it stays `canAccess(p, "pricing")`. The twin of RLS
+ * `public.is_admin() or public.is_manager()`.
+ */
+export const managesTickets = (p: AccessLike | null | undefined): boolean => seesEveryone(p);
+
+/**
+ * The page a route belongs to; null for routes every signed-in user may open (/account).
+ * "admin": admins only; "manager": admins and managers (`managesTickets`).
+ */
+export function pageForPath(pathname: string): Page | "admin" | "manager" | null {
   if (pathname === "/account" || pathname === "/login") return null;
   // Follow-ups and My Work: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
   if (pathname.startsWith("/my-work")) return null;
   // "/" only redirects to My Work.
   if (pathname === "/") return null;
-  if (
-    pathname.startsWith("/admin/users") ||
-    pathname.startsWith("/admin/reminders") ||
-    pathname.startsWith("/admin/service-rates")
-  )
+  if (pathname.startsWith("/admin/users") || pathname.startsWith("/admin/reminders"))
     return "admin";
+  // Service Rates are ticket money: a manager's too (owner, Oct 1).
+  if (pathname.startsWith("/admin/service-rates")) return "manager";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";

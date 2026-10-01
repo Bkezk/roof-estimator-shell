@@ -3,7 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { canAccess, homeFor, isAdmin, pageForPath } from "@/lib/access";
+import { canAccess, homeFor, isAdmin, managesTickets, pageForPath } from "@/lib/access";
 import { dispatchRemindersIfDue } from "@/lib/followups.functions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationsBell } from "@/components/notifications-bell";
@@ -122,7 +122,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const blocked =
     !!profile &&
     page !== null &&
-    (page === "admin" ? !isAdmin(profile) : !canAccess(profile, page));
+    (page === "admin"
+      ? !isAdmin(profile)
+      : page === "manager"
+        ? !managesTickets(profile)
+        : !canAccess(profile, page));
   const home = homeFor(profile);
 
   useEffect(() => {

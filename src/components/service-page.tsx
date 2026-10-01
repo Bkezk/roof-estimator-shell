@@ -32,6 +32,12 @@
  * invoiced ("N to invoice"); `?new=1&from=<ticket id>` starts a ticket with an earlier ticket's
  * customer side ("New ticket for this site") and `?new=1&account=<id>&site=<id>` with a
  * customer picked (the Customers page).
+ *
+ * Owner, Oct 1 ("The manager creates the tickets; reps do not create tickets"; "only the
+ * managers / admins can see and edit the prices"): New ticket / `?new=1`, Repeat, the Board,
+ * the technician select and crew with its $ / hour boxes, the Labor rate, the invoice and
+ * Delete / Restore are `managesTickets` (admin or manager). Everyone else reads the technician
+ * and crew by name. `isOffice` / `officeOrAdmin` decide only what is seen and the layout.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,7 +70,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice, seesEveryone } from "@/lib/access";
+import { isOffice, managesTickets, seesEveryone } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   deleteServiceJob,
@@ -211,8 +217,13 @@ export function ServicePage({
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
   overdue?: boolean | undefined;
 }) {
+  const { profile } = useAuth();
   if (id) return <TicketLoader id={id} closeout={!!closeout} />;
   if (isNew) {
+    // Owner, Oct 1: "The manager creates the tickets; reps do not create tickets" (the server
+    // refuses too: saveServiceJob "Only a manager creates tickets").
+    if (!profile) return null;
+    if (!managesTickets(profile)) return <ManagersCreateTickets />;
     if (from) return <NewFromTicket key={from} from={from} />;
     if (account)
       return <NewForAccount key={`${account}|${site ?? ""}`} accountId={account} siteId={site} />;
@@ -225,6 +236,21 @@ export function ServicePage({
       presetStage={stage}
       presetOverdue={!!overdue}
     />
+  );
+}
+
+/** `?new=1` for anyone but a manager: the same "sent away" card as the Board and Invoices. */
+function ManagersCreateTickets() {
+  return (
+    <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
+      <p className="font-medium">A manager creates tickets.</p>
+      <p className="text-sm text-muted-foreground">
+        Your tickets are the ones assigned to you, on the Service list and on Today.
+      </p>
+      <Button asChild>
+        <Link to="/service">Back to tickets</Link>
+      </Button>
+    </div>
   );
 }
 
@@ -309,7 +335,9 @@ function ServiceList({
 
   // A technician (not admin) receives only their own tickets from the server.
   const isTech = !isOffice(profile);
-  const officeOrAdmin = !isTech;
+  // Owner, Oct 1: "The manager creates the tickets": New ticket, the Board (dispatch), delete
+  // and restore, and the to-invoice count are a manager's.
+  const manager = managesTickets(profile);
   const BOARD_OPEN_KEY = "bid-o-matic:service-board-open";
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => {
     try {
@@ -443,7 +471,7 @@ function ServiceList({
             ticket itself.
           </p>
           <div className="mt-2">
-            <ServiceTabs toInvoice={officeOrAdmin ? toInvoiceCount : 0} />
+            <ServiceTabs toInvoice={manager ? toInvoiceCount : 0} />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -454,15 +482,17 @@ function ServiceList({
               </Link>
             </Button>
           )}
-          <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
-            <Plus className="mr-2 h-5 w-5" /> New ticket
-          </Button>
+          {manager && (
+            <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
+              <Plus className="mr-2 h-5 w-5" /> New ticket
+            </Button>
+          )}
         </div>
       </div>
 
       <NeedsActionStrip kinds={["ticket"]} />
 
-      {officeOrAdmin && (
+      {manager && (
         // Owner, Sep 28: the board sits above the list (five techs by seven days never grows).
         <section className="rounded-lg border" aria-label="Tech Board">
           <button
@@ -584,9 +614,11 @@ function ServiceList({
               <p className="text-muted-foreground">
                 {isTech ? "No tickets assigned to you yet." : "No tickets yet."}
               </p>
-              <Button variant="outline" className="mt-4" onClick={newTicket}>
-                Open the first ticket
-              </Button>
+              {manager && (
+                <Button variant="outline" className="mt-4" onClick={newTicket}>
+                  Open the first ticket
+                </Button>
+              )}
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
@@ -629,7 +661,7 @@ function ServiceList({
                             key={j.id}
                             row={j}
                             untouched={untouched.get(untouchedKey("ticket", j.id))}
-                            onDelete={officeOrAdmin ? () => setToDelete(j) : undefined}
+                            onDelete={manager ? () => setToDelete(j) : undefined}
                           />
                         ))}
                       </div>
@@ -679,15 +711,17 @@ function ServiceList({
                       {j.description ? ` · ${j.description}` : ""}
                     </p>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={restore.isPending}
-                    onClick={() => restore.mutate(j.id)}
-                  >
-                    <RotateCcw className="mr-1 h-4 w-4" />
-                    Restore
-                  </Button>
+                  {manager && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={restore.isPending}
+                      onClick={() => restore.mutate(j.id)}
+                    >
+                      <RotateCcw className="mr-1 h-4 w-4" />
+                      Restore
+                    </Button>
+                  )}
                 </div>
               ))
             )}
@@ -1093,6 +1127,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const isTech = !isOffice(profile);
   const officeOrAdmin = !isTech;
+  // Owner, Oct 1: dispatch (technician, crew), every rate (crew $/hour, labor rate), Repeat (a
+  // new ticket) and Delete are a manager's; officeOrAdmin is visibility and layout only.
+  const manager = managesTickets(profile);
   const jobStage = job ? asStage(job.stage) : null;
   // Invoiced / Closed are the office's; a technician's ticket there is read-only for them (the
   // server refuses a technician's save of those stages).
@@ -1141,11 +1178,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // An old ticket with unnamed helpers keeps them until the office names the crew.
   const legacyHelpers = !!job && job.helper_count > 0 && crewQ.data?.length === 0;
   const crewDirty = !!crew && crewKey(crew) !== crewSavedKey;
-  const sendCrew = officeOrAdmin && !!crew && (!legacyHelpers || crewDirty);
+  const sendCrew = manager && !!crew && (!legacyHelpers || crewDirty);
   const rateDefaults = useQuery({
     queryKey: ["crew-rate-defaults", draft.labor_rate_kind],
     queryFn: () => ratesFn({ data: { rate_kind: draft.labor_rate_kind } }),
-    enabled: !!session && officeOrAdmin,
+    enabled: !!session && manager,
     staleTime: 5 * 60_000,
   });
   const ratePlaceholder = (techId: string, isLead: boolean) => {
@@ -1231,8 +1268,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
         description: draft.description,
         service_type: draft.service_type,
-        // The rate is the office's call; a technician's save leaves it as it is.
-        ...(officeOrAdmin ? { labor_rate_kind: draft.labor_rate_kind } : {}),
+        // The rate is a manager's call (owner, Oct 1); anyone else's save leaves it as it is.
+        ...(manager ? { labor_rate_kind: draft.labor_rate_kind } : {}),
         po_number: draft.po_number,
         // The job number is the office's (a technician's save leaves it as it is).
         ...(officeOrAdmin ? { job_number: draft.job_number.trim() || null } : {}),
@@ -1645,7 +1682,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           <Label htmlFor="ticket-date">Date</Label>
           {dateInput}
         </div>
-        {officeOrAdmin && (
+        {manager && (
           <div className="space-y-1">
             <Label htmlFor="ticket-rate">Labor rate</Label>
             <Select
@@ -1670,7 +1707,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </div>
         )}
       </div>
-      {officeOrAdmin ? (
+      {manager ? (
         <div className="space-y-2 sm:max-w-[460px]">
           <div className="flex items-end justify-between gap-2">
             <Label htmlFor="ticket-tech">
@@ -1688,11 +1725,17 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           {techError}
         </div>
       ) : (
+        // Anyone but a manager reads who is on the ticket (owner, Oct 1: the manager dispatches).
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label htmlFor="ticket-tech">Technician</Label>
-            {techSelect()}
-            {techError}
+            <p className="text-sm font-medium leading-none">Technician</p>
+            <p className="flex min-h-9 items-center text-sm">
+              {draft.technician_id
+                ? (techOptions.find((t) => t.id === draft.technician_id)?.name ??
+                  job?.technician_name ??
+                  "Former assignee")
+                : "Unassigned"}
+            </p>
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">Crew</p>
@@ -1705,7 +1748,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                     ? `${job.helper_count} helper${job.helper_count > 1 ? "s" : ""}`
                     : "—"}
             </p>
-            <p className="text-xs text-muted-foreground">Change it on the close-out.</p>
+            <p className="text-xs text-muted-foreground">
+              {job?.technician_id === profile?.id
+                ? "Change it on the close-out."
+                : "A manager dispatches the ticket."}
+            </p>
           </div>
         </div>
       )}
@@ -1892,7 +1939,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   ))}
                 </SelectContent>
               </Select>
-              {officeOrAdmin && repeatable && (
+              {manager && repeatable && (
                 <Button asChild variant="outline">
                   <Link
                     to="/service"
@@ -1906,7 +1953,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   </Link>
                 </Button>
               )}
-              {officeOrAdmin && (
+              {manager && (
                 <Button
                   variant="outline"
                   className="text-destructive hover:text-destructive"
