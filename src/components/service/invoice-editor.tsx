@@ -89,12 +89,10 @@ import {
   invoicePageKey,
   isEmail,
   money,
-  openPdfTab,
   PAYMENT_METHODS,
   pdfBlob,
   r2,
   shortDay,
-  showPdf,
   splitEmails,
   stampDay,
   STATUS_CLASS,
@@ -655,22 +653,19 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         `Rebuilt from the ticket: ${r.lines.length} line${r.lines.length === 1 ? "" : "s"}`,
       );
     });
+  // Owner (Oct 1): the preview opens in the page, not a new tab — a blob: page in a new tab
+  // was "blocked by Chrome" (ERR_BLOCKED_BY_CLIENT, an extension) on the owner's machine.
+  const [pdfView, setPdfView] = useState<PdfView | null>(null);
   const preview = () => {
     if (!complete(false, false)) return;
-    const win = openPdfTab();
     void run(
       "preview",
       "Could not make the PDF",
       async () => {
-        try {
-          const saved = await saveIfNeeded(false);
-          const pdf = await renderFn({ data: { id: inv.id } });
-          showPdf(win, pdf.base64, pdf.file_name);
-          if (saved) ctx.applied(saved);
-        } catch (e) {
-          win?.close();
-          throw e;
-        }
+        const saved = await saveIfNeeded(false);
+        const pdf = await renderFn({ data: { id: inv.id } });
+        setPdfView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });
+        if (saved) ctx.applied(saved);
       },
       dirty,
     );
@@ -1032,6 +1027,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         </Button>
       </div>
 
+      <PdfPreviewDialog view={pdfView} onClose={() => setPdfView(null)} />
       <AlertDialog
         open={confirm !== null}
         onOpenChange={(o) => {
@@ -1169,6 +1165,72 @@ function BillTo({
         {p["address"] && <p className="text-muted-foreground">{p["address"]}</p>}
       </div>
     </div>
+  );
+}
+
+type PdfView = { blob: Blob; fileName: string };
+
+/**
+ * The PDF in the page (owner, Oct 1: a new tab was blocked by a browser extension): an
+ * <iframe> on a blob URL that lives as long as the dialog, with Download and a plain link for
+ * a tab of its own. Nothing is uploaded or stored; the PDF is the server's render.
+ */
+function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!view) {
+      setUrl(null);
+      return;
+    }
+    const u = URL.createObjectURL(view.blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [view]);
+  return (
+    <Dialog open={!!view} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="flex h-[92vh] max-w-[min(96vw,1100px)] flex-col gap-3 p-4">
+        <DialogHeader className="shrink-0">
+          <DialogTitle>{view?.fileName ?? "Invoice PDF"}</DialogTitle>
+          <DialogDescription>
+            What the customer receives. Download it, or open it in a tab of its own.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
+          {url && (
+            <iframe
+              key={url}
+              title={view?.fileName ?? "Invoice PDF"}
+              src={url}
+              className="h-full w-full"
+            />
+          )}
+        </div>
+        <DialogFooter className="shrink-0 gap-2 sm:justify-between">
+          {url && (
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener"
+              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+            >
+              Open in a new tab
+            </a>
+          )}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => view && downloadBlob(view.blob, view.fileName)}
+            >
+              <Download className="mr-2 h-4 w-4" /> Download
+            </Button>
+            <Button type="button" onClick={onClose}>
+              Close
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -2033,8 +2033,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
             <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
             {materials}
-            <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
+            {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
             <PurchaseOrdersSection jobId={job.id} />
+            <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
             <InvoiceBlock job={job} />
           </aside>
         </div>
@@ -2047,8 +2048,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <div className="space-y-4">
               <TicketExtras job={job} canEdit={canEdit} />
               {materials}
-              <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
               <PurchaseOrdersSection jobId={job.id} />
+              <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} />
             </div>
           )}
         </>

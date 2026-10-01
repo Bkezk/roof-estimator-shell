@@ -62,6 +62,8 @@ import {
 } from "@/components/ui/table";
 
 export const OWNER_VIEW_KEY = ["owner-view"] as const;
+/** Column widths (Person, Role, Due today, Overdue, Done this week, Open opps, Last activity). */
+const OWNER_COLS = ["20%", "11%", "12%", "12%", "13%", "15%", "17%"] as const;
 /** One person's expanded detail (cached 60 s per person). */
 const ownerPersonKey = (userId: string) => ["owner-view-person", userId] as const;
 const DETAIL_STALE_MS = 60_000;
@@ -142,7 +144,14 @@ export function OwnerView() {
         </div>
       ) : (
         <div className="rounded-lg border">
-          <Table className="min-w-[760px]">
+          {/* table-fixed with set column widths (owner, Oct 1: "retain the width whether
+              expanded or collapsed"): the columns never move, whatever a detail row holds. */}
+          <Table className="w-full min-w-[760px] table-fixed">
+            <colgroup>
+              {OWNER_COLS.map((w, i) => (
+                <col key={i} style={{ width: w }} />
+              ))}
+            </colgroup>
             <TableHeader>
               <TableRow>
                 <TableHead>Person</TableHead>

@@ -598,16 +598,16 @@ describe("the section (purchase-orders-section.tsx)", () => {
 });
 
 describe("mounted on the ticket page and the close-out", () => {
-  it("ticket page: right column after the field sections, before the invoice; and for a technician", () => {
+  it("ticket page: right column under Materials (owner, Oct 1), before the field sections; and for a technician", () => {
     const page = read("src/components/service-page.tsx");
     expect(page).toContain(
       'import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";',
     );
     expect(page).toMatch(
-      /<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<InvoiceBlock job=\{job\} \/>/,
+      /\{materials\}\s*\{\/\*[^*]*\*\/\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} repairs=\{false\} \/>/,
     );
     expect(page).toMatch(
-      /<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>/,
+      /\{materials\}\s*<PurchaseOrdersSection jobId=\{job\.id\} \/>\s*<TicketFieldSections job=\{job\} officeOrAdmin=\{officeOrAdmin\} \/>/,
     );
   });
   it("close-out: right after Materials, in field mode (no Approved toggle)", () => {
