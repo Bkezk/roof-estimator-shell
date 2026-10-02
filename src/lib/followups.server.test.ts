@@ -48,7 +48,13 @@ function fakeClient(openRow: Record<string, unknown> | null) {
       tables.push(table);
       return builder(table);
     },
-    rpc: vi.fn(async () => ({ data: [], error: null })),
+    // Before 20261002140000_followup_guard.sql: the follow-up functions are missing, so these
+    // run the direct writes (followup-sync.test.ts covers the functions' path).
+    rpc: vi.fn(async (fn: string) =>
+      fn.startsWith("followup_sync_")
+        ? { data: null, error: { code: "PGRST202", message: "Could not find the function" } }
+        : { data: [], error: null },
+    ),
   };
   return { client: client as unknown as Client, ops, tables };
 }

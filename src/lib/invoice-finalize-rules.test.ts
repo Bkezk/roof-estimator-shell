@@ -135,6 +135,10 @@ function fakeDb(tables: Record<string, Row[]>) {
       if (job) job["stage"] = args["p_stage"];
       return { data: null, error: null };
     }
+    // The follow-up functions (20261002140000_followup_guard.sql) as before that migration:
+    // missing, so syncFollowup makes the same close with a direct write.
+    if (fn === "followup_sync_close" || fn === "followup_sync_upsert")
+      return { data: null, error: { code: "PGRST202", message: `Could not find ${fn}` } };
     return { data: null, error: { message: `unexpected rpc ${fn}` } };
   };
   // The bucket keeps what is uploaded: a sent invoice attaches the PDF stored at finalising.

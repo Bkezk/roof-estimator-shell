@@ -4001,6 +4001,24 @@ export type Database = {
         }[];
       };
       escalation_recipients: { Args: never; Returns: string[] };
+      followup_sync_upsert: {
+        Args: {
+          p_kind: string;
+          p_item_id: string;
+          p_assignee_id: string;
+          p_account_id: string | null;
+          p_title: string;
+          p_url: string;
+          p_due_date: string | null;
+          p_created_by?: string | null;
+        };
+        Returns: Json;
+      };
+      followup_sync_close: { Args: { p_id: string; p_reason: string }; Returns: boolean };
+      followup_claim_reminder: {
+        Args: { p_id: string; p_expected: string };
+        Returns: boolean;
+      };
       notify_recipients: {
         Args: { ids: string[] };
         Returns: {

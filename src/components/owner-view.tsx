@@ -34,7 +34,7 @@ import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
-import { ymdParts } from "@/lib/my-work";
+import { localYmd, ymdParts } from "@/lib/my-work";
 import { getOwnerPersonDetail, listOwnerView } from "@/lib/owner-view.functions";
 import {
   DETAIL_KIND_LABELS,
@@ -87,7 +87,8 @@ export function OwnerView() {
   const fn = useServerFn(listOwnerView);
   const q = useQuery({
     queryKey: OWNER_VIEW_KEY,
-    queryFn: () => fn(),
+    // The browser's day, the one My Work uses (the server falls back to the Eastern day).
+    queryFn: () => fn({ data: { today: localYmd(new Date()) } }),
     enabled: !!session && visibleToOwner(profile),
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
@@ -509,7 +510,7 @@ function PersonDetail({ userId, name }: { userId: string; name: string }) {
   const fn = useServerFn(getOwnerPersonDetail);
   const q = useQuery({
     queryKey: ownerPersonKey(userId),
-    queryFn: () => fn({ data: { userId } }),
+    queryFn: () => fn({ data: { userId, today: localYmd(new Date()) } }),
     staleTime: DETAIL_STALE_MS,
   });
   // Errors toast the server's message.

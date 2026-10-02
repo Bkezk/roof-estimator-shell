@@ -41,10 +41,11 @@ import {
   type OwnerRow,
 } from "@/lib/owner-view";
 import { localYmd, zonedTime } from "@/lib/tasks";
-import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
+import { OPEN_OPP_STATUSES, parseTodayInput, viewerToday } from "@/lib/work-counts";
 
 export interface OwnerViewResult {
-  /** The office's day (YYYY-MM-DD, Eastern) the numbers are for. */
+  /** The day (YYYY-MM-DD) the numbers are for: the viewer's (sent by the browser, as My Work
+   *  uses), else the office's (Eastern) — viewerToday. */
   today: string;
   /** When the numbers were read (ISO): "2 h ago" is relative to this. */
   at: string;
@@ -71,7 +72,9 @@ function must<T>(label: string, r: { data: T | null; error: { message: string } 
 
 export const listOwnerView = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<OwnerViewResult> => {
+  // The viewer's day (audit, Oct 2: the Owner view used the Eastern day, My Work the browser's).
+  .validator((d: unknown) => parseTodayInput(d))
+  .handler(async ({ data, context }): Promise<OwnerViewResult> => {
     const sb = context.supabase;
     // The role comes from the caller's own profile row — never from the client.
     const { data: me, error: meErr } = await sb
@@ -83,7 +86,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
     if (!me || !visibleToOwner(me)) throw new Error("Forbidden: admin only");
 
     const now = new Date();
-    const today = localYmd(now);
+    const today = viewerToday(data.today, now);
     const week = weekRange(today);
     const weekFrom = zonedTime(week.start, "00:00").toISOString();
     const weekTo = zonedTime(addDays(week.end, 1), "00:00").toISOString();
@@ -302,7 +305,10 @@ const RECENT_PER_SOURCE = 20;
  */
 export const getOwnerPersonDetail = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ userId: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => ({
+    ...z.object({ userId: z.string().uuid() }).parse(d),
+    ...parseTodayInput(d),
+  }))
   .handler(async ({ data, context }): Promise<OwnerPersonDetail> => {
     const sb = context.supabase;
     // The role comes from the caller's own profile row — never from the client.
@@ -316,7 +322,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
 
     const userId = data.userId;
     const now = new Date();
-    const today = localYmd(now);
+    const today = viewerToday(data.today, now);
     const week = weekRange(today);
     const weekFrom = zonedTime(week.start, "00:00").toISOString();
     const weekTo = zonedTime(addDays(week.end, 1), "00:00").toISOString();

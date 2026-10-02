@@ -17,7 +17,7 @@ import {
   setCrmSettings,
   type CrmSettingsInput,
 } from "@/lib/followups.functions";
-import { listTechnicians } from "@/lib/auth.functions";
+import { listAssigneeOptions } from "@/lib/opportunities.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -105,15 +105,15 @@ export function RemindersSettings() {
   const setFn = useServerFn(setCrmSettings);
   const healthFn = useServerFn(notificationHealth);
   const runFn = useServerFn(dispatchRemindersIfDue);
-  const techFn = useServerFn(listTechnicians);
+  const usersFn = useServerFn(listAssigneeOptions);
 
   const settings = useQuery({ queryKey: ["crm-settings"], queryFn: () => getFn() });
   const health = useQuery({ queryKey: ["notification-health"], queryFn: () => healthFn() });
-  // The people untouched items can escalate to (technician_options, same list as the assignee
-  // pickers).
+  // The people untouched items can escalate to: every user (crm_user_options, the same list as
+  // the opportunity assignee box; it was technician_options, the Service roster only).
   const users = useQuery({
-    queryKey: ["technicians"],
-    queryFn: () => techFn(),
+    queryKey: ["assignee-options"],
+    queryFn: () => usersFn(),
     staleTime: 5 * 60_000,
   });
 
@@ -144,7 +144,7 @@ export function RemindersSettings() {
     const all = [...(users.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
     // Keep someone already picked listed (and removable) even if they left the roster.
     for (const id of draft.escalate_user_ids)
-      if (!all.some((u) => u.id === id)) all.push({ id, name: "Former user", technician: false });
+      if (!all.some((u) => u.id === id)) all.push({ id, name: "Former user" });
     return all;
   }, [users.data, draft.escalate_user_ids]);
   const invalid = FIELDS.filter((f) => !Number.isInteger(draft[f.key]) || draft[f.key] < f.min);
@@ -243,7 +243,7 @@ export function RemindersSettings() {
                     checked={draft.escalate_to_admins}
                     onCheckedChange={(v) => setDraft((d) => ({ ...d, escalate_to_admins: v }))}
                   />
-                  Escalate untouched items to every admin
+                  Escalate untouched items to every admin and manager
                 </label>
                 <div className="space-y-1.5">
                   <p className="text-sm font-medium">Also escalate to</p>
@@ -345,6 +345,18 @@ export function RemindersSettings() {
                     </>
                   )}
                 </dd>
+                {health.data.email_configured && health.data.email_problem && (
+                  <>
+                    <dt className="text-muted-foreground">Reminder emails</dt>
+                    <dd className="space-y-1" data-health="email-problem">
+                      <Badge variant="destructive">Held back</Badge>
+                      <p className="text-xs text-destructive">
+                        {health.data.email_problem} — set it in Lovable Cloud › Secrets. Until then
+                        each reminder records this instead of sending a broken email.
+                      </p>
+                    </dd>
+                  </>
+                )}
                 <dt className="text-muted-foreground">From address</dt>
                 <dd className="break-all">{health.data.from || "—"}</dd>
                 <dt className="text-muted-foreground">App URL (links in reminders)</dt>
@@ -379,6 +391,40 @@ export function RemindersSettings() {
                             <TableCell className="text-destructive">
                               {f.push_error ?? "—"}
                             </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+
+              {/* Task notices (created / morning / overdue) record their failures on the task
+                  (tasks.notify_error); they are listed here too (audit, Oct 2). */}
+              <div className="space-y-2" data-health="task-failures">
+                <p className="text-sm font-semibold">Task notice failures</p>
+                {health.data.task_failures.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No failed task notices.</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Updated</TableHead>
+                          <TableHead>Task</TableHead>
+                          <TableHead>Assignee</TableHead>
+                          <TableHead>Problem</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {health.data.task_failures.map((t) => (
+                          <TableRow key={t.id}>
+                            <TableCell className="whitespace-nowrap">
+                              {whenTime(t.updated_at)}
+                            </TableCell>
+                            <TableCell>{t.title}</TableCell>
+                            <TableCell>{t.assignee_name ?? "—"}</TableCell>
+                            <TableCell className="text-destructive">{t.notify_error}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

@@ -150,6 +150,13 @@ function fakeDb(tables: Record<string, Row[]>, objects: Record<string, Uint8Arra
       if (job) job["stage"] = args["p_stage"];
       return { data: null, error: null };
     }
+    // The follow-up functions (20261002140000_followup_guard.sql) are database code: answered
+    // as "not in the schema cache" so syncFollowup runs its direct writes, as src/test/fake-supabase.
+    if (fn === "followup_sync_upsert" || fn === "followup_sync_close")
+      return {
+        data: null,
+        error: { code: "PGRST202", message: `Could not find the function public.${fn}` },
+      };
     return { data: null, error: { message: `unexpected rpc ${fn}` } };
   };
   const storage = {

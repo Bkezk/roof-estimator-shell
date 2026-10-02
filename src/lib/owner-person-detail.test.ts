@@ -471,7 +471,7 @@ describe("Source: getOwnerPersonDetail is admin-only; the component expands rows
     ])
       expect(view).toContain(`title="${title}"\n        empty="${empty}"`);
     expect(view).toContain("Last activity\n          <span className=");
-    expect(view).toContain("queryFn: () => fn({ data: { userId } })");
+    expect(view).toContain("queryFn: () => fn({ data: { userId, today: localYmd(new Date()) } })");
     expect(view).toContain("staleTime: DETAIL_STALE_MS");
     expect(view).toContain("const DETAIL_STALE_MS = 60_000;");
     // Errors toast the server's message.

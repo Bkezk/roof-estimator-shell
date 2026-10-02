@@ -7,15 +7,21 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
-import { localYmd } from "@/lib/tasks";
-import { OPEN_OPP_STATUSES, OPEN_TICKET_STAGES, type WorkCounts } from "@/lib/work-counts";
+import {
+  OPEN_OPP_STATUSES,
+  OPEN_TICKET_STAGES,
+  parseTodayInput,
+  viewerToday,
+  type WorkCounts,
+} from "@/lib/work-counts";
 
 export const getWorkCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<WorkCounts & { today: string }> => {
+  // The viewer's day (the browser's, as My Work); without one, the office's (Eastern).
+  .validator((d: unknown) => parseTodayInput(d))
+  .handler(async ({ data, context }): Promise<WorkCounts & { today: string }> => {
     const sb = context.supabase;
-    // The office's calendar day (America/New_York): a date before it is overdue.
-    const today = localYmd(new Date());
+    const today = viewerToday(data.today);
     const tickets = () =>
       sb
         .from("service_jobs")

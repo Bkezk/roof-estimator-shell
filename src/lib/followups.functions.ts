@@ -39,17 +39,61 @@ export const listFollowups = createServerFn({ method: "GET" })
     const sb = context.supabase;
     let q = sb.from("crm_followups").select("*").order("due_at").limit(1000);
     if (!data.include_closed) q = q.eq("status", "open");
-    const [{ data: rows, error }, { data: techs }] = await Promise.all([
-      q,
-      sb.rpc("technician_options"),
-    ]);
+    const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
-    const names = new Map<string, string>();
-    for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
-    return (rows ?? []).map((r) => ({
-      ...r,
-      assignee_name: names.get(r.assignee_id) ?? "(user)",
-    }));
+    return withAssigneeNames(sb, rows ?? []);
+  });
+
+/**
+ * Assignee names from crm_user_options (every user, for anyone with Customers, Service or
+ * Estimate access — it was technician_options, which answers Service users only), then the
+ * caller's own profile row for anyone left.
+ */
+async function withAssigneeNames(
+  sb: SupabaseClient<Database>,
+  rows: FollowupRow[],
+): Promise<FollowupWithName[]> {
+  if (!rows.length) return [];
+  const names = new Map<string, string>();
+  const { data: people } = await sb.rpc("crm_user_options");
+  for (const t of people ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  const missing = [...new Set(rows.map((r) => r.assignee_id).filter((id) => !names.has(id)))];
+  if (missing.length) {
+    const { data: own } = await sb
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", missing);
+    for (const t of own ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  }
+  return rows.map((r) => ({ ...r, assignee_name: names.get(r.assignee_id) ?? "(user)" }));
+}
+
+/**
+ * One item's open follow-up, or null (the opportunity page's follow-up strip). Read by item, so
+ * it is found however many follow-ups there are (audit, Oct 2: the strip searched the first
+ * 1,000 rows of listFollowups and said "No open follow-up" past them).
+ */
+export const followupForItem = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        kind: z.enum(["ticket", "opportunity", "invoice"]),
+        item_id: z.string().uuid(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<FollowupWithName | null> => {
+    const { data: rows, error } = await context.supabase
+      .from("crm_followups")
+      .select("*")
+      .eq("kind", data.kind)
+      .eq("item_id", data.item_id)
+      .eq("status", "open")
+      .limit(1);
+    if (error) throw new Error(error.message);
+    const [row] = await withAssigneeNames(context.supabase, rows ?? []);
+    return row ?? null;
   });
 
 /**
@@ -325,6 +369,8 @@ export const notificationHealth = createServerFn({ method: "GET" })
     }): Promise<{
       last_dispatch_at: string | null;
       email_configured: boolean;
+      /** "APP_URL not set" / "NOTIFY_FROM_EMAIL not set": reminder emails are held back. */
+      email_problem: string | null;
       app_url: string;
       from: string;
       recent_failures: {
@@ -334,11 +380,14 @@ export const notificationHealth = createServerFn({ method: "GET" })
         email_error: string | null;
         push_error: string | null;
       }[];
+      /** Tasks whose notice (created / morning / overdue) failed: tasks.notify_error. */
+      task_failures: TaskNoticeFailure[];
     }> => {
       const p = await me(context);
       if (p.role !== "admin") throw new Error("Forbidden: admin access required");
-      const { emailConfigured, appUrl, fromAddress } = await import("@/lib/notify.server");
-      const [{ data: s }, { data: fails }] = await Promise.all([
+      const { emailConfigured, emailConfigProblem, appUrl, fromAddress } =
+        await import("@/lib/notify.server");
+      const [{ data: s }, { data: fails }, { data: taskFails }] = await Promise.all([
         context.supabase.from("crm_settings").select("last_dispatch_at").eq("id", 1).maybeSingle(),
         context.supabase
           .from("notifications")
@@ -346,13 +395,30 @@ export const notificationHealth = createServerFn({ method: "GET" })
           .or("email_error.not.is.null,push_error.not.is.null")
           .order("created_at", { ascending: false })
           .limit(20),
+        context.supabase
+          .from("tasks")
+          .select("id, title, notify_error, updated_at, assignee_name")
+          .not("notify_error", "is", null)
+          .order("updated_at", { ascending: false })
+          .limit(20),
       ]);
       return {
         last_dispatch_at: s?.last_dispatch_at ?? null,
         email_configured: emailConfigured(),
+        email_problem: emailConfigProblem(),
         app_url: appUrl(),
         from: fromAddress(),
         recent_failures: fails ?? [],
+        task_failures: (taskFails ?? []).filter((t): t is TaskNoticeFailure => !!t.notify_error),
       };
     },
   );
+
+/** A task whose notice failed (Admin › Reminders, audit Oct 2: it showed only on the task). */
+export interface TaskNoticeFailure {
+  id: string;
+  title: string;
+  notify_error: string;
+  updated_at: string;
+  assignee_name: string | null;
+}

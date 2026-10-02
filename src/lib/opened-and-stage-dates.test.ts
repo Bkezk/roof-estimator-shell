@@ -467,7 +467,7 @@ describe("the opportunity page: 'Opened … by …' and the status strip", () =>
       "const statusCells = opp ? oppStatusStrip(asStatus(opp.status), events.data ?? []) : [];",
     );
     expect(flat(src)).toContain(
-      "openedLine(opp.created_at, openerName(opp.created_by, techs.data, events.data ?? []))",
+      "openedLine(opp.created_at, openerName(opp.created_by, people.data, events.data ?? []))",
     );
   });
   it("the Opened line under the title; the strip ends the header; the status select stays", () => {

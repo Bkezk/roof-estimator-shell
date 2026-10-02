@@ -30,6 +30,11 @@ export interface EstimateSearch {
   pfSite?: string;
   /** The bid's Setup notes. */
   pfNotes?: string;
+  /**
+   * The opportunity "Start a bid" came from (crm_opportunities.id): once the new bid is saved,
+   * its id is written on that opportunity (opportunities.functions.ts linkBid).
+   */
+  opportunity?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,7 +46,7 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
     const v = s[k];
     return typeof v === "string" && v ? { [k]: v } : {};
   };
-  const uuid = (k: "pfAccount" | "pfSite"): string | null => {
+  const uuid = (k: "pfAccount" | "pfSite" | "opportunity"): string | null => {
     const v = s[k];
     return typeof v === "string" && UUID.test(v) ? v : null;
   };
@@ -52,6 +57,7 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
   const account = uuid("pfAccount");
   // A site only means something with its customer.
   const site = account ? uuid("pfSite") : null;
+  const opportunity = uuid("opportunity");
   return {
     ...(typeof b === "string" ? { bid: b } : {}),
     // Bid Combiner (docs §22.41): comma-separated ids of the bids to merge into a NEW bid.
@@ -74,5 +80,6 @@ export function parseEstimateSearch(s: Record<string, unknown>): EstimateSearch 
     ...(account ? { pfAccount: account } : {}),
     ...(site ? { pfSite: site } : {}),
     ...str("pfNotes"),
+    ...(opportunity ? { opportunity } : {}),
   };
 }

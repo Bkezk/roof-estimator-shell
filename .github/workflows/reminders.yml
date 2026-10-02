@@ -1,7 +1,8 @@
 # Fires the due follow-up reminders (email + push) by calling the app's cron endpoint. Set two
 # repository secrets: APP_URL (the published app, e.g. https://bid-o-matic.lovable.app) and
-# CRON_SECRET (the same value as LOVABLE_CRON_SECRET in Lovable Cloud). Without them the job
-# skips; the app still dispatches, throttled, whenever an office user opens it.
+# CRON_SECRET (the same value as LOVABLE_CRON_SECRET in Lovable Cloud). Without them the run
+# FAILS (red, so it is noticed — audit, Oct 2: it used to exit 0 with "skipping"); the app still
+# dispatches, throttled, whenever an office user opens it.
 name: Follow-up reminders
 
 on:
@@ -19,7 +20,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "APP_URL / CRON_SECRET not set; skipping"; exit 0
+            echo "::error::APP_URL / CRON_SECRET repository secrets are not set; no reminders were sent by this run"
+            exit 1
           fi
           curl -sS -f -X POST "$APP_URL/api/cron/reminders" \
             -H "Authorization: Bearer $CRON_SECRET" \

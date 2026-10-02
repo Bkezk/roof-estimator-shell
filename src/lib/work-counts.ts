@@ -11,8 +11,31 @@
  *   Open opportunities     live, status not closing (not won / lost / no response)
  *   Overdue opportunities  open opportunities whose expected_close is before today
  *
- * "Today" is the office's calendar day (America/New_York, lib/tasks.ts localYmd), as YYYY-MM-DD.
+ * "Today" is the viewer's calendar day, sent by the browser (lib/my-work.ts localYmd, the day My
+ * Work uses), as YYYY-MM-DD; without one, the office's day (America/New_York, lib/tasks.ts
+ * localYmd). Audit, Oct 2: the counts, the Owner view and the Opportunities list used the
+ * Eastern day while My Work used the browser's, so at 23:30 in Chicago they disagreed.
  */
+import { localYmd as easternYmd } from "@/lib/tasks";
+
+/**
+ * The day to count against: the viewer's (`sent`, YYYY-MM-DD) when it is a real date within a
+ * day of the office's — every US zone is — else the office's day (America/New_York).
+ */
+export function viewerToday(sent: string | null | undefined, now: Date = new Date()): string {
+  const eastern = easternYmd(now);
+  if (!sent || !YMD.test(sent)) return eastern;
+  const t = Date.parse(`${sent}T00:00:00Z`);
+  const e = Date.parse(`${eastern}T00:00:00Z`);
+  if (!Number.isFinite(t) || new Date(t).toISOString().slice(0, 10) !== sent) return eastern;
+  return Math.abs(t - e) <= 86400000 ? sent : eastern;
+}
+
+/** The server functions' input: the viewer's day, optional (viewerToday). */
+export const parseTodayInput = (d: unknown): { today?: string } => {
+  const v = (d as { today?: unknown } | null | undefined)?.today;
+  return typeof v === "string" && YMD.test(v) ? { today: v } : {};
+};
 
 /** Ticket stages that are still work (the same three as My Work and the Tech Board load). */
 export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;

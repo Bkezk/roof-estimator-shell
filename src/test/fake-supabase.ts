@@ -1,11 +1,12 @@
 /**
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
  * the server functions under test (select / insert / update / delete with eq, neq, in, is, not
- * is, ilike, or(ilike…), gte, lt, order, limit, range, count; maybeSingle / single; rpc
- * technician_options, plus any rpc a test passes in `opts.rpcs`). Every write that changed
- * something is recorded, so a test can say "nothing was written". `opts.maxRows` caps every
- * select the way Supabase's PostgREST does (1,000 rows per request whatever .limit() asks).
- * Not imported by the app.
+ * is, ilike, or(ilike… / not.is.null), gte, lt, order, limit, range, count; maybeSingle /
+ * single; rpc technician_options, crm_user_options, the follow-up functions as missing, any
+ * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
+ * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
+ * `rpcCalls`. `opts.maxRows` caps every select the way Supabase's PostgREST does (1,000 rows
+ * per request whatever .limit() asks). Not imported by the app.
  */
 type Row = Record<string, unknown>;
 export interface FakeWrite {
@@ -33,11 +34,17 @@ const likeToRegExp = (pattern: string) =>
     "is",
   );
 
+/** An rpc a test provides by name: its return value is the data (a throw becomes the error). */
 export type FakeRpc = (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown;
+/** Answer any rpc (undefined: fall through to `opts.rpcs` and the defaults below). */
+export type FakeRpcAnswer = (
+  fn: string,
+  args: Row | undefined,
+) => { data: unknown; error: { code?: string; message: string } | null } | undefined;
 
 export function fakeSupabase(
   tables: Record<string, Row[]>,
-  opts: { maxRows?: number; rpcs?: Record<string, FakeRpc> } = {},
+  opts: { maxRows?: number; rpcs?: Record<string, FakeRpc>; rpc?: FakeRpcAnswer } = {},
 ) {
   const writes: FakeWrite[] = [];
   let seq = 0;
@@ -105,12 +112,15 @@ export function fakeSupabase(
       ilike: (c: string, pattern: string) =>
         filter(`ilike ${c}=${pattern}`, (r) => likeToRegExp(pattern).test(String(r[c] ?? ""))),
       or: (expr: string) => {
-        const parts = expr.split(",").map((part) => {
+        const parts = expr.split(",").map((part): ((r: Row) => boolean) => {
+          const notNull = /^(\w+)\.not\.is\.null$/.exec(part);
+          if (notNull) return (r) => (r[notNull[1]!] ?? null) !== null;
           const m = /^(\w+)\.ilike\.(.*)$/.exec(part);
           if (!m) throw new Error(`fake: or(${part})`);
-          return { c: m[1]!, re: likeToRegExp(m[2]!) };
+          const re = likeToRegExp(m[2]!);
+          return (r) => re.test(String(r[m[1]!] ?? ""));
         });
-        return filter(`or ${expr}`, (r) => parts.some((p) => p.re.test(String(r[p.c] ?? ""))));
+        return filter(`or ${expr}`, (r) => parts.some((p) => p(r)));
       },
       gte: (c: string, v: string) => filter(`gte ${c}`, (r) => String(r[c] ?? "") >= v),
       lt: (c: string, v: string) => filter(`lt ${c}`, (r) => String(r[c] ?? "") < v),
@@ -149,6 +159,8 @@ export function fakeSupabase(
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
   const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
     rpcCalls.push({ fn, args });
+    const custom = opts.rpc?.(fn, args);
+    if (custom) return custom;
     const own = opts.rpcs?.[fn];
     if (own) {
       try {
@@ -157,6 +169,23 @@ export function fakeSupabase(
         return { data: null, error: { message: e instanceof Error ? e.message : String(e) } };
       }
     }
+    // Every user (crm_user_options: id, name, email).
+    if (fn === "crm_user_options")
+      return {
+        data: (tables["profiles"] ?? []).map((p) => ({
+          id: p["id"],
+          full_name: p["full_name"] ?? null,
+          email: p["email"] ?? "",
+        })),
+        error: null,
+      };
+    // The follow-up functions of 20261002140000_followup_guard.sql are database code: here they
+    // answer "not in the schema cache", so syncFollowup runs its direct writes (the same rules).
+    if (fn === "followup_sync_upsert" || fn === "followup_sync_close")
+      return {
+        data: null,
+        error: { code: "PGRST202", message: `Could not find the function public.${fn}` },
+      };
     if (fn === "technician_options")
       return {
         data: (tables["profiles"] ?? []).map((p) => ({

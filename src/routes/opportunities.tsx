@@ -9,7 +9,8 @@ export const Route = createFileRoute("/opportunities")({
   // them, with its status chip preset by `status=` (a status, or `allopen`), `overdue=1` (the
   // Customers page counts strip) and `assignee=<id>` (one person's: the Owner view's numbers).
   // Parsing: lib/opportunities-search.ts. Access is the central
-  // gate's (pageForPath: /opportunities → Customers).
+  // gate's (pageForPath: /opportunities → every signed-in user; the server lists a user
+  // without Customers or Estimate access only their own assignments).
   validateSearch: parseOpportunitiesSearch,
   component: OpportunitiesRoute,
 });

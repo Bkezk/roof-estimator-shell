@@ -50,6 +50,42 @@ export const appUrl = () => (process.env["APP_URL"] || "").replace(/\/+$/, "");
 
 export const emailConfigured = () => !!process.env["RESEND_API_KEY"];
 
+/**
+ * Why a reminder email would go out broken, or null (audit, Oct 2): without APP_URL its link is
+ * a bare "/opportunities?id=…" that opens nothing from a mail client; without NOTIFY_FROM_EMAIL
+ * it is sent from Resend's onboarding address, which only delivers to the Resend account owner.
+ * notify() records this on the inbox row (email_error) instead of sending. The Reminders page
+ * shows it (followups.functions.ts notificationHealth).
+ */
+export function emailConfigProblem(): string | null {
+  const missing: string[] = [];
+  if (!appUrl()) missing.push("APP_URL not set");
+  if (!process.env["NOTIFY_FROM_EMAIL"]) missing.push("NOTIFY_FROM_EMAIL not set");
+  return missing.length ? missing.join("; ") : null;
+}
+
+/** Problems already logged in this reminder pass (one console.error each per pass). */
+let loggedThisPass = new Set<string>();
+function logOncePerPass(problem: string) {
+  if (loggedThisPass.has(problem)) return;
+  loggedThisPass.add(problem);
+  console.error(
+    `Reminder email not sent: ${problem} (Lovable Cloud › Secrets). The inbox rows record it.`,
+  );
+}
+
+/** The email signature: the company's name (Settings › General), else "JBK Portal". */
+export const EMAIL_SIGNATURE_FALLBACK = "JBK Portal";
+async function emailSignature(admin: Client): Promise<string> {
+  try {
+    const { data } = await admin.from("company_settings").select("company_name").limit(1);
+    const name = (data?.[0]?.company_name ?? "").trim();
+    return name || EMAIL_SIGNATURE_FALLBACK;
+  } catch {
+    return EMAIL_SIGNATURE_FALLBACK;
+  }
+}
+
 export async function sendEmail(input: {
   to: string;
   subject: string;
@@ -130,6 +166,10 @@ export async function sendPush(
   }
 }
 
+/** A reminder email's text: title, body, the link, and the company's name to sign it. */
+export const emailText = (msg: Outgoing, link: string, signature: string) =>
+  `${msg.title}\n\n${msg.body ?? ""}${link ? `\n\nOpen: ${link}` : ""}\n\n— ${signature}`;
+
 /**
  * Write one inbox row per recipient and deliver it by email and push according to each
  * user's channels. Never throws for a delivery failure: the row records the error and the
@@ -172,15 +212,24 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
     .in("user_id", ids)
     .is("failed_at", null);
   const link = msg.url ? `${appUrl()}${msg.url}` : "";
+  // Email: only when it would arrive whole (emailConfigProblem; without RESEND_API_KEY sendEmail
+  // records that, as before); the signature is read once.
+  const emailProblem = emailConfigured() ? emailConfigProblem() : null;
+  const wantsEmail = (people ?? []).some((p) => p.notify_email);
+  if (wantsEmail && emailProblem) logOncePerPass(emailProblem);
+  const signature = wantsEmail && !emailProblem ? await emailSignature(admin) : "";
   for (const row of rows ?? []) {
     const p = (people ?? []).find((x) => x.id === row.user_id);
     if (!p) continue;
     const patch: Database["public"]["Tables"]["notifications"]["Update"] = {};
     if (p.notify_email) {
-      const text = `${msg.title}\n\n${msg.body ?? ""}${link ? `\n\nOpen: ${link}` : ""}\n\n— Bid-O-Matic`;
-      const r = await sendEmail({ to: p.email, subject: msg.title, text });
-      if (r.ok) patch.email_sent_at = new Date().toISOString();
-      else patch.email_error = r.error;
+      if (emailProblem) patch.email_error = emailProblem;
+      else {
+        const text = emailText(msg, link, signature);
+        const r = await sendEmail({ to: p.email, subject: msg.title, text });
+        if (r.ok) patch.email_sent_at = new Date().toISOString();
+        else patch.email_error = r.error;
+      }
     }
     if (p.notify_push) {
       const mine = (subs ?? []).filter((s) => s.user_id === p.id);
@@ -233,6 +282,46 @@ export interface DispatchResult {
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** PostgREST's "function not in the schema cache" (a migration not applied yet). */
+const isMissingRpc = (e: { code?: string; message?: string }) =>
+  e.code === "PGRST202" || /Could not find the function/i.test(e.message ?? "");
+
+/**
+ * Claim a due reminder (see dispatchDueReminders): true when this pass won it. Through
+ * followup_claim_reminder when the pass runs as a signed-in user (it refuses the follow-up's own
+ * assignee: false, and another pass sends it); a direct conditional update with the service key,
+ * or before 20261002140000_followup_guard.sql is applied.
+ */
+async function claimReminder(
+  admin: Client,
+  f: FollowupRow,
+  now: Date,
+  viaRpc: boolean,
+): Promise<boolean> {
+  if (viaRpc) {
+    const r = await admin.rpc("followup_claim_reminder", {
+      p_id: f.id,
+      p_expected: f.next_remind_at,
+    });
+    if (!r.error) return r.data === true;
+    if (!isMissingRpc(r.error)) throw new Error(r.error.message);
+  }
+  const next = new Date(now.getTime() + f.every_days * 86400000);
+  const { data: won, error } = await admin
+    .from("crm_followups")
+    .update({
+      next_remind_at: next.toISOString(),
+      reminders_sent: f.reminders_sent + 1,
+      last_reminded_at: now.toISOString(),
+    })
+    .eq("id", f.id)
+    .eq("status", "open")
+    .eq("next_remind_at", f.next_remind_at)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return !!won?.length;
+}
+
 /**
  * Record a failed step on the follow-up (dispatch_errors / last_dispatch_error, migration
  * 20261002090000) and in the server log. Never throws: before that migration is applied the
@@ -275,6 +364,12 @@ async function recordFailure(admin: Client, f: FollowupRow, step: string, e: unk
 export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> {
   const admin = await serverClient(sb);
   const now = new Date();
+  // A configuration problem is logged once per pass (emailConfigProblem).
+  loggedThisPass = new Set();
+  // Without the service key (the preview) the pass runs as the signed-in office user, whom the
+  // database no longer lets move next_remind_at directly (20261002140000_followup_guard.sql):
+  // the claim goes through followup_claim_reminder, which makes the same conditional update.
+  const claimViaRpc = !hasServiceRole();
   const { data: due, error } = await admin
     .from("crm_followups")
     .select("*")
@@ -292,21 +387,8 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   };
   for (const f of due ?? []) {
     // 1. Claim (see above). Lost to another pass: skip. Could not claim: record, skip.
-    const next = new Date(now.getTime() + f.every_days * 86400000);
     try {
-      const { data: won, error: claimErr } = await admin
-        .from("crm_followups")
-        .update({
-          next_remind_at: next.toISOString(),
-          reminders_sent: f.reminders_sent + 1,
-          last_reminded_at: now.toISOString(),
-        })
-        .eq("id", f.id)
-        .eq("status", "open")
-        .eq("next_remind_at", f.next_remind_at)
-        .select("id");
-      if (claimErr) throw new Error(claimErr.message);
-      if (!won?.length) {
+      if (!(await claimReminder(admin, f, now, claimViaRpc))) {
         out.skipped++;
         continue;
       }

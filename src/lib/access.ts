@@ -139,6 +139,14 @@ export const seesInvoices = (p: AccessLike | null | undefined): boolean =>
   managesTickets(p) || isSalesPm(p);
 
 /**
+ * Who works the whole Opportunities list (the sidebar entry, New opportunity): Customers or
+ * Estimate access — the twin of crm_opportunities_read. Anyone else still opens /opportunities
+ * (pageForPath: null) and sees only the opportunities assigned to them.
+ */
+export const seesOpportunitiesList = (p: AccessLike | null | undefined): boolean =>
+  canAccess(p, "customers") || canAccess(p, "estimate");
+
+/**
  * The page a route belongs to; null for routes every signed-in user may open (/account).
  * "admin": admins only; "manager": admins and managers (`managesTickets`).
  */
@@ -159,7 +167,12 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/takeoff")) return "takeoff";
   if (pathname.startsWith("/service")) return "service";
   if (pathname.startsWith("/customers")) return "customers";
-  if (pathname.startsWith("/opportunities")) return "customers";
+  // Opportunities: every signed-in user (audit, Oct 2: a rep without Customers access was
+  // bounced from their own opportunity's My Work link). What they see is the server's: RLS
+  // gives Customers / Estimate users every opportunity and anyone else only their own
+  // assignments (crm_opportunities_read). The sidebar lists the page for Customers / Estimate
+  // (seesOpportunitiesList).
+  if (pathname.startsWith("/opportunities")) return null;
   if (
     pathname.startsWith("/bids") ||
     pathname.startsWith("/estimate") ||

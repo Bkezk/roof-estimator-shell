@@ -8,6 +8,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { claimReminderInMemory } from "@/test/claim-reminder";
+
 type Row = Record<string, unknown>;
 type Result = { data: unknown; error: { message: string } | null };
 type Tables = Record<string, Row[]>;
@@ -100,6 +102,9 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
       s[0]!["last_dispatch_at"] = new Date().toISOString();
       return { data: null, error: null };
     }
+    // Without the service key the pass claims through this function
+    // (20261002140000_followup_guard.sql): open, due, still holding the value read.
+    if (name === "followup_claim_reminder") return claimReminderInMemory(db, args);
     return { data: [], error: null };
   };
   return { from, rpc };

@@ -165,7 +165,8 @@ describe("a deleted opportunity takes no change (old link)", () => {
 describe("the same calls on a live opportunity still work", () => {
   it("setOpportunityStatus changes it and syncs the follow-up", async () => {
     setup({ followups: [followup()] });
-    await call(setOpportunityStatus, { id: OPP, status: "won" });
+    // Won is a manager's (audit, Oct 2 — opportunity-reps.test.ts).
+    await call(setOpportunityStatus, { id: OPP, status: "won" }, MGR);
     expect(oppRow()["status"]).toBe("won");
     expect(followups()[0]!["status"]).toBe("closed");
   });

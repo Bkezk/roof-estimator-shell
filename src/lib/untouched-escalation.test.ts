@@ -14,6 +14,8 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { claimReminderInMemory } from "@/test/claim-reminder";
+
 import { dispatchDueReminders, type Client } from "@/lib/notify.server";
 
 type Row = Record<string, unknown>;
@@ -127,6 +129,9 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
       settings["last_dispatch_at"] = new Date().toISOString();
       return { data: null, error: null };
     }
+    // Without the service key the pass claims through this function (as its SQL does: open,
+    // due, and still holding the value read; then on by every_days).
+    if (name === "followup_claim_reminder") return claimReminderInMemory(db, args);
     return { data: [], error: null };
   };
   return { from, rpc };

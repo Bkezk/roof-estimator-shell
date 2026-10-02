@@ -125,6 +125,18 @@ export function followupStateText(
   return parts;
 }
 
+/**
+ * Is the follow-up overdue on `today` (YYYY-MM-DD, the viewer's day)? Only once its due DAY has
+ * passed, as My Work says it (followupStateText): on the due day itself it is "Due today", not
+ * red (audit, Oct 2: the opportunity's follow-up strip compared the instant, so it turned red at
+ * 12:00 UTC on the due day).
+ */
+export const isFollowupOverdue = (
+  f: Pick<FollowupStateIn, "due_at" | "status">,
+  today: string,
+  toYmd: (iso: string) => string = localYmd,
+): boolean => (!f.status || f.status === "open") && daysBetween(toYmd(f.due_at), today) > 0;
+
 /** The parts as one line ("Overdue 3 days · Reminders every 3 days"). */
 export const followupStateLine = (parts: FollowupStatePart[]): string =>
   parts.map((p) => p.text).join(" · ");

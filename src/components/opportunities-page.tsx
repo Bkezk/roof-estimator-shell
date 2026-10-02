@@ -40,22 +40,28 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { seesEveryone } from "@/lib/access";
-import { canManageFollowup } from "@/lib/followup-rules";
+import { seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import { canManageFollowup, isFollowupOverdue } from "@/lib/followup-rules";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
   assigneeProblem,
   autoSiteId,
   bidPrefillFromOpportunity,
+  canSetOppStatus,
+  createReminderHint,
+  OPP_STATUS_REP_HINT,
   opportunitySiteProblem,
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
 import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
-import { localYmd } from "@/lib/tasks";
+// The viewer's own calendar day, as My Work uses (audit, Oct 2: this list used the Eastern day,
+// so at 23:30 in Chicago it said "overdue" for what My Work called due today).
+import { localYmd } from "@/lib/my-work";
 import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN } from "@/lib/work-counts";
 import {
   deleteOpportunity,
   getOpportunity,
+  listAssigneeOptions,
   listOpportunities,
   listOpportunityEvents,
   OPP_CLOSING,
@@ -68,8 +74,7 @@ import {
   type OpportunityInput,
   type OpportunityWithNames,
 } from "@/lib/opportunities.functions";
-import { getCrmSettings, listFollowups } from "@/lib/followups.functions";
-import { listTechnicians } from "@/lib/auth.functions";
+import { followupForItem, getCrmSettings } from "@/lib/followups.functions";
 import { oppStatusStrip, openedLine, openerName } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
@@ -251,6 +256,9 @@ function OppList({
   // One person's (?assignee=<id>, the Owner view's numbers); cleared from its chip.
   const [assigneeOnly, setAssigneeOnly] = useState<string | undefined>(presetAssignee);
   const today = localYmd(new Date());
+  // Reps without Customers or Estimate access open the page for their own assignments (the
+  // server lists only theirs); creating one is the office's.
+  const canCreate = seesOpportunitiesList(profile);
   const [mine, setMine] = useState(false);
   const [collapsed, setCollapsed] = useState<OppStatus[]>(readCollapsed);
   const toggleGroup = (status: OppStatus) =>
@@ -318,9 +326,11 @@ function OppList({
             No response.
           </p>
         </div>
-        <Button size="lg" className="text-base font-semibold" onClick={newOpp}>
-          <Plus className="mr-2 h-5 w-5" /> New opportunity
-        </Button>
+        {canCreate && (
+          <Button size="lg" className="text-base font-semibold" onClick={newOpp}>
+            <Plus className="mr-2 h-5 w-5" /> New opportunity
+          </Button>
+        )}
       </div>
 
       <NeedsActionStrip kinds={["opportunity"]} />
@@ -413,10 +423,14 @@ function OppList({
 
           {opps.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
-              <p className="text-muted-foreground">No opportunities yet.</p>
-              <Button variant="outline" className="mt-4" onClick={newOpp}>
-                Add the first opportunity
-              </Button>
+              <p className="text-muted-foreground">
+                {canCreate ? "No opportunities yet." : "No opportunities are assigned to you."}
+              </p>
+              {canCreate && (
+                <Button variant="outline" className="mt-4" onClick={newOpp}>
+                  Add the first opportunity
+                </Button>
+              )}
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-lg border border-dashed p-8 text-center">
@@ -640,7 +654,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const statusFn = useServerFn(setOpportunityStatus);
   const deleteFn = useServerFn(deleteOpportunity);
   const restoreFn = useServerFn(restoreOpportunity);
-  const techFn = useServerFn(listTechnicians);
+  const peopleFn = useServerFn(listAssigneeOptions);
   const settingsFn = useServerFn(getCrmSettings);
   const accountFn = useServerFn(getAccount);
   const eventsFn = useServerFn(listOpportunityEvents);
@@ -660,25 +674,21 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const deleted = !!opp?.deleted_at;
   const canRestore = seesEveryone(profile);
 
-  const techs = useQuery({
-    queryKey: ["technicians"],
-    queryFn: () => techFn(),
+  // Every user (crm_user_options), not the Service roster: a Customers-only user got an empty
+  // box from technician_options (audit, Oct 2).
+  const people = useQuery({
+    queryKey: ["assignee-options"],
+    queryFn: () => peopleFn(),
     enabled: !!session,
     staleTime: 5 * 60_000,
   });
-  const techOptions = useMemo(() => {
-    const all = [...(techs.data ?? [])].sort(
-      (a, b) => Number(b.technician) - Number(a.technician) || a.name.localeCompare(b.name),
-    );
-    // Keep the current assignee listed even if they are no longer on the roster.
+  const assigneeOptions = useMemo(() => {
+    const all = [...(people.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    // Keep the current assignee listed even if they are no longer on the list.
     if (opp?.assignee_id && !all.some((t) => t.id === opp.assignee_id))
-      all.unshift({
-        id: opp.assignee_id,
-        name: opp.assignee_name ?? "Former assignee",
-        technician: false,
-      });
+      all.unshift({ id: opp.assignee_id, name: opp.assignee_name ?? "Former assignee" });
     return all;
-  }, [techs.data, opp?.assignee_id, opp?.assignee_name]);
+  }, [people.data, opp?.assignee_id, opp?.assignee_name]);
   // Owner, Oct 1: "Opened <date> by <name>" under the title and the status strip, each status
   // with the date it was last entered — from the opportunity's log, which the database writes
   // (crm_opportunity_events; lib/stage-dates.ts).
@@ -689,7 +699,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   });
   const statusCells = opp ? oppStatusStrip(asStatus(opp.status), events.data ?? []) : [];
   const opened = opp
-    ? openedLine(opp.created_at, openerName(opp.created_by, techs.data, events.data ?? []))
+    ? openedLine(opp.created_at, openerName(opp.created_by, people.data, events.data ?? []))
     : "";
   const settings = useQuery({
     queryKey: ["crm-settings"],
@@ -735,8 +745,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         est_value: draft.est_value > 0 ? draft.est_value : null,
         description: draft.description,
         notes: draft.notes,
-        // Keep a bid linked elsewhere (no field for it here yet).
-        bid_id: opp?.bid_id ?? null,
+        // No bid_id: the link is written by /estimate (linkBid); left out, the server keeps it.
       };
       return saveFn({ data: input });
     },
@@ -746,7 +755,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       qc.setQueryData(["opportunity", row.id], row);
       if (opp) {
         setSavedKey(draftKey(draft));
-        toast.success("Opportunity saved");
+        // A moved date clears a running snooze (followups.server.ts): say so.
+        toast.success(
+          row.followup_note ? `Opportunity saved — ${row.followup_note}` : "Opportunity saved",
+        );
       } else {
         toast.success("Opportunity created");
         void navigate({ to: "/opportunities", search: { id: row.id }, replace: true });
@@ -799,16 +811,11 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     save.mutate();
   };
 
-  const assigneeItems = (list: typeof techOptions) =>
-    list.map((t) => (
-      <SelectItem key={t.id} value={t.id}>
-        {t.name}
-        {t.id === profile?.id ? " (me)" : ""}
-      </SelectItem>
-    ));
-
   // Owner, Oct 1: the status lives in the header only — a new opportunity's select sets the
-  // status it is created with (Open to start); a saved one's changes it at once.
+  // status it is created with (Open to start); a saved one's changes it at once. Won / Lost /
+  // No response are a manager's (lib/opportunity-form.ts canSetOppStatus; the server and the
+  // database refuse them too): a rep sees them disabled, with the hint.
+  const repLimited = OPP_STATUSES.some((s) => !canSetOppStatus(profile, s));
   const statusSelect = (
     <Select
       value={status}
@@ -817,18 +824,35 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
         opp ? statusMut.mutate(v as OppStatus) : set("status", v as OppStatus)
       }
     >
-      <SelectTrigger className="w-[150px]" aria-label="Status">
+      <SelectTrigger
+        className="w-[150px]"
+        aria-label="Status"
+        title={repLimited ? OPP_STATUS_REP_HINT : undefined}
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {OPP_STATUSES.map((s) => (
-          <SelectItem key={s} value={s}>
+          <SelectItem
+            key={s}
+            value={s}
+            disabled={s !== status && !canSetOppStatus(profile, s)}
+            data-manager-only={!canSetOppStatus(profile, s) || undefined}
+          >
             {OPP_STATUS_LABELS[s]}
           </SelectItem>
         ))}
+        {repLimited && (
+          <SelectGroup>
+            <SelectLabel className="text-xs font-normal text-muted-foreground">
+              {OPP_STATUS_REP_HINT}
+            </SelectLabel>
+          </SelectGroup>
+        )}
       </SelectContent>
     </Select>
   );
+  const createHint = createReminderHint({ status: draft.status, assignee_id: draft.assignee_id });
 
   // The customer: the search box until one is picked, then one block with the name (× to
   // change) and the site, as on a ticket. Optional (a prospect may not be a customer yet).
@@ -931,23 +955,17 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                     <SelectValue placeholder="Pick someone…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {techOptions.some((t) => !t.technician) && (
-                      <SelectGroup>
-                        <SelectLabel>Office</SelectLabel>
-                        {assigneeItems(techOptions.filter((t) => !t.technician))}
-                      </SelectGroup>
-                    )}
-                    {techOptions.some((t) => t.technician) && (
-                      <SelectGroup>
-                        <SelectLabel>Technicians</SelectLabel>
-                        {assigneeItems(techOptions.filter((t) => t.technician))}
-                      </SelectGroup>
-                    )}
+                    {assigneeOptions.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                        {t.id === profile?.id ? " (me)" : ""}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
-                {techs.error && (
+                {people.error && (
                   <p className="text-xs text-destructive">
-                    Could not load the users: {errText(techs.error)}
+                    Could not load the users: {errText(people.error)}
                   </p>
                 )}
                 {assigneeMessage && <p className="text-xs text-destructive">{assigneeMessage}</p>}
@@ -1032,9 +1050,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               {opp ? "Save" : "Create opportunity"}
             </Button>
             {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-            {!opp && draft.assignee_id && (
-              <span className="text-xs text-muted-foreground">
-                Creating it starts the assignee&apos;s follow-up reminders.
+            {!opp && createHint && (
+              <span className="text-xs text-muted-foreground" data-hint="create-reminders">
+                {createHint}
               </span>
             )}
           </div>
@@ -1258,17 +1276,18 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
   const { session, profile } = useAuth();
   // Snooze / Close are a manager's (owner, Oct 1); everyone else sees the state only.
   const canManage = canManageFollowup(profile);
-  const listFn = useServerFn(listFollowups);
+  // This one item's open follow-up, read by item (audit, Oct 2: searching the first 1,000 rows
+  // of listFollowups said "No open follow-up" past them). Under the ["followups", …] key, so
+  // Snooze / Close / a save refresh it.
+  const oneFn = useServerFn(followupForItem);
   const followups = useQuery({
-    queryKey: followupsKey(false),
-    queryFn: () => listFn({ data: { include_closed: false } }),
+    queryKey: [...followupsKey(false), "item", "opportunity", opp.id],
+    queryFn: () => oneFn({ data: { kind: "opportunity", item_id: opp.id } }),
     enabled: !!session,
   });
   const { snooze, close } = useFollowupActions();
   const [closing, setClosing] = useState(false);
-  const f = (followups.data ?? []).find(
-    (x) => x.kind === "opportunity" && x.item_id === opp.id && x.status === "open",
-  );
+  const f = followups.data ?? null;
 
   const box = "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm";
   if (followups.error)
@@ -1294,7 +1313,8 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
             : "No open follow-up for this opportunity."}
       </p>
     );
-  const overdue = new Date(f.due_at).getTime() < Date.now();
+  // Red only once the due DAY has passed, as My Work says it (not at 12:00 UTC on the due day).
+  const overdue = isFollowupOverdue(f, localYmd(new Date()));
   return (
     <div className={box}>
       <BellRing className="h-4 w-4 shrink-0 text-muted-foreground" />

@@ -28,6 +28,7 @@ import {
   getFastenerLookup,
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
+import { linkBid } from "@/lib/opportunities.functions";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -369,6 +370,8 @@ function EstimatePage() {
   const getBidFn = useServerFn(getBid);
   const listEstimatorsFn = useServerFn(listEstimatorNames);
   const saveBidFn = useServerFn(saveBid);
+  // "Start a bid" from an opportunity (?opportunity=<id>): the first save links it back.
+  const linkBidFn = useServerFn(linkBid);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const search = Route.useSearch();
@@ -2149,6 +2152,7 @@ function EstimatePage() {
       if (row && !bidId) {
         setBidId(row.id);
         hydratedFor.current = row.id;
+        if (search.opportunity) linkOpportunity(search.opportunity, row.id);
         // The takeoff that built this bid is linked to it, and so locked.
         if (linkedTakeoffId) lockTakeoff(linkedTakeoffId, row.id, row.name);
         void navigate({ to: "/estimate", search: { bid: row.id }, replace: true });
@@ -2162,6 +2166,20 @@ function EstimatePage() {
     } finally {
       setSaving(false);
     }
+  };
+  // The opportunity this bid was started from gets its bid_id (opportunities.functions.ts
+  // linkBid). Best effort: the bid is saved either way; a failure is said, not swallowed.
+  const linkOpportunity = (opportunityId: string, newBidId: string) => {
+    linkBidFn({ data: { opportunityId, bidId: newBidId } })
+      .then(() => {
+        void qc.invalidateQueries({ queryKey: ["opportunity", opportunityId] });
+        void qc.invalidateQueries({ queryKey: ["opportunities"] });
+      })
+      .catch((e: unknown) =>
+        toast.error(
+          `The bid is saved, but it could not be linked to the opportunity: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
   };
   // Previous / Next save the bid before moving (every step is a checkpoint); a failed save
   // stays put.

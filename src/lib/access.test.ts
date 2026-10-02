@@ -63,7 +63,8 @@ describe("per-page access", () => {
     expect(pageForPath("/")).toBeNull();
     expect(pageForPath("/service")).toBe("service");
     expect(pageForPath("/customers")).toBe("customers");
-    expect(pageForPath("/opportunities")).toBe("customers");
+    // Every signed-in user: the server lists a rep only their own (audit, Oct 2).
+    expect(pageForPath("/opportunities")).toBeNull();
     expect(pageForPath("/followups")).toBeNull();
   });
 

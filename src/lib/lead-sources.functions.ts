@@ -68,9 +68,25 @@ export const addLeadSource = createServerFn({ method: "POST" })
       .insert({ name: data.name, sort: nextLeadSourceSort(all) })
       .select("*")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // Added in another case (or at the same moment) since the read: the unique index on
+      // lower(btrim(name)) refused it. The one on the list comes back, as above.
+      if (!leadSourceTaken(error)) throw new Error(error.message);
+      const now = findLeadSource(await readAll(sb), data.name);
+      if (now) return now;
+      throw new Error(leadSourceTakenMessage(data.name));
+    }
     return row;
   });
+
+/**
+ * Postgres unique violation on a lead source's name: the case-blind index
+ * (lead_sources_name_ci_key, 20261002140000_followup_guard.sql) or the plain one.
+ */
+export const leadSourceTaken = (e: { code?: string; message?: string }) =>
+  e.code === "23505" && /lead_sources_name/.test(e.message ?? "");
+/** The plain message for that refusal (never the database's text). */
+export const leadSourceTakenMessage = (name: string) => `${name} is already on the list`;
 
 /**
  * Settings: add (no id) or rename / reorder. A rename also changes the opportunities that carry
@@ -91,7 +107,8 @@ export const saveLeadSource = createServerFn({ method: "POST" })
         .insert({ name: data.name, sort: data.sort ?? nextLeadSourceSort(all) })
         .select("*")
         .single();
-      if (error) throw new Error(error.message);
+      if (error)
+        throw new Error(leadSourceTaken(error) ? leadSourceTakenMessage(data.name) : error.message);
       return { row, renamed: 0 };
     }
     const before = all.find((r) => r.id === data.id);
@@ -102,7 +119,8 @@ export const saveLeadSource = createServerFn({ method: "POST" })
         p_id: data.id,
         p_name: data.name,
       });
-      if (error) throw new Error(error.message);
+      if (error)
+        throw new Error(leadSourceTaken(error) ? leadSourceTakenMessage(data.name) : error.message);
       renamed = n ?? 0;
     }
     const { data: row, error } = await sb

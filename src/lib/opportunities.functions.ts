@@ -21,7 +21,9 @@ import { canAccess, seesEveryone } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
-import { assigneeProblem, opportunitySiteProblem } from "@/lib/opportunity-form";
+import { assigneeProblem, opportunitySiteProblem, oppStatusProblem } from "@/lib/opportunity-form";
+import { addDays } from "@/lib/my-work";
+import { localYmd as easternYmd } from "@/lib/tasks";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
 export const OPP_STATUSES = ["open", "contacted", "quoted", "won", "lost", "no_response"] as const;
@@ -44,6 +46,8 @@ export type OpportunityWithNames = OpportunityRow & {
   site_name: string | null;
   /** The linked bid's name (bid_id), when the caller may read it. */
   bid_name: string | null;
+  /** After a save: what happened to the follow-up worth telling (SNOOZE_CLEARED_NOTE). */
+  followup_note?: string | null;
 };
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
@@ -74,24 +78,62 @@ export async function assertLiveOpportunity(sb: SupabaseClient<Database>, id: st
   if (data.deleted_at) throw new Error(OPP_DELETED);
 }
 
+/**
+ * The people an opportunity can be assigned to, and whose names the lists show: every user
+ * (crm_user_options — SECURITY DEFINER; it answers anyone with Customers, Service or Estimate
+ * access, i.e. everyone who may assign). It used to be technician_options, the Service roster,
+ * which answers only Service users, so a Customers-only user got an empty assignee box and
+ * nameless rows (audit, Oct 2).
+ */
+export interface AssigneeOption {
+  id: string;
+  name: string;
+}
+async function userOptions(sb: SupabaseClient<Database>): Promise<AssigneeOption[]> {
+  const { data, error } = await sb.rpc("crm_user_options");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((u) => ({ id: u.id, name: (u.full_name ?? "").trim() || u.email }));
+}
+
+/** The assignee box and the "Also escalate to" picker (Admin › Reminders). */
+export const listAssigneeOptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AssigneeOption[]> =>
+    (await userOptions(context.supabase)).sort((a, b) => a.name.localeCompare(b.name)),
+  );
+
 async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   const accountIds = [...new Set(rows.map((r) => r.account_id).filter((x): x is string => !!x))];
   const siteIds = [...new Set(rows.map((r) => r.site_id).filter((x): x is string => !!x))];
   const bidIds = [...new Set(rows.map((r) => r.bid_id).filter((x): x is string => !!x))];
-  const [{ data: techs }, { data: accounts }, { data: sites }, { data: bids }] = await Promise.all([
-    sb.rpc("technician_options"),
-    accountIds.length
-      ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    siteIds.length
-      ? sb.from("crm_sites").select("id, name").in("id", siteIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-    bidIds.length
-      ? sb.from("bids").select("id, name").in("id", bidIds)
-      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
-  ]);
+  const [{ data: people }, { data: accounts }, { data: sites }, { data: bids }] = await Promise.all(
+    [
+      sb.rpc("crm_user_options"),
+      accountIds.length
+        ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      siteIds.length
+        ? sb.from("crm_sites").select("id, name").in("id", siteIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      bidIds.length
+        ? sb.from("bids").select("id, name").in("id", bidIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    ],
+  );
   const names = new Map<string, string>();
-  for (const t of techs ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  for (const t of people ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  // Anyone left (a user with no page grants sees only their own: profiles RLS lets them read
+  // their own row).
+  const missing = [
+    ...new Set(rows.map((r) => r.assignee_id).filter((x): x is string => !!x && !names.has(x))),
+  ];
+  if (missing.length) {
+    const { data: own } = await sb
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", missing);
+    for (const t of own ?? []) names.set(t.id, (t.full_name ?? "").trim() || t.email);
+  }
   const accs = new Map<string, string>();
   for (const a of accounts ?? []) accs.set(a.id, a.name);
   const siteNames = new Map<string, string>();
@@ -246,14 +288,16 @@ export const saveOpportunity = createServerFn({ method: "POST" })
     }
     // The stored expected close: once set, only an admin or a manager moves it (owner, Oct 1).
     let oldClose: string | null = null;
+    let oldStatus: string | null = null;
     if (id) {
       const { data: cur, error: cErr } = await sb
         .from("crm_opportunities")
-        .select("expected_close")
+        .select("expected_close, status")
         .eq("id", id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
       oldClose = cur?.expected_close ?? null;
+      oldStatus = cur?.status ?? null;
       const moveProblem = dateMoveProblem({
         profile: p,
         oldYmd: oldClose,
@@ -261,6 +305,9 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       });
       if (moveProblem) throw new Error(moveProblem);
     }
+    // Won / Lost / No response are a manager's (lib/opportunity-form.ts oppStatusProblem).
+    const statusProblem = oppStatusProblem({ profile: p, from: oldStatus, to: fields.status });
+    if (statusProblem) throw new Error(statusProblem);
     let expected = fields.expected_close ?? null;
     if (!id && !expected) {
       const { data: s } = await sb
@@ -268,8 +315,7 @@ export const saveOpportunity = createServerFn({ method: "POST" })
         .select("opportunity_close_days")
         .eq("id", 1)
         .maybeSingle();
-      const d = new Date(Date.now() + (s?.opportunity_close_days ?? 30) * 86400000);
-      expected = d.toISOString().slice(0, 10);
+      expected = defaultExpectedClose(s?.opportunity_close_days ?? 30);
     }
     const patch = {
       account_id,
@@ -282,7 +328,9 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       ...(fields.status ? { status: fields.status } : {}),
       lead_source: fields.lead_source ?? null,
       est_value: fields.est_value ?? null,
-      bid_id: fields.bid_id ?? null,
+      // Left out = kept: the bid link is written by /estimate (linkBid), and a form opened
+      // before it was linked must not clear it.
+      ...(fields.bid_id === undefined ? {} : { bid_id: fields.bid_id }),
       notes: fields.notes ?? null,
       updated_by_name: nameOf(p),
     };
@@ -322,26 +370,55 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       if (error) throw new Error(error.message);
       row = r;
     }
-    const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup(
-      {
-        kind: "opportunity",
-        itemId: row.id,
-        accountId: row.account_id,
-        assigneeId: row.assignee_id,
-        title: row.title,
-        url: `/opportunities?id=${row.id}`,
-        closing: OPP_CLOSING.includes(row.status as OppStatus),
-        closeReason: `status ${row.status}`,
-        dueDate: row.expected_close,
-        actorId: context.userId,
-        actorName: nameOf(p),
-      },
-      context.supabase,
-    );
+    const synced = await syncOppFollowup(row, oldStatus, context, nameOf(p));
     const [r] = await withNames(sb, [row]);
-    return r as OpportunityWithNames;
+    return {
+      ...(r as OpportunityWithNames),
+      followup_note: synced === "snooze_cleared" ? SNOOZE_CLEARED_NOTE : null,
+    };
   });
+
+/** What the Save toast adds when the moved date cleared a running snooze (audit, Oct 2). */
+export const SNOOZE_CLEARED_NOTE = "snooze cleared: the reminders follow the new date";
+
+/**
+ * A new opportunity's expected close when none is given: today + opportunity_close_days, today
+ * being the office's day (America/New_York, lib/tasks.ts) — it was the UTC day, a day ahead
+ * every evening after 8 pm Eastern (audit, Oct 2).
+ */
+export const defaultExpectedClose = (closeDays: number, now: Date = new Date()): string =>
+  addDays(easternYmd(now), closeDays);
+
+/** Is the opportunity open again after Won / Lost / No response? */
+const isReopen = (from: string | null, to: string) =>
+  !!from && OPP_CLOSING.includes(from as OppStatus) && !OPP_CLOSING.includes(to as OppStatus);
+
+/** Keep the opportunity's follow-up in step after a save or a status change. */
+async function syncOppFollowup(
+  row: OpportunityRow,
+  prevStatus: string | null,
+  ctx: Ctx,
+  actorName: string,
+) {
+  const { syncFollowup } = await import("@/lib/followups.server");
+  return syncFollowup(
+    {
+      kind: "opportunity",
+      itemId: row.id,
+      accountId: row.account_id,
+      assigneeId: row.assignee_id,
+      title: row.title,
+      url: `/opportunities?id=${row.id}`,
+      closing: OPP_CLOSING.includes(row.status as OppStatus),
+      closeReason: `status ${row.status}`,
+      dueDate: row.expected_close,
+      actorId: ctx.userId,
+      actorName,
+      reopened: isReopen(prevStatus, row.status),
+    },
+    ctx.supabase,
+  );
+}
 
 export const setOpportunityStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -351,6 +428,16 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
     await assertLiveOpportunity(context.supabase, data.id);
+    const { data: cur, error: curErr } = await context.supabase
+      .from("crm_opportunities")
+      .select("status")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (curErr) throw new Error(curErr.message);
+    const prevStatus = cur?.status ?? null;
+    // Won / Lost / No response are a manager's (lib/opportunity-form.ts oppStatusProblem).
+    const statusProblem = oppStatusProblem({ profile: p, from: prevStatus, to: data.status });
+    if (statusProblem) throw new Error(statusProblem);
     const { data: row, error } = await context.supabase
       .from("crm_opportunities")
       .update({ status: data.status, updated_by_name: nameOf(p) })
@@ -360,23 +447,45 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Opportunity not found, or not yours to change");
-    const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup(
-      {
-        kind: "opportunity",
-        itemId: row.id,
-        accountId: row.account_id,
-        assigneeId: row.assignee_id,
-        title: row.title,
-        url: `/opportunities?id=${row.id}`,
-        closing: OPP_CLOSING.includes(row.status as OppStatus),
-        closeReason: `status ${row.status}`,
-        dueDate: row.expected_close,
-        actorId: context.userId,
-        actorName: nameOf(p),
-      },
-      context.supabase,
-    );
+    await syncOppFollowup(row, prevStatus, context, nameOf(p));
+  });
+
+/**
+ * "Start a bid" links back (audit, Oct 2: crm_opportunities.bid_id was never written). /estimate
+ * calls this once the bid it opened with `?opportunity=<id>` is first saved. The caller must be
+ * able to read both the opportunity (its RLS: Customers, Estimate, or the assignee) and the bid
+ * (Estimate); an opportunity already linked to another bid keeps that link. The write itself is
+ * the server's (an estimator without Customers access cannot update the opportunity under RLS).
+ */
+export const linkBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z.object({ opportunityId: z.string().uuid(), bidId: z.string().uuid() }).parse(d),
+  )
+  .handler(async ({ data, context }): Promise<{ linked: boolean }> => {
+    const sb = context.supabase;
+    await assertLiveOpportunity(sb, data.opportunityId);
+    const [{ data: opp, error: oErr }, { data: bid, error: bErr }] = await Promise.all([
+      sb.from("crm_opportunities").select("id, bid_id").eq("id", data.opportunityId).maybeSingle(),
+      sb.from("bids").select("id").eq("id", data.bidId).maybeSingle(),
+    ]);
+    if (oErr) throw new Error(oErr.message);
+    if (bErr) throw new Error(bErr.message);
+    if (!opp) throw new Error("Opportunity not found");
+    if (!bid) throw new Error("Bid not found");
+    if (opp.bid_id === data.bidId) return { linked: true };
+    if (opp.bid_id) throw new Error("This opportunity is already linked to another bid");
+    const { serverClient } = await import("@/lib/notify.server");
+    const admin = await serverClient(sb);
+    const p = await me(context);
+    const { data: rows, error } = await admin
+      .from("crm_opportunities")
+      .update({ bid_id: data.bidId, updated_by_name: nameOf(p) })
+      .eq("id", data.opportunityId)
+      .is("bid_id", null)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return { linked: !!rows?.length };
   });
 
 /**

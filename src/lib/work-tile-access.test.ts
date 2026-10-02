@@ -32,9 +32,16 @@ describe("tileBlockedTitle", () => {
     for (const p of [manager, admin])
       for (const t of WORK_TILES) expect(m.tileBlockedTitle(p, t.kind)).toBeNull();
   });
-  it("a Service-only user: tickets link, opportunities (a Customers page) do not", () => {
+  it("a Service-only user: tickets link, and so do opportunities (the page is open to every signed-in user; the list shows their own)", () => {
     expect(m.tileBlockedTitle(serviceOnly, "openTickets")).toBeNull();
-    expect(m.tileBlockedTitle(serviceOnly, "openOpps")).toBe("Needs Customers access");
+    expect(m.tileBlockedTitle(serviceOnly, "openOpps")).toBeNull();
+    // A technician with no page grants at all: tickets blocked, opportunities still open.
+    expect(m.tileBlockedTitle({ role: "user", access: [], technician: true }, "openTickets")).toBe(
+      "Needs Service access",
+    );
+    expect(
+      m.tileBlockedTitle({ role: "user", access: [], technician: true }, "openOpps"),
+    ).toBeNull();
   });
   it("canOpenPath is the gate's rule (admin pages, manager pages, free pages; no profile = no)", () => {
     expect(m.canOpenPath(customersOnly, "/service")).toBe(false);

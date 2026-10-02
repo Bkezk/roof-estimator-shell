@@ -28,7 +28,15 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { PAGE_LABELS, ROLE_LABELS, isOffice, managesTickets, type Page } from "@/lib/access";
+import {
+  PAGE_LABELS,
+  ROLE_LABELS,
+  isOffice,
+  managesTickets,
+  seesOpportunitiesList,
+  type AccessLike,
+  type Page,
+} from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Sidebar,
@@ -71,6 +79,8 @@ type ServiceItem = {
   office?: boolean;
   /** Shown only when the profile has the technician tick. */
   techOnly?: boolean;
+  /** Shown only when this says so (beyond `page`). */
+  visible?: (p: AccessLike | null | undefined) => boolean;
   /** Paths under `url` that belong to another item (Today has its own entry). */
   except?: string[];
 };
@@ -78,7 +88,14 @@ const customerItems: ServiceItem[] = [
   { title: "Today", url: "/service/today", icon: CalendarCheck, page: "service", techOnly: true },
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
-  { title: "Opportunities", url: "/opportunities", icon: Target, page: "customers" },
+  // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from My Work.
+  {
+    title: "Opportunities",
+    url: "/opportunities",
+    icon: Target,
+    page: null,
+    visible: seesOpportunitiesList,
+  },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [
@@ -314,6 +331,7 @@ export function AppSidebar() {
   const renderItems = (items: ServiceItem[]) =>
     items
       .filter((item) => item.page === null || can(item.page))
+      .filter((item) => !item.visible || item.visible(profile))
       .filter((item) => !(item.office && isTech))
       .filter((item) => !item.techOnly || !!profile?.technician)
       .map((item) => (

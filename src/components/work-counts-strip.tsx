@@ -14,6 +14,7 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
+import { localYmd } from "@/lib/my-work";
 import { getWorkCounts } from "@/lib/work-counts.functions";
 import { tileHref, WORK_TILES } from "@/lib/work-counts";
 import { tileBlockedTitle } from "@/lib/work-tile-access";
@@ -28,9 +29,12 @@ export function WorkCountsStrip() {
   const { session, profile } = useAuth();
   const qc = useQueryClient();
   const countsFn = useServerFn(getWorkCounts);
+  // The viewer's own day (audit, Oct 2: My Work, the Opportunities list, the Owner view and
+  // this strip must agree on "today"); the key carries it so a new day refetches.
+  const today = localYmd(new Date());
   const counts = useQuery({
-    queryKey: WORK_COUNTS_KEY,
-    queryFn: () => countsFn(),
+    queryKey: [...WORK_COUNTS_KEY, today],
+    queryFn: () => countsFn({ data: { today } }),
     enabled: !!session,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
