@@ -4034,6 +4034,11 @@ export type Database = {
           id: string;
         }[];
       };
+      /** 20261002130000_audit_readable.sql: the contact row plus its site_ids. */
+      save_contact_with_sites: {
+        Args: { p_contact: Json; p_site_ids?: string[] | null };
+        Returns: Json;
+      };
       technician_options: {
         Args: never;
         Returns: {

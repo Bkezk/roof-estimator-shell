@@ -403,8 +403,9 @@ describe("server functions (vendors.functions.ts)", () => {
     );
     expect(serverFn(src, "saveVendor")).toContain("await editor(context);");
     expect(src).toMatch(/async function setArchived[\s\S]*?await editor\(ctx\);/);
+    // An archived vendor's name is named as archived (audit, Oct 2; vendor-archived-clash.test.ts).
     expect(serverFn(src, "saveVendor")).toContain(
-      "if (clash && clash.id !== data.id) throw new Error(`${clash.name} is already a vendor`);",
+      "const clash = vendorNameClash(all ?? [], data.name, data.id);\n    if (clash) throw new Error(clash.message);",
     );
     expect(src).toContain("archived_at: archived ? new Date().toISOString() : null");
   });

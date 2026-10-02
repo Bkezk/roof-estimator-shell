@@ -9,6 +9,7 @@ import { useServerFn } from "@tanstack/react-start";
 
 import { useAuth } from "@/lib/auth-store";
 import { getAccount, siteAddressLine, type SiteRow } from "@/lib/crm.functions";
+import { siteOptionLabel } from "@/lib/county-codes";
 import { useCountyCodes } from "@/components/crm/use-county-codes";
 import {
   Select,
@@ -42,7 +43,8 @@ export function SiteSelect(props: {
   const sites = detail.data?.sites ?? [];
   // The site's JBK county code after the address (the shared, cached list).
   const codes = useCountyCodes().data;
-  const codeOf = (id: string | null) => (id ? codes?.find((c) => c.id === id)?.code : undefined);
+  // The whole code row: "0108 Kenton, KY" (0108 alone is Kenton, KY or Putman, TN).
+  const codeOf = (id: string | null) => (id ? codes?.find((c) => c.id === id) : undefined);
   if (detail.error)
     return (
       <p className="text-xs text-destructive">Could not load the sites: {errText(detail.error)}</p>
@@ -65,17 +67,11 @@ export function SiteSelect(props: {
       </SelectTrigger>
       <SelectContent>
         {!props.required && <SelectItem value="none">No site</SelectItem>}
-        {sites.map((s) => {
-          const address = siteAddressLine(s);
-          const code = codeOf(s.county_code_id);
-          return (
-            <SelectItem key={s.id} value={s.id}>
-              {s.name}
-              {address ? ` — ${address}` : ""}
-              {code ? ` · County code ${code}` : ""}
-            </SelectItem>
-          );
-        })}
+        {sites.map((s) => (
+          <SelectItem key={s.id} value={s.id}>
+            {siteOptionLabel(s.name, siteAddressLine(s), codeOf(s.county_code_id))}
+          </SelectItem>
+        ))}
         {/* A site since removed from the customer stays readable on an old record. */}
         {!known && !detail.isLoading && props.value && (
           <SelectItem value={props.value}>Former site</SelectItem>

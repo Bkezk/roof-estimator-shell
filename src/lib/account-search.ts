@@ -69,3 +69,27 @@ export function shapeAccountHits(
   });
   return hits.slice(0, SEARCH_LIMIT);
 }
+
+/**
+ * Characters PostgREST reads as syntax inside or=(…) (`,` `.` `:` `(` `)` and the quotes), the
+ * LIKE wildcards and escape (`%` `_` `\`) and PostgREST's `*` (its alias for `%`). Typed into
+ * the customer search they broke the request ("Smith (") or searched something else ("a,b"
+ * became "a b"; audit, Oct 2).
+ */
+const RESERVED = /[,.:()"'%_*\\]/g;
+
+/**
+ * The search text as one ilike pattern, `%…%`, safe in a plain filter and inside or=(…): each
+ * reserved character becomes `_` (LIKE's "any one character"), so "O'Brien" still finds
+ * O'Brien (and O’Brien), "Smith (" finds "Smith (Main)" and "a,b" finds "a,b Supply" — nothing
+ * typed reaches PostgREST's parser as syntax. Blank = everything ("%").
+ */
+export function ilikePattern(q: string): string {
+  const t = q.replace(RESERVED, "_").replace(/\s+/g, " ").trim();
+  return t ? `%${t}%` : "%";
+}
+
+/** `name.ilike.<pattern>,address1.ilike.<pattern>` for .or(); the pattern from ilikePattern. */
+export function orIlike(columns: readonly string[], pattern: string): string {
+  return columns.map((c) => `${c}.ilike.${pattern}`).join(",");
+}

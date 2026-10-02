@@ -22,23 +22,32 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, seesEveryone } from "@/lib/access";
 import {
   ACCOUNT_ALREADY_DELETED,
   ACCOUNT_DELETED,
   OPEN_OPPORTUNITY_STATUSES,
   OPEN_TICKET_STAGES,
+  CRM_MAX,
   accountSchema,
   deleteBlockedMessage,
-  optText,
+  keepText,
+  normalizeAddress,
   parseInput,
   quickAccountSchema,
   type AccountInput,
   type QuickAccountInput,
 } from "@/lib/crm-account";
 import { namesLookAlike } from "@/lib/name-match";
-import { SEARCH_LIMIT, shapeAccountHits, type SearchSiteRow } from "@/lib/account-search";
+import {
+  SEARCH_LIMIT,
+  ilikePattern,
+  orIlike,
+  shapeAccountHits,
+  type SearchSiteRow,
+} from "@/lib/account-search";
+import { countBy, fetchAllPages } from "@/lib/paging";
 
 export type { AccountInput, QuickAccountInput };
 
@@ -120,12 +129,13 @@ export interface AccountHit {
  */
 export const searchAccounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ q: z.string().trim().max(120) }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ q: z.string().trim().max(120) }), d))
   .handler(async ({ data, context }): Promise<AccountHit[]> => {
     await readAccess(context);
     const sb = context.supabase;
-    const q = data.q.replace(/[%_,]/g, " ").trim();
-    const like = q ? `%${q}%` : "%";
+    const q = data.q.trim();
+    // Reserved characters become "_" (account-search.ts): nothing typed is PostgREST syntax.
+    const like = ilikePattern(q);
     const { data: accounts, error: aErr } = await sb
       .from("crm_accounts")
       .select("id, name, kind, contact_name, phone")
@@ -142,7 +152,7 @@ export const searchAccounts = createServerFn({ method: "GET" })
         .from("crm_sites")
         .select("account_id")
         .is("deleted_at", null)
-        .or(`name.ilike.${like},address1.ilike.${like}`)
+        .or(orIlike(["name", "address1"], like))
         .limit(SEARCH_LIMIT * 4);
       if (shErr) throw new Error(shErr.message);
       const known = new Set((accounts ?? []).map((a) => a.id));
@@ -191,23 +201,40 @@ export const listAccounts = createServerFn({ method: "GET" })
   .handler(async ({ context }): Promise<AccountListRow[]> => {
     await readAccess(context);
     const sb = context.supabase;
-    const [{ data: accounts, error }, { data: sites }, { data: jobs }] = await Promise.all([
-      sb.from("crm_accounts").select("*").is("deleted_at", null).order("name").limit(2000),
-      sb.from("crm_sites").select("account_id").is("deleted_at", null),
-      sb
-        .from("service_jobs")
-        .select("account_id")
-        .is("deleted_at", null)
-        .in("stage", ["open", "scheduled", "done"]),
+    // Every row, 1,000 at a time (paging.ts: PostgREST caps a request at 1,000 rows, so
+    // asking for 2,000 stopped at 1,000 customers and the counts at 1,000 sites / tickets).
+    // Ordered by a unique column last, so no row repeats or drops between pages.
+    const [accounts, sites, jobs] = await Promise.all([
+      fetchAllPages((from, to) =>
+        sb
+          .from("crm_accounts")
+          .select("*")
+          .is("deleted_at", null)
+          .order("name")
+          .order("id")
+          .range(from, to),
+      ),
+      fetchAllPages((from, to) =>
+        sb
+          .from("crm_sites")
+          .select("id, account_id")
+          .is("deleted_at", null)
+          .order("id")
+          .range(from, to),
+      ),
+      fetchAllPages((from, to) =>
+        sb
+          .from("service_jobs")
+          .select("id, account_id")
+          .is("deleted_at", null)
+          .in("stage", [...OPEN_TICKET_STAGES])
+          .order("id")
+          .range(from, to),
+      ),
     ]);
-    if (error) throw new Error(error.message);
-    const siteCount = new Map<string, number>();
-    for (const s of sites ?? [])
-      siteCount.set(s.account_id, (siteCount.get(s.account_id) ?? 0) + 1);
-    const jobCount = new Map<string, number>();
-    for (const j of jobs ?? [])
-      if (j.account_id) jobCount.set(j.account_id, (jobCount.get(j.account_id) ?? 0) + 1);
-    return (accounts ?? []).map((a) => ({
+    const siteCount = countBy(sites, (s) => s.account_id);
+    const jobCount = countBy(jobs, (j) => j.account_id);
+    return accounts.map((a) => ({
       ...a,
       site_count: siteCount.get(a.id) ?? 0,
       open_jobs: jobCount.get(a.id) ?? 0,
@@ -237,7 +264,7 @@ export interface AccountDetail {
 
 export const getAccount = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<AccountDetail> => {
     const p = await readAccess(context);
     const sb = context.supabase;
@@ -324,25 +351,32 @@ export const saveAccount = createServerFn({ method: "POST" })
     return row;
   });
 
-/** A site's fields. county_code_id: null clears the JBK county code; left out keeps it. */
-export const siteSchema = z.object({
-  id: z.string().uuid().optional(),
-  account_id: z.string().uuid(),
-  name: z.string().trim().min(1, "Site name is required").max(200),
-  address1: optText(200),
-  address2: optText(200),
-  city: optText(120),
-  state: optText(20),
-  zip: optText(20),
-  technician_instructions: optText(2000),
-  notes: optText(5000),
-  county_code_id: z.string().uuid().nullable().optional(),
-});
+/**
+ * A site's fields. Every optional one left out stays as it is (keepText: missing = unchanged,
+ * "" or null = clear; audit, Oct 2: a save that did not send the notes wiped them);
+ * county_code_id: null clears the JBK county code, left out keeps it. A state with no other
+ * address part is stored as no address (normalizeAddress).
+ */
+export const siteSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    account_id: z.string().uuid(),
+    name: z.string().trim().min(1, "Site name is required").max(CRM_MAX.name),
+    address1: keepText(CRM_MAX.address1),
+    address2: keepText(CRM_MAX.address2),
+    city: keepText(CRM_MAX.city),
+    state: keepText(CRM_MAX.state),
+    zip: keepText(CRM_MAX.zip),
+    technician_instructions: keepText(CRM_MAX.technician_instructions),
+    notes: keepText(CRM_MAX.notes),
+    county_code_id: z.string().uuid().nullable().optional(),
+  })
+  .transform((s) => normalizeAddress(s));
 export type SiteInput = z.input<typeof siteSchema>;
 
 export const saveSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => siteSchema.parse(d))
+  .validator((d: unknown) => parseInput(siteSchema, d))
   .handler(async ({ data, context }): Promise<SiteRow> => {
     await writeAccess(context);
     const sb = context.supabase;
@@ -429,7 +463,7 @@ export const listCrmUsers = createServerFn({ method: "GET" })
  */
 export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await writeAccess(context);
     const sb = context.supabase;
@@ -494,7 +528,7 @@ export const deleteAccount = createServerFn({ method: "POST" })
  */
 export const restoreAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
     if (!seesEveryone(p)) throw new Error("Only an admin or a manager can restore a customer");
@@ -530,7 +564,7 @@ export const restoreAccount = createServerFn({ method: "POST" })
 
 export const deleteSite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<void> => {
     await writeAccess(context);
     // Once deleted it keeps its stamp (a deleted customer's rows are restored by that stamp).
@@ -548,13 +582,14 @@ export const deleteSite = createServerFn({ method: "POST" })
 export const linkBidToAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z
-      .object({
+    parseInput(
+      z.object({
         bid_id: z.string().uuid(),
         account_id: z.string().uuid().nullable(),
         site_id: z.string().uuid().nullable().optional(),
-      })
-      .parse(d),
+      }),
+      d,
+    ),
   )
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
@@ -569,7 +604,7 @@ export const linkBidToAccount = createServerFn({ method: "POST" })
 /** Saved bids not yet linked to any account, for the account page's "Link a bid" search. */
 export const listUnlinkedBids = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ q: z.string().trim().max(120) }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ q: z.string().trim().max(120) }), d))
   .handler(async ({ data, context }): Promise<LinkedBidRow[]> => {
     const p = await me(context);
     if (!p || !canAccess(p, "estimate")) return [];
@@ -594,7 +629,7 @@ export const listUnlinkedBids = createServerFn({ method: "GET" })
  */
 export const suggestBidsForAccount = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ account_id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ account_id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<LinkedBidRow[]> => {
     const p = await me(context);
     if (!p || !canAccess(p, "estimate")) return [];
@@ -644,7 +679,7 @@ export interface ContactWithSites extends ContactRow {
 
 export const listContacts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ account_id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ account_id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<ContactWithSites[]> => {
     await readAccess(context);
     const sb = context.supabase;
@@ -666,78 +701,61 @@ export const listContacts = createServerFn({ method: "GET" })
     }));
   });
 
-const contactSchema = z.object({
+/**
+ * A contact's fields: every optional one left out stays as it is (keepText; is_billing too), ""
+ * or null clears it. site_ids left out keeps the contact's site links.
+ */
+export const contactSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid(),
-  name: z.string().trim().min(1, "Name is required").max(200),
-  position: optText(200),
-  email: optText(200),
-  mobile: optText(60),
-  office_phone: optText(60),
+  name: z.string().trim().min(1, "Name is required").max(CRM_MAX.name),
+  position: keepText(CRM_MAX.position),
+  email: keepText(CRM_MAX.email),
+  mobile: keepText(CRM_MAX.mobile),
+  office_phone: keepText(CRM_MAX.office_phone),
   is_billing: z.boolean().optional(),
-  notes: optText(2000),
+  notes: keepText(CRM_MAX.contact_notes),
   /** Sites this contact belongs to (empty = the whole account). */
   site_ids: z.array(z.string().uuid()).max(200).optional(),
 });
 export type ContactInput = z.input<typeof contactSchema>;
 
+/**
+ * The arguments of save_contact_with_sites (migration 20261002130000_audit_readable.sql): the
+ * contact's fields that were sent (a key left out = that column unchanged; no id = a new
+ * contact), and its sites (null = links unchanged). One call, one transaction: the contact and
+ * its links are saved together or not at all (audit, Oct 2: a failed link insert after the
+ * contact insert left a duplicate contact on retry).
+ */
+export function saveContactArgs(data: z.output<typeof contactSchema>): {
+  p_contact: Json;
+  p_site_ids: string[] | null;
+} {
+  const { site_ids, ...fields } = data;
+  return {
+    p_contact: defined(fields) as Json,
+    p_site_ids: site_ids ? [...new Set(site_ids)] : null,
+  };
+}
+
 export const saveContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => contactSchema.parse(d))
+  .validator((d: unknown) => parseInput(contactSchema, d))
   .handler(async ({ data, context }): Promise<ContactWithSites> => {
     await writeAccess(context);
     const sb = context.supabase;
-    const { id, site_ids, ...fields } = data;
     await assertLiveAccount(sb, data.account_id);
-    const row = { ...fields, is_billing: fields.is_billing ?? false };
-    let saved: ContactRow;
-    if (id) {
-      const { data: r, error } = await sb
-        .from("crm_contacts")
-        .update(row)
-        .eq("id", id)
-        .select("*")
-        .single();
-      if (error) throw new Error(error.message);
-      saved = r;
-    } else {
-      const { data: r, error } = await sb.from("crm_contacts").insert(row).select("*").single();
-      if (error) throw new Error(error.message);
-      saved = r;
-    }
-    if (site_ids) {
-      // Only the sites that changed are unlinked / linked, so the database's audit log records
-      // "site 'X' linked / unlinked" for those and nothing for the rest.
-      const { data: links, error: rErr } = await sb
-        .from("crm_site_contacts")
-        .select("site_id")
-        .eq("contact_id", saved.id);
-      if (rErr) throw new Error(rErr.message);
-      const had = new Set((links ?? []).map((l) => l.site_id));
-      const want = new Set(site_ids);
-      const unlink = [...had].filter((s) => !want.has(s));
-      const link = [...want].filter((s) => !had.has(s));
-      if (unlink.length) {
-        const { error: dErr } = await sb
-          .from("crm_site_contacts")
-          .delete()
-          .eq("contact_id", saved.id)
-          .in("site_id", unlink);
-        if (dErr) throw new Error(dErr.message);
-      }
-      if (link.length) {
-        const { error: lErr } = await sb
-          .from("crm_site_contacts")
-          .insert(link.map((site_id) => ({ site_id, contact_id: saved.id })));
-        if (lErr) throw new Error(lErr.message);
-      }
-    }
-    return { ...saved, site_ids: site_ids ?? [] };
+    // Under the caller's RLS (security invoker); only the sites that changed are unlinked /
+    // linked, so the audit log records "site 'X' linked / unlinked" for those alone.
+    const { data: saved, error } = await sb.rpc("save_contact_with_sites", saveContactArgs(data));
+    if (error) throw new Error(error.message);
+    if (!saved) throw new Error("The contact was not saved");
+    return saved as unknown as ContactWithSites;
   });
 
 export const deleteContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<void> => {
     await writeAccess(context);
     // Once deleted it keeps its stamp (a deleted customer's rows are restored by that stamp).

@@ -1,9 +1,11 @@
 /**
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
  * the server functions under test (select / insert / update / delete with eq, neq, in, is, not
- * is, ilike, or(ilike…), gte, lt, order, limit, count; maybeSingle / single; rpc
- * technician_options). Every write that changed something is recorded, so a test can say
- * "nothing was written". Not imported by the app.
+ * is, ilike, or(ilike…), gte, lt, order, limit, range, count; maybeSingle / single; rpc
+ * technician_options, plus any rpc a test passes in `opts.rpcs`). Every write that changed
+ * something is recorded, so a test can say "nothing was written". `opts.maxRows` caps every
+ * select the way Supabase's PostgREST does (1,000 rows per request whatever .limit() asks).
+ * Not imported by the app.
  */
 type Row = Record<string, unknown>;
 export interface FakeWrite {
@@ -16,16 +18,27 @@ export interface FakeWrite {
 }
 type Result = { data: Row[]; error: null; count: number | null };
 
+/** LIKE → RegExp: % is any run, _ is any one character, everything else literal. */
 const likeToRegExp = (pattern: string) =>
   new RegExp(
     `^${pattern
       .split("%")
-      .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .map((p) =>
+        p
+          .split("_")
+          .map((q) => q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("."),
+      )
       .join(".*")}$`,
-    "i",
+    "is",
   );
 
-export function fakeSupabase(tables: Record<string, Row[]>) {
+export type FakeRpc = (args: Record<string, unknown>, tables: Record<string, Row[]>) => unknown;
+
+export function fakeSupabase(
+  tables: Record<string, Row[]>,
+  opts: { maxRows?: number; rpcs?: Record<string, FakeRpc> } = {},
+) {
   const writes: FakeWrite[] = [];
   let seq = 0;
   const from = (table: string) => {
@@ -34,6 +47,7 @@ export function fakeSupabase(tables: Record<string, Row[]>) {
     let payload: Row | Row[] | null = null;
     let wantCount = false;
     let max = Infinity;
+    let offset = 0;
     const preds: Array<(r: Row) => boolean> = [];
     const filters: string[] = [];
     const run = (): Result => {
@@ -53,7 +67,10 @@ export function fakeSupabase(tables: Record<string, Row[]>) {
         tables[table] = rows().filter((r) => !hit.includes(r));
         writes.push({ table, op, payload: null, filters, rows: hit.length });
       }
-      const data = (op === "select" ? hit.slice(0, max) : hit).map((r) => ({ ...r }));
+      const cap = Math.min(max, opts.maxRows ?? Infinity);
+      const data = (op === "select" ? hit.slice(offset, offset + cap) : hit).map((r) => ({
+        ...r,
+      }));
       return { data, error: null, count: wantCount ? hit.length : null };
     };
     const filter = (label: string, p: (r: Row) => boolean) => {
@@ -69,6 +86,11 @@ export function fakeSupabase(tables: Record<string, Row[]>) {
       order: () => b,
       limit: (n: number) => {
         max = n;
+        return b;
+      },
+      range: (from: number, to: number) => {
+        offset = from;
+        max = to - from + 1;
         return b;
       },
       eq: (c: string, v: unknown) => filter(`eq ${c}=${String(v)}`, (r) => r[c] === v),
@@ -124,7 +146,17 @@ export function fakeSupabase(tables: Record<string, Row[]>) {
     };
     return b;
   };
-  const rpc = async (fn: string) => {
+  const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
+  const rpc = async (fn: string, args: Record<string, unknown> = {}) => {
+    rpcCalls.push({ fn, args });
+    const own = opts.rpcs?.[fn];
+    if (own) {
+      try {
+        return { data: own(args, tables), error: null };
+      } catch (e) {
+        return { data: null, error: { message: e instanceof Error ? e.message : String(e) } };
+      }
+    }
     if (fn === "technician_options")
       return {
         data: (tables["profiles"] ?? []).map((p) => ({
@@ -137,7 +169,7 @@ export function fakeSupabase(tables: Record<string, Row[]>) {
       };
     return { data: null, error: { message: `fake: unexpected rpc ${fn}` } };
   };
-  return { db: { from, rpc } as never, writes, tables };
+  return { db: { from, rpc } as never, writes, tables, rpcCalls };
 }
 
 /** createServerFn reduced to "validate, then call the handler" (use inside vi.mock). */

@@ -25,6 +25,7 @@ import {
   vendorCityState,
   vendorDraftOf,
   vendorFormProblem,
+  vendorNameClash,
   type VendorDraft,
 } from "@/lib/vendors";
 import { archiveVendor, restoreVendor, saveVendor, type VendorRow } from "@/lib/vendors.functions";
@@ -247,7 +248,21 @@ function VendorDialog({
     },
     onError: (e) => loudError("Could not change the vendor", e),
   });
-  const busy = save.isPending || archive.isPending;
+  // The name typed is an archived vendor's (the list hides it): offer to restore that one
+  // instead of adding a second (audit, Oct 2; the server refuses the save with the same words).
+  const everyVendor = useVendors(true).data ?? [];
+  const clash = readOnly ? null : vendorNameClash(everyVendor, draft.name, vendor?.id);
+  const archivedClash = clash?.vendor.archived_at ? clash : null;
+  const restoreClash = useMutation({
+    mutationFn: (id: string) => restoreFn({ data: { id } }),
+    onSuccess: (v) => {
+      refresh();
+      toast.success(`${v.name} restored to the pickers`);
+      onSaved(v);
+    },
+    onError: (e) => loudError("Could not restore the vendor", e),
+  });
+  const busy = save.isPending || archive.isPending || restoreClash.isPending;
   const submit = () => {
     const problem = vendorFormProblem(draft);
     if (problem) {
@@ -306,6 +321,29 @@ function VendorDialog({
               </div>
             ))}
           </div>
+          {archivedClash && (
+            <div
+              role="alert"
+              data-vendor-clash="archived"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm"
+            >
+              <span>{archivedClash.message}</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => restoreClash.mutate(archivedClash.vendor.id)}
+              >
+                {restoreClash.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <ArchiveRestore className="mr-1 h-4 w-4" />
+                )}
+                Restore {archivedClash.vendor.name}
+              </Button>
+            </div>
+          )}
           <div className="space-y-1">
             <Label htmlFor="vendor-notes">Notes</Label>
             <Textarea

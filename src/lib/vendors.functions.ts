@@ -18,9 +18,10 @@ import {
   canEditVendors,
   cleanVendorName,
   compareVendors,
-  findVendorByName,
   searchVendors,
+  vendorNameClash,
 } from "@/lib/vendors";
+import { parseInput } from "@/lib/crm-account";
 
 export type VendorRow = Database["public"]["Tables"]["vendors"]["Row"];
 
@@ -65,12 +66,13 @@ const nameTaken = (e: { code?: string; message: string }) =>
 export const listVendors = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
-    z
-      .object({
+    parseInput(
+      z.object({
         includeArchived: z.boolean().optional(),
         q: z.string().max(200).optional(),
-      })
-      .parse(d ?? {}),
+      }),
+      d ?? {},
+    ),
   )
   .handler(async ({ data, context }): Promise<VendorRow[]> => {
     await reader(context);
@@ -125,7 +127,7 @@ export const vendorSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => (v ? v : null))
-    .pipe(z.string().email("Not an email address").max(200).nullable()),
+    .pipe(z.string().email().max(200).nullable()), // "Email looks wrong" (parseInput)
   terms: optText(120),
   account_number: optText(60),
   notes: optText(10_000),
@@ -136,14 +138,15 @@ export type VendorInput = z.input<typeof vendorSchema>;
 /** Add a vendor (no id) or change one. The same name twice, in any case, is refused. */
 export const saveVendor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => vendorSchema.parse(d))
+  .validator((d: unknown) => parseInput(vendorSchema, d))
   .handler(async ({ data, context }): Promise<VendorRow> => {
     await editor(context);
     const sb = context.supabase;
-    const { data: all, error: aErr } = await sb.from("vendors").select("id, name");
+    // Archived vendors too: a clash with one says so (the list hides it; the tab offers Restore).
+    const { data: all, error: aErr } = await sb.from("vendors").select("id, name, archived_at");
     if (aErr) throw new Error(aErr.message);
-    const clash = findVendorByName(all ?? [], data.name);
-    if (clash && clash.id !== data.id) throw new Error(`${clash.name} is already a vendor`);
+    const clash = vendorNameClash(all ?? [], data.name, data.id);
+    if (clash) throw new Error(clash.message);
     const { id, ...fields } = data;
     if (!id) {
       const { data: row, error } = await sb
@@ -187,11 +190,11 @@ async function setArchived(ctx: Ctx, id: string, archived: boolean): Promise<Ven
 /** Archive: off the pickers; its invoices and POs keep it. */
 export const archiveVendor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<VendorRow> => setArchived(context, data.id, true));
 
 /** Restore an archived vendor to the pickers. */
 export const restoreVendor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .validator((d: unknown) => parseInput(z.object({ id: z.string().uuid() }), d))
   .handler(async ({ data, context }): Promise<VendorRow> => setArchived(context, data.id, false));

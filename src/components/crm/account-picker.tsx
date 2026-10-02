@@ -21,7 +21,13 @@ import { toast } from "sonner";
 import { Building2, Loader2, Plus, User, X } from "lucide-react";
 
 import { quickCreateAccount, searchAccounts, type AccountHit } from "@/lib/crm.functions";
-import { CONTACT_REQUIRED, hasContactMethod } from "@/lib/crm-account";
+import {
+  CONTACT_REQUIRED,
+  CRM_MAX,
+  addressPayload,
+  hasContactMethod,
+  mailingPayload,
+} from "@/lib/crm-account";
 import {
   AccountManagerSelect,
   AddressInputs,
@@ -332,17 +338,10 @@ export function QuickAddCustomerDialog(props: {
           email,
           mobile,
           phone,
-          ...physical,
+          // The state box starts at "KY": with no other part filled in no address is sent.
+          ...addressPayload(physical),
           mailing_same: mailingSame,
-          ...(mailingSame
-            ? {}
-            : {
-                mailing_address1: mailing.address1,
-                mailing_address2: mailing.address2,
-                mailing_city: mailing.city,
-                mailing_state: mailing.state,
-                mailing_zip: mailing.zip,
-              }),
+          ...(mailingSame ? {} : mailingPayload(mailing)),
           account_manager_id: manager || null,
         },
       }),
@@ -394,6 +393,7 @@ export function QuickAddCustomerDialog(props: {
               <Label htmlFor="qa-name">Name</Label>
               <Input
                 id="qa-name"
+                maxLength={CRM_MAX.name}
                 value={name}
                 autoFocus
                 onChange={(e) => setName(e.target.value)}
@@ -418,12 +418,18 @@ export function QuickAddCustomerDialog(props: {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="qa-contact">Contact name</Label>
-              <Input id="qa-contact" value={contact} onChange={(e) => setContact(e.target.value)} />
+              <Input
+                id="qa-contact"
+                maxLength={CRM_MAX.contact_name}
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="qa-email">Email</Label>
               <Input
                 id="qa-email"
+                maxLength={CRM_MAX.email}
                 type="email"
                 inputMode="email"
                 value={email}
@@ -434,6 +440,7 @@ export function QuickAddCustomerDialog(props: {
               <Label htmlFor="qa-mobile">Cell phone</Label>
               <Input
                 id="qa-mobile"
+                maxLength={CRM_MAX.mobile}
                 type="tel"
                 inputMode="tel"
                 value={mobile}
@@ -444,6 +451,7 @@ export function QuickAddCustomerDialog(props: {
               <Label htmlFor="qa-phone">Office phone</Label>
               <Input
                 id="qa-phone"
+                maxLength={CRM_MAX.phone}
                 type="tel"
                 inputMode="tel"
                 value={phone}

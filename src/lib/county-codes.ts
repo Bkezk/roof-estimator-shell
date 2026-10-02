@@ -187,6 +187,27 @@ export function countyCodeLabel(row: Pick<CountyCodeRow, "code" | "county" | "st
   return `${row.code} · ${row.county}, ${row.state}`;
 }
 
+/**
+ * "0108 Kenton, KY": the code with its county and state, inline (the site picker; the History's
+ * county code, audit_label in 20261002130000_audit_readable.sql). Never the bare code: 0108 is
+ * both Kenton, KY and Putman, TN.
+ */
+export function countyCodeShort(row: Pick<CountyCodeRow, "code" | "county" | "state">): string {
+  return `${row.code} ${row.county}, ${row.state}`;
+}
+
+/**
+ * A site in the site picker: "Main St — 1 Main St, Covington, KY · 0108 Kenton, KY" (the
+ * address and the county code when there are; audit, Oct 2: it read "County code 0108").
+ */
+export function siteOptionLabel(
+  name: string,
+  address: string,
+  code: Pick<CountyCodeRow, "code" | "county" | "state"> | null | undefined,
+): string {
+  return `${name}${address ? ` — ${address}` : ""}${code ? ` · ${countyCodeShort(code)}` : ""}`;
+}
+
 /** State, then county, then code (KY before TN). */
 export function compareCountyCodes(
   a: Pick<CountyCodeRow, "code" | "county" | "state">,

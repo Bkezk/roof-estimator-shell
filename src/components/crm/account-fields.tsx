@@ -3,6 +3,7 @@
  * Account manager picker, an address block (physical or mailing) and the mailing address with
  * its "Same as physical" switch.
  */
+import { CRM_MAX } from "@/lib/crm-account";
 import { useCrmUsers } from "@/lib/use-crm-users";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -78,12 +79,14 @@ export function AddressInputs(props: {
       <div className="grid gap-3 sm:grid-cols-2">
         <Input
           aria-label={`${label} line 1`}
+          maxLength={CRM_MAX.address1}
           placeholder="Address line 1"
           value={a.address1}
           onChange={(e) => onChange("address1", e.target.value)}
         />
         <Input
           aria-label={`${label} line 2`}
+          maxLength={CRM_MAX.address2}
           placeholder="Address line 2"
           value={a.address2}
           onChange={(e) => onChange("address2", e.target.value)}
@@ -92,18 +95,21 @@ export function AddressInputs(props: {
       <div className="grid grid-cols-[1fr_4.5rem_6rem] gap-3">
         <Input
           aria-label={`${label} city`}
+          maxLength={CRM_MAX.city}
           placeholder="City"
           value={a.city}
           onChange={(e) => onChange("city", e.target.value)}
         />
         <Input
           aria-label={`${label} state`}
+          maxLength={CRM_MAX.state}
           placeholder="State"
           value={a.state}
           onChange={(e) => onChange("state", e.target.value)}
         />
         <Input
           aria-label={`${label} zip`}
+          maxLength={CRM_MAX.zip}
           placeholder="Zip"
           inputMode="numeric"
           value={a.zip}

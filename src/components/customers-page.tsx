@@ -76,7 +76,9 @@ import {
 } from "@/lib/crm.functions";
 import {
   CONTACT_REQUIRED,
+  CRM_MAX,
   addressLines,
+  sitePayload,
   deletedLine,
   hasContactMethod,
   mailingLines,
@@ -765,6 +767,7 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
       <Input
         id={`acct-${k}`}
         type={props?.type ?? "text"}
+        maxLength={(CRM_MAX as Record<string, number>)[k]}
         value={f[k]}
         onChange={(e) => set(k, e.target.value)}
       />
@@ -804,6 +807,7 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
           <Label htmlFor="acct-name">Name</Label>
           <Input
             id="acct-name"
+            maxLength={CRM_MAX.name}
             autoFocus
             value={f.name}
             onChange={(e) => set("name", e.target.value)}
@@ -872,6 +876,7 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
         <Textarea
           id="acct-billing"
           rows={2}
+          maxLength={CRM_MAX.billing_instructions}
           placeholder="e.g. Need a PO on the invoice; call the BOE office first"
           value={f.billing_instructions}
           onChange={(e) => set("billing_instructions", e.target.value)}
@@ -885,6 +890,7 @@ function AccountForm({ account, onDone }: { account: AccountRow; onDone: () => v
           <Textarea
             id="acct-notes"
             rows={2}
+            maxLength={CRM_MAX.notes}
             value={f.notes}
             onChange={(e) => set("notes", e.target.value)}
           />
@@ -917,6 +923,8 @@ type SiteFields = {
   state: string;
   zip: string;
   technician_instructions: string;
+  /** The site's notes (crm_sites.notes): the form carries them, so a save keeps them. */
+  notes: string;
   /** The JBK county code (county_codes.id), or none. */
   county_code_id: string | null;
 };
@@ -928,6 +936,7 @@ const siteFields = (s: SiteRow | null): SiteFields => ({
   state: s ? (s.state ?? "") : "KY",
   zip: s?.zip ?? "",
   technician_instructions: s?.technician_instructions ?? "",
+  notes: s?.notes ?? "",
   county_code_id: s?.county_code_id ?? null,
 });
 
@@ -1231,6 +1240,7 @@ function ContactForm(props: {
           <Label htmlFor={`contact-${idp}-name`}>Name</Label>
           <Input
             id={`contact-${idp}-name`}
+            maxLength={CRM_MAX.name}
             autoFocus
             value={f.name}
             placeholder="e.g. Pat Miller"
@@ -1241,6 +1251,7 @@ function ContactForm(props: {
           <Label htmlFor={`contact-${idp}-position`}>Position</Label>
           <Input
             id={`contact-${idp}-position`}
+            maxLength={CRM_MAX.position}
             value={f.position}
             placeholder="e.g. Facilities manager"
             onChange={(e) => set("position", e.target.value)}
@@ -1252,6 +1263,7 @@ function ContactForm(props: {
           <Label htmlFor={`contact-${idp}-mobile`}>Mobile</Label>
           <Input
             id={`contact-${idp}-mobile`}
+            maxLength={CRM_MAX.mobile}
             type="tel"
             inputMode="tel"
             value={f.mobile}
@@ -1262,6 +1274,7 @@ function ContactForm(props: {
           <Label htmlFor={`contact-${idp}-office`}>Office phone</Label>
           <Input
             id={`contact-${idp}-office`}
+            maxLength={CRM_MAX.office_phone}
             type="tel"
             inputMode="tel"
             value={f.office_phone}
@@ -1272,6 +1285,7 @@ function ContactForm(props: {
           <Label htmlFor={`contact-${idp}-email`}>Email</Label>
           <Input
             id={`contact-${idp}-email`}
+            maxLength={CRM_MAX.email}
             type="email"
             inputMode="email"
             value={f.email}
@@ -1321,6 +1335,7 @@ function ContactForm(props: {
         <Label htmlFor={`contact-${idp}-notes`}>Notes</Label>
         <Textarea
           id={`contact-${idp}-notes`}
+          maxLength={CRM_MAX.contact_notes}
           rows={2}
           value={f.notes}
           placeholder="e.g. Text before calling; off Fridays"
@@ -1427,6 +1442,12 @@ function SitesSection({
                     {s.technician_instructions}
                   </p>
                 )}
+                {s.notes && (
+                  <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">
+                    <span className="font-medium">Notes: </span>
+                    {s.notes}
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (
@@ -1522,14 +1543,7 @@ function SiteForm(props: {
   const set = <K extends keyof SiteFields>(k: K, v: SiteFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
   const save = useMutation({
-    mutationFn: () =>
-      saveFn({
-        data: {
-          ...(props.site ? { id: props.site.id } : {}),
-          account_id: props.accountId,
-          ...f,
-        },
-      }),
+    mutationFn: () => saveFn({ data: sitePayload(props.accountId, props.site?.id ?? null, f) }),
     onSuccess: () => {
       toast.success(props.site ? "Site saved" : "Site added");
       props.onDone(true);
@@ -1553,6 +1567,7 @@ function SiteForm(props: {
         <Label htmlFor={`site-${idp}-name`}>Site name</Label>
         <Input
           id={`site-${idp}-name`}
+          maxLength={CRM_MAX.name}
           autoFocus
           value={f.name}
           placeholder="e.g. Yellow Creek Elementary"
@@ -1562,12 +1577,14 @@ function SiteForm(props: {
       <div className="grid gap-2 sm:grid-cols-2">
         <Input
           aria-label="Address line 1"
+          maxLength={CRM_MAX.address1}
           placeholder="Address line 1"
           value={f.address1}
           onChange={(e) => set("address1", e.target.value)}
         />
         <Input
           aria-label="Address line 2"
+          maxLength={CRM_MAX.address2}
           placeholder="Address line 2"
           value={f.address2}
           onChange={(e) => set("address2", e.target.value)}
@@ -1576,18 +1593,21 @@ function SiteForm(props: {
       <div className="grid grid-cols-[1fr_4.5rem_6rem] gap-2">
         <Input
           aria-label="City"
+          maxLength={CRM_MAX.city}
           placeholder="City"
           value={f.city}
           onChange={(e) => set("city", e.target.value)}
         />
         <Input
           aria-label="State"
+          maxLength={CRM_MAX.state}
           placeholder="State"
           value={f.state}
           onChange={(e) => set("state", e.target.value)}
         />
         <Input
           aria-label="Zip"
+          maxLength={CRM_MAX.zip}
           placeholder="Zip"
           inputMode="numeric"
           value={f.zip}
@@ -1608,8 +1628,20 @@ function SiteForm(props: {
           id={`site-${idp}-tech`}
           rows={2}
           placeholder="e.g. Check in at the front office; roof hatch in the boiler room"
+          maxLength={CRM_MAX.technician_instructions}
           value={f.technician_instructions}
           onChange={(e) => set("technician_instructions", e.target.value)}
+        />
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={`site-${idp}-notes`}>Notes</Label>
+        <Textarea
+          id={`site-${idp}-notes`}
+          rows={2}
+          placeholder="e.g. Gate code 1234; roof replaced 2019"
+          maxLength={CRM_MAX.notes}
+          value={f.notes}
+          onChange={(e) => set("notes", e.target.value)}
         />
       </div>
       <div className="flex gap-2">

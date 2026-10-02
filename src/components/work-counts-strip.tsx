@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-store";
 import { getWorkCounts } from "@/lib/work-counts.functions";
 import { tileHref, WORK_TILES } from "@/lib/work-counts";
+import { tileBlockedTitle } from "@/lib/work-tile-access";
 
 export const WORK_COUNTS_KEY = ["work-counts"] as const;
 /** Query keys whose invalidation (a ticket or opportunity save) also refreshes the counts. */
@@ -24,7 +25,7 @@ const SOURCE_KEYS = new Set(["service-jobs", "opportunities"]);
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export function WorkCountsStrip() {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
   const qc = useQueryClient();
   const countsFn = useServerFn(getWorkCounts);
   const counts = useQuery({
@@ -58,16 +59,8 @@ export function WorkCountsStrip() {
       {WORK_TILES.map((t) => {
         const n = data ? data[t.kind] : null;
         const red = t.overdue && n !== null && n > 0;
-        return (
-          <Link
-            key={t.kind}
-            {...tileHref(t.kind)}
-            className={`flex flex-col gap-1 rounded-lg border p-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-              red
-                ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/15"
-                : "bg-card hover:bg-muted/50"
-            }`}
-          >
+        const body = (
+          <>
             {/* Blank until the count arrives (never a placeholder 0). */}
             <span
               className={`min-h-9 text-3xl font-bold tabular-nums leading-9 ${
@@ -79,6 +72,32 @@ export function WorkCountsStrip() {
             <span className={`text-sm font-medium ${red ? "" : "text-muted-foreground"}`}>
               {t.label}
             </span>
+          </>
+        );
+        const tone = red ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card";
+        // A tile links only to a page this user may open (the gate would bounce them to My
+        // Work); otherwise the number stands alone, titled "Needs Service access".
+        const blocked = tileBlockedTitle(profile, t.kind);
+        if (blocked)
+          return (
+            <div
+              key={t.kind}
+              title={blocked}
+              data-tile-blocked=""
+              className={`flex flex-col gap-1 rounded-lg border p-3 ${tone}`}
+            >
+              {body}
+            </div>
+          );
+        return (
+          <Link
+            key={t.kind}
+            {...tileHref(t.kind)}
+            className={`flex flex-col gap-1 rounded-lg border p-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tone} ${
+              red ? "hover:bg-destructive/15" : "hover:bg-muted/50"
+            }`}
+          >
+            {body}
           </Link>
         );
       })}

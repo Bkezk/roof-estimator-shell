@@ -224,12 +224,20 @@ describe("the database logs: no server code calls logAudit", () => {
     expect(fn).not.toMatch(/\.from\("invoice_lines"\)\.delete\(\)\.eq\("invoice_id", inv\.id\)/);
   });
   it("a saved contact links and unlinks only the sites that changed", () => {
+    // Since Oct 2 in one transaction: save_contact_with_sites (20261002130000_audit_readable.sql)
+    // deletes only the links no longer wanted and inserts only the new ones.
     const fn = serverFn(read("src/lib/crm.functions.ts"), "saveContact");
-    expect(fn).toMatch(
-      /\.from\("crm_site_contacts"\)\s*\.delete\(\)\s*\.eq\("contact_id", saved\.id\)\s*\.in\("site_id", unlink\)/,
+    expect(fn).toContain('sb.rpc("save_contact_with_sites", saveContactArgs(data))');
+    expect(fn).not.toContain('.from("crm_site_contacts")');
+    const sql = read("supabase/migrations/20261002130000_audit_readable.sql")
+      .replace(/--[^\n]*/g, "")
+      .replace(/\s+/g, " ");
+    expect(sql).toContain(
+      "delete from public.crm_site_contacts sc where sc.contact_id = v_row.id and not (sc.site_id = any (p_site_ids));",
     );
-    expect(fn).not.toMatch(
-      /\.from\("crm_site_contacts"\)\.delete\(\)\.eq\("contact_id", saved\.id\);/,
+    expect(sql).toContain("on conflict (site_id, contact_id) do nothing;");
+    expect(sql).not.toMatch(
+      /delete from public\.crm_site_contacts sc where sc\.contact_id = v_row\.id;/,
     );
   });
 });

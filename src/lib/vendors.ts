@@ -207,6 +207,30 @@ export function findVendorByName<T extends Pick<VendorLike, "name">>(
   return cleanVendorName(name) ? list.find((v) => same(v.name, name)) : undefined;
 }
 
+/**
+ * Why a vendor may not take this name, or null (audit, Oct 2: "X is already a vendor" pointed at
+ * an archived vendor the list hides). Another vendor with the name in any case and spacing: an
+ * archived one is named as such, so the Vendors tab offers to restore it instead.
+ */
+export function vendorNameClash<
+  T extends Pick<VendorLike, "name" | "archived_at"> & { id: string },
+>(list: readonly T[], name: string, selfId?: string | null): { vendor: T; message: string } | null {
+  const clash = cleanVendorName(name)
+    ? list.find((v) => v.id !== selfId && same(v.name, name))
+    : undefined;
+  if (!clash) return null;
+  return {
+    vendor: clash,
+    message: clash.archived_at
+      ? archivedVendorMessage(clash.name)
+      : `${clash.name} is already a vendor`,
+  };
+}
+
+/** The clash with an archived vendor, in words. */
+export const archivedVendorMessage = (name: string) =>
+  `${name} is an archived vendor — restore it instead of adding a new one`;
+
 /** By name, any case. */
 export const compareVendors = (a: Pick<VendorLike, "name">, b: Pick<VendorLike, "name">) =>
   a.name.localeCompare(b.name, "en", { sensitivity: "base" });

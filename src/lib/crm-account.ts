@@ -69,27 +69,154 @@ export function normalizeMailing<
   return out;
 }
 
+/** "Same as physical" first, then no state-only physical or mailing address. */
+function normalizeAccountAddresses<T extends Parameters<typeof normalizeMailing>[0]>(a: T): T {
+  return normalizeAddress(normalizeAddress(normalizeMailing(a)), "mailing_");
+}
+
 const contactCheck = (a: Parameters<typeof hasContactMethod>[0], ctx: z.RefinementCtx) => {
   if (!hasContactMethod(a))
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["email"], message: CONTACT_REQUIRED });
 };
 
+/**
+ * The longest text each customer, site and contact field takes: the zod schemas here and in
+ * crm.functions.ts, and the inputs' maxLength on the Customers screens (audit, Oct 2: a field
+ * without one let a paste through that the server then refused).
+ */
+export const CRM_MAX = {
+  name: 200,
+  contact_name: 200,
+  phone: 60,
+  mobile: 60,
+  email: 200,
+  address1: 200,
+  address2: 200,
+  city: 120,
+  state: 20,
+  zip: 20,
+  billing_instructions: 2000,
+  external_id: 40,
+  notes: 5000,
+  technician_instructions: 2000,
+  position: 200,
+  office_phone: 60,
+  contact_notes: 2000,
+} as const;
+
+/**
+ * Optional address text, missing = unchanged (keepText): an update that leaves a part out keeps
+ * the stored one (audit, Oct 2: every site save wiped the site's notes the same way).
+ */
 const addressFields = {
-  address1: optText(200),
-  address2: optText(200),
-  city: optText(120),
-  state: optText(20),
-  zip: optText(20),
+  address1: keepText(CRM_MAX.address1),
+  address2: keepText(CRM_MAX.address2),
+  city: keepText(CRM_MAX.city),
+  state: keepText(CRM_MAX.state),
+  zip: keepText(CRM_MAX.zip),
 };
+
+// ---- A state on its own is no address (audit, Oct 2) ----------------------------------------
+
+const ADDRESS_PARTS = ["address1", "address2", "city", "zip"] as const;
+
+export interface AddressPayload {
+  address1: string | null;
+  address2: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+}
+
+/**
+ * The form's address as sent: blanks become null, and the state (the forms start it at "KY")
+ * is sent only when line 1, line 2, the city or the zip is filled in; otherwise every part is
+ * null. So a "New customer" or a site with no address saves none, not an address that is "KY".
+ */
+export function addressPayload(a: {
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  zip: string;
+}): AddressPayload {
+  const t = (v: string) => (v.trim() === "" ? null : v.trim());
+  const parts = {
+    address1: t(a.address1),
+    address2: t(a.address2),
+    city: t(a.city),
+    zip: t(a.zip),
+  };
+  const any = Object.values(parts).some((v) => v !== null);
+  return { ...parts, state: any ? t(a.state) : null };
+}
+
+/** The site form's fields (Customers › a customer › Sites). */
+export interface SiteDraft {
+  name: string;
+  address1: string;
+  address2: string;
+  city: string;
+  state: string;
+  zip: string;
+  technician_instructions: string;
+  notes: string;
+  county_code_id: string | null;
+}
+
+/**
+ * What the site form sends: every field — Notes too (audit, Oct 2: the form had no Notes and
+ * every save set the site's notes to NULL) — and the address by addressPayload's rule (the state
+ * box starts at "KY"; with no street, city or zip no address is sent).
+ */
+export function sitePayload(accountId: string, siteId: string | null, f: SiteDraft) {
+  return {
+    ...(siteId ? { id: siteId } : {}),
+    account_id: accountId,
+    name: f.name,
+    ...addressPayload(f),
+    technician_instructions: f.technician_instructions,
+    notes: f.notes,
+    county_code_id: f.county_code_id,
+  };
+}
+
+/** A separate mailing address as sent (addressPayload's rule, under the mailing_ keys). */
+export function mailingPayload(a: Parameters<typeof addressPayload>[0]) {
+  const p = addressPayload(a);
+  return {
+    mailing_address1: p.address1,
+    mailing_address2: p.address2,
+    mailing_city: p.city,
+    mailing_state: p.state,
+    mailing_zip: p.zip,
+  };
+}
+
+/**
+ * The server's twin of addressPayload, on every save path (a customer's physical and mailing
+ * address, a site's): a state sent with every other part blank is stored as null. A part left
+ * out (undefined = unchanged) leaves the state alone, since the stored street may be there.
+ * `prefix` picks the mailing set ("mailing_").
+ */
+export function normalizeAddress<T extends object>(a: T, prefix = ""): T {
+  const v = a as Record<string, unknown>;
+  const state = v[`${prefix}state`];
+  if (typeof state !== "string" || state.trim() === "") return a;
+  const others = ADDRESS_PARTS.map((k) => v[`${prefix}${k}`]);
+  if (others.some((x) => x === undefined)) return a;
+  if (others.some((x) => typeof x === "string" && x.trim() !== "")) return a;
+  return { ...a, [`${prefix}state`]: null };
+}
 const newFields = {
   /** Cell phone. `phone` is the office phone. */
-  mobile: keepText(60),
+  mobile: keepText(CRM_MAX.mobile),
   mailing_same: z.boolean().optional(),
-  mailing_address1: keepText(200),
-  mailing_address2: keepText(200),
-  mailing_city: keepText(120),
-  mailing_state: keepText(20),
-  mailing_zip: keepText(20),
+  mailing_address1: keepText(CRM_MAX.address1),
+  mailing_address2: keepText(CRM_MAX.address2),
+  mailing_city: keepText(CRM_MAX.city),
+  mailing_state: keepText(CRM_MAX.state),
+  mailing_zip: keepText(CRM_MAX.zip),
   /** A user (profiles.id); null = unassigned, missing = unchanged. */
   account_manager_id: z.string().uuid().nullable().optional(),
 };
@@ -98,20 +225,20 @@ const newFields = {
 export const accountSchema = z
   .object({
     id: z.string().uuid().optional(),
-    name: z.string().trim().min(1, "Name is required").max(200),
+    name: z.string().trim().min(1, "Name is required").max(CRM_MAX.name),
     kind: z.enum(["company", "individual"]).default("company"),
-    contact_name: optText(200),
-    phone: optText(60),
-    email: optText(200),
+    contact_name: keepText(CRM_MAX.contact_name),
+    phone: keepText(CRM_MAX.phone),
+    email: keepText(CRM_MAX.email),
     ...addressFields,
-    billing_instructions: optText(2000),
-    external_id: optText(40),
-    notes: optText(5000),
+    billing_instructions: keepText(CRM_MAX.billing_instructions),
+    external_id: keepText(CRM_MAX.external_id),
+    notes: keepText(CRM_MAX.notes),
     source: z.enum(["manual", "prospect", "import"]).optional(),
     ...newFields,
   })
   .superRefine(contactCheck)
-  .transform(normalizeMailing);
+  .transform(normalizeAccountAddresses);
 export type AccountInput = z.input<typeof accountSchema>;
 
 /**
@@ -120,28 +247,91 @@ export type AccountInput = z.input<typeof accountSchema>;
  */
 export const quickAccountSchema = z
   .object({
-    name: z.string().trim().min(1, "Name is required").max(200),
+    name: z.string().trim().min(1, "Name is required").max(CRM_MAX.name),
     kind: z.enum(["company", "individual"]).default("company"),
-    contact_name: optText(200),
-    phone: optText(60),
-    email: optText(200),
+    contact_name: keepText(CRM_MAX.contact_name),
+    phone: keepText(CRM_MAX.phone),
+    email: keepText(CRM_MAX.email),
     ...addressFields,
     source: z.enum(["manual", "prospect", "import"]).optional(),
     ...newFields,
   })
   .superRefine(contactCheck)
-  .transform(normalizeMailing);
+  .transform(normalizeAccountAddresses);
 export type QuickAccountInput = z.input<typeof quickAccountSchema>;
 
+/** How a field is named in a message ("Email looks wrong"); other keys are put in words. */
+const FIELD_LABELS: Record<string, string> = {
+  q: "The search",
+  id: "The record",
+  account_id: "The customer",
+  site_id: "The site",
+  bid_id: "The bid",
+  county_code_id: "The county code",
+  account_manager_id: "The account manager",
+  site_ids: "Sites",
+  mobile: "Cell phone",
+  office_phone: "Office phone",
+  address1: "Address line 1",
+  address2: "Address line 2",
+  mailing_address1: "Mailing address line 1",
+  mailing_address2: "Mailing address line 2",
+  contact_name: "Contact",
+  external_id: "Customer #",
+  account_number: "Account #",
+};
+
+/** The field an issue is about, in words: ["email"] → "Email", ["site_ids", 3] → "Sites". */
+export function fieldLabel(path: readonly (string | number)[]): string {
+  const key = [...path].reverse().find((p): p is string => typeof p === "string");
+  if (!key) return "A value";
+  const known = FIELD_LABELS[key];
+  if (known) return known;
+  const words = key.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /**
- * Parse server-function input, throwing a plain Error whose message is the rule that failed
- * ("Add an email or a phone number"), not zod's JSON dump, so the toast reads cleanly.
+ * Zod's issues as one plain sentence each ("Email looks wrong", "Name is too long (200 max)",
+ * "Name is required"). A message written on the schema itself ("Add an email or a phone
+ * number") wins over this map (zod's precedence).
+ */
+const plainErrors: z.ZodErrorMap = (issue) => {
+  const label = fieldLabel(issue.path);
+  switch (issue.code) {
+    case z.ZodIssueCode.too_big:
+      return {
+        message:
+          issue.type === "array"
+            ? `${label}: too many (${String(issue.maximum)} max)`
+            : `${label} is too long (${String(issue.maximum)} max)`,
+      };
+    case z.ZodIssueCode.too_small:
+      return {
+        message:
+          issue.type === "string" && Number(issue.minimum) <= 1
+            ? `${label} is required`
+            : `${label} is too short (${String(issue.minimum)} min)`,
+      };
+    case z.ZodIssueCode.invalid_type:
+      return {
+        message: issue.received === "undefined" ? `${label} is required` : `${label} looks wrong`,
+      };
+    default:
+      return { message: `${label} looks wrong` };
+  }
+};
+
+/**
+ * Parse server-function input, throwing a plain Error whose message is the first rule that
+ * failed, in words ("Add an email or a phone number", "Email looks wrong", "Name is too long
+ * (200 max)") — never zod's JSON dump — so the toast reads cleanly. Every validator in
+ * crm.functions.ts and vendors.functions.ts goes through it.
  */
 export function parseInput<S extends z.ZodTypeAny>(schema: S, d: unknown): z.output<S> {
-  const r = schema.safeParse(d);
+  const r = schema.safeParse(d, { errorMap: plainErrors });
   if (r.success) return r.data;
-  const msgs = [...new Set(r.error.issues.map((i) => i.message))];
-  throw new Error(msgs.join("; "));
+  throw new Error(r.error.issues[0]?.message ?? "The input looks wrong");
 }
 
 // ---- Account manager filter (Customers list) ------------------------------------------------

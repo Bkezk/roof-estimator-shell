@@ -178,6 +178,9 @@ describe("where the county code shows", () => {
     expect(settings).toContain('<TabsTrigger value="countycodes">County codes</TabsTrigger>');
     expect(settings).toContain("<CountyCodesSettings />");
     const siteSelect = read("../components/crm/site-select.tsx");
-    expect(siteSelect).toContain("County code ${code}");
+    // "0108 Kenton, KY", not the bare code (audit, Oct 2; site-select-county.test.ts).
+    expect(siteSelect).toContain(
+      "siteOptionLabel(s.name, siteAddressLine(s), codeOf(s.county_code_id))",
+    );
   });
 });
