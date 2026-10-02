@@ -217,14 +217,62 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
   return rows.length;
 }
 
+export type FollowupRow = Database["public"]["Tables"]["crm_followups"]["Row"];
+export interface DispatchResult {
+  /** Follow-ups whose reminder was due (read at the start of the pass). */
+  checked: number;
+  /** Assignee reminders delivered (inbox row written). */
+  reminded: number;
+  /** Untouched-item escalations delivered. */
+  escalated: number;
+  /** Steps that failed (claim, reminder or escalation); each is logged and recorded on its row. */
+  failed: number;
+  /** Due follow-ups another pass claimed first (the cron and a page load at once). */
+  skipped: number;
+}
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Record a failed step on the follow-up (dispatch_errors / last_dispatch_error, migration
+ * 20261002090000) and in the server log. Never throws: before that migration is applied the
+ * columns are missing and only the log line remains.
+ */
+async function recordFailure(admin: Client, f: FollowupRow, step: string, e: unknown) {
+  const message = `${step}: ${errText(e)}`;
+  console.error(`Reminder pass: follow-up ${f.id} (${f.title}) failed at ${message}`);
+  try {
+    const { error } = await admin
+      .from("crm_followups")
+      .update({
+        dispatch_errors: (f.dispatch_errors ?? 0) + 1,
+        last_dispatch_error: message.slice(0, 1000),
+        last_dispatch_error_at: new Date().toISOString(),
+      })
+      .eq("id", f.id);
+    if (error) throw new Error(error.message);
+  } catch (e2) {
+    console.error(`Reminder pass: could not record the failure on follow-up ${f.id}`, e2);
+  }
+}
+
 /**
  * Fire every due follow-up reminder: one inbox row (+ email / push) per open follow-up whose
- * next_remind_at has passed, then push its next reminder out by every_days. Runs from the cron
- * route and, throttled, from the app (followups.functions.ts). Returns what it did.
+ * next_remind_at has passed, and push its next reminder out by every_days. Runs from the cron
+ * route and, throttled, from the app (followups.functions.ts dispatchRemindersIfDue). Returns
+ * what it did.
+ *
+ * Each follow-up is CLAIMED before anything is sent: one conditional update moves
+ * next_remind_at on (and stamps last_reminded_at / reminders_sent) only where it still holds the
+ * value this pass read. Two passes at once (the cron and an office user's page load) both read
+ * the item, but only one update matches; the other affects no row and sends nothing. The claim
+ * is never rolled back: if a send then fails, the failure is recorded on the row and logged,
+ * and the item waits for its next reminder. A missed reminder is better than a duplicate, and an
+ * escalation failure can no longer make the assignee hear the same reminder twice.
+ *
+ * Each follow-up is handled on its own: an error on one is recorded and the pass goes on.
  */
-export async function dispatchDueReminders(
-  sb: Client,
-): Promise<{ reminded: number; escalated: number; checked: number }> {
+export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> {
   const admin = await serverClient(sb);
   const now = new Date();
   const { data: due, error } = await admin
@@ -239,10 +287,10 @@ export async function dispatchDueReminders(
   // such an item's reminder fires, admins (and any named users) hear about it too, on the
   // same cadence, until someone logs a contact or starts it. crm_untouched() applies the
   // caller's read rules: the cron's service role and office users see everything.
-  const [{ data: untouched }, { data: escalateTo }] = await Promise.all([
-    admin.rpc("crm_untouched"),
-    admin.rpc("escalation_recipients"),
-  ]);
+  const [{ data: untouched, error: untouchedErr }, { data: escalateTo, error: escalateErr }] =
+    await Promise.all([admin.rpc("crm_untouched"), admin.rpc("escalation_recipients")]);
+  const lookupErr = untouchedErr ?? escalateErr;
+  if (lookupErr) console.error("Reminder pass: no escalations this pass —", lookupErr.message);
   const untouchedByItem = new Map<string, NonNullable<typeof untouched>[number]>();
   for (const u of untouched ?? []) {
     const since = u.assigned_at
@@ -250,9 +298,40 @@ export async function dispatchDueReminders(
       : 0;
     if (since >= u.limit_days) untouchedByItem.set(`${u.kind}:${u.item_id}`, u);
   }
-  let reminded = 0;
-  let escalated = 0;
+  const out: DispatchResult = {
+    checked: due?.length ?? 0,
+    reminded: 0,
+    escalated: 0,
+    failed: 0,
+    skipped: 0,
+  };
   for (const f of due ?? []) {
+    // 1. Claim (see above). Lost to another pass: skip. Could not claim: record, skip.
+    const next = new Date(now.getTime() + f.every_days * 86400000);
+    try {
+      const { data: won, error: claimErr } = await admin
+        .from("crm_followups")
+        .update({
+          next_remind_at: next.toISOString(),
+          reminders_sent: f.reminders_sent + 1,
+          last_reminded_at: now.toISOString(),
+        })
+        .eq("id", f.id)
+        .eq("status", "open")
+        .eq("next_remind_at", f.next_remind_at)
+        .select("id");
+      if (claimErr) throw new Error(claimErr.message);
+      if (!won?.length) {
+        out.skipped++;
+        continue;
+      }
+    } catch (e) {
+      out.failed++;
+      await recordFailure(admin, f, "claim", e);
+      continue;
+    }
+
+    // 2. The assignee's reminder.
     const dueDate = new Date(f.due_at);
     const overdueDays = Math.floor((now.getTime() - dueDate.getTime()) / 86400000);
     const when =
@@ -261,50 +340,54 @@ export async function dispatchDueReminders(
         : overdueDays === 0
           ? "due today"
           : `due ${dueDate.toLocaleDateString("en-US")}`;
-    await notify(
-      [f.assignee_id],
-      {
-        kind: "followup",
-        title: `Follow up: ${f.title}`,
-        body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
-        url: f.url,
-        followup_id: f.id,
-      },
-      admin,
-    );
-    const u = untouchedByItem.get(`${f.kind}:${f.item_id}`);
-    if (u) {
-      const recipients = (escalateTo ?? []).filter((id) => id !== f.assignee_id);
-      const since = u.assigned_at
-        ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
-        : 0;
-      if (recipients.length) {
-        await notify(
-          recipients,
-          {
-            kind: "untouched",
-            title: `Untouched ${f.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
-            body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
-            url: f.url,
-            followup_id: f.id,
-          },
-          admin,
-        );
-        escalated++;
-      }
+    try {
+      await notify(
+        [f.assignee_id],
+        {
+          kind: "followup",
+          title: `Follow up: ${f.title}`,
+          body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
+          url: f.url,
+          followup_id: f.id,
+        },
+        admin,
+      );
+      out.reminded++;
+    } catch (e) {
+      out.failed++;
+      await recordFailure(admin, f, "reminder", e);
     }
-    const next = new Date(now.getTime() + f.every_days * 86400000);
-    await admin
-      .from("crm_followups")
-      .update({
-        next_remind_at: next.toISOString(),
-        reminders_sent: f.reminders_sent + 1,
-        last_reminded_at: now.toISOString(),
-      })
-      .eq("id", f.id);
-    reminded++;
+
+    // 3. The escalation, under the same claim (it never re-sends the assignee's reminder).
+    const u = untouchedByItem.get(`${f.kind}:${f.item_id}`);
+    if (!u) continue;
+    const recipients = (escalateTo ?? []).filter((id) => id !== f.assignee_id);
+    if (!recipients.length) continue;
+    const since = u.assigned_at
+      ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
+      : 0;
+    try {
+      await notify(
+        recipients,
+        {
+          kind: "untouched",
+          title: `Untouched ${f.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
+          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
+          url: f.url,
+          followup_id: f.id,
+        },
+        admin,
+      );
+      out.escalated++;
+    } catch (e) {
+      out.failed++;
+      await recordFailure(admin, f, "escalation", e);
+    }
   }
-  // SECURITY DEFINER stamp: the pass may run as an office user who cannot edit settings.
-  await admin.rpc("stamp_dispatch");
-  return { reminded, escalated, checked: due?.length ?? 0 };
+  // SECURITY DEFINER stamp (it arms the app's ten-minute throttle): the pass may run as an
+  // office user who cannot edit settings, or as the service role (20261002090000).
+  const { error: stampErr } = await admin.rpc("stamp_dispatch");
+  if (stampErr)
+    console.error("Reminder pass: could not stamp last_dispatch_at —", stampErr.message);
+  return out;
 }

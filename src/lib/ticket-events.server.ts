@@ -22,9 +22,14 @@ type JobRow = {
 const ticketTitle = (j: JobRow) =>
   `Ticket #${j.number} ${j.customer_name}${j.description ? ` — ${j.description}` : ""}`;
 
-/** Office users (Service without the technician tick, and admins), from the roster RPC. */
+/**
+ * Office users (Service without the technician tick, and admins), from the roster RPC. Under
+ * the service role the RPC returned nothing until 20261002090000_service_role_helpers.sql; an
+ * empty or failed roster is logged rather than passed over in silence.
+ */
 async function officeUsers(sb: Client): Promise<{ id: string; technician: boolean }[]> {
-  const { data } = await sb.rpc("technician_options");
+  const { data, error } = await sb.rpc("technician_options");
+  if (error) console.error(`afterTicketStage: technician_options failed — ${error.message}`);
   return (data ?? []).filter((u) => !u.technician).map((u) => ({ id: u.id, technician: false }));
 }
 
@@ -37,6 +42,10 @@ export async function afterTicketStage(
   const admin = await serverClient(sb);
   const office = await officeUsers(admin);
   const becameDone = row.stage === "done" && prevStage !== "done" && !row.deleted_at;
+  if (row.stage === "done" && !row.deleted_at && !office.length)
+    console.error(
+      `afterTicketStage: ticket #${row.number} is done but technician_options returned no office users, so no "invoice ready" notice was sent and no "Invoice ticket" follow-up was opened (is 20261002090000_service_role_helpers.sql applied?)`,
+    );
   if (becameDone) {
     const others = office.map((u) => u.id).filter((id) => id !== actor.id);
     if (others.length)
