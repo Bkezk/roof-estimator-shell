@@ -14,10 +14,10 @@ export function BoardGlyph(props: { fourByFour?: boolean; className?: string | u
     <svg viewBox="0 0 44 22" className={props.className ?? "h-5 w-10 shrink-0"} aria-hidden="true">
       <polygon points="3,14 13,4 41,4 31,14" fill="#e9d5a3" stroke="#b1935a" strokeWidth="1" />
       <polygon points="3,14 31,14 31,18 3,18" fill="#cdb27a" stroke="#b1935a" strokeWidth="1" />
-      <text x="2" y="21.5" fontSize="7" fill="#000">
+      <text x="2" y="21.5" fontSize="7" className="fill-black dark:fill-neutral-200">
         {props.fourByFour ? "4'" : "8'"}
       </text>
-      <text x="33" y="21.5" fontSize="7" fill="#000">
+      <text x="33" y="21.5" fontSize="7" className="fill-black dark:fill-neutral-200">
         4'
       </text>
     </svg>
@@ -59,15 +59,22 @@ function WedgeGlyph(props: { className?: string | undefined }) {
   );
 }
 
-/** The legacy black screw, head up, driven down into the layer below. */
+/**
+ * The legacy black screw, head up, driven down into the layer below. Drawn in currentColor:
+ * black, or light grey in dark mode where black would vanish into the page.
+ */
 export function ScrewGlyph(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 30" className={props.className ?? "h-7 w-4 shrink-0"} aria-hidden="true">
-      <rect x="2" y="1" width="12" height="4" rx="1" fill="#000" />
-      <rect x="6.5" y="5" width="3" height="19" fill="#000" />
-      <path d="M8 29 L4.5 24 H11.5 Z" fill="#000" />
+    <svg
+      viewBox="0 0 16 30"
+      className={props.className ?? "h-7 w-4 shrink-0 text-black dark:text-neutral-300"}
+      aria-hidden="true"
+    >
+      <rect x="2" y="1" width="12" height="4" rx="1" fill="currentColor" />
+      <rect x="6.5" y="5" width="3" height="19" fill="currentColor" />
+      <path d="M8 29 L4.5 24 H11.5 Z" fill="currentColor" />
       {[8, 11, 14, 17, 20].map((y) => (
-        <path key={y} d={`M4 ${y} L12 ${y + 1.5}`} stroke="#000" strokeWidth="1.4" />
+        <path key={y} d={`M4 ${y} L12 ${y + 1.5}`} stroke="currentColor" strokeWidth="1.4" />
       ))}
     </svg>
   );

@@ -2249,6 +2249,7 @@ export type Database = {
           notify_push: boolean;
           role: string;
           technician: boolean;
+          theme: string;
           updated_at: string;
         };
         Insert: {
@@ -2263,6 +2264,7 @@ export type Database = {
           notify_push?: boolean;
           role?: string;
           technician?: boolean;
+          theme?: string;
           updated_at?: string;
         };
         Update: {
@@ -2277,6 +2279,7 @@ export type Database = {
           notify_push?: boolean;
           role?: string;
           technician?: boolean;
+          theme?: string;
           updated_at?: string;
         };
         Relationships: [];
@@ -4022,6 +4025,7 @@ export type Database = {
       };
       stamp_dispatch: { Args: never; Returns: undefined };
       set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };
+      set_my_theme: { Args: { p_theme: string }; Returns: undefined };
       building_county_counts_storm: {
         Args: never;
         Returns: { county: string; state: string; n: number }[];

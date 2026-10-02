@@ -14,6 +14,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AuthProvider } from "@/lib/auth-context";
 import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "@/components/ui/sonner";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
+import { ThemeProvider } from "@/lib/theme-context";
 
 function NotFoundComponent() {
   return (
@@ -117,8 +119,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // The boot script sets the `dark` class on <html> before React hydrates, hence
+    // suppressHydrationWarning (that one attribute only; children are checked as usual).
+    <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Dark mode: the cached choice (or the OS setting) before the first paint, so a dark
+            page never flashes white (src/lib/theme.ts). First in <head>, ahead of the CSS. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
         <HeadContent />
       </head>
       <body>
@@ -135,11 +142,15 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AuthGate>
-          <Outlet />
-        </AuthGate>
+        {/* The theme reads the signed-in user (their saved choice), so it sits inside auth; the
+            Toaster is inside it too so the toasts follow the theme. */}
+        <ThemeProvider>
+          <AuthGate>
+            <Outlet />
+          </AuthGate>
+          <Toaster />
+        </ThemeProvider>
       </AuthProvider>
-      <Toaster />
     </QueryClientProvider>
   );
 }

@@ -38,6 +38,7 @@ import {
   type Page,
 } from "@/lib/access";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Sidebar,
   SidebarContent,
@@ -356,11 +357,19 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className={collapsed ? "items-center px-1 py-2" : "px-3 pt-3 pb-1"}>
-        <img
-          src="/jbk-logo.webp"
-          alt="JBK Commercial Roofing"
-          className={collapsed ? "h-6 w-auto" : "mx-auto h-auto w-full max-w-[180px]"}
-        />
+        {/* The logo's black banner and outline vanish on the dark sidebar, so it sits on the
+            image-plate token: transparent in light mode, a lighter grey panel in dark mode
+            (styles.css). The image itself is untouched. */}
+        <div
+          data-image-plate=""
+          className={`rounded-md bg-image-plate ${collapsed ? "p-0.5" : "mx-auto w-full max-w-[180px] p-1"}`}
+        >
+          <img
+            src="/jbk-logo.webp"
+            alt="JBK Commercial Roofing"
+            className={collapsed ? "h-6 w-auto" : "mx-auto h-auto w-full"}
+          />
+        </div>
       </SidebarHeader>
       <SidebarContent>
         {/* My Work (owner, Sep 30): every signed-in user's landing page — their own tickets,
@@ -588,11 +597,14 @@ export function AppSidebar() {
               {!collapsed && <span>Sign out</span>}
             </SidebarMenuButton>
           </SidebarMenuItem>
-          <SidebarMenuItem>
+          {/* Dark mode (owner, Oct 2): the sun / moon toggle sits to the right of Collapse menu;
+              in the icon-only sidebar it is its own icon row beneath it. */}
+          <SidebarMenuItem className={collapsed ? undefined : "flex items-center gap-1"}>
             <SidebarMenuButton
               onClick={toggleSidebar}
               tooltip={collapsed ? "Expand menu" : "Collapse menu"}
               title="Ctrl+B / Cmd+B also toggles the menu"
+              className={collapsed ? undefined : "min-w-0 flex-1"}
             >
               {collapsed ? (
                 <PanelLeftOpen className="h-4 w-4" />
@@ -601,7 +613,13 @@ export function AppSidebar() {
               )}
               {!collapsed && <span>Collapse menu</span>}
             </SidebarMenuButton>
+            {!collapsed && <ThemeToggle variant="sidebar" />}
           </SidebarMenuItem>
+          {collapsed && (
+            <SidebarMenuItem>
+              <ThemeToggle variant="sidebar-collapsed" />
+            </SidebarMenuItem>
+          )}
         </SidebarMenu>
       </SidebarFooter>
       {/* The thin rail on the sidebar's edge: click it to collapse or expand. */}

@@ -228,7 +228,7 @@ export function ImportBaxDialog(props: { open: boolean; onClose: () => void }) {
                         {warnings.length > 0 && (
                           <button
                             type="button"
-                            className="flex items-center gap-1 text-xs text-amber-700 hover:underline"
+                            className="flex items-center gap-1 text-xs text-amber-700 hover:underline dark:text-amber-400"
                             onClick={() => setShowWarnings((s) => ({ ...s, [p.fileName]: !open }))}
                           >
                             <AlertTriangle className="h-3.5 w-3.5" />

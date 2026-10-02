@@ -59,6 +59,7 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-image-plate: var(--image-plate);
 }
 
 :root {
@@ -95,41 +96,54 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.929 0.013 255.508);
   --sidebar-ring: oklch(0.704 0.04 256.788);
+  /* The panel behind transparent images drawn in black (the logo, line-art icons): none here. */
+  --image-plate: transparent;
 }
 
+/*
+ * Dark mode (owner, Oct 2): "a grey, not a black, so the JBK logo can still be legible". A
+ * charcoal / graphite palette (blue-grey, hue 220): the page at hsl(220 10% 14%), cards and
+ * popovers a step lighter so pop-ups stand off the page, borders at 26%, text near-white. The
+ * red (--destructive) is the light theme's red, unchanged (owner: "red status colours can stay").
+ * The class goes on <html> (src/lib/theme.ts); printing drops it, paper is always light.
+ */
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
-  --destructive: oklch(0.704 0.191 22.216);
+  color-scheme: dark;
+  --background: oklch(0.254 0.01 264.4); /* hsl(220 10% 14%) */
+  --foreground: oklch(0.947 0 0); /* hsl(0 0% 93%) */
+  --card: oklch(0.294 0.012 264.4); /* hsl(220 10% 18%) */
+  --card-foreground: oklch(0.947 0 0);
+  --popover: oklch(0.314 0.013 264.4); /* hsl(220 10% 20%) */
+  --popover-foreground: oklch(0.947 0 0);
+  --primary: oklch(0.921 0.009 247.9); /* hsl(210 20% 90%) */
+  --primary-foreground: oklch(0.254 0.01 264.4);
+  --secondary: oklch(0.352 0.015 264.4); /* hsl(220 10% 24%) */
+  --secondary-foreground: oklch(0.947 0 0);
+  --muted: oklch(0.333 0.014 264.4); /* hsl(220 10% 22%) */
+  --muted-foreground: oklch(0.741 0.013 264.5); /* hsl(220 8% 68%) */
+  --accent: oklch(0.371 0.016 264.4); /* hsl(220 10% 26%) */
+  --accent-foreground: oklch(0.947 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
+  --border: oklch(0.371 0.016 264.4); /* hsl(220 10% 26%) */
+  --input: oklch(0.408 0.018 264.3); /* hsl(220 10% 30%) */
+  --ring: oklch(0.627 0.025 264.4); /* hsl(220 10% 55%) */
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.208 0.042 265.755);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.279 0.041 260.031);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
+  --sidebar: oklch(0.284 0.011 264.4); /* hsl(220 10% 17%) */
+  --sidebar-foreground: oklch(0.947 0 0);
+  --sidebar-primary: oklch(0.921 0.009 247.9);
+  --sidebar-primary-foreground: oklch(0.254 0.01 264.4);
+  --sidebar-accent: oklch(0.352 0.015 264.4); /* hsl(220 10% 24%) */
+  --sidebar-accent-foreground: oklch(0.947 0 0);
+  --sidebar-border: oklch(0.371 0.016 264.4);
+  --sidebar-ring: oklch(0.627 0.025 264.4);
+  /* A lighter panel behind transparent images drawn in black (the logo's banner and outline,
+     the curb and Non-DL line art) so the black stays visible; the images are untouched. */
+  --image-plate: oklch(0.656 0.018 264.4); /* hsl(220 8% 58%) */
 }
 
 @layer base {

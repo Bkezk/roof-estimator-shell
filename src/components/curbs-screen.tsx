@@ -277,7 +277,11 @@ export function CurbsScreen(p: CurbsScreenProps) {
                       c.styleId === s.id ? "border-primary bg-primary/10" : "hover:bg-muted"
                     }`}
                   >
-                    <img src={`/curb-icon-${s.img}.png`} alt="" className="h-11 w-11" />
+                    <img
+                      src={`/curb-icon-${s.img}.png`}
+                      alt=""
+                      className="h-11 w-11 rounded-sm bg-image-plate"
+                    />
                     <span className="text-[10px] font-medium">
                       {s.label}
                       {s.quote ? " (quote)" : ""}
@@ -475,7 +479,7 @@ export function CurbsScreen(p: CurbsScreenProps) {
                 <img
                   src={`/curb-style-${style.img}.png`}
                   alt={style.label}
-                  className="h-[115px] w-[150px] shrink-0"
+                  className="h-[115px] w-[150px] shrink-0 rounded-sm bg-image-plate"
                   style={{ imageRendering: "auto" }}
                 />
               ) : (

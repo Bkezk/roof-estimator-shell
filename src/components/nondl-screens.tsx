@@ -185,7 +185,11 @@ export function NonDlScreens({ refData, state, onChange, result, crewRate }: Non
             onClick={() => setOpenTile(t.id)}
             className={`flex flex-col items-center gap-2 rounded-md border-2 border-border p-3 text-center text-xs font-medium transition-colors ${t.tile}`}
           >
-            <img src={t.icon} alt="" className="h-12 w-16 object-contain" />
+            <img
+              src={t.icon}
+              alt=""
+              className="h-12 w-16 rounded-sm bg-image-plate object-contain"
+            />
             {t.label}
           </button>
         ))}

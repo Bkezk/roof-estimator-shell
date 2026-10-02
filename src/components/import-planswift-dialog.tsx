@@ -65,8 +65,8 @@ const num = (x: number) =>
 const TARGET_ORDER: PlanSwiftTarget[] = [...PLANSWIFT_TARGETS];
 
 const CONFIDENCE_STYLE: Record<Confidence, string> = {
-  high: "text-emerald-700",
-  medium: "text-amber-700",
+  high: "text-emerald-700 dark:text-emerald-400",
+  medium: "text-amber-700 dark:text-amber-400",
   low: "text-destructive",
 };
 const CONFIDENCE_LABEL: Record<Confidence, string> = {
@@ -274,7 +274,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
             )}
             {readError && <p className="text-sm font-medium text-destructive">{readError}</p>}
             {sheet && !sheet.hasLinearTotal && (
-              <p className="text-xs text-amber-700">
+              <p className="text-xs text-amber-700 dark:text-amber-400">
                 This export has no “Linear total” column, so each roof section is a square of its
                 area. Add Linear total to the PlanSwift export for the real perimeters.
               </p>

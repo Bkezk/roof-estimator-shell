@@ -269,7 +269,7 @@ function StatusButton({
       ? "bg-red-600 text-white hover:bg-red-600/90"
       : status === "ok"
         ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-        : "bg-slate-600 text-white hover:bg-slate-600/90";
+        : "bg-slate-600 text-white hover:bg-slate-600/90 dark:bg-slate-500 dark:hover:bg-slate-500/90";
   return (
     <Button
       type="button"

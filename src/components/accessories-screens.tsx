@@ -678,7 +678,9 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
             0,
           );
           return (
-            <p className={`text-xs font-medium ${needed > 0 ? "text-red-600" : "text-green-700"}`}>
+            <p
+              className={`text-xs font-medium ${needed > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
+            >
               Fasteners Needed: {needed}
               {entered > 0 && (
                 <span className="font-normal text-muted-foreground">
@@ -1691,7 +1693,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
         return (
           <div className="space-y-3">
             <p
-              className={`text-xs font-medium ${(result?.parapetTabs.fastenersNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700"}`}
+              className={`text-xs font-medium ${(result?.parapetTabs.fastenersNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
             >
               Fasteners Needed: {result?.parapetTabs.fastenersNeeded ?? 0}
             </p>
@@ -1708,7 +1710,7 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
               />
               <div className="space-y-2">
                 <p
-                  className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700"}`}
+                  className={`text-xs font-medium ${(result?.parapetTabs.steelPlatesNeeded ?? 0) > 0 ? "text-red-600" : "text-green-700 dark:text-green-400"}`}
                 >
                   Steel Plates Needed: {result?.parapetTabs.steelPlatesNeeded ?? 0}
                 </p>
@@ -1775,17 +1777,39 @@ export function AccessoriesScreens(props: AccessoriesScreensProps) {
           <div className="space-y-3">
             <p className="text-center text-xs font-semibold">Items Required</p>
             <div className="flex flex-wrap justify-center gap-6 text-xs font-medium">
-              <span className={(needs?.fasteners ?? 0) > 0 ? "text-red-600" : "text-green-700"}>
+              <span
+                className={
+                  (needs?.fasteners ?? 0) > 0
+                    ? "text-red-600"
+                    : "text-green-700 dark:text-green-400"
+                }
+              >
                 Fasteners: {needs?.fasteners ?? 0}
               </span>
-              <span className={(needs?.polyPlates ?? 0) > 0 ? "text-red-600" : "text-green-700"}>
+              <span
+                className={
+                  (needs?.polyPlates ?? 0) > 0
+                    ? "text-red-600"
+                    : "text-green-700 dark:text-green-400"
+                }
+              >
                 Poly Plates: {needs?.polyPlates ?? 0}
               </span>
-              <span className={(needs?.insulPlates ?? 0) > 0 ? "text-red-600" : "text-green-700"}>
+              <span
+                className={
+                  (needs?.insulPlates ?? 0) > 0
+                    ? "text-red-600"
+                    : "text-green-700 dark:text-green-400"
+                }
+              >
                 Insul. Plates: {needs?.insulPlates ?? 0}
               </span>
               <span
-                className={(needs?.inductionPlates ?? 0) > 0 ? "text-red-600" : "text-green-700"}
+                className={
+                  (needs?.inductionPlates ?? 0) > 0
+                    ? "text-red-600"
+                    : "text-green-700 dark:text-green-400"
+                }
               >
                 Induction Plates: {needs?.inductionPlates ?? 0}
               </span>

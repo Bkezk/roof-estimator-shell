@@ -17,6 +17,7 @@ import {
   type PushState,
 } from "@/lib/push-client";
 import { NOTIFICATIONS_QUERY_KEY } from "@/components/notifications-bell";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +90,19 @@ function AccountPage() {
         </Card>
       )}
       <NotificationsCard />
+      {/* Dark mode (owner, Oct 2): the same toggle as the sidebar footer's sun / moon. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>
+            Light or dark (a charcoal grey). Saved to your account, so it follows you to other
+            devices.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemeToggle variant="account" />
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle>Change password</CardTitle>

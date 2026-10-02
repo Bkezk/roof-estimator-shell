@@ -29,6 +29,7 @@ import {
 } from "@/lib/engine.functions";
 import { getBid, saveBid, getWarrantyData, getMarkupPresets } from "@/lib/bids.functions";
 import { linkBid } from "@/lib/opportunities.functions";
+import { withLightTheme } from "@/lib/theme";
 import {
   buildEstimateInputs,
   type BidInput,
@@ -2273,16 +2274,20 @@ function EstimatePage() {
       const { capturePanel, renderShotsPdf, waitForPanel } =
         await import("@/lib/bid-summary-shots");
       const steps: Parameters<typeof renderShotsPdf>[0]["steps"] = [];
-      for (const [i, s] of STEPS.entries()) {
-        try {
-          goStep(i);
-          const panel = await waitForPanel(`[data-bid-step="${s.key}"]`);
-          steps.push({ label: s.label, shot: await capturePanel(panel) });
-        } catch (e) {
-          // Keep going: the step gets a page saying why, and the failure is announced below.
-          steps.push({ label: s.label, shot: null, note: errText(e) });
+      // The PDF is paper: the panels are captured in light mode whatever theme is showing (dark
+      // mode, Oct 2); the theme comes back when the captures are done.
+      await withLightTheme(document.documentElement, async () => {
+        for (const [i, s] of STEPS.entries()) {
+          try {
+            goStep(i);
+            const panel = await waitForPanel(`[data-bid-step="${s.key}"]`);
+            steps.push({ label: s.label, shot: await capturePanel(panel) });
+          } catch (e) {
+            // Keep going: the step gets a page saying why, and the failure is announced below.
+            steps.push({ label: s.label, shot: null, note: errText(e) });
+          }
         }
-      }
+      });
       const bytes = await renderShotsPdf({
         title: bidName.trim() || "Untitled bid",
         subtitle: [
@@ -2473,8 +2478,8 @@ function EstimatePage() {
             )}
             {importInfo.warnings.length > 0 && (
               <>
-                <p className="text-xs text-amber-700">Check:</p>
-                <ul className="list-disc pl-5 text-xs text-amber-700">
+                <p className="text-xs text-amber-700 dark:text-amber-400">Check:</p>
+                <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">
                   {importInfo.warnings.map((w, i) => (
                     <li key={i}>{w}</li>
                   ))}
@@ -4016,7 +4021,7 @@ function EstimatePage() {
                         {(admin.underlaymentPrices?.[uBoard] ?? 0).toFixed(2)}
                       </span>
                       {(underlaymentPriceOverrides[uBoard] ?? 0) > 0 && (
-                        <span className="ml-1 text-amber-700">
+                        <span className="ml-1 text-amber-700 dark:text-amber-400">
                           (this bid: {underlaymentPriceOverrides[uBoard]!.toFixed(2)})
                         </span>
                       )}
@@ -5926,7 +5931,9 @@ function EstimatePage() {
                             <li key={m.id}>
                               {new Date(m.created_at).toLocaleDateString()} ·{" "}
                               {m.created_by_name ?? "someone"} ·{" "}
-                              <span className={m.qty < 0 ? "" : "text-green-700"}>
+                              <span
+                                className={m.qty < 0 ? "" : "text-green-700 dark:text-green-400"}
+                              >
                                 {m.qty < 0 ? "took" : "returned"} {Math.abs(m.qty)} {m.unit}
                               </span>{" "}
                               {m.row_label}
