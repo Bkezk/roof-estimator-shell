@@ -54,3 +54,20 @@ export const stageLocked = (
   p: AccessLike | null | undefined,
   current: ServiceStage | null,
 ): boolean => !!current && !!stageProblem(p, current);
+
+/**
+ * Who is offered Close out on a ticket (audit, Oct 2): the ticket's lead technician — not once
+ * the office has invoiced or closed it, unless they are office — and managers / admins
+ * (`managesTickets`). The twin of the server: the close-out's crew question (setJobCrew) and
+ * its field writes (ownJob) refuse anyone else, so an office user who is not a manager, or a
+ * crew member who is not the lead, used to get stuck there. They see no button now.
+ */
+export function canCloseOut(
+  p: (AccessLike & { id?: string | null }) | null | undefined,
+  job: { technician_id: string | null; stage: string } | null | undefined,
+): boolean {
+  if (!p || !job) return false;
+  if (managesTickets(p)) return true;
+  if (!p.id || job.technician_id !== p.id) return false;
+  return isOffice(p) || TECH_STAGES.includes(job.stage as ServiceStage);
+}

@@ -109,6 +109,47 @@ export const listServiceJobs = createServerFn({ method: "GET" })
     return withTechNames(context.supabase, data ?? []);
   });
 
+/**
+ * "Awaiting invoice": the tickets at Done (finalising moves a ticket to Invoiced). The count is
+ * the database's own (`count: "exact"`, `head: true`), not the length of a loaded list — the
+ * ticket list stops at 1,000 rows, so the count and the queue built from it stopped there too
+ * (audit, Oct 2). The rows are the Done tickets themselves, longest waiting first.
+ */
+export interface AwaitingInvoice {
+  count: number;
+  rows: ServiceJobWithTech[];
+}
+export const AWAITING_INVOICE_LIMIT = 1000;
+/** Its query key: under "service-jobs", so invalidating the ticket list refreshes it too. */
+export const AWAITING_INVOICE_KEY = ["service-jobs", "awaiting-invoice"] as const;
+export const listAwaitingInvoice = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<AwaitingInvoice> => {
+    await serviceAccess(context);
+    const sb = context.supabase;
+    const [counted, listed] = await Promise.all([
+      sb
+        .from("service_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("stage", "done")
+        .is("deleted_at", null),
+      sb
+        .from("service_jobs")
+        .select("*")
+        .eq("stage", "done")
+        .is("deleted_at", null)
+        .order("completed_at", { ascending: true, nullsFirst: false })
+        .order("updated_at", { ascending: true })
+        .limit(AWAITING_INVOICE_LIMIT),
+    ]);
+    if (counted.error) throw new Error(counted.error.message);
+    if (listed.error) throw new Error(listed.error.message);
+    return {
+      count: counted.count ?? 0,
+      rows: await withTechNames(sb, listed.data ?? []),
+    };
+  });
+
 export const getServiceJob = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
@@ -174,7 +215,9 @@ const jobSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable()
     .optional(),
-  stage: z.enum(SERVICE_STAGES).optional(),
+  // No stage (audit, Oct 2): a stale tab's save sent the stage it had loaded and moved an
+  // Invoiced ticket back to Done. setServiceStage (the header's picker) is the one way to set
+  // it; a `stage` key sent here is dropped by the schema.
   notes: optText(10000),
   centerpoint_ticket: optText(40),
   centerpoint_invoice: optText(40),
@@ -183,9 +226,11 @@ export type ServiceJobInput = z.input<typeof jobSchema>;
 
 /**
  * Create (no id) or update a ticket. The customer / site names and the site address are
- * snapshotted from the linked account so the list reads without joins. A missing stage on
- * create is Scheduled when a tech and a date are set, else Open. A customer with more than one
- * live site needs the site picked (lib/ticket-form.ts siteProblem).
+ * snapshotted from the linked account so the list reads without joins. The save never sets the
+ * stage from its input: a new ticket is Scheduled when a tech and a date are set, else Open; an
+ * existing ticket keeps its stage, except that an Open one that now has a technician and a day
+ * becomes Scheduled. A customer with more than one live site needs the site picked
+ * (lib/ticket-form.ts siteProblem).
  */
 export const saveServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -237,8 +282,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     // Every ticket has a date (owner, Oct 1); a technician's save leaves it as it is.
     const dateProblem = ticketDateProblem({ id, scheduled_date: fields.scheduled_date });
     if (dateProblem) throw new Error(dateProblem);
-    const stage =
-      fields.stage ?? (fields.technician_id && fields.scheduled_date ? "scheduled" : "open");
+    // A new ticket's stage; an existing ticket keeps its own (below).
+    const stage: ServiceStage =
+      fields.technician_id && fields.scheduled_date ? "scheduled" : "open";
     // The crew and its rates are dispatch and money: a manager's (owner, Oct 1). A technician
     // answers "who is on this job" on the close-out (setJobCrew) instead; anyone else's save
     // leaves the crew, the technician and the labor rate as they are.
@@ -261,38 +307,46 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       ...(fields.scheduled_date !== undefined || !id
         ? { scheduled_date: fields.scheduled_date ?? null }
         : {}),
-      stage,
       notes: fields.notes ?? null,
       centerpoint_ticket: fields.centerpoint_ticket ?? null,
       centerpoint_invoice: fields.centerpoint_invoice ?? null,
       updated_by_name: nameOf(p),
     };
     if (id) {
-      const { data: cur } = await sb
+      const { data: cur, error: cErr } = await sb
         .from("service_jobs")
         .select("technician_id, stage, scheduled_date")
         .eq("id", id)
         .maybeSingle();
+      if (cErr) throw new Error(cErr.message);
+      if (!cur) throw new Error("Ticket not found");
       // A technician edits only their own ticket (RLS says the same; this gives a clear message).
-      if (!isOffice(p) && cur && cur.technician_id !== context.userId)
+      if (!isOffice(p) && cur.technician_id !== context.userId)
         throw new Error(
           "Only the assigned technician, the office or an admin can edit this ticket",
         );
-      // Invoiced and Closed are a manager's (owner, Oct 1); keeping the ticket's stage is fine.
-      const problem = stageProblem(p, stage, cur?.stage);
-      if (problem) throw new Error(problem);
       // Owner, Oct 1: once a ticket has a date, only an admin or a manager moves it.
       const moveProblem = dateMoveProblem({
         profile: p,
-        oldYmd: cur?.scheduled_date,
+        oldYmd: cur.scheduled_date,
         newYmd: fields.scheduled_date,
       });
       if (moveProblem) throw new Error(moveProblem);
       // Dispatch is a manager's: anyone else's save keeps the assigned technician.
-      if (!manager && cur) patch.technician_id = cur.technician_id;
+      if (!manager) patch.technician_id = cur.technician_id;
+      // The stage is not the form's to send: the ticket keeps the one it has now. An Open ticket
+      // that now has a technician and a day becomes Scheduled (nothing else moves it here).
+      const scheduledNow =
+        cur.stage === "open" &&
+        !!patch.technician_id &&
+        !!(fields.scheduled_date !== undefined ? fields.scheduled_date : cur.scheduled_date);
+      if (scheduledNow) {
+        const problem = stageProblem(p, "scheduled", cur.stage);
+        if (problem) throw new Error(problem);
+      }
       const { data: row, error } = await sb
         .from("service_jobs")
-        .update(patch)
+        .update(scheduledNow ? { ...patch, stage: "scheduled" } : patch)
         .eq("id", id)
         .select("*")
         .single();
@@ -304,19 +358,14 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Crew rows are a manager's to write (RLS service_job_techs_manage); nobody else's save
       // touches them (the technician did not change either).
       const saved = manager ? await saveCrew(sb, row, crew) : row;
-      await syncTicketFollowup(
-        saved,
-        { id: context.userId, name: nameOf(p) },
-        sb,
-        cur?.stage ?? null,
-      );
+      await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
       return withTechName(sb, saved);
     }
     const createProblem = stageProblem(p, stage);
     if (createProblem) throw new Error(createProblem);
     const { data: row, error } = await sb
       .from("service_jobs")
-      .insert({ ...patch, created_by: context.userId })
+      .insert({ ...patch, stage, created_by: context.userId })
       .select("*")
       .single();
     if (error) throw new Error(error.message);

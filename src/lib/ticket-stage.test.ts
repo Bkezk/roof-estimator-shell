@@ -96,8 +96,10 @@ describe("the server functions apply stageProblem", () => {
   const svc = read("src/lib/service.functions.ts");
   it("saveServiceJob checks the stage against the ticket's current stage (create: none)", () => {
     const fn = serverFn(svc, "saveServiceJob");
+    // An update sets no stage from its input (audit, Oct 2); its one move, Open → Scheduled, is
+    // checked against the ticket's current stage.
     expect(fn).toMatch(
-      /const problem = stageProblem\(p, stage, cur\?\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
+      /const problem = stageProblem\(p, "scheduled", cur\.stage\);\s*if \(problem\) throw new Error\(problem\);/,
     );
     expect(fn).toMatch(
       /const createProblem = stageProblem\(p, stage\);\s*if \(createProblem\) throw new Error\(createProblem\);/,

@@ -388,18 +388,21 @@ describe("StageStrip: a compact stepper — dots on a line, label and date benea
     expect(src).not.toContain("rounded-md border px-2 py-1.5");
   });
   it("the current step is the primary ringed dot with a bold label; reached steps filled; ahead hollow", () => {
+    // The looks are lib/stage-strip.ts stepLooks (by position; stage-strip.test.ts).
+    const looks = read("src/lib/stage-strip.ts");
     expect(src).toContain('aria-current={c.current ? "step" : undefined}');
-    expect(src).toContain("bg-primary ring-2 ring-primary ring-offset-2 ring-offset-background");
-    expect(src).toContain("const past = !!c.at && !c.current;");
-    expect(src).toContain('? "bg-foreground/60"');
-    expect(src).toContain('"border border-muted-foreground/40 bg-background"');
-    expect(src).toContain(
-      'c.current ? "font-semibold" : past ? "font-medium" : "text-muted-foreground"',
-    );
+    expect(src).toContain("const looks = stepLooks(cells);");
+    expect(src).not.toContain("const past = !!c.at && !c.current;");
+    expect(looks).toContain("bg-primary ring-2 ring-primary ring-offset-2 ring-offset-background");
+    expect(looks).toContain('"bg-foreground/60"');
+    expect(looks).toContain('"border border-muted-foreground/40 bg-background"');
+    expect(looks).toContain('LABEL_CURRENT = "font-semibold"');
+    expect(looks).toContain('LABEL_REACHED = "font-medium"');
+    expect(looks).toContain('LABEL_AHEAD = "text-muted-foreground"');
   });
   it("a connector line after every step but the last; each date, blank when never reached", () => {
     expect(src).toContain("const last = i === cells.length - 1;");
-    expect(src).toContain("{!last && (");
+    expect(src).toContain("{!last && <span");
     expect(src).toContain('{c.at ? shortDate(c.at) : "\u00a0"}');
   });
 });

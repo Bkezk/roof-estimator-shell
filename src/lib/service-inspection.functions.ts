@@ -238,7 +238,8 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
  * "Create repair ticket" from a completed inspection: a new Open ticket for the same customer,
  * site and contact (PO #, labor rate as on the inspection), its description and notes prefilled
  * from the Issue items, linked back (from_job_id). Managers and admins only (owner, Oct 1: "The
- * manager creates the tickets"); unassigned.
+ * manager creates the tickets"); unassigned. One per inspection: a second call returns the
+ * first one (`existing: true`) instead of making another.
  */
 export const createRepairFromInspection = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -252,60 +253,91 @@ export const createRepairFromInspection = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<{ id: string; number: number }> => {
-    const p = await me(context);
-    if (!canAccess(p, "service") || !managesTickets(p))
-      throw new Error("Only a manager creates a repair ticket");
-    const sb = context.supabase;
-    const { data: src, error } = await sb
-      .from("service_jobs")
-      .select("*")
-      .eq("id", data.id)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!src) throw new Error("Ticket not found");
-    const job = src as JobRow;
-    if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
-    if (!inspectionComplete(job.stage))
-      throw new Error("The inspection is not done yet; mark it Done first");
-    const ins = parseInspection(job.inspection);
-    if (!ins) throw new Error("The inspection checklist has not been saved on this ticket");
-    const dateProblem = ticketDateProblem({ scheduled_date: data.scheduled_date });
-    if (dateProblem) throw new Error(dateProblem);
-    const text = repairTicketText(job.number, ins);
-    const { data: row, error: iErr } = await sb
-      .from("service_jobs")
-      .insert({
-        account_id: job.account_id,
-        site_id: job.site_id,
-        contact_id: job.contact_id,
-        customer_name: job.customer_name,
-        site_name: job.site_name,
-        site_address: job.site_address,
-        labor_rate_kind: job.labor_rate_kind,
-        po_number: job.po_number,
-        description: text.description,
-        notes: text.notes || null,
-        service_type: data.service_type,
-        scheduled_date: data.scheduled_date,
-        stage: "open",
-        from_job_id: job.id,
-        created_by: context.userId,
-        updated_by_name: nameOf(p),
-      })
-      .select("id, number")
-      .single();
-    if (iErr) throw new Error(iErr.message);
-    await sb.from("service_job_events").insert({
-      service_job_id: job.id,
-      kind: "note",
-      note: `Repair ticket #${row.number} created from this inspection`,
-      by_user: context.userId,
-      by_name: nameOf(p),
-      meta: { created_job_id: row.id } as Json,
-    });
-    return row;
-  });
+  .handler(
+    async ({ data, context }): Promise<{ id: string; number: number; existing: boolean }> => {
+      const p = await me(context);
+      if (!canAccess(p, "service") || !managesTickets(p))
+        throw new Error("Only a manager creates a repair ticket");
+      const sb = context.supabase;
+      const { data: src, error } = await sb
+        .from("service_jobs")
+        .select("*")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!src) throw new Error("Ticket not found");
+      const job = src as JobRow;
+      if (job.service_type !== "inspection") throw new Error("This ticket is not an inspection");
+      // Idempotent (audit, Oct 2: a double click made two repair tickets): the inspection's live
+      // repair ticket, when there is one, is returned instead of inserting another.
+      const already = await repairTicketOf(sb, job.id);
+      if (already) return { ...already, existing: true };
+      if (!inspectionComplete(job.stage))
+        throw new Error("The inspection is not done yet; mark it Done first");
+      const ins = parseInspection(job.inspection);
+      if (!ins) throw new Error("The inspection checklist has not been saved on this ticket");
+      const dateProblem = ticketDateProblem({ scheduled_date: data.scheduled_date });
+      if (dateProblem) throw new Error(dateProblem);
+      const text = repairTicketText(job.number, ins);
+      const { data: row, error: iErr } = await sb
+        .from("service_jobs")
+        .insert({
+          account_id: job.account_id,
+          site_id: job.site_id,
+          contact_id: job.contact_id,
+          customer_name: job.customer_name,
+          site_name: job.site_name,
+          site_address: job.site_address,
+          labor_rate_kind: job.labor_rate_kind,
+          po_number: job.po_number,
+          description: text.description,
+          notes: text.notes || null,
+          service_type: data.service_type,
+          scheduled_date: data.scheduled_date,
+          stage: "open",
+          from_job_id: job.id,
+          created_by: context.userId,
+          updated_by_name: nameOf(p),
+        })
+        .select("id, number")
+        .single();
+      if (iErr) {
+        // Two requests at once: the second trips service_jobs_from_job_live_idx (migration
+        // 20261002120000) and gets the first one's ticket.
+        if (iErr.code === "23505") {
+          const made = await repairTicketOf(sb, job.id);
+          if (made) return { ...made, existing: true };
+        }
+        throw new Error(iErr.message);
+      }
+      await sb.from("service_job_events").insert({
+        service_job_id: job.id,
+        kind: "note",
+        note: `Repair ticket #${row.number} created from this inspection`,
+        by_user: context.userId,
+        by_name: nameOf(p),
+        meta: { created_job_id: row.id } as Json,
+      });
+      return { ...row, existing: false };
+    },
+  );
+
+/** The inspection's live (not deleted) repair ticket, the first made; null when none. */
+async function repairTicketOf(
+  sb: SupabaseClient<Database>,
+  inspectionId: string,
+): Promise<{ id: string; number: number } | null> {
+  const { data, error } = await sb
+    .from("service_jobs")
+    .select("id, number")
+    .eq("from_job_id", inspectionId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ?? null;
+}
 
 /** The inspection a ticket came from ("From inspection #6012"). */
 export const getSourceInspection = createServerFn({ method: "GET" })

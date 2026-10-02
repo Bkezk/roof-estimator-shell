@@ -120,7 +120,8 @@ describe("the ticket's invoice card", () => {
 describe("Awaiting invoice (was: To invoice)", () => {
   it("the chip on the Invoices list reads Awaiting invoice (N) with a tooltip", () => {
     const page = read("src/components/service/invoices-page.tsx");
-    expect(page).toContain('Awaiting invoice{jobsQ.data ? ` (${waiting.length})` : ""}');
+    // The count is the server's (listAwaitingInvoice), not the loaded list's length.
+    expect(page).toContain('Awaiting invoice{jobsQ.data ? ` (${waitingCount})` : ""}');
     expect(page).toContain("title={AWAITING_INVOICE_TITLE}");
     expect(page).not.toMatch(/>\s*To invoice/);
   });

@@ -93,12 +93,13 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
   // goes through managesTickets.
   const allowed: Record<string, string[]> = {
     // Who sees every ticket, and whether a technician edits only their own.
-    "src/lib/service.functions.ts": [
-      "if (!isOffice(p) && cur && cur.technician_id !== context.userId)",
-    ],
+    "src/lib/service.functions.ts": ["if (!isOffice(p) && cur.technician_id !== context.userId)"],
     // The stage rule: a technician sets Open / Scheduled / Done (Invoiced / Closed: managesTickets).
+    // canCloseOut: the lead technician closes out until the office invoices (an office lead
+    // at any stage).
     "src/lib/ticket-stage.ts": [
       "if (!isOffice(p)) return TECH_STAGES.includes(stage) ? null : TECH_STAGE_MESSAGE;",
+      "return isOffice(p) || TECH_STAGES.includes(job.stage as ServiceStage);",
     ],
     "src/lib/service-field.functions.ts": [
       "if (!isOffice(p) && job.technician_id !== ctx.userId)",
@@ -250,7 +251,7 @@ describe("dispatch is a manager's", () => {
   it("saveServiceJob keeps the technician, crew and labor rate on anyone else's save", () => {
     const svc = serverFn(read("src/lib/service.functions.ts"), "saveServiceJob");
     expect(svc).toContain("const crew = manager ? fields.crew : undefined;");
-    expect(svc).toContain("if (!manager && cur) patch.technician_id = cur.technician_id;");
+    expect(svc).toContain("if (!manager) patch.technician_id = cur.technician_id;");
     expect(svc).toContain("fields.labor_rate_kind && manager ?");
     expect(svc).toContain("const saved = manager ? await saveCrew(sb, row, crew) : row;");
   });

@@ -1434,8 +1434,12 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       }),
     onSuccess: (r) => {
       setDialog(null);
-      ctx.applied(r, true);
-      toast.success(`Invoice #${invoiceLabel(r.invoice)} marked paid; the ticket is Closed`);
+      ctx.applied(r, r.ticket_closed);
+      toast.success(
+        r.ticket_closed
+          ? `Invoice #${invoiceLabel(r.invoice)} marked paid; the ticket is Closed`
+          : `Invoice #${invoiceLabel(r.invoice)} marked paid; the ticket stays open while another invoice on it is unpaid`,
+      );
     },
     onError: (e) => toast.error(`Could not mark the invoice paid: ${errText(e)}`),
   });

@@ -28,7 +28,11 @@ import { ServiceTabs } from "@/components/service/service-tabs";
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
-import { listServiceJobs, type ServiceJobWithTech } from "@/lib/service.functions";
+import {
+  AWAITING_INVOICE_KEY,
+  listAwaitingInvoice,
+  type ServiceJobWithTech,
+} from "@/lib/service.functions";
 import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
 import {
   exportSageCsv,
@@ -111,7 +115,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listInvoices);
-  const jobsFn = useServerFn(listServiceJobs);
+  const awaitingFn = useServerFn(listAwaitingInvoice);
   // The invoice status chips; the Awaiting invoice chip is the URL's (?tab=to-invoice) so the
   // Invoices tab's count lands on it.
   const [status, setStatusState] = useState<StatusFilter>("all");
@@ -137,13 +141,16 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
       }),
     enabled: !!session && !toInvoice,
   });
-  // The same cache as the Tickets list and the Board.
+  // The Done tickets and their count from the server (the count is the database's, not the
+  // length of the 1,000-row ticket list). Under "service-jobs", so every ticket change that
+  // refreshes the Tickets list refreshes this too.
   const jobsQ = useQuery({
-    queryKey: ["service-jobs"],
-    queryFn: () => jobsFn(),
+    queryKey: AWAITING_INVOICE_KEY,
+    queryFn: () => awaitingFn(),
     enabled: !!session,
   });
-  const waiting = toInvoiceRows(jobsQ.data ?? []);
+  const waiting = toInvoiceRows(jobsQ.data?.rows ?? []);
+  const waitingCount = jobsQ.data?.count ?? 0;
   const rows = list.data ?? [];
   // Void invoices are not money owed; they stay out of the footer sums.
   const live = rows.filter((r) => r.status !== "void");
@@ -181,7 +188,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
             title={AWAITING_INVOICE_TITLE}
             onClick={toInvoice ? () => setStatus("all") : showToInvoice}
           >
-            Awaiting invoice{jobsQ.data ? ` (${waiting.length})` : ""}
+            Awaiting invoice{jobsQ.data ? ` (${waitingCount})` : ""}
           </Chip>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
           <Chip active={!toInvoice && status === "all"} onClick={() => setStatus("all")}>
@@ -247,6 +254,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
       {toInvoice ? (
         <ToInvoiceTable
           rows={waiting}
+          count={waitingCount}
           loading={jobsQ.isLoading || !jobsQ.data}
           error={jobsQ.error}
           onOpen={open}
@@ -362,6 +370,8 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
 /** The Awaiting invoice queue: Done tickets, longest waiting first; a row opens its ticket. */
 function ToInvoiceTable(props: {
   rows: ServiceJobWithTech[];
+  /** Every Done ticket (the database's count); more than rows when the list is capped. */
+  count: number;
   loading: boolean;
   error: Error | null;
   onOpen: (serviceJobId: string) => void;
@@ -439,7 +449,10 @@ function ToInvoiceTable(props: {
         <tfoot>
           <tr className="border-t bg-muted/40 text-sm font-medium">
             <td className="px-3 py-2" colSpan={6}>
-              {props.rows.length} ticket{props.rows.length === 1 ? "" : "s"} awaiting invoice
+              {props.count} ticket{props.count === 1 ? "" : "s"} awaiting invoice
+              {props.count > props.rows.length
+                ? ` (the ${props.rows.length} waiting longest shown)`
+                : ""}
             </td>
           </tr>
         </tfoot>

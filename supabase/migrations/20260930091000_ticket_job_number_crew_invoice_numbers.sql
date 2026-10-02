@@ -6,6 +6,20 @@
 -- who is on the job (crew_confirmed_at). Existing invoices keep their integer numbers
 -- (display_number stays NULL); existing tickets without crew rows bill as before. Idempotent.
 
+-- Replay order (audit, Oct 2): the policies below call public.is_manager(), which
+-- 20260930093000_manager_role.sql defines — after this file — so a fresh `db reset` failed here.
+-- The same definition, identical to that file's (create or replace: idempotent; the live
+-- database already has it).
+create or replace function public.is_manager()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.role = 'manager'
+  );
+$$;
+revoke all on function public.is_manager() from public;
+grant execute on function public.is_manager() to authenticated;
+
 -- (A) Job number, shown and edited next to PO #.
 alter table public.service_jobs add column if not exists job_number text;
 

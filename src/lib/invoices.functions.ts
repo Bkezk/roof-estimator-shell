@@ -172,6 +172,39 @@ async function finalizeDraft(
 /** Where the final PDF is stored: by number, plus the id so a void keeps its own file. */
 const pdfPath = (inv: InvoiceRow) => `invoices/${invoiceFileStem(inv)}-${inv.id.slice(0, 8)}.pdf`;
 
+/**
+ * The invoice's PDF as it is downloaded and emailed (audit, Oct 2: a "frozen" invoice changed
+ * after later ticket edits, because download and send drew it again from the live ticket). A
+ * draft is drawn fresh (it is a preview). A final, sent, paid or void invoice is the PDF stored
+ * when it was finalised (pdf_path in the "service" bucket), never drawn again — unless that file
+ * is missing: then it is drawn once from the invoice as it stands, stored (never over an
+ * existing file) and a warning logged.
+ */
+async function invoicePdf(sb: SupabaseClient<Database>, b: InvoiceBundle): Promise<Uint8Array> {
+  const { renderInvoicePdf } = await import("@/lib/invoices.server");
+  if (b.invoice.status === "draft") return renderInvoicePdf(sb, b);
+  const stored = b.invoice.pdf_path;
+  if (stored) {
+    const { data, error } = await sb.storage.from("service").download(stored);
+    if (!error && data) return new Uint8Array(await data.arrayBuffer());
+  }
+  const path = stored ?? pdfPath(b.invoice);
+  console.warn(
+    `Invoice ${invoiceLabel(b.invoice)} (${b.invoice.id}): the stored PDF ${stored ?? "(none recorded)"} is missing; drawn again from the invoice and stored at ${path}`,
+  );
+  const pdf = await renderInvoicePdf(sb, b);
+  const { error: upErr } = await sb.storage
+    .from("service")
+    .upload(path, pdf, { contentType: "application/pdf", upsert: false });
+  if (upErr) {
+    console.warn(`Invoice ${b.invoice.id}: could not store the redrawn PDF: ${upErr.message}`);
+  } else if (!stored) {
+    const { error } = await sb.from("invoices").update({ pdf_path: path }).eq("id", b.invoice.id);
+    if (error) console.warn(`Invoice ${b.invoice.id}: could not record pdf_path: ${error.message}`);
+  }
+  return pdf;
+}
+
 export interface InvoiceWithLines {
   invoice: InvoiceRow;
   lines: InvoiceLineRow[];
@@ -626,9 +659,10 @@ export const renderInvoice = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<{ base64: string; file_name: string }> => {
     await office(context);
-    const { loadBundle, renderInvoicePdf } = await import("@/lib/invoices.server");
+    const { loadBundle } = await import("@/lib/invoices.server");
     const b = await loadBundle(context.supabase, data.id);
-    const pdf = await renderInvoicePdf(context.supabase, b);
+    // A draft is drawn now; anything later is the PDF stored at finalising (invoicePdf).
+    const pdf = await invoicePdf(context.supabase, b);
     return {
       base64: toBase64(pdf),
       file_name: `Invoice-${invoiceFileStem(b.invoice)}.pdf`,
@@ -663,7 +697,7 @@ export const sendInvoice = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
-    const { loadBundle, renderInvoicePdf, emailInvoice } = await import("@/lib/invoices.server");
+    const { loadBundle, emailInvoice } = await import("@/lib/invoices.server");
     let b = await loadBundle(sb, data.id);
     if (b.invoice.status === "draft") {
       // Finalised exactly as Finalize does (no lines refused, the ticket's follow-up closed).
@@ -671,7 +705,8 @@ export const sendInvoice = createServerFn({ method: "POST" })
       b = await loadBundle(sb, data.id);
     }
     if (b.invoice.status === "void") throw new Error("This invoice is void");
-    const pdf = await renderInvoicePdf(sb, b);
+    // The PDF stored at finalising is the one attached (invoicePdf), not a fresh drawing.
+    const pdf = await invoicePdf(sb, b);
     const label = invoiceLabel(b.invoice);
     const subject = b.settings.email_subject.replace("{number}", label);
     const text = `${data.message ?? b.settings.email_message}\n\nInvoice #${label} for ${(b.invoice.property as { name?: string }).name ?? b.job.customer_name}: $${Number(b.invoice.total).toFixed(2)}.\n${b.invoice.payment_terms ?? ""}`;
@@ -698,7 +733,10 @@ export const sendInvoice = createServerFn({ method: "POST" })
     return withLines(sb, updated);
   });
 
-/** Record the payment (Sage stays the ledger) and close the ticket. */
+/**
+ * Record the payment (Sage stays the ledger) and close the ticket — once no other final / sent
+ * invoice on it is still unpaid (`ticket_closed` says which).
+ */
 export const markInvoicePaid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -712,7 +750,7 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
+  .handler(async ({ data, context }): Promise<InvoiceWithLines & { ticket_closed: boolean }> => {
     const p = await office(context);
     const sb = context.supabase;
     const actor = { id: context.userId, name: nameOf(p) };
@@ -742,12 +780,22 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
+    // Another final / sent invoice on the ticket still unpaid (a ".2", or one billed to a vendor):
+    // the ticket stays where it is until that one is paid too (audit, Oct 2).
+    const { data: unpaid, error: oErr } = await sb
+      .from("invoices")
+      .select("id")
+      .eq("service_job_id", inv.service_job_id)
+      .neq("id", inv.id)
+      .in("status", ["final", "sent"]);
+    if (oErr) throw new Error(oErr.message);
+    if ((unpaid ?? []).length) return { ...(await withLines(sb, inv)), ticket_closed: false };
     await ticketStageFromInvoice(sb, inv.service_job_id, "closed", inv.id);
     const job = await stageEvent(sb, inv.service_job_id, null, actor);
     // The ticket's own follow-up ends at Closed too (still open when the invoice was finalised
     // before finalizeDraft closed it).
     if (job) await closeTicketFollowup(sb, job, actor, "stage closed");
-    return withLines(sb, inv);
+    return { ...(await withLines(sb, inv)), ticket_closed: true };
   });
 
 /** Void an invoice (a mistake); the ticket goes back to Done and a new draft can be made. */
@@ -764,6 +812,15 @@ export const voidInvoice = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found");
+    // The ticket's stage before this, for the stage automation (audit, Oct 2: a hard-coded
+    // "invoiced" re-sent "done — invoice ready" when a draft was deleted on a Done ticket).
+    const { data: jobBefore, error: jErr } = await sb
+      .from("service_jobs")
+      .select("stage")
+      .eq("id", inv.service_job_id)
+      .maybeSingle();
+    if (jErr) throw new Error(jErr.message);
+    const prevStage = jobBefore?.stage ?? null;
     if (inv.status === "draft") {
       // A draft is deleted outright; its number is free for the next invoice on the ticket.
       const { error: dErr } = await sb.from("invoices").delete().eq("id", inv.id);
@@ -783,20 +840,32 @@ export const voidInvoice = createServerFn({ method: "POST" })
         .eq("id", inv.id);
       if (vErr) throw new Error(vErr.message);
     }
-    // Another live invoice on the ticket keeps it where it is; the last one sends it back to Done.
+    const gone = inv.status === "draft" ? "deleted" : "void";
+    const ticketFailed = (m: string) =>
+      new Error(`The invoice is ${gone}, but the ticket was not updated: ${m}`);
+    // Another live invoice on the ticket keeps it where it is; the last one sends an Invoiced or
+    // Closed ticket back to Done (a ticket at Done or earlier keeps its stage).
     const [other] = await liveInvoices(sb, inv.service_job_id);
     if (other) {
-      await sb
+      const { error: oErr } = await sb
         .from("service_jobs")
         .update({ invoice_id: other.id, updated_by_name: nameOf(p) })
         .eq("id", inv.service_job_id);
+      if (oErr) throw ticketFailed(oErr.message);
       return;
     }
-    await sb
+    const backToDone = prevStage === "invoiced" || prevStage === "closed";
+    const { error: uErr } = await sb
       .from("service_jobs")
-      .update({ stage: "done", invoice_id: null, updated_by_name: nameOf(p) })
+      .update({
+        ...(backToDone ? { stage: "done" } : {}),
+        invoice_id: null,
+        updated_by_name: nameOf(p),
+      })
       .eq("id", inv.service_job_id);
-    await stageEvent(sb, inv.service_job_id, "invoiced", { id: context.userId, name: nameOf(p) });
+    if (uErr) throw ticketFailed(uErr.message);
+    if (backToDone)
+      await stageEvent(sb, inv.service_job_id, prevStage, { id: context.userId, name: nameOf(p) });
   });
 
 export interface InvoiceListRow extends InvoiceRow {

@@ -72,11 +72,13 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
-import { stageChoices, stageLocked } from "@/lib/ticket-stage";
+import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
+  AWAITING_INVOICE_KEY,
   deleteServiceJob,
   getCrewRateDefaults,
   getServiceJob,
+  listAwaitingInvoice,
   listJobCrew,
   listDeletedServiceJobs,
   listServiceJobMaterials,
@@ -320,6 +322,14 @@ function ServiceList({
     queryFn: () => listDeletedFn(),
     enabled: !!session,
   });
+  // The Invoices tab's "awaiting invoice" count: the database's count of Done tickets, not the
+  // length of the 1,000-row list above (audit, Oct 2). Only for those who see invoices.
+  const awaitingFn = useServerFn(listAwaitingInvoice);
+  const awaiting = useQuery({
+    queryKey: AWAITING_INVOICE_KEY,
+    queryFn: () => awaitingFn(),
+    enabled: !!session && seesInvoices(profile),
+  });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["service-jobs-deleted"] });
@@ -459,8 +469,8 @@ function ServiceList({
     setMineOverride(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
-  // Done = waiting to be invoiced (finalising moves a ticket to Invoiced).
-  const toInvoiceCount = jobs.filter((j) => asStage(j.stage) === "done").length;
+  // Done = waiting to be invoiced (finalising moves a ticket to Invoiced); counted by the server.
+  const toInvoiceCount = awaiting.data?.count ?? 0;
 
   return (
     <div className="space-y-6">
@@ -1286,7 +1296,6 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const save = useMutation({
     mutationFn: () => {
-      const stage = job ? asStage(job.stage) : undefined;
       const input: ServiceJobInput = {
         ...(job ? { id: job.id } : {}),
         account_id: draft.customer?.account_id ?? null,
@@ -1313,16 +1322,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             }
           : {}),
         scheduled_date: draft.scheduled_date || null,
-        // An Open ticket that now has a technician and a day becomes Scheduled; otherwise the
-        // stage stays what the header says (a new ticket's stage is the server's call).
-        ...(stage
-          ? {
-              stage:
-                stage === "open" && draft.technician_id && draft.scheduled_date
-                  ? "scheduled"
-                  : stage,
-            }
-          : {}),
+        // No stage (audit, Oct 2: a stale tab's save sent the stage it had loaded and moved an
+        // Invoiced ticket back to Done). The header's picker is the one way to change it; the
+        // server keeps the stage, moving an Open ticket that now has a technician and a day to
+        // Scheduled itself.
         notes: draft.notes,
         centerpoint_ticket: draft.centerpoint_ticket,
         centerpoint_invoice: draft.centerpoint_invoice,
@@ -1389,8 +1392,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   };
 
   const ro = !canEdit;
-  // Close-out: the office and the assigned technician (not once the office has invoiced).
-  const canCloseOut = !!job && canEdit;
+  // Close-out: the lead technician (not once the office has invoiced) and managers / admins —
+  // the server's rule (setJobCrew, ownJob); an office user who is not a manager sees no button.
+  const showCloseOut = canCloseOut(profile, job);
   // Repeat work: once a ticket is Done (or later) the office opens the next one at the same site.
   const repeatable = jobStage === "done" || jobStage === "invoiced" || jobStage === "closed";
 
@@ -1947,7 +1951,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </h1>
           {job && (
             <div className="flex flex-wrap items-center gap-2">
-              {canCloseOut && (
+              {showCloseOut && (
                 <Button asChild>
                   <Link to="/service" search={{ id: job.id, closeout: 1 }}>
                     <ClipboardCheck className="mr-1 h-4 w-4" /> Close out

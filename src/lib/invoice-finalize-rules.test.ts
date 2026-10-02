@@ -137,13 +137,21 @@ function fakeDb(tables: Record<string, Row[]>) {
     }
     return { data: null, error: { message: `unexpected rpc ${fn}` } };
   };
+  // The bucket keeps what is uploaded: a sent invoice attaches the PDF stored at finalising.
+  const objects = new Map<string, Uint8Array>();
   const storage = {
     from: () => ({
-      upload: async (path: string) => {
+      upload: async (path: string, bytes: Uint8Array) => {
         uploads.push(path);
+        objects.set(path, bytes);
         return { data: { path }, error: null };
       },
-      download: async () => ({ data: null, error: { message: "none" } }),
+      download: async (path: string) => {
+        const o = objects.get(path);
+        return o
+          ? { data: { arrayBuffer: async () => o.slice().buffer }, error: null }
+          : { data: null, error: { message: "none" } };
+      },
     }),
   };
   return { db: { from, rpc, storage } as never, writes, rpcs, uploads, tables };

@@ -8,7 +8,7 @@
  *
  * `FromInspectionNote` is the "From inspection #6012" link on a ticket created from one.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -305,13 +305,17 @@ function OfficeActions({
   // Every ticket has a date (owner, Oct 1): the repair ticket gets its day here.
   const [date, setDate] = useState("");
   const complete = inspectionComplete(job.stage);
+  const inFlight = useRef(false);
   const create = useMutation({
     mutationFn: () => createFn({ data: { id: job.id, service_type: type, scheduled_date: date } }),
     onSuccess: (row) => {
       void qc.invalidateQueries({ queryKey: inspectionKey(job.id) });
       void qc.invalidateQueries({ queryKey: ["service-jobs"] });
       void qc.invalidateQueries({ queryKey: fieldKeys.events(job.id) });
-      toast.success(`Repair ticket #${row.number} created`, {
+      const said = row.existing
+        ? `This inspection already has repair ticket #${row.number}`
+        : `Repair ticket #${row.number} created`;
+      toast.success(said, {
         action: {
           label: "Open",
           onClick: () => void navigate({ to: "/service", search: { id: row.id } }),
@@ -365,7 +369,17 @@ function OfficeActions({
                   variant="outline"
                   className="h-10"
                   disabled={dirty || create.isPending || !date}
-                  onClick={() => create.mutate()}
+                  onClick={() => {
+                    // One request at a time, even for a double click before the re-render
+                    // disables the button (the server returns the existing ticket anyway).
+                    if (inFlight.current || create.isPending) return;
+                    inFlight.current = true;
+                    create.mutate(undefined, {
+                      onSettled: () => {
+                        inFlight.current = false;
+                      },
+                    });
+                  }}
                 >
                   {create.isPending ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
