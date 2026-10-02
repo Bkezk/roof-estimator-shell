@@ -243,19 +243,22 @@ describe("the invoice's Internal fold: approved POs are cost, never the customer
 
   const ed = read("src/components/service/invoice-editor.tsx");
   const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));
-  it("the editor uses the pure helper with the ticket's approved PO total", () => {
+  it("the editor uses the pure helper with this invoice's share of the approved PO total", () => {
     expect(ed).not.toMatch(/\nfunction computeTotals\(/);
-    expect(ed).toContain(
-      'import { computeTotals, storedTotals, type InvoiceTotals } from "@/lib/invoice-totals";',
+    expect(ed).toMatch(
+      /import \{\s*computeTotals,\s*poCostForInvoice,\s*storedTotals,\s*type InvoiceTotals,\s*\} from "@\/lib\/invoice-totals";/,
     );
-    expect(ed).toContain("return { cost: approvedPoTotal(q.data?.pos ?? []), error: q.error };");
-    expect(ed).toContain("enabled: !!session && managesTickets(profile),");
+    // Each approved PO counts on one invoice of the ticket (po-cost-per-invoice.test.ts).
+    expect(ed).toContain(
+      "...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(q.data.pos)),",
+    );
+    expect(ed).toContain("const enabled = !!session && managesTickets(profile);");
     expect(ed).toContain("computeTotals(lines, fromPct(head.tax_pct), po.cost)");
     expect(ed).toContain("const stored = storedTotals(inv, t);");
     expect(ed).toMatch(/Number\(inv\.tax_rate\),\s*po\.cost,\s*\)/);
   });
   it('"Purchase orders (approved)" is its own line inside the closed Internal fold', () => {
-    const line = totals.indexOf("<dt>Purchase orders (approved)</dt>");
+    const line = totals.indexOf("<dt>\n                  Purchase orders (approved)\n");
     expect(line).toBeGreaterThan(totals.indexOf("{internal && ("));
     expect(line).toBeGreaterThan(totals.indexOf("{open && ("));
     expect(line).toBeLessThan(totals.indexOf("<dt>Cost</dt>"));

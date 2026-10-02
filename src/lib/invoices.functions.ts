@@ -24,6 +24,7 @@ import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
+import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
 export type InvoiceLineRow = Database["public"]["Tables"]["invoice_lines"]["Row"];
@@ -81,7 +82,10 @@ async function ticketStageFromInvoice(
       `The invoice is saved, but the ticket was not marked ${stage === "invoiced" ? "Invoiced" : "Closed"}: ${error.message}`,
     );
 }
-/** Re-read the ticket after a stage change and run the stage automation (ticket-events). */
+/**
+ * Re-read the ticket after a stage change and run the stage automation (ticket-events: the
+ * office's "Invoice ticket #…" follow-up). Returns the ticket as it is now (null when gone).
+ */
 async function stageEvent(
   sb: SupabaseClient<Database>,
   jobId: string,
@@ -89,9 +93,80 @@ async function stageEvent(
   actor: { id: string; name: string | null },
 ) {
   const { data: row } = await sb.from("service_jobs").select("*").eq("id", jobId).maybeSingle();
-  if (!row) return;
+  if (!row) return null;
   const { afterTicketStage } = await import("@/lib/ticket-events.server");
   await afterTicketStage(row, prevStage, actor, sb);
+  return row;
+}
+
+/**
+ * Close the ticket's own follow-up ("Follow up: Ticket #…", its technician's): a ticket's timer
+ * ends once it is Invoiced or Closed (followups.server.ts). The stage automation above syncs
+ * only the office's invoice follow-up, so every path that invoices or closes a ticket calls this.
+ */
+async function closeTicketFollowup(
+  sb: SupabaseClient<Database>,
+  job: { id: string; account_id: string | null; technician_id: string | null },
+  actor: Actor,
+  reason: "stage invoiced" | "stage closed",
+) {
+  const { syncFollowup } = await import("@/lib/followups.server");
+  await syncFollowup(
+    {
+      kind: "ticket",
+      itemId: job.id,
+      accountId: job.account_id,
+      assigneeId: job.technician_id,
+      title: "",
+      url: "",
+      closing: true,
+      closeReason: reason,
+      dueDate: null,
+      actorId: actor.id,
+      actorName: actor.name,
+    },
+    sb,
+  );
+}
+
+/**
+ * Finalise a draft: the one routine behind Finalize and Send on a draft (audit, Oct 2: Send
+ * skipped the no-lines check and left the ticket's follow-up open). Refuses an invoice with no
+ * lines before anything is written; stores the PDF; stamps the invoice final; moves the ticket
+ * to Invoiced through the rpc (ticketStageFromInvoice: sales / project managers too); runs the
+ * stage automation (the invoice follow-up) and closes the ticket's follow-up.
+ */
+async function finalizeDraft(
+  sb: SupabaseClient<Database>,
+  b: InvoiceBundle,
+  actor: Actor,
+): Promise<InvoiceRow> {
+  if (b.invoice.status !== "draft") throw new Error("Already final");
+  if (!b.lines.length) throw new Error("The invoice has no lines");
+  const { renderInvoicePdf } = await import("@/lib/invoices.server");
+  const pdf = await renderInvoicePdf(sb, b);
+  const path = pdfPath(b.invoice);
+  const { error: upErr } = await sb.storage
+    .from("service")
+    .upload(path, pdf, { contentType: "application/pdf", upsert: true });
+  if (upErr) throw new Error(`Could not store the PDF: ${upErr.message}`);
+  const { data: updated, error } = await sb
+    .from("invoices")
+    .update({
+      status: "final",
+      finalized_at: new Date().toISOString(),
+      pdf_path: path,
+      updated_by_name: actor.name,
+    })
+    .eq("id", b.invoice.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc).
+  await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
+  await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);
+  await closeTicketFollowup(sb, b.job, actor, "stage invoiced");
+  return updated;
 }
 
 /** Where the final PDF is stored: by number, plus the id so a void keeps its own file. */
@@ -560,58 +635,16 @@ export const renderInvoice = createServerFn({ method: "POST" })
     };
   });
 
-/** Freeze the invoice: status final, PDF stored, the ticket Invoiced. */
+/** Freeze the invoice: status final, PDF stored, the ticket Invoiced (finalizeDraft). */
 export const finalizeInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
-    const { loadBundle, renderInvoicePdf } = await import("@/lib/invoices.server");
+    const { loadBundle } = await import("@/lib/invoices.server");
     const b = await loadBundle(sb, data.id);
-    if (b.invoice.status !== "draft") throw new Error("Already final");
-    if (!b.lines.length) throw new Error("The invoice has no lines");
-    const pdf = await renderInvoicePdf(sb, b);
-    const path = pdfPath(b.invoice);
-    const { error: upErr } = await sb.storage
-      .from("service")
-      .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-    if (upErr) throw new Error(`Could not store the PDF: ${upErr.message}`);
-    const { data: updated, error } = await sb
-      .from("invoices")
-      .update({
-        status: "final",
-        finalized_at: new Date().toISOString(),
-        pdf_path: path,
-        updated_by_name: nameOf(p),
-      })
-      .eq("id", b.invoice.id)
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
-    // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc).
-    await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
-    await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
-      id: context.userId,
-      name: nameOf(p),
-    });
-    const { syncFollowup } = await import("@/lib/followups.server");
-    await syncFollowup(
-      {
-        kind: "ticket",
-        itemId: b.job.id,
-        accountId: b.job.account_id,
-        assigneeId: b.job.technician_id,
-        title: "",
-        url: "",
-        closing: true,
-        closeReason: "stage invoiced",
-        dueDate: null,
-        actorId: context.userId,
-        actorName: nameOf(p),
-      },
-      sb,
-    );
+    const updated = await finalizeDraft(sb, b, { id: context.userId, name: nameOf(p) });
     return withLines(sb, updated);
   });
 
@@ -633,22 +666,8 @@ export const sendInvoice = createServerFn({ method: "POST" })
     const { loadBundle, renderInvoicePdf, emailInvoice } = await import("@/lib/invoices.server");
     let b = await loadBundle(sb, data.id);
     if (b.invoice.status === "draft") {
-      const pdf = await renderInvoicePdf(sb, b);
-      const path = pdfPath(b.invoice);
-      const { error: upErr } = await sb.storage
-        .from("service")
-        .upload(path, pdf, { contentType: "application/pdf", upsert: true });
-      if (upErr) throw new Error(`Could not store the PDF: ${upErr.message}`);
-      const { error: fErr } = await sb
-        .from("invoices")
-        .update({ status: "final", finalized_at: new Date().toISOString(), pdf_path: path })
-        .eq("id", b.invoice.id);
-      if (fErr) throw new Error(fErr.message);
-      await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", b.invoice.id);
-      await stageEvent(sb, b.invoice.service_job_id, b.job.stage, {
-        id: context.userId,
-        name: nameOf(p),
-      });
+      // Finalised exactly as Finalize does (no lines refused, the ticket's follow-up closed).
+      await finalizeDraft(sb, b, { id: context.userId, name: nameOf(p) });
       b = await loadBundle(sb, data.id);
     }
     if (b.invoice.status === "void") throw new Error("This invoice is void");
@@ -696,6 +715,17 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines> => {
     const p = await office(context);
     const sb = context.supabase;
+    const actor = { id: context.userId, name: nameOf(p) };
+    // A draft is not paid on the server either (the screen offers Mark paid only once final):
+    // it has no stored PDF and never went through the finalise rules (finalizeDraft).
+    const { data: cur, error: rErr } = await sb
+      .from("invoices")
+      .select("id, status")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (rErr) throw new Error(rErr.message);
+    if (!cur || cur.status === "void") throw new Error("Invoice not found, or void");
+    if (cur.status === "draft") throw new Error("Finalize the invoice first");
     const { data: inv, error } = await sb
       .from("invoices")
       .update({
@@ -707,13 +737,16 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
         updated_by_name: nameOf(p),
       })
       .eq("id", data.id)
-      .neq("status", "void")
+      .in("status", ["final", "sent", "paid"])
       .select("*")
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
     await ticketStageFromInvoice(sb, inv.service_job_id, "closed", inv.id);
-    await stageEvent(sb, inv.service_job_id, null, { id: context.userId, name: nameOf(p) });
+    const job = await stageEvent(sb, inv.service_job_id, null, actor);
+    // The ticket's own follow-up ends at Closed too (still open when the invoice was finalised
+    // before finalizeDraft closed it).
+    if (job) await closeTicketFollowup(sb, job, actor, "stage closed");
     return withLines(sb, inv);
   });
 

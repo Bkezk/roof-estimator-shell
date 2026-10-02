@@ -52,7 +52,12 @@ import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
 import { rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
-import { computeTotals, storedTotals, type InvoiceTotals } from "@/lib/invoice-totals";
+import {
+  computeTotals,
+  poCostForInvoice,
+  storedTotals,
+  type InvoiceTotals,
+} from "@/lib/invoice-totals";
 import { approvedPoTotal } from "@/lib/purchase-orders";
 import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
 import { useVendors } from "@/components/crm/use-vendors";
@@ -550,7 +555,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const dateUntouched = (ymd: string) =>
     ymd === toYmd(new Date(inv.created_at)) || ymd === inv.created_at.slice(0, 10);
   const taxExempt = !!account?.tax_exempt;
-  const po = useApprovedPoCost(job.id);
+  const po = useApprovedPoCost(job.id, inv.id);
   const t = computeTotals(lines, fromPct(head.tax_pct), po.cost);
   // Bill to changed here and not saved yet: show whom it will be billed to.
   const vendors = useVendors();
@@ -978,7 +983,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           </Button>
         </section>
         <div className="xl:sticky xl:top-4">
-          <Totals t={t} taxPct={head.tax_pct} poError={po.error} />
+          <Totals t={t} taxPct={head.tax_pct} poError={po.error} poCountedOn={po.countedOn} />
         </div>
       </div>
 
@@ -1237,29 +1242,51 @@ function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: ()
 const INTERNAL_OPEN_KEY = "invoiceInternalOpen";
 
 /**
- * The ticket's approved purchase-order total (purchase-orders.ts): an internal cost, read for
- * admins and managers only (the Internal fold is theirs). Never an invoice line or on the PDF.
+ * This invoice's share of the ticket's approved purchase-order total (purchase-orders.ts): an
+ * internal cost, read for admins and managers only (the Internal fold is theirs). Never an
+ * invoice line or on the PDF. Each approved PO counts on one invoice of the ticket, its earliest
+ * live one (invoice-totals.ts poCostForInvoice); the others carry $0 and name it (`countedOn`).
+ * The ticket's invoices come from the same cache as the ticket's invoice block and this page.
  */
-function useApprovedPoCost(jobId: string): { cost: number; error: unknown } {
+function useApprovedPoCost(
+  jobId: string,
+  invoiceId: string,
+): { cost: number; countedOn: string | null; error: unknown } {
   const { session, profile } = useAuth();
   const listFn = useServerFn(listPurchaseOrders);
+  const invoicesFn = useServerFn(listTicketInvoices);
+  const enabled = !!session && managesTickets(profile);
   const q = useQuery({
     queryKey: fieldKeys.pos(jobId),
     queryFn: () => listFn({ data: { jobId } }),
-    enabled: !!session && managesTickets(profile),
+    enabled,
   });
-  return { cost: approvedPoTotal(q.data?.pos ?? []), error: q.error };
+  const invoices = useQuery({
+    queryKey: ticketInvoicesKey(jobId),
+    queryFn: () => invoicesFn({ data: { job_id: jobId } }),
+    enabled,
+  });
+  // Until both are read nothing is added: never the whole total on every invoice "for now".
+  if (!q.data || !invoices.data)
+    return { cost: 0, countedOn: null, error: q.error ?? invoices.error };
+  return {
+    ...poCostForInvoice(invoiceId, invoices.data, approvedPoTotal(q.data.pos)),
+    error: null,
+  };
 }
 
 function Totals({
   t,
   taxPct,
   poError,
+  poCountedOn,
 }: {
   t: InvoiceTotals;
   taxPct: number;
   /** The purchase orders could not be read: Cost and Margin leave them out, and say so. */
   poError?: unknown;
+  /** The ticket's approved POs are counted on that other invoice ("6000"); $0 here. */
+  poCountedOn?: string | null;
 }) {
   const { profile } = useAuth();
   // Cost and margin are internal (owner, Oct 1: the invoice goes out to a customer): folded,
@@ -1316,7 +1343,10 @@ function Totals({
           {open && (
             <dl id="invoice-internal" className="mt-1.5 space-y-1">
               <div className="flex justify-between gap-2">
-                <dt>Purchase orders (approved)</dt>
+                <dt>
+                  Purchase orders (approved)
+                  {poCountedOn ? ` — counted on #${poCountedOn}` : ""}
+                </dt>
                 <dd className="tabular-nums">
                   {poError ? (
                     <span className="text-destructive">could not load: {errText(poError)}</span>
@@ -1360,7 +1390,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const account = useAccount(job.account_id);
   const [dialog, setDialog] = useState<null | "send" | "paid" | "void">(null);
 
-  const po = useApprovedPoCost(job.id);
+  const po = useApprovedPoCost(job.id, inv.id);
   const t = computeTotals(
     data.lines.map((l) => ({
       kind: l.kind,
@@ -1519,7 +1549,12 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </p>
           )}
         </div>
-        <Totals t={stored} taxPct={toPct(inv.tax_rate)} poError={po.error} />
+        <Totals
+          t={stored}
+          taxPct={toPct(inv.tax_rate)}
+          poError={po.error}
+          poCountedOn={po.countedOn}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">

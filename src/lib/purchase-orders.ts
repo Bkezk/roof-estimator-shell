@@ -3,7 +3,8 @@
  * page has "PO Information"): material a crew bought for the job on the way (Lowe's, a supply
  * house). Date, PO # (typed, e.g. "Jbk24-0255"; never generated), Title, Price, Notes, the
  * receipt (an image or a PDF) and Approved? — approval is a manager's. The approved total is an
- * internal cost on the ticket's invoice (cost and margin), never on the customer's invoice.
+ * internal cost on one invoice of the ticket, its earliest live one (invoice-totals.ts
+ * poCostForInvoice: cost and margin), never on the customer's invoice.
  *
  * Table: public.service_job_purchase_orders (migration 20261001100000_ticket_purchase_orders.sql).
  * Server functions: service-pos.functions.ts. UI: components/service/purchase-orders-section.tsx.

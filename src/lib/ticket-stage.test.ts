@@ -134,10 +134,18 @@ describe("the stage picker offers Invoiced / Closed only to managers", () => {
 describe("the invoice path still sets Invoiced / Closed, through the database function", () => {
   const inv = read("src/lib/invoices.functions.ts");
   it("finalizeInvoice and sendInvoice (a draft) mark the ticket Invoiced via the rpc", () => {
+    // Both finalise through the one shared routine (finalizeDraft), which calls the rpc.
     for (const fn of ["finalizeInvoice", "sendInvoice"])
-      expect(serverFn(inv, fn), fn).toMatch(
-        /await ticketStageFromInvoice\(sb, b\.invoice\.service_job_id, "invoiced", (updated|b\.invoice)\.id\);/,
+      expect(serverFn(inv, fn), fn).toContain(
+        "await finalizeDraft(sb, b, { id: context.userId, name: nameOf(p) });",
       );
+    const draft = inv.slice(
+      inv.indexOf("async function finalizeDraft("),
+      inv.indexOf("export interface InvoiceWithLines"),
+    );
+    expect(draft).toContain(
+      'await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);',
+    );
     expect(inv).toMatch(
       /async function ticketStageFromInvoice[\s\S]*?sb\.rpc\("set_ticket_stage_from_invoice", \{\s*p_job: jobId,\s*p_stage: stage,\s*p_invoice: invoiceId,\s*\}\);\s*if \(error\)\s*throw new Error/,
     );
