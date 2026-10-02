@@ -18,7 +18,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
-import { siteProblem } from "@/lib/ticket-form";
+import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import { stageProblem } from "@/lib/ticket-stage";
@@ -185,7 +185,7 @@ const jobSchema = z.object({
   labor_rate_kind: z.enum(["standard", "urgent", "emergency"]).optional(),
   /** Used only when no account is linked (a one-off caller). */
   customer_name: z.string().trim().max(200).optional(),
-  description: z.string().trim().max(500).default(""),
+  description: z.string().trim().max(TICKET_DESCRIPTION_MAX).default(""),
   service_type: z.enum(SERVICE_TYPES).default("leak"),
   po_number: optText(60),
   /** The job number (owner, Sep 30), next to PO #; carried to the invoice as job_code. */
@@ -221,6 +221,11 @@ const jobSchema = z.object({
   notes: optText(10000),
   centerpoint_ticket: optText(40),
   centerpoint_invoice: optText(40),
+  /**
+   * The opportunity a new ticket was started from ("Start a ticket", owner Oct 2). Written on
+   * create only; an update never changes it.
+   */
+  from_opportunity_id: z.string().uuid().nullable().optional(),
 });
 export type ServiceJobInput = z.input<typeof jobSchema>;
 
@@ -230,7 +235,8 @@ export type ServiceJobInput = z.input<typeof jobSchema>;
  * stage from its input: a new ticket is Scheduled when a tech and a date are set, else Open; an
  * existing ticket keeps its stage, except that an Open one that now has a technician and a day
  * becomes Scheduled. A customer with more than one live site needs the site picked
- * (lib/ticket-form.ts siteProblem).
+ * (lib/ticket-form.ts siteProblem). A new ticket may carry the opportunity it was started from
+ * (from_opportunity_id; the caller must be able to read it).
  */
 export const saveServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -363,9 +369,25 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     }
     const createProblem = stageProblem(p, stage);
     if (createProblem) throw new Error(createProblem);
+    // "Start a ticket": the opportunity it came from, when the caller can read it.
+    const from_opportunity_id = fields.from_opportunity_id ?? null;
+    if (from_opportunity_id) {
+      const { data: o, error: oErr } = await sb
+        .from("crm_opportunities")
+        .select("id")
+        .eq("id", from_opportunity_id)
+        .maybeSingle();
+      if (oErr) throw new Error(oErr.message);
+      if (!o) throw new Error("Opportunity not found");
+    }
     const { data: row, error } = await sb
       .from("service_jobs")
-      .insert({ ...patch, stage, created_by: context.userId })
+      .insert({
+        ...patch,
+        stage,
+        created_by: context.userId,
+        ...(from_opportunity_id ? { from_opportunity_id } : {}),
+      })
       .select("*")
       .single();
     if (error) throw new Error(error.message);

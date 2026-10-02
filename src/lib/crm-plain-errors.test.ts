@@ -102,10 +102,12 @@ describe("the inputs carry a maxLength", () => {
   const page = readFileSync("src/components/customers-page.tsx", "utf8");
   const slice = (from: string, to: string) => page.slice(page.indexOf(from), page.indexOf(to));
   it("the account form, the contact form and the site form", () => {
+    // The site form lives in crm/site-form.tsx since Oct 2 (shared with the opportunity).
+    const siteForm = readFileSync("src/components/crm/site-form.tsx", "utf8");
     for (const part of [
-      slice("function AccountForm(", "type SiteFields"),
+      slice("function AccountForm(", "// ---- Contacts"),
       slice("function ContactForm(", "function SitesSection("),
-      slice("function SiteForm(", "function TicketsSection("),
+      siteForm.slice(siteForm.indexOf("export function SiteForm(")),
     ]) {
       const list = inputs(part);
       expect(list.length).toBeGreaterThan(3);

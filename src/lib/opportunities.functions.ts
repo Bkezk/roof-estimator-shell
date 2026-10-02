@@ -21,7 +21,13 @@ import { canAccess, seesEveryone } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
-import { assigneeProblem, opportunitySiteProblem, oppStatusProblem } from "@/lib/opportunity-form";
+import {
+  assigneeProblem,
+  OPP_CUSTOMER_REQUIRED,
+  opportunityProblem,
+  oppStatusProblem,
+} from "@/lib/opportunity-form";
+import { hasContactMethod } from "@/lib/crm-account";
 import { addDays } from "@/lib/my-work";
 import { localYmd as easternYmd } from "@/lib/tasks";
 
@@ -210,8 +216,9 @@ const optText = (max: number) =>
     .transform((v) => (v == null || v === "" ? null : v));
 const oppSchema = z.object({
   id: z.string().uuid().optional(),
+  /** Required (owner, Oct 2); nullable here so a missing one gets the plain message. */
   account_id: z.string().uuid().nullable().optional(),
-  /** The customer's site; required once a customer with several sites is set. */
+  /** The customer's site: required; the only live site is filled in when none is sent. */
   site_id: z.string().uuid().nullable().optional(),
   title: z.string().trim().min(1, "Title is required").max(200),
   description: optText(2000),
@@ -232,8 +239,10 @@ export type OpportunityInput = z.input<typeof oppSchema>;
 /**
  * Create (no id) or update. A new opportunity with no expected close gets today +
  * crm_settings.opportunity_close_days. The assignee is required (lib/opportunity-form.ts
- * assigneeProblem). With a customer, the site is the customer's: one live site is filled in,
- * several need one picked (opportunitySiteProblem); without a customer there is no site. The
+ * assigneeProblem). So are the customer (OPP_CUSTOMER_REQUIRED), a way to reach them by the
+ * customer rule, hasContactMethod (OPP_CUSTOMER_NO_CONTACT, for older data), and the site, which
+ * is the customer's: one live site is filled in, several need one picked, none needs one added
+ * (opportunityProblem; owner, Oct 2 — every save from now on; older rows still open). The
  * follow-up timer is synced after every save.
  */
 export const saveOpportunity = createServerFn({ method: "POST" })
@@ -253,39 +262,52 @@ export const saveOpportunity = createServerFn({ method: "POST" })
     // Owner, Oct 1: someone always follows an opportunity up; an update may not clear it.
     const whoProblem = assigneeProblem({ id, assignee_id: fields.assignee_id });
     if (whoProblem) throw new Error(whoProblem);
+    // Owner, Oct 2: every opportunity names its customer (reachable) and its site.
     const account_id = fields.account_id ?? null;
+    if (!account_id) throw new Error(OPP_CUSTOMER_REQUIRED);
+    const { data: acc, error: aErr } = await sb
+      .from("crm_accounts")
+      .select("id, email, phone, mobile")
+      .eq("id", account_id)
+      .maybeSingle();
+    if (aErr) throw new Error(aErr.message);
+    if (!acc) throw new Error("Customer not found");
     let site_id: string | null = null;
-    if (account_id) {
-      if (fields.site_id) {
-        const { data: s, error: sErr } = await sb
-          .from("crm_sites")
-          .select("account_id")
-          .eq("id", fields.site_id)
-          .maybeSingle();
-        if (sErr) throw new Error(sErr.message);
-        if (!s || s.account_id !== account_id)
-          throw new Error("That site does not belong to the customer");
-        site_id = fields.site_id;
-      } else {
-        // The customer's live sites (the count is all of them; two rows are enough to read).
-        const {
-          data: live,
-          count,
-          error: lErr,
-        } = await sb
-          .from("crm_sites")
-          .select("id", { count: "exact" })
-          .eq("account_id", account_id)
-          .is("deleted_at", null)
-          .limit(2);
-        if (lErr) throw new Error(lErr.message);
-        const siteCount = count ?? live?.length ?? 0;
-        const siteProblem = opportunitySiteProblem({ account_id, site_id: null, siteCount });
-        if (siteProblem) throw new Error(siteProblem);
-        // One site: it is the one (the form picks it too).
-        site_id = siteCount === 1 && live?.[0] ? live[0].id : null;
-      }
+    let siteCount = 0;
+    if (fields.site_id) {
+      const { data: s, error: sErr } = await sb
+        .from("crm_sites")
+        .select("account_id")
+        .eq("id", fields.site_id)
+        .maybeSingle();
+      if (sErr) throw new Error(sErr.message);
+      if (!s || s.account_id !== account_id)
+        throw new Error("That site does not belong to the customer");
+      site_id = fields.site_id;
+    } else {
+      // The customer's live sites (the count is all of them; two rows are enough to read).
+      const {
+        data: live,
+        count,
+        error: lErr,
+      } = await sb
+        .from("crm_sites")
+        .select("id", { count: "exact" })
+        .eq("account_id", account_id)
+        .is("deleted_at", null)
+        .limit(2);
+      if (lErr) throw new Error(lErr.message);
+      siteCount = count ?? live?.length ?? 0;
+      // One site: it is the one (the form picks it too).
+      site_id = siteCount === 1 && live?.[0] ? live[0].id : null;
     }
+    const customerProblem = opportunityProblem({
+      account_id,
+      site_id,
+      siteCount,
+      hasContact: hasContactMethod(acc),
+    });
+    if (customerProblem) throw new Error(customerProblem);
     // The stored expected close: once set, only an admin or a manager moves it (owner, Oct 1).
     let oldClose: string | null = null;
     let oldStatus: string | null = null;
@@ -448,6 +470,26 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!row) throw new Error("Opportunity not found, or not yours to change");
     await syncOppFollowup(row, prevStatus, context, nameOf(p));
+  });
+
+/**
+ * The live tickets started from this opportunity ("Start a ticket" writes
+ * service_jobs.from_opportunity_id), oldest first, for the header's "Ticket #6004". Read under
+ * the tickets' own RLS: someone without Service access gets none.
+ */
+export const listOpportunityTickets = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<{ id: string; number: number }[]> => {
+    const { data: rows, error } = await context.supabase
+      .from("service_jobs")
+      .select("id, number")
+      .eq("from_opportunity_id", data.id)
+      .is("deleted_at", null)
+      .order("number", { ascending: true })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return (rows ?? []).map((r) => ({ id: r.id, number: r.number }));
   });
 
 /**

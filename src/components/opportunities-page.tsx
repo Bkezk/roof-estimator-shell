@@ -7,9 +7,16 @@
  * the form otherwise), with the contact log. Won, Lost and No response stop the reminders.
  *
  * Owner, Oct 1: the status lives in the header only (a new one starts Open); the assignee is
- * required; a customer is optional, but once set the opportunity names its site
- * (lib/opportunity-form.ts); the lead source picks from a maintained list (Settings › General ›
- * Lead sources, type-to-add); "Start a bid" opens /estimate prefilled at any status.
+ * required; the lead source picks from a maintained list (Settings › General › Lead sources,
+ * type-to-add); "Start a bid" opens /estimate prefilled at any status.
+ *
+ * Owner, Oct 2: the customer (with its address and a way to reach them) and the site are
+ * required (lib/opportunity-form.ts opportunityProblem; saveOpportunity refuses the same). The
+ * forms are the ones that exist: the customer search's "Add as a new customer" (asking for the
+ * address here: requireAddress) and, for a customer with no site, the site box's "Add site" (the
+ * Customers page's site form). "Start a ticket" (those who create tickets) sits beside Start a
+ * bid and opens the new-ticket form prefilled; a ticket started here shows as "Ticket #6004".
+ * Marking it Won only records the win (the status log and the strip show it).
  *
  * A deleted opportunity (an old `?id=` link) opens read-only under a "Deleted on <date>" banner:
  * the form is disabled, and the status select, Start a bid, Delete, the follow-up strip and the
@@ -36,11 +43,13 @@ import {
   Save,
   Target,
   Trash2,
+  Wrench,
   X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import { managesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import { hasContactMethod, NO_CONTACT_ON_FILE } from "@/lib/crm-account";
 import { canManageFollowup, isFollowupOverdue } from "@/lib/followup-rules";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
 import {
@@ -50,7 +59,10 @@ import {
   canSetOppStatus,
   createReminderHint,
   OPP_STATUS_REP_HINT,
+  opportunityProblem,
   opportunitySiteProblem,
+  ticketLinkLabel,
+  ticketPrefillFromOpportunity,
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
 import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
@@ -64,6 +76,7 @@ import {
   listAssigneeOptions,
   listOpportunities,
   listOpportunityEvents,
+  listOpportunityTickets,
   OPP_CLOSING,
   OPP_STATUS_LABELS,
   OPP_STATUSES,
@@ -658,6 +671,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const settingsFn = useServerFn(getCrmSettings);
   const accountFn = useServerFn(getAccount);
   const eventsFn = useServerFn(listOpportunityEvents);
+  const ticketsFn = useServerFn(listOpportunityTickets);
 
   const [draft, setDraft] = useState<Draft>(() => draftFrom(opp));
   const [savedKey, setSavedKey] = useState(() => draftKey(draft));
@@ -701,6 +715,13 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const opened = opp
     ? openedLine(opp.created_at, openerName(opp.created_by, people.data, events.data ?? []))
     : "";
+  // Tickets started from it ("Start a ticket"): "Ticket #6004" in the header. Read under the
+  // tickets' RLS, so only for those with Service access.
+  const tickets = useQuery({
+    queryKey: ["opportunity-tickets", opp?.id ?? "new"],
+    queryFn: () => ticketsFn({ data: { id: opp!.id } }),
+    enabled: !!session && !!opp && can("service"),
+  });
   const settings = useQuery({
     queryKey: ["crm-settings"],
     queryFn: () => settingsFn(),
@@ -708,8 +729,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     staleTime: 5 * 60_000,
   });
 
-  // The customer's sites (the same query the site box reads): with a customer, the opportunity
-  // names the site — one is picked without asking, several need a pick (owner, Oct 1).
+  // The customer's sites (the same query the site box reads): the opportunity names the site —
+  // one is picked without asking, several need a pick (owner, Oct 1), none needs one added
+  // (owner, Oct 2).
   const accountId = draft.customer?.account_id ?? null;
   const accountQ = useQuery({
     queryKey: ["account", accountId],
@@ -722,6 +744,16 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     ? (draft.customer.site_id ?? (liveSites ? autoSiteId(liveSites) : null))
     : null;
   const siteMessage = opportunitySiteProblem({ account_id: accountId, site_id: siteId, siteCount });
+  // The customer rule (hasContactMethod): an older customer may have no way to reach them.
+  const pickedAccount = accountQ.data?.account.id === accountId ? accountQ.data.account : null;
+  const hasContact = pickedAccount ? hasContactMethod(pickedAccount) : null;
+  // Owner, Oct 2: the customer, reachable, and the site (the server refuses the same).
+  const customerMessage = opportunityProblem({
+    account_id: accountId,
+    site_id: siteId,
+    siteCount,
+    hasContact,
+  });
   const assigneeMessage = assigneeProblem({ id: opp?.id, assignee_id: draft.assignee_id || null });
 
   const invalidate = (id: string) => {
@@ -804,8 +836,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       toast.error("Give the opportunity a title first");
       return;
     }
-    if (assigneeMessage || siteMessage) {
-      toast.error(assigneeMessage ?? siteMessage);
+    if (assigneeMessage || customerMessage) {
+      toast.error(assigneeMessage ?? customerMessage);
       return;
     }
     save.mutate();
@@ -855,7 +887,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const createHint = createReminderHint({ status: draft.status, assignee_id: draft.assignee_id });
 
   // The customer: the search box until one is picked, then one block with the name (× to
-  // change) and the site, as on a ticket. Optional (a prospect may not be a customer yet).
+  // change) and the site, as on a ticket. Required (owner, Oct 2), with its site.
   const customerField = (
     <div className="space-y-1">
       <Label htmlFor={draft.customer ? undefined : "opp-customer"}>Customer</Label>
@@ -865,6 +897,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           name={accountQ.data?.account.name ?? draft.customer.label}
           siteId={siteId}
           siteMessage={siteMessage}
+          noContact={hasContact === false}
           onChangeCustomer={() => {
             setChangingCustomer(true);
             set("customer", null);
@@ -878,7 +911,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           id="opp-customer"
           value={null}
           autoFocus={changingCustomer}
-          placeholder="Search or add a customer (optional)…"
+          placeholder="Search or add a customer…"
+          // "Add as a new customer" asks for the address too (owner, Oct 2).
+          requireAddress
           onChange={(hit) =>
             set(
               "customer",
@@ -894,6 +929,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )
           }
         />
+      )}
+      {/* No customer yet: say so under the search box (the block says what else is missing). */}
+      {!draft.customer && customerMessage && (
+        <p className="text-xs text-destructive">{customerMessage}</p>
       )}
     </div>
   );
@@ -1005,8 +1044,10 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               <div className="min-w-0 space-y-1">
                 <Label htmlFor="opp-value">Est. value ($)</Label>
                 <div id="opp-value">
+                  {/* Blank for none (null or 0), no grey 0 (owner, Oct 2); blank saves as null. */}
                   <NumberField
                     value={draft.est_value}
+                    placeholder=""
                     min={0}
                     step="any"
                     inputMode="decimal"
@@ -1039,6 +1080,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                 (!!opp && !dirty) ||
                 (!!opp && !draft.expected_close) ||
                 !!assigneeMessage ||
+                !!customerMessage ||
                 !!siteMessage
               }
             >
@@ -1089,6 +1131,30 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                     title="A new bid for this opportunity's customer and site"
                   >
                     <FilePlus2 className="mr-1 h-4 w-4" /> Start a bid
+                  </Link>
+                </Button>
+              ))}
+            {/* Owner, Oct 2: beside Start a bid, at every status, for those who create tickets. */}
+            {opp && !deleted && managesTickets(profile) && (
+              <Button asChild variant="outline">
+                <Link
+                  to="/service"
+                  search={ticketPrefillFromOpportunity(opp)}
+                  title="A new service ticket for this opportunity's customer and site"
+                >
+                  <Wrench className="mr-1 h-4 w-4" /> Start a ticket
+                </Link>
+              </Button>
+            )}
+            {opp &&
+              (tickets.data ?? []).map((t) => (
+                <Button key={t.id} asChild variant="outline">
+                  <Link
+                    to="/service"
+                    search={{ id: t.id }}
+                    title="Open the ticket started from this opportunity"
+                  >
+                    <Wrench className="mr-1 h-4 w-4" /> {ticketLinkLabel(t.number)}
                   </Link>
                 </Button>
               ))}
@@ -1215,8 +1281,8 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
 
 /**
  * The picked customer as one block (as the ticket's): the name (opens the customer) with an ×
- * to change it, then the site box — required when the customer has several sites; one site
- * comes with the pick.
+ * to change it, then the site box — always required: one site comes with the pick, several need
+ * one picked, none offers "Add site".
  */
 function OppCustomerBlock(props: {
   accountId: string;
@@ -1224,6 +1290,8 @@ function OppCustomerBlock(props: {
   siteId: string | null;
   /** Why the site still needs picking (lib/opportunity-form.ts), or null. */
   siteMessage: string | null;
+  /** The customer has no email or phone (older data): the Customers page's warning. */
+  noContact: boolean;
   onChangeCustomer: () => void;
   onPickSite: (siteId: string) => void;
 }) {
@@ -1250,6 +1318,11 @@ function OppCustomerBlock(props: {
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {props.noContact && (
+        <p role="alert" className="text-sm font-medium text-destructive">
+          {NO_CONTACT_ON_FILE}
+        </p>
+      )}
       <div className="space-y-1">
         <label htmlFor="opp-site" className="text-xs font-medium">
           Site
@@ -1259,6 +1332,8 @@ function OppCustomerBlock(props: {
           accountId={props.accountId}
           value={props.siteId}
           required
+          // A customer with no site: "Add site" (the Customers page's site form).
+          allowAdd
           invalid={!!props.siteMessage}
           className="bg-background"
           onChange={(s) => {

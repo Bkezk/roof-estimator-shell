@@ -8,7 +8,8 @@ export const Route = createFileRoute("/service")({
   // ?id=<uuid> opens that ticket; ?new=1 opens a blank ticket, optionally prefilled with a
   // technician `tech=<uuid>` and a day `date=YYYY-MM-DD` (the Tech Board's "+"), with the
   // customer side of an earlier ticket `from=<ticket uuid>` ("New ticket for this site"), or
-  // with a customer `account=<uuid>` and site `site=<uuid>` (the Customers page); without
+  // with a customer `account=<uuid>` and site `site=<uuid>` (the Customers page), or from an
+  // opportunity `opportunity=<uuid>` (its "Start a ticket": customer, site, description); without
   // either the page lists tickets, with its stage chip preset by `stage=` (a stage, or
   // `openwork`) and `overdue=1` (the Customers page counts strip). Parsing: lib/service-search.ts.
   // Access is the central gate's (pageForPath: /service → Service).
@@ -30,6 +31,7 @@ function ServiceRoute() {
       from={search.from}
       account={search.account}
       site={search.site}
+      opportunity={search.opportunity}
       stage={search.stage}
       overdue={search.overdue === 1}
     />

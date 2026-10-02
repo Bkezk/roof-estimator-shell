@@ -25,6 +25,28 @@ export function hasContactMethod(a: {
   return filled(a.email) || filled(a.phone) || filled(a.mobile);
 }
 
+/** The warning on a customer saved before the rule (no email or phone on file). */
+export const NO_CONTACT_ON_FILE = `${CONTACT_REQUIRED}: this customer has no email or phone on file. Edit to add one.`;
+
+/** The one message for a customer whose address must be complete (an opportunity's quick add). */
+export const ADDRESS_REQUIRED = "Add the street address, city, state and ZIP";
+
+/**
+ * ADDRESS_REQUIRED unless line 1, the city, the state and the zip are all filled in (line 2
+ * stays optional). The forms start the state at "KY", so a state alone is no address.
+ */
+export function addressProblem(a: {
+  address1: string;
+  address2?: string | undefined;
+  city: string;
+  state: string;
+  zip: string;
+}): string | null {
+  return filled(a.address1) && filled(a.city) && filled(a.state) && filled(a.zip)
+    ? null
+    : ADDRESS_REQUIRED;
+}
+
 /** Optional text: missing, null or blank all become null (the DB column's "not set"). */
 export const optText = (max: number) =>
   z

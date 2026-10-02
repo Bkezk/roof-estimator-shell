@@ -117,11 +117,9 @@ describe("saveContact: what it sends leaves unsent columns out", () => {
 });
 
 describe("the site form carries Notes", () => {
-  const page = readFileSync("src/components/customers-page.tsx", "utf8");
-  const form = page.slice(
-    page.indexOf("function SiteForm("),
-    page.indexOf("function TicketsSection("),
-  );
+  // Moved out of customers-page.tsx (Oct 2): the opportunity's "Add site" uses it too.
+  const page = readFileSync("src/components/crm/site-form.tsx", "utf8");
+  const form = page.slice(page.indexOf("export function SiteForm("));
   it("a Notes textarea bound to the site's notes", () => {
     expect(form).toContain("<Label htmlFor={`site-${idp}-notes`}>Notes</Label>");
     expect(form).toMatch(/id=\{`site-\$\{idp\}-notes`\}[\s\S]*?value=\{f\.notes\}/);

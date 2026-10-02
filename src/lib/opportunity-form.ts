@@ -5,13 +5,21 @@
  *   opportunity needs one; an update may leave it out (unchanged) but may not clear it. The
  *   form shows ASSIGNEE_REQUIRED under the box and keeps Create / Save off; saveOpportunity
  *   refuses with the same text.
- * - Site: the customer stays optional (a prospect may not be a customer yet), but once a
- *   customer is set the opportunity names the site the way a ticket does (lib/ticket-form.ts
- *   siteProblem / autoSiteId): one site is picked automatically, several must be picked.
+ * - Customer, site and contact (owner, Oct 2: "require the customer name, address and one
+ *   contact and site for an opportunity"): every opportunity names its customer
+ *   (OPP_CUSTOMER_REQUIRED) and its site, the way a ticket does (lib/ticket-form.ts siteProblem /
+ *   autoSiteId): one site is picked automatically, several must be picked, none must be added
+ *   first (OPP_SITE_NEEDED). The customer must be reachable by the customer rule itself
+ *   (lib/crm-account.ts hasContactMethod; OPP_CUSTOMER_NO_CONTACT for older data saved before
+ *   it). The form keeps Create / Save off and the server (saveOpportunity) refuses the same.
  * - "Start a bid": the /estimate prefill (lib/estimate-search.ts) from the opportunity.
+ * - "Start a ticket": /service?new=1&opportunity=<id>; the new-ticket form fills the customer,
+ *   the site and the description (ticketSeedFromOpportunity) and the ticket keeps the
+ *   opportunity as service_jobs.from_opportunity_id.
  */
 import { BID_NOTES_MAX } from "@/lib/inspection";
 import type { EstimateSearch } from "@/lib/estimate-search";
+import type { ServiceSearch } from "@/lib/service-search";
 import { seesEveryone, type AccessLike } from "@/lib/access";
 
 type BidPrefill = Pick<
@@ -20,7 +28,7 @@ type BidPrefill = Pick<
 >;
 
 export { autoSiteId, siteProblem, siteRequiredMessage } from "@/lib/ticket-form";
-import { siteProblem } from "@/lib/ticket-form";
+import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 
 export const ASSIGNEE_REQUIRED = "Pick who follows this up";
 
@@ -33,17 +41,40 @@ export function assigneeProblem(input: {
   return input.assignee_id ? null : ASSIGNEE_REQUIRED;
 }
 
+export const OPP_CUSTOMER_REQUIRED = "Pick or add the customer";
+export const OPP_SITE_NEEDED = "Add a site to this customer first";
+/** The customer rule (hasContactMethod) for a customer saved before it (older data). */
+export const OPP_CUSTOMER_NO_CONTACT = "This customer needs a phone or an email first";
+
 /**
- * The problem with an opportunity's site, or null: none without a customer; with one, a
- * customer with several live sites needs one picked.
+ * The problem with an opportunity's site, or null: every opportunity has one. Without a
+ * customer there is none to pick (OPP_CUSTOMER_REQUIRED); a customer with no live site needs one
+ * added; with several, one picked; the only one is the one.
  */
 export function opportunitySiteProblem(input: {
   account_id: string | null | undefined;
   site_id: string | null | undefined;
   siteCount: number;
 }): string | null {
-  if (!input.account_id) return null;
+  if (!input.account_id) return OPP_CUSTOMER_REQUIRED;
+  if (input.site_id) return null;
+  if (input.siteCount === 0) return OPP_SITE_NEEDED;
   return siteProblem({ siteCount: input.siteCount, site_id: input.site_id });
+}
+
+/**
+ * The opportunity's customer side, or null: the customer, a way to reach them
+ * (`hasContact`: hasContactMethod on the account; null / left out = not known yet), the site.
+ */
+export function opportunityProblem(input: {
+  account_id: string | null | undefined;
+  site_id: string | null | undefined;
+  siteCount: number;
+  hasContact?: boolean | null | undefined;
+}): string | null {
+  if (!input.account_id) return OPP_CUSTOMER_REQUIRED;
+  if (input.hasContact === false) return OPP_CUSTOMER_NO_CONTACT;
+  return opportunitySiteProblem(input);
 }
 
 /**
@@ -76,6 +107,36 @@ export function bidPrefillFromOpportunity(o: {
   if (o.id) out.opportunity = o.id;
   return out;
 }
+
+/**
+ * "Start a ticket" (every status; those who create tickets — managesTickets): a new ticket that
+ * carries the opportunity. /service loads it and fills the form (ticketSeedFromOpportunity).
+ */
+export function ticketPrefillFromOpportunity(o: { id: string }): ServiceSearch {
+  return { new: 1, opportunity: o.id };
+}
+
+/**
+ * The new ticket's description (the opportunity's, else its title; a ticket's description holds
+ * TICKET_DESCRIPTION_MAX) and the link back (service_jobs.from_opportunity_id). The customer and
+ * the site come from the opportunity the way the Customers page's "New ticket" passes them.
+ */
+export function ticketSeedFromOpportunity(o: {
+  id: string;
+  title: string;
+  description: string | null;
+}): { description: string; from_opportunity_id: string } {
+  const text = (o.description ?? "").trim() || o.title.trim();
+  return {
+    description: text.slice(0, TICKET_DESCRIPTION_MAX),
+    from_opportunity_id: o.id,
+  };
+}
+
+/** The ticket's line under "Opened …". */
+export const fromOpportunityLabel = (title: string) => `From opportunity: ${title}`;
+/** The opportunity's link to a ticket started from it. */
+export const ticketLinkLabel = (n: number) => `Ticket #${n}`;
 
 /**
  * Won / Lost / No response end the follow-up reminders that management relies on, so they are

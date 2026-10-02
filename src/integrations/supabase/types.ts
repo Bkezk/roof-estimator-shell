@@ -2947,6 +2947,7 @@ export type Database = {
           en_route_at: string | null;
           field_status: string | null;
           from_job_id: string | null;
+          from_opportunity_id: string | null;
           helper_count: number;
           id: string;
           inspection: Json | null;
@@ -2992,6 +2993,7 @@ export type Database = {
           en_route_at?: string | null;
           field_status?: string | null;
           from_job_id?: string | null;
+          from_opportunity_id?: string | null;
           helper_count?: number;
           id?: string;
           inspection?: Json | null;
@@ -3037,6 +3039,7 @@ export type Database = {
           en_route_at?: string | null;
           field_status?: string | null;
           from_job_id?: string | null;
+          from_opportunity_id?: string | null;
           helper_count?: number;
           id?: string;
           inspection?: Json | null;
@@ -3067,6 +3070,13 @@ export type Database = {
             columns: ["from_job_id"];
             isOneToOne: false;
             referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_jobs_from_opportunity_id_fkey";
+            columns: ["from_opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "crm_opportunities";
             referencedColumns: ["id"];
           },
           {

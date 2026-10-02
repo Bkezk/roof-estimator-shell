@@ -25,6 +25,7 @@ import {
   CONTACT_REQUIRED,
   CRM_MAX,
   addressPayload,
+  addressProblem,
   hasContactMethod,
   mailingPayload,
 } from "@/lib/crm-account";
@@ -71,6 +72,8 @@ export function AccountPicker(props: {
   onText?: (text: string) => void;
   /** The input lost focus (not when a row is clicked: the row keeps the focus). */
   onBlur?: () => void;
+  /** "Add as a new customer" asks for the whole physical address too (an opportunity). */
+  requireAddress?: boolean;
 }) {
   const free = !!props.allowFreeText;
   const listId = useId();
@@ -271,6 +274,7 @@ export function AccountPicker(props: {
       <QuickAddCustomerDialog
         open={adding !== null}
         initialName={adding ?? ""}
+        requireAddress={!!props.requireAddress}
         onOpenChange={(o) => {
           if (!o) setAdding(null);
         }}
@@ -287,13 +291,17 @@ export function AccountPicker(props: {
 
 /**
  * New customer in one step: the account only (owner, Sep 30: its sites are added on the account
- * afterwards, under Customers). Needs an email, a cell phone or an office phone.
+ * afterwards, under Customers). Needs an email, a cell phone or an office phone, and with
+ * `requireAddress` (an opportunity's customer, owner Oct 2) the physical address: line 1, city,
+ * state and zip (addressProblem). Default off: every other caller is unchanged.
  */
 export function QuickAddCustomerDialog(props: {
   open: boolean;
   initialName: string;
   onOpenChange: (open: boolean) => void;
   onCreated: (hit: AccountHit) => void;
+  /** The physical address is required too (line 1, city, state, zip). */
+  requireAddress?: boolean;
 }) {
   const qc = useQueryClient();
   const createFn = useServerFn(quickCreateAccount);
@@ -327,6 +335,7 @@ export function QuickAddCustomerDialog(props: {
   }, [props.open, props.initialName]);
 
   const reachable = hasContactMethod({ email, phone, mobile });
+  const addressMissing = props.requireAddress ? addressProblem(physical) : null;
 
   const save = useMutation({
     mutationFn: () =>
@@ -366,8 +375,10 @@ export function QuickAddCustomerDialog(props: {
         <DialogHeader>
           <DialogTitle>New customer</DialogTitle>
           <DialogDescription>
-            The name and one way to reach them (email or a phone) are required. Sites are added on
-            the customer after it is saved.
+            {props.requireAddress
+              ? "The name, the address and one way to reach them (email or a phone) are required."
+              : "The name and one way to reach them (email or a phone) are required."}{" "}
+            Sites are added on the customer after it is saved.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -383,6 +394,10 @@ export function QuickAddCustomerDialog(props: {
             }
             if (!reachable) {
               toast.error(CONTACT_REQUIRED);
+              return;
+            }
+            if (addressMissing) {
+              toast.error(addressMissing);
               return;
             }
             save.mutate();
@@ -471,6 +486,11 @@ export function QuickAddCustomerDialog(props: {
               value={physical}
               onChange={(k, v) => setPhysical((a) => ({ ...a, [k]: v }))}
             />
+            {tried && addressMissing && (
+              <p role="alert" className="text-sm font-medium text-destructive">
+                {addressMissing}
+              </p>
+            )}
           </div>
           <MailingAddressInputs
             idPrefix="qa"

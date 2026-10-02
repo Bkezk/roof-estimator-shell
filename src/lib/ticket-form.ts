@@ -6,6 +6,9 @@
  * automatically.
  */
 
+/** A ticket's description holds this many characters (saveServiceJob's schema). */
+export const TICKET_DESCRIPTION_MAX = 500;
+
 /** The line beside Create ticket: what stage a new ticket gets. */
 export const TICKET_STAGE_HINT = "Scheduled once a technician is set, otherwise Open.";
 

@@ -51,6 +51,9 @@ const REP = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"; // no page grants at all
 const OPP = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const BID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const BID2 = "99999999-9999-4999-8999-999999999999";
+// Every opportunity names a reachable customer and a site (owner, Oct 2).
+const ACC = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
+const SITE = "51515151-5151-4515-8515-515151515151";
 
 const cust = {
   id: CUST,
@@ -84,7 +87,8 @@ function setup(opts: { opp?: Row; followups?: Row[] } = {}) {
       crm_opportunities: [opportunity(opts.opp)],
       crm_followups: opts.followups ?? [],
       crm_contact_log: [],
-      crm_sites: [],
+      crm_accounts: [{ id: ACC, name: "Bell County Schools", phone: "606-555-0100" }],
+      crm_sites: [{ id: SITE, account_id: ACC, name: "Gym", deleted_at: null }],
       bids: [
         { id: BID, name: "Gym reroof bid" },
         { id: BID2, name: "Other bid" },
@@ -174,7 +178,11 @@ describe("item 6 — Won / Lost / No response are a manager's", () => {
   });
   it("a rep cannot create one at Won either", async () => {
     await expect(
-      call(saveOpportunity, { title: "New", assignee_id: CUST, status: "won" }, CUST),
+      call(
+        saveOpportunity,
+        { title: "New", account_id: ACC, assignee_id: CUST, status: "won" },
+        CUST,
+      ),
     ).rejects.toThrow(OPP_STATUS_MANAGER_ONLY);
   });
   it("the rule", () => {
@@ -297,7 +305,11 @@ describe("item 13 — Start a bid links back", () => {
   });
   it("a save from a form opened before the link does not clear it", async () => {
     setup({ opp: { bid_id: BID } });
-    await call(saveOpportunity, { id: OPP, title: "Reroof gym", assignee_id: REP }, MGR);
+    await call(
+      saveOpportunity,
+      { id: OPP, title: "Reroof gym", account_id: ACC, assignee_id: REP },
+      MGR,
+    );
     expect(oppRow()["bid_id"]).toBe(BID);
   });
   it("/estimate links it right after the bid is first created (the smallest hook)", () => {

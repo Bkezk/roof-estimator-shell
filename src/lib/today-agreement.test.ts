@@ -37,6 +37,7 @@ const read = (p: string) => readFileSync(p, "utf8");
 const ADMIN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const REP = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const OPP = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const ACC = "a1a1a1a1-a1a1-4a1a-8a1a-a1a1a1a1a1a1";
 
 const call = <T = void>(fn: unknown, data: Row | undefined, db: unknown, userId = ADMIN) =>
   (fn as (a: { data: Row | undefined; context: unknown }) => Promise<T>)({
@@ -230,11 +231,18 @@ describe("item 14f — the default expected close counts from the Eastern day", 
       profiles: [{ id: ADMIN, role: "admin", access: [], full_name: "Ann", email: "a@x" }],
       crm_opportunities: [],
       crm_followups: [],
+      // Every opportunity names a reachable customer and a site (owner, Oct 2).
+      crm_accounts: [{ id: ACC, name: "Bell County Schools", phone: "606-555-0100" }],
+      crm_sites: [{ id: "s1", account_id: ACC, name: "Gym", deleted_at: null }],
       crm_settings: [
         { id: 1, opportunity_close_days: 30, opportunity_first_days: 3, opportunity_every_days: 7 },
       ],
     });
-    const row = await call<Row>(saveOpportunity, { title: "New one", assignee_id: ADMIN }, env.db);
+    const row = await call<Row>(
+      saveOpportunity,
+      { title: "New one", account_id: ACC, assignee_id: ADMIN },
+      env.db,
+    );
     expect(row["expected_close"]).toBe("2026-10-31");
   });
 });

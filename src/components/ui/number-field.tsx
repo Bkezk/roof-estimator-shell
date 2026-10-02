@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Input } from "@/components/ui/input";
+import { numberFieldView } from "@/lib/number-field-view";
 
 /**
  * Numeric input backed by a number value. While the field is focused it keeps its own text so
@@ -34,7 +35,8 @@ export function NumberField(props: {
   const min = props.min ?? 0;
   const blankZero = props.blankZero ?? true;
   const shown = Number.isFinite(props.value) ? props.value : 0;
-  const display = text ?? (blankZero && shown === 0 ? "" : String(shown));
+  const view = numberFieldView(props);
+  const display = text ?? view.text;
   return (
     <Input
       type="number"
@@ -44,7 +46,7 @@ export function NumberField(props: {
       step={props.step ?? "1"}
       inputMode={props.inputMode}
       disabled={props.disabled ?? false}
-      placeholder={props.placeholder ?? (blankZero ? "0" : undefined)}
+      placeholder={view.placeholder}
       title={props.title}
       className={`${props.invalid ? "border-destructive " : ""}${props.className ?? ""}`}
       value={display}

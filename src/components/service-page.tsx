@@ -31,7 +31,9 @@
  * Fewer clicks (owner, Sep 27): the list header links the Done tickets waiting to be
  * invoiced ("N to invoice"); `?new=1&from=<ticket id>` starts a ticket with an earlier ticket's
  * customer side ("New ticket for this site") and `?new=1&account=<id>&site=<id>` with a
- * customer picked (the Customers page).
+ * customer picked (the Customers page). `?new=1&opportunity=<id>` (an opportunity's "Start a
+ * ticket", owner Oct 2) starts one with the opportunity's customer, site and description; the
+ * ticket keeps the opportunity (from_opportunity_id) and says "From opportunity: <title>".
  *
  * Owner, Oct 1 ("The manager creates the tickets; reps do not create tickets"; "only the
  * managers / admins can see and edit the prices"): New ticket / `?new=1`, Repeat, the Board,
@@ -64,6 +66,7 @@ import {
   Receipt,
   RotateCcw,
   Save,
+  Target,
   Trash2,
   Wrench,
   X,
@@ -98,6 +101,8 @@ import {
   type ServiceType,
 } from "@/lib/service.functions";
 import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
+import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.functions";
+import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
 import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";
@@ -208,6 +213,7 @@ export function ServicePage({
   from,
   account,
   site,
+  opportunity,
   stage,
   overdue,
 }: {
@@ -219,6 +225,8 @@ export function ServicePage({
   /** New ticket: start with this customer (and site) picked (from the Customers page). */
   account?: string | undefined;
   site?: string | undefined;
+  /** New ticket: from this opportunity (its customer, site and description). */
+  opportunity?: string | undefined;
   /** The list: preset the stage chip (`?stage=`; "openwork" = open + scheduled + done). */
   stage?: Exclude<StageFilter, "all"> | undefined;
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
@@ -232,6 +240,7 @@ export function ServicePage({
     if (!profile) return null;
     if (!managesTickets(profile)) return <ManagersCreateTickets />;
     if (from) return <NewFromTicket key={from} from={from} />;
+    if (opportunity) return <NewForOpportunity key={opportunity} id={opportunity} />;
     if (account)
       return <NewForAccount key={`${account}|${site ?? ""}`} accountId={account} siteId={site} />;
     return <TicketEditor job={null} />;
@@ -924,8 +933,73 @@ function NewFromTicket({ from }: { from: string }) {
   return <TicketEditor job={null} seed={seedFromTicket(src.data)} />;
 }
 
-/** A new ticket with a customer (and site) already picked, from the Customers page. */
-function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: string | undefined }) {
+/**
+ * A new ticket from an opportunity's "Start a ticket" (owner, Oct 2): its customer and site as
+ * the Customers page passes them (NewForAccount), its description, and the link back
+ * (from_opportunity_id, written when the ticket is created).
+ */
+function NewForOpportunity({ id }: { id: string }) {
+  const { session } = useAuth();
+  const getFn = useServerFn(getOpportunity);
+  const opp = useQuery({
+    queryKey: ["opportunity", id],
+    queryFn: () => getFn({ data: { id } }),
+    enabled: !!session,
+  });
+  useEffect(() => {
+    if (opp.error)
+      toast.error(`Could not load the opportunity: ${errText(opp.error)}`, { duration: 10_000 });
+  }, [opp.error]);
+  if (opp.error)
+    return (
+      <TicketEditor
+        job={null}
+        seed={{
+          draft: {},
+          tone: "error",
+          note: `Could not load the opportunity (${errText(opp.error)}). Fill this one in by hand.`,
+        }}
+      />
+    );
+  if (!opp.data)
+    return (
+      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading the opportunity…
+      </p>
+    );
+  const o = opp.data;
+  if (o.account_id)
+    return (
+      <NewForAccount accountId={o.account_id} siteId={o.site_id ?? undefined} opportunity={o} />
+    );
+  // An older opportunity without a customer: the description and the link only.
+  const pf = ticketSeedFromOpportunity(o);
+  return (
+    <TicketEditor
+      job={null}
+      seed={{
+        draft: { description: pf.description },
+        from_opportunity_id: pf.from_opportunity_id,
+        tone: "info",
+        note: `${fromOpportunityLabel(o.title)}. Pick the customer, then the technician and day.`,
+      }}
+    />
+  );
+}
+
+/**
+ * A new ticket with a customer (and site) already picked, from the Customers page — or from an
+ * opportunity (its description and from_opportunity_id too).
+ */
+function NewForAccount({
+  accountId,
+  siteId,
+  opportunity,
+}: {
+  accountId: string;
+  siteId?: string | undefined;
+  opportunity?: OpportunityWithNames | undefined;
+}) {
   const { session } = useAuth();
   const getFn = useServerFn(getAccount);
   const detail = useQuery({
@@ -962,6 +1036,7 @@ function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: stri
       </p>
     );
   const a = detail.data.account;
+  const fromOpp = opportunity ? ticketSeedFromOpportunity(opportunity) : null;
   // No site asked for: a customer with one site gets it (owner, Oct 1).
   const sites = detail.data.sites;
   const pickId = siteId ?? autoSiteId(sites);
@@ -984,10 +1059,17 @@ function NewForAccount({ accountId, siteId }: { accountId: string; siteId?: stri
         contact_name: a.contact_name,
         phone: a.phone,
       },
+      ...(fromOpp ? { description: fromOpp.description } : {}),
     },
+    ...(fromOpp ? { from_opportunity_id: fromOpp.from_opportunity_id } : {}),
     ...(siteMissing
       ? { tone: "error" as const, note: "That site is no longer on file; pick the site." }
-      : {}),
+      : opportunity
+        ? {
+            tone: "info" as const,
+            note: `${fromOpportunityLabel(opportunity.title)}: customer, site and description filled in. Add the technician and day.`,
+          }
+        : {}),
   };
   return <TicketEditor job={null} seed={seed} />;
 }
@@ -1065,6 +1147,8 @@ interface Seed {
   draft: Partial<Draft>;
   note?: string;
   tone?: "info" | "error";
+  /** "Start a ticket": the opportunity the new ticket keeps (service_jobs.from_opportunity_id). */
+  from_opportunity_id?: string;
 }
 
 /**
@@ -1329,6 +1413,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         notes: draft.notes,
         centerpoint_ticket: draft.centerpoint_ticket,
         centerpoint_invoice: draft.centerpoint_invoice,
+        // Written on create only (an opportunity's "Start a ticket").
+        ...(!job && seed?.from_opportunity_id
+          ? { from_opportunity_id: seed.from_opportunity_id }
+          : {}),
       };
       return saveFn({ data: input });
     },
@@ -1348,6 +1436,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         toast.success(`Ticket #${row.number} saved`);
       } else {
         toast.success(`Ticket #${row.number} created`);
+        // The opportunity's header lists it ("Ticket #6004").
+        if (row.from_opportunity_id)
+          void qc.invalidateQueries({ queryKey: ["opportunity-tickets", row.from_opportunity_id] });
         qc.setQueryData(["service-job", row.id], row);
         void navigate({ to: "/service", search: { id: row.id }, replace: true });
       }
@@ -2005,6 +2096,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {opened}
           </p>
         )}
+        {job?.from_opportunity_id && <FromOpportunityNote id={job.from_opportunity_id} />}
         {job && (
           <p className="flex flex-wrap gap-x-4 text-sm" aria-label="Ticket numbers">
             <span>
@@ -2365,5 +2457,34 @@ function MaterialsUsed({ jobId, canLog }: { jobId: string; canLog: boolean }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * "From opportunity: <title>" under "Opened …" on a ticket started from an opportunity (owner,
+ * Oct 2), linking to it. Someone who cannot read the opportunity (its RLS) sees the line without
+ * the title.
+ */
+function FromOpportunityNote({ id }: { id: string }) {
+  const { session } = useAuth();
+  const getFn = useServerFn(getOpportunity);
+  const q = useQuery({
+    queryKey: ["opportunity", id],
+    queryFn: () => getFn({ data: { id } }),
+    enabled: !!session,
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+  return (
+    <p className="flex items-center gap-1.5 text-sm" data-line="from-opportunity">
+      <Target className="h-4 w-4 text-muted-foreground" />
+      {q.data ? (
+        <Link to="/opportunities" search={{ id }} className="underline underline-offset-2">
+          {fromOpportunityLabel(q.data.title)}
+        </Link>
+      ) : (
+        <span className="text-muted-foreground">From an opportunity</span>
+      )}
+    </p>
   );
 }

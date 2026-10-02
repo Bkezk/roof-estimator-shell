@@ -3,14 +3,30 @@
  * the site is chosen here). Lists the customer's live sites from the account detail (the same
  * ["account", id] query the ticket and the bid already read). `required` drops the "No site"
  * choice (a ticket for a customer with several sites); otherwise the site stays optional.
+ *
+ * `allowAdd` (the opportunity, owner Oct 2: every opportunity names a site): a customer with no
+ * site gets "Add site", which opens the Customers page's own site form (crm/site-form.tsx) in a
+ * dialog; the saved site is picked. Only for those who may add sites (Customers access, which
+ * admins and managers have); anyone else sees the "No sites on file" line alone.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { Plus } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { getAccount, siteAddressLine, type SiteRow } from "@/lib/crm.functions";
+import { getAccount, siteAddressLine, type AccountDetail, type SiteRow } from "@/lib/crm.functions";
 import { siteOptionLabel } from "@/lib/county-codes";
 import { useCountyCodes } from "@/components/crm/use-county-codes";
+import { SiteForm } from "@/components/crm/site-form";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -32,8 +48,11 @@ export function SiteSelect(props: {
   /** Red outline (the form says why underneath). */
   invalid?: boolean;
   className?: string;
+  /** A customer with no site: offer "Add site" (the Customers page's site form). */
+  allowAdd?: boolean;
 }) {
-  const { session } = useAuth();
+  const { session, can } = useAuth();
+  const qc = useQueryClient();
   const getFn = useServerFn(getAccount);
   const detail = useQuery({
     queryKey: ["account", props.accountId],
@@ -45,12 +64,58 @@ export function SiteSelect(props: {
   const codes = useCountyCodes().data;
   // The whole code row: "0108 Kenton, KY" (0108 alone is Kenton, KY or Putman, TN).
   const codeOf = (id: string | null) => (id ? codes?.find((c) => c.id === id) : undefined);
+  // Who adds a site here: Customers access (admins and managers have it).
+  const mayAdd = !!props.allowAdd && can("customers");
+  const [adding, setAdding] = useState(false);
   if (detail.error)
     return (
       <p className="text-xs text-destructive">Could not load the sites: {errText(detail.error)}</p>
     );
   if (detail.data && sites.length === 0 && !props.value)
-    return <p className="text-xs text-muted-foreground">No sites on file for this customer.</p>;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-muted-foreground">No sites on file for this customer.</p>
+        {mayAdd && (
+          <>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={props.disabled}
+              onClick={() => setAdding(true)}
+            >
+              <Plus className="mr-1 h-4 w-4" /> Add site
+            </Button>
+            <Dialog open={adding} onOpenChange={setAdding}>
+              <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>New site</DialogTitle>
+                  <DialogDescription>
+                    The building or address the work happens at. It is saved on the customer.
+                  </DialogDescription>
+                </DialogHeader>
+                <SiteForm
+                  accountId={props.accountId}
+                  site={null}
+                  onDone={(changed, row) => {
+                    setAdding(false);
+                    if (!changed || !row) return;
+                    // The new site is in the list at once (then re-read), and picked.
+                    qc.setQueryData<AccountDetail>(["account", props.accountId], (d) =>
+                      d ? { ...d, sites: [...d.sites, row] } : d,
+                    );
+                    void qc.invalidateQueries({ queryKey: ["account", props.accountId] });
+                    void qc.invalidateQueries({ queryKey: ["accounts"] });
+                    void qc.invalidateQueries({ queryKey: ["account-search"] });
+                    props.onChange(row);
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          </>
+        )}
+      </div>
+    );
   const known = !props.value || sites.some((s) => s.id === props.value);
   return (
     <Select

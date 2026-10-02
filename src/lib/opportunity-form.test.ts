@@ -35,10 +35,14 @@ describe("assigneeProblem — someone always follows an opportunity up (owner, O
   });
 });
 
-describe("opportunitySiteProblem — the site once a customer is set", () => {
-  it("no customer: no site asked for", () => {
-    expect(opportunitySiteProblem({ account_id: null, site_id: null, siteCount: 3 })).toBeNull();
-    expect(opportunitySiteProblem({ account_id: "", site_id: null, siteCount: 3 })).toBeNull();
+describe("opportunitySiteProblem — every opportunity names its site (owner, Oct 2)", () => {
+  it("no customer: the customer comes first (it is required)", () => {
+    expect(opportunitySiteProblem({ account_id: null, site_id: null, siteCount: 3 })).toBe(
+      "Pick or add the customer",
+    );
+    expect(opportunitySiteProblem({ account_id: "", site_id: null, siteCount: 3 })).toBe(
+      "Pick or add the customer",
+    );
   });
   it("a customer with several sites needs one picked, with the count", () => {
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 3 })).toBe(
@@ -49,10 +53,12 @@ describe("opportunitySiteProblem — the site once a customer is set", () => {
     );
     expect(opportunitySiteProblem({ account_id: ACC, site_id: SITE, siteCount: 3 })).toBeNull();
   });
-  it("one site is picked without asking; none is fine", () => {
+  it("one site is picked without asking; none needs one added first", () => {
     expect(autoSiteId([{ id: SITE }])).toBe(SITE);
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 1 })).toBeNull();
-    expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 0 })).toBeNull();
+    expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 0 })).toBe(
+      "Add a site to this customer first",
+    );
   });
 });
 
@@ -94,7 +100,10 @@ describe("saveOpportunity enforces the rules", () => {
   it("assignee required, site with the customer, site stored", () => {
     expect(src).toContain("assigneeProblem({ id, assignee_id: fields.assignee_id })");
     expect(src).toMatch(/site_id: z\.string\(\)\.uuid\(\)\.nullable\(\)\.optional\(\)/);
-    expect(src).toContain("opportunitySiteProblem({ account_id, site_id: null, siteCount })");
+    // Owner, Oct 2: customer, contact and site in one rule (opportunity-customer-required.test.ts).
+    expect(src).toMatch(
+      /opportunityProblem\(\{\s*account_id,\s*site_id,\s*siteCount,\s*hasContact: hasContactMethod\(acc\),\s*\}\)/,
+    );
     expect(src).toMatch(/\.from\("crm_sites"\)\s*\.select\("id", \{ count: "exact" \}\)/);
     expect(src).toContain('.is("deleted_at", null)');
     expect(src).toContain("That site does not belong to the customer");

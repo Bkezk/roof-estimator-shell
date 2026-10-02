@@ -124,7 +124,8 @@ describe("the forms send addressPayload", () => {
     expect(picker).toContain("...addressPayload(physical),");
     expect(picker).toContain("...(mailingSame ? {} : mailingPayload(mailing)),");
     expect(picker).not.toMatch(/^\s*\.\.\.physical,$/m);
-    const page = readFileSync("src/components/customers-page.tsx", "utf8");
+    // The site form (moved out of customers-page.tsx on Oct 2).
+    const page = readFileSync("src/components/crm/site-form.tsx", "utf8");
     expect(page).toContain(
       "saveFn({ data: sitePayload(props.accountId, props.site?.id ?? null, f) })",
     );

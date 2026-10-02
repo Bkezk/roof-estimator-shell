@@ -99,7 +99,15 @@ function setup(opts: { opp?: Row; followups?: Row[]; rpc?: FakeRpcAnswer } = {})
       crm_opportunities: [opportunity(opts.opp)],
       crm_followups: opts.followups ?? [],
       crm_contact_log: [],
-      crm_sites: [],
+      // Every opportunity names a reachable customer and a site (owner, Oct 2).
+      crm_accounts: [
+        { id: ACC1, name: "Bell County Schools", phone: "606-555-0100" },
+        { id: ACC2, name: "Pineville Water", email: "office@pv.example" },
+      ],
+      crm_sites: [
+        { id: "s1", account_id: ACC1, name: "Gym", deleted_at: null },
+        { id: "s2", account_id: ACC2, name: "Plant", deleted_at: null },
+      ],
       crm_settings: [SETTINGS],
     },
     opts.rpc ? { rpc: opts.rpc } : {},
@@ -129,7 +137,7 @@ describe("item 1 — a reopen is announced as a reopen, not an assignment", () =
     setup({ opp: { status: "lost" } });
     await call(
       saveOpportunity,
-      { id: OPP, title: "Reroof gym", assignee_id: REP, status: "contacted" },
+      { id: OPP, title: "Reroof gym", account_id: ACC1, assignee_id: REP, status: "contacted" },
       MGR,
     );
     expect(notified.map((n) => n.title)).toEqual(["Opportunity reopened: Reroof gym"]);
@@ -217,7 +225,13 @@ describe("item 8 — moving the date clears a running snooze, and says so", () =
     setup({ followups: [followup({ snoozed_until: future, next_remind_at: future })] });
     const row = await call<Row>(
       saveOpportunity,
-      { id: OPP, title: "Reroof gym", assignee_id: REP, expected_close: "2026-10-27" },
+      {
+        id: OPP,
+        title: "Reroof gym",
+        account_id: ACC1,
+        assignee_id: REP,
+        expected_close: "2026-10-27",
+      },
       MGR,
     );
     expect(row["followup_note"]).toBe("snooze cleared: the reminders follow the new date");
@@ -228,7 +242,13 @@ describe("item 8 — moving the date clears a running snooze, and says so", () =
     setup({ followups: [followup()] });
     const row = await call<Row>(
       saveOpportunity,
-      { id: OPP, title: "Reroof gym", assignee_id: REP, expected_close: "2026-10-27" },
+      {
+        id: OPP,
+        title: "Reroof gym",
+        account_id: ACC1,
+        assignee_id: REP,
+        expected_close: "2026-10-27",
+      },
       MGR,
     );
     expect(row["followup_note"] ?? null).toBeNull();

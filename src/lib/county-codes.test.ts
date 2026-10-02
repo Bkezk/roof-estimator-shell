@@ -169,8 +169,10 @@ describe("county code server input", () => {
 describe("where the county code shows", () => {
   it("the site form picks it, the site card and the ticket show it, Settings edits it", () => {
     const customers = read("../components/customers-page.tsx");
-    expect(customers).toMatch(/>County code<\/Label>\s*<CountyCodePicker/);
-    expect(customers).toContain("county_code_id: s?.county_code_id ?? null");
+    // The site form moved to its own module (Oct 2), shared with the opportunity's "Add site".
+    const siteForm = read("../components/crm/site-form.tsx");
+    expect(siteForm).toMatch(/>County code<\/Label>\s*<CountyCodePicker/);
+    expect(siteForm).toContain("county_code_id: s?.county_code_id ?? null");
     expect(customers).toContain("<CountyCodeLine id={s.county_code_id}");
     const ticket = read("../components/service-page.tsx");
     expect(ticket).toContain("<CountyCodeLine id={site?.county_code_id}");

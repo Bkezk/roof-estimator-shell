@@ -3,9 +3,10 @@
  * tested without the route.
  *
  *   ?id=<uuid>[&closeout=1]   open that ticket (closeout=1, from Today: at its close-out)
- *   ?new=1[&tech&date|&from|&account[&site]]
+ *   ?new=1[&tech&date|&from|&account[&site]|&opportunity]
  *                             a blank ticket, optionally prefilled (Tech Board "+", "New ticket
- *                             for this site", the Customers page)
+ *                             for this site", the Customers page, an opportunity's "Start a
+ *                             ticket")
  *   ?stage=<filter>[&overdue=1]
  *                             the list with its stage chip preset — a single stage or
  *                             `openwork` (open + scheduled + done) — and, with overdue=1, only
@@ -28,6 +29,8 @@ export interface ServiceSearch {
   from?: string;
   account?: string;
   site?: string;
+  /** New ticket: from this opportunity (customer, site, description; from_opportunity_id). */
+  opportunity?: string;
   /** List only: the stage chip to preset. */
   stage?: Exclude<StageFilter, "all">;
   /** List only: show only overdue open tickets. */
@@ -65,6 +68,7 @@ export function parseServiceSearch(s: Record<string, unknown>): ServiceSearch {
   const account = uuidParam(s["account"]);
   // A site only means something with its account.
   const site = account ? uuidParam(s["site"]) : undefined;
+  const opportunity = uuidParam(s["opportunity"]);
   return {
     new: 1,
     ...(typeof tech === "string" && tech ? { tech } : {}),
@@ -72,5 +76,6 @@ export function parseServiceSearch(s: Record<string, unknown>): ServiceSearch {
     ...(from ? { from } : {}),
     ...(account ? { account } : {}),
     ...(site ? { site } : {}),
+    ...(opportunity ? { opportunity } : {}),
   };
 }
