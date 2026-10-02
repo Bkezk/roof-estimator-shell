@@ -3897,7 +3897,50 @@ export type Database = {
       };
     };
     Views: {
-      [_ in never]: never;
+      /** repair_templates without unit_price (20261002160000_tech_price_free_reads.sql). */
+      repair_templates_catalog: {
+        Row: {
+          active: boolean | null;
+          category: string | null;
+          centerpoint_template_id: string | null;
+          created_at: string | null;
+          description: string | null;
+          favorite: boolean | null;
+          id: string | null;
+          name: string | null;
+          unit: string | null;
+          updated_at: string | null;
+          usage_count: number | null;
+          work_completed: string | null;
+        };
+        Relationships: [];
+      };
+      /** service_job_techs without bill_rate (20261002160000_tech_price_free_reads.sql). */
+      service_job_crew: {
+        Row: {
+          created_at: string | null;
+          id: string | null;
+          service_job_id: string | null;
+          sort: number | null;
+          technician_id: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "service_job_techs_service_job_id_fkey";
+            columns: ["service_job_id"];
+            isOneToOne: false;
+            referencedRelation: "service_jobs";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "service_job_techs_technician_id_fkey";
+            columns: ["technician_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Functions: {
       acquire_bid_lock: {
@@ -3978,6 +4021,7 @@ export type Database = {
         Returns: undefined;
       };
       stamp_dispatch: { Args: never; Returns: undefined };
+      set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };
       building_county_counts_storm: {
         Args: never;
         Returns: { county: string; state: string; n: number }[];

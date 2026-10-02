@@ -69,8 +69,9 @@ async function ticketFor(ctx: Ctx, jobId: string) {
   const sb = ctx.supabase;
   const [{ data: job, error }, { data: crew, error: cErr }] = await Promise.all([
     sb.from("service_jobs").select("id, technician_id").eq("id", jobId).maybeSingle(),
+    // Crew membership from the price-free view (no bill_rate; a technician reads nothing else).
     sb
-      .from("service_job_techs")
+      .from("service_job_crew")
       .select("id")
       .eq("service_job_id", jobId)
       .eq("technician_id", ctx.userId)

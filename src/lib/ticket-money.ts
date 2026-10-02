@@ -4,11 +4,42 @@
  * estimate pricing and can be edited per job"). The pure rules the server functions and the
  * migration 20261001050000_ticket_money_managers.sql share. No I/O.
  */
+import type { Database } from "@/integrations/supabase/types";
+
+type TemplateRow = Database["public"]["Tables"]["repair_templates"]["Row"];
+/** A row of the price-free view repair_templates_catalog (no unit_price). */
+export type CatalogTemplateRow = Database["public"]["Views"]["repair_templates_catalog"]["Row"];
+
+/**
+ * A row of repair_templates_catalog as a template row with no price: what anyone but a manager
+ * received before the view existed (the table's row through templatesForViewer). The catalog is
+ * how a technician reads templates now; RLS (repair_templates_read,
+ * 20261002160000_tech_price_free_reads.sql) no longer shows them the table. Built field by
+ * field, so a price never passes through.
+ */
+export function catalogTemplate(r: CatalogTemplateRow): TemplateRow {
+  return {
+    id: r.id ?? "",
+    name: r.name ?? "",
+    category: r.category ?? null,
+    unit: r.unit ?? "EA",
+    description: r.description ?? null,
+    work_completed: r.work_completed ?? null,
+    unit_price: null,
+    favorite: r.favorite ?? false,
+    usage_count: r.usage_count ?? 0,
+    active: r.active ?? true,
+    centerpoint_template_id: r.centerpoint_template_id ?? null,
+    created_at: r.created_at ?? "",
+    updated_at: r.updated_at ?? "",
+  };
+}
 
 /**
  * Repair templates as a viewer receives them: a non-manager gets every template with its
  * `unit_price` blanked (names, units and texts stay — reps still pick and complete repairs).
- * RLS cannot hide one column, so the server functions that list templates call this.
+ * RLS cannot hide one column: a manager's list reads the table, anyone else's the catalog view
+ * (catalogTemplate, already without the price); both lists still pass through this.
  */
 export function templatesForViewer<T extends { unit_price: number | null }>(
   rows: readonly T[],

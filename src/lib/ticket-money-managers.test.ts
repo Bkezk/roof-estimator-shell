@@ -300,12 +300,13 @@ describe("ticket money is a manager's", () => {
   });
   it("repair templates: listed without prices for a rep; edited by a manager", () => {
     const field = read("src/lib/service-field.functions.ts");
-    expect(serverFn(field, "listRepairTemplates")).toContain(
-      "return templatesForViewer(rows ?? [], managesTickets(p));",
-    );
-    expect(serverFn(field, "recentRepairsForJob")).toContain(
-      "return templatesForViewer(sorted, managesTickets(p));",
-    );
+    // A rep reads the price-free catalog view since 20261002160000 (tech-price-free-reads.test.ts);
+    // both lists still pass through templatesForViewer.
+    for (const name of ["listRepairTemplates", "recentRepairsForJob"]) {
+      const fn = serverFn(field, name);
+      expect(fn, name).toContain("const manager = managesTickets(p);");
+      expect(fn, name).toMatch(/return templatesForViewer\((rows|sorted), manager\);/);
+    }
     expect(serverFn(field, "saveRepairTemplate")).toContain(
       'if (!managesTickets(p)) throw new Error("Only a manager edits repair templates");',
     );

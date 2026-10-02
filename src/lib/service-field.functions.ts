@@ -15,7 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
-import { templatesForViewer } from "@/lib/ticket-money";
+import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
@@ -154,9 +154,10 @@ export const myDay = createServerFn({ method: "GET" })
       accountIds.length
         ? sb.from("crm_accounts").select("id, phone").in("id", accountIds)
         : Promise.resolve({ data: [] as { id: string; phone: string | null }[] }),
+      // Who is on each crew: the price-free view (a technician reads no rates).
       jobIds.length
         ? sb
-            .from("service_job_techs")
+            .from("service_job_crew")
             .select("service_job_id, technician_id, sort")
             .in("service_job_id", jobIds)
             .gt("sort", 0)
@@ -165,7 +166,7 @@ export const myDay = createServerFn({ method: "GET" })
             data: [] as {
               service_job_id: string | null;
               technician_id: string | null;
-              sort: number;
+              sort: number | null;
             }[],
           }),
       sb.rpc("technician_options"),
@@ -413,19 +414,42 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
   )
   .handler(async ({ data, context }): Promise<RepairTemplateRow[]> => {
     const p = await me(context);
-    let q = context.supabase
-      .from("repair_templates")
-      .select("*")
-      .eq("active", true)
-      .order("favorite", { ascending: false })
-      .order("usage_count", { ascending: false })
-      .order("name")
-      .limit(data.limit ?? 60);
-    if (data.q) q = q.ilike("name", `%${data.q.replace(/[%_,]/g, " ")}%`);
-    const { data: rows, error } = await q;
-    if (error) throw new Error(error.message);
-    // Prices are a manager's (owner, Oct 1); a rep gets the names without them.
-    return templatesForViewer(rows ?? [], managesTickets(p));
+    const manager = managesTickets(p);
+    const sb = context.supabase;
+    const limit = data.limit ?? 60;
+    const like = data.q ? `%${data.q.replace(/[%_,]/g, " ")}%` : null;
+    // Prices are a manager's (owner, Oct 1): a manager reads the table (unit_price), anyone
+    // else the price-free catalog view (RLS repair_templates_read no longer shows a technician
+    // the table). Same filters and order on both.
+    let rows: RepairTemplateRow[];
+    if (manager) {
+      let q = sb
+        .from("repair_templates")
+        .select("*")
+        .eq("active", true)
+        .order("favorite", { ascending: false })
+        .order("usage_count", { ascending: false })
+        .order("name")
+        .limit(limit);
+      if (like) q = q.ilike("name", like);
+      const { data: r, error } = await q;
+      if (error) throw new Error(error.message);
+      rows = r ?? [];
+    } else {
+      let q = sb
+        .from("repair_templates_catalog")
+        .select("*")
+        .eq("active", true)
+        .order("favorite", { ascending: false })
+        .order("usage_count", { ascending: false })
+        .order("name")
+        .limit(limit);
+      if (like) q = q.ilike("name", like);
+      const { data: r, error } = await q;
+      if (error) throw new Error(error.message);
+      rows = (r ?? []).map(catalogTemplate);
+    }
+    return templatesForViewer(rows, manager);
   });
 
 const templateSchema = z.object({
@@ -752,10 +776,16 @@ export const setJobCrew = createServerFn({ method: "POST" })
     if (!managesTickets(p) && job.technician_id !== context.userId)
       throw new Error("Only the technician on this ticket or a manager says who is on the job");
     const sb = context.supabase;
-    // Kept members keep the rate a manager set; new ones get none (the trigger
-    // service_job_techs_rate_guard refuses anything else from a non-manager).
+    // Kept members keep the rate a manager set; new ones get none. A manager reads the rates
+    // and sends them back; the lead cannot read them (RLS service_job_techs_read) and sends
+    // none, and set_job_crew keeps the stored ones (it and the trigger
+    // service_job_techs_rate_guard refuse a rate from a non-manager).
     const { readCrew, writeCrew } = await import("@/lib/service-crew.server");
-    const rows = confirmedCrew(await readCrew(sb, job.id), job.technician_id, data.others);
+    const rows = confirmedCrew(
+      await readCrew(sb, job.id, { rates: managesTickets(p) }),
+      job.technician_id,
+      data.others,
+    );
     const helper_count = await writeCrew(sb, job.id, rows);
     const { data: row, error } = await sb
       .from("service_jobs")
@@ -816,6 +846,7 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<RepairTemplateRow[]> => {
     const p = await me(context);
+    const manager = managesTickets(p);
     const sb = context.supabase;
     const { data: job } = await sb
       .from("service_jobs")
@@ -847,17 +878,28 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
       if (r.repair_template_id && !seen.includes(r.repair_template_id))
         seen.push(r.repair_template_id);
     if (!seen.length) return [];
-    const { data: templates } = await sb
-      .from("repair_templates")
-      .select("*")
-      .in("id", seen.slice(0, 12))
-      .eq("active", true);
+    // Prices are a manager's (owner, Oct 1): the table for a manager, the price-free catalog
+    // view for anyone else (as listRepairTemplates).
+    const picked = seen.slice(0, 12);
+    let templates: RepairTemplateRow[];
+    if (manager) {
+      const { data: r } = await sb
+        .from("repair_templates")
+        .select("*")
+        .in("id", picked)
+        .eq("active", true);
+      templates = r ?? [];
+    } else {
+      const { data: r } = await sb
+        .from("repair_templates_catalog")
+        .select("*")
+        .in("id", picked)
+        .eq("active", true);
+      templates = (r ?? []).map(catalogTemplate);
+    }
     const order = new Map(seen.map((id, i) => [id, i]));
-    const sorted = (templates ?? []).sort(
-      (a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99),
-    );
-    // Prices are a manager's (owner, Oct 1); a rep gets the names without them.
-    return templatesForViewer(sorted, managesTickets(p));
+    const sorted = templates.sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+    return templatesForViewer(sorted, manager);
   });
 
 /**
