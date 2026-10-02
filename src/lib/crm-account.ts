@@ -195,3 +195,42 @@ export function mailingLines(
     zip: a.mailing_zip,
   });
 }
+
+// ---- deleting a customer (audit, Oct 2) ---------------------------------------------------
+
+/** A second Delete on a customer already deleted: nothing is written. */
+export const ACCOUNT_ALREADY_DELETED = "This customer was already deleted";
+/** Any change to a deleted customer, its sites or its contacts. */
+export const ACCOUNT_DELETED = "This customer was deleted; an admin or a manager can restore it";
+/** Ticket stages that keep a customer from being deleted (the open work). */
+export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/** Opportunity statuses that keep a customer from being deleted. */
+export const OPEN_OPPORTUNITY_STATUSES = ["open", "contacted", "quoted"] as const;
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * Why a customer may not be deleted yet, or null: "This customer has 2 open tickets and 1 open
+ * opportunity; close or move them first".
+ */
+export function deleteBlockedMessage(openTickets: number, openOpps: number): string | null {
+  const parts = [
+    openTickets > 0 ? count(openTickets, "open ticket", "open tickets") : null,
+    openOpps > 0 ? count(openOpps, "open opportunity", "open opportunities") : null,
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return `This customer has ${parts.join(" and ")}; close or move them first`;
+}
+
+/**
+ * The banner on a deleted customer: "Deleted on Oct 2, 2026 by Pat Sales" — the date alone when
+ * who is unknown (the audit log is an admin's or a manager's to read).
+ */
+export function deletedLine(deletedAt: string, byName: string | null | undefined): string {
+  const d = new Date(deletedAt);
+  const date = Number.isNaN(d.getTime())
+    ? deletedAt
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const who = (byName ?? "").trim();
+  return `Deleted on ${date}${who ? ` by ${who}` : ""}`;
+}

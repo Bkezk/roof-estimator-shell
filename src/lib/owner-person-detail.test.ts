@@ -177,7 +177,7 @@ const items = mergeWork({ tickets, tasks, followups }, toYmd);
 
 describe("detail groups hold exactly what the row's numbers count", () => {
   const buckets = bucketCounts(items, TODAY);
-  const oppsBy = oppCounts(opps, TODAY);
+  const oppsBy = oppCounts(opps, TODAY, followups);
   const doneBy = doneThisWeek(doneTickets, doneTasks, TODAY);
   for (const [who, id] of [
     ["Bob", BOB],
@@ -185,7 +185,7 @@ describe("detail groups hold exactly what the row's numbers count", () => {
     ["nobody", "33333333-3333-4333-8333-333333333333"],
   ] as const) {
     it(`${who}: Due today, Overdue and Done this week equal the group lengths`, () => {
-      const g = detailGroups(id, items, opps, TODAY);
+      const g = detailGroups(id, items, opps, TODAY, followups);
       const done = doneItemsFor(id, doneTickets, doneTasks, weekRange(TODAY));
       const b = bucketsFor(buckets, id);
       expect(g.today.length).toBe(dueTotal(b.today));
@@ -194,7 +194,7 @@ describe("detail groups hold exactly what the row's numbers count", () => {
     });
   }
   it("Bob's groups, item by item", () => {
-    const g = detailGroups(BOB, items, opps, TODAY);
+    const g = detailGroups(BOB, items, opps, TODAY, followups);
     expect(g.today.map((i) => i.key)).toEqual(["ticket:t1", "ticket:t2", "task:k1", "followup:f1"]);
     expect(g.today.map((i) => i.kind)).toEqual(["ticket", "inspection", "task", "followup"]);
     // Oldest first; the overdue opportunity rides in Overdue with its own badge and link.

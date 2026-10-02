@@ -93,6 +93,18 @@ export const snoozeFollowup = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
     if (!canManageFollowup(p)) throw new Error(FOLLOWUP_MANAGER_ONLY);
+    // A deleted opportunity's follow-up is not pushed out (deleting closes it; closing stays
+    // allowed).
+    const { data: f, error: fErr } = await context.supabase
+      .from("crm_followups")
+      .select("kind, item_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (fErr) throw new Error(fErr.message);
+    if (f?.kind === "opportunity") {
+      const { assertLiveOpportunity } = await import("@/lib/opportunities.functions");
+      await assertLiveOpportunity(context.supabase, f.item_id);
+    }
     const next = new Date(Date.now() + data.days * 86400000).toISOString();
     const snooze = (patch: { next_remind_at: string; snoozed_until?: string }) =>
       context.supabase

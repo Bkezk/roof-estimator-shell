@@ -2,6 +2,14 @@
  * Opportunities — a potential new customer, or new work for one (design §11). Assigned to a
  * user with an expected close date; the follow-up timer (followups.server.ts) reminds them
  * until it is Won / Lost / No response.
+ *
+ * A deleted opportunity (deleted_at set) stays readable by id — an old `/opportunities?id=…`
+ * link shows it with a "Deleted on <date>" banner, read-only — but nothing changes it: saving,
+ * a status change, logging a contact, snoozing its follow-up are refused with OPP_DELETED
+ * (audit, Oct 2: through an old link the status could be changed, a new follow-up started and
+ * the assignee reminded about an opportunity the list hides). Deleting closes its open
+ * follow-up; an admin or a manager may restore it (restoreOpportunity), which does not reopen
+ * the follow-up (the next status change syncs a fresh one).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -9,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, seesEveryone } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
@@ -27,6 +35,8 @@ export const OPP_STATUS_LABELS: Record<OppStatus, string> = {
   no_response: "No response",
 };
 export const OPP_CLOSING: readonly OppStatus[] = ["won", "lost", "no_response"];
+/** The plain refusal for any change to a deleted opportunity. */
+export const OPP_DELETED = "This opportunity was deleted";
 
 export type OpportunityWithNames = OpportunityRow & {
   assignee_name: string | null;
@@ -48,6 +58,21 @@ async function me(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
+
+/**
+ * Refuse a change to an opportunity that is gone: "Opportunity not found" when it cannot be read,
+ * OPP_DELETED when it was deleted. Called before anything is written.
+ */
+export async function assertLiveOpportunity(sb: SupabaseClient<Database>, id: string) {
+  const { data, error } = await sb
+    .from("crm_opportunities")
+    .select("id, deleted_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Opportunity not found");
+  if (data.deleted_at) throw new Error(OPP_DELETED);
+}
 
 async function withNames(sb: SupabaseClient<Database>, rows: OpportunityRow[]) {
   const accountIds = [...new Set(rows.map((r) => r.account_id).filter((x): x is string => !!x))];
@@ -178,6 +203,8 @@ export const saveOpportunity = createServerFn({ method: "POST" })
       throw new Error("Forbidden: Customers access required");
     const sb = context.supabase;
     const { id, ...fields } = data;
+    // A deleted opportunity is read-only (an old link still opens it).
+    if (id) await assertLiveOpportunity(sb, id);
     // Every opportunity keeps a date (owner, Oct 1): an update may not clear it.
     const dateProblem = opportunityDateProblem({ id, expected_close: fields.expected_close });
     if (dateProblem) throw new Error(dateProblem);
@@ -265,9 +292,12 @@ export const saveOpportunity = createServerFn({ method: "POST" })
         .from("crm_opportunities")
         .update(patch)
         .eq("id", id)
+        .is("deleted_at", null)
         .select("*")
-        .single();
+        .maybeSingle();
       if (error) throw new Error(error.message);
+      // Deleted between the check and the write, or not the caller's to change (RLS).
+      if (!r) throw new Error("Opportunity not found, or not yours to change");
       row = r;
       // Every move goes in the contact log as a plain note (not a contact: it does not stamp
       // contacted_at — 20261001030000_followups_manager_only.sql). Best effort: already saved.
@@ -320,10 +350,12 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
+    await assertLiveOpportunity(context.supabase, data.id);
     const { data: row, error } = await context.supabase
       .from("crm_opportunities")
       .update({ status: data.status, updated_by_name: nameOf(p) })
       .eq("id", data.id)
+      .is("deleted_at", null)
       .select("*")
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -347,16 +379,22 @@ export const setOpportunityStatus = createServerFn({ method: "POST" })
     );
   });
 
+/**
+ * Soft delete. Its open follow-up is closed in the same call (reason 'deleted', under the system
+ * flag — syncFollowup), so no reminder goes out for it. A second delete changes nothing.
+ */
 export const deleteOpportunity = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     const p = await me(context);
     if (!canAccess(p, "customers")) throw new Error("Forbidden: Customers access required");
+    await assertLiveOpportunity(context.supabase, data.id);
     const { error } = await context.supabase
       .from("crm_opportunities")
-      .update({ deleted_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .update({ deleted_at: new Date().toISOString(), updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .is("deleted_at", null);
     if (error) throw new Error(error.message);
     const { syncFollowup } = await import("@/lib/followups.server");
     await syncFollowup(
@@ -375,4 +413,24 @@ export const deleteOpportunity = createServerFn({ method: "POST" })
       },
       context.supabase,
     );
+  });
+
+/**
+ * Undo a delete: admins and managers only. Clears deleted_at; the follow-up closed by the delete
+ * stays closed (the next save or status change syncs a fresh one).
+ */
+export const restoreOpportunity = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<void> => {
+    const p = await me(context);
+    if (!seesEveryone(p)) throw new Error("Only an admin or a manager can restore an opportunity");
+    const { data: rows, error } = await context.supabase
+      .from("crm_opportunities")
+      .update({ deleted_at: null, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .not("deleted_at", "is", null)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if (!rows?.length) throw new Error("This opportunity is not deleted");
   });

@@ -14,10 +14,16 @@
  *                   scheduled today, open tasks due today, open follow-ups due today — the same
  *                   items My Work lists for that person (a ticket's own follow-up rides on it).
  *   Overdue         My Work items in the Overdue bucket (a Done ticket never is) plus open
- *                   opportunities assigned to them past expected close (`isOverdueOpp`).
+ *                   opportunities assigned to them past expected close (`isOverdueOpp`) that
+ *                   have NO open follow-up of theirs: an opportunity with one is already on My
+ *                   Work as that follow-up's row (its due date is the expected close), so it is
+ *                   counted there, once (audit, Oct 2: an overdue opportunity counted twice —
+ *                   Owner said 2 while the My Work list it links to showed 1).
  *   Done this week  tickets in done / invoiced / closed whose completed_at falls in this Mon–Sun
  *                   week, plus tasks marked done (done_at) in that week.
- *   Open opps       opportunities assigned to them, status open / contacted / quoted.
+ *   Open opps       opportunities assigned to them, status open / contacted / quoted; the
+ *                   number opens the Opportunities list filtered to that person
+ *                   (`oppsHref`: ?status=allopen&assignee=<id>).
  *   Last activity   the latest of their ticket events, contact-log entries, tasks done, time
  *                   entries and audit-log entries; red when older than 3 working days (never
  *                   for admins).
@@ -29,11 +35,12 @@ import {
   bucketOf,
   ticketKind,
   weekday,
+  type FollowupIn,
   type WorkItem,
   type WorkKind,
 } from "@/lib/my-work";
 import { TASK_TZ, localYmd as easternYmd } from "@/lib/tasks";
-import { isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
+import { OPP_ALL_OPEN, isOpenOppStatus, isOverdueOpp } from "@/lib/work-counts";
 
 // ---- who may see it -----------------------------------------------------------------------
 
@@ -143,6 +150,7 @@ export const bucketsFor = (all: Record<string, PersonBuckets>, id: string): Pers
   all[id] ?? emptyBuckets();
 
 export interface OppIn {
+  id: string;
   assignee_id: string | null;
   status: string;
   expected_close: string | null;
@@ -151,21 +159,72 @@ export interface OppIn {
 
 export interface OppCounts {
   open: number;
+  /**
+   * Past expected close with no open follow-up of the assignee's: the opportunities Overdue adds
+   * on top of My Work's Overdue bucket (one with a follow-up is already in that bucket as the
+   * follow-up's row).
+   */
   overdue: number;
   value: number;
 }
 
-/** Open (not closing) opportunities per assignee: count, past expected close, est_value sum. */
-export function oppCounts(opps: OppIn[], today: string): Record<string, OppCounts> {
+/** The follow-up fields that say which opportunity (and whose) an open follow-up is. */
+export type OppFollowupIn = Pick<FollowupIn, "kind" | "item_id" | "assignee_id" | "status">;
+
+const followKey = (oppId: string, assigneeId: string) => `${oppId}|${assigneeId}`;
+
+/**
+ * The opportunities already on My Work: `<opportunity id>|<assignee id>` of every open follow-up
+ * of kind 'opportunity'. My Work lists that follow-up (mergeWork), so the opportunity is counted
+ * there and never again as an opportunity row.
+ */
+export function followedOpps(followups: readonly OppFollowupIn[]): Set<string> {
+  const out = new Set<string>();
+  for (const f of followups)
+    if (f.kind === "opportunity" && f.status === "open")
+      out.add(followKey(f.item_id, f.assignee_id));
+  return out;
+}
+
+/** An overdue opportunity that is not on My Work as its assignee's open follow-up. */
+const extraOverdueOpp = (o: OppIn, today: string, followed: ReadonlySet<string>) =>
+  !!o.assignee_id && isOverdueOpp(o, today) && !followed.has(followKey(o.id, o.assignee_id));
+
+/**
+ * Open (not closing) opportunities per assignee: count, overdue (past expected close and not
+ * already on My Work as an open follow-up — `followups` are the open follow-up rows My Work
+ * reads), est_value sum.
+ */
+export function oppCounts(
+  opps: OppIn[],
+  today: string,
+  followups: readonly OppFollowupIn[] = [],
+): Record<string, OppCounts> {
+  const followed = followedOpps(followups);
   const out: Record<string, OppCounts> = {};
   for (const o of opps) {
     if (!o.assignee_id || !isOpenOppStatus(o.status)) continue;
     const c = (out[o.assignee_id] ??= { open: 0, overdue: 0, value: 0 });
     c.open++;
-    if (isOverdueOpp(o, today)) c.overdue++;
+    if (extraOverdueOpp(o, today, followed)) c.overdue++;
     c.value += Number(o.est_value ?? 0) || 0;
   }
   return out;
+}
+
+/** The numbers on one person's row, from their buckets and opportunity counts — defined once. */
+export function personNumbers(
+  b: PersonBuckets,
+  o: OppCounts | undefined,
+): Pick<OwnerRow, "dueToday" | "overdue" | "overdueOpps" | "openOpps" | "oppValue"> {
+  const opp = o ?? { open: 0, overdue: 0, value: 0 };
+  return {
+    dueToday: b.today,
+    overdue: b.overdue + opp.overdue,
+    overdueOpps: opp.overdue,
+    openOpps: opp.open,
+    oppValue: opp.value,
+  };
 }
 
 /** Ticket stages that count as done for "Done this week". */
@@ -321,9 +380,9 @@ export interface OwnerRow {
   name: string;
   role: RoleLabel;
   dueToday: DueCounts;
-  /** My Work overdue items + overdue opportunities. */
+  /** My Work overdue items + overdue opportunities not already there as a follow-up. */
   overdue: number;
-  /** Of `overdue`, opportunities past expected close. */
+  /** Of `overdue`, the opportunities past expected close that are not on My Work. */
   overdueOpps: number;
   doneThisWeek: number;
   openOpps: number;
@@ -386,13 +445,36 @@ export function myWorkHref(
   };
 }
 
+/**
+ * Where an opportunity number links: the Opportunities list, All open, filtered to that person
+ * (`who` = their id; "all" for the totals row = everyone), and to the overdue ones for the
+ * "incl. N opportunities" line. Before Oct 2 a person's number opened everyone's list.
+ */
+export function oppsHref(
+  who: string,
+  overdue = false,
+): {
+  to: "/opportunities";
+  search: { status: typeof OPP_ALL_OPEN; assignee?: string; overdue?: 1 };
+} {
+  return {
+    to: "/opportunities",
+    search: {
+      status: OPP_ALL_OPEN,
+      ...(who === "all" ? {} : { assignee: who }),
+      ...(overdue ? { overdue: 1 as const } : {}),
+    },
+  };
+}
+
 // ---- one person's detail (owner, Oct 1: "a bit more detail per person") -------------------
 //
 // Clicking a row on the Owner view opens that person's actual items, grouped Today / Overdue /
 // Done this week, and their last five actions. The groups hold exactly the items the row's
 // numbers count: Today and Overdue go through the same `bucketOf` as `bucketCounts` (plus the
-// overdue opportunities `oppCounts` adds to Overdue), Done this week through the same week test
-// as `doneThisWeek`.
+// overdue opportunities `oppCounts` adds to Overdue: only those not already there as their open
+// follow-up — the follow-up row wins, one row per real item), Done this week through the same
+// week test as `doneThisWeek`.
 
 export type DetailKind = WorkKind | "opportunity";
 
@@ -448,15 +530,18 @@ function compareDetail(a: DetailItem, b: DetailItem): number {
 /**
  * One person's Today and Overdue items: their My Work items (`mergeWork`) bucketed by `bucketOf`
  * exactly as `bucketCounts` does, plus their open opportunities past expected close in Overdue
- * (`isOverdueOpp`, as `oppCounts`). So today.length = the row's Due today and overdue.length =
- * the row's Overdue.
+ * that have no open follow-up of theirs (`followups`, as `oppCounts`): an opportunity with one is
+ * listed once, as the follow-up's row (it opens the opportunity too). So today.length = the
+ * row's Due today and overdue.length = the row's Overdue.
  */
 export function detailGroups(
   userId: string,
   items: WorkItem[],
   opps: DetailOppIn[],
   today: string,
+  followups: readonly OppFollowupIn[] = [],
 ): { today: DetailItem[]; overdue: DetailItem[] } {
+  const followed = followedOpps(followups);
   const due: DetailItem[] = [];
   const late: DetailItem[] = [];
   for (const it of items) {
@@ -466,7 +551,7 @@ export function detailGroups(
     else if (b === "overdue") late.push(it);
   }
   for (const o of opps)
-    if (o.assignee_id === userId && isOverdueOpp(o, today)) late.push(oppItem(o));
+    if (o.assignee_id === userId && extraOverdueOpp(o, today, followed)) late.push(oppItem(o));
   return { today: due.sort(compareDetail), overdue: late.sort(compareDetail) };
 }
 

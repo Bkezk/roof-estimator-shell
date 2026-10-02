@@ -10,6 +10,11 @@
  * required; a customer is optional, but once set the opportunity names its site
  * (lib/opportunity-form.ts); the lead source picks from a maintained list (Settings › General ›
  * Lead sources, type-to-add); "Start a bid" opens /estimate prefilled at any status.
+ *
+ * A deleted opportunity (an old `?id=` link) opens read-only under a "Deleted on <date>" banner:
+ * the form is disabled, and the status select, Start a bid, Delete, the follow-up strip and the
+ * contact-log buttons are gone (the server refuses them too: OPP_DELETED). Admins and managers
+ * get Restore (restoreOpportunity).
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,6 +32,7 @@ import {
   Loader2,
   Phone,
   Plus,
+  RotateCcw,
   Save,
   Target,
   Trash2,
@@ -44,7 +50,7 @@ import {
   opportunitySiteProblem,
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
-import type { StatusFilter } from "@/lib/opportunities-search";
+import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 import { localYmd } from "@/lib/tasks";
 import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN } from "@/lib/work-counts";
 import {
@@ -55,6 +61,7 @@ import {
   OPP_CLOSING,
   OPP_STATUS_LABELS,
   OPP_STATUSES,
+  restoreOpportunity,
   saveOpportunity,
   setOpportunityStatus,
   type OppStatus,
@@ -145,6 +152,7 @@ export function OpportunitiesPage({
   isNew,
   status,
   overdue,
+  assignee,
 }: {
   id?: string | undefined;
   isNew?: boolean;
@@ -152,15 +160,18 @@ export function OpportunitiesPage({
   status?: Exclude<StatusFilter, "all"> | undefined;
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
   overdue?: boolean | undefined;
+  /** The list: only this person's (`?assignee=<id>`, the Owner view's per-person numbers). */
+  assignee?: string | undefined;
 }) {
   if (id) return <OppLoader id={id} />;
   if (isNew) return <OppEditor opp={null} />;
   // Keyed on the preset so following another counts-strip link re-applies it.
   return (
     <OppList
-      key={`${status ?? ""}|${overdue ? 1 : 0}`}
+      key={`${status ?? ""}|${overdue ? 1 : 0}|${assignee ?? ""}`}
       presetStatus={status}
       presetOverdue={!!overdue}
+      presetAssignee={assignee}
     />
   );
 }
@@ -203,9 +214,11 @@ const writeCollapsed = (statuses: OppStatus[]) => {
 function OppList({
   presetStatus,
   presetOverdue,
+  presetAssignee,
 }: {
   presetStatus?: Exclude<StatusFilter, "all"> | undefined;
   presetOverdue: boolean;
+  presetAssignee?: string | undefined;
 }) {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
@@ -235,6 +248,8 @@ function OppList({
   // Overdue: open opportunities past their expected close (lib/work-counts.ts isOverdueOpp),
   // preset by ?overdue=1 from the Customers page counts strip; cleared from its chip.
   const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
+  // One person's (?assignee=<id>, the Owner view's numbers); cleared from its chip.
+  const [assigneeOnly, setAssigneeOnly] = useState<string | undefined>(presetAssignee);
   const today = localYmd(new Date());
   const [mine, setMine] = useState(false);
   const [collapsed, setCollapsed] = useState<OppStatus[]>(readCollapsed);
@@ -249,6 +264,7 @@ function OppList({
   const q = search.trim().toLowerCase();
   const filtered = opps.filter((o) => {
     if (mine && o.assignee_id !== profile?.id) return false;
+    if (!matchesAssignee(o, assigneeOnly)) return false;
     if (statusFilter === OPP_ALL_OPEN) {
       if (!isOpenOppStatus(asStatus(o.status))) return false;
     } else if (statusFilter !== "all" && asStatus(o.status) !== statusFilter) return false;
@@ -277,13 +293,17 @@ function OppList({
       rows.sort((a, b) => (a.expected_close ?? "9999").localeCompare(b.expected_close ?? "9999"));
     return { status, rows };
   }).filter((g) => g.rows.length > 0);
-  const anyFilter = q !== "" || statusFilter !== "all" || mine || overdueOnly;
+  const anyFilter = q !== "" || statusFilter !== "all" || mine || overdueOnly || !!assigneeOnly;
   const clearFilters = () => {
     setSearch("");
     setStatusFilter("all");
     setOverdueOnly(false);
     setMine(false);
+    setAssigneeOnly(undefined);
   };
+  const assigneeLabel = assigneeOnly
+    ? (opps.find((o) => o.assignee_id === assigneeOnly)?.assignee_name ?? "one person")
+    : "";
   const newOpp = () => void navigate({ to: "/opportunities", search: { new: 1 } });
 
   return (
@@ -358,6 +378,20 @@ function OppList({
                     onClick={() => setOverdueOnly(false)}
                   >
                     Overdue <X className="ml-1 h-3 w-3" aria-hidden />
+                    <span className="sr-only">(clear)</span>
+                  </Button>
+                )}
+                {assigneeOnly && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="h-7 rounded-full px-3 text-xs"
+                    data-filter="assignee"
+                    title="Only this person's opportunities. Click to show everyone's."
+                    onClick={() => setAssigneeOnly(undefined)}
+                  >
+                    Assigned to {assigneeLabel} <X className="ml-1 h-3 w-3" aria-hidden />
                     <span className="sr-only">(clear)</span>
                   </Button>
                 )}
@@ -605,6 +639,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const saveFn = useServerFn(saveOpportunity);
   const statusFn = useServerFn(setOpportunityStatus);
   const deleteFn = useServerFn(deleteOpportunity);
+  const restoreFn = useServerFn(restoreOpportunity);
   const techFn = useServerFn(listTechnicians);
   const settingsFn = useServerFn(getCrmSettings);
   const accountFn = useServerFn(getAccount);
@@ -621,6 +656,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   // The × on the customer block: the search box comes back, focused.
   const [changingCustomer, setChangingCustomer] = useState(false);
   const status = opp ? asStatus(opp.status) : draft.status;
+  // Deleted (an old link): read-only, with Restore for admins and managers.
+  const deleted = !!opp?.deleted_at;
+  const canRestore = seesEveryone(profile);
 
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -739,6 +777,15 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
     onError: (e) => toast.error(`Could not delete the opportunity: ${errText(e)}`),
   });
 
+  const restore = useMutation({
+    mutationFn: () => restoreFn({ data: { id: opp!.id } }),
+    onSuccess: () => {
+      toast.success("Opportunity restored");
+      invalidate(opp!.id);
+    },
+    onError: (e) => toast.error(`Could not restore the opportunity: ${errText(e)}`),
+  });
+
   const submit = () => {
     if (save.isPending) return;
     if (!draft.title.trim()) {
@@ -765,7 +812,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
   const statusSelect = (
     <Select
       value={status}
-      disabled={statusMut.isPending}
+      disabled={statusMut.isPending || deleted}
       onValueChange={(v) =>
         opp ? statusMut.mutate(v as OppStatus) : set("status", v as OppStatus)
       }
@@ -835,153 +882,164 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
       className="space-y-5"
       onSubmit={(e) => {
         e.preventDefault();
-        submit();
+        if (!deleted) submit();
       }}
     >
-      <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
-        <div className="min-w-0 space-y-4">
-          <div className="space-y-1">
-            <Label htmlFor="opp-title">Title</Label>
-            <Input
-              id="opp-title"
-              value={draft.title}
-              autoFocus={!opp}
-              maxLength={200}
-              placeholder="e.g. Reroof — Yellow Creek Elementary gym"
-              onChange={(e) => set("title", e.target.value)}
-            />
-          </div>
-          {customerField}
-          <div className="space-y-1">
-            <Label htmlFor="opp-description">Description</Label>
-            <AutoTextarea
-              id="opp-description"
-              rows={2}
-              value={draft.description}
-              maxLength={2000}
-              placeholder="What the job is"
-              onChange={(e) => set("description", e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="@container min-w-0">
-          <div className="grid grid-cols-2 gap-4 @2xl:grid-cols-4" data-row="opp-four-fields">
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor="opp-assignee">Assignee</Label>
-              <Select value={draft.assignee_id} onValueChange={(v) => set("assignee_id", v)}>
-                <SelectTrigger
-                  id="opp-assignee"
-                  aria-invalid={!!assigneeMessage || undefined}
-                  className={assigneeMessage ? "border-destructive" : ""}
-                >
-                  <SelectValue placeholder="Pick someone…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {techOptions.some((t) => !t.technician) && (
-                    <SelectGroup>
-                      <SelectLabel>Office</SelectLabel>
-                      {assigneeItems(techOptions.filter((t) => !t.technician))}
-                    </SelectGroup>
-                  )}
-                  {techOptions.some((t) => t.technician) && (
-                    <SelectGroup>
-                      <SelectLabel>Technicians</SelectLabel>
-                      {assigneeItems(techOptions.filter((t) => t.technician))}
-                    </SelectGroup>
-                  )}
-                </SelectContent>
-              </Select>
-              {techs.error && (
-                <p className="text-xs text-destructive">
-                  Could not load the users: {errText(techs.error)}
-                </p>
-              )}
-              {assigneeMessage && <p className="text-xs text-destructive">{assigneeMessage}</p>}
-            </div>
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor="opp-close">Expected close</Label>
+      {/* A deleted opportunity's form is read-only: every field in the fieldset is disabled. */}
+      <fieldset
+        disabled={deleted}
+        className="min-w-0 space-y-5"
+        data-readonly={deleted || undefined}
+      >
+        <div className="grid gap-5 md:grid-cols-2 md:gap-x-8">
+          <div className="min-w-0 space-y-4">
+            <div className="space-y-1">
+              <Label htmlFor="opp-title">Title</Label>
               <Input
-                id="opp-close"
-                type="date"
-                value={draft.expected_close}
-                readOnly={closeLocked}
-                onChange={(e) => {
-                  if (!closeLocked) set("expected_close", e.target.value);
-                }}
-              />
-              {closeLocked && <p className="text-xs text-muted-foreground">Managers move dates</p>}
-              {opp && !draft.expected_close && (
-                <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
-              )}
-              {!opp && (
-                <p className="text-xs text-muted-foreground">
-                  Blank = the admin default
-                  {settings.data ? ` (${settings.data.opportunity_close_days} days)` : ""}.
-                </p>
-              )}
-            </div>
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor="opp-source">Lead source</Label>
-              <LeadSourcePicker
-                id="opp-source"
-                value={draft.lead_source}
-                onChange={(v) => set("lead_source", v)}
+                id="opp-title"
+                value={draft.title}
+                autoFocus={!opp}
+                maxLength={200}
+                placeholder="e.g. Reroof — Yellow Creek Elementary gym"
+                onChange={(e) => set("title", e.target.value)}
               />
             </div>
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor="opp-value">Est. value ($)</Label>
-              <div id="opp-value">
-                <NumberField
-                  value={draft.est_value}
-                  min={0}
-                  step="any"
-                  inputMode="decimal"
-                  onChange={(v) => set("est_value", v)}
+            {customerField}
+            <div className="space-y-1">
+              <Label htmlFor="opp-description">Description</Label>
+              <AutoTextarea
+                id="opp-description"
+                rows={2}
+                value={draft.description}
+                maxLength={2000}
+                placeholder="What the job is"
+                onChange={(e) => set("description", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="@container min-w-0">
+            <div className="grid grid-cols-2 gap-4 @2xl:grid-cols-4" data-row="opp-four-fields">
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="opp-assignee">Assignee</Label>
+                <Select value={draft.assignee_id} onValueChange={(v) => set("assignee_id", v)}>
+                  <SelectTrigger
+                    id="opp-assignee"
+                    aria-invalid={!!assigneeMessage || undefined}
+                    className={assigneeMessage ? "border-destructive" : ""}
+                  >
+                    <SelectValue placeholder="Pick someone…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {techOptions.some((t) => !t.technician) && (
+                      <SelectGroup>
+                        <SelectLabel>Office</SelectLabel>
+                        {assigneeItems(techOptions.filter((t) => !t.technician))}
+                      </SelectGroup>
+                    )}
+                    {techOptions.some((t) => t.technician) && (
+                      <SelectGroup>
+                        <SelectLabel>Technicians</SelectLabel>
+                        {assigneeItems(techOptions.filter((t) => t.technician))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+                {techs.error && (
+                  <p className="text-xs text-destructive">
+                    Could not load the users: {errText(techs.error)}
+                  </p>
+                )}
+                {assigneeMessage && <p className="text-xs text-destructive">{assigneeMessage}</p>}
+              </div>
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="opp-close">Expected close</Label>
+                <Input
+                  id="opp-close"
+                  type="date"
+                  value={draft.expected_close}
+                  readOnly={closeLocked}
+                  onChange={(e) => {
+                    if (!closeLocked) set("expected_close", e.target.value);
+                  }}
                 />
+                {closeLocked && (
+                  <p className="text-xs text-muted-foreground">Managers move dates</p>
+                )}
+                {opp && !draft.expected_close && (
+                  <p className="text-xs text-destructive">{OPPORTUNITY_DATE_REQUIRED}</p>
+                )}
+                {!opp && (
+                  <p className="text-xs text-muted-foreground">
+                    Blank = the admin default
+                    {settings.data ? ` (${settings.data.opportunity_close_days} days)` : ""}.
+                  </p>
+                )}
+              </div>
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="opp-source">Lead source</Label>
+                <LeadSourcePicker
+                  id="opp-source"
+                  value={draft.lead_source}
+                  onChange={(v) => set("lead_source", v)}
+                />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="opp-value">Est. value ($)</Label>
+                <div id="opp-value">
+                  <NumberField
+                    value={draft.est_value}
+                    min={0}
+                    step="any"
+                    inputMode="decimal"
+                    onChange={(v) => set("est_value", v)}
+                  />
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <Label htmlFor="opp-notes">Notes</Label>
-        <AutoTextarea
-          id="opp-notes"
-          rows={2}
-          value={draft.notes}
-          maxLength={10000}
-          onChange={(e) => set("notes", e.target.value)}
-        />
-      </div>
+        <div className="space-y-1">
+          <Label htmlFor="opp-notes">Notes</Label>
+          <AutoTextarea
+            id="opp-notes"
+            rows={2}
+            value={draft.notes}
+            maxLength={10000}
+            onChange={(e) => set("notes", e.target.value)}
+          />
+        </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          type="submit"
-          size="lg"
-          disabled={
-            save.isPending ||
-            (!!opp && !dirty) ||
-            (!!opp && !draft.expected_close) ||
-            !!assigneeMessage ||
-            !!siteMessage
-          }
-        >
-          {save.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Save className="mr-2 h-4 w-4" />
-          )}
-          {opp ? "Save" : "Create opportunity"}
-        </Button>
-        {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
-        {!opp && draft.assignee_id && (
-          <span className="text-xs text-muted-foreground">
-            Creating it starts the assignee&apos;s follow-up reminders.
-          </span>
+        {!deleted && (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              size="lg"
+              disabled={
+                save.isPending ||
+                (!!opp && !dirty) ||
+                (!!opp && !draft.expected_close) ||
+                !!assigneeMessage ||
+                !!siteMessage
+              }
+            >
+              {save.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {opp ? "Save" : "Create opportunity"}
+            </Button>
+            {opp && dirty && <span className="text-sm text-muted-foreground">Unsaved changes</span>}
+            {!opp && draft.assignee_id && (
+              <span className="text-xs text-muted-foreground">
+                Creating it starts the assignee&apos;s follow-up reminders.
+              </span>
+            )}
+          </div>
         )}
-      </div>
+      </fieldset>
     </form>
   );
 
@@ -997,6 +1055,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           <div className="flex flex-wrap items-center gap-2">
             {statusSelect}
             {opp &&
+              !deleted &&
               // Owner, Oct 1: at every status. A linked bid shows instead (opens it).
               (opp.bid_id ? (
                 <Button asChild variant="outline">
@@ -1015,7 +1074,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   </Link>
                 </Button>
               ))}
-            {opp && can("customers") && (
+            {opp && !deleted && can("customers") && (
               <Button
                 variant="outline"
                 className="text-destructive hover:text-destructive"
@@ -1026,6 +1085,30 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             )}
           </div>
         </div>
+        {opp?.deleted_at && (
+          <div
+            role="status"
+            data-banner="deleted"
+            className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm"
+          >
+            <Trash2 className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="font-medium">Deleted on {when(opp.deleted_at)}.</span> It is
+              read-only and sends no reminders.
+              {canRestore ? "" : " An admin or a manager can restore it."}
+            </span>
+            {canRestore && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate()}
+              >
+                <RotateCcw className="mr-1 h-4 w-4" /> Restore
+              </Button>
+            )}
+          </div>
+        )}
         {opp && opened && (
           <p className="text-sm text-muted-foreground" data-line="opened">
             {opened}
@@ -1054,7 +1137,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
             className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]"
             aria-label="Follow-up and contact"
           >
-            <FollowupStrip opp={opp} status={status} />
+            {!deleted && <FollowupStrip opp={opp} status={status} />}
             {/* Owner, Sep 28: log each call / text / email / visit. The first one moves an Open
                 opportunity to Contacted (server side); the buttons refetch this opportunity so
                 the status select shows it. */}
@@ -1062,11 +1145,14 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
               <p className="flex items-center gap-1.5 font-medium">
                 <Phone className="h-3.5 w-3.5 text-muted-foreground" /> Contact
               </p>
-              <LogContactButtons
-                kind="opportunity"
-                itemId={opp.id}
-                onLogged={() => invalidate(opp.id)}
-              />
+              {/* Not on a deleted opportunity: a contact would move it Open → Contacted. */}
+              {!deleted && (
+                <LogContactButtons
+                  kind="opportunity"
+                  itemId={opp.id}
+                  onLogged={() => invalidate(opp.id)}
+                />
+              )}
               <ContactLogList kind="opportunity" itemId={opp.id} />
             </section>
           </aside>

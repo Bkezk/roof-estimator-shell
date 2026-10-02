@@ -9,6 +9,13 @@
  * (trigger audit_row → audit_log, migration 20261001080000; owner, Oct 1: "whatever is changed
  * needs to be logged somewhere showing what they did, when, and who"), by everyone; admins and
  * managers read it in the customer's History. Nothing here logs.
+ *
+ * Deleting a customer (audit, Oct 2) is refused while it has open tickets or open opportunities,
+ * refused again once deleted, and soft-deletes its live sites and contacts with the same stamp
+ * so they leave every search; restoreAccount (admins and managers) brings back the customer and
+ * the sites and contacts that went with it (same deleted_at), not ones deleted on their own
+ * before. A deleted customer still opens by id (old links, a ticket's customer chip) but takes no
+ * change: saveAccount, saveSite and saveContact refuse it (ACCOUNT_DELETED).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -16,9 +23,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess } from "@/lib/access";
+import { canAccess, seesEveryone } from "@/lib/access";
 import {
+  ACCOUNT_ALREADY_DELETED,
+  ACCOUNT_DELETED,
+  OPEN_OPPORTUNITY_STATUSES,
+  OPEN_TICKET_STAGES,
   accountSchema,
+  deleteBlockedMessage,
   optText,
   parseInput,
   quickAccountSchema,
@@ -58,6 +70,18 @@ async function writeAccess(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string } | null) =>
   (p?.full_name ?? "").trim() || p?.email || null;
+
+/** Refuse a change under a customer that is gone (not found, or deleted). */
+async function assertLiveAccount(sb: SupabaseClient<Database>, accountId: string) {
+  const { data, error } = await sb
+    .from("crm_accounts")
+    .select("id, deleted_at")
+    .eq("id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("Customer not found");
+  if (data.deleted_at) throw new Error(ACCOUNT_DELETED);
+}
 
 /** One line of a site's address for lists and snapshots. */
 export function siteAddressLine(
@@ -198,7 +222,13 @@ export interface LinkedBidRow {
   updated_at: string;
 }
 export interface AccountDetail {
+  /** Deleted ones too (deleted_at set): an old link shows it with a banner, read-only. */
   account: AccountRow;
+  /**
+   * Who deleted it (the audit log's delete row), when it is deleted and the reader may read the
+   * log (admins and managers); otherwise null and the banner shows the date alone.
+   */
+  deleted_by: string | null;
   sites: SiteRow[];
   jobs: Database["public"]["Tables"]["service_jobs"]["Row"][];
   /** Bids linked to the account — empty when the reader has no Estimate access. */
@@ -229,6 +259,19 @@ export const getAccount = createServerFn({ method: "GET" })
     ]);
     if (error) throw new Error(error.message);
     if (!account) throw new Error("Customer not found");
+    let deleted_by: string | null = null;
+    if (account.deleted_at) {
+      // Best effort: the log is an admin's or a manager's to read (RLS); anyone else gets none.
+      const { data: logged } = await sb
+        .from("audit_log")
+        .select("by_name, at")
+        .eq("entity", "account")
+        .eq("entity_id", data.id)
+        .eq("action", "delete")
+        .order("at", { ascending: false })
+        .limit(1);
+      deleted_by = (logged?.[0]?.by_name ?? "").trim() || null;
+    }
     let bids: LinkedBidRow[] = [];
     if (canAccess(p, "estimate")) {
       const { data: b } = await sb
@@ -240,7 +283,7 @@ export const getAccount = createServerFn({ method: "GET" })
         .limit(200);
       bids = (b ?? []) as LinkedBidRow[];
     }
-    return { account, sites: sites ?? [], jobs: jobs ?? [], bids };
+    return { account, deleted_by, sites: sites ?? [], jobs: jobs ?? [], bids };
   });
 
 /** Drop the keys a caller left out, so an update leaves those columns as they are. */
@@ -262,6 +305,7 @@ export const saveAccount = createServerFn({ method: "POST" })
     const { id, source, ...fields } = data;
     const patch = { ...defined(fields), updated_by_name: nameOf(p) };
     if (id) {
+      await assertLiveAccount(sb, id);
       const { data: row, error } = await sb
         .from("crm_accounts")
         .update(patch)
@@ -303,6 +347,7 @@ export const saveSite = createServerFn({ method: "POST" })
     await writeAccess(context);
     const sb = context.supabase;
     const { id, ...rest } = data;
+    await assertLiveAccount(sb, data.account_id);
     // A county code left out stays as it is.
     const fields = defined(rest);
     if (id) {
@@ -375,19 +420,112 @@ export const listCrmUsers = createServerFn({ method: "GET" })
     return (data ?? []).map((r) => ({ id: r.id, name: (r.full_name ?? "").trim() || r.email }));
   });
 
-/** Soft delete; tickets and bids keep their snapshot names and lose the link on purge. */
+/**
+ * Soft delete; tickets and bids keep their snapshot names and lose the link on purge. Refused
+ * while the customer has open tickets (open / scheduled / done) or open opportunities (open /
+ * contacted / quoted), and when it is already deleted (nothing is written). Its live sites and
+ * contacts are deleted with it, with the same stamp, so they leave the searches; the database
+ * logs each row (audit_row).
+ */
 export const deleteAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
-    await writeAccess(context);
-    const { data: row, error } = await context.supabase
+    const p = await writeAccess(context);
+    const sb = context.supabase;
+    const { data: account, error: aErr } = await sb
       .from("crm_accounts")
-      .update({ deleted_at: new Date().toISOString() })
+      .select("id, deleted_at")
       .eq("id", data.id)
-      .select("id, name")
+      .maybeSingle();
+    if (aErr) throw new Error(aErr.message);
+    if (!account) throw new Error("Customer not found");
+    if (account.deleted_at) throw new Error(ACCOUNT_ALREADY_DELETED);
+    const [{ data: tickets, error: tErr }, { data: opps, error: oErr }] = await Promise.all([
+      sb
+        .from("service_jobs")
+        .select("id")
+        .eq("account_id", data.id)
+        .is("deleted_at", null)
+        .in("stage", [...OPEN_TICKET_STAGES])
+        .limit(1000),
+      sb
+        .from("crm_opportunities")
+        .select("id")
+        .eq("account_id", data.id)
+        .is("deleted_at", null)
+        .in("status", [...OPEN_OPPORTUNITY_STATUSES])
+        .limit(1000),
+    ]);
+    if (tErr) throw new Error(tErr.message);
+    if (oErr) throw new Error(oErr.message);
+    const blocked = deleteBlockedMessage(tickets?.length ?? 0, opps?.length ?? 0);
+    if (blocked) throw new Error(blocked);
+    // One stamp for the customer, its sites and its contacts: restoreAccount brings back
+    // exactly the rows deleted with it.
+    const stamp = new Date().toISOString();
+    const { data: row, error } = await sb
+      .from("crm_accounts")
+      .update({ deleted_at: stamp, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .select("id")
       .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!row) throw new Error(ACCOUNT_ALREADY_DELETED);
+    const { error: sErr } = await sb
+      .from("crm_sites")
+      .update({ deleted_at: stamp })
+      .eq("account_id", data.id)
+      .is("deleted_at", null);
+    if (sErr) throw new Error(sErr.message);
+    const { error: cErr } = await sb
+      .from("crm_contacts")
+      .update({ deleted_at: stamp })
+      .eq("account_id", data.id)
+      .is("deleted_at", null);
+    if (cErr) throw new Error(cErr.message);
+  });
+
+/**
+ * Undo deleteAccount: admins and managers only. Clears deleted_at on the customer and on the
+ * sites and contacts deleted with it (the same stamp); a site or contact deleted on its own
+ * before stays deleted.
+ */
+export const restoreAccount = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<void> => {
+    const p = await me(context);
+    if (!seesEveryone(p)) throw new Error("Only an admin or a manager can restore a customer");
+    const sb = context.supabase;
+    const { data: account, error: aErr } = await sb
+      .from("crm_accounts")
+      .select("id, deleted_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (aErr) throw new Error(aErr.message);
+    if (!account) throw new Error("Customer not found");
+    const stamp = account.deleted_at;
+    if (!stamp) throw new Error("This customer is not deleted");
+    const { error } = await sb
+      .from("crm_accounts")
+      .update({ deleted_at: null, updated_by_name: nameOf(p) })
+      .eq("id", data.id)
+      .eq("deleted_at", stamp);
+    if (error) throw new Error(error.message);
+    const { error: sErr } = await sb
+      .from("crm_sites")
+      .update({ deleted_at: null })
+      .eq("account_id", data.id)
+      .eq("deleted_at", stamp);
+    if (sErr) throw new Error(sErr.message);
+    const { error: cErr } = await sb
+      .from("crm_contacts")
+      .update({ deleted_at: null })
+      .eq("account_id", data.id)
+      .eq("deleted_at", stamp);
+    if (cErr) throw new Error(cErr.message);
   });
 
 export const deleteSite = createServerFn({ method: "POST" })
@@ -395,10 +533,12 @@ export const deleteSite = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     await writeAccess(context);
+    // Once deleted it keeps its stamp (a deleted customer's rows are restored by that stamp).
     const { data: row, error } = await context.supabase
       .from("crm_sites")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", data.id)
+      .is("deleted_at", null)
       .select("id, name")
       .maybeSingle();
     if (error) throw new Error(error.message);
@@ -548,6 +688,7 @@ export const saveContact = createServerFn({ method: "POST" })
     await writeAccess(context);
     const sb = context.supabase;
     const { id, site_ids, ...fields } = data;
+    await assertLiveAccount(sb, data.account_id);
     const row = { ...fields, is_billing: fields.is_billing ?? false };
     let saved: ContactRow;
     if (id) {
@@ -599,10 +740,12 @@ export const deleteContact = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     await writeAccess(context);
+    // Once deleted it keeps its stamp (a deleted customer's rows are restored by that stamp).
     const { data: row, error } = await context.supabase
       .from("crm_contacts")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", data.id)
+      .is("deleted_at", null)
       .select("id, name")
       .maybeSingle();
     if (error) throw new Error(error.message);

@@ -9,6 +9,8 @@
  *                              `allopen` (every non-closing status) — and, with overdue=1, only
  *                              open opportunities past their expected close (the Customers page
  *                              counts strip)
+ *   &assignee=<uuid>           the list: only that person's opportunities (the Owner view's
+ *                              per-person numbers, owner-view.ts oppsHref)
  */
 import { OPP_ALL_OPEN } from "@/lib/work-counts";
 
@@ -25,7 +27,20 @@ export interface OpportunitiesSearch {
   status?: Exclude<StatusFilter, "all">;
   /** List only: show only overdue open opportunities. */
   overdue?: 1;
+  /** List only: show only the opportunities assigned to this user (a profile id). */
+  assignee?: string;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** A profile id, or undefined for anything else. */
+export const parseAssignee = (v: unknown): string | undefined =>
+  typeof v === "string" && UUID.test(v) ? v : undefined;
+
+/** The list filter `assignee=` presets (none = everyone's). */
+export const matchesAssignee = (
+  o: { assignee_id: string | null },
+  assignee: string | undefined,
+): boolean => !assignee || o.assignee_id === assignee;
 
 const isOne = (v: unknown) => v === 1 || v === "1" || v === true;
 
@@ -41,8 +56,10 @@ export function parseOpportunitiesSearch(s: Record<string, unknown>): Opportunit
   if (typeof id === "string" && id) return { id };
   if (isOne(s["new"])) return { new: 1 };
   const status = parseStatusFilter(s["status"]);
+  const assignee = parseAssignee(s["assignee"]);
   return {
     ...(status ? { status } : {}),
     ...(isOne(s["overdue"]) ? { overdue: 1 as const } : {}),
+    ...(assignee ? { assignee } : {}),
   };
 }

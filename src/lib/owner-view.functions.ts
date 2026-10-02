@@ -27,6 +27,7 @@ import {
   doneThisWeek,
   lastActivity,
   oppCounts,
+  personNumbers,
   recentActivity,
   roleLabel,
   sortOwnerRows,
@@ -109,7 +110,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
       sb.from("crm_followups").select("*").eq("status", "open").limit(LIMIT),
       sb
         .from("crm_opportunities")
-        .select("assignee_id, status, expected_close, est_value")
+        .select("id, assignee_id, status, expected_close, est_value")
         .is("deleted_at", null)
         .in("status", [...OPEN_OPP_STATUSES])
         .not("assignee_id", "is", null)
@@ -131,11 +132,12 @@ export const listOwnerView = createServerFn({ method: "GET" })
         .limit(LIMIT),
     ]);
     const people = must("Profiles", profiles);
+    const followupRows = must("Follow-ups", followups);
     const items = mergeWork(
       {
         tickets: must("Tickets", tickets) as TicketIn[],
         tasks: must("Tasks", tasks),
-        followups: must("Follow-ups", followups).map((f) => ({
+        followups: followupRows.map((f) => ({
           id: f.id,
           title: f.title,
           url: f.url,
@@ -149,7 +151,9 @@ export const listOwnerView = createServerFn({ method: "GET" })
       (iso) => localYmd(new Date(iso)),
     );
     const buckets = bucketCounts(items, today);
-    const oppsBy = oppCounts(must("Opportunities", opps), today);
+    // An overdue opportunity with an open follow-up is already in the Overdue bucket as that
+    // follow-up: counted once (owner-view.ts oppCounts).
+    const oppsBy = oppCounts(must("Opportunities", opps), today, followupRows);
     const doneBy = doneThisWeek(
       must("Done tickets", doneTickets),
       must("Done tasks", doneTasks),
@@ -162,19 +166,13 @@ export const listOwnerView = createServerFn({ method: "GET" })
     );
 
     const rows: OwnerRow[] = people.map((p) => {
-      const b = bucketsFor(buckets, p.id);
-      const o = oppsBy[p.id] ?? { open: 0, overdue: 0, value: 0 };
       const last = latest.get(p.id) ?? null;
       return {
         id: p.id,
         name: nameOf(p),
         role: roleLabel(p),
-        dueToday: b.today,
-        overdue: b.overdue + o.overdue,
-        overdueOpps: o.overdue,
+        ...personNumbers(bucketsFor(buckets, p.id), oppsBy[p.id]),
         doneThisWeek: doneBy[p.id] ?? 0,
-        openOpps: o.open,
-        oppValue: o.value,
         lastActivity: last,
         stale: staleness(last, today, roleLabel(p) === "Admin") === "stale",
       };
@@ -444,6 +442,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
         customer: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
       })),
       today,
+      followupRows,
     );
     const done = doneItemsFor(
       userId,

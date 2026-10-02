@@ -90,6 +90,11 @@ export const logContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => logSchema.parse(d))
   .handler(async ({ data, context }): Promise<ContactLogRow> => {
+    // A deleted opportunity takes no contact: the log's trigger would move it Open → Contacted.
+    if (data.kind === "opportunity") {
+      const { assertLiveOpportunity } = await import("@/lib/opportunities.functions");
+      await assertLiveOpportunity(context.supabase, data.item_id);
+    }
     const by_name = await myName(context);
     const { data: row, error } = await context.supabase
       .from("crm_contact_log")

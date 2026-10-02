@@ -15,6 +15,11 @@
  * "We need somewhere to add vendor info like name, address etc, then we can select them as a
  * recipient" — a tab here, not a sidebar entry: the owner wants fewer nav items). The Vendors
  * tab is vendors-section.tsx.
+ *
+ * A deleted customer still opens by id (an old `?id=` link, a ticket's customer chip): a
+ * "Deleted on <date> by <who>" banner, and everything read-only — no New ticket, Edit, Delete,
+ * site, contact or bid-link actions (the server refuses them too). Admins and managers get
+ * Restore (restoreAccount), which brings back the sites and contacts deleted with it.
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,6 +37,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  RotateCcw,
   Ruler,
   Save,
   Sparkles,
@@ -45,7 +51,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
+import { managesTickets, seesEveryone } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
 import {
   deleteAccount,
@@ -56,6 +62,7 @@ import {
   listAccounts,
   listContacts,
   listUnlinkedBids,
+  restoreAccount,
   saveAccount,
   saveContact,
   saveSite,
@@ -70,6 +77,7 @@ import {
 import {
   CONTACT_REQUIRED,
   addressLines,
+  deletedLine,
   hasContactMethod,
   mailingLines,
   matchesManager,
@@ -360,11 +368,12 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
 }
 
 function AccountDetailPane({ id }: { id: string }) {
-  const { session, can } = useAuth();
+  const { session, can, profile } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const getFn = useServerFn(getAccount);
   const deleteFn = useServerFn(deleteAccount);
+  const restoreFn = useServerFn(restoreAccount);
   const detail = useQuery({
     queryKey: ["account", id],
     queryFn: () => getFn({ data: { id } }),
@@ -380,6 +389,18 @@ function AccountDetailPane({ id }: { id: string }) {
       void navigate({ to: "/customers" });
     },
     onError: (e) => toast.error(`Could not delete the customer: ${errText(e)}`),
+  });
+  const restore = useMutation({
+    mutationFn: () => restoreFn({ data: { id } }),
+    onSuccess: () => {
+      toast.success("Customer restored");
+      void qc.invalidateQueries({ queryKey: ["account", id] });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["account-search"] });
+      void qc.invalidateQueries({ queryKey: ["contacts", id] });
+      void qc.invalidateQueries({ queryKey: ["audit"] });
+    },
+    onError: (e) => toast.error(`Could not restore the customer: ${errText(e)}`),
   });
 
   const back = (
@@ -406,14 +427,45 @@ function AccountDetailPane({ id }: { id: string }) {
       </p>
     );
   const d = detail.data;
+  // Deleted (an old link, a ticket's customer chip): read-only, Restore for admins / managers.
+  const deleted = !!d.account.deleted_at;
+  const canRestore = seesEveryone(profile);
   return (
     <div className="space-y-6">
       {back}
-      <AccountBlock account={d.account} onDelete={() => setConfirmDelete(true)} />
-      <ContactsSection accountId={id} sites={d.sites} />
-      <SitesSection accountId={id} sites={d.sites} />
+      {d.account.deleted_at && (
+        <div
+          role="status"
+          data-banner="deleted"
+          className="flex flex-wrap items-center gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm"
+        >
+          <Trash2 className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{deletedLine(d.account.deleted_at, d.deleted_by)}.</span>{" "}
+            It is out of the list and the searches, with its sites and contacts, and read-only.
+            {canRestore ? "" : " An admin or a manager can restore it."}
+          </span>
+          {canRestore && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={restore.isPending}
+              onClick={() => restore.mutate()}
+            >
+              <RotateCcw className="mr-1 h-4 w-4" /> Restore
+            </Button>
+          )}
+        </div>
+      )}
+      <AccountBlock
+        account={d.account}
+        readOnly={deleted}
+        onDelete={() => setConfirmDelete(true)}
+      />
+      <ContactsSection accountId={id} sites={d.sites} readOnly={deleted} />
+      <SitesSection accountId={id} sites={d.sites} readOnly={deleted} />
       <TicketsSection jobs={d.jobs} />
-      {can("estimate") && <BidsSection accountId={id} bids={d.bids} />}
+      {can("estimate") && <BidsSection accountId={id} bids={d.bids} readOnly={deleted} />}
       {can("takeoff") && <TakeoffsSection accountId={id} />}
       {/* Admins and managers: who changed the customer, its sites and contacts (audit_log). */}
       <AuditHistory entity="account" entityId={id} className="rounded-lg border p-4" />
@@ -428,8 +480,9 @@ function AccountDetailPane({ id }: { id: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{d.account.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              The customer disappears from the list and the searches. Its tickets and bids keep the
-              customer name they were saved with.
+              The customer disappears from the list and the searches, with its sites and contacts.
+              Its tickets and bids keep the customer name they were saved with. A customer with open
+              tickets or open opportunities cannot be deleted. An admin or a manager can restore it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -501,17 +554,41 @@ const accountFields = (a: AccountRow): AccountFields => ({
   notes: a.notes ?? "",
 });
 
-/** The account's fields: a read-only summary, or (after Edit) the form. */
-function AccountBlock({ account, onDelete }: { account: AccountRow; onDelete: () => void }) {
+/**
+ * The account's fields: a read-only summary, or (after Edit) the form. A deleted customer
+ * (`readOnly`) has the summary only, without Edit / Delete / New ticket.
+ */
+function AccountBlock({
+  account,
+  readOnly,
+  onDelete,
+}: {
+  account: AccountRow;
+  readOnly: boolean;
+  onDelete: () => void;
+}) {
   const [editing, setEditing] = useState(false);
-  if (editing) return <AccountForm account={account} onDone={() => setEditing(false)} />;
-  return <AccountSummary account={account} onEdit={() => setEditing(true)} onDelete={onDelete} />;
+  if (editing && !readOnly)
+    return <AccountForm account={account} onDone={() => setEditing(false)} />;
+  return (
+    <AccountSummary
+      account={account}
+      readOnly={readOnly}
+      onEdit={() => setEditing(true)}
+      onDelete={onDelete}
+    />
+  );
 }
 
-function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDelete: () => void }) {
+function AccountSummary(props: {
+  account: AccountRow;
+  readOnly: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const { can, profile } = useAuth();
   // Only a manager creates tickets (owner, Oct 1).
-  const canNewTicket = can("service") && managesTickets(profile);
+  const canNewTicket = can("service") && managesTickets(profile) && !props.readOnly;
   const users = useCrmUsers();
   const a = props.account;
   const physical = addressLines(a);
@@ -566,18 +643,22 @@ function AccountSummary(props: { account: AccountRow; onEdit: () => void; onDele
               </Link>
             </Button>
           )}
-          <Button type="button" variant="outline" size="sm" onClick={props.onEdit}>
-            <Pencil className="mr-1 h-4 w-4" /> Edit
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={props.onDelete}
-          >
-            <Trash2 className="mr-1 h-4 w-4" /> Delete customer
-          </Button>
+          {!props.readOnly && (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={props.onEdit}>
+                <Pencil className="mr-1 h-4 w-4" /> Edit
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={props.onDelete}
+              >
+                <Trash2 className="mr-1 h-4 w-4" /> Delete customer
+              </Button>
+            </>
+          )}
         </div>
       </div>
       {!a.deleted_at && !hasContactMethod(a) && (
@@ -878,7 +959,16 @@ const contactFields = (c: ContactWithSites | null): ContactFields => ({
 /** "tel:" wants the digits (and a leading +), not the formatting. */
 const telHref = (phone: string) => `tel:${phone.replace(/[^\d+]/g, "")}`;
 
-function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
+function ContactsSection({
+  accountId,
+  sites,
+  readOnly,
+}: {
+  accountId: string;
+  sites: SiteRow[];
+  /** A deleted customer: the contacts are listed, no Add / Edit / Delete. */
+  readOnly: boolean;
+}) {
   const { session } = useAuth();
   const qc = useQueryClient();
   const listFn = useServerFn(listContacts);
@@ -923,7 +1013,7 @@ function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteR
             <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
           )}
         </h2>
-        {editing !== "new" && (
+        {!readOnly && editing !== "new" && (
           <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
             <Plus className="mr-1 h-4 w-4" /> Add contact
           </Button>
@@ -948,7 +1038,7 @@ function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteR
       )}
       <div className="space-y-2">
         {rows.map((c) =>
-          editing === c.id ? (
+          !readOnly && editing === c.id ? (
             <ContactForm
               key={c.id}
               accountId={accountId}
@@ -1012,31 +1102,33 @@ function ContactsSection({ accountId, sites }: { accountId: string; sites: SiteR
                 </p>
                 {c.notes && <p className="whitespace-pre-line text-xs">{c.notes}</p>}
               </div>
-              <div className="flex items-center gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="Edit this contact"
-                  aria-label={`Edit ${c.name}`}
-                  onClick={() => setEditing(c.id)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive"
-                  title="Delete this contact"
-                  aria-label={`Delete ${c.name}`}
-                  onClick={() => setToDelete(c)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
+              {!readOnly && (
+                <div className="flex items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="Edit this contact"
+                    aria-label={`Edit ${c.name}`}
+                    onClick={() => setEditing(c.id)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    title="Delete this contact"
+                    aria-label={`Delete ${c.name}`}
+                    onClick={() => setToDelete(c)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
             </div>
           ),
         )}
-        {editing === "new" && (
+        {!readOnly && editing === "new" && (
           <ContactForm
             accountId={accountId}
             contact={null}
@@ -1254,10 +1346,19 @@ function ContactForm(props: {
   );
 }
 
-function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[] }) {
+function SitesSection({
+  accountId,
+  sites,
+  readOnly,
+}: {
+  accountId: string;
+  sites: SiteRow[];
+  /** A deleted customer: the sites are listed, no Add / New ticket / Edit / Delete. */
+  readOnly: boolean;
+}) {
   const { can, profile } = useAuth();
   // Only a manager creates tickets (owner, Oct 1).
-  const canNewTicket = can("service") && managesTickets(profile);
+  const canNewTicket = can("service") && managesTickets(profile) && !readOnly;
   const qc = useQueryClient();
   const deleteFn = useServerFn(deleteSite);
   // "new" = the add form is open; an id = that site is being edited.
@@ -1286,7 +1387,7 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
           <MapPin className="h-4 w-4" /> Sites
           <span className="text-xs font-normal text-muted-foreground">{sites.length}</span>
         </h2>
-        {editing !== "new" && (
+        {!readOnly && editing !== "new" && (
           <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
             <Plus className="mr-1 h-4 w-4" /> Add site
           </Button>
@@ -1299,7 +1400,7 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
       )}
       <div className="space-y-2">
         {sites.map((s) =>
-          editing === s.id ? (
+          !readOnly && editing === s.id ? (
             <SiteForm
               key={s.id}
               accountId={accountId}
@@ -1340,30 +1441,34 @@ function SitesSection({ accountId, sites }: { accountId: string; sites: SiteRow[
                     </Link>
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  title="Edit this site"
-                  aria-label={`Edit ${s.name}`}
-                  onClick={() => setEditing(s.id)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-destructive hover:text-destructive"
-                  title="Delete this site"
-                  aria-label={`Delete ${s.name}`}
-                  onClick={() => setToDelete(s)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {!readOnly && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Edit this site"
+                      aria-label={`Edit ${s.name}`}
+                      onClick={() => setEditing(s.id)}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      title="Delete this site"
+                      aria-label={`Delete ${s.name}`}
+                      onClick={() => setToDelete(s)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           ),
         )}
-        {editing === "new" && (
+        {!readOnly && editing === "new" && (
           <SiteForm
             accountId={accountId}
             site={null}
@@ -1623,7 +1728,16 @@ function TakeoffsSection({ accountId }: { accountId: string }) {
   );
 }
 
-function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRow[] }) {
+function BidsSection({
+  accountId,
+  bids,
+  readOnly,
+}: {
+  accountId: string;
+  bids: LinkedBidRow[];
+  /** A deleted customer: the linked bids are listed, no Link / Unlink / suggestions. */
+  readOnly: boolean;
+}) {
   const { session } = useAuth();
   const qc = useQueryClient();
   const linkFn = useServerFn(linkBidToAccount);
@@ -1645,7 +1759,7 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
   const suggested = useQuery({
     queryKey: ["bid-suggestions", accountId],
     queryFn: () => suggestFn({ data: { account_id: accountId } }),
-    enabled: !!session,
+    enabled: !!session && !readOnly,
   });
   const link = useMutation({
     mutationFn: (v: { bid: LinkedBidRow; accountId: string | null }) =>
@@ -1667,13 +1781,13 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
           <Link2 className="h-4 w-4" /> Bids
           <span className="text-xs font-normal text-muted-foreground">{bids.length}</span>
         </h2>
-        {!linking && (
+        {!readOnly && !linking && (
           <Button size="sm" variant="outline" onClick={() => setLinking(true)}>
             <Plus className="mr-1 h-4 w-4" /> Link a bid
           </Button>
         )}
       </div>
-      {!!suggested.data?.length && (
+      {!readOnly && !!suggested.data?.length && (
         <div
           className="space-y-2 rounded-md border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-800 dark:bg-amber-950/40"
           aria-label="Bids that look like this customer"
@@ -1729,21 +1843,23 @@ function BidsSection({ accountId, bids }: { accountId: string; bids: LinkedBidRo
               </Badge>
               <span className="text-sm tabular-nums">{money(Number(b.grand_total) || 0)}</span>
               <span className="text-xs text-muted-foreground">{shortDate(b.updated_at)}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                title="Unlink this bid from the customer"
-                aria-label={`Unlink ${b.name}`}
-                disabled={link.isPending}
-                onClick={() => link.mutate({ bid: b, accountId: null })}
-              >
-                <Unlink className="h-4 w-4" />
-              </Button>
+              {!readOnly && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="Unlink this bid from the customer"
+                  aria-label={`Unlink ${b.name}`}
+                  disabled={link.isPending}
+                  onClick={() => link.mutate({ bid: b, accountId: null })}
+                >
+                  <Unlink className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           ))}
         </div>
       )}
-      {linking && (
+      {!readOnly && linking && (
         <div className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-3">
           <div className="flex items-center gap-2">
             <Input

@@ -177,9 +177,10 @@ describe("creating tickets is a manager's", () => {
   });
   it("the Customers page's New ticket buttons too", () => {
     const cust = read("src/components/customers-page.tsx");
+    // A deleted customer (read-only, audit Oct 2) offers no New ticket either.
     expect(linesWith(cust, "const canNewTicket = ")).toEqual([
-      'const canNewTicket = can("service") && managesTickets(profile);',
-      'const canNewTicket = can("service") && managesTickets(profile);',
+      'const canNewTicket = can("service") && managesTickets(profile) && !props.readOnly;',
+      'const canNewTicket = can("service") && managesTickets(profile) && !readOnly;',
     ]);
     expect(cust).toMatch(
       /\{canNewTicket && \(\s*<Button asChild size="sm">\s*<Link to="\/service" search=\{\{ new: 1, account: a\.id \}\}>/,

@@ -37,4 +37,19 @@ describe("/opportunities search params", () => {
     expect(parseOpportunitiesSearch({ overdue: 1 })).toEqual({ overdue: 1 });
     expect(parseOpportunitiesSearch({ overdue: "yes" })).toEqual({});
   });
+  it("filters to one person with assignee=<uuid> (the Owner view's per-person numbers)", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(parseOpportunitiesSearch({ status: "allopen", assignee: id })).toEqual({
+      status: "allopen",
+      assignee: id,
+    });
+    expect(parseOpportunitiesSearch({ assignee: id, overdue: 1 })).toEqual({
+      assignee: id,
+      overdue: 1,
+    });
+    expect(parseOpportunitiesSearch({ assignee: "bob" })).toEqual({});
+    expect(parseOpportunitiesSearch({ assignee: 5 })).toEqual({});
+    // An opened opportunity ignores it.
+    expect(parseOpportunitiesSearch({ id: "x", assignee: id })).toEqual({ id: "x" });
+  });
 });

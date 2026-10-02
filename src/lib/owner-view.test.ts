@@ -162,10 +162,28 @@ describe("oppCounts", () => {
   it("open (not closing) per assignee, overdue past expected close, est_value sum", () => {
     const c = oppCounts(
       [
-        { assignee_id: "bob", status: "open", expected_close: "2026-09-30", est_value: 1000 },
-        { assignee_id: "bob", status: "quoted", expected_close: "2026-10-01", est_value: null },
-        { assignee_id: "bob", status: "won", expected_close: "2026-09-01", est_value: 9999 },
-        { assignee_id: null, status: "open", expected_close: null, est_value: 5 },
+        {
+          id: "o1",
+          assignee_id: "bob",
+          status: "open",
+          expected_close: "2026-09-30",
+          est_value: 1000,
+        },
+        {
+          id: "o2",
+          assignee_id: "bob",
+          status: "quoted",
+          expected_close: "2026-10-01",
+          est_value: null,
+        },
+        {
+          id: "o3",
+          assignee_id: "bob",
+          status: "won",
+          expected_close: "2026-09-01",
+          est_value: 9999,
+        },
+        { id: "o4", assignee_id: null, status: "open", expected_close: null, est_value: 5 },
       ],
       "2026-10-01",
     );

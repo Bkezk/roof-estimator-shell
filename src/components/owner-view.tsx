@@ -6,7 +6,8 @@
  * Definitions are in src/lib/owner-view.ts.
  *
  * Each number links into My Work for that person (`who`) with the List preset (`bucket`);
- * opportunity numbers link to the Opportunities list's open / overdue filter. Refreshes when the
+ * opportunity numbers link to the Opportunities list's open / overdue filter for that person
+ * (`oppsHref`: `assignee=<id>`; the totals row: everyone). Refreshes when the
  * window regains focus, every 60 s and on mount, like the counts strip.
  *
  * Rows start collapsed; clicking a person's row (or its chevron) expands it in place (owner,
@@ -42,12 +43,12 @@ import {
   digestLine,
   dueTotal,
   myWorkHref,
+  oppsHref,
   ownerTotals,
   visibleToOwner,
   type DetailKind,
   type DueCounts,
 } from "@/lib/owner-view";
-import { OPP_ALL_OPEN } from "@/lib/work-counts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -220,9 +221,9 @@ export function OwnerView() {
                           {r.overdueOpps > 0 && (
                             <div className="text-xs">
                               <Link
-                                to="/opportunities"
-                                search={{ status: OPP_ALL_OPEN, overdue: 1 }}
+                                {...oppsHref(r.id, true)}
                                 className="underline-offset-4 hover:underline"
+                                title="Opportunities past expected close with no open follow-up (not on My Work)"
                               >
                                 incl. {r.overdueOpps} opportunit{r.overdueOpps === 1 ? "y" : "ies"}
                               </Link>
@@ -235,11 +236,7 @@ export function OwnerView() {
                           </Link>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Link
-                            to="/opportunities"
-                            search={{ status: OPP_ALL_OPEN }}
-                            className={linkCls}
-                          >
+                          <Link {...oppsHref(r.id)} className={linkCls}>
                             {r.openOpps}
                           </Link>
                           {r.oppValue > 0 && (
@@ -284,7 +281,7 @@ export function OwnerView() {
                     </Link>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Link to="/opportunities" search={{ status: OPP_ALL_OPEN }} className={linkCls}>
+                    <Link {...oppsHref("all")} className={linkCls}>
                       {totals.openOpps}
                     </Link>
                     {totals.oppValue > 0 && (
