@@ -42,6 +42,8 @@ export interface PurchaseOrderView extends PurchaseOrderRow {
 }
 export interface PurchaseOrderList {
   pos: PurchaseOrderView[];
+  /** The ticket's number — a new PO's number starts as "<number>.A" (nextPoNumber). */
+  ticketNumber: number | null;
   /** May I add a PO to this ticket? */
   canAdd: boolean;
   /** May I approve (admins and managers)? */
@@ -68,7 +70,7 @@ async function me(ctx: Ctx): Promise<Me> {
 async function ticketFor(ctx: Ctx, jobId: string) {
   const sb = ctx.supabase;
   const [{ data: job, error }, { data: crew, error: cErr }] = await Promise.all([
-    sb.from("service_jobs").select("id, technician_id").eq("id", jobId).maybeSingle(),
+    sb.from("service_jobs").select("id, number, technician_id").eq("id", jobId).maybeSingle(),
     // Crew membership from the price-free view (no bill_rate; a technician reads nothing else).
     sb
       .from("service_job_crew")
@@ -152,7 +154,7 @@ export const listPurchaseOrders = createServerFn({ method: "GET" })
   .validator((d: unknown) => z.object({ jobId: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<PurchaseOrderList> => {
     const p = await me(context);
-    const { works } = await ticketFor(context, data.jobId);
+    const { job, works } = await ticketFor(context, data.jobId);
     const { data: rows, error } = await context.supabase
       .from("service_job_purchase_orders")
       .select("*")
@@ -162,6 +164,7 @@ export const listPurchaseOrders = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return {
       pos: await viewsOf(context, p, rows ?? [], works),
+      ticketNumber: job.number ?? null,
       canAdd: canAddPo(p, works),
       canApprove: canApprovePo(p),
     };

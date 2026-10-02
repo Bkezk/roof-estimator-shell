@@ -173,3 +173,36 @@ export function canEditPo(
 
 /** Who may approve (the Approved toggle): admins and managers. */
 export const canApprovePo = (p: AccessLike | null | undefined): boolean => managesTickets(p);
+
+/**
+ * The PO # a new purchase order on a ticket starts with (owner, Oct 2): the ticket number, a
+ * dot and the next unused letter — "6000.A", then "6000.B" … "6000.Z", "6000.AA". Letters
+ * already used on the ticket are skipped, whatever their case or spacing; the person may
+ * still type anything else. No ticket number → blank (the box is just empty).
+ */
+export function nextPoNumber(
+  ticketNumber: number | string | null | undefined,
+  existing: readonly string[],
+): string {
+  const n = ticketNumber === null || ticketNumber === undefined ? "" : String(ticketNumber).trim();
+  if (!n) return "";
+  const used = new Set(
+    existing
+      .map((x) => x.trim().toUpperCase())
+      .filter((x) => x.startsWith(`${n}.`))
+      .map((x) => x.slice(n.length + 1)),
+  );
+  for (let i = 0; i < 26 * 27; i++) {
+    const letters = poLetters(i);
+    if (!used.has(letters)) return `${n}.${letters}`;
+  }
+  return "";
+}
+
+/** 0 → "A" … 25 → "Z", 26 → "AA", 27 → "AB" … */
+export function poLetters(i: number): string {
+  const A = "A".charCodeAt(0);
+  if (i < 26) return String.fromCharCode(A + i);
+  const first = Math.floor(i / 26) - 1;
+  return String.fromCharCode(A + first) + String.fromCharCode(A + (i % 26));
+}

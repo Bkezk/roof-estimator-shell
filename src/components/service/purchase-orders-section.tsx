@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import {
   PO_NUMBER_MAX,
+  nextPoNumber,
   parsePrice,
   poFormProblem,
   poMoney,
@@ -128,7 +129,15 @@ export function PurchaseOrdersSection({
             </ul>
           )}
           {editing === "new" ? (
-            <PoForm jobId={jobId} approver={approver} onClose={() => setEditing(null)} />
+            <PoForm
+              jobId={jobId}
+              approver={approver}
+              suggestedNumber={nextPoNumber(
+                q.data.ticketNumber,
+                q.data.pos.map((p) => p.po_number),
+              )}
+              onClose={() => setEditing(null)}
+            />
           ) : (
             q.data.canAdd && (
               <Button
@@ -303,9 +312,10 @@ function PoRow({
   );
 }
 
-const draftOf = (po?: PurchaseOrderView): PoDraft => ({
+const draftOf = (po?: PurchaseOrderView, suggested = ""): PoDraft => ({
   po_date: po?.po_date ?? localYmd(),
-  po_number: po?.po_number ?? "",
+  // A new PO starts as "<ticket>.A", "<ticket>.B" … (owner, Oct 2); editable.
+  po_number: po?.po_number ?? suggested,
   title: po?.title ?? "",
   // The Price box starts blank on a new PO (owner rule: never a placeholder 0).
   price: po ? String(Number(po.price)) : "",
@@ -320,17 +330,20 @@ function PoForm({
   jobId,
   po,
   approver,
+  suggestedNumber = "",
   onClose,
 }: {
   jobId: string;
   po?: PurchaseOrderView;
   approver: boolean;
+  /** The PO # a new PO starts with (nextPoNumber); ignored when editing. */
+  suggestedNumber?: string;
   onClose: () => void;
 }) {
   const { refresh } = usePoMutations(jobId);
   const saveFn = useServerFn(savePurchaseOrder);
   const approveFn = useServerFn(setPurchaseOrderApproved);
-  const [draft, setDraft] = useState<PoDraft>(() => draftOf(po));
+  const [draft, setDraft] = useState<PoDraft>(() => draftOf(po, suggestedNumber));
   const [approved, setApproved] = useState(po?.approved ?? false);
   // The supplier (optional): a vendor's id, or null.
   const [vendorId, setVendorId] = useState<string | null>(po?.vendor_id ?? null);
