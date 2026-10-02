@@ -66,7 +66,7 @@ const estimatorItems = [
 ];
 // Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
 // (tickets, with the Tech Board above them and Invoices as a tab), Opportunities. Follow-ups
-// live on My Work (owner, Oct 1; /followups redirects there). Today sits first, for technicians
+// live on Work Overview (owner, Oct 1; /followups redirects there). Today sits first, for technicians
 // only: it is
 // the field day for the signed-in tech, so an office login never sees it. `exact`: active only
 // on that path.
@@ -89,7 +89,7 @@ const customerItems: ServiceItem[] = [
   { title: "Today", url: "/service/today", icon: CalendarCheck, page: "service", techOnly: true },
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
-  // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from My Work.
+  // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from Work Overview.
   {
     title: "Opportunities",
     url: "/opportunities",
@@ -372,16 +372,16 @@ export function AppSidebar() {
         </div>
       </SidebarHeader>
       <SidebarContent>
-        {/* My Work (owner, Sep 30): every signed-in user's landing page — their own tickets,
+        {/* Work Overview (owner, Sep 30): every signed-in user's landing page — their own tickets,
             tasks and follow-ups in one list and calendar. */}
         {profile && (
           <SidebarGroup>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={isActive("/my-work")} tooltip="My Work">
+                <SidebarMenuButton asChild isActive={isActive("/my-work")} tooltip="Work Overview">
                   <Link to="/my-work">
                     <ListTodo className="h-4 w-4" />
-                    {!collapsed && <span>My Work</span>}
+                    {!collapsed && <span>Work Overview</span>}
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

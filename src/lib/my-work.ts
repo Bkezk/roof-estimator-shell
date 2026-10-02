@@ -1,5 +1,5 @@
 /**
- * My Work (owner, Sep 30): one list and calendar of a person's own assignable work — service
+ * Work Overview (owner, Sep 30): one list and calendar of a person's own assignable work — service
  * tickets they lead (open / scheduled / done), open tasks assigned to them, and their open
  * follow-ups — merged and sorted by date. Pure helpers only (no I/O): the server function in
  * my-work.functions.ts reads the rows, the page in components/my-work-page.tsx renders them.
@@ -22,7 +22,7 @@ export const KIND_LABELS: Record<WorkKind, string> = {
 /** Same-day order: tickets, inspections, tasks, follow-ups. */
 const KIND_ORDER: Record<WorkKind, number> = { ticket: 0, inspection: 1, task: 2, followup: 3 };
 
-/** The ticket stages My Work lists (Invoiced / Closed are the office's, not anyone's to-do). */
+/** The ticket stages Work Overview lists (Invoiced / Closed are the office's, not anyone's to-do). */
 export const WORK_TICKET_STAGES = ["open", "scheduled", "done"] as const;
 
 const STAGE_LABELS: Record<string, string> = {
@@ -113,7 +113,7 @@ export interface FollowupIn {
   item_id: string;
   assignee_id: string;
   account_name?: string | null;
-  /** Reminder cadence and a running snooze (My Work's follow-up state line). */
+  /** Reminder cadence and a running snooze (Work Overview's follow-up state line). */
   every_days?: number | null;
   snoozed_until?: string | null;
 }
@@ -262,7 +262,7 @@ export function followupItem(
     date: toYmd(f.due_at),
     status: "Open",
     done: false,
-    // Only an in-app path (the follow-up's own link); anything else stays on My Work.
+    // Only an in-app path (the follow-up's own link); anything else stays on Work Overview.
     href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/my-work",
     assigneeId: f.assignee_id,
     assigneeName: names[f.assignee_id] ?? null,

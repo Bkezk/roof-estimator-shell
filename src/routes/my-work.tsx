@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth-store";
 import { parseBucketPreset, resolveWho, whoParam, type BucketPreset } from "@/lib/my-work";
 
 export const Route = createFileRoute("/my-work")({
-  head: () => ({ meta: [{ title: "My Work — JBK Portal" }] }),
+  head: () => ({ meta: [{ title: "Work Overview — JBK Portal" }] }),
   // Every signed-in user (pageForPath: /my-work → null) and everyone's landing page (homeFor).
   // ?view=calendar opens the month calendar (the list otherwise); ?view=owner the Owner view,
   // admins only — the page falls back to the list for anyone else (effectiveView) and the

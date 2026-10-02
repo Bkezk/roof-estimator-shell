@@ -1,9 +1,9 @@
 /**
- * Who may turn a follow-up off, and how a follow-up reads on My Work (owner, Oct 1: "the
+ * Who may turn a follow-up off, and how a follow-up reads on Work Overview (owner, Oct 1: "the
  * follow-up and overdue things are so management can keep reps / account managers responsible,
  * so they shouldn't be able to turn them off or disable due dates — that's only for managers").
  * Pure helpers only; the server functions (followups.functions.ts), the database trigger
- * (20261001030000_followups_manager_only.sql) and My Work use them.
+ * (20261001030000_followups_manager_only.sql) and Work Overview use them.
  *
  * - canManageFollowup: Snooze and Close by hand are an admin's or a manager's. The automatic
  *   sync (followups.server.ts syncFollowup: the item is closed, won, lost, reassigned, or its date
@@ -12,7 +12,7 @@
  *   admin or a manager may change it ("manager and admins can move dates … reps cannot").
  * - dateMoveNote: the line logged on the item when its date moves, so every push is on record.
  * - followupStateText: "Due Fri, Oct 3" / "Overdue 3 days" / "Snoozed until …" / "Reminders
- *   every N days" for a row on My Work.
+ *   every N days" for a row on Work Overview.
  */
 import { seesEveryone, type AccessLike } from "@/lib/access";
 import { localYmd, ymdParts } from "@/lib/my-work";
@@ -83,7 +83,7 @@ export function dateMoveNote(
   return `${label} moved from ${longDay(from)} to ${longDay(to)}`;
 }
 
-/** What My Work needs of a follow-up to describe it. */
+/** What Work Overview needs of a follow-up to describe it. */
 export interface FollowupStateIn {
   due_at: string;
   every_days?: number | null;
@@ -127,7 +127,7 @@ export function followupStateText(
 
 /**
  * Is the follow-up overdue on `today` (YYYY-MM-DD, the viewer's day)? Only once its due DAY has
- * passed, as My Work says it (followupStateText): on the due day itself it is "Due today", not
+ * passed, as Work Overview says it (followupStateText): on the due day itself it is "Due today", not
  * red (audit, Oct 2: the opportunity's follow-up strip compared the instant, so it turned red at
  * 12:00 UTC on the due day).
  */

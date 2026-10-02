@@ -106,7 +106,7 @@ export function startNotice(input: {
 /**
  * What the sync did. "snooze_cleared": the same assignee keeps the timer, its date moved, and a
  * running snooze was cleared with it (audit, Oct 2: a move used to cancel the snooze silently,
- * My Work still saying "Snoozed until …").
+ * Work Overview still saying "Snoozed until …").
  */
 export type SyncResult = "started" | "reassigned" | "closed" | "unchanged" | "snooze_cleared";
 

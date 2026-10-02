@@ -1,7 +1,7 @@
 /**
  * Whether a counts-strip tile (components/work-counts-strip.tsx) may be a link (audit, Oct 2):
  * the ticket tiles link to /service, which needs Service; a Customers-only user who clicked one
- * was bounced by the gate to My Work. A tile links only when the user may open its page — the
+ * was bounced by the gate to Work Overview. A tile links only when the user may open its page — the
  * gate's own rule (components/auth-gate.tsx), from `pageForPath` — and otherwise shows its number
  * without a link, titled "Needs Service access".
  *

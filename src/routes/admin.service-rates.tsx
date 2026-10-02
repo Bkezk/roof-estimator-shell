@@ -14,7 +14,7 @@ export const Route = createFileRoute("/admin/service-rates")({
 
 function ServiceRatesPage() {
   return (
-    <div className="space-y-6">
+    <div className="max-w-5xl space-y-6">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <Receipt className="h-6 w-6" /> Service Rates

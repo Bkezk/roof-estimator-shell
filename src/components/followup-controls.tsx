@@ -1,6 +1,6 @@
 /**
  * The follow-up controls (moved here from the old Follow-ups page, owner, Oct 1): the Snooze menu
- * (next reminder in 1 / 3 / 7 days) and the Close dialog (optional reason). My Work and the
+ * (next reminder in 1 / 3 / 7 days) and the Close dialog (optional reason). Work Overview and the
  * opportunity page's follow-up strip render them only for admins and managers (seesEveryone);
  * the mutations and the other helpers live in followups-shared.ts.
  */

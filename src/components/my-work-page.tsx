@@ -1,5 +1,5 @@
 /**
- * My Work (owner, Sep 30): the signed-in person's own tickets (as lead technician), open tasks
+ * Work Overview (owner, Sep 30): the signed-in person's own tickets (as lead technician), open tasks
  * and open follow-ups in one list, grouped Overdue / Today / This week / Later / No date (a Done
  * ticket last, never overdue), or on a month calendar where a click on a day lists that day.
  * Every signed-in user lands here. Admins and managers also get a "Show" picker (Mine /
@@ -555,7 +555,7 @@ export function MyWorkPage(props: {
     <div className="mx-auto max-w-none space-y-5">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <ListTodo className="h-6 w-6" /> My Work
+          <ListTodo className="h-6 w-6" /> Work Overview
         </h1>
         <p className="text-sm text-muted-foreground">
           {view === "owner"

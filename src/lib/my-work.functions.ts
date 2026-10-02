@@ -1,5 +1,5 @@
 /**
- * My Work — the server side (src/lib/my-work.ts has the pure rules). Every signed-in user may
+ * Work Overview — the server side (src/lib/my-work.ts has the pure rules). Every signed-in user may
  * call it; it returns only the caller's own tickets, tasks and follow-ups, unless the caller is an
  * admin or a manager, who may ask for everyone's or one person's (`visibleUserIds`).
  *

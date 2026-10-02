@@ -17,7 +17,7 @@ import {
 
 export const getWorkCounts = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  // The viewer's day (the browser's, as My Work); without one, the office's (Eastern).
+  // The viewer's day (the browser's, as Work Overview); without one, the office's (Eastern).
   .validator((d: unknown) => parseTodayInput(d))
   .handler(async ({ data, context }): Promise<WorkCounts & { today: string }> => {
     const sb = context.supabase;

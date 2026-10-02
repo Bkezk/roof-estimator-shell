@@ -4026,6 +4026,10 @@ export type Database = {
       stamp_dispatch: { Args: never; Returns: undefined };
       set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };
       set_my_theme: { Args: { p_theme: string }; Returns: undefined };
+      set_my_notify_prefs: {
+        Args: { p_email: boolean | null; p_push: boolean | null };
+        Returns: { notify_email: boolean; notify_push: boolean }[];
+      };
       building_county_counts_storm: {
         Args: never;
         Returns: { county: string; state: string; n: number }[];

@@ -66,8 +66,8 @@ import {
 } from "@/lib/opportunity-form";
 import { getAccount } from "@/lib/crm.functions";
 import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
-// The viewer's own calendar day, as My Work uses (audit, Oct 2: this list used the Eastern day,
-// so at 23:30 in Chicago it said "overdue" for what My Work called due today).
+// The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
+// so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
 import { localYmd } from "@/lib/my-work";
 import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN } from "@/lib/work-counts";
 import {
@@ -1388,7 +1388,7 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
             : "No open follow-up for this opportunity."}
       </p>
     );
-  // Red only once the due DAY has passed, as My Work says it (not at 12:00 UTC on the due day).
+  // Red only once the due DAY has passed, as Work Overview says it (not at 12:00 UTC on the due day).
   const overdue = isFollowupOverdue(f, localYmd(new Date()));
   return (
     <div className={box}>

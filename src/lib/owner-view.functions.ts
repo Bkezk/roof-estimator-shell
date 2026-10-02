@@ -1,5 +1,5 @@
 /**
- * The Owner view on My Work — the server side (src/lib/owner-view.ts has the pure rules and the
+ * The Owner view on Work Overview — the server side (src/lib/owner-view.ts has the pure rules and the
  * column definitions). Admins only: `listOwnerView` reads the caller's own profile row and
  * throws "Forbidden: admin only" unless its role is admin (`visibleToOwner` = isAdmin) — never a
  * flag from the client. Reads run under the caller's own client (admins read everything by RLS).
@@ -44,7 +44,7 @@ import { localYmd, zonedTime } from "@/lib/tasks";
 import { OPEN_OPP_STATUSES, parseTodayInput, viewerToday } from "@/lib/work-counts";
 
 export interface OwnerViewResult {
-  /** The day (YYYY-MM-DD) the numbers are for: the viewer's (sent by the browser, as My Work
+  /** The day (YYYY-MM-DD) the numbers are for: the viewer's (sent by the browser, as Work Overview
    *  uses), else the office's (Eastern) — viewerToday. */
   today: string;
   /** When the numbers were read (ISO): "2 h ago" is relative to this. */
@@ -72,7 +72,7 @@ function must<T>(label: string, r: { data: T | null; error: { message: string } 
 
 export const listOwnerView = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  // The viewer's day (audit, Oct 2: the Owner view used the Eastern day, My Work the browser's).
+  // The viewer's day (audit, Oct 2: the Owner view used the Eastern day, Work Overview the browser's).
   .validator((d: unknown) => parseTodayInput(d))
   .handler(async ({ data, context }): Promise<OwnerViewResult> => {
     const sb = context.supabase;
@@ -285,9 +285,9 @@ async function loadLastActivity(
 // ---- one person's detail (the expanded row) ------------------------------------------------
 
 export interface OwnerPersonDetail {
-  /** Their My Work items due today — what the row's Due today counts. */
+  /** Their Work Overview items due today — what the row's Due today counts. */
   today: DetailItem[];
-  /** Their overdue My Work items and opportunities past expected close — the row's Overdue. */
+  /** Their overdue Work Overview items and opportunities past expected close — the row's Overdue. */
   overdue: DetailItem[];
   /** Tickets completed and tasks done this Mon–Sun week — the row's Done this week. */
   doneThisWeek: DoneItem[];

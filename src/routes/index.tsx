@@ -16,7 +16,7 @@ export const Route = createFileRoute("/")({
     ],
   }),
   beforeLoad: async () => {
-    // Everyone lands on My Work (owner, Sep 30; homeFor in src/lib/access.ts).
+    // Everyone lands on Work Overview (owner, Sep 30; homeFor in src/lib/access.ts).
     throw redirect({ to: "/my-work" });
   },
   component: Index,

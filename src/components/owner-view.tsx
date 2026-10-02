@@ -1,11 +1,11 @@
 /**
- * My Work › Owner (owner, Oct 1): who is doing what they should be doing, when they should be
+ * Work Overview › Owner (owner, Oct 1): who is doing what they should be doing, when they should be
  * doing it — one row per person (Role, Due today, Overdue, Done this week, Open opportunities,
- * Last activity), a totals row and a one-line digest above. Admins only: My Work renders this
+ * Last activity), a totals row and a one-line digest above. Admins only: Work Overview renders this
  * only under `visibleToOwner(profile)`, and `listOwnerView` refuses anyone else on the server.
  * Definitions are in src/lib/owner-view.ts.
  *
- * Each number links into My Work for that person (`who`) with the List preset (`bucket`);
+ * Each number links into Work Overview for that person (`who`) with the List preset (`bucket`);
  * opportunity numbers link to the Opportunities list's open / overdue filter for that person
  * (`oppsHref`: `assignee=<id>`; the totals row: everyone). Refreshes when the
  * window regains focus, every 60 s and on mount, like the counts strip.
@@ -87,7 +87,7 @@ export function OwnerView() {
   const fn = useServerFn(listOwnerView);
   const q = useQuery({
     queryKey: OWNER_VIEW_KEY,
-    // The browser's day, the one My Work uses (the server falls back to the Eastern day).
+    // The browser's day, the one Work Overview uses (the server falls back to the Eastern day).
     queryFn: () => fn({ data: { today: localYmd(new Date()) } }),
     enabled: !!session && visibleToOwner(profile),
     refetchOnMount: "always",
@@ -224,7 +224,7 @@ export function OwnerView() {
                               <Link
                                 {...oppsHref(r.id, true)}
                                 className="underline-offset-4 hover:underline"
-                                title="Opportunities past expected close with no open follow-up (not on My Work)"
+                                title="Opportunities past expected close with no open follow-up (not on Work Overview)"
                               >
                                 incl. {r.overdueOpps} opportunit{r.overdueOpps === 1 ? "y" : "ies"}
                               </Link>

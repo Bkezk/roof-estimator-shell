@@ -29,7 +29,7 @@ export function WorkCountsStrip() {
   const { session, profile } = useAuth();
   const qc = useQueryClient();
   const countsFn = useServerFn(getWorkCounts);
-  // The viewer's own day (audit, Oct 2: My Work, the Opportunities list, the Owner view and
+  // The viewer's own day (audit, Oct 2: Work Overview, the Opportunities list, the Owner view and
   // this strip must agree on "today"); the key carries it so a new day refetches.
   const today = localYmd(new Date());
   const counts = useQuery({

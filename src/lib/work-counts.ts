@@ -14,7 +14,7 @@
  * "Today" is the viewer's calendar day, sent by the browser (lib/my-work.ts localYmd, the day My
  * Work uses), as YYYY-MM-DD; without one, the office's day (America/New_York, lib/tasks.ts
  * localYmd). Audit, Oct 2: the counts, the Owner view and the Opportunities list used the
- * Eastern day while My Work used the browser's, so at 23:30 in Chicago they disagreed.
+ * Eastern day while Work Overview used the browser's, so at 23:30 in Chicago they disagreed.
  */
 import { localYmd as easternYmd } from "@/lib/tasks";
 
@@ -37,7 +37,7 @@ export const parseTodayInput = (d: unknown): { today?: string } => {
   return typeof v === "string" && YMD.test(v) ? { today: v } : {};
 };
 
-/** Ticket stages that are still work (the same three as My Work and the Tech Board load). */
+/** Ticket stages that are still work (the same three as Work Overview and the Tech Board load). */
 export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;
 /** Opportunity statuses that are not closing (OPP_CLOSING: won / lost / no_response). */
 export const OPEN_OPP_STATUSES = ["open", "contacted", "quoted"] as const;

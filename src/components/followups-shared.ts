@@ -1,5 +1,5 @@
 /**
- * Follow-up helpers shared by My Work and the opportunity page's follow-up strip: the list's
+ * Follow-up helpers shared by Work Overview and the opportunity page's follow-up strip: the list's
  * query key, date formats, and the snooze / close mutations (toasts included). The Snooze menu
  * and the Close dialog are components, in followup-controls.tsx. Snooze and Close are an admin's
  * or a manager's (owner, Oct 1: canManageFollowup in lib/followup-rules.ts; the server refuses

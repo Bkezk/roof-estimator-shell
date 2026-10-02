@@ -3,7 +3,7 @@
  * time (or all day), who it is assigned to, attendees (users) and outside attendee emails,
  * notes. Saving a new task emails everyone on it ("New task: …"); adding attendees later emails
  * the added ones. Mounted by the Prospecting page (TasksPanel, the building's Tasks card) and,
- * later, My Work — keep the props simple.
+ * later, Work Overview — keep the props simple.
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";

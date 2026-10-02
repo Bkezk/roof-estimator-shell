@@ -145,29 +145,37 @@ export function ServiceRatesSettings() {
           </p>
         ) : (
           <form
-            className="space-y-6"
+            className="space-y-4"
             onSubmit={(e) => {
               e.preventDefault();
               submit();
             }}
           >
-            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-1 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100 md:truncate">
               Defaults came from the CenterPoint invoices in the report; confirm the helper travel
               rates with the office.
             </p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               On a ticket with named technicians, each one&apos;s labor bills at the $ typed beside
               their name, else their default bill rate (Admin › Users), else the Tech / Helper labor
               rate below. Travel and the cost side always come from this table.
             </p>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
+              <table className="text-sm">
+                <caption className="caption-top pb-1 text-left text-xs text-muted-foreground">
+                  $ per hour
+                </caption>
                 <thead>
                   <tr className="border-b text-left text-xs text-muted-foreground">
-                    <th className="py-1.5 pr-3 font-medium">$ per hour</th>
+                    <th scope="col" className="py-1 pr-4 font-medium">
+                      Rate kind
+                    </th>
+                    <th scope="col" className="py-1 pr-4 font-medium">
+                      Role
+                    </th>
                     {COLUMNS.map((c) => (
-                      <th key={c.label} className="py-1.5 pr-3 text-right font-medium">
+                      <th key={c.label} scope="col" className="py-1 pr-2 text-right font-medium">
                         {c.label}
                       </th>
                     ))}
@@ -175,28 +183,32 @@ export function ServiceRatesSettings() {
                 </thead>
                 <tbody>
                   {RATE_KINDS.flatMap((kind) =>
-                    ROLES.map((role) => (
+                    ROLES.map((role, i) => (
                       <tr
                         key={`${kind}-${role.key}`}
-                        className={role.key === "helper" ? "border-b" : ""}
+                        className={i === ROLES.length - 1 ? "border-b last:border-b-0" : ""}
                       >
-                        <td className="whitespace-nowrap py-1.5 pr-3">
-                          {role.key === "tech" ? (
-                            <span className="font-medium">{RATE_KIND_LABELS[kind]}</span>
-                          ) : null}
-                          <span className="ml-1 text-muted-foreground">{role.label}</span>
-                        </td>
+                        {i === 0 ? (
+                          <th
+                            scope="row"
+                            rowSpan={ROLES.length}
+                            className="whitespace-nowrap py-1 pr-4 text-left align-middle font-medium"
+                          >
+                            {RATE_KIND_LABELS[kind]}
+                          </th>
+                        ) : null}
+                        <td className="py-1 pr-4 text-muted-foreground">{role.label}</td>
                         {COLUMNS.map((c) => {
                           const row = find(kind, role.key, c.time);
                           const draft = row ? rates[row.id] : undefined;
                           return (
-                            <td key={c.label} className="w-28 py-1.5 pr-3">
+                            <td key={c.label} className="py-1 pr-2">
                               {row && draft ? (
                                 <NumberField
                                   value={draft[c.field]}
                                   step="0.01"
                                   inputMode="decimal"
-                                  className="text-right"
+                                  className="ml-auto h-8 w-24 text-right"
                                   title={`${RATE_KIND_LABELS[kind]} ${role.label} ${c.label}`}
                                   onChange={(v) =>
                                     setRates((rs) => ({
@@ -206,7 +218,9 @@ export function ServiceRatesSettings() {
                                   }
                                 />
                               ) : (
-                                <span className="block text-right text-muted-foreground">—</span>
+                                <span className="ml-auto block w-24 text-right text-muted-foreground">
+                                  —
+                                </span>
                               )}
                             </td>
                           );
@@ -218,7 +232,7 @@ export function ServiceRatesSettings() {
               </table>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
               <div className="space-y-1">
                 <Label>Material markup %</Label>
                 <NumberField
@@ -245,7 +259,7 @@ export function ServiceRatesSettings() {
                   On the taxable lines of new invoices; a tax-exempt customer gets 0.
                 </p>
               </div>
-              <div className="space-y-1 sm:col-span-2">
+              <div className="space-y-1">
                 <Label htmlFor="rates-terms">Payment terms</Label>
                 <Input
                   id="rates-terms"
@@ -254,7 +268,7 @@ export function ServiceRatesSettings() {
                   onChange={(e) => setS2("payment_terms", e.target.value)}
                 />
               </div>
-              <div className="space-y-1 sm:col-span-2">
+              <div className="space-y-1">
                 <Label htmlFor="rates-contact">Invoice contact line</Label>
                 <Input
                   id="rates-contact"
@@ -265,7 +279,7 @@ export function ServiceRatesSettings() {
                 />
                 <p className="text-xs text-muted-foreground">Printed on the invoice PDF.</p>
               </div>
-              <div className="space-y-1 sm:col-span-2">
+              <div className="space-y-1">
                 <Label htmlFor="rates-subject">Email subject</Label>
                 <Input
                   id="rates-subject"
@@ -277,11 +291,11 @@ export function ServiceRatesSettings() {
                   {"{number}"} is replaced with the invoice number.
                 </p>
               </div>
-              <div className="space-y-1 sm:col-span-2">
+              <div className="space-y-1">
                 <Label htmlFor="rates-message">Email message</Label>
                 <Textarea
                   id="rates-message"
-                  rows={4}
+                  rows={3}
                   maxLength={2000}
                   value={s.email_message}
                   onChange={(e) => setS2("email_message", e.target.value)}

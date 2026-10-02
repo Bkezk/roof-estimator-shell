@@ -1,5 +1,5 @@
 /**
- * The Owner view on My Work (owner, Oct 1): "The owner should see everything in a format that is
+ * The Owner view on Work Overview (owner, Oct 1): "The owner should see everything in a format that is
  * easily digestible and have a view that allows him to see who is doing what they should be
  * doing, when they should be doing it" — "just ensure no one can see it but them."
  *
@@ -10,15 +10,15 @@
  * function in owner-view.functions.ts reads the rows, components/owner-view.tsx renders them.
  *
  * Definitions (every day is the office's calendar day, America/New_York):
- *   Due today       My Work items in the Today bucket (`bucketOf`): open / scheduled tickets
+ *   Due today       Work Overview items in the Today bucket (`bucketOf`): open / scheduled tickets
  *                   scheduled today, open tasks due today, open follow-ups due today — the same
- *                   items My Work lists for that person (a ticket's own follow-up rides on it).
- *   Overdue         My Work items in the Overdue bucket (a Done ticket never is) plus open
+ *                   items Work Overview lists for that person (a ticket's own follow-up rides on it).
+ *   Overdue         Work Overview items in the Overdue bucket (a Done ticket never is) plus open
  *                   opportunities assigned to them past expected close (`isOverdueOpp`) that
  *                   have NO open follow-up of theirs: an opportunity with one is already on My
  *                   Work as that follow-up's row (its due date is the expected close), so it is
  *                   counted there, once (audit, Oct 2: an overdue opportunity counted twice —
- *                   Owner said 2 while the My Work list it links to showed 1).
+ *                   Owner said 2 while the Work Overview list it links to showed 1).
  *   Done this week  tickets in done / invoiced / closed whose completed_at falls in this Mon–Sun
  *                   week, plus tasks marked done (done_at) in that week.
  *   Open opps       opportunities assigned to them, status open / contacted / quoted; the
@@ -110,7 +110,7 @@ export interface DueCounts {
 
 export interface PersonBuckets {
   today: DueCounts;
-  /** My Work items in the Overdue bucket (tickets, tasks, follow-ups). */
+  /** Work Overview items in the Overdue bucket (tickets, tasks, follow-ups). */
   overdue: number;
 }
 
@@ -127,8 +127,8 @@ const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
 };
 
 /**
- * Due today and overdue per person (`assigneeId`), from My Work items (`mergeWork`), bucketed
- * exactly as My Work's List does (`bucketOf`) so a number and the list it opens agree.
+ * Due today and overdue per person (`assigneeId`), from Work Overview items (`mergeWork`), bucketed
+ * exactly as Work Overview's List does (`bucketOf`) so a number and the list it opens agree.
  */
 export function bucketCounts(
   items: Pick<WorkItem, "kind" | "date" | "done" | "assigneeId">[],
@@ -161,7 +161,7 @@ export interface OppCounts {
   open: number;
   /**
    * Past expected close with no open follow-up of the assignee's: the opportunities Overdue adds
-   * on top of My Work's Overdue bucket (one with a follow-up is already in that bucket as the
+   * on top of Work Overview's Overdue bucket (one with a follow-up is already in that bucket as the
    * follow-up's row).
    */
   overdue: number;
@@ -174,8 +174,8 @@ export type OppFollowupIn = Pick<FollowupIn, "kind" | "item_id" | "assignee_id" 
 const followKey = (oppId: string, assigneeId: string) => `${oppId}|${assigneeId}`;
 
 /**
- * The opportunities already on My Work: `<opportunity id>|<assignee id>` of every open follow-up
- * of kind 'opportunity'. My Work lists that follow-up (mergeWork), so the opportunity is counted
+ * The opportunities already on Work Overview: `<opportunity id>|<assignee id>` of every open follow-up
+ * of kind 'opportunity'. Work Overview lists that follow-up (mergeWork), so the opportunity is counted
  * there and never again as an opportunity row.
  */
 export function followedOpps(followups: readonly OppFollowupIn[]): Set<string> {
@@ -186,13 +186,13 @@ export function followedOpps(followups: readonly OppFollowupIn[]): Set<string> {
   return out;
 }
 
-/** An overdue opportunity that is not on My Work as its assignee's open follow-up. */
+/** An overdue opportunity that is not on Work Overview as its assignee's open follow-up. */
 const extraOverdueOpp = (o: OppIn, today: string, followed: ReadonlySet<string>) =>
   !!o.assignee_id && isOverdueOpp(o, today) && !followed.has(followKey(o.id, o.assignee_id));
 
 /**
  * Open (not closing) opportunities per assignee: count, overdue (past expected close and not
- * already on My Work as an open follow-up — `followups` are the open follow-up rows My Work
+ * already on Work Overview as an open follow-up — `followups` are the open follow-up rows Work Overview
  * reads), est_value sum.
  */
 export function oppCounts(
@@ -380,9 +380,9 @@ export interface OwnerRow {
   name: string;
   role: RoleLabel;
   dueToday: DueCounts;
-  /** My Work overdue items + overdue opportunities not already there as a follow-up. */
+  /** Work Overview overdue items + overdue opportunities not already there as a follow-up. */
   overdue: number;
-  /** Of `overdue`, the opportunities past expected close that are not on My Work. */
+  /** Of `overdue`, the opportunities past expected close that are not on Work Overview. */
   overdueOpps: number;
   doneThisWeek: number;
   openOpps: number;
@@ -431,9 +431,9 @@ export function ownerTotals(rows: OwnerRow[]): OwnerSums {
 export type OwnerCell = "today" | "overdue" | "done";
 
 /**
- * Where a number links: My Work for that person (`who` = their id, or "all" for the totals row)
+ * Where a number links: Work Overview for that person (`who` = their id, or "all" for the totals row)
  * with the matching List bucket preset — Due today → bucket=today, Overdue → bucket=overdue,
- * Done this week → their list (My Work has no history filter).
+ * Done this week → their list (Work Overview has no history filter).
  */
 export function myWorkHref(
   who: string,
@@ -483,7 +483,7 @@ export const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
   opportunity: "Opportunity",
 };
 
-/** A My Work item, or an opportunity past expected close (Overdue only). */
+/** A Work Overview item, or an opportunity past expected close (Overdue only). */
 export type DetailItem = Omit<WorkItem, "kind"> & { kind: DetailKind };
 
 export interface DetailOppIn extends OppIn {
@@ -528,7 +528,7 @@ function compareDetail(a: DetailItem, b: DetailItem): number {
 }
 
 /**
- * One person's Today and Overdue items: their My Work items (`mergeWork`) bucketed by `bucketOf`
+ * One person's Today and Overdue items: their Work Overview items (`mergeWork`) bucketed by `bucketOf`
  * exactly as `bucketCounts` does, plus their open opportunities past expected close in Overdue
  * that have no open follow-up of theirs (`followups`, as `oppCounts`): an opportunity with one is
  * listed once, as the follow-up's row (it opens the opportunity too). So today.length = the

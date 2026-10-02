@@ -14,7 +14,7 @@
  * `profiles.role` is 'admin' | 'manager' | 'user'; `profiles.access` is the granted pages (empty
  * for admins and managers). Enforcement is RLS (`public.has_access(page)`, `public.is_admin()`,
  * `public.is_manager()`) plus the checks inside every server function; the gate and the sidebar
- * only mirror it. My Work (/my-work) is every signed-in user's landing page.
+ * only mirror it. Work Overview (/my-work) is every signed-in user's landing page.
  */
 export const PAGES = [
   "estimate",
@@ -92,7 +92,7 @@ export const isAdmin = (p: AccessLike | null | undefined): boolean => p?.role ==
 
 export const isManager = (p: AccessLike | null | undefined): boolean => p?.role === "manager";
 
-/** Admins and managers see everyone's tickets, tasks and follow-ups (My Work's "Show" picker). */
+/** Admins and managers see everyone's tickets, tasks and follow-ups (Work Overview's "Show" picker). */
 export const seesEveryone = (p: AccessLike | null | undefined): boolean =>
   isAdmin(p) || isManager(p);
 
@@ -152,10 +152,10 @@ export const seesOpportunitiesList = (p: AccessLike | null | undefined): boolean
  */
 export function pageForPath(pathname: string): Page | "admin" | "manager" | null {
   if (pathname === "/account" || pathname === "/login") return null;
-  // Follow-ups and My Work: every signed-in user (the server returns only what they may see).
+  // Follow-ups and Work Overview: every signed-in user (the server returns only what they may see).
   if (pathname.startsWith("/followups")) return null;
   if (pathname.startsWith("/my-work")) return null;
-  // "/" only redirects to My Work.
+  // "/" only redirects to Work Overview.
   if (pathname === "/") return null;
   if (pathname.startsWith("/admin/users") || pathname.startsWith("/admin/reminders"))
     return "admin";
@@ -168,7 +168,7 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/service")) return "service";
   if (pathname.startsWith("/customers")) return "customers";
   // Opportunities: every signed-in user (audit, Oct 2: a rep without Customers access was
-  // bounced from their own opportunity's My Work link). What they see is the server's: RLS
+  // bounced from their own opportunity's Work Overview link). What they see is the server's: RLS
   // gives Customers / Estimate users every opportunity and anyone else only their own
   // assignments (crm_opportunities_read). The sidebar lists the page for Customers / Estimate
   // (seesOpportunitiesList).
@@ -183,7 +183,7 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
 }
 
 /**
- * Where a signed-in user lands: My Work, for everyone (owner, Sep 30) — every signed-in user may
+ * Where a signed-in user lands: Work Overview, for everyone (owner, Sep 30) — every signed-in user may
  * open it (it replaced "a technician lands on Service, others on their first page").
  */
 export function homeFor(_p?: AccessLike | null): string {

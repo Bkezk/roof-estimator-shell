@@ -126,7 +126,7 @@ export const closeFollowup = createServerFn({ method: "POST" })
   });
 
 /**
- * Push the next reminder out by N days (the item stays open; My Work shows "Snoozed until …").
+ * Push the next reminder out by N days (the item stays open; Work Overview shows "Snoozed until …").
  * Admins and managers only (owner, Oct 1), like closeFollowup.
  */
 export const snoozeFollowup = createServerFn({ method: "POST" })
@@ -214,6 +214,14 @@ export const getNotifyPrefs = createServerFn({ method: "GET" })
     },
   );
 
+const PREFS_NOT_SAVED = "Your notification settings were not saved. Please try again.";
+
+/**
+ * Save the caller's channels through set_my_notify_prefs (their own row only, keyed on
+ * auth.uid(); migration 20261002180000_notify_prefs.sql). Not a direct profiles update: only
+ * admins may update profiles, so for anyone else that matched 0 rows and looked like success.
+ * The function returns the row after the write; anything but the values asked for is an error.
+ */
 export const setNotifyPrefs = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -221,15 +229,20 @@ export const setNotifyPrefs = createServerFn({ method: "POST" })
       .object({ notify_email: z.boolean().optional(), notify_push: z.boolean().optional() })
       .parse(d),
   )
-  .handler(async ({ data, context }): Promise<void> => {
-    const { error } = await context.supabase
-      .from("profiles")
-      .update({
-        ...(data.notify_email === undefined ? {} : { notify_email: data.notify_email }),
-        ...(data.notify_push === undefined ? {} : { notify_push: data.notify_push }),
-      })
-      .eq("id", context.userId);
-    if (error) throw new Error(error.message);
+  .handler(async ({ data, context }): Promise<{ notify_email: boolean; notify_push: boolean }> => {
+    const { data: rows, error } = await context.supabase.rpc("set_my_notify_prefs", {
+      p_email: data.notify_email ?? null,
+      p_push: data.notify_push ?? null,
+    });
+    if (error) throw new Error(PREFS_NOT_SAVED);
+    const saved = Array.isArray(rows) ? rows[0] : undefined;
+    if (
+      !saved ||
+      (data.notify_email !== undefined && saved.notify_email !== data.notify_email) ||
+      (data.notify_push !== undefined && saved.notify_push !== data.notify_push)
+    )
+      throw new Error(PREFS_NOT_SAVED);
+    return { notify_email: saved.notify_email, notify_push: saved.notify_push };
   });
 
 /** The public VAPID key the browser needs to subscribe (generated on first call). */
