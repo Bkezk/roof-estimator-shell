@@ -69,7 +69,8 @@ import { matchesAssignee, type StatusFilter } from "@/lib/opportunities-search";
 // The viewer's own calendar day, as Work Overview uses (audit, Oct 2: this list used the Eastern day,
 // so at 23:30 in Chicago it said "overdue" for what Work Overview called due today).
 import { localYmd } from "@/lib/my-work";
-import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN } from "@/lib/work-counts";
+import { isOpenOppStatus, isOverdueOpp, OPP_ALL_OPEN, oppOverdueDays } from "@/lib/work-counts";
+import { OverdueBadge } from "@/components/overdue-badge";
 import {
   deleteOpportunity,
   getOpportunity,
@@ -486,6 +487,7 @@ function OppList({
                             key={o.id}
                             row={o}
                             untouched={untouched.get(untouchedKey("opportunity", o.id))}
+                            today={today}
                           />
                         ))}
                       </div>
@@ -504,8 +506,11 @@ function OppList({
 function OppListRow({
   row: o,
   untouched,
+  today,
 }: {
   row: OpportunityWithNames;
+  /** The list's day (the Overdue filter's): an open one past its expected close shows "Overdue". */
+  today: string;
   /** Assigned with no contact logged and still Open (listUntouched). */
   untouched?: UntouchedRow | undefined;
 }) {
@@ -540,6 +545,7 @@ function OppListRow({
           <Badge variant={STATUS_BADGE[status]} className="px-1.5 py-0 text-[11px]">
             {OPP_STATUS_LABELS[status]}
           </Badge>
+          <OverdueBadge days={oppOverdueDays({ ...o, status }, today)} what="Expected to close" />
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
           )}
@@ -1194,8 +1200,18 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
           </div>
         )}
         {opp && opened && (
-          <p className="text-sm text-muted-foreground" data-line="opened">
+          <p
+            className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
+            data-line="opened"
+          >
             {opened}
+            <OverdueBadge
+              days={oppOverdueDays(
+                { status: asStatus(opp.status), expected_close: opp.expected_close },
+                localYmd(new Date()),
+              )}
+              what="Expected to close"
+            />
           </p>
         )}
         {opp && (

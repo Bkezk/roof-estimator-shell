@@ -115,7 +115,13 @@ import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import type { StageFilter } from "@/lib/service-search";
 import { localYmd } from "@/lib/tasks";
-import { isOpenTicketStage, isOverdueTicket, SERVICE_OPEN_WORK } from "@/lib/work-counts";
+import {
+  isOpenTicketStage,
+  isOverdueTicket,
+  SERVICE_OPEN_WORK,
+  ticketOverdueDays,
+} from "@/lib/work-counts";
+import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
@@ -685,6 +691,7 @@ function ServiceList({
                             key={j.id}
                             row={j}
                             untouched={untouched.get(untouchedKey("ticket", j.id))}
+                            today={today}
                             onDelete={manager ? () => setToDelete(j) : undefined}
                           />
                         ))}
@@ -791,9 +798,12 @@ function ServiceList({
 function TicketListRow({
   row: j,
   untouched,
+  today,
   onDelete,
 }: {
   row: ServiceJobWithTech;
+  /** The list's day (the Overdue filter's): an open ticket whose day has passed shows "Overdue". */
+  today: string;
   /** Assigned with no contact logged and not started (listUntouched). */
   untouched?: UntouchedRow | undefined;
   onDelete?: (() => void) | undefined;
@@ -832,6 +842,7 @@ function TicketListRow({
           <Badge variant={STAGE_BADGE[stage]} className="px-1.5 py-0 text-[11px]">
             {STAGE_LABELS[stage]}
           </Badge>
+          <OverdueBadge days={ticketOverdueDays({ ...j, stage }, today)} what="Was due" />
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
           )}
@@ -2092,8 +2103,18 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           )}
         </div>
         {job && opened && (
-          <p className="text-sm text-muted-foreground" data-line="opened">
+          <p
+            className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"
+            data-line="opened"
+          >
             {opened}
+            <OverdueBadge
+              days={ticketOverdueDays(
+                { stage: asStage(job.stage), scheduled_date: job.scheduled_date },
+                localYmd(new Date()),
+              )}
+              what="Was due"
+            />
           </p>
         )}
         {job?.from_opportunity_id && <FromOpportunityNote id={job.from_opportunity_id} />}

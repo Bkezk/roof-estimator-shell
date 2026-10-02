@@ -434,7 +434,10 @@ describe("the ticket page: 'Opened … by …' under the title, the stage strip 
     expect(h1).toBeGreaterThan(0);
     expect(opened).toBeGreaterThan(h1);
     expect(opened).toBeLessThan(numbers);
-    expect(src).toContain('<p className="text-sm text-muted-foreground" data-line="opened">');
+    // Owner, Oct 2: the red Overdue tag sits inline after the Opened text (overdue-tag.test.ts).
+    expect(src).toMatch(
+      /<p\s+className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground"\s+data-line="opened"\s*>/,
+    );
   });
   it("the strip closes the header, on every width; the stage picker stays", () => {
     const strip = src.indexOf('<StageStrip cells={stageCells} label="Stages" />');

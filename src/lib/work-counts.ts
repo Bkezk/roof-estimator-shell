@@ -105,3 +105,31 @@ export const WORK_TILES: readonly { kind: TileKind; label: string; overdue: bool
   { kind: "openOpps", label: "Open opportunities", overdue: false },
   { kind: "overdueOpps", label: "Overdue opportunities", overdue: true },
 ];
+
+/** Whole days from one YYYY-MM-DD to a later one (calendar arithmetic, no time zone). */
+function daysBetween(fromYmd: string, toYmd: string): number {
+  const ms = (ymd: string) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    return Date.UTC(y!, m! - 1, d!);
+  };
+  return Math.round((ms(toYmd) - ms(fromYmd)) / 86400000);
+}
+
+/**
+ * The red "Overdue" tag on a ticket (owner, Oct 2): how many days past its day an open ticket is,
+ * or null when it is not overdue — exactly the rule of the Overdue filter and tile.
+ */
+export function ticketOverdueDays(
+  j: { stage: string; scheduled_date: string | null },
+  todayYmd: string,
+): number | null {
+  return isOverdueTicket(j, todayYmd) ? daysBetween(j.scheduled_date!, todayYmd) : null;
+}
+
+/** The same for an opportunity: days past its expected close while it is still open. */
+export function oppOverdueDays(
+  o: { status: string; expected_close: string | null },
+  todayYmd: string,
+): number | null {
+  return isOverdueOpp(o, todayYmd) ? daysBetween(o.expected_close!, todayYmd) : null;
+}
