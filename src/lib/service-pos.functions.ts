@@ -9,8 +9,9 @@
  * - add: Service access and working the ticket (the office, its lead technician, a crew member);
  * - edit / delete: admins and managers any PO; anyone else their own while it is not approved;
  * - approve: admins and managers only.
- * A PO may name the vendor (supplier) it was bought from (vendor_id → public.vendors; any vendor
- * not archived; vendors.ts); the list carries the vendor's name.
+ * A PO names the supplier it was bought from as typed (vendor_text, free text — owner, Oct 2:
+ * "type Lowes and it just saves"); vendor_id is set too only when the text matches a saved,
+ * unarchived vendor (vendorLink). Nothing here adds to public.vendors.
  * Errors are thrown with a plain message; the screens toast it (owner: bugs announced loudly).
  */
 import { createServerFn } from "@tanstack/react-start";
@@ -141,7 +142,8 @@ async function viewsOf(
   return rows.map((r) => ({
     ...r,
     price: Number(r.price),
-    vendor_name: r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null,
+    // What was typed wins for display; a linked vendor's current name backs it up.
+    vendor_name: r.vendor_text ?? (r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null),
     created_by_name: r.created_by ? (names.get(r.created_by) ?? null) : null,
     approved_by_name: r.approved_by ? (names.get(r.approved_by) ?? null) : null,
     can_edit: canEditPo(p, ctx.userId, r, works),
@@ -197,6 +199,8 @@ const saveSchema = z.object({
   notes: optText(10_000),
   /** The supplier (public.vendors); null = none; undefined keeps the stored one. */
   vendor_id: z.string().uuid().nullable().optional(),
+  /** The supplier as typed ("Lowes"); free text, never a new vendor; undefined keeps it. */
+  vendor_text: z.string().trim().max(120).nullable().optional(),
   receipt_path: z.string().min(1).max(300).nullable().optional(),
   receipt_name: z.string().max(200).nullable().optional(),
   receipt_size: z.number().int().nonnegative().nullable().optional(),
@@ -224,6 +228,7 @@ export const savePurchaseOrder = createServerFn({ method: "POST" })
       price: Math.round(data.price * 100) / 100,
       notes: data.notes,
       ...(data.vendor_id === undefined ? {} : { vendor_id: data.vendor_id }),
+      ...(data.vendor_text === undefined ? {} : { vendor_text: data.vendor_text || null }),
     };
     const receipt =
       data.receipt_path === undefined

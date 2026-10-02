@@ -2757,6 +2757,7 @@ export type Database = {
           title: string | null;
           updated_at: string;
           vendor_id: string | null;
+          vendor_text: string | null;
         };
         Insert: {
           approved?: boolean;
@@ -2776,6 +2777,7 @@ export type Database = {
           title?: string | null;
           updated_at?: string;
           vendor_id?: string | null;
+          vendor_text?: string | null;
         };
         Update: {
           approved?: boolean;
@@ -2795,6 +2797,7 @@ export type Database = {
           title?: string | null;
           updated_at?: string;
           vendor_id?: string | null;
+          vendor_text?: string | null;
         };
         Relationships: [
           {

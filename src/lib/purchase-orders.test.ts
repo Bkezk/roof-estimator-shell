@@ -466,7 +466,7 @@ describe("generated types: service_job_purchase_orders", () => {
       types.indexOf("      service_job_purchase_orders: {"),
     );
     expect(block).toContain(
-      "Row: {\n          approved: boolean;\n          approved_at: string | null;\n          approved_by: string | null;\n          created_at: string;\n          created_by: string | null;\n          id: string;\n          notes: string | null;\n          po_date: string;\n          po_number: string;\n          price: number;\n          receipt_name: string | null;\n          receipt_path: string | null;\n          receipt_size: number | null;\n          service_job_id: string;\n          title: string | null;\n          updated_at: string;\n          vendor_id: string | null;\n        };",
+      "Row: {\n          approved: boolean;\n          approved_at: string | null;\n          approved_by: string | null;\n          created_at: string;\n          created_by: string | null;\n          id: string;\n          notes: string | null;\n          po_date: string;\n          po_number: string;\n          price: number;\n          receipt_name: string | null;\n          receipt_path: string | null;\n          receipt_size: number | null;\n          service_job_id: string;\n          title: string | null;\n          updated_at: string;\n          vendor_id: string | null;\n          vendor_text: string | null;\n        };",
     );
     const insert = block.slice(block.indexOf("Insert: {"), block.indexOf("Update: {"));
     for (const req of ["po_number: string;", "price: number;", "service_job_id: string;"])
@@ -574,7 +574,8 @@ describe("the section (purchase-orders-section.tsx)", () => {
   it("Date defaults to today; Price starts blank with no placeholder 0; Notes auto-grow", () => {
     expect(src).toContain("po_date: po?.po_date ?? localYmd(),");
     expect(src).toContain('price: po ? String(Number(po.price)) : "",');
-    const price = src.slice(src.indexOf("id={`${idp}-price`}"), src.indexOf(">Notes</Label>"));
+    // Up to the Vendor box (whose "e.g. Lowes" placeholder is text, not a number).
+    const price = src.slice(src.indexOf("id={`${idp}-price`}"), src.indexOf(">Vendor</Label>"));
     expect(price).not.toContain("placeholder");
     expect(price).not.toContain("NumberField");
     expect(src).toMatch(/<AutoTextarea\s+id=\{`\$\{idp\}-notes`\}\s+rows=\{2\}/);

@@ -206,3 +206,19 @@ export function poLetters(i: number): string {
   const first = Math.floor(i / 26) - 1;
   return String.fromCharCode(A + first) + String.fromCharCode(A + (i % 26));
 }
+
+/** What a PO stores for the supplier typed in its Vendor box (owner, Oct 2): the text as typed,
+ * plus the saved vendor's id only when the text is exactly a saved, unarchived vendor's name
+ * (case and spacing aside). Never creates a vendor. Blank → nothing. */
+export function vendorLink(
+  text: string,
+  vendors: readonly { id: string; name: string; archived_at?: string | null }[],
+): { vendor_id: string | null; vendor_text: string | null } {
+  const t = text.trim();
+  if (!t) return { vendor_id: null, vendor_text: null };
+  const key = t.toLowerCase().replace(/\s+/g, " ");
+  const hit = vendors.find(
+    (v) => !v.archived_at && v.name.trim().toLowerCase().replace(/\s+/g, " ") === key,
+  );
+  return { vendor_id: hit?.id ?? null, vendor_text: t.slice(0, 120) };
+}

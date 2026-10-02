@@ -7,14 +7,14 @@
  * Price (the box starts blank — owner rule: never a placeholder 0), Notes, Upload Receipt
  * (a photo or a PDF, straight to the private "service" bucket like the photos), Approved? and
  * Submit / Back. The fields stack on a phone. An optional Vendor (the supplier it was bought from,
- * any vendor not archived; VendorPicker, type to filter) shows on the row after the title.
+ * typed free text, saved vendors' names suggested) shows on the row after the title.
  *
  * Approval is a manager's: the Approved toggle shows only to admins and managers
  * (`managesTickets`) and never on the technician's close-out (`field`); everyone else sees a
  * read-only badge. The approved total is an internal cost on the invoice (invoice-editor.tsx).
  * Mounted on the ticket page (service-page.tsx) and the close-out (closeout.tsx).
  */
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -26,6 +26,7 @@ import {
   PO_NUMBER_MAX,
   nextPoNumber,
   parsePrice,
+  vendorLink,
   poFormProblem,
   poMoney,
   poSummary,
@@ -48,7 +49,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { Box } from "@/components/service/field-shared";
-import { VendorPicker } from "@/components/crm/vendor-picker";
+import { useVendors } from "@/components/crm/use-vendors";
 import {
   errText,
   fieldKeys,
@@ -345,8 +346,11 @@ function PoForm({
   const approveFn = useServerFn(setPurchaseOrderApproved);
   const [draft, setDraft] = useState<PoDraft>(() => draftOf(po, suggestedNumber));
   const [approved, setApproved] = useState(po?.approved ?? false);
-  // The supplier (optional): a vendor's id, or null.
-  const [vendorId, setVendorId] = useState<string | null>(po?.vendor_id ?? null);
+  // The supplier as typed (owner, Oct 2: free text — "Lowes" just saves; a saved vendor's
+  // name links its id too; nothing is ever added to the Vendors list). Saved names suggest.
+  const [vendorText, setVendorText] = useState(po?.vendor_name ?? "");
+  const vendors = useVendors();
+  const vendorListId = useId();
   const [file, setFile] = useState<File | null>(null);
   // Editing: the stored receipt stays unless removed or replaced.
   const [dropReceipt, setDropReceipt] = useState(false);
@@ -381,7 +385,7 @@ function PoForm({
             title: draft.title.trim() || null,
             price: price ?? 0,
             notes: draft.notes.trim() || null,
-            vendor_id: vendorId,
+            ...vendorLink(vendorText, vendors.data ?? []),
             ...receipt,
           },
         });
@@ -477,14 +481,24 @@ function PoForm({
         </div>
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor={`${idp}-vendor`}>Vendor</Label>
-          <VendorPicker
+          <Input
             id={`${idp}-vendor`}
-            value={vendorId}
-            fallbackName={po?.vendor_name ?? null}
+            list={vendorListId}
+            value={vendorText}
+            maxLength={120}
             disabled={busy}
+            placeholder="e.g. Lowes"
+            autoComplete="off"
             className="h-11 text-base sm:h-9 sm:text-sm"
-            onChange={(v) => setVendorId(v?.id ?? null)}
+            onChange={(e) => setVendorText(e.target.value)}
           />
+          <datalist id={vendorListId}>
+            {(vendors.data ?? [])
+              .filter((v) => !v.archived_at)
+              .map((v) => (
+                <option key={v.id} value={v.name} />
+              ))}
+          </datalist>
         </div>
       </div>
       <div className="space-y-1">

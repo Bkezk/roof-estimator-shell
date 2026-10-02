@@ -355,7 +355,9 @@ describe("generated types", () => {
       "      service_job_purchase_orders: {\n",
       "      service_job_repairs: {\n",
     );
-    expect(po).toContain("          vendor_id: string | null;\n        };");
+    expect(po).toContain(
+      "          vendor_id: string | null;\n          vendor_text: string | null;\n        };",
+    );
     expect(po.match(/vendor_id\?: string \| null;/g)).toHaveLength(2);
     expect(po).toContain('foreignKeyName: "service_job_purchase_orders_vendor_id_fkey";');
   });
@@ -479,9 +481,11 @@ describe("purchase orders: the Vendor (service-pos.functions.ts)", () => {
       "if (v.archived_at) throw new Error(`${v.name} is archived; pick another vendor`);",
     );
   });
-  it("the list carries the vendor's name", () => {
+  it("the list carries the vendor's name: the text as typed, else the linked vendor's", () => {
     expect(src).toContain("vendor_name: string | null;");
-    expect(src).toContain("vendor_name: r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null,");
+    expect(src).toContain(
+      "vendor_name: r.vendor_text ?? (r.vendor_id ? (vendors.get(r.vendor_id) ?? null) : null),",
+    );
   });
 });
 
@@ -621,18 +625,14 @@ describe("the Vendors tab on the Customers page", () => {
 
 describe("the PO form's Vendor (purchase-orders-section.tsx)", () => {
   const src = read("src/components/service/purchase-orders-section.tsx");
-  it("an optional Vendor box (every vendor not archived), saved with the PO", () => {
+  it("a free-text Vendor box (owner, Oct 2): typed text saves; a saved vendor's name links too", () => {
     const form = src.slice(src.indexOf("function PoForm("));
-    expect(form).toContain(
-      "const [vendorId, setVendorId] = useState<string | null>(po?.vendor_id ?? null);",
-    );
-    expect(form).toMatch(/<Label htmlFor=\{`\$\{idp\}-vendor`\}>Vendor<\/Label>\s*<VendorPicker/);
-    const picker = form.slice(
-      form.indexOf("<VendorPicker"),
-      form.indexOf("/>", form.indexOf("<VendorPicker")),
-    );
-    expect(picker).not.toContain("billableOnly");
-    expect(form).toContain("vendor_id: vendorId,");
+    expect(form).toContain('const [vendorText, setVendorText] = useState(po?.vendor_name ?? "");');
+    expect(form).toMatch(/<Label htmlFor=\{`\$\{idp\}-vendor`\}>Vendor<\/Label>\s*<Input/);
+    expect(form).toContain("list={vendorListId}");
+    expect(form).toContain(".filter((v) => !v.archived_at)");
+    expect(form).toContain("...vendorLink(vendorText, vendors.data ?? []),");
+    expect(form).not.toContain("<VendorPicker");
     // After Price, before Notes (CenterPoint's order is kept).
     expect(form.indexOf(">Vendor</Label>")).toBeGreaterThan(form.indexOf(">Price *</Label>"));
     expect(form.indexOf(">Vendor</Label>")).toBeLessThan(form.indexOf(">Notes</Label>"));
