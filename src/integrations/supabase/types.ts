@@ -684,6 +684,7 @@ export type Database = {
           account_id: string | null;
           assigned_at: string | null;
           contacted_at: string | null;
+          escalated_at: string | null;
           assignee_id: string | null;
           bid_id: string | null;
           created_at: string;
@@ -705,6 +706,7 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           contacted_at?: string | null;
+          escalated_at?: string | null;
           assignee_id?: string | null;
           bid_id?: string | null;
           created_at?: string;
@@ -726,6 +728,7 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           contacted_at?: string | null;
+          escalated_at?: string | null;
           assignee_id?: string | null;
           bid_id?: string | null;
           created_at?: string;
@@ -2927,6 +2930,7 @@ export type Database = {
           account_id: string | null;
           assigned_at: string | null;
           contacted_at: string | null;
+          escalated_at: string | null;
           centerpoint_invoice: string | null;
           centerpoint_ticket: string | null;
           checked_in_with: string | null;
@@ -2971,6 +2975,7 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           contacted_at?: string | null;
+          escalated_at?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
           checked_in_with?: string | null;
@@ -3015,6 +3020,7 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           contacted_at?: string | null;
+          escalated_at?: string | null;
           centerpoint_invoice?: string | null;
           centerpoint_ticket?: string | null;
           checked_in_with?: string | null;

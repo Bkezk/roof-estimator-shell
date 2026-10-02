@@ -227,7 +227,7 @@ export interface DispatchResult {
   escalated: number;
   /** Steps that failed (claim, reminder or escalation); each is logged and recorded on its row. */
   failed: number;
-  /** Due follow-ups another pass claimed first (the cron and a page load at once). */
+  /** Due follow-ups or escalations another pass claimed first (the cron and a page load at once). */
   skipped: number;
 }
 
@@ -258,9 +258,9 @@ async function recordFailure(admin: Client, f: FollowupRow, step: string, e: unk
 
 /**
  * Fire every due follow-up reminder: one inbox row (+ email / push) per open follow-up whose
- * next_remind_at has passed, and push its next reminder out by every_days. Runs from the cron
- * route and, throttled, from the app (followups.functions.ts dispatchRemindersIfDue). Returns
- * what it did.
+ * next_remind_at has passed, and push its next reminder out by every_days. Then escalate the
+ * untouched work (escalateUntouched below), on its own clock. Runs from the cron route and,
+ * throttled, from the app (followups.functions.ts dispatchRemindersIfDue). Returns what it did.
  *
  * Each follow-up is CLAIMED before anything is sent: one conditional update moves
  * next_remind_at on (and stamps last_reminded_at / reminders_sent) only where it still holds the
@@ -283,21 +283,6 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
     .order("next_remind_at")
     .limit(200);
   if (error) throw new Error(error.message);
-  // Untouched past the limit (owner, Sep 28): assigned, never contacted, never started. When
-  // such an item's reminder fires, admins (and any named users) hear about it too, on the
-  // same cadence, until someone logs a contact or starts it. crm_untouched() applies the
-  // caller's read rules: the cron's service role and office users see everything.
-  const [{ data: untouched, error: untouchedErr }, { data: escalateTo, error: escalateErr }] =
-    await Promise.all([admin.rpc("crm_untouched"), admin.rpc("escalation_recipients")]);
-  const lookupErr = untouchedErr ?? escalateErr;
-  if (lookupErr) console.error("Reminder pass: no escalations this pass —", lookupErr.message);
-  const untouchedByItem = new Map<string, NonNullable<typeof untouched>[number]>();
-  for (const u of untouched ?? []) {
-    const since = u.assigned_at
-      ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
-      : 0;
-    if (since >= u.limit_days) untouchedByItem.set(`${u.kind}:${u.item_id}`, u);
-  }
   const out: DispatchResult = {
     checked: due?.length ?? 0,
     reminded: 0,
@@ -357,37 +342,165 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
       out.failed++;
       await recordFailure(admin, f, "reminder", e);
     }
-
-    // 3. The escalation, under the same claim (it never re-sends the assignee's reminder).
-    const u = untouchedByItem.get(`${f.kind}:${f.item_id}`);
-    if (!u) continue;
-    const recipients = (escalateTo ?? []).filter((id) => id !== f.assignee_id);
-    if (!recipients.length) continue;
-    const since = u.assigned_at
-      ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / 86400000)
-      : 0;
-    try {
-      await notify(
-        recipients,
-        {
-          kind: "untouched",
-          title: `Untouched ${f.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
-          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
-          url: f.url,
-          followup_id: f.id,
-        },
-        admin,
-      );
-      out.escalated++;
-    } catch (e) {
-      out.failed++;
-      await recordFailure(admin, f, "escalation", e);
-    }
   }
+
+  // 3. Untouched work, on its own clock (never stops the reminders above or the stamp below).
+  try {
+    await escalateUntouched(admin, now, out);
+  } catch (e) {
+    out.failed++;
+    console.error("Reminder pass: the escalation step failed —", errText(e));
+  }
+
   // SECURITY DEFINER stamp (it arms the app's ten-minute throttle): the pass may run as an
   // office user who cannot edit settings, or as the service role (20261002090000).
   const { error: stampErr } = await admin.rpc("stamp_dispatch");
   if (stampErr)
     console.error("Reminder pass: could not stamp last_dispatch_at —", stampErr.message);
   return out;
+}
+
+const DAY = 86400000;
+type UntouchedItem = Database["public"]["Functions"]["crm_untouched"]["Returns"][number];
+/** Whole days an item has sat since it was assigned (0 when the stamp is missing). */
+const daysSince = (u: UntouchedItem, now: Date) =>
+  u.assigned_at ? Math.floor((now.getTime() - Date.parse(u.assigned_at)) / DAY) : 0;
+
+/**
+ * The untouched-work escalation (owner, Sep 28; on its own clock since the Oct 2 audit). An item
+ * crm_untouched() returns (assigned, no contact logged, not started) that has sat past its
+ * limit (ticket_untouched_days / opportunity_untouched_days) is escalated to the admins (when
+ * escalate_to_admins is on) and the "also escalate to" people, minus its assignee: on the first
+ * pass past the limit, then again every ticket_every_days / opportunity_every_days until someone
+ * logs a contact or starts it (it then leaves crm_untouched()). It used to ride on the item's
+ * own follow-up reminder, so the first escalation waited for that reminder (day 4 with a 2-day
+ * limit and reminders at day 1, then every 3).
+ *
+ * The item's escalated_at (migration 20261002110000) records the last escalation; the pass
+ * CLAIMS it before sending, with one conditional update that only matches while escalated_at
+ * still holds the value this pass read, so two passes at once (the cron and a page load)
+ * escalate once. As with the reminders the claim is never rolled back: a failed send is
+ * recorded (on the item's open follow-up, if any, and in the log) and the item waits for its
+ * next turn. A re-assignment clears escalated_at (the stamp_assigned triggers).
+ *
+ * Each item is handled on its own: an error on one is recorded and the pass goes on.
+ */
+async function escalateUntouched(admin: Client, now: Date, out: DispatchResult): Promise<void> {
+  // What is untouched and who hears. Either lookup failing means no escalations this pass, and
+  // nothing else (the reminders have gone; the stamp follows).
+  let untouched: UntouchedItem[];
+  let escalateTo: string[];
+  try {
+    const [u, r] = await Promise.all([
+      admin.rpc("crm_untouched"),
+      admin.rpc("escalation_recipients"),
+    ]);
+    const err = u.error ?? r.error;
+    if (err) throw new Error(err.message);
+    untouched = u.data ?? [];
+    escalateTo = r.data ?? [];
+  } catch (e) {
+    console.error("Reminder pass: no escalations this pass —", errText(e));
+    return;
+  }
+  const past = untouched.filter((u) => daysSince(u, now) >= u.limit_days);
+  if (!past.length || !escalateTo.length) return;
+
+  // How often each kind repeats, when each item was last escalated, and its open follow-up (for
+  // the link and to record a failure).
+  const ids = (kind: string) => past.filter((u) => u.kind === kind).map((u) => u.item_id);
+  const [settings, jobs, opps, fus] = await Promise.all([
+    admin
+      .from("crm_settings")
+      .select("ticket_every_days, opportunity_every_days")
+      .eq("id", 1)
+      .limit(1),
+    ids("ticket").length
+      ? admin.from("service_jobs").select("id, escalated_at").in("id", ids("ticket"))
+      : Promise.resolve({ data: [], error: null }),
+    ids("opportunity").length
+      ? admin.from("crm_opportunities").select("id, escalated_at").in("id", ids("opportunity"))
+      : Promise.resolve({ data: [], error: null }),
+    admin
+      .from("crm_followups")
+      .select("*")
+      .eq("status", "open")
+      .in(
+        "item_id",
+        past.map((u) => u.item_id),
+      ),
+  ]);
+  const readErr = settings.error ?? jobs.error ?? opps.error;
+  if (readErr) {
+    console.error("Reminder pass: no escalations this pass —", readErr.message);
+    return;
+  }
+  const s = settings.data?.[0];
+  // The column defaults (20260927100000_crm_followups.sql) if the row is missing.
+  const every = {
+    ticket: Math.max(1, Number(s?.ticket_every_days ?? 3)),
+    opportunity: Math.max(1, Number(s?.opportunity_every_days ?? 7)),
+  };
+  const lastAt = new Map<string, string | null>();
+  for (const j of jobs.data ?? []) lastAt.set(`ticket:${j.id}`, j.escalated_at ?? null);
+  for (const o of opps.data ?? []) lastAt.set(`opportunity:${o.id}`, o.escalated_at ?? null);
+  const followupOf = new Map<string, FollowupRow>();
+  for (const f of (fus.data ?? []) as FollowupRow[]) followupOf.set(`${f.kind}:${f.item_id}`, f);
+
+  for (const u of past) {
+    const key = `${u.kind}:${u.item_id}`;
+    // Gone, or not readable by this pass: the cron's service role reads everything.
+    if (!lastAt.has(key)) continue;
+    const prev = lastAt.get(key) ?? null;
+    const everyDays = u.kind === "opportunity" ? every.opportunity : every.ticket;
+    if (prev && now.getTime() - Date.parse(prev) < everyDays * DAY) continue;
+    const recipients = escalateTo.filter((id) => id !== u.assignee_id);
+    if (!recipients.length) continue;
+    const f = followupOf.get(key);
+    const record = async (step: string, e: unknown) => {
+      if (f) await recordFailure(admin, f, step, e);
+      else console.error(`Reminder pass: ${key} (${u.title}) failed at ${step}: ${errText(e)}`);
+    };
+
+    // 1. Claim: escalated_at moves to now only where it still holds what this pass read.
+    try {
+      const table = u.kind === "opportunity" ? "crm_opportunities" : "service_jobs";
+      const claim = admin
+        .from(table)
+        .update({ escalated_at: now.toISOString() })
+        .eq("id", u.item_id);
+      const { data: won, error: claimErr } = await (
+        prev ? claim.eq("escalated_at", prev) : claim.is("escalated_at", null)
+      ).select("id");
+      if (claimErr) throw new Error(claimErr.message);
+      if (!won?.length) {
+        out.skipped++;
+        continue;
+      }
+    } catch (e) {
+      out.failed++;
+      await record("escalation claim", e);
+      continue;
+    }
+
+    // 2. The escalation (the message is the Sep 28 one).
+    const since = daysSince(u, now);
+    try {
+      await notify(
+        recipients,
+        {
+          kind: "untouched",
+          title: `Untouched ${u.kind === "opportunity" ? "opportunity" : "ticket"}: ${u.title}`,
+          body: `Assigned to ${u.assignee_name ?? "someone"} ${since} day${since === 1 ? "" : "s"} ago; no contact logged and not started. Limit is ${u.limit_days} day${u.limit_days === 1 ? "" : "s"}.`,
+          url: f?.url ?? u.url,
+          followup_id: f?.id ?? null,
+        },
+        admin,
+      );
+      out.escalated++;
+    } catch (e) {
+      out.failed++;
+      await record("escalation", e);
+    }
+  }
 }

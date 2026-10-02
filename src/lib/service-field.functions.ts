@@ -19,6 +19,7 @@ import { templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
+import { resolveFieldDay } from "@/lib/field-day";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -39,6 +40,13 @@ async function me(ctx: Ctx) {
 }
 const nameOf = (p: { full_name: string | null; email: string }) =>
   (p.full_name ?? "").trim() || p.email;
+/**
+ * The phone's calendar day (YYYY-MM-DD, field-utils.ts localYmd) sent with a field action that
+ * stamps a day. Optional: an older cached bundle sends none and the server uses the Eastern day
+ * (field-day.ts resolveFieldDay, which also refuses a day that is not believable).
+ */
+const phoneDay = z.string().max(32).optional();
+
 /** A technician may only touch their own ticket; office users and admins any. */
 async function ownJob(ctx: Ctx, id: string): Promise<ServiceJobRow> {
   const p = await me(ctx);
@@ -197,14 +205,22 @@ export const setFieldStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
     z
-      .object({ id: z.string().uuid(), to: z.enum(["en_route", "on_site", "done", "undo"]) })
+      .object({
+        id: z.string().uuid(),
+        to: z.enum(["en_route", "on_site", "done", "undo"]),
+        day: phoneDay,
+      })
       .parse(d),
   )
   .handler(async ({ data, context }): Promise<ServiceJobRow> => {
+    // The day the time entries belong to: the phone's, not UTC's (field-day.ts). Checked first,
+    // so a refused day changes nothing.
+    const at = new Date();
+    const onDate = resolveFieldDay(data.day, at);
     const p = await me(context);
     const job = await ownJob(context, data.id);
     const sb = context.supabase;
-    const now = new Date().toISOString();
+    const now = at.toISOString();
     const who = nameOf(p);
     let patch: Database["public"]["Tables"]["service_jobs"]["Update"] = {};
     if (data.to === "en_route") {
@@ -232,7 +248,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           hours: quarterHours(job.en_route_at, now),
           helper_count: job.helper_count,
           source: "buttons",
-          on_date: now.slice(0, 10),
+          on_date: onDate,
           created_by: context.userId,
         });
       }
@@ -250,7 +266,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           hours: quarterHours(job.on_site_at, now),
           helper_count: job.helper_count,
           source: "buttons",
-          on_date: now.slice(0, 10),
+          on_date: onDate,
           created_by: context.userId,
         });
       }
@@ -479,6 +495,8 @@ const repairSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
   print_on_invoice: z.boolean().optional(),
+  /** Today on the phone: the completed_on of a repair saved without one (one just added). */
+  day: phoneDay,
 });
 export type JobRepairInput = z.input<typeof repairSchema>;
 /** Add or edit a repair on a ticket; a template fills the name and texts when given. */
@@ -486,15 +504,17 @@ export const saveJobRepair = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => repairSchema.parse(d))
   .handler(async ({ data, context }): Promise<JobRepairRow> => {
+    const { id, day, ...fields } = data;
+    // The phone's day (field-day.ts), checked first so a refused day changes nothing.
+    const completedOn = fields.completed_on ?? resolveFieldDay(day);
     const job = await ownJob(context, data.service_job_id);
     const sb = context.supabase;
-    const { id, ...fields } = data;
     const row = {
       ...fields,
       repair_template_id: fields.repair_template_id ?? null,
       problem_text: fields.problem_text ?? null,
       resolution_text: fields.resolution_text ?? null,
-      completed_on: fields.completed_on ?? new Date().toISOString().slice(0, 10),
+      completed_on: completedOn,
       print_on_invoice: fields.print_on_invoice ?? true,
     };
     if (id) {

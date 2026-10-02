@@ -232,7 +232,9 @@ export function RemindersSettings() {
                   <p className="text-sm font-semibold">Untouched work</p>
                   <p className="text-sm text-muted-foreground">
                     Untouched = assigned but no contact logged and not started. Past the limit the
-                    item turns red in the lists and its reminder also goes to the people below.
+                    item turns red in the lists and the people below hear about it right away, then
+                    again at the &ldquo;Then every N days&rdquo; above (ticket or opportunity) until
+                    someone logs a contact or starts it.
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">{daysFields("untouched")}</div>

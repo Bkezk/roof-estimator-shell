@@ -79,6 +79,7 @@ import {
   errText,
   fieldKeys,
   getPosition,
+  localYmd,
   loudError,
   removeFromServiceBucket,
   uploadToServiceBucket,
@@ -299,7 +300,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       autosave.cancel();
       const row = await saveFn({ data: input(latest.current) });
       if (FINISHED.includes(row.stage)) return row;
-      return statusFn({ data: { id: job.id, to: "done" } });
+      // The phone's own calendar day: the labor entry's date (not UTC's day).
+      return statusFn({ data: { id: job.id, to: "done", day: localYmd() } });
     },
     onSuccess: (row) => {
       keepRow(row);
@@ -532,8 +534,10 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
                 quantity: 1,
                 problem_text: t.description,
                 resolution_text: t.work_completed,
+                // Completed today on the phone's calendar (not UTC's day).
+                day: localYmd(),
               }
-            : { service_job_id: jobId, name: t.name, unit: "EA", quantity: 1 },
+            : { service_job_id: jobId, name: t.name, unit: "EA", quantity: 1, day: localYmd() },
       }),
     onSuccess: (row) => {
       qc.setQueryData<JobRepairRow[]>(fieldKeys.repairs(jobId), (old) => [...(old ?? []), row]);

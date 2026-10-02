@@ -12,6 +12,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database, Json } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
 import { parseLooseJson } from "@/lib/loose-json";
+import { easternYmd } from "@/lib/field-day";
 import {
   countyFromServiceUrl,
   guessFieldMap,
@@ -616,7 +617,8 @@ export const listWarrantyLeads = createServerFn({ method: "GET" })
     await assertPageAccess(context.supabase, context.userId, "prospect");
     const { data, error } = await context.supabase.rpc("warranty_leads");
     if (error) throw new Error(error.message);
-    const today = new Date().toISOString().slice(0, 10);
+    // The office's day (America/New_York), not UTC's.
+    const today = easternYmd();
     return sortWarrantyLeads(
       ((data ?? []) as WarrantyLeadRow[]).map((r) => warrantyLeadFrom(r, today)),
     );

@@ -27,6 +27,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
+import { easternYmd } from "@/lib/field-day";
 
 export const MOVEMENT_REASONS = [
   "leftover",
@@ -742,7 +743,8 @@ export const setVehicleDrivers = createServerFn({ method: "POST" })
     if (me?.role !== "admin") throw new Error("Forbidden: admin access required");
     const location = await locationOf(sb, data.location_id);
     if (location.kind !== "vehicle") throw new Error("Drivers are set on service vehicles only");
-    const today = new Date().toISOString().slice(0, 10);
+    // The office's day (America/New_York), not UTC's: after 8 pm Eastern UTC is tomorrow.
+    const today = easternYmd();
     const { data: current, error } = await sb
       .from("vehicle_drivers")
       .select("id, user_id")

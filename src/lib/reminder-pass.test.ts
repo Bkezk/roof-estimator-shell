@@ -259,7 +259,13 @@ describe("(b) two passes at once send a due reminder exactly once", () => {
 
 describe("(c) an escalation failure never re-sends the assignee's reminder", () => {
   it("escalation throws after the assignee was reminded → the next pass does not remind them again", async () => {
-    const db: Tables = { crm_followups: [followup("f1", "rep-1")] };
+    // The escalation is its own step since Oct 2 (untouched-escalation.test.ts): it reads the
+    // repeat interval from crm_settings and claims the ticket's escalated_at.
+    const db: Tables = {
+      crm_followups: [followup("f1", "rep-1")],
+      crm_settings: [{ id: 1, last_dispatch_at: null, ticket_every_days: 3 }],
+      service_jobs: [{ id: "item-f1", escalated_at: null }],
+    };
     const untouched = [
       {
         kind: "ticket",

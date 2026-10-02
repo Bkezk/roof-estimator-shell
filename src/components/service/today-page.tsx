@@ -168,7 +168,8 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
   const navigate = useNavigate();
   const statusFn = useServerFn(setFieldStatus);
   const step = useMutation({
-    mutationFn: (to: Step) => statusFn({ data: { id: j.id, to } }),
+    // The phone's own calendar day: the server stamps time entries with it (not UTC's day).
+    mutationFn: (to: Step) => statusFn({ data: { id: j.id, to, day: localYmd() } }),
     onMutate: async (to) => {
       await qc.cancelQueries({ queryKey: fieldKeys.today });
       const prev = qc.getQueryData<TodayJob[]>(fieldKeys.today);

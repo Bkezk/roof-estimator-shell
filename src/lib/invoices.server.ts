@@ -51,6 +51,7 @@ import {
 } from "@/lib/photo-annotations";
 import { pieceFromCountedNotes, type PieceDef } from "@/lib/stock-units";
 import { timeLines, type RateTable } from "@/lib/invoice-labor";
+import { easternYmd } from "@/lib/field-day";
 import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
@@ -245,7 +246,8 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
       sort: sort++,
       kind: "material",
       ...materialLineFor(c, c.qty, cost ?? 0, markup, piece),
-      on_date: c.last.slice(0, 10),
+      // The day the material was last taken, in the office's time zone (not UTC's day).
+      on_date: easternYmd(new Date(c.last)),
       source: `cell:${c.screen_id}|${c.row_label}|${c.price_col}`,
       taxable: true,
     });
