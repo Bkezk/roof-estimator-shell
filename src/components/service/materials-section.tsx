@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { managesTickets } from "@/lib/access";
 import {
   addMovement,
   listLocations,
@@ -120,6 +121,7 @@ export function MaterialsSection({
   // Putting a piece back against this ticket is allowed for any login that may log material
   // (the server caps it at what the ticket took).
   const canRelease = canLog;
+  const manager = managesTickets(profile);
 
   const materialsFn = useServerFn(listServiceJobMaterials);
   const truckFn = useServerFn(myTruckStock);
@@ -368,11 +370,15 @@ export function MaterialsSection({
     if (gone) moveTruck(r, -Number(gone.qty));
   };
 
-  /** Use `units` more of the row on this ticket. */
-  const add = (r: ListRow, units: number) => {
+  /**
+   * Use `units` more of the row on this ticket. `checkStock` false: a manager correcting a line
+   * taken from the shop or another truck, whose on-hand this screen does not hold — the server
+   * checks it (addMovement: "Only N … on the shelf").
+   */
+  const add = (r: ListRow, units: number, checkStock = true) => {
     if (!(units > EPS)) return;
     const onHand = onHandUnits(r);
-    if (units > onHand + EPS) {
+    if (checkStock && units > onHand + EPS) {
       loudError(
         `Not enough ${r.row_label}`,
         new Error(
@@ -419,9 +425,9 @@ export function MaterialsSection({
   };
 
   /** Set the ticket's total for the row (the typed box). */
-  const setTotal = (r: ListRow, total: number) => {
+  const setTotal = (r: ListRow, total: number, checkStock = true) => {
     const delta = round6(total - usedUnits(r));
-    if (delta > EPS) add(r, delta);
+    if (delta > EPS) add(r, delta, checkStock);
     else if (delta < -EPS) reduce(r, -delta);
   };
 
@@ -439,6 +445,28 @@ export function MaterialsSection({
     return [...byCell.values()].filter((v) => Math.abs(v.packs) > EPS);
   }, [ledger, vehicleId]);
   const itemsOnTicket = rows.filter((r) => usedUnits(r) > EPS).length + elsewhere.length;
+  // Owner, Oct 5 (service follow-up 1): a manager corrects any line on the ticket here — the
+  // lines from the shop or another truck get the same −, typed total and + as the truck's.
+  // − puts it back where it was taken from (a "released" movement, capped by the server at what
+  // the ticket took); + takes more from the same place (the server checks the stock there).
+  const officeRows: ListRow[] = manager
+    ? elsewhere
+        .filter(({ packs }) => packs > EPS)
+        .map(({ m }) => ({
+          key: cellKey(m),
+          location_id: m.location_id,
+          screen_id: m.screen_id,
+          row_label: m.row_label,
+          price_col: m.price_col,
+          category: "",
+          unit: m.unit,
+          on_hand: 0,
+          piece: pieceFromLedger(ledger, m),
+          item_no: null,
+          location_name: locName(m.location_id),
+        }))
+    : [];
+  const officeKeys = new Set(officeRows.map((r) => r.key));
 
   // Lines on the ticket: the cells with something used (or returned) net of take-backs.
   const lineCount = useMemo(() => {
@@ -641,44 +669,75 @@ export function MaterialsSection({
         </>
       )}
 
-      {elsewhere.length > 0 && (
+      {officeRows.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            On this ticket — correct a quantity
+          </p>
+          <ul className="divide-y rounded-lg border">
+            {officeRows.map((r) => (
+              <TruckRow
+                key={r.key}
+                row={r}
+                used={usedUnits(r)}
+                onHand={0}
+                fromText={`from ${r.location_name}`}
+                onAdd={(n) => add(r, n, false)}
+                onReduce={(n) => reduce(r, n)}
+                onSet={(n) => setTotal(r, n, false)}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
+      {elsewhere.some(({ m }) => !officeKeys.has(cellKey(m))) && (
         <div className="space-y-1.5">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Also on this ticket
           </p>
           <ul className="divide-y rounded-md border text-sm">
-            {elsewhere.map(({ m, packs }) => {
-              const piece = pieceFromLedger(ledger, m);
-              const units = packsToUnits(packs, piece);
-              return (
-                <li key={cellKey(m)} className="flex justify-between gap-3 px-3 py-2">
-                  <span className="min-w-0">
-                    {m.row_label}
-                    {m.price_col !== "price" ? ` (${m.price_col})` : ""}
-                    <span className="block text-xs text-muted-foreground">
-                      from {locName(m.location_id)}
+            {elsewhere
+              .filter(({ m }) => !officeKeys.has(cellKey(m)))
+              .map(({ m, packs }) => {
+                const piece = pieceFromLedger(ledger, m);
+                const units = packsToUnits(packs, piece);
+                return (
+                  <li key={cellKey(m)} className="flex justify-between gap-3 px-3 py-2">
+                    <span className="min-w-0">
+                      {m.row_label}
+                      {m.price_col !== "price" ? ` (${m.price_col})` : ""}
+                      <span className="block text-xs text-muted-foreground">
+                        from {locName(m.location_id)}
+                      </span>
                     </span>
-                  </span>
-                  <span className="shrink-0 tabular-nums">
-                    {units < 0
-                      ? `returned ${amountText(-units, piece, m.unit)}`
-                      : amountText(units, piece, m.unit)}
-                  </span>
-                </li>
-              );
-            })}
+                    <span className="shrink-0 tabular-nums">
+                      {units < 0
+                        ? `returned ${amountText(-units, piece, m.unit)}`
+                        : amountText(units, piece, m.unit)}
+                    </span>
+                  </li>
+                );
+              })}
           </ul>
         </div>
       )}
 
-      {can("inventory") && (
-        <Button asChild variant="link" className="h-10 px-0 text-sm">
-          {/* Inventory reads ?job=<id> and opens "Take from inventory" for this ticket. */}
-          <Link to="/inventory" search={{ job: jobId }}>
-            From the shop / another truck
-          </Link>
-        </Button>
-      )}
+      {(can("inventory") || manager) &&
+        (manager ? (
+          // A manager adds material the tech forgot from any place (owner, Oct 5).
+          <Button asChild variant="outline" className="h-10">
+            <Link to="/inventory" search={{ job: jobId }}>
+              <Plus className="mr-1 h-4 w-4" /> Add material (shop or a truck)
+            </Link>
+          </Button>
+        ) : (
+          <Button asChild variant="link" className="h-10 px-0 text-sm">
+            {/* Inventory reads ?job=<id> and opens "Take from inventory" for this ticket. */}
+            <Link to="/inventory" search={{ job: jobId }}>
+              From the shop / another truck
+            </Link>
+          </Button>
+        ))}
     </>
   );
 
@@ -736,6 +795,7 @@ function TruckRow({
   row,
   used,
   onHand,
+  fromText,
   onAdd,
   onReduce,
   onSet,
@@ -743,6 +803,8 @@ function TruckRow({
   row: ListRow;
   used: number;
   onHand: number;
+  /** In place of the truck's on-hand line: where a manager-corrected line was taken from. */
+  fromText?: string | undefined;
   onAdd: (units: number) => void;
   onReduce: (units: number) => void;
   onSet: (total: number) => void;
@@ -778,13 +840,17 @@ function TruckRow({
         <div className="min-w-0 flex-1">
           <p className="font-medium leading-snug">{row.row_label}</p>
           {small && <p className="truncate text-xs text-muted-foreground">{small}</p>}
-          <p
-            className={`text-sm tabular-nums ${empty ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
-          >
-            {empty
-              ? "None left on the truck"
-              : `${onHandText(onHandPacks, row.unit, row.piece)} left`}
-          </p>
+          {fromText ? (
+            <p className="text-sm text-muted-foreground">{fromText}</p>
+          ) : (
+            <p
+              className={`text-sm tabular-nums ${empty ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
+            >
+              {empty
+                ? "None left on the truck"
+                : `${onHandText(onHandPacks, row.unit, row.piece)} left`}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
