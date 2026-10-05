@@ -19,7 +19,8 @@ import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
-import { resolveFieldDay } from "@/lib/field-day";
+import { easternYmd, resolveFieldDay } from "@/lib/field-day";
+import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
 import { mentionedIds } from "@/lib/mentions";
 
@@ -104,6 +105,8 @@ export interface TodayJob extends ServiceJobRow {
   account_phone: string | null;
   /** The other technicians of the named crew (not the lead), in order. */
   crew_names: string[];
+  /** The site's roof warranties in force today ("Duro-Last 15 NDL · to Mar 2031"; M5). */
+  warranty_badges: string[];
 }
 
 /** My tickets that still need me: not Done yet, soonest first (today's on top). */
@@ -139,6 +142,7 @@ export const myDay = createServerFn({ method: "GET" })
       { data: accounts },
       { data: crewRows },
       { data: techs },
+      warrantyRes,
     ] = await Promise.all([
       siteIds.length
         ? sb.from("crm_sites").select("id, technician_instructions").in("id", siteIds)
@@ -172,7 +176,18 @@ export const myDay = createServerFn({ method: "GET" })
             }[],
           }),
       sb.rpc("technician_options"),
+      // M5: before 20261005160000_site_warranties.sql is applied this errors; no badges then.
+      siteIds.length
+        ? sb
+            .from("site_warranties")
+            .select("id, site_id, manufacturer, kind, number, start_date, end_date, notes")
+            .in("site_id", siteIds)
+        : Promise.resolve({ data: [] as Warranty[], error: null }),
     ]);
+    const today = easternYmd();
+    const warrantiesOf = new Map<string, Warranty[]>();
+    for (const w of warrantyRes.error ? [] : (warrantyRes.data ?? []))
+      warrantiesOf.set(w.site_id, [...(warrantiesOf.get(w.site_id) ?? []), w]);
     const techName = new Map<string, string>();
     for (const t of techs ?? []) techName.set(t.id, (t.full_name ?? "").trim() || t.email);
     const crewOf = new Map<string, string[]>();
@@ -194,6 +209,7 @@ export const myDay = createServerFn({ method: "GET" })
         contact_phone: c?.mobile || c?.office_phone || null,
         account_phone: j.account_id ? (accountMap.get(j.account_id) ?? null) : null,
         crew_names: crewOf.get(j.id) ?? [],
+        warranty_badges: j.site_id ? warrantyBadges(warrantiesOf.get(j.site_id) ?? [], today) : [],
       };
     });
   });

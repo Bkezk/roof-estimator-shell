@@ -108,6 +108,7 @@ import { AccountPicker, type AccountPickerValue } from "@/components/crm/account
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
+import { WarrantyBadges } from "@/components/crm/site-warranties";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import type { StageFilter } from "@/lib/service-search";
@@ -2361,6 +2362,8 @@ function CustomerBlock(props: {
           <p className="text-xs text-destructive">{props.siteMessage}</p>
         )}
         <CountyCodeLine id={site?.county_code_id} className="text-xs" />
+        {/* M5 (owner, Oct 5): the site's roof warranty while in force, as CenterPoint shows. */}
+        <WarrantyBadges siteId={site?.id} />
         {site?.technician_instructions && (
           <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
             <span className="font-medium">Technician instructions: </span>

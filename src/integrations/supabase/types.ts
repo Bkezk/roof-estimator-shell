@@ -3148,6 +3148,49 @@ export type Database = {
         };
         Relationships: [];
       };
+      /** 20261005160000_site_warranties.sql */
+      site_warranties: {
+        Row: {
+          created_at: string;
+          created_by: string | null;
+          end_date: string | null;
+          id: string;
+          kind: string | null;
+          manufacturer: string;
+          notes: string | null;
+          number: string | null;
+          site_id: string;
+          start_date: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          created_by?: string | null;
+          end_date?: string | null;
+          id?: string;
+          kind?: string | null;
+          manufacturer: string;
+          notes?: string | null;
+          number?: string | null;
+          site_id: string;
+          start_date?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          created_by?: string | null;
+          end_date?: string | null;
+          id?: string;
+          kind?: string | null;
+          manufacturer?: string;
+          notes?: string | null;
+          number?: string | null;
+          site_id?: string;
+          start_date?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       service_settings: {
         Row: {
           authorizer_id: string | null;

@@ -88,6 +88,7 @@ import { SERVICE_STAGES, STAGE_LABELS, type ServiceStage } from "@/lib/service.f
 import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
+import { SiteWarranties } from "@/components/crm/site-warranties";
 import { SiteForm } from "@/components/crm/site-form";
 import {
   AccountManagerSelect,
@@ -1423,6 +1424,8 @@ function SitesSection({
                     {s.notes}
                   </p>
                 )}
+                {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
+                <SiteWarranties siteId={s.id} readOnly={readOnly} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (

@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
+import { WarrantyBadgeList } from "@/components/crm/site-warranties";
 import {
   clock,
   errText,
@@ -270,6 +271,9 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
       )}
 
       {j.description && <p className="text-base">{j.description}</p>}
+
+      {/* M5 (owner, Oct 5): the roof warranty while in force. */}
+      {j.warranty_badges?.length > 0 && <WarrantyBadgeList badges={j.warranty_badges} />}
 
       {j.technician_instructions && (
         <p className="whitespace-pre-line rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-50">
