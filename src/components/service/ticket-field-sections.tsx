@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Clock,
   History,
+  MapPinned,
   Loader2,
   MessageSquare,
   PenLine,
@@ -25,12 +26,21 @@ import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
 import { listContacts } from "@/lib/crm.functions";
-import { STAGE_LABELS, type ServiceJobWithTech, type ServiceStage } from "@/lib/service.functions";
+import {
+  STAGE_LABELS,
+  TYPE_LABELS,
+  type ServiceJobWithTech,
+  type ServiceStage,
+  type ServiceType,
+} from "@/lib/service.functions";
+import { Link } from "@tanstack/react-router";
+import { historyDay, historyDayText, historySnippet, SITE_HISTORY_LIMIT } from "@/lib/site-history";
 import {
   addJobNote,
   listJobEvents,
   listJobPhotos,
   listJobRepairs,
+  listSiteHistory,
   listTimeEntries,
   type JobEventRow,
 } from "@/lib/service-field.functions";
@@ -178,6 +188,7 @@ export function TicketFieldSections({
       <CloseoutSummary job={job} />
       <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
       <Timeline jobId={job.id} />
+      {job.site_id && <EarlierAtSite jobId={job.id} />}
     </>
   );
 }
@@ -582,6 +593,76 @@ function Timeline({ jobId }: { jobId: string }) {
                     {e.by_name ? ` · ${e.by_name}` : ""}
                   </p>
                 </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Earlier at this site (service study M4, owner Oct 5)
+
+/**
+ * The last tickets at the same site, newest first: number (opens it), day, type, stage, who,
+ * and the first line of what was found. Collapsed by default; the header says how many.
+ */
+function EarlierAtSite({ jobId }: { jobId: string }) {
+  const { session } = useAuth();
+  const listFn = useServerFn(listSiteHistory);
+  const q = useQuery({
+    queryKey: ["site-history", jobId],
+    queryFn: () => listFn({ data: { id: jobId } }),
+    enabled: !!session,
+  });
+  const rows = q.data ?? [];
+  const summary = q.error ? (
+    <span className="text-destructive">could not load</span>
+  ) : q.isLoading ? null : rows.length === 0 ? (
+    "none"
+  ) : (
+    `${rows.length}${rows.length === SITE_HISTORY_LIMIT ? "+" : ""} earlier · last ${historyDayText(historyDay(rows[0]!))}`
+  );
+  return (
+    <Box
+      title="Earlier at this site"
+      icon={MapPinned}
+      collapsible
+      defaultOpen={false}
+      storageKey="earlier"
+      summary={summary}
+    >
+      {q.error ? (
+        <p className="text-sm text-destructive">
+          Could not load earlier tickets: {errText(q.error)}
+        </p>
+      ) : q.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No earlier tickets at this site.</p>
+      ) : (
+        <ol className="divide-y">
+          {rows.map((r) => {
+            const snippet = historySnippet(r);
+            return (
+              <li key={r.id} className="py-2 text-sm">
+                <Link
+                  to="/service"
+                  search={{ id: r.id }}
+                  className="font-semibold underline-offset-2 hover:underline"
+                >
+                  #{r.number}
+                </Link>
+                <span className="text-muted-foreground">
+                  {" · "}
+                  {historyDayText(historyDay(r))} ·{" "}
+                  {TYPE_LABELS[r.service_type as ServiceType] ?? "Other"} ·{" "}
+                  {STAGE_LABELS[r.stage as ServiceStage] ?? r.stage}
+                  {r.technician_name ? ` · ${r.technician_name}` : ""}
+                </span>
+                {snippet && <p className="mt-0.5 text-muted-foreground">“{snippet}”</p>}
               </li>
             );
           })}
