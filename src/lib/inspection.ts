@@ -1,6 +1,6 @@
 /**
  * Inspection tickets (owner, Sep 30). A ticket of type Inspection carries a checklist — the
- * admin's items (inspection_checklist_items, edited on Admin › Service Rates) each marked OK /
+ * admin's items (inspection_checklist_items, edited on Setup › Inspection checklist) each marked OK /
  * Issue / N/A with a note — plus general notes, stored as one JSON document on the ticket
  * (service_jobs.inspection). Pure: no I/O.
  *

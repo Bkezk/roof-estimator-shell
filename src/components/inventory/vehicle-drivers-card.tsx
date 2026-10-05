@@ -1,5 +1,6 @@
 /**
- * Admin: who drives each service vehicle (owner, Sep 26 — service design §11). Up to two drivers
+ * Setup › Vehicles & drivers (admins; owner, Sep 26 — service design §11; moved from Inventory
+ * Oct 5): who drives each service vehicle. Up to two drivers
  * per vehicle and a person may be on two vehicles. Saving a row closes whoever is no longer
  * listed from today and adds the new names from today (setVehicleDrivers), so the history below
  * shows every change. A driver's "Take from inventory" starts on their vehicle.
@@ -74,7 +75,7 @@ export function VehicleDriversCard(props: { locations: InventoryLocation[] }) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Truck className="h-4 w-4" /> Vehicles &amp; drivers (admin)
+          <Truck className="h-4 w-4" /> Vehicles &amp; drivers
         </CardTitle>
         <CardDescription>
           Up to two drivers per vehicle; a person may drive two. A driver&apos;s &ldquo;Take from

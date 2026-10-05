@@ -1,6 +1,6 @@
 /**
- * Admin › Service Rates, owner Oct 2: "there's a ton of white space". Layout only: the page is
- * capped at max-w-5xl; the twelve rates are one compact table (Rate kind | Role | four rate
+ * Setup › Service rates (Admin › Service Rates until Oct 5), owner Oct 2: "there's a ton of white
+ * space". Layout only: the page is capped at max-w-5xl; the twelve rates are one compact table (Rate kind | Role | four rate
  * columns, the Tech / Helper pair under one kind label, small right-aligned boxes, "$ per hour"
  * as the caption); markup / tax, terms / contact line and subject / message sit side by side
  * on md+; the CenterPoint note is one line. Every label, hint and number box stays.
@@ -9,11 +9,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const read = (p: string) => readFileSync(p, "utf8");
-const page = read("src/routes/admin.service-rates.tsx");
+const page = read("src/routes/setup.tsx");
 const ui = read("src/components/service-rates-settings.tsx");
 const flat = ui.replace(/\s+/g, " ");
 
-describe("Service Rates page width", () => {
+describe("Setup page width", () => {
   it("is capped at max-w-5xl", () => {
     expect(page).toMatch(/<div className="[^"]*\bmax-w-5xl\b[^"]*">/);
   });

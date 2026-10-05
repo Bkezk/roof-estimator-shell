@@ -962,7 +962,7 @@ export const exportSageCsv = createServerFn({ method: "POST" })
   );
 
 /**
- * The Service Rates page (Admin › Service Rates): ticket money, so an admin's or a manager's
+ * The Service rates tab of Setup (was Admin › Service Rates): ticket money, so an admin's or a manager's
  * (owner, Oct 1; RLS service_rates_read / service_rates_write). Not Estimate Pricing.
  */
 async function ratesManager(ctx: Ctx) {

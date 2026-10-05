@@ -11,7 +11,8 @@
  * drive and their open ticket (service design §6 A, §11); the ticket page's "Log material" link
  * lands here with ?job=<ticket>, the estimator's leftovers link with ?bid=<bid>. Adjustments and
  * write-offs are not offered here — the server still accepts them from estimators. Admins set
- * the opened-box rule and who drives each vehicle at the bottom of the page.
+ * the opened-box rule at the bottom of the page; who drives each vehicle is on Setup ›
+ * Vehicles & drivers (owner, Oct 5).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -90,7 +91,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
-import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
 
 const fmtQty = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 const fmtWhen = (iso: string) =>
@@ -525,7 +525,6 @@ export function InventoryPage(props: {
       </Card>
 
       {role === "admin" && <SettingsCard rule={rule} />}
-      {role === "admin" && <VehicleDriversCard locations={locations} />}
 
       {dialog && (
         <RecordDialog

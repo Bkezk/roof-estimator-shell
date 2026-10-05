@@ -45,6 +45,7 @@ describe("per-page access", () => {
     expect(pageForPath("/admin/price-import")).toBe("pricing");
     expect(pageForPath("/admin/users")).toBe("admin");
     expect(pageForPath("/admin/reminders")).toBe("admin");
+    expect(pageForPath("/setup")).toBe("manager");
     expect(pageForPath("/admin/service-rates")).toBe("manager");
     expect(pageForPath("/account")).toBeNull();
   });

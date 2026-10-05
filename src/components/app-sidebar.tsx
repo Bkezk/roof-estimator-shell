@@ -23,8 +23,8 @@ import {
   BellRing,
   CalendarCheck,
   CalendarDays,
-  Receipt,
   ListTodo,
+  Settings2,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -65,7 +65,9 @@ const estimatorItems = [
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
 // Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
-// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities. Follow-ups
+// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities, then Setup
+// (owner, Oct 5: Service Rates renamed, plus the inspection checklist and vehicles & drivers;
+// admins and managers). Follow-ups
 // live on Work Overview (owner, Oct 1; /followups redirects there). Today sits first, for technicians
 // only: it is
 // the field day for the signed-in tech, so an office login never sees it. `exact`: active only
@@ -97,6 +99,9 @@ const customerItems: ServiceItem[] = [
     page: null,
     visible: seesOpportunitiesList,
   },
+  // Service rates, the inspection checklist and (admins) vehicles & drivers: ticket money and
+  // setup are a manager's (owner, Oct 1), so the same gate as Service Rates had.
+  { title: "Setup", url: "/setup", icon: Settings2, page: null, visible: managesTickets },
 ];
 const inventoryItems = [{ title: "Inventory", url: "/inventory", icon: Package }];
 const prospectItems = [
@@ -107,13 +112,11 @@ const prospectItems = [
   { title: "Bid Board", url: "/prospect/leads", icon: Radar },
 ];
 // The Admin group: who can sign in and which pages each person may open, and the reminder and
-// untouched-work rules (admins only), and the service labor rates (admins and managers: ticket
-// money is a manager's, owner, Oct 1). Owner, Sep 28: their own pages under Admin, not tabs of
-// Estimate Pricing › General.
+// untouched-work rules — admins only. (Service Rates moved out to Setup, under Opportunities,
+// owner Oct 5.) Owner, Sep 28: their own pages under Admin, not tabs of Estimate Pricing › General.
 const adminGroupItems = [
   { title: "Users & access", url: "/admin/users", icon: Users, adminOnly: true },
   { title: "Reminders", url: "/admin/reminders", icon: BellRing, adminOnly: true },
-  { title: "Service Rates", url: "/admin/service-rates", icon: Receipt, adminOnly: false },
 ];
 
 // Admin pages with `sub` get a caret submenu; each sub deep-links to that page's
@@ -541,7 +544,7 @@ export function AppSidebar() {
           </NavGroup>
         )}
 
-        {managesTickets(profile) && (
+        {role === "admin" && (
           <NavGroup label="Admin" id="admin" iconMode={collapsed}>
             <SidebarMenu>
               {adminGroupItems

@@ -1,31 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Receipt } from "lucide-react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { ServiceRatesSettings } from "@/components/service-rates-settings";
-import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
-
-// Owner, Sep 28: Service Rates is its own Admin page (it used to be a tab of Estimate Pricing ›
-// General). Access is the central gate's (pageForPath: /admin/service-rates → manager: admins
-// and managers, owner, Oct 1).
+/**
+ * Service Rates became the Setup page (owner, Oct 5), under Opportunities in the Customers group.
+ * The old address stays for bookmarks and sends everyone to /setup (its first tab is the rates).
+ */
 export const Route = createFileRoute("/admin/service-rates")({
-  head: () => ({ meta: [{ title: "Service Rates — JBK Portal" }] }),
-  component: ServiceRatesPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/setup", replace: true });
+  },
 });
-
-function ServiceRatesPage() {
-  return (
-    <div className="max-w-5xl space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-          <Receipt className="h-6 w-6" /> Service Rates
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Travel and labor rates per rate kind and role, the material markup and the tax rate that
-          service invoices are built from.
-        </p>
-      </div>
-      <ServiceRatesSettings />
-      <InspectionChecklistSettings />
-    </div>
-  );
-}

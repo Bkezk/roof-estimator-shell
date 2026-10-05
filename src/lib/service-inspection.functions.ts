@@ -1,6 +1,6 @@
 /**
  * Inspection tickets (owner, Sep 30; src/lib/inspection.ts has the rules): the checklist the
- * admin keeps (inspection_checklist_items, Admin › Service Rates), the answers saved on the
+ * admin keeps (inspection_checklist_items, Setup › Inspection checklist), the answers saved on the
  * ticket (service_jobs.inspection), and — from a completed inspection, at the office's choice —
  * a repair ticket linked back to it (service_jobs.from_job_id). "Create bid" is a link to the
  * estimator with the customer prefilled (bidPrefillFromInspection), so nothing is written here

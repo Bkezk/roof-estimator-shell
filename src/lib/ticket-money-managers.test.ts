@@ -61,7 +61,8 @@ describe("managesTickets: admins and managers only", () => {
 });
 
 describe("the gate and the Admin group", () => {
-  it('/admin/service-rates is a "manager" page; Users and Reminders stay admin', () => {
+  it('/setup (and its old address /admin/service-rates) is a "manager" page; Users and Reminders stay admin', () => {
+    expect(pageForPath("/setup")).toBe("manager");
     expect(pageForPath("/admin/service-rates")).toBe("manager");
     expect(pageForPath("/admin/users")).toBe("admin");
     expect(pageForPath("/admin/reminders")).toBe("admin");
@@ -71,20 +72,21 @@ describe("the gate and the Admin group", () => {
     const gate = read("src/components/auth-gate.tsx");
     expect(gate).toMatch(/page === "manager"\s*\?\s*!managesTickets\(profile\)/);
   });
-  it("the sidebar's Admin group shows for admins and managers; Users / Reminders admin only", () => {
+  it("the sidebar: Setup (managers and admins) under Opportunities; the Admin group admins only", () => {
+    // Owner, Oct 5: Service Rates became Setup, under Opportunities in the Customers group; with
+    // it gone the Admin group holds only admin pages (setup-page.test.ts has the detail).
     const nav = read("src/components/app-sidebar.tsx");
-    expect(nav).toMatch(/\{managesTickets\(profile\) && \(\s*<NavGroup label="Admin"/);
-    expect(nav).not.toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
+    expect(nav).toMatch(/\{role === "admin" && \(\s*<NavGroup label="Admin"/);
     expect(nav).toMatch(
       /title: "Users & access", url: "\/admin\/users", icon: Users, adminOnly: true/,
     );
     expect(nav).toMatch(
       /title: "Reminders", url: "\/admin\/reminders", icon: BellRing, adminOnly: true/,
     );
+    expect(nav).not.toContain("/admin/service-rates");
     expect(nav).toMatch(
-      /title: "Service Rates", url: "\/admin\/service-rates", icon: Receipt, adminOnly: false/,
+      /title: "Setup", url: "\/setup", icon: Settings2, page: null, visible: managesTickets/,
     );
-    expect(nav).toMatch(/\.filter\(\(item\) => !item\.adminOnly \|\| role === "admin"\)/);
   });
 });
 

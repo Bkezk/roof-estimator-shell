@@ -1681,7 +1681,7 @@ function SendDialog(props: {
   const ratesQ = useQuery({
     queryKey: ["service-rates"],
     queryFn: () => ratesFn(),
-    // Service Rates (the default message) are a manager's; for sales the box starts blank and
+    // Service rates (the default message) are a manager's; for sales the box starts blank and
     // the server uses the default message.
     enabled: !!session && managesTickets(profile),
   });

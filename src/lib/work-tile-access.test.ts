@@ -48,6 +48,8 @@ describe("tileBlockedTitle", () => {
     expect(m.canOpenPath(customersOnly, "/opportunities")).toBe(true);
     expect(m.canOpenPath(customersOnly, "/my-work")).toBe(true);
     expect(m.canOpenPath(manager, "/admin/users")).toBe(false);
+    expect(m.canOpenPath(manager, "/setup")).toBe(true);
+    expect(m.canOpenPath(customersOnly, "/setup")).toBe(false);
     expect(m.canOpenPath(manager, "/admin/service-rates")).toBe(true);
     expect(m.canOpenPath(customersOnly, "/admin/service-rates")).toBe(false);
     expect(m.canOpenPath(admin, "/admin/users")).toBe(true);

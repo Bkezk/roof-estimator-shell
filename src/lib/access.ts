@@ -5,9 +5,9 @@
  *
  * Roles (owner, 2026-09-30: "users should only see their own stuff except for managers who see
  * everything"):
- * - admin: every page, plus the Admin pages (users, reminders, service rates).
- * - manager: every page, Estimate Pricing included (owner, Oct 1), and Admin › Service Rates,
- *   but not Users or Reminders; sees everyone's tickets, tasks and follow-ups (also when ticked
+ * - admin: every page, plus the Admin pages (users, reminders) and Setup.
+ * - manager: every page, Estimate Pricing included (owner, Oct 1), and Setup (service rates,
+ *   inspection checklist), but not Users or Reminders; sees everyone's tickets, tasks and follow-ups (also when ticked
  *   Technician); creates and dispatches tickets and owns their money (`managesTickets`).
  * - user: only the pages in `access`; a Technician user sees and edits only their own tickets.
  *
@@ -60,7 +60,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_HELP: Record<Role, string> = {
   admin: "Everything, plus Users & access",
   manager:
-    "Sees everyone's tickets, tasks and customers; creates and dispatches tickets and sets their prices (Service Rates); Estimate Pricing; no Users or Reminders pages",
+    "Sees everyone's tickets, tasks and customers; creates and dispatches tickets and sets their prices (Setup); Estimate Pricing; no Users or Reminders pages",
   user: "Only the pages ticked below; a technician sees only their own tickets",
 };
 
@@ -111,7 +111,7 @@ export const isOffice = (p: AccessLike | null | undefined): boolean =>
  * manager creates the tickets; reps do not create tickets, the reps are just responding to what
  * is assigned to them."; "the per-technician charge is separate from estimate pricing and can be
  * edited per job"). Creating a ticket, dispatching it (technician, crew, the Board), every price
- * on a ticket (crew $/hour, invoices, repair template prices, the Service Rates page) and
+ * on a ticket (crew $/hour, invoices, repair template prices, the Setup page) and
  * deleting a ticket. `isOffice` stays for visibility only (who sees every ticket). Estimate
  * Pricing is not this: it stays `canAccess(p, "pricing")`. The twin of RLS
  * `public.is_admin() or public.is_manager()`.
@@ -159,8 +159,10 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname === "/") return null;
   if (pathname.startsWith("/admin/users") || pathname.startsWith("/admin/reminders"))
     return "admin";
-  // Service Rates are ticket money: a manager's too (owner, Oct 1).
-  if (pathname.startsWith("/admin/service-rates")) return "manager";
+  // Setup (service rates, inspection checklist, vehicles) is ticket money: a manager's too
+  // (owner, Oct 1); /admin/service-rates is its old address and redirects there.
+  if (pathname.startsWith("/setup") || pathname.startsWith("/admin/service-rates"))
+    return "manager";
   if (pathname.startsWith("/admin")) return "pricing";
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";

@@ -22,6 +22,7 @@ import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
 import { Route as ServiceRouteImport } from './routes/service'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TakeoffRouteImport } from './routes/takeoff'
 import { Route as AdminDuroLastRouteImport } from './routes/admin.duro-last'
 import { Route as AdminLaborRouteImport } from './routes/admin.labor'
@@ -103,6 +104,11 @@ const ProspectRoute = ProspectRouteImport.update({
 const ServiceRoute = ServiceRouteImport.update({
   id: '/service',
   path: '/service',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TakeoffRoute = TakeoffRouteImport.update({
@@ -205,6 +211,7 @@ export interface FileRoutesByFullPath {
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
+  '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
+  '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -270,6 +278,7 @@ export interface FileRoutesById {
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
   '/service': typeof ServiceRouteWithChildren
+  '/setup': typeof SetupRoute
   '/takeoff': typeof TakeoffRoute
   '/admin/duro-last': typeof AdminDuroLastRoute
   '/admin/labor': typeof AdminLaborRoute
@@ -304,6 +313,7 @@ export interface FileRouteTypes {
     | '/proposal'
     | '/prospect'
     | '/service'
+    | '/setup'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/proposal'
     | '/prospect'
     | '/service'
+    | '/setup'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -368,6 +379,7 @@ export interface FileRouteTypes {
     | '/proposal'
     | '/prospect'
     | '/service'
+    | '/setup'
     | '/takeoff'
     | '/admin/duro-last'
     | '/admin/labor'
@@ -401,6 +413,7 @@ export interface RootRouteChildren {
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
   ServiceRoute: typeof ServiceRouteWithChildren
+  SetupRoute: typeof SetupRoute
   TakeoffRoute: typeof TakeoffRoute
   AdminDuroLastRoute: typeof AdminDuroLastRoute
   AdminLaborRoute: typeof AdminLaborRoute
@@ -508,6 +521,13 @@ declare module '@tanstack/react-router' {
       path: '/service'
       fullPath: '/service'
       preLoaderRoute: typeof ServiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/takeoff': {
@@ -661,6 +681,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
   ServiceRoute: ServiceRouteWithChildren,
+  SetupRoute: SetupRoute,
   TakeoffRoute: TakeoffRoute,
   AdminDuroLastRoute: AdminDuroLastRoute,
   AdminLaborRoute: AdminLaborRoute,

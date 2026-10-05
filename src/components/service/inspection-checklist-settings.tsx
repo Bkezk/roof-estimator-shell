@@ -1,5 +1,5 @@
 /**
- * Admin › Service Rates: the inspection checklist (owner, Sep 30) — the items an Inspection
+ * Setup › Inspection checklist: the inspection checklist (owner, Sep 30) — the items an Inspection
  * ticket asks about, in order. Add, rename, reorder, remove; "Save checklist" writes the list.
  * Inspections already done keep their own answers and labels (stored on the ticket).
  */

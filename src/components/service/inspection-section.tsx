@@ -173,7 +173,7 @@ function InspectionEditor({
     <div className="space-y-3">
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          The checklist is empty. An admin adds its items on Admin › Service Rates.
+          The checklist is empty. A manager or admin adds its items on Setup › Inspection checklist.
         </p>
       ) : (
         <ol className="space-y-2">
