@@ -361,11 +361,16 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
     job.recommend_new_roof ||
     job.signature_path ||
     job.completed_at;
+  // Owner, Oct 5: a ticket the office set Invoiced / Closed from the stage picker, with no
+  // close-out behind it, says so instead of "not closed out yet".
+  const officeStage = job.stage === "invoiced" || job.stage === "closed";
   const summary = job.completed_at
     ? `Done ${whenShort(job.completed_at)}`
     : any
       ? "in progress"
-      : "not closed out yet";
+      : officeStage
+        ? `${STAGE_LABELS[job.stage as ServiceStage]} by the office — no close-out`
+        : "not closed out yet";
   return (
     <Box
       title="Close-out"
@@ -376,7 +381,11 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
       summary={summary}
     >
       {!any ? (
-        <p className="text-sm text-muted-foreground">Not closed out yet.</p>
+        <p className="text-sm text-muted-foreground">
+          {officeStage
+            ? `The office set this ticket ${STAGE_LABELS[job.stage as ServiceStage]} from the stage picker; nobody has closed it out.`
+            : "Not closed out yet."}
+        </p>
       ) : (
         <div className="space-y-2 text-sm">
           {job.completed_at && (

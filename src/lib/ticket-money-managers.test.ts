@@ -225,10 +225,13 @@ describe("dispatch is a manager's", () => {
     expect(board).toMatch(
       /export function BoardPage[\s\S]*?if \(!managesTickets\(profile\)\)\s*return \(/,
     );
-    const page = read("src/components/service-page.tsx");
-    expect(page).toMatch(
-      /\{manager && \(\s*\/\/[^\n]*\n\s*<section className="rounded-lg border" aria-label="Tech Board">/,
+    // Owner, Oct 5: the board is the Tech Board tab (service-board-tab.test.ts), shown to
+    // managers only; the list page no longer embeds it.
+    const tabs = read("src/components/service/service-tabs.tsx");
+    expect(tabs).toMatch(
+      /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: managesTickets \}/,
     );
+    expect(read("src/components/service-page.tsx")).not.toContain("EmbeddedBoard");
   });
   it("the form's technician select, crew and $ / hour boxes are under managesTickets", () => {
     const page = read("src/components/service-page.tsx");
@@ -289,7 +292,7 @@ describe("ticket money is a manager's", () => {
     );
     const tabs = read("src/components/service/service-tabs.tsx");
     expect(tabs).toMatch(
-      /const invoices = seesInvoices\(profile\);\s*const tabs = TABS\.filter\(\(t\) => !t\.office \|\| invoices\);/,
+      /\{ title: "Invoices", to: "\/service\/invoices", icon: Receipt, show: seesInvoices \}/,
     );
   });
   it("Service Rates: read and saved by admins and managers only", () => {

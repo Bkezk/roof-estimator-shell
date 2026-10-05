@@ -255,8 +255,15 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       }
       await logEvent(context, job.id, { kind: "field", field_status: "on_site" }, who);
     } else if (data.to === "done") {
-      if (job.stage === "done" || job.stage === "invoiced" || job.stage === "closed") return job;
-      patch = { field_status: null, completed_at: now, stage: "done" };
+      const finished = job.stage === "done" || job.stage === "invoiced" || job.stage === "closed";
+      // Owner, Oct 5 (RoAnna closed #6004 from the stage picker, then completed its close-out and
+      // "the status didn't move"): a ticket the office already set Done / Invoiced / Closed keeps
+      // that stage, but its close-out is still recorded — completed_at is stamped once, so the
+      // ticket page's Close-out fold says "Done <date>" instead of "not closed out yet".
+      if (finished && job.completed_at) return job;
+      patch = finished
+        ? { field_status: null, completed_at: now }
+        : { field_status: null, completed_at: now, stage: "done" };
       if (job.on_site_at) {
         await sb.from("service_time_entries").insert({
           service_job_id: job.id,

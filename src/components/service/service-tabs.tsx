@@ -1,28 +1,34 @@
 /**
- * The Service page's views as tabs (owner, Sep 28: one menu entry, not four): Tickets, Board and
- * Invoices are views of the same work, so they sit on one row under the page title. The
- * Invoices tab shows to admins, managers and sales / project managers (`seesInvoices`; owner,
- * Oct 1); anyone else sees Tickets only.
+ * The Service page's views as tabs (owner, Sep 28: one menu entry, not four): Tickets, Tech
+ * Board and Invoices are views of the same work, so they sit on one row under the page title.
+ * The Tech Board tab (owner, Oct 5: it used to sit folded above the ticket list) shows to
+ * managers and admins, who dispatch (`managesTickets`); the Invoices tab to admins, managers and
+ * sales / project managers (`seesInvoices`; owner, Oct 1); anyone else sees Tickets only.
  */
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Receipt, Wrench } from "lucide-react";
+import { CalendarDays, Receipt, Wrench } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { seesInvoices } from "@/lib/access";
+import { managesTickets, seesInvoices, type AccessLike } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
 import { cn } from "@/lib/utils";
 
-const TABS = [
-  { title: "Tickets", to: "/service", icon: Wrench, office: false },
-  { title: "Invoices", to: "/service/invoices", icon: Receipt, office: true },
-] as const;
+const everyone = () => true;
+const TABS: readonly {
+  title: string;
+  to: "/service" | "/service/board" | "/service/invoices";
+  icon: typeof Wrench;
+  show: (p: AccessLike | null | undefined) => boolean;
+}[] = [
+  { title: "Tickets", to: "/service", icon: Wrench, show: everyone },
+  { title: "Tech Board", to: "/service/board", icon: CalendarDays, show: managesTickets },
+  { title: "Invoices", to: "/service/invoices", icon: Receipt, show: seesInvoices },
+];
 
 export function ServiceTabs({ toInvoice }: { toInvoice?: number }) {
   const { profile } = useAuth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  // Invoices are a manager's and sales' / PMs' (owner, Oct 1).
-  const invoices = seesInvoices(profile);
-  const tabs = TABS.filter((t) => !t.office || invoices);
+  const tabs = TABS.filter((t) => t.show(profile));
   if (tabs.length < 2) return null;
   return (
     <nav aria-label="Service views" className="flex flex-wrap gap-1 border-b">

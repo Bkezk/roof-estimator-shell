@@ -65,7 +65,7 @@ const estimatorItems = [
   { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
 // Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
-// (tickets, with the Tech Board above them and Invoices as a tab), Opportunities, then Setup
+// (tickets, with the Tech Board and Invoices as tabs), Opportunities, then Setup
 // (owner, Oct 5: Service Rates renamed, plus the inspection checklist and vehicles & drivers;
 // admins and managers). Follow-ups
 // live on Work Overview (owner, Oct 1; /followups redirects there). Today sits first, for technicians

@@ -153,7 +153,7 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
       /export function InvoicesPage[\s\S]*?if \(!seesInvoices\(profile\)\)\s*return \(/,
     );
     expect(read("src/components/service/service-tabs.tsx")).toMatch(
-      /const invoices = seesInvoices\(profile\);\s*const tabs = TABS\.filter\(\(t\) => !t\.office \|\| invoices\);/,
+      /\{ title: "Invoices", to: "\/service\/invoices", icon: Receipt, show: seesInvoices \}/,
     );
     expect(read("src/components/service-page.tsx")).toContain(
       "<ServiceTabs toInvoice={seesInvoices(profile) ? toInvoiceCount : 0} />",

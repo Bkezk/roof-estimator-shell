@@ -1,9 +1,11 @@
 /**
  * The Tech Board (docs/service-module-design.md §5.2): a week grid of technicians × days, like
- * CenterPoint's board. Drag an unassigned ticket from the left rail onto a cell (= technician +
- * day), drag between cells to reschedule, drag back onto the rail to unassign; click a ticket to
- * open it. Colour = stage. The rail lists Open / Scheduled tickets missing a technician or a
- * day, oldest first.
+ * CenterPoint's board, the Tech Board tab of the Service page (owner, Oct 5; it used to sit
+ * folded above the ticket list). Drag an unassigned ticket from the left rail onto a cell
+ * (= technician + day), drag between cells to reschedule, drag back onto the rail to unassign;
+ * click a ticket to open it. Colour = stage (STAGE_CHIP; the rail carries a legend and each of
+ * its chips names its stage — owner, Oct 5: "color coded by status"). The rail lists Open /
+ * Scheduled tickets missing a technician or a day, oldest first.
  *
  * Managers and admins only (owner, Oct 1: the manager dispatches; `managesTickets`):
  * assignServiceJob refuses anyone else, who is sent to /service/today instead. Drag and drop is native HTML5 (desktop); on a phone the grid
@@ -21,7 +23,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Inbox,
-  List,
   Loader2,
   Plus,
 } from "lucide-react";
@@ -73,9 +74,12 @@ const openedOn = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/** Stage colours: open grey, scheduled blue, done green, invoiced / closed muted. */
+/**
+ * Stage colours: open amber, scheduled blue, done green, invoiced / closed muted (owner, Oct 5:
+ * Open used to be grey, which read as "no colour" next to the blue Scheduled chips on the rail).
+ */
 const STAGE_CHIP: Record<ServiceStage, string> = {
-  open: "border-border bg-muted text-foreground",
+  open: "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100",
   scheduled:
     "border-blue-300 bg-blue-100 text-blue-950 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100",
   done: "border-green-300 bg-green-100 text-green-950 dark:border-green-800 dark:bg-green-950 dark:text-green-100",
@@ -106,13 +110,6 @@ interface Assign {
   scheduled_date: string | null;
 }
 
-/** The board inside the Service page (owner, Sep 28: it will not grow, so it sits above the
- * list). The week lives in local state instead of the URL and the page chrome is left out. */
-export function EmbeddedBoard() {
-  const [week, setWeek] = useState<string | undefined>(undefined);
-  return <Board week={week} embedded onWeek={setWeek} />;
-}
-
 export function BoardPage({ week }: { week?: string | undefined }) {
   const { profile } = useAuth();
   if (!managesTickets(profile))
@@ -128,15 +125,7 @@ export function BoardPage({ week }: { week?: string | undefined }) {
   return <Board week={week} />;
 }
 
-function Board({
-  week,
-  embedded = false,
-  onWeek,
-}: {
-  week?: string | undefined;
-  embedded?: boolean;
-  onWeek?: (week: string | undefined) => void;
-}) {
+function Board({ week }: { week?: string | undefined }) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -160,10 +149,6 @@ function Board({
   const monday = mondayOf(week ? fromYmd(week) : new Date());
   const days = Array.from({ length: 7 }, (_, i) => toYmd(addDays(monday, i)));
   const goWeek = (d: Date | null) => {
-    if (embedded) {
-      onWeek?.(d ? toYmd(mondayOf(d)) : undefined);
-      return;
-    }
     void navigate({
       to: "/service/board",
       search: d ? { week: toYmd(mondayOf(d)) } : {},
@@ -323,34 +308,27 @@ function Board({
 
   return (
     <div className="space-y-4">
-      {!embedded && (
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-              <CalendarDays className="h-6 w-6" /> Tech Board
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
-              unassign. Click a ticket to open it.
-            </p>
-            <div className="mt-2">
-              <ServiceTabs />
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button asChild variant="outline">
-              <Link to="/service">
-                <List className="mr-1 h-4 w-4" /> List
-              </Link>
-            </Button>
-            <Button asChild>
-              <Link to="/service" search={{ new: 1 }}>
-                <Plus className="mr-1 h-4 w-4" /> New ticket
-              </Link>
-            </Button>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <CalendarDays className="h-6 w-6" /> Tech Board
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
+            unassign. Click a ticket to open it.
+          </p>
+          <div className="mt-2">
+            <ServiceTabs />
           </div>
         </div>
-      )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button asChild>
+            <Link to="/service" search={{ new: 1 }}>
+              <Plus className="mr-1 h-4 w-4" /> New ticket
+            </Link>
+          </Button>
+        </div>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -409,6 +387,7 @@ function Board({
               <Inbox className="h-4 w-4" /> Unassigned
               <span className="text-xs font-normal text-muted-foreground">{unassignedTotal}</span>
             </h2>
+            <StageLegend stages={["open", "scheduled"]} />
             <Input
               type="search"
               placeholder="Search #, customer, site…"
@@ -599,6 +578,26 @@ function BoardRow(props: {
 }
 
 /** One ticket on the board: "#6001 Customer · description", coloured by stage. */
+/** What the chip colours mean (owner, Oct 5): one swatch per stage, in board order. */
+function StageLegend({ stages }: { stages: readonly ServiceStage[] }) {
+  return (
+    <ul
+      className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+      aria-label="Colours"
+    >
+      {stages.map((s) => (
+        <li key={s} className="flex items-center gap-1">
+          <span
+            className={`inline-block h-2.5 w-2.5 rounded-sm border ${STAGE_CHIP[s]}`}
+            aria-hidden
+          />
+          {STAGE_LABELS[s]}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function TicketChip(props: {
   job: ServiceJobWithTech;
   /** The rail's chips also say what is already set (a technician without a day, or the reverse). */
@@ -644,8 +643,9 @@ function TicketChip(props: {
       </span>
       {props.detail && (
         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
-          {j.site_name ? `${j.site_name} · ` : ""}
-          {partial ?? `opened ${openedOn(j.created_at)}`}
+          <span className="font-medium">{STAGE_LABELS[stage]}</span>
+          {j.site_name ? ` · ${j.site_name}` : ""}
+          {` · ${partial ?? `opened ${openedOn(j.created_at)}`}`}
         </span>
       )}
     </Link>

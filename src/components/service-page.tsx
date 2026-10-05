@@ -46,7 +46,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ServiceTabs } from "@/components/service/service-tabs";
-import { EmbeddedBoard } from "@/components/service/board-page";
 import { MaterialsSection } from "@/components/service/materials-section";
 import { toast } from "sonner";
 import {
@@ -368,24 +367,6 @@ function ServiceList({
   // Owner, Oct 1: "The manager creates the tickets": New ticket, the Board (dispatch), delete
   // and restore are a manager's; the to-invoice count shows to whoever sees invoices.
   const manager = managesTickets(profile);
-  const BOARD_OPEN_KEY = "bid-o-matic:service-board-open";
-  const [boardOpen, setBoardOpenState] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(BOARD_OPEN_KEY) !== "0";
-    } catch {
-      return true;
-    }
-  });
-  const setBoardOpen = (f: (v: boolean) => boolean) =>
-    setBoardOpenState((v) => {
-      const next = f(v);
-      try {
-        localStorage.setItem(BOARD_OPEN_KEY, next ? "1" : "0");
-      } catch {
-        /* private window */
-      }
-      return next;
-    });
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<StageFilter>(presetStage ?? "all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -522,29 +503,7 @@ function ServiceList({
 
       <NeedsActionStrip kinds={["ticket"]} />
 
-      {manager && (
-        // Owner, Sep 28: the board sits above the list (five techs by seven days never grows).
-        <section className="rounded-lg border" aria-label="Tech Board">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between px-4 py-2 text-left font-semibold"
-            onClick={() => setBoardOpen((v) => !v)}
-            aria-expanded={boardOpen}
-          >
-            <span className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4" /> Tech Board
-            </span>
-            <span className="text-xs font-normal text-muted-foreground">
-              {boardOpen ? "Hide" : "Show"}
-            </span>
-          </button>
-          {boardOpen && (
-            <div className="border-t p-3">
-              <EmbeddedBoard />
-            </div>
-          )}
-        </section>
-      )}
+      {/* The Tech Board is its own tab (owner, Oct 5); it used to sit folded here above the list. */}
       {list.error ? (
         <p className="text-sm text-destructive">
           Could not load tickets ({errText(list.error)}). Try refreshing, or sign in again.

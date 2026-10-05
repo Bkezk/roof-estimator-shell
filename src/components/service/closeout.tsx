@@ -40,6 +40,8 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isOffice } from "@/lib/access";
 import {
+  SERVICE_STAGES,
+  STAGE_LABELS,
   TECH_STAGES,
   type ServiceJobRow,
   type ServiceJobWithTech,
@@ -143,6 +145,8 @@ function clearDraft(id: string) {
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
 const FINISHED = ["done", "invoiced", "closed"];
+const asStage = (s: string): ServiceStage =>
+  (SERVICE_STAGES as readonly string[]).includes(s) ? (s as ServiceStage) : "open";
 
 /** Shrink a big camera photo (to 2048 px, JPEG) so it uploads on one bar of signal. */
 async function shrinkPhoto(file: File): Promise<{ blob: Blob; type: string; name: string }> {
@@ -248,6 +252,7 @@ function Section({
 function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
 
@@ -299,7 +304,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     mutationFn: async () => {
       autosave.cancel();
       const row = await saveFn({ data: input(latest.current) });
-      if (FINISHED.includes(row.stage)) return row;
+      // Already finished and stamped: nothing more to record. A ticket the office set Done /
+      // Invoiced / Closed from the stage picker is still stamped here (owner, Oct 5: #6004).
+      if (FINISHED.includes(row.stage) && row.completed_at) return row;
       // The phone's own calendar day: the labor entry's date (not UTC's day).
       return statusFn({ data: { id: job.id, to: "done", day: localYmd() } });
     },
@@ -314,8 +321,17 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
         ["service-jobs"],
       ])
         void qc.invalidateQueries({ queryKey: k });
-      toast.success("Done — the office invoices and closes it");
-      void navigate({ to: "/service/today" });
+      // Say what is true: the office's stage stays; "the office invoices and closes it" only
+      // when the ticket is now Done and waiting on them.
+      toast.success(
+        row.stage === "done"
+          ? "Done — the office invoices and closes it"
+          : `Close-out saved — the ticket stays ${STAGE_LABELS[asStage(row.stage)]}`,
+      );
+      // A technician goes back to their day; the office (owner, Oct 5: a manager closing out
+      // from the ticket) back to the ticket, where the stage and the Close-out fold now agree.
+      if (profile?.technician) void navigate({ to: "/service/today" });
+      else void navigate({ to: "/service", search: { id: job.id } });
     },
     onError: (e) =>
       loudError("Could not complete the ticket (your typing is kept on this phone)", e),
