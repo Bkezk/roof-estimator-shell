@@ -25,6 +25,7 @@ import {
 import { toast } from "sonner";
 
 import { useAuth } from "@/lib/auth-store";
+import { managesTickets } from "@/lib/access";
 import { listContacts } from "@/lib/crm.functions";
 import {
   STAGE_LABELS,
@@ -189,7 +190,11 @@ export function TicketFieldSections({
     <>
       {repairs && <RepairsReadOnly jobId={job.id} ticketNumber={job.number} canEdit={markup} />}
       <CloseoutSummary job={job} />
-      <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
+      <TimeSection
+        job={job}
+        officeOrAdmin={officeOrAdmin}
+        review={managesTickets(profile) && (job.stage === "done" || job.stage === "authorized")}
+      />
       <Timeline jobId={job.id} />
       {job.site_id && <EarlierAtSite jobId={job.id} />}
       {/* M6 (owner, Oct 5): every change to the ticket and its time, old → new, who, when.
@@ -200,7 +205,16 @@ export function TicketFieldSections({
 }
 
 /** Time, collapsed by default; the header shows travel + labor hours. */
-function TimeSection({ job, officeOrAdmin }: { job: ServiceJobWithTech; officeOrAdmin: boolean }) {
+function TimeSection({
+  job,
+  officeOrAdmin,
+  review,
+}: {
+  job: ServiceJobWithTech;
+  officeOrAdmin: boolean;
+  /** A manager reviewing a Done / Authorized ticket: open, remembered apart (follow-up 6). */
+  review: boolean;
+}) {
   const { session } = useAuth();
   const listFn = useServerFn(listTimeEntries);
   // The same query (and key) TimeEntries reads, so the list below shares the cache.
@@ -210,23 +224,22 @@ function TimeSection({ job, officeOrAdmin }: { job: ServiceJobWithTech; officeOr
     enabled: !!session,
   });
   const rows = q.data ?? [];
-  const total = rows
-    .filter((r) => r.kind === "travel" || r.kind === "labor")
-    .reduce((s, r) => s + Number(r.hours), 0);
+  const hoursOf = (kind: string) =>
+    rows.filter((r) => r.kind === kind).reduce((s, r) => s + Number(r.hours), 0);
   const summary = q.error ? (
     <span className="text-destructive">could not load</span>
   ) : q.isLoading ? null : rows.length === 0 ? (
     "no time yet"
   ) : (
-    hoursText(total)
+    `Travel ${hoursText(hoursOf("travel"))} · Labor ${hoursText(hoursOf("labor"))}`
   );
   return (
     <Box
       title="Time"
       icon={Clock}
       collapsible
-      defaultOpen={false}
-      storageKey="time"
+      defaultOpen={review}
+      storageKey={review ? "time-review" : "time"}
       summary={summary}
     >
       <TimeEntries

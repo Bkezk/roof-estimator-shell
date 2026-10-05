@@ -106,12 +106,15 @@ export function MaterialsSection({
   jobId,
   collapsible,
   defaultOpen,
+  storageKey = "materials",
 }: {
   jobId: string;
   /** The office ticket page: a collapsible section with "N lines" in the header. */
   collapsible?: boolean | undefined;
   /** Its first open state (the remembered one wins once toggled). */
   defaultOpen?: boolean | undefined;
+  /** Where the open state is remembered (managers reviewing a Done / Authorized ticket: their own). */
+  storageKey?: string | undefined;
 }) {
   const { session, profile, can } = useAuth();
   const qc = useQueryClient();
@@ -748,7 +751,7 @@ export function MaterialsSection({
         icon={Package}
         collapsible
         defaultOpen={defaultOpen ?? true}
-        storageKey="materials"
+        storageKey={storageKey}
         summary={
           <span className="flex items-center gap-2">
             {busy > 0 && <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />}

@@ -2020,14 +2020,17 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   );
 
   // Owner, Sep 28: log material here, on the ticket, never on the Inventory page.
-  // Open for a technician on an Open / Scheduled ticket (they log here), else folded.
+  // Open for a technician on an Open / Scheduled ticket (they log here), else folded. Open for a
+  // manager reviewing a Done / Authorized ticket (owner, Oct 5, follow-up 6), remembered apart.
+  const review = manager && (jobStage === "done" || jobStage === "authorized");
   const materials =
     job &&
     (can("service") || can("inventory") || can("estimate") ? (
       <MaterialsSection
         jobId={job.id}
         collapsible
-        defaultOpen={isTech && (jobStage === "open" || jobStage === "scheduled")}
+        defaultOpen={review || (isTech && (jobStage === "open" || jobStage === "scheduled"))}
+        storageKey={review ? "materials-review" : undefined}
       />
     ) : (
       <MaterialsUsed jobId={job.id} canLog={false} />
