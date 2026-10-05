@@ -8,7 +8,13 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
-import { WARRANTY_MAX, warrantyProblem, type Warranty } from "@/lib/warranty";
+import {
+  isMissingTable,
+  WARRANTIES_NOT_SET_UP,
+  WARRANTY_MAX,
+  warrantyProblem,
+  type Warranty,
+} from "@/lib/warranty";
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const day = z.string().regex(YMD).nullable();
@@ -32,6 +38,8 @@ export const listSiteWarranties = createServerFn({ method: "GET" })
       .select(COLS)
       .eq("site_id", data.site_id)
       .order("end_date", { ascending: false, nullsFirst: true });
+    // Before the migration: no warranties yet, not an error (it blanked the page, Oct 5).
+    if (error && isMissingTable(error)) return [];
     if (error) throw new Error(error.message);
     return rows ?? [];
   });
@@ -60,7 +68,7 @@ export const saveSiteWarranty = createServerFn({ method: "POST" })
       ? context.supabase.from("site_warranties").update(fields).eq("id", id)
       : context.supabase.from("site_warranties").insert(fields);
     const { data: row, error } = await q.select(COLS).maybeSingle();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(isMissingTable(error) ? WARRANTIES_NOT_SET_UP : error.message);
     if (!row) throw new Error("Warranty not found");
     return row;
   });
@@ -70,5 +78,5 @@ export const deleteSiteWarranty = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     const { error } = await context.supabase.from("site_warranties").delete().eq("id", data.id);
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(isMissingTable(error) ? WARRANTIES_NOT_SET_UP : error.message);
   });

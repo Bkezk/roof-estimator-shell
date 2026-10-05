@@ -56,3 +56,14 @@ export function warrantyProblem(w: {
     return "The end date is before the start date";
   return null;
 }
+
+/**
+ * PostgREST's "Could not find the table … in the schema cache" (PGRST205): the table's migration
+ * (20261005160000_site_warranties.sql) is not applied yet. Owner, Oct 5: that error blanked the
+ * page; until the table exists a site has no warranties to show.
+ */
+export const isMissingTable = (e: { code?: string; message?: string } | null | undefined) =>
+  !!e && (e.code === "PGRST205" || /Could not find the table/i.test(e.message ?? ""));
+
+export const WARRANTIES_NOT_SET_UP =
+  "Warranties are not set up in the database yet (apply 20261005160000_site_warranties.sql)";
