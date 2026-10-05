@@ -1,0 +1,173 @@
+/**
+ * The owner's "Monicello Banking Company 2026.xlsx" (Oct 5): imported into a bid whose sections
+ * were "wayyyy off". Both roof rows — "Roof Type 1 - 50 Mil DL, Min 6" ISO, 1/8th per Ft
+ * Tappered Iso, 1/4" Dens Deck" and Roof Type 2 — were filed as Tapered ISO quotes because of
+ * the word "Tappered", so the metal panel row became the only "roof" (a 100 × 2 ft strip at the
+ * default 40 mil), "Parrpet 02" was dropped for its spelling, and a 0-quantity stack came along.
+ * Now: the roofs are sections carrying their tapered layer, 50 mil Duro-Last ("DL"), with their
+ * ISO and DensDeck layers; all three parapets; the metal panel a Sheet Metals line; no 0 rows.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+import { classifyRows, describeTarget, parseMembrane, parseParapetProfile } from "./classify";
+import { readPlanSwiftWorkbook } from "./parse";
+import { planSwiftSeed, type PlanSwiftChoice } from "./to-seed";
+
+const fixture = (name: string) =>
+  new Uint8Array(readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url))));
+const BOARDS = ['1/2" ISO', '2" ISO', '6" ISO', '1/4" DensDeck', "Tapered ISO", "Tapered Crickets"];
+const LABOR = { "Duro-Last|mechanical": { thicknessLaborByMil: { 40: 1, 50: 1.05, 60: 1.1 } } };
+
+describe("monticello.xlsx — the owner's export, row by row", async () => {
+  const sheet = await readPlanSwiftWorkbook(fixture("monticello.xlsx"));
+  const cs = classifyRows(sheet.rows);
+  const by = (start: string) => cs.find((c) => c.row.name.startsWith(start))!;
+
+  it('13 rows: the 0-quantity 1.5" stack is skipped with a note', () => {
+    expect(sheet.rows).toHaveLength(13);
+    expect(sheet.rows.map((r) => r.name)).not.toContain('1.5" Stack');
+    expect(sheet.warnings).toEqual(['Row 12 "1.5" Stack": quantity 0 — skipped.']);
+  });
+
+  it("both Roof Type rows are sections (not tapered quotes), carrying a tapered layer", () => {
+    for (const r of [by("Roof Type 1"), by("Roof Type 2")]) {
+      expect([r.target, r.confidence]).toEqual(["section", "high"]);
+      expect(r.details.taperedInName).toBe(true);
+      expect(r.details.quoteBoard).toBe("Tapered ISO");
+      expect(r.details.membrane?.thicknessMil).toBe(50);
+      expect(r.details.membrane?.roofSystem).toBe("Duro-Last");
+      // "1/8th per Ft" is a slope, not a 1" / 8" parapet profile.
+      expect(r.details.skirtIn).toBeUndefined();
+      expect(r.details.verticalIn).toBeUndefined();
+    }
+    expect(by("Roof Type 1").details.membrane?.layers.map((l) => l.boardName)).toEqual([
+      '6" ISO',
+      '1/4" Dens Deck',
+    ]);
+    expect(by("Roof Type 2").details.membrane?.layers.map((l) => l.boardName)).toEqual([
+      '2" ISO',
+      '1/4" Dens Deck',
+    ]);
+    expect(describeTarget(by("Roof Type 1"))).toBe(
+      'section 4,157.86 sq ft · 50 mil Duro-Last · 6" ISO + 1/4" Dens Deck · + Tapered ISO quote · perimeter 258.7 ft',
+    );
+  });
+
+  it('"Parrpet 02" is a parapet like the other two; the metal panel is a Sheet Metals line', () => {
+    expect([by("Parrpet 02").target, by("Parrpet 02").confidence]).toEqual(["parapet", "high"]);
+    expect(by("Parrpet 02").details).toMatchObject({ skirtIn: 6, verticalIn: 18 });
+    const metal = by("Metal MTL1");
+    expect([metal.target, metal.confidence]).toEqual(["metals", "medium"]);
+    expect(metal.details).toMatchObject({ kind: "Metal panel", where: "Non-DL › Sheet Metals" });
+    expect(cs.map((c) => c.target)).toEqual([
+      "section",
+      "section",
+      "coping",
+      "parapet",
+      "parapet",
+      "parapet",
+      "curb",
+      "curb",
+      "pipe",
+      "pipe",
+      "drain",
+      "drain",
+      "metals",
+    ]);
+  });
+
+  it("the seed: two roofs at 50 mil with ISO, the tapered quote, DensDeck; three parapets", () => {
+    const choices: PlanSwiftChoice[] = cs.map((c) => ({ row: c, target: c.target }));
+    const seed = planSwiftSeed(sheet, choices, {
+      fileName: "Monicello Banking Company 2026.xlsx",
+      boardNames: BOARDS,
+      labor: LABOR,
+    });
+    expect(seed.sections.map((s) => [s.name, s.length, s.width, s.thickness])).toEqual([
+      ["Roof Type 1", 69.67, 59.68, 50],
+      ["Roof Type 2", 50.08, 21.28, 50],
+    ]);
+    expect(seed.sections.map((s) => s.layers!.map((l) => [l.board, !!l.quote]))).toEqual([
+      [
+        ['6" ISO', false],
+        ["Tapered ISO", true],
+        ['1/4" DensDeck', false],
+      ],
+      [
+        ['2" ISO', false],
+        ["Tapered ISO", true],
+        ['1/4" DensDeck', false],
+      ],
+    ]);
+    expect(JSON.stringify(seed)).toContain('"roofSystem":"Duro-Last"');
+    expect(seed.parapets.map((p) => [p.name, p.lengthFt, p.skirtInches, p.verticalInches])).toEqual(
+      [
+        ["Parapet 01", 273.06, 6, 54],
+        ["Parrpet 02", 50.08, 6, 18],
+        ["Parapet 03", 91.86, 6, 24],
+      ],
+    );
+    expect(seed.nonDlCustom.sheetMetal?.map((l) => [l.description, l.qty])).toEqual([
+      ["Coping Aluminum", 380.15],
+      ["Metal MTL1/ MTL2 @ Addenda 2 22Ga V-groove", 205.46],
+    ]);
+    expect(seed.pipeStacks.map((p) => [p.size, p.quantity])).toEqual([
+      [4, 1],
+      [2, 1],
+    ]);
+    expect(seed.importInfo.summary).toBe(
+      'From PlanSwift "Monicello Banking Company 2026.xlsx": 2 sections, 5,223.38 sq ft; 415 ft of parapet; 2 curbs; 2 tapered quote layers; 2 pipe stacks; 2 Non-DL lines; 2 to place by hand.',
+    );
+    expect(seed.warnings).toContain(
+      "Roof Type 1: a Tapered ISO quote layer from its name, with no price — enter the quote on the Underlayment screen.",
+    );
+    // The old import's tell-tale: nothing is a 100 × 2 ft strip any more.
+    expect(seed.warnings.join("\n")).not.toContain("100.13");
+  });
+});
+
+describe("name reading added for this file", () => {
+  it('"DL" is Duro-Last; "Non-DL" is not', () => {
+    expect(parseMembrane('50 Mil DL, Min 6" ISO').roofSystem).toBe("Duro-Last");
+    expect(parseMembrane("Non-DL TPO 60 mil").roofSystem).toBeUndefined();
+    expect(parseMembrane("Non DL membrane").roofSystem).toBeUndefined();
+  });
+  it("a parapet profile needs an inch mark or the underscore on the skirt", () => {
+    expect(parseParapetProfile("1/8th per Ft Tappered Iso")).toBeNull();
+    expect(parseParapetProfile('Parrpet  02  ( 6"_/ 18" )')).toEqual({
+      skirtIn: 6,
+      verticalIn: 18,
+    });
+    expect(parseParapetProfile("Wall (6_/54)")).toEqual({ skirtIn: 6, verticalIn: 54 });
+  });
+  it("a tapered-only row is still a tapered quote; a roof with tapered in its name is a section", () => {
+    const [onlyTapered, roof] = classifyRows([
+      {
+        sheetRow: 2,
+        name: "Tapered ISO 1/4 per ft",
+        description: "",
+        qty: 1000,
+        units: "SQ FT",
+        unitKind: "sqft",
+        linearTotal: null,
+        wallHeight: null,
+        wallArea: null,
+      },
+      {
+        sheetRow: 3,
+        name: "Roof Type 4 (tapered)",
+        description: "",
+        qty: 1000,
+        units: "SQ FT",
+        unitKind: "sqft",
+        linearTotal: null,
+        wallHeight: null,
+        wallArea: null,
+      },
+    ]);
+    expect(onlyTapered!.target).toBe("tapered");
+    expect([roof!.target, roof!.details.taperedInName]).toEqual(["section", true]);
+  });
+});

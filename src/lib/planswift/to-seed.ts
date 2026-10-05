@@ -45,7 +45,7 @@ import {
   type MembraneGuess,
   type PlanSwiftTarget,
 } from "./classify";
-import type { PlanSwiftSheet } from "./parse";
+import type { PlanSwiftRow, PlanSwiftSheet } from "./parse";
 
 /** What a bid imported from PlanSwift remembers (SavedBidState.importInfo). */
 export interface PlanSwiftImportInfo {
@@ -529,6 +529,44 @@ export function planSwiftSeed(
     return out;
   });
 
+  // A quote layer (Tapered ISO / Tapered Crickets) on a section: above the insulation, below
+  // a coverboard / HD board.
+  const addQuoteLayer = (target: number, board: string, r: PlanSwiftRow, idSuffix = "") => {
+    const o = seedSections[target]!;
+    const layers = [...(o.layers ?? [])];
+    const quoteLayer: UnderlaymentLayer = {
+      ...layerOf(board, "mechanical"),
+      quote: {
+        id: `planswift-${r.sheetRow}${idSuffix}`,
+        name: `${collapse(r.name)} — ${num(r.qty)} sq ft (PlanSwift)`,
+      },
+    };
+    const coverAt = layers.findIndex((l) => /\bhd\b|cover|dens/i.test(l.board));
+    layers.splice(coverAt >= 0 ? coverAt : layers.length, 0, quoteLayer);
+    return { o, layers, quoteLayer };
+  };
+
+  // A section whose own name says tapered (owner, Oct 5: "… 1/8th per Ft Tappered Iso …"): its
+  // quote layer sits in its own stack, with no price until the quote is entered.
+  let taperedInName = 0;
+  sectionMeta.forEach((meta, i) => {
+    const c = meta.choice.row;
+    if (!c.details.taperedInName) return;
+    const board = c.details.quoteBoard ?? "Tapered ISO";
+    const { o, layers } = addQuoteLayer(i, board, c.row, "-tapered");
+    if (layers.length > MAX_UNDERLAYMENT_LAYERS) {
+      warnings.push(
+        `${o.name}: the name's ${board} layer would be layer ${layers.length} (the limit is ${MAX_UNDERLAYMENT_LAYERS}) — add it by hand on Underlayment.`,
+      );
+      return;
+    }
+    o.layers = layers;
+    taperedInName++;
+    warnings.push(
+      `${o.name}: a ${board} quote layer from its name, with no price — enter the quote on the Underlayment screen.`,
+    );
+  });
+
   // Tapered / crickets quote layers on their section (the largest when none was picked).
   const largest = sectionMeta.length
     ? sectionMeta.reduce((a, b) => (b.choice.row.row.qty > a.choice.row.row.qty ? b : a))
@@ -545,18 +583,7 @@ export function planSwiftSeed(
       });
       continue;
     }
-    const o = seedSections[target]!;
-    const layers = [...(o.layers ?? [])];
-    const quoteLayer: UnderlaymentLayer = {
-      ...layerOf(board, "mechanical"),
-      quote: {
-        id: `planswift-${r.sheetRow}`,
-        name: `${collapse(r.name)} — ${num(r.qty)} sq ft (PlanSwift)`,
-      },
-    };
-    // Above the insulation, below a coverboard / HD board.
-    const coverAt = layers.findIndex((l) => /\bhd\b|cover|dens/i.test(l.board));
-    layers.splice(coverAt >= 0 ? coverAt : layers.length, 0, quoteLayer);
+    const { o, layers } = addQuoteLayer(target, board, r);
     if (layers.length > MAX_UNDERLAYMENT_LAYERS) {
       warnings.push(
         `${o.name}: more than ${MAX_UNDERLAYMENT_LAYERS} layers — ${layers.length - MAX_UNDERLAYMENT_LAYERS} left off; check the Underlayment screen.`,
@@ -601,8 +628,8 @@ export function planSwiftSeed(
       : "no sections",
     parapetFt > 0 ? `${num(round2(parapetFt))} ft of parapet` : null,
     curbs.length ? `${curbs.reduce((s, k) => s + (k.quantity ?? 0), 0)} curbs` : null,
-    tapered.length
-      ? `${tapered.length} tapered quote layer${tapered.length === 1 ? "" : "s"}`
+    tapered.length + taperedInName
+      ? `${tapered.length + taperedInName} tapered quote layer${tapered.length + taperedInName === 1 ? "" : "s"}`
       : null,
     pipeStacks.length ? `${pipeStacks.reduce((s, p) => s + p.quantity, 0)} pipe stacks` : null,
     drains.length ? `${drains.reduce((s, p) => s + p.quantity, 0)} drains` : null,

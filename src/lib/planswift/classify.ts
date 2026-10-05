@@ -87,6 +87,12 @@ export interface RowDetails {
   where?: string;
   /** The tapered quote's underlayment entry (NeedQuote board). */
   quoteBoard?: string;
+  /**
+   * A roof section whose name also says tapered (owner, Oct 5: "Roof Type 1 - 50 Mil DL, Min 6"
+   * ISO, 1/8th per Ft Tappered Iso, 1/4" Dens Deck"): the section gets a `quoteBoard` quote
+   * layer of its own instead of being mistaken for a tapered-only row.
+   */
+  taperedInName?: boolean;
 }
 
 export interface ClassifiedRow {
@@ -162,9 +168,15 @@ export function parseDims(name: string): { a: number; b: number; c?: number } | 
   return c !== undefined && c > 0 ? { a, b, c } : { a, b };
 }
 
-/** `( 6"_/ 102" )`, `6" / 102"`, `(6"_/54")` → skirt 6, vertical 102. */
+/**
+ * `( 6"_/ 102" )`, `6" / 102"`, `(6"_/54")` → skirt 6, vertical 102. The skirt must carry an
+ * inch mark or the `_` (owner's file, Oct 5: `1/8th per Ft` is a slope, not a 1" / 8" wall).
+ */
 export function parseParapetProfile(name: string): { skirtIn: number; verticalIn: number } | null {
-  const re = new RegExp(`${NUM}\\s*${INCH_MARK}?\\s*_?\\s*\\/\\s*${NUM}\\s*${INCH_MARK}?`, "i");
+  const re = new RegExp(
+    `${NUM}\\s*(?:${INCH_MARK}\\s*_?|_)\\s*\\/\\s*${NUM}\\s*${INCH_MARK}?`,
+    "i",
+  );
   const m = re.exec(name);
   if (!m) return null;
   const skirtIn = Number(m[1]);
@@ -190,6 +202,8 @@ const SYSTEMS: Array<{ re: RegExp; system?: string; note?: string }> = [
   { re: /duro[\s-]*bond/i, system: "Duro-Bond" },
   { re: /duro[\s-]*fleece/i, system: "Duro-Fleece" },
   { re: /duro[\s-]*last/i, system: "Duro-Last" },
+  // "50 Mil DL" — JBK's shorthand for Duro-Last (not the "DL" of "Non-DL").
+  { re: /(?<![Nn][Oo][Nn][\s-]*)\bDL\b/, system: "Duro-Last" },
   { re: /\bpvc\b/i, system: "Duro-Last" },
   { re: /\bepdm\b/i, system: "EPDM Rubber" },
   { re: /\btpo\b/i },
@@ -350,18 +364,33 @@ function classifyTarget(
   ) => ({ target, confidence, reason, details: { ...d, ...extra } });
 
   if (row.unitKind === "sqft") {
+    const m = d.membrane;
+    // A membrane in the name (system, mil) or a "Roof Type N" name: a roof area, whatever else
+    // the name says.
+    const roofArea =
+      !!m?.roofSystem ||
+      !!m?.systemWords.length ||
+      m?.thicknessMil !== undefined ||
+      has(/^\s*roof\s*(?:type|area|section|\d)/i, n);
     if (has(/tap+er|cricket|saddle/i, n)) {
       const cricketsOnly = has(/cricket|saddle/i, n) && !has(/tap+er/i, n);
-      return out("tapered", "high", "the name says tapered / crickets", {
-        quoteBoard: cricketsOnly ? "Tapered Crickets" : "Tapered ISO",
-      });
+      const quoteBoard = cricketsOnly ? "Tapered Crickets" : "Tapered ISO";
+      // Owner, Oct 5: "Roof Type 1 - 50 Mil DL, Min 6" ISO, 1/8th per Ft Tappered Iso, 1/4"
+      // Dens Deck" is the roof, with its tapered layer in the stack — not a tapered-only row.
+      if (roofArea)
+        return out(
+          "section",
+          "high",
+          `a roof area with its membrane; the name also says tapered — a ${quoteBoard} quote layer goes on it`,
+          { quoteBoard, taperedInName: true },
+        );
+      return out("tapered", "high", "the name says tapered / crickets", { quoteBoard });
     }
     if (has(/wall\s*panel|\bacm\b|siding|soffit|metal\s*panel|composite\s*panel/i, n))
       return out("nondl", "medium", "wall or panel work, not roof area", {
         kind: n.trim(),
         where: "Non-DL › Contractor Applications",
       });
-    const m = d.membrane;
     const insulationOnly =
       has(/\biso\b|insulation|cover\s*board|polyiso/i, n) &&
       !m?.roofSystem &&
@@ -377,13 +406,21 @@ function classifyTarget(
     if (m?.roofSystem || m?.systemWords.length || m?.thicknessMil !== undefined)
       return out("section", "high", "a roof area with its membrane in the name");
     if (has(/roof/i, n)) return out("section", "high", "a roof area");
+    // Sheet metal by the square foot ("Metal MTL1/ MTL2 @ Addenda 2 22Ga V-groove", owner Oct 5):
+    // a Sheet Metals line, never the roof.
+    if (has(/\d+\s*ga(?:uge)?\b|v-?groove|standing\s*seam|\bmtl\b|^\s*(?:sheet\s*)?metal\b/i, n))
+      return out("metals", "medium", "sheet metal by the square foot, not roof area", {
+        kind: "Metal panel",
+        where: SHEET_METALS,
+      });
     return out("section", "medium", "an area in square feet");
   }
 
   if (row.unitKind === "ft") {
     if (has(/measur|\bcheck\b|verify|\btest\b/i, n))
       return out("unmatched", "low", "looks like a check measurement");
-    if (has(/parapet/i, n))
+    // "Parapet", and its misspellings ("Parrpet", owner's file Oct 5).
+    if (has(/par+a?p+e?t/i, n))
       return out(
         "parapet",
         d.verticalIn !== undefined ? "high" : "medium",
@@ -391,6 +428,9 @@ function classifyTarget(
           ? "the name says parapet, with its profile"
           : "the name says parapet (no height in the name)",
       );
+    // A wall profile `( 6"_/ 54" )` in the name is a parapet whatever the word before it.
+    if (d.skirtIn !== undefined && d.verticalIn !== undefined)
+      return out("parapet", "medium", "a wall profile in the name — read as a parapet");
     if (has(/coping/i, n))
       return out("coping", "high", "the name says coping", {
         kind: "Coping",
@@ -532,6 +572,7 @@ export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.tar
             .map((l) => (l.count > 1 ? `${l.count} × ${l.boardName}` : l.boardName))
             .join(" + "),
         );
+      if (d.taperedInName) parts.push(`+ ${d.quoteBoard ?? "Tapered ISO"} quote`);
       if (r.linearTotal !== null && r.linearTotal > 0)
         parts.push(`perimeter ${num(r.linearTotal)} ft`);
       return parts.join(" · ");

@@ -133,6 +133,11 @@ export function parsePlanSwiftMatrix(
       warnings.push(`Row ${i + 1} "${name}": no number in Takeoff — skipped.`);
       continue;
     }
+    // A named row with nothing counted ("1.5" Stack" × 0, owner's file Oct 5): nothing to bid.
+    if (qty === 0) {
+      warnings.push(`Row ${i + 1} "${name}": quantity 0 — skipped.`);
+      continue;
+    }
     const units = cellText(at(r, cols.units));
     rows.push({
       sheetRow: i + 1,
