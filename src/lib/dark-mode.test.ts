@@ -17,7 +17,7 @@
  * taken in light mode.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -126,7 +126,7 @@ function tsxFiles(dir: string, out: string[] = []): string[] {
   for (const f of readdirSync(dir)) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) tsxFiles(p, out);
-    else if (p.endsWith(".tsx")) out.push(p);
+    else if (p.endsWith(".tsx")) out.push(p.split(sep).join("/")); // "src/…" on Windows too
   }
   return out;
 }
