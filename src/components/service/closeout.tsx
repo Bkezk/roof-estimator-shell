@@ -77,6 +77,17 @@ import { MaterialsSection } from "@/components/service/materials-section";
 import { PurchaseOrdersSection } from "@/components/service/purchase-orders-section";
 import { TicketExtras } from "@/components/service/ticket-extras";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { missingForComplete } from "@/lib/closeout-check";
+import {
   clock,
   errText,
   fieldKeys,
@@ -252,7 +263,7 @@ function Section({
 function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { profile, session } = useAuth();
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
 
@@ -339,6 +350,38 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
   const busy = complete.isPending;
   const finished = FINISHED.includes(job.stage);
+
+  // M2 (owner, Oct 5): Complete first lists what is missing — a repair without its Before /
+  // After photo, no closing notes, no signature — with "Go back" and "Complete anyway". The
+  // same queries (and cache) the Repairs section reads.
+  const repairsFn = useServerFn(listJobRepairs);
+  const photosFn = useServerFn(listJobPhotos);
+  const repairsQ = useQuery({
+    queryKey: fieldKeys.repairs(job.id),
+    queryFn: () => repairsFn({ data: { id: job.id } }),
+    enabled: !!session,
+  });
+  const photosQ = useQuery({
+    queryKey: fieldKeys.photos(job.id),
+    queryFn: () => photosFn({ data: { id: job.id } }),
+    enabled: !!session,
+  });
+  const [missing, setMissing] = useState<string[]>([]);
+  const pressComplete = () => {
+    // Still loading, or already finished (Finish): no list, as before.
+    const gaps =
+      finished || !repairsQ.data || !photosQ.data
+        ? []
+        : missingForComplete({
+            service_type: job.service_type,
+            repairs: repairsQ.data,
+            photos: photosQ.data,
+            signature_path: job.signature_path,
+            closing_notes: latest.current.closing_notes,
+          });
+    if (gaps.length > 0) setMissing(gaps);
+    else complete.mutate();
+  };
   // Owner, Sep 30: "Who is on this job with you?" comes first; the rest opens once answered.
   const waiting = crewQuestionPending(job);
 
@@ -447,7 +490,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               type="button"
               className="h-14 w-full text-lg font-semibold"
               disabled={busy}
-              onClick={() => complete.mutate()}
+              onClick={pressComplete}
             >
               {complete.isPending ? (
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -457,6 +500,32 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               {finished ? "Finish" : "Complete"}
             </Button>
           </div>
+          <AlertDialog open={missing.length > 0} onOpenChange={(o) => !o && setMissing([])}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Before you finish</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <ul className="list-disc space-y-1 pl-5 text-left text-base">
+                    {missing.map((m) => (
+                      <li key={m}>{m}</li>
+                    ))}
+                  </ul>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className="h-12">Go back</AlertDialogCancel>
+                <AlertDialogAction
+                  className="h-12"
+                  onClick={() => {
+                    setMissing([]);
+                    complete.mutate();
+                  }}
+                >
+                  Complete anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       )}
     </div>
