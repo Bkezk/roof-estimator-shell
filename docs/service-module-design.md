@@ -514,3 +514,30 @@ applied live.
   notifies `escalation_recipients()` — every admin when `escalate_to_admins` is on, plus
   `escalate_user_ids` — minus the assignee, on the follow-up's own cadence, until someone logs a
   contact or starts it (`dispatchDueReminders` in `notify.server.ts`).
+
+## 16. After the CenterPoint Service study (Oct 5)
+
+`centerpoint/service-study.md` put CenterPoint's Service side next to the portal's and listed
+the gaps; the owner picked M1–M9 ("build M1 through M9") and answered the open questions:
+Brandon (the owner) authorizes Done tickets, Closed is set by hand, and a manager may move a
+ticket past Authorized. What changed, in the order built:
+
+| Row | What changed | Why | Migration |
+|---|---|---|---|
+| M8 | §4 corrected: travel bills at the travel rate ($55 tech, $45 helper, $40 Urgent helper), not at 135/95/85 | the study checked every rate against CenterPoint invoice 5431; only the doc was wrong | — |
+| M7 | Tickets list: a Technician filter (All, Unassigned, each person) | CenterPoint's list filters by technician; the office dispatches by person | — |
+| M1 | Optional arrival window (Morning 8–10 / Midday 10–1 / Afternoon 1–4) beside the day; on the list card, Tech Board card, Today card | CenterPoint schedules "Morning (8-10am)"; the owner: "just an option" — blank = any time | `20261005120000_arrival_window.sql` |
+| M4 | Ticket page: "Earlier at this site" — the last 10 tickets at the same site, each a link, with the first line of the closing notes | what the office checks on a callback; CenterPoint's file library shows it | — |
+| M2 | Complete lists what is missing (Before / After photo per repair, closing notes, signature, a repair) with "Go back" / "Complete anyway" | CenterPoint will not tick a repair without photos; the portal's Complete checked nothing. A warning, not a wall | — |
+| M3 | @mentions in ticket notes: "@" suggests people; the named people are notified (inbox, email / push by their settings) | RoAnna uses them on callbacks in CenterPoint | — |
+| M6 | A History fold on the ticket (admins, managers): every change to the ticket and its time entries, old → new, who, when | CenterPoint's Activity tab; the audit log covered invoices and customers but not tickets | `20261005130000_ticket_audit.sql` |
+| M9 | Stages Open → Scheduled → Done → **Authorized** → Invoiced → Closed. Authorized is a manager's stage; "Make the invoice" only from Authorized; To invoice = Authorized; a void goes back to Authorized; Mark paid no longer closes the ticket | the owner's workflow: the tech completes, the owner reviews and authorizes, the manager invoices and closes | `20261005140000_authorized_stage.sql` |
+| M9 | Setup › Service rates: "Authorizes Done tickets" (Brandon; default every admin). Done tells him "ready for your review" and opens his "Authorize ticket #…" follow-up, shown under a new **Needs authorization** tab on Work Overview; Authorized tells the office "ready to invoice" | "Brandon is the owner so he will be the go to person to authorize"; "a Needs authorization tab on the work overview page instead of done — waiting on the office" | `20261005150000_ticket_authorizer.sql` |
+| M5 | Sites carry their roof warranties (Customers › Sites: Add / Edit / Delete); a "Warranty: Duro-Last 15 NDL · to Mar 2031" badge on the ticket and the Today card while in force | CenterPoint shows the warranty on every ticket; the portal had none. CenterPoint's 47 are not imported | `20261005160000_site_warranties.sql` |
+
+§2's stage list and §9 are read with this: Authorized now sits between Done and Invoiced, and
+the office's "invoice it" follow-up became the authorizer's "authorize it" follow-up.
+
+Still open from the study (RoAnna): what sets tech travel at $45 instead of $55 (and helper
+$35), whether any customer gives a Not to Exceed, and whether bill-to on the invoice (not at
+intake) is early enough.

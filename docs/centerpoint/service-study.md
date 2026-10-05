@@ -418,12 +418,13 @@ at 6000 so they never collide with CenterPoint's.
 | M6 | Activity tab: field-level **audit** of ticket changes (old → new, who, when) [35][36] | `audit_log` covers invoices and CRM, not `service_jobs` | add `service_jobs` (and time entries) to the existing audit trigger; "Changes" under the Timeline for managers. Migration |
 | M7 | List filters by **technician** and by dates [4] | type, stage, Mine, Overdue | a Technician select in the list filters (no date ranges — the stage groups already sort by date) |
 | M8 | design doc §4 vs what is billed (table above) | doc says travel bills at 135/95/85 | correct `service-module-design.md` §4 to the travel rates actually used |
+| M9 | **Authorized** (added Oct 5 from the owner's workflow): the owner reviews a Completed ticket before the manager invoices it [24][R-§2] | Done went straight to "To invoice" | an Authorized stage between Done and Invoiced, set by the owner (Brandon) or a manager; his "Needs authorization" tab on Work Overview; Closed by hand |
 
 ## 2. Portal is better — keep
 
 | # | CenterPoint | Portal | Why keep |
 |---|---|---|---|
-| P1 | 9 stages, each pressed by hand; dates out of order (En Route before Scheduled on 5431) | 5 stages; Scheduled / Invoiced / Closed set automatically | fewer clicks and dates that mean something; "Authorized" maps to the "To invoice" list (Q6) |
+| P1 | 9 stages, each pressed by hand; dates out of order (En Route before Scheduled on 5431) | 5 stages; Scheduled / Invoiced / Closed set automatically | fewer clicks and dates that mean something. **Corrected Oct 5:** the owner reviews Done tickets before they are invoiced, so Authorized was added (M9 above); the rest of the stages stay automatic |
 | P2 | search misses city, Job #, technician; the fuzzy match hits the wrong town | substring over 11 fields incl. Job #, PO, address, technician | finds what the office types |
 | P3 | property search by name only, a bare name per row | customer search by name, site name or address, with "N sites" | two buildings at one address are told apart |
 | P4 | board queue: no ticket #, no search, newest first | Unassigned rail with #, search, oldest first; "+" in every cell | the oldest unscheduled ticket is the one to dispatch |
@@ -476,3 +477,9 @@ For RoAnna Sims:
 - Whether editing an invoiced ticket changes its invoice.
 - A real case of two properties at one address.
 - Weekly hours per technician on the board (seen in the earlier study, absent today).
+
+## Built (Oct 5)
+
+The owner picked M1–M9 and answered: Brandon authorizes; Closed is set by hand; a manager may
+move past Authorized; the arrival window is optional; Complete warns (does not refuse). What
+was built, commit by commit, is listed in `../service-module-design.md` §16.
