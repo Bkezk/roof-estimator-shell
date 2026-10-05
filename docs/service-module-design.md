@@ -119,9 +119,14 @@ pattern as `takeoffs`.
 From report §5 and the 5431 / 5449 invoices:
 
 - Every time entry becomes one invoice line per person: the tech line at the ticket's labor rate
-  kind (Emergency $135 / Urgent $95 / Standard $85 per hour, travel and labor alike), and one
-  **Helper** line per extra tech (travel $40–45/h, labor $55/h). Cost side: tech $85/h, helper
-  $55/h.
+  kind for **labor** (Emergency $135 / Urgent $95 / Standard $85 per hour) and at the **travel**
+  rate for travel ($55/h whatever the kind), and one **Helper** line per extra tech (travel
+  $45/h, $40 on Urgent; labor $55/h). Cost side: tech $85/h, helper $55/h, travel and labor
+  alike. These are the `service_rates` seed (migration 20260927160000). Corrected Oct 5 after the
+  service study (`centerpoint/service-study.md` §H): the earlier text said travel billed at the
+  labor rate, which neither CenterPoint nor the code does. CenterPoint invoice 5431 also billed
+  tech travel at $45 and helper travel at $35 on one day — not in the seed; ask RoAnna what sets
+  it (study, open question 5).
 - Every material used becomes a line at **cost × (1 + markup)**, markup 0.75 today. Cost comes
   from the catalog cell or `service_materials`.
 - Tax is a rate on the subtotal, 0 % today; `companies.tax_exempt` overrides.
