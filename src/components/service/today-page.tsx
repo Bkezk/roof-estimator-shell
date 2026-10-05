@@ -30,6 +30,7 @@ import { myDay, setFieldStatus, type TodayJob } from "@/lib/service-field.functi
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
 import { crewQuestionPending } from "@/lib/service-crew";
+import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
 import {
   clock,
   errText,
@@ -203,6 +204,8 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
     j.on_site_at ? `On site ${clock(j.on_site_at)}` : null,
   ].filter(Boolean);
   const overdue = !!j.scheduled_date && j.scheduled_date < today;
+  // The arrival window (M1), when the office set one.
+  const arrival = arrivalLabel(j.arrival_window);
   // Started and not yet answered: the crew question shows on the card.
   const askCrew = !!j.field_status && crewQuestionPending(j);
   // Once asked, the box stays open on this card (ticking a second tech after the first
@@ -231,12 +234,20 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
         >
           #{j.number} · {j.customer_name}
         </Link>
-        {j.scheduled_date && j.scheduled_date !== today && (
+        {j.scheduled_date && (j.scheduled_date !== today || arrival) && (
           <p
             className={`flex items-center gap-1 text-xs ${overdue ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
           >
             <CalendarDays className="h-3.5 w-3.5" />
-            {overdue ? `Was due ${shortDay(j.scheduled_date)}` : shortDay(j.scheduled_date)}
+            {dayWithWindow(
+              j.scheduled_date === today
+                ? "Today"
+                : overdue
+                  ? `Was due ${shortDay(j.scheduled_date)}`
+                  : shortDay(j.scheduled_date),
+              // An overdue ticket's window has passed with its day.
+              overdue ? null : j.arrival_window,
+            )}
           </p>
         )}
       </div>

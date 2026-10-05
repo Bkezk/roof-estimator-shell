@@ -41,6 +41,7 @@ import {
 import { listTechnicians } from "@/lib/auth.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { arrivalLabel } from "@/lib/arrival-window";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const asStage = (s: string): ServiceStage =>
@@ -604,8 +605,10 @@ function TicketChip(props: {
         ? `${shortDay(j.scheduled_date)} · no technician`
         : null
     : null;
+  const arrival = arrivalLabel(j.arrival_window);
   const title = [
     `#${j.number} ${j.customer_name}`,
+    arrival,
     j.site_name,
     j.description,
     STAGE_LABELS[stage],
@@ -629,6 +632,7 @@ function TicketChip(props: {
         <span className="font-semibold">#{j.number}</span> {j.customer_name}
         {j.description ? <span className="opacity-80"> · {j.description}</span> : null}
       </span>
+      {arrival && <span className="mt-0.5 block truncate text-[11px] font-medium">{arrival}</span>}
       {props.detail && (
         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
           <span className="font-medium">{STAGE_LABELS[stage]}</span>

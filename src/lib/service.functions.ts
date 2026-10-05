@@ -22,6 +22,7 @@ import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import { stageProblem } from "@/lib/ticket-stage";
+import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
 export { TECH_STAGES } from "@/lib/ticket-stage";
@@ -215,6 +216,11 @@ const jobSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .nullable()
     .optional(),
+  /**
+   * The arrival window on that day (M1, owner Oct 5): null = any time. Not sent = left as it
+   * is, so a save from a screen that does not show it never clears it.
+   */
+  arrival_window: z.enum(ARRIVAL_WINDOWS).nullable().optional(),
   // No stage (audit, Oct 2): a stale tab's save sent the stage it had loaded and moved an
   // Invoiced ticket back to Done. setServiceStage (the header's picker) is the one way to set
   // it; a `stage` key sent here is dropped by the schema.
@@ -313,6 +319,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       ...(fields.scheduled_date !== undefined || !id
         ? { scheduled_date: fields.scheduled_date ?? null }
         : {}),
+      ...(fields.arrival_window !== undefined ? { arrival_window: fields.arrival_window } : {}),
       notes: fields.notes ?? null,
       centerpoint_ticket: fields.centerpoint_ticket ?? null,
       centerpoint_invoice: fields.centerpoint_invoice ?? null,

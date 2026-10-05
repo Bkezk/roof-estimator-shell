@@ -2935,6 +2935,7 @@ export type Database = {
         Row: {
           account_id: string | null;
           assigned_at: string | null;
+          arrival_window: string | null;
           contacted_at: string | null;
           escalated_at: string | null;
           centerpoint_invoice: string | null;
@@ -2981,6 +2982,7 @@ export type Database = {
         Insert: {
           account_id?: string | null;
           assigned_at?: string | null;
+          arrival_window?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;
@@ -3027,6 +3029,7 @@ export type Database = {
         Update: {
           account_id?: string | null;
           assigned_at?: string | null;
+          arrival_window?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;

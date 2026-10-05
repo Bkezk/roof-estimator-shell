@@ -114,6 +114,13 @@ import type { StageFilter } from "@/lib/service-search";
 import { localYmd } from "@/lib/tasks";
 import { SERVICE_OPEN_WORK, ticketOverdueDays } from "@/lib/work-counts";
 import {
+  ARRIVAL_ANY,
+  ARRIVAL_LABELS,
+  ARRIVAL_WINDOWS,
+  asArrival,
+  dayWithWindow,
+} from "@/lib/arrival-window";
+import {
   filterTickets,
   techChoices,
   TECH_ALL,
@@ -774,7 +781,7 @@ function TicketListRow({
   const stage = asStage(j.stage);
   const meta = [
     j.technician_name ?? "Unassigned",
-    j.scheduled_date ? day(j.scheduled_date) : "No date",
+    j.scheduled_date ? dayWithWindow(day(j.scheduled_date), j.arrival_window) : "No date",
     j.centerpoint_ticket ? `CenterPoint #${j.centerpoint_ticket}` : null,
   ].filter(Boolean);
   // Owner, Sep 28: the whole card opens the ticket, as on Bids (no Open button).
@@ -1072,6 +1079,8 @@ interface Draft {
   /** "" = unassigned. */
   technician_id: string;
   scheduled_date: string;
+  /** "" = any time (lib/arrival-window.ts). */
+  arrival_window: string;
   centerpoint_ticket: string;
   centerpoint_invoice: string;
   notes: string;
@@ -1096,6 +1105,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         job_number: job.job_number ?? "",
         technician_id: job.technician_id ?? "",
         scheduled_date: job.scheduled_date ?? "",
+        arrival_window: job.arrival_window ?? "",
         centerpoint_ticket: job.centerpoint_ticket ?? "",
         centerpoint_invoice: job.centerpoint_invoice ?? "",
         notes: job.notes ?? "",
@@ -1111,6 +1121,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         job_number: "",
         technician_id: meId ?? "",
         scheduled_date: "",
+        arrival_window: "",
         centerpoint_ticket: "",
         centerpoint_invoice: "",
         notes: "",
@@ -1379,6 +1390,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             }
           : {}),
         scheduled_date: draft.scheduled_date || null,
+        // Sent only when it changed, so a save never touches a window it did not show.
+        ...(draft.arrival_window !== (job?.arrival_window ?? "")
+          ? { arrival_window: asArrival(draft.arrival_window) }
+          : {}),
         // No stage (audit, Oct 2: a stale tab's save sent the stage it had loaded and moved an
         // Invoiced ticket back to Done). The header's picker is the one way to change it; the
         // server keeps the stage, moving an Open ticket that now has a technician and a day to
@@ -1780,6 +1795,26 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         <div className="space-y-1">
           <Label htmlFor="ticket-date">Date</Label>
           {dateInput}
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ticket-arrival">Arrival</Label>
+          <Select
+            value={draft.arrival_window || ARRIVAL_ANY}
+            disabled={ro || dateLocked}
+            onValueChange={(v) => set("arrival_window", v === ARRIVAL_ANY ? "" : v)}
+          >
+            <SelectTrigger id="ticket-arrival" title="Optional: when on that day">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ARRIVAL_ANY}>Any time</SelectItem>
+              {ARRIVAL_WINDOWS.map((w) => (
+                <SelectItem key={w} value={w}>
+                  {ARRIVAL_LABELS[w]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         {manager && (
           <div className="space-y-1">
