@@ -181,11 +181,14 @@ describe("List: all six headings, always, in the same order", () => {
       page.indexOf("function ListView"),
       page.indexOf("function CalendarView"),
     );
-    expect(list).toContain("listGroups(items, today)");
+    expect(list).toContain("listGroups(items, today, { authorize })");
     expect(list).not.toContain("groupWork(");
     expect(list).not.toContain("presetGroups(");
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.
-    expect(list).toContain('<div className="hidden gap-3 lg:grid lg:grid-cols-3 xl:grid-cols-6">');
+    // Seven when the Needs authorization column shows (M9, owner Oct 5).
+    expect(list).toContain(
+      'className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 6 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}',
+    );
     expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
     expect(list).toContain('preset === g.bucket ? "ring-2 ring-primary" : ""');
     // Phone: tabs, the picked one's items below.

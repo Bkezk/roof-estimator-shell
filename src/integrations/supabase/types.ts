@@ -3150,6 +3150,7 @@ export type Database = {
       };
       service_settings: {
         Row: {
+          authorizer_id: string | null;
           email_message: string;
           email_subject: string;
           id: number;
@@ -3160,6 +3161,7 @@ export type Database = {
           updated_at: string;
         };
         Insert: {
+          authorizer_id?: string | null;
           email_message?: string;
           email_subject?: string;
           id?: number;
@@ -3170,6 +3172,7 @@ export type Database = {
           updated_at?: string;
         };
         Update: {
+          authorizer_id?: string | null;
           email_message?: string;
           email_subject?: string;
           id?: number;
@@ -4132,6 +4135,21 @@ export type Database = {
           full_name: string | null;
           id: string;
           technician: boolean;
+        }[];
+      };
+      /** 20261005150000_ticket_authorizer.sql: who reviews Done tickets (ids). */
+      ticket_authorizers: {
+        Args: never;
+        Returns: string[];
+      };
+      /** 20261005150000_ticket_authorizer.sql: admins and managers, for the authorizer picker. */
+      manager_options: {
+        Args: never;
+        Returns: {
+          email: string;
+          full_name: string | null;
+          id: string;
+          role: string;
         }[];
       };
       service_aerial_address_candidates: {

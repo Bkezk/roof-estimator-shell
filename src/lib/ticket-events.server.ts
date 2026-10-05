@@ -1,8 +1,9 @@
 /**
  * What happens when a ticket changes stage — SERVER ONLY (load inside handlers). Owner, Sep 27:
- * maximise automation. Reaching Done tells the office ("invoice ready to review") and starts an
- * "Invoice ticket #…" follow-up for the person who opened the ticket (or the first office user),
- * which closes when the invoice goes out. Leaving Done (undo, void) closes it again.
+ * maximise automation. Since Oct 5 (M9, the Authorized stage): reaching Done tells the authorizer
+ * (Setup › Service rates, else every admin) "ready for your review" and opens an "Authorize
+ * ticket #…" follow-up for them (Work Overview's Needs authorization tab), which closes when the
+ * ticket leaves Done. Reaching Authorized tells the office "ready to invoice".
  */
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { syncFollowup } from "@/lib/followups.server";
@@ -33,6 +34,13 @@ async function officeUsers(sb: Client): Promise<{ id: string; technician: boolea
   return (data ?? []).filter((u) => !u.technician).map((u) => ({ id: u.id, technician: false }));
 }
 
+/** Who reviews Done tickets (20261005150000_ticket_authorizer.sql); [] until it is applied. */
+export async function authorizerIds(sb: Client): Promise<string[]> {
+  const { data, error } = await sb.rpc("ticket_authorizers");
+  if (error) return [];
+  return (data ?? []).filter((x): x is string => typeof x === "string" && !!x);
+}
+
 export async function afterTicketStage(
   row: JobRow,
   prevStage: string | null,
@@ -41,27 +49,51 @@ export async function afterTicketStage(
 ): Promise<void> {
   const admin = await serverClient(sb);
   const office = await officeUsers(admin);
-  const becameDone = row.stage === "done" && prevStage !== "done" && !row.deleted_at;
-  if (row.stage === "done" && !row.deleted_at && !office.length)
+  const live = !row.deleted_at;
+  const becameDone = row.stage === "done" && prevStage !== "done" && live;
+  const becameAuthorized = row.stage === "authorized" && prevStage !== "authorized" && live;
+  // M9 (owner, Oct 5): the owner reviews a Done ticket ("Brandon … will be the go to person to
+  // authorize"): the set authorizer, else every admin (ticket_authorizers). Until that migration
+  // is applied, or if it names nobody, the office as before.
+  const authorizers = row.stage === "done" && live ? await authorizerIds(admin) : [];
+  const reviewers = authorizers.length ? authorizers : office.map((u) => u.id);
+  if (row.stage === "done" && live && !reviewers.length)
     console.error(
-      `afterTicketStage: ticket #${row.number} is done but technician_options returned no office users, so no "invoice ready" notice was sent and no "Invoice ticket" follow-up was opened (is 20261002090000_service_role_helpers.sql applied?)`,
+      `afterTicketStage: ticket #${row.number} is done but nobody authorizes it (no authorizer, no admin, no office user), so no "ready for your review" notice was sent and no "Authorize ticket" follow-up was opened`,
     );
   if (becameDone) {
-    const others = office.map((u) => u.id).filter((id) => id !== actor.id);
+    const others = reviewers.filter((id) => id !== actor.id);
     if (others.length)
       await notify(
         others,
         {
           kind: "ticket_done",
-          title: `${ticketTitle(row)} is done — invoice ready to review`,
-          body: `${actor.name ?? "The technician"} marked it done. Open the ticket to review and send the invoice.`,
+          title: `${ticketTitle(row)} is done — ready for your review`,
+          body: `${actor.name ?? "The technician"} marked it done. Review it and mark it Authorized; the invoice is made after that.`,
           url: `/service?id=${row.id}`,
         },
         admin,
       );
   }
-  // The office's "invoice it" timer: open while the ticket sits at Done, closed otherwise.
+  if (becameAuthorized) {
+    // The manager invoices it next (the Invoices tab's To invoice queue).
+    const others = office.map((u) => u.id).filter((id) => id !== actor.id);
+    if (others.length)
+      await notify(
+        others,
+        {
+          kind: "ticket_authorized",
+          title: `${ticketTitle(row)} authorized — ready to invoice`,
+          body: `${actor.name ?? "The office"} authorized it. Make the invoice from the ticket.`,
+          url: `/service?id=${row.id}`,
+        },
+        admin,
+      );
+  }
+  // The review timer (follow-up kind "invoice"): open while the ticket sits at Done, closed
+  // otherwise; on the authorizer's Work Overview under "Needs authorization".
   const assignee =
+    authorizers[0] ??
     (row.created_by && office.some((u) => u.id === row.created_by) ? row.created_by : null) ??
     office[0]?.id ??
     null;
@@ -70,8 +102,8 @@ export async function afterTicketStage(
       kind: "invoice",
       itemId: row.id,
       accountId: row.account_id,
-      assigneeId: row.stage === "done" && !row.deleted_at ? assignee : null,
-      title: `Invoice ${ticketTitle(row)}`,
+      assigneeId: row.stage === "done" && live ? assignee : null,
+      title: `Authorize ${ticketTitle(row)}`,
       url: `/service?id=${row.id}`,
       closing: row.stage !== "done" || !!row.deleted_at,
       closeReason: row.deleted_at ? "deleted" : `stage ${row.stage}`,

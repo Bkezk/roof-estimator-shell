@@ -972,9 +972,16 @@ async function ratesManager(ctx: Ctx) {
 export const getServiceRates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(
-    async ({ context }): Promise<{ rates: ServiceRateRow[]; settings: ServiceSettingsRow }> => {
+    async ({
+      context,
+    }): Promise<{
+      rates: ServiceRateRow[];
+      settings: ServiceSettingsRow;
+      /** Admins and managers: who may be the authorizer (M9). [] until its migration. */
+      managers: { id: string; name: string }[];
+    }> => {
       await ratesManager(context);
-      const [{ data: rates, error }, { data: settings }] = await Promise.all([
+      const [{ data: rates, error }, { data: settings }, mgrs] = await Promise.all([
         context.supabase
           .from("service_rates")
           .select("*")
@@ -982,10 +989,15 @@ export const getServiceRates = createServerFn({ method: "GET" })
           .order("role")
           .order("time_kind"),
         context.supabase.from("service_settings").select("*").eq("id", 1).maybeSingle(),
+        context.supabase.rpc("manager_options"),
       ]);
       if (error) throw new Error(error.message);
       if (!settings) throw new Error("Service settings row is missing");
-      return { rates: rates ?? [], settings };
+      const managers = (mgrs.error ? [] : (mgrs.data ?? [])).map((m) => ({
+        id: m.id,
+        name: (m.full_name ?? "").trim() || m.email,
+      }));
+      return { rates: rates ?? [], settings, managers };
     },
   );
 
@@ -1007,15 +1019,25 @@ const ratesSchema = z.object({
       invoice_contact: z.string().trim().max(500).nullable(),
       email_subject: z.string().trim().min(1).max(200),
       email_message: z.string().trim().max(2000),
+      /** Who reviews Done tickets (M9); null = every admin. */
+      authorizer_id: z.string().uuid().nullable(),
     })
     .partial(),
 });
+export const AUTHORIZER_NOT_MANAGER = "Pick an admin or a manager to authorize tickets";
 export type ServiceRatesInput = z.input<typeof ratesSchema>;
 export const setServiceRates = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => ratesSchema.parse(d))
   .handler(async ({ data, context }): Promise<void> => {
     await ratesManager(context);
+    // Only an admin or a manager may set Authorized (ticket-stage.ts), so only they authorize.
+    if (data.settings.authorizer_id) {
+      const { data: mgrs, error: mErr } = await context.supabase.rpc("manager_options");
+      if (mErr) throw new Error(mErr.message);
+      if (!(mgrs ?? []).some((m) => m.id === data.settings.authorizer_id))
+        throw new Error(AUTHORIZER_NOT_MANAGER);
+    }
     for (const r of data.rates) {
       const { error } = await context.supabase
         .from("service_rates")

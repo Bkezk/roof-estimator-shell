@@ -165,6 +165,11 @@ export interface WorkItem {
   assigneeName: string | null;
   /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
   followup: WorkFollowup | null;
+  /**
+   * A Done ticket's review timer ("Authorize ticket #…", follow-up kind "invoice"): it sits under
+   * "Needs authorization" (M9, owner Oct 5).
+   */
+  needsAuth?: boolean;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -268,6 +273,7 @@ export function followupItem(
     assigneeId: f.assignee_id,
     assigneeName: names[f.assignee_id] ?? null,
     followup: workFollowup(f),
+    ...(f.kind === "invoice" ? { needsAuth: true } : {}),
   };
 }
 
@@ -308,9 +314,11 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
 
 // ---- grouping ------------------------------------------------------------------------------
 
-export type WorkBucket = "overdue" | "today" | "week" | "later" | "nodate" | "done";
+export type WorkBucket = "authorize" | "overdue" | "today" | "week" | "later" | "nodate" | "done";
 
 export const BUCKET_LABELS: Record<WorkBucket, string> = {
+  // M9 (owner, Oct 5): "a Needs authorization tab on the work overview page".
+  authorize: "Needs authorization",
   overdue: "Overdue",
   today: "Today",
   week: "This week",
@@ -319,7 +327,15 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   done: "Done — waiting on the office",
 };
 
-const BUCKET_ORDER: WorkBucket[] = ["overdue", "today", "week", "later", "nodate", "done"];
+const BUCKET_ORDER: WorkBucket[] = [
+  "authorize",
+  "overdue",
+  "today",
+  "week",
+  "later",
+  "nodate",
+  "done",
+];
 
 /** The Saturday that ends `today`'s week (weeks run Sunday to Saturday, like the calendar). */
 export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
@@ -329,7 +345,11 @@ export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
  * week (through Saturday); Later; No date. A Done ticket is finished work, never overdue: it has
  * its own last group.
  */
-export function bucketOf(item: Pick<WorkItem, "date" | "done">, today: string): WorkBucket {
+export function bucketOf(
+  item: Pick<WorkItem, "date" | "done" | "needsAuth">,
+  today: string,
+): WorkBucket {
+  if (item.needsAuth) return "authorize";
   if (item.done) return "done";
   if (!item.date) return "nodate";
   if (item.date < today) return "overdue";
@@ -365,6 +385,7 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
  * only"): all six groups, always, in the same order — an empty one shows "(0)" and this line.
  */
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
+  authorize: "Nothing waiting for your review.",
   overdue: "Nothing overdue.",
   today: "Nothing due today.",
   week: "Nothing else this week.",
@@ -373,12 +394,20 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   done: "Nothing waiting on the office.",
 };
 
-/** All six List groups in order, empty ones included, each sorted by `compareWork`. */
-export function listGroups(items: WorkItem[], today: string): WorkGroup[] {
+/**
+ * All six List groups in order, empty ones included, each sorted by `compareWork`. "Needs
+ * authorization" comes first and only for the person who authorizes (`opts.authorize`) or when
+ * something is in it (a manager looking at that person's work).
+ */
+export function listGroups(
+  items: WorkItem[],
+  today: string,
+  opts: { authorize?: boolean } = {},
+): WorkGroup[] {
   const filled = new Map(groupWork(items, today).map((g) => [g.bucket, g]));
-  return BUCKET_ORDER.map(
-    (b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] },
-  );
+  return BUCKET_ORDER.filter(
+    (b) => b !== "authorize" || opts.authorize || filled.has("authorize"),
+  ).map((b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] });
 }
 
 /** A List preset from the URL (?bucket=today|overdue — the Owner view's links). */

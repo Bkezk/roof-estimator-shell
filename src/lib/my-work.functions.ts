@@ -41,6 +41,8 @@ export interface MyWorkResult {
   canPick: boolean;
   /** Whose items came back: "all" or the profile ids. */
   scope: string[] | "all";
+  /** Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? */
+  authorizer: boolean;
 }
 
 const LIMIT = 1000;
@@ -93,7 +95,15 @@ export const listMyWork = createServerFn({ method: "GET" })
       .limit(LIMIT);
     if (scope !== "all") fq = fq.in("assignee_id", scope);
 
-    const [tickets, tasks, followups] = await Promise.all([tq, kq, fq]);
+    // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
+    const [tickets, tasks, followups, auth] = await Promise.all([
+      tq,
+      kq,
+      fq,
+      sb.rpc("ticket_authorizers"),
+    ]);
+    const authorizer =
+      !auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId);
     if (tickets.error) throw new Error(`Tickets: ${tickets.error.message}`);
     if (tasks.error) throw new Error(`Tasks: ${tasks.error.message}`);
     if (followups.error) throw new Error(`Follow-ups: ${followups.error.message}`);
@@ -150,6 +160,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       people,
       canPick,
       scope,
+      authorizer,
     };
   });
 

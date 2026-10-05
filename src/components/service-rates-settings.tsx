@@ -24,6 +24,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const toPct = (frac: number | string) => Number((Number(frac) * 100).toFixed(4));
@@ -51,7 +58,12 @@ interface SettingsDraft {
   invoice_contact: string;
   email_subject: string;
   email_message: string;
+  /** Who reviews Done tickets (M9); "" = every admin. */
+  authorizer_id: string;
 }
+
+/** The authorizer select's "Every admin" item (a Select item cannot have an empty value). */
+const ADMINS = "admins";
 
 export function ServiceRatesSettings() {
   const qc = useQueryClient();
@@ -76,6 +88,7 @@ export function ServiceRatesSettings() {
       invoice_contact: d.settings.invoice_contact ?? "",
       email_subject: d.settings.email_subject,
       email_message: d.settings.email_message,
+      authorizer_id: d.settings.authorizer_id ?? "",
     });
   }, [q.data]);
 
@@ -101,6 +114,10 @@ export function ServiceRatesSettings() {
             invoice_contact: s.invoice_contact.trim() || null,
             email_subject: s.email_subject.trim(),
             email_message: s.email_message.trim(),
+            // Sent only when changed (the column arrives with 20261005150000_ticket_authorizer.sql).
+            ...(s.authorizer_id !== (q.data?.settings.authorizer_id ?? "")
+              ? { authorizer_id: s.authorizer_id || null }
+              : {}),
           },
         },
       });
@@ -233,6 +250,30 @@ export function ServiceRatesSettings() {
             </div>
 
             <div className="grid gap-x-6 gap-y-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="rates-authorizer">Authorizes Done tickets</Label>
+                <Select
+                  value={s.authorizer_id || ADMINS}
+                  onValueChange={(v) => setS2("authorizer_id", v === ADMINS ? "" : v)}
+                >
+                  <SelectTrigger id="rates-authorizer">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ADMINS}>Every admin</SelectItem>
+                    {(q.data?.managers ?? []).map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Gets &quot;ready for your review&quot; when a ticket is Done and the Needs
+                  authorization tab on Work Overview. Any manager can still mark a ticket
+                  Authorized.
+                </p>
+              </div>
               <div className="space-y-1">
                 <Label>Material markup %</Label>
                 <NumberField

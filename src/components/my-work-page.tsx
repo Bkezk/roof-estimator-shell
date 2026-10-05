@@ -200,9 +200,12 @@ function ListView({
   manage,
   preset,
   onClearPreset,
+  authorize = false,
 }: {
   items: WorkItem[];
   today: string;
+  /** The caller reviews Done tickets: the Needs authorization tab shows, empty or not (M9). */
+  authorize?: boolean;
   showWho: boolean;
   manage: ManageFollowup | null;
   /** ?bucket=today|overdue: the tab to open on (the Owner view's links). */
@@ -214,7 +217,7 @@ function ListView({
   // the top instead of having to click each one"); on a phone they are a row of tabs and the
   // selected tab's items show below. An empty group shows its muted line. A preset (?bucket=)
   // picks the tab and marks the column; picking another tab clears it.
-  const groups = useMemo(() => listGroups(items, today), [items, today]);
+  const groups = useMemo(() => listGroups(items, today, { authorize }), [items, today, authorize]);
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
   const [prevPreset, setPrevPreset] = useState(preset);
@@ -245,7 +248,9 @@ function ListView({
   return (
     <>
       {/* Desktop: six columns across, every group's items in view at once. */}
-      <div className="hidden gap-3 lg:grid lg:grid-cols-3 xl:grid-cols-6">
+      <div
+        className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 6 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}
+      >
         {groups.map((g) => (
           <section
             key={g.bucket}
@@ -662,6 +667,7 @@ export function MyWorkPage(props: {
           manage={manage}
           preset={props.bucket}
           onClearPreset={() => props.onBucket(null)}
+          authorize={!!q.data?.authorizer}
         />
       )}
 

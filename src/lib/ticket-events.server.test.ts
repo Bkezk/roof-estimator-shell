@@ -65,7 +65,8 @@ describe("a ticket reaching Done", () => {
     expect(ids.sort()).toEqual(["admin-1", "office-1"]); // office only, not the technician
     expect(msg.kind).toBe("ticket_done");
     expect(msg.title).toContain("Ticket #101 Acme");
-    expect(msg.title).toContain("invoice ready to review");
+    // Since Oct 5 (M9) the Done notice asks for the review; the invoice comes after Authorized.
+    expect(msg.title).toContain("ready for your review");
 
     expect(syncFollowup).toHaveBeenCalledTimes(1);
     expect(syncFollowup.mock.calls[0]![0]).toMatchObject({
@@ -73,7 +74,7 @@ describe("a ticket reaching Done", () => {
       itemId: "job-1",
       assigneeId: "office-1", // the office user who opened the ticket
       closing: false,
-      title: "Invoice Ticket #101 Acme — Leak",
+      title: "Authorize Ticket #101 Acme — Leak",
     });
     expect(errorLog).not.toHaveBeenCalled();
   });
@@ -91,7 +92,7 @@ describe("a ticket reaching Done", () => {
     expect(notify).not.toHaveBeenCalled();
     expect(syncFollowup.mock.calls[0]![0]).toMatchObject({ assigneeId: null });
     expect(errorLog).toHaveBeenCalledWith(
-      expect.stringMatching(/ticket #101 is done but technician_options returned no office users/),
+      expect.stringMatching(/ticket #101 is done but nobody authorizes it/),
     );
   });
 
