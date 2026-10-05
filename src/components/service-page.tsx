@@ -112,12 +112,14 @@ import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
 import type { StageFilter } from "@/lib/service-search";
 import { localYmd } from "@/lib/tasks";
+import { SERVICE_OPEN_WORK, ticketOverdueDays } from "@/lib/work-counts";
 import {
-  isOpenTicketStage,
-  isOverdueTicket,
-  SERVICE_OPEN_WORK,
-  ticketOverdueDays,
-} from "@/lib/work-counts";
+  filterTickets,
+  techChoices,
+  TECH_ALL,
+  TECH_UNASSIGNED,
+  type TechFilter,
+} from "@/lib/ticket-list-filter";
 import { OverdueBadge } from "@/components/overdue-badge";
 import { CloseoutScreen } from "@/components/service/closeout";
 import { InvoiceBlock } from "@/components/service/invoice-block";
@@ -360,6 +362,8 @@ function ServiceList({
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<StageFilter>(presetStage ?? "all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  // One technician's tickets (service study M7, owner Oct 5), office only.
+  const [techFilter, setTechFilter] = useState<TechFilter>(TECH_ALL);
   // Overdue: open tickets whose day has passed (lib/work-counts.ts isOverdueTicket), preset by
   // ?overdue=1 from the Customers page counts strip; cleared from its chip.
   const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
@@ -402,34 +406,20 @@ function ServiceList({
   const jobs = list.data ?? [];
   const deleted = deletedQuery.data ?? [];
   const q = search.trim().toLowerCase();
-  const filtered = jobs.filter((j) => {
-    if (mine && j.technician_id !== profile?.id) return false;
-    if (stageFilter === SERVICE_OPEN_WORK) {
-      if (!isOpenTicketStage(asStage(j.stage))) return false;
-    } else if (stageFilter !== "all" && asStage(j.stage) !== stageFilter) return false;
-    if (overdueOnly && !isOverdueTicket({ ...j, stage: asStage(j.stage) }, today)) return false;
-    if (typeFilter !== "all" && asType(j.service_type) !== typeFilter) return false;
-    if (q) {
-      const hay = [
-        `#${j.number}`,
-        String(j.number),
-        j.customer_name,
-        j.site_name,
-        j.site_address,
-        j.description,
-        j.po_number,
-        j.job_number,
-        j.centerpoint_ticket,
-        j.centerpoint_invoice,
-        j.technician_name,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  });
+  const techs = techChoices(jobs);
+  // Unknown stage / type values read as Open / Other, as everywhere on this screen.
+  const filtered = filterTickets(
+    jobs.map((j) => ({ ...j, stage: asStage(j.stage), service_type: asType(j.service_type) })),
+    {
+      mineId: mine ? (profile?.id ?? null) : null,
+      stage: stageFilter,
+      overdueOnly,
+      type: typeFilter,
+      tech: isTech ? TECH_ALL : techFilter,
+      search,
+      today,
+    },
+  );
   // Grouped Open → Closed; newest update first inside each group, except Scheduled, which
   // reads soonest first. Empty groups are left out.
   const groups = SERVICE_STAGES.map((stage) => {
@@ -446,12 +436,18 @@ function ServiceList({
       )
     : SERVICE_STAGES;
   const anyFilter =
-    q !== "" || stageFilter !== "all" || typeFilter !== "all" || mine || overdueOnly;
+    q !== "" ||
+    stageFilter !== "all" ||
+    typeFilter !== "all" ||
+    techFilter !== TECH_ALL ||
+    mine ||
+    overdueOnly;
   const clearFilters = () => {
     setSearch("");
     setStageFilter("all");
     setOverdueOnly(false);
     setTypeFilter("all");
+    setTechFilter(TECH_ALL);
     setMineOverride(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
@@ -531,6 +527,25 @@ function ServiceList({
                     </SelectContent>
                   </Select>
                 </label>
+                {!isTech && (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Technician
+                    <Select value={techFilter} onValueChange={(v) => setTechFilter(v)}>
+                      <SelectTrigger className="w-[190px] bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={TECH_ALL}>All technicians</SelectItem>
+                        <SelectItem value={TECH_UNASSIGNED}>Unassigned</SelectItem>
+                        {techs.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                )}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Chip active={stageFilter === "all"} onClick={() => setStageFilter("all")}>
