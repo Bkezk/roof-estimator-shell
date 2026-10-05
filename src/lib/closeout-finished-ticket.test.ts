@@ -181,7 +181,7 @@ describe("the ticket page's Close-out fold", () => {
   const src = readFileSync("src/components/service/ticket-field-sections.tsx", "utf8");
   it("says 'Closed by the office — no close-out' for an office stage with nothing recorded", () => {
     expect(src).toContain(
-      'const officeStage = job.stage === "invoiced" || job.stage === "closed";',
+      'const officeStage = ["authorized", "invoiced", "closed"].includes(job.stage);',
     );
     expect(src).toContain(
       "`${STAGE_LABELS[job.stage as ServiceStage]} by the office — no close-out`",

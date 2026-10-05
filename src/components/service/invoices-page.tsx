@@ -206,8 +206,8 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
         </div>
         {toInvoice ? (
           <p className="text-xs text-muted-foreground">
-            Done tickets waiting for their invoice, longest waiting first. Open one to review and
-            finalise its invoice.
+            Authorized tickets waiting for their invoice, longest waiting first. Open one to make
+            and finalise its invoice.
           </p>
         ) : (
           <div className="flex flex-wrap items-end gap-3">
@@ -271,7 +271,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
         <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
           {anyFilter
             ? "No invoices match these filters."
-            : "No invoices yet. Make one from a Done ticket's invoice card (Make the invoice)."}
+            : "No invoices yet. Make one from an Authorized ticket's invoice card (Make the invoice)."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -391,7 +391,7 @@ function ToInvoiceTable(props: {
   if (props.rows.length === 0)
     return (
       <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-        Nothing waiting: every Done ticket has been invoiced.
+        Nothing waiting: every Authorized ticket has been invoiced.
       </div>
     );
   const now = new Date();

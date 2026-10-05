@@ -29,6 +29,7 @@ const STAGE_LABELS: Record<string, string> = {
   open: "Open",
   scheduled: "Scheduled",
   done: "Done",
+  authorized: "Authorized",
   invoiced: "Invoiced",
   closed: "Closed",
 };

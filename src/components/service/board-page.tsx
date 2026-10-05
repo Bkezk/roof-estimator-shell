@@ -72,6 +72,8 @@ const STAGE_CHIP: Record<ServiceStage, string> = {
   scheduled:
     "border-blue-300 bg-blue-100 text-blue-950 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100",
   done: "border-green-300 bg-green-100 text-green-950 dark:border-green-800 dark:bg-green-950 dark:text-green-100",
+  authorized:
+    "border-teal-300 bg-teal-100 text-teal-950 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100",
   invoiced: "border-dashed border-border bg-background text-muted-foreground",
   closed: "border-dashed border-border bg-background text-muted-foreground",
 };

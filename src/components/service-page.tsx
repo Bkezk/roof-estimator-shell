@@ -214,6 +214,7 @@ const STAGE_BADGE: Record<ServiceStage, "default" | "secondary" | "outline"> = {
   open: "default",
   scheduled: "secondary",
   done: "secondary",
+  authorized: "secondary",
   invoiced: "outline",
   closed: "outline",
 };
@@ -469,8 +470,8 @@ function ServiceList({
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Repair calls: who, where, which technician and when. A Done ticket is invoiced from the
-            ticket itself.
+            Repair calls: who, where, which technician and when. A Done ticket is authorized, then
+            invoiced from the ticket itself.
           </p>
           <div className="mt-2">
             <ServiceTabs />
@@ -1475,7 +1476,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // the server's rule (setJobCrew, ownJob); an office user who is not a manager sees no button.
   const showCloseOut = canCloseOut(profile, job);
   // Repeat work: once a ticket is Done (or later) the office opens the next one at the same site.
-  const repeatable = jobStage === "done" || jobStage === "invoiced" || jobStage === "closed";
+  const repeatable = !!jobStage && ["done", "authorized", "invoiced", "closed"].includes(jobStage);
 
   // Section 4's controls, shared by the office layout (under the grid) and the technician's.
   const techSelect = (triggerClass?: string) => (

@@ -40,14 +40,16 @@ describe("stepLooks: by position, not by date", () => {
       ["open", false, "2026-09-29T14:00:00Z"],
       ["scheduled", true, "2026-10-02T14:00:00Z"],
       ["done", false, "2026-10-01T14:00:00Z"],
+      ["authorized", false, null],
       ["invoiced", false, null],
       ["closed", false, null],
     ]);
   });
-  it("#6003: Open reached, Scheduled current, Done / Invoiced / Closed ahead", () => {
+  it("#6003: Open reached, Scheduled current, Done / Authorized / Invoiced / Closed ahead", () => {
     expect(stepLooks(cells).map((l) => l.state)).toEqual([
       "reached",
       "current",
+      "ahead",
       "ahead",
       "ahead",
       "ahead",
@@ -70,6 +72,7 @@ describe("stepLooks: by position, not by date", () => {
       LINE_AHEAD,
       LINE_AHEAD,
       LINE_AHEAD,
+      LINE_AHEAD,
     ]);
   });
   it("a skipped step before the current one (never entered) stays hollow", () => {
@@ -78,7 +81,14 @@ describe("stepLooks: by position, not by date", () => {
       { kind: "stage", stage: "done", at: "2026-10-01T14:00:00Z" },
     ]);
     const looks = stepLooks(skipped);
-    expect(looks.map((l) => l.state)).toEqual(["reached", "reached", "current", "ahead", "ahead"]);
+    expect(looks.map((l) => l.state)).toEqual([
+      "reached",
+      "reached",
+      "current",
+      "ahead",
+      "ahead",
+      "ahead",
+    ]);
     expect(looks[1]!.dot).toBe(DOT_AHEAD);
     expect(looks[0]!.dot).toBe(DOT_REACHED);
   });
@@ -87,9 +97,11 @@ describe("stepLooks: by position, not by date", () => {
       { kind: "stage", stage: "open", at: "2026-09-29T14:00:00Z" },
       { kind: "stage", stage: "scheduled", at: "2026-09-30T14:00:00Z" },
       { kind: "stage", stage: "done", at: "2026-10-01T14:00:00Z" },
+      { kind: "stage", stage: "authorized", at: "2026-10-01T18:00:00Z" },
       { kind: "stage", stage: "invoiced", at: "2026-10-02T14:00:00Z" },
     ]);
     expect(stepLooks(fwd).map((l) => l.dot)).toEqual([
+      DOT_REACHED,
       DOT_REACHED,
       DOT_REACHED,
       DOT_REACHED,
@@ -103,6 +115,7 @@ describe("stepLooks: by position, not by date", () => {
       "reached",
       "reached",
       "reached",
+      "ahead",
       "ahead",
       "ahead",
     ]);

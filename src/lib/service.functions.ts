@@ -29,12 +29,22 @@ export { TECH_STAGES } from "@/lib/ticket-stage";
 
 export type ServiceJobRow = Database["public"]["Tables"]["service_jobs"]["Row"];
 
-export const SERVICE_STAGES = ["open", "scheduled", "done", "invoiced", "closed"] as const;
+// Authorized (owner, Oct 5, service study M9): the owner reviews a Done ticket before the
+// manager invoices it. A manager's stage, like Invoiced and Closed (ticket-stage.ts).
+export const SERVICE_STAGES = [
+  "open",
+  "scheduled",
+  "done",
+  "authorized",
+  "invoiced",
+  "closed",
+] as const;
 export type ServiceStage = (typeof SERVICE_STAGES)[number];
 export const STAGE_LABELS: Record<ServiceStage, string> = {
   open: "Open",
   scheduled: "Scheduled",
   done: "Done",
+  authorized: "Authorized",
   invoiced: "Invoiced",
   closed: "Closed",
 };
@@ -111,10 +121,11 @@ export const listServiceJobs = createServerFn({ method: "GET" })
   });
 
 /**
- * "Awaiting invoice": the tickets at Done (finalising moves a ticket to Invoiced). The count is
+ * "Awaiting invoice": the tickets at Authorized (owner, Oct 5: the owner reviews a Done ticket,
+ * then the manager invoices it; finalising moves it to Invoiced). The count is
  * the database's own (`count: "exact"`, `head: true`), not the length of a loaded list — the
  * ticket list stops at 1,000 rows, so the count and the queue built from it stopped there too
- * (audit, Oct 2). The rows are the Done tickets themselves, longest waiting first.
+ * (audit, Oct 2). The rows are the Authorized tickets themselves, longest waiting first.
  */
 export interface AwaitingInvoice {
   count: number;
@@ -132,12 +143,12 @@ export const listAwaitingInvoice = createServerFn({ method: "GET" })
       sb
         .from("service_jobs")
         .select("id", { count: "exact", head: true })
-        .eq("stage", "done")
+        .eq("stage", "authorized")
         .is("deleted_at", null),
       sb
         .from("service_jobs")
         .select("*")
-        .eq("stage", "done")
+        .eq("stage", "authorized")
         .is("deleted_at", null)
         .order("completed_at", { ascending: true, nullsFirst: false })
         .order("updated_at", { ascending: true })
@@ -449,7 +460,7 @@ async function logTicketDateMove(
 }
 
 /** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
-const TICKET_CLOSING: readonly ServiceStage[] = ["done", "invoiced", "closed"];
+const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced", "closed"];
 /** Keep the ticket's follow-up timer in step with its technician and stage (design §11). */
 async function syncTicketFollowup(
   row: ServiceJobRow,

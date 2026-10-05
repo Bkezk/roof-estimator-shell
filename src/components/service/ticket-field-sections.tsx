@@ -380,7 +380,7 @@ function CloseoutSummary({ job }: { job: ServiceJobWithTech }) {
     job.completed_at;
   // Owner, Oct 5: a ticket the office set Invoiced / Closed from the stage picker, with no
   // close-out behind it, says so instead of "not closed out yet".
-  const officeStage = job.stage === "invoiced" || job.stage === "closed";
+  const officeStage = ["authorized", "invoiced", "closed"].includes(job.stage);
   const summary = job.completed_at
     ? `Done ${whenShort(job.completed_at)}`
     : any

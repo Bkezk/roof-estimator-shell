@@ -15,7 +15,14 @@
 import { SERVICE_OPEN_WORK } from "@/lib/work-counts";
 
 /** The ticket stages (SERVICE_STAGES in service.functions.ts; the test checks they agree). */
-export const STAGE_VALUES = ["open", "scheduled", "done", "invoiced", "closed"] as const;
+export const STAGE_VALUES = [
+  "open",
+  "scheduled",
+  "done",
+  "authorized",
+  "invoiced",
+  "closed",
+] as const;
 export type StageValue = (typeof STAGE_VALUES)[number];
 /** The list's stage chip: everything, "Open work", or one stage. */
 export type StageFilter = "all" | typeof SERVICE_OPEN_WORK | StageValue;

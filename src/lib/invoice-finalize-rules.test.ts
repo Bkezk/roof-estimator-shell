@@ -332,7 +332,7 @@ describe("(b) Send on a draft with lines finalises it exactly as Finalize does",
   });
 });
 
-describe("(c) Mark paid: a draft is refused; a final invoice closes the ticket's follow-up", () => {
+describe("(c) Mark paid: a draft is refused; a final invoice is paid, the ticket untouched", () => {
   const paid = { id: INV, paid_on: "2026-10-02", amount: 391, method: "Check", ref: "1001" };
   it("a draft: 'Finalize the invoice first'; nothing written, the ticket not moved", async () => {
     await expect(call(markInvoicePaid, paid)).rejects.toThrow("Finalize the invoice first");
@@ -342,19 +342,13 @@ describe("(c) Mark paid: a draft is refused; a final invoice closes the ticket's
     expect(env.rpcs).toEqual([]);
     expect(fu("ticket")["status"]).toBe("open");
   });
-  it("a final invoice: paid, the ticket Closed through the rpc, the ticket's follow-up closed", async () => {
-    // A final invoice whose ticket follow-up is still open (e.g. finalised by the old Send).
+  it("a final invoice: paid; the ticket keeps its stage (owner, Oct 5: a manager closes it by hand)", async () => {
     setup({ inv: { status: "sent", finalized_at: "2026-10-01T00:00:00Z" }, stage: "invoiced" });
-    const r = await call<{ invoice: Row }>(markInvoicePaid, paid);
+    const r = await call<{ invoice: Row; ticket_closed: boolean }>(markInvoicePaid, paid);
     expect(r.invoice).toMatchObject({ status: "paid", paid_on: "2026-10-02", paid_amount: 391 });
-    expect(stageRpcs()).toEqual([
-      {
-        fn: "set_ticket_stage_from_invoice",
-        args: { p_job: JOB, p_stage: "closed", p_invoice: INV },
-      },
-    ]);
-    expect(env.tables["service_jobs"]![0]!["stage"]).toBe("closed");
-    expect(fu("ticket")).toMatchObject({ status: "closed", closed_reason: "stage closed" });
+    expect(r.ticket_closed).toBe(false);
+    expect(stageRpcs()).toEqual([]);
+    expect(env.tables["service_jobs"]![0]!["stage"]).toBe("invoiced");
   });
   it("a void invoice is still refused", async () => {
     setup({ inv: { status: "void" } });

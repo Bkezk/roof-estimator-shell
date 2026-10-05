@@ -119,7 +119,7 @@ export function inspectionSummary(items: readonly InspectionItem[]): string {
 }
 
 /** Stages at which an inspection is complete (the tech has marked the ticket Done). */
-export const COMPLETE_STAGES: readonly string[] = ["done", "invoiced", "closed"];
+export const COMPLETE_STAGES: readonly string[] = ["done", "authorized", "invoiced", "closed"];
 export const inspectionComplete = (stage: string): boolean => COMPLETE_STAGES.includes(stage);
 
 /** The ticket description's limit (service.functions jobSchema). */

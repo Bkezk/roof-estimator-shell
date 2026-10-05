@@ -23,10 +23,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2, Plus, Receipt, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { seesInvoices } from "@/lib/access";
+import { managesTickets, seesInvoices } from "@/lib/access";
+import { INVOICE_STAGES } from "@/lib/ticket-stage";
+import { setServiceStage } from "@/lib/service.functions";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
   createAnotherInvoice,
@@ -60,15 +62,58 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
-const INVOICE_STAGES = ["done", "invoiced", "closed"];
-
 /** Mounted on every ticket; decides whether the invoice applies here. */
 export function InvoiceBlock({ job }: { job: ServiceJobWithTech }) {
   const { profile } = useAuth();
   // Invoices are a manager's and sales' / PMs' (owner, Oct 1): nobody else sees the card.
   if (!profile || !seesInvoices(profile)) return null;
+  // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced.
+  if (job.stage === "done" && !job.invoice_id) return <AuthorizeCard job={job} />;
   if (!INVOICE_STAGES.includes(job.stage) && !job.invoice_id) return null;
   return <InvoiceCard job={job} />;
+}
+
+/**
+ * At Done: "Needs authorization". A manager (the owner reviews; "the manager can move it past
+ * authorize if need be") marks it Authorized here; a sales / project manager sees that it waits.
+ */
+function AuthorizeCard({ job }: { job: ServiceJobWithTech }) {
+  const { profile } = useAuth();
+  const qc = useQueryClient();
+  const stageFn = useServerFn(setServiceStage);
+  const authorize = useMutation({
+    mutationFn: () => stageFn({ data: { id: job.id, stage: "authorized" } }),
+    onSuccess: () => {
+      toast.success(`Ticket #${job.number} authorized — ready to invoice`);
+      void qc.invalidateQueries({ queryKey: ["service-job", job.id] });
+      void qc.invalidateQueries({ queryKey: ["service-jobs"] });
+      void qc.invalidateQueries({ queryKey: ["service-job-events", job.id] });
+    },
+    onError: (e) => toast.error(`Could not authorize the ticket: ${errText(e)}`),
+  });
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Invoice">
+      <h2 className="flex items-center gap-2 font-semibold">
+        <ShieldCheck className="h-4 w-4" /> Needs authorization
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        The work is done. Once it is reviewed and authorized, the invoice is made from the
+        ticket&apos;s time and materials.
+      </p>
+      {managesTickets(profile) ? (
+        <Button disabled={authorize.isPending} onClick={() => authorize.mutate()}>
+          {authorize.isPending ? (
+            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+          ) : (
+            <ShieldCheck className="mr-1 h-4 w-4" />
+          )}
+          Mark authorized
+        </Button>
+      ) : (
+        <p className="text-sm">Waiting for a manager to authorize it.</p>
+      )}
+    </section>
+  );
 }
 
 function InvoiceCard({ job }: { job: ServiceJobWithTech }) {

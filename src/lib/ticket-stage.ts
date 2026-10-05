@@ -1,6 +1,6 @@
 /**
  * Who may set a ticket's stage (owner, Sep 27 and Oct 1). A technician sets Open / Scheduled /
- * Done (TECH_STAGES); Invoiced and Closed (OFFICE_STAGES) are a manager's or an admin's
+ * Done (TECH_STAGES); Authorized, Invoiced and Closed (OFFICE_STAGES) are a manager's or an admin's
  * (`managesTickets`): "Only a manager invoices or closes a ticket". An office user or a sales /
  * project manager who is neither sets the technician's stages too. Keeping the stage a ticket
  * already has is no change (a save of an Invoiced ticket by someone else is fine).
@@ -17,14 +17,23 @@ import type { ServiceStage } from "@/lib/service.functions";
 
 /** The stages a technician may set. */
 export const TECH_STAGES: readonly ServiceStage[] = ["open", "scheduled", "done"];
-/** The stages only a manager or an admin sets (an invoice sets them through its own path). */
-export const OFFICE_STAGES: readonly ServiceStage[] = ["invoiced", "closed"];
+/**
+ * The stages only a manager or an admin sets (an invoice sets Invoiced through its own path).
+ * Authorized (owner, Oct 5): the owner reviews a Done ticket; "the manager can move it past
+ * authorize if need be".
+ */
+export const OFFICE_STAGES: readonly ServiceStage[] = ["authorized", "invoiced", "closed"];
+
+/** The stages a ticket may be invoiced at: Authorized and after (a Done ticket is reviewed first). */
+export const INVOICE_STAGES: readonly string[] = ["authorized", "invoiced", "closed"];
+export const INVOICE_NEEDS_AUTH =
+  "Authorize the ticket first: a Done ticket is reviewed before it is invoiced";
 /** Every stage, in board order (the same as SERVICE_STAGES). */
 const ALL_STAGES: readonly ServiceStage[] = [...TECH_STAGES, ...OFFICE_STAGES];
 
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";
-export const MANAGER_STAGE_MESSAGE = "Only a manager invoices or closes a ticket";
+export const MANAGER_STAGE_MESSAGE = "Only a manager authorizes, invoices or closes a ticket";
 
 /**
  * Why `p` may not move a ticket to `stage` (null = they may). `current` is the ticket's stage

@@ -228,7 +228,7 @@ export function personNumbers(
 }
 
 /** Ticket stages that count as done for "Done this week". */
-export const DONE_TICKET_STAGES = ["done", "invoiced", "closed"] as const;
+export const DONE_TICKET_STAGES = ["done", "authorized", "invoiced", "closed"] as const;
 
 export interface DoneTicketIn {
   technician_id: string | null;

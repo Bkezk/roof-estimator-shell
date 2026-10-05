@@ -137,7 +137,7 @@ export function effectiveBillRate(
 }
 
 /** Stages at which the close-out no longer waits for the crew answer. */
-const FINISHED = ["done", "invoiced", "closed"];
+const FINISHED = ["done", "authorized", "invoiced", "closed"];
 
 /**
  * Whether "Who is on this job with you?" still needs an answer before the rest of the field

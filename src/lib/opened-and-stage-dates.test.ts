@@ -142,9 +142,23 @@ describe("ticketStageStrip: every stage in board order, the current one marked, 
     { kind: "note", stage: null, at: "2026-09-26T13:00:00Z" },
   ];
   const cells = ticketStageStrip("scheduled", events);
-  it("Open, Scheduled, Done, Invoiced, Closed (STAGE_LABELS, SERVICE_STAGES order)", () => {
-    expect(cells.map((c) => c.label)).toEqual(["Open", "Scheduled", "Done", "Invoiced", "Closed"]);
-    expect(cells.map((c) => c.key)).toEqual(["open", "scheduled", "done", "invoiced", "closed"]);
+  it("Open, Scheduled, Done, Authorized, Invoiced, Closed (STAGE_LABELS, SERVICE_STAGES order)", () => {
+    expect(cells.map((c) => c.label)).toEqual([
+      "Open",
+      "Scheduled",
+      "Done",
+      "Authorized",
+      "Invoiced",
+      "Closed",
+    ]);
+    expect(cells.map((c) => c.key)).toEqual([
+      "open",
+      "scheduled",
+      "done",
+      "authorized",
+      "invoiced",
+      "closed",
+    ]);
   });
   it("the current stage only is marked", () => {
     expect(cells.filter((c) => c.current).map((c) => c.key)).toEqual(["scheduled"]);
@@ -153,6 +167,7 @@ describe("ticketStageStrip: every stage in board order, the current one marked, 
     expect(cells.map((c) => c.at)).toEqual([
       "2026-09-25T12:00:00Z",
       "2026-09-26T12:00:00Z",
+      null,
       null,
       null,
       null,

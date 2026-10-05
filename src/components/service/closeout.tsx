@@ -155,7 +155,7 @@ function clearDraft(id: string) {
 }
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
-const FINISHED = ["done", "invoiced", "closed"];
+const FINISHED = ["done", "authorized", "invoiced", "closed"];
 const asStage = (s: string): ServiceStage =>
   (SERVICE_STAGES as readonly string[]).includes(s) ? (s as ServiceStage) : "open";
 

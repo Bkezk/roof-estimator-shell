@@ -141,10 +141,18 @@ function fakeDb(tables: Record<string, Row[]>, objects: Record<string, Uint8Arra
       return { data: [{ id: OFFICE, technician: false }], error: null };
     if (fn === "set_ticket_stage_from_invoice") {
       const inv = (tables["invoices"] ?? []).find((i) => i["id"] === args["p_invoice"]);
+      // Back to Authorized (M9): once the ticket has no final / sent / paid invoice left.
+      const live = (tables["invoices"] ?? []).some(
+        (i) =>
+          i["service_job_id"] === args["p_job"] &&
+          ["final", "sent", "paid"].includes(String(i["status"])),
+      );
       const ok =
-        args["p_stage"] === "invoiced"
-          ? ["final", "sent", "paid"].includes(String(inv?.["status"]))
-          : inv?.["status"] === "paid";
+        args["p_stage"] === "authorized"
+          ? !live
+          : args["p_stage"] === "invoiced"
+            ? ["final", "sent", "paid"].includes(String(inv?.["status"]))
+            : inv?.["status"] === "paid";
       if (!ok) return { data: null, error: { message: "That ticket has no such invoice" } };
       const job = (tables["service_jobs"] ?? []).find((j) => j["id"] === args["p_job"]);
       if (job) job["stage"] = args["p_stage"];
@@ -354,14 +362,19 @@ describe("2. voidInvoice: the ticket's real previous stage; every ticket write c
     expect(job()["stage"]).toBe("done");
     expect(job()["invoice_id"]).toBeNull();
   });
-  it("voiding the last final invoice on an Invoiced ticket moves it back to Done and notifies once", async () => {
+  it("voiding the last final invoice on an Invoiced ticket moves it back to Authorized (M9), through the rpc", async () => {
     await call(voidInvoice, { id: INV });
-    expect(job()["stage"]).toBe("done");
-    // The office's "invoice ready" notice, once (the other notice is the follow-up's assignment).
-    const ready = notified.filter((n) => n.title.includes("is done — invoice ready to review"));
-    expect(ready).toEqual([{ to: [OFFICE], title: expect.any(String) }]);
+    expect(job()["stage"]).toBe("authorized");
+    expect(stageRpcs()).toEqual([
+      {
+        fn: "set_ticket_stage_from_invoice",
+        args: { p_job: JOB, p_stage: "authorized", p_invoice: null },
+      },
+    ]);
+    // Not back at Done: no "is done" notice goes out again.
+    expect(notified.filter((n) => n.title.includes("is done"))).toEqual([]);
   });
-  it("a database error writing the ticket (back to Done) is thrown", async () => {
+  it("a database error writing the ticket (back to Authorized) is thrown", async () => {
     env.failOn.add("service_jobs.update");
     await expect(call(voidInvoice, { id: INV })).rejects.toThrow(
       "The invoice is void, but the ticket was not updated: service_jobs update refused",
@@ -381,7 +394,7 @@ describe("2. voidInvoice: the ticket's real previous stage; every ticket write c
   });
 });
 
-describe("3. Mark paid closes the ticket only when no other final / sent invoice is unpaid", () => {
+describe("3. Mark paid never closes the ticket (owner, Oct 5: a manager closes it by hand)", () => {
   const paid = { id: INV, paid_on: "2026-10-02", amount: 391, method: "Check", ref: "1001" };
   it("another final invoice on the ticket is unpaid: paid, but the ticket stays Invoiced", async () => {
     setup({
@@ -396,7 +409,7 @@ describe("3. Mark paid closes the ticket only when no other final / sent invoice
     expect(stageRpcs()).toEqual([]);
     expect(job()["stage"]).toBe("invoiced");
   });
-  it("every other invoice is paid, void or a draft: the ticket goes Closed", async () => {
+  it("every other invoice is paid, void or a draft: paid, and the ticket still stays Invoiced", async () => {
     setup({
       invoices: [
         invoice({ status: "sent" }),
@@ -406,13 +419,8 @@ describe("3. Mark paid closes the ticket only when no other final / sent invoice
       ],
     });
     const r = await call<{ ticket_closed: boolean }>(markInvoicePaid, paid);
-    expect(r.ticket_closed).toBe(true);
-    expect(stageRpcs()).toEqual([
-      {
-        fn: "set_ticket_stage_from_invoice",
-        args: { p_job: JOB, p_stage: "closed", p_invoice: INV },
-      },
-    ]);
-    expect(job()["stage"]).toBe("closed");
+    expect(r.ticket_closed).toBe(false);
+    expect(stageRpcs()).toEqual([]);
+    expect(job()["stage"]).toBe("invoiced");
   });
 });

@@ -39,7 +39,8 @@ const sales = { role: "user", access: ["estimate", "service"], technician: false
 describe("stageProblem (pure)", () => {
   it("the stage sets: technician stages, office stages, together every stage in order", () => {
     expect([...TECH_STAGES]).toEqual(["open", "scheduled", "done"]);
-    expect([...OFFICE_STAGES]).toEqual(["invoiced", "closed"]);
+    // Authorized (owner, Oct 5, M9): a manager's stage too.
+    expect([...OFFICE_STAGES]).toEqual(["authorized", "invoiced", "closed"]);
     expect([...TECH_STAGES, ...OFFICE_STAGES]).toEqual([...SERVICE_STAGES]);
   });
   it("admins and managers (a manager ticked Technician too) set any stage", () => {
@@ -51,10 +52,13 @@ describe("stageProblem (pure)", () => {
     expect(stageProblem(tech, "invoiced")).toBe(TECH_STAGE_MESSAGE);
     expect(stageProblem(tech, "closed")).toBe(TECH_STAGE_MESSAGE);
   });
-  it("an office user or a sales / PM who is not a manager: not Invoiced or Closed", () => {
+  it("an office user or a sales / PM who is not a manager: not Authorized, Invoiced or Closed", () => {
     for (const p of [office, sales]) {
       for (const s of TECH_STAGES) expect(stageProblem(p, s)).toBeNull();
-      expect(stageProblem(p, "invoiced")).toBe("Only a manager invoices or closes a ticket");
+      expect(stageProblem(p, "authorized")).toBe(MANAGER_STAGE_MESSAGE);
+      expect(stageProblem(p, "invoiced")).toBe(
+        "Only a manager authorizes, invoices or closes a ticket",
+      );
       expect(stageProblem(p, "closed")).toBe(MANAGER_STAGE_MESSAGE);
     }
   });
@@ -152,10 +156,10 @@ describe("the invoice path still sets Invoiced / Closed, through the database fu
       /async function ticketStageFromInvoice[\s\S]*?sb\.rpc\("set_ticket_stage_from_invoice", \{\s*p_job: jobId,\s*p_stage: stage,\s*p_invoice: invoiceId,\s*\}\);\s*if \(error\)\s*throw new Error/,
     );
   });
-  it("markInvoicePaid closes the ticket via the rpc", () => {
-    expect(serverFn(inv, "markInvoicePaid")).toContain(
-      'await ticketStageFromInvoice(sb, inv.service_job_id, "closed", inv.id);',
-    );
+  it("markInvoicePaid no longer closes the ticket (owner, Oct 5: close by hand)", () => {
+    const fn = serverFn(inv, "markInvoicePaid");
+    expect(fn).not.toContain("ticketStageFromInvoice(");
+    expect(fn).toContain("ticket_closed: false");
   });
   it("no invoice function writes Invoiced or Closed to service_jobs directly", () => {
     expect(inv).not.toMatch(/\.update\(\{\s*stage: "(invoiced|closed)"/);

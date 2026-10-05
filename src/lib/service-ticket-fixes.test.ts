@@ -361,14 +361,15 @@ describe("7. Ticket Save never moves the stage", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("8. Awaiting invoice: the count is the database's, not the loaded list's", () => {
+  // Since Oct 5 (M9) the To-invoice queue is the Authorized tickets: a Done one is reviewed first.
   const done = (n: number): Row => ({
     id: `job-${n}`,
     number: 6000 + n,
-    stage: "done",
+    stage: "authorized",
     deleted_at: null,
     technician_id: null,
   });
-  it("counts with count: 'exact', head: true on Done, live tickets", async () => {
+  it("counts with count: 'exact', head: true on Authorized, live tickets", async () => {
     env = fakeDb({ profiles: [manager], service_jobs: [done(1), done(2)] });
     const r = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
     const counted = env.queries.find((q) => q.selectOpts?.["head"] === true);
@@ -376,11 +377,11 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
       table: "service_jobs",
       selectOpts: { count: "exact", head: true },
     });
-    expect(counted!.filters).toEqual(["eq stage=done", "is deleted_at=null"]);
+    expect(counted!.filters).toEqual(["eq stage=authorized", "is deleted_at=null"]);
     expect(r.count).toBe(2);
     expect(r.rows.map((j) => j["id"])).toEqual(["job-1", "job-2"]);
   });
-  it("more than 1,000 Done tickets: the count is the database's 1,350, the rows are capped", async () => {
+  it("more than 1,000 Authorized tickets: the count is the database's 1,350, the rows are capped", async () => {
     const rows = Array.from({ length: AWAITING_INVOICE_LIMIT + 5 }, (_, i) => done(i));
     env = fakeDb({ profiles: [manager], service_jobs: rows }, { service_jobs: 1350 });
     const r = await call<{ count: number; rows: Row[] }>(listAwaitingInvoice);
@@ -390,7 +391,12 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
   it("other stages and deleted tickets are not counted", async () => {
     env = fakeDb({
       profiles: [manager],
-      service_jobs: [done(1), { ...done(2), stage: "invoiced" }, { ...done(3), deleted_at: "x" }],
+      service_jobs: [
+        done(1),
+        { ...done(2), stage: "invoiced" },
+        { ...done(4), stage: "done" },
+        { ...done(3), deleted_at: "x" },
+      ],
     });
     const r = await call<{ count: number }>(listAwaitingInvoice);
     expect(r.count).toBe(1);

@@ -257,7 +257,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       }
       await logEvent(context, job.id, { kind: "field", field_status: "on_site" }, who);
     } else if (data.to === "done") {
-      const finished = job.stage === "done" || job.stage === "invoiced" || job.stage === "closed";
+      const finished = ["done", "authorized", "invoiced", "closed"].includes(job.stage);
       // Owner, Oct 5 (RoAnna closed #6004 from the stage picker, then completed its close-out and
       // "the status didn't move"): a ticket the office already set Done / Invoiced / Closed keeps
       // that stage, but its close-out is still recorded — completed_at is stamped once, so the
@@ -326,7 +326,7 @@ export const setFieldStatus = createServerFn({ method: "POST" })
           assigneeId: row.technician_id,
           title: `Ticket #${row.number} ${row.customer_name}${row.description ? ` — ${row.description}` : ""}`,
           url: `/service?id=${row.id}`,
-          closing: row.stage === "done" || row.stage === "invoiced" || row.stage === "closed",
+          closing: ["done", "authorized", "invoiced", "closed"].includes(row.stage),
           closeReason: `stage ${row.stage}`,
           dueDate: row.scheduled_date,
           actorId: context.userId,

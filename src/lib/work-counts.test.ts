@@ -41,7 +41,7 @@ describe("open sets", () => {
     expect([...OPEN_TICKET_STAGES]).toEqual([...TECH_STAGES]);
     expect([...OPEN_TICKET_STAGES]).toEqual([...LOAD_STAGES]);
     for (const s of SERVICE_STAGES)
-      expect(isOpenTicketStage(s)).toBe(s !== "invoiced" && s !== "closed");
+      expect(isOpenTicketStage(s)).toBe(s !== "authorized" && s !== "invoiced" && s !== "closed");
   });
   it("open opportunities are every status that is not closing", () => {
     expect([...OPEN_OPP_STATUSES]).toEqual(OPP_STATUSES.filter((s) => !OPP_CLOSING.includes(s)));

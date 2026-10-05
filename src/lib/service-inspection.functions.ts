@@ -210,7 +210,7 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
     if (isTech(p)) {
       if (job.technician_id !== context.userId)
         throw new Error("This ticket is assigned to someone else");
-      if (job.stage === "invoiced" || job.stage === "closed")
+      if (["authorized", "invoiced", "closed"].includes(job.stage))
         throw new Error(
           "The office has invoiced or closed this ticket; ask the office to change it",
         );

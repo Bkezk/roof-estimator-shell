@@ -24,6 +24,7 @@ import { invoiceFileStem, invoiceLabel, nextInvoiceNumber } from "@/lib/invoice-
 import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
+import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -373,6 +374,8 @@ async function createInvoiceFor(
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!job) throw new Error("Ticket not found");
+  // M9 (owner, Oct 5): a Done ticket is reviewed (Authorized) before it is invoiced.
+  if (!INVOICE_STAGES.includes(job.stage)) throw new Error(INVOICE_NEEDS_AUTH);
   const [{ data: account }, { data: site }] = await Promise.all([
     job.account_id
       ? sb.from("crm_accounts").select("*").eq("id", job.account_id).maybeSingle()
@@ -734,8 +737,9 @@ export const sendInvoice = createServerFn({ method: "POST" })
   });
 
 /**
- * Record the payment (Sage stays the ledger) and close the ticket — once no other final / sent
- * invoice on it is still unpaid (`ticket_closed` says which).
+ * Record the payment (Sage stays the ledger). The ticket is not closed here any more (owner,
+ * Oct 5: "close by hand"): a manager moves it to Closed from its stage. `ticket_closed` is
+ * always false; kept for the screen that reads it.
  */
 export const markInvoicePaid = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -753,7 +757,6 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
   .handler(async ({ data, context }): Promise<InvoiceWithLines & { ticket_closed: boolean }> => {
     const p = await office(context);
     const sb = context.supabase;
-    const actor = { id: context.userId, name: nameOf(p) };
     // A draft is not paid on the server either (the screen offers Mark paid only once final):
     // it has no stored PDF and never went through the finalise rules (finalizeDraft).
     const { data: cur, error: rErr } = await sb
@@ -780,25 +783,11 @@ export const markInvoicePaid = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!inv) throw new Error("Invoice not found, or void");
-    // Another final / sent invoice on the ticket still unpaid (a ".2", or one billed to a vendor):
-    // the ticket stays where it is until that one is paid too (audit, Oct 2).
-    const { data: unpaid, error: oErr } = await sb
-      .from("invoices")
-      .select("id")
-      .eq("service_job_id", inv.service_job_id)
-      .neq("id", inv.id)
-      .in("status", ["final", "sent"]);
-    if (oErr) throw new Error(oErr.message);
-    if ((unpaid ?? []).length) return { ...(await withLines(sb, inv)), ticket_closed: false };
-    await ticketStageFromInvoice(sb, inv.service_job_id, "closed", inv.id);
-    const job = await stageEvent(sb, inv.service_job_id, null, actor);
-    // The ticket's own follow-up ends at Closed too (still open when the invoice was finalised
-    // before finalizeDraft closed it).
-    if (job) await closeTicketFollowup(sb, job, actor, "stage closed");
-    return { ...(await withLines(sb, inv)), ticket_closed: true };
+    // The ticket keeps its stage (owner, Oct 5: a manager closes it by hand).
+    return { ...(await withLines(sb, inv)), ticket_closed: false };
   });
 
-/** Void an invoice (a mistake); the ticket goes back to Done and a new draft can be made. */
+/** Void an invoice (a mistake); the ticket goes back to Authorized and a new draft can be made. */
 export const voidInvoice = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
@@ -854,18 +843,23 @@ export const voidInvoice = createServerFn({ method: "POST" })
       if (oErr) throw ticketFailed(oErr.message);
       return;
     }
-    const backToDone = prevStage === "invoiced" || prevStage === "closed";
+    // Back to Authorized, not Done (owner, Oct 5): the work was reviewed already. Authorized is
+    // a manager's stage, so it goes through set_ticket_stage_from_invoice (a sales / PM may void).
+    const backToAuthorized = prevStage === "invoiced" || prevStage === "closed";
     const { error: uErr } = await sb
       .from("service_jobs")
-      .update({
-        ...(backToDone ? { stage: "done" } : {}),
-        invoice_id: null,
-        updated_by_name: nameOf(p),
-      })
+      .update({ invoice_id: null, updated_by_name: nameOf(p) })
       .eq("id", inv.service_job_id);
     if (uErr) throw ticketFailed(uErr.message);
-    if (backToDone)
+    if (backToAuthorized) {
+      const { error: sErr } = await sb.rpc("set_ticket_stage_from_invoice", {
+        p_job: inv.service_job_id,
+        p_stage: "authorized",
+        p_invoice: null,
+      });
+      if (sErr) throw ticketFailed(sErr.message);
       await stageEvent(sb, inv.service_job_id, prevStage, { id: context.userId, name: nameOf(p) });
+    }
   });
 
 export interface InvoiceListRow extends InvoiceRow {
