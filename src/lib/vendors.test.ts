@@ -295,7 +295,10 @@ describe("migration 20261001110000_vendors.sql", () => {
       "alter table public.audit_log drop constraint if exists audit_log_entity_check; alter table public.audit_log add constraint audit_log_entity_check check (entity in ('invoice', 'invoice_line', 'account', 'site', 'contact', 'purchase_order', 'vendor'));",
     );
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
-    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual([...AUDIT_ENTITIES]);
+    // As of this migration: 'ticket' / 'ticket_time' came later (20261005130000_ticket_audit.sql).
+    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
+      AUDIT_ENTITIES.filter((e) => e !== "ticket" && e !== "ticket_time"),
+    );
     expect(flat).toContain(
       "when 'vendors' then v_entity := 'vendor'; v_entity_id := (v_row ->> 'id')::uuid; v_label := 'Vendor ''' || coalesce(v_old ->> 'name', v_new ->> 'name', '') || '''';",
     );
@@ -366,17 +369,17 @@ describe("generated types", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("audit: the vendor entity and its History", () => {
-  it("AUDIT_ENTITIES ends with 'vendor'", () => {
-    expect(AUDIT_ENTITIES.at(-1)).toBe("vendor");
+  it("AUDIT_ENTITIES has 'vendor' (the ticket entities follow it since Oct 5)", () => {
+    expect(AUDIT_ENTITIES).toContain("vendor");
   });
   it("listAudit reads a vendor's own rows; the fold takes 'vendor'", () => {
     const fn = serverFn(read("src/lib/audit.functions.ts"), "listAudit");
-    expect(fn).toContain('entity: z.enum(["invoice", "account", "vendor"]),');
+    expect(fn).toContain('entity: z.enum(["invoice", "account", "vendor"');
     expect(fn).toMatch(
       /if \(data\.entity === "vendor"\) \{[\s\S]*?\.eq\("entity", "vendor"\)\s*\.eq\("entity_id", data\.entity_id\)/,
     );
     expect(read("src/components/audit-history.tsx")).toContain(
-      'export type AuditFold = "invoice" | "account" | "vendor";',
+      'export type AuditFold = "invoice" | "account" | "vendor"',
     );
   });
 });

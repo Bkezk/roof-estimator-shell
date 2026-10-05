@@ -21,7 +21,7 @@ export const listAudit = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z
       .object({
-        entity: z.enum(["invoice", "account", "vendor"]),
+        entity: z.enum(["invoice", "account", "vendor", "ticket"]),
         entity_id: z.string().uuid(),
       })
       .parse(d),
@@ -40,6 +40,19 @@ export const listAudit = createServerFn({ method: "GET" })
         .from("audit_log")
         .select(cols)
         .in("entity", ["invoice", "invoice_line"])
+        .eq("entity_id", data.entity_id)
+        .order("at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(LIMIT);
+      if (error) throw new Error(error.message);
+      return (rows ?? []) as AuditRow[];
+    }
+    if (data.entity === "ticket") {
+      // The ticket and its time entries (M6, owner Oct 5).
+      const { data: rows, error } = await sb
+        .from("audit_log")
+        .select(cols)
+        .in("entity", ["ticket", "ticket_time"])
         .eq("entity_id", data.entity_id)
         .order("at", { ascending: false })
         .order("id", { ascending: false })

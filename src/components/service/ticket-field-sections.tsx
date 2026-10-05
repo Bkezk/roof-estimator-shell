@@ -35,6 +35,7 @@ import {
 } from "@/lib/service.functions";
 import { Link } from "@tanstack/react-router";
 import { listTechnicians } from "@/lib/auth.functions";
+import { AuditHistory } from "@/components/audit-history";
 import { insertMention, mentionQuery, suggestPeople } from "@/lib/mentions";
 import { historyDay, historyDayText, historySnippet, SITE_HISTORY_LIMIT } from "@/lib/site-history";
 import {
@@ -191,6 +192,9 @@ export function TicketFieldSections({
       <TimeSection job={job} officeOrAdmin={officeOrAdmin} />
       <Timeline jobId={job.id} />
       {job.site_id && <EarlierAtSite jobId={job.id} />}
+      {/* M6 (owner, Oct 5): every change to the ticket and its time, old → new, who, when.
+          Admins and managers only (AuditHistory renders nothing for anyone else). */}
+      <AuditHistory entity="ticket" entityId={job.id} className="rounded-lg border px-4 py-3" />
     </>
   );
 }

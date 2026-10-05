@@ -31,6 +31,9 @@ export const AUDIT_ENTITIES = [
   "contact",
   "purchase_order",
   "vendor",
+  // A ticket and its time entries (entity_id = the ticket; 20261005130000_ticket_audit.sql).
+  "ticket",
+  "ticket_time",
 ] as const;
 export type AuditEntity = (typeof AUDIT_ENTITIES)[number];
 /** The audit_log.action check constraint. */

@@ -430,11 +430,11 @@ describe("migration 20261001100000_ticket_purchase_orders.sql", () => {
     expect(flat).toContain(
       "drop trigger if exists service_job_purchase_orders_audit on public.service_job_purchase_orders; create trigger service_job_purchase_orders_audit after insert or update or delete on public.service_job_purchase_orders for each row execute function public.audit_row();",
     );
-    // The constraint and AUDIT_ENTITIES agree (less 'vendor', which 20261001110000_vendors.sql
-    // added after this migration; vendors.test.ts checks that one against the whole list).
+    // The constraint and AUDIT_ENTITIES agree, less what later migrations added: 'vendor'
+    // (20261001110000_vendors.sql) and 'ticket' / 'ticket_time' (20261005130000_ticket_audit.sql).
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
     expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
-      AUDIT_ENTITIES.filter((e) => e !== "vendor"),
+      AUDIT_ENTITIES.filter((e) => e !== "vendor" && e !== "ticket" && e !== "ticket_time"),
     );
   });
   it("audit_row is 20261001080000's, plus only the PO branch and the approval stamps skipped", () => {

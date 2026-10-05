@@ -796,7 +796,9 @@ export function activityText(row: ActivityRow): ActivityItem | null {
           ? `/customers?id=${row.entity_id}`
           : row.entity === "invoice" || row.entity === "invoice_line"
             ? "/service/invoices"
-            : undefined;
+            : (row.entity === "ticket" || row.entity === "ticket_time") && row.entity_id
+              ? ticketHref(row.entity_id)
+              : undefined;
       return href ? { at, text, href } : { at, text };
     }
   }
