@@ -1,9 +1,11 @@
 /**
  * "Import PlanSwift takeoff (.xlsx)" — reads a PlanSwift 11 Excel export in the browser, shows one
  * review row per sheet row with the importer's guess (src/lib/planswift/classify.ts), lets the
- * estimator change any target, then starts a NEW bid from it in the estimator (linked to the
- * customer), the same way "Create bid" on a takeoff does. The choices are remembered per row name
- * in this browser (`planswift.mapping`) for the next export.
+ * estimator change any target, then starts a NEW bid from it in the estimator, the same way
+ * "Create bid" on a takeoff does. The customer is optional (owner, Oct 5: "get rid of that for
+ * now and just have the imported planswift file make an untitled bid"): without one the bid
+ * starts as "Untitled bid", unlinked, to be named and linked on its Setup screen. The choices
+ * are remembered per row name in this browser (`planswift.mapping`) for the next export.
  */
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -31,6 +33,7 @@ import {
   rememberMappings,
 } from "@/lib/planswift/mapping-memory";
 import {
+  planSwiftBidName,
   planSwiftSeed,
   suggestPlanSwiftBidName,
   type PlanSwiftChoice,
@@ -58,6 +61,9 @@ import {
 } from "@/components/ui/select";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+/** The name box's prefill: "<customer> · <file>" once a customer is picked; blank (Untitled bid) until then. */
+const prefillName = (customerLabel: string | null | undefined, fileName: string) =>
+  customerLabel ? suggestPlanSwiftBidName(customerLabel, fileName) : "";
 const num = (x: number) =>
   x.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 0 });
 
@@ -87,8 +93,8 @@ const safeStorage = (kind: "local" | "session"): Storage | null => {
 export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => void }) {
   const navigate = useNavigate();
   const { can } = useAuth();
-  // Same rule as the New takeoff dialog: the customer is required whenever the user can search
-  // customers; a user who cannot links the customer on the bid's Setup later.
+  // The customer box shows to whoever can search customers; it is optional (owner, Oct 5). A
+  // bid without one is "Untitled bid" and gets its customer on the bid's Setup later.
   const canPickCustomer = can("customers") || can("service") || can("estimate");
   const getAdminFn = useServerFn(getEngineAdminData);
   const { data: liveAdmin } = useQuery({
@@ -141,7 +147,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
       setSheet(s);
       setFileName(file.name);
       setRows(classified.map((c) => ({ row: c, target: c.target })));
-      if (!nameTouched) setBidName(suggestPlanSwiftBidName(account?.label, file.name));
+      if (!nameTouched) setBidName(prefillName(account?.label, file.name));
     } catch (e) {
       const msg = `Could not read ${file.name}: ${errText(e)}`;
       setSheet(null);
@@ -163,8 +169,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
       : null;
     setAccount(v);
     setHit(hit);
-    if (!nameTouched)
-      setBidName(fileName || v ? suggestPlanSwiftBidName(v?.label ?? null, fileName) : "");
+    if (!nameTouched) setBidName(prefillName(v?.label ?? null, fileName));
   };
 
   const setTarget = (i: number, target: PlanSwiftTarget) =>
@@ -194,20 +199,15 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     }
   }, [sheet, rows, fileName, liveAdmin, account]);
 
-  const missingCustomer = canPickCustomer && !account;
   const create = () => {
     if (busy) return;
     if (!preview?.seed) {
       toast.error(preview?.error ?? "Choose a PlanSwift export first.");
       return;
     }
-    if (missingCustomer) {
-      toast.error("Pick the customer this bid is for (or add them) before creating it.");
-      return;
-    }
     setBusy(true);
     try {
-      const name = (bidName.trim() || suggestPlanSwiftBidName(account?.label, fileName)).trim();
+      const name = planSwiftBidName(bidName, account?.label, fileName);
       rememberMappings(
         safeStorage("local"),
         rows.map((r) => ({ key: r.row.key, target: r.target })),
@@ -222,7 +222,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
         session,
         {
           seed: preview.seed,
-          bidName: name || "Untitled bid",
+          bidName: name,
           account: account
             ? { id: account.account_id, siteId: account.site_id, label: account.label }
             : null,
@@ -247,9 +247,10 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
         <DialogHeader>
           <DialogTitle>Import PlanSwift takeoff (.xlsx)</DialogTitle>
           <DialogDescription>
-            Pick a PlanSwift “Export to Excel” file. Check where each row goes, pick the customer,
-            then Create bid opens a new bid in the estimator with the sections, parapets, curbs,
-            pipe stacks and lines filled in. Nothing is saved until you save the bid.
+            Pick a PlanSwift “Export to Excel” file. Check where each row goes, then Create bid
+            opens a new bid in the estimator with the sections, parapets, curbs, pipe stacks and
+            lines filled in. The customer is optional here; without one the bid starts as “Untitled
+            bid”. Nothing is saved until you save the bid.
           </DialogDescription>
         </DialogHeader>
 
@@ -284,9 +285,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
           <div className="grid gap-3 sm:grid-cols-2">
             {canPickCustomer && (
               <div className="space-y-1">
-                <Label htmlFor="planswift-customer">
-                  Customer <span className="text-destructive">*</span>
-                </Label>
+                <Label htmlFor="planswift-customer">Customer (optional)</Label>
                 <AccountPicker
                   id="planswift-customer"
                   value={account}
@@ -295,7 +294,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                   onChange={pickAccount}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Required. The bid is filed under this customer.
+                  Files the bid under this customer; it can be linked on the bid later instead.
                 </p>
               </div>
             )}
@@ -324,7 +323,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                 id="planswift-bid-name"
                 value={bidName}
                 disabled={busy}
-                placeholder="Starts as the customer and the file name"
+                placeholder={account ? "Starts as the customer and the file name" : "Untitled bid"}
                 onChange={(e) => {
                   setNameTouched(e.target.value.trim().length > 0);
                   setBidName(e.target.value);
@@ -472,7 +471,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
           <Button variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !preview?.seed || missingCustomer}>
+          <Button onClick={create} disabled={busy || !preview?.seed}>
             {busy ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

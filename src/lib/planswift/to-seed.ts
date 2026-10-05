@@ -657,6 +657,22 @@ export function suggestPlanSwiftBidName(
 }
 
 /**
+ * The imported bid's name (owner, Oct 5: "just have the imported planswift file make an untitled
+ * bid" — the customer is no longer required). A typed name wins; with a customer picked the
+ * name is "<customer> · <file>"; with none it is plain "Untitled bid", to be named on the bid.
+ */
+export function planSwiftBidName(
+  typed: string,
+  customerLabel: string | null | undefined,
+  fileName: string,
+): string {
+  const t = collapse(typed);
+  if (t) return t.slice(0, 200);
+  if (!collapse(customerLabel ?? "")) return "Untitled bid";
+  return suggestPlanSwiftBidName(customerLabel, fileName) || "Untitled bid";
+}
+
+/**
  * The NEW bid from a PlanSwift seed: the takeoff's seed → bid step (`newBidFromSeed`), plus the
  * Non-DL custom lines (labor at the bid's crew rate) and the import record.
  */
