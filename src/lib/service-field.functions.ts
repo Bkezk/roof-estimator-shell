@@ -21,6 +21,7 @@ import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
 import { resolveFieldDay } from "@/lib/field-day";
 import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
+import { mentionedIds } from "@/lib/mentions";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -842,10 +843,38 @@ export const addJobNote = createServerFn({ method: "POST" })
   .validator((d: unknown) =>
     z.object({ id: z.string().uuid(), note: z.string().trim().min(1).max(5000) }).parse(d),
   )
-  .handler(async ({ data, context }): Promise<void> => {
+  .handler(async ({ data, context }): Promise<{ mentioned: number }> => {
     const p = await me(context);
-    await ownJob(context, data.id);
+    const job = await ownJob(context, data.id);
     await logEvent(context, data.id, { kind: "note", note: data.note }, nameOf(p));
+    // @mentions (M3, owner Oct 5): everyone named after an "@" hears about it, not the writer.
+    if (!data.note.includes("@")) return { mentioned: 0 };
+    const { data: roster, error } = await context.supabase.rpc("technician_options");
+    if (error) throw new Error(`Note added, but the mentions were not sent: ${error.message}`);
+    const people = (roster ?? []).map((r) => ({
+      id: r.id,
+      name: (r.full_name ?? "").trim() || r.email,
+    }));
+    const ids = mentionedIds(data.note, people).filter((id) => id !== context.userId);
+    if (!ids.length) return { mentioned: 0 };
+    const { notify } = await import("@/lib/notify.server");
+    try {
+      await notify(
+        ids,
+        {
+          kind: "mention",
+          title: `${nameOf(p)} mentioned you on Ticket #${job.number} ${job.customer_name}`,
+          body: data.note,
+          url: `/service?id=${job.id}`,
+        },
+        context.supabase,
+      );
+    } catch (e) {
+      throw new Error(
+        `Note added, but the mentions were not sent: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    return { mentioned: ids.length };
   });
 
 /** Templates used before on this site (or account), most recent first — the "usual" chips. */

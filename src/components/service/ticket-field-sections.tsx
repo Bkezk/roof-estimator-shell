@@ -4,7 +4,7 @@
  * with photos, close-out notes and signature, time; time is editable for the office) plus the
  * ticket's timeline with an "Add note" box.
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import {
@@ -34,6 +34,8 @@ import {
   type ServiceType,
 } from "@/lib/service.functions";
 import { Link } from "@tanstack/react-router";
+import { listTechnicians } from "@/lib/auth.functions";
+import { insertMention, mentionQuery, suggestPeople } from "@/lib/mentions";
 import { historyDay, historyDayText, historySnippet, SITE_HISTORY_LIMIT } from "@/lib/site-history";
 import {
   addJobNote,
@@ -520,14 +522,53 @@ function Timeline({ jobId }: { jobId: string }) {
     enabled: !!session,
   });
   const [note, setNote] = useState("");
+  // @mentions (M3, owner Oct 5): "@" opens a short list of people; picking one writes the name.
+  const peopleFn = useServerFn(listTechnicians);
+  const peopleQ = useQuery({
+    queryKey: ["technician-options"],
+    queryFn: () => peopleFn(),
+    enabled: !!session,
+    staleTime: 5 * 60_000,
+  });
+  const boxRef = useRef<HTMLTextAreaElement>(null);
+  const [mention, setMention] = useState<{ at: number; query: string } | null>(null);
+  const suggestions = mention ? suggestPeople(peopleQ.data ?? [], mention.query) : [];
+  const typed = (value: string, caret: number) => {
+    setNote(value);
+    setMention(mentionQuery(value, caret));
+  };
+  const pick = (name: string) => {
+    const box = boxRef.current;
+    if (!mention || !box) return;
+    const next = insertMention(note, mention.at, box.selectionStart ?? note.length, name);
+    setNote(next.text);
+    setMention(null);
+    requestAnimationFrame(() => {
+      box.focus();
+      box.setSelectionRange(next.caret, next.caret);
+    });
+  };
   const add = useMutation({
     mutationFn: () => noteFn({ data: { id: jobId, note: note.trim() } }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       setNote("");
-      toast.success("Note added");
+      setMention(null);
+      toast.success(
+        r.mentioned > 0
+          ? `Note added — told ${r.mentioned} ${r.mentioned === 1 ? "person" : "people"}`
+          : "Note added",
+      );
       void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
     },
-    onError: (e) => loudError("Could not add the note", e),
+    onError: (e) => {
+      // "Note added, but the mentions were not sent: …": the note is in, so it leaves the box.
+      if (errText(e).startsWith("Note added")) {
+        setNote("");
+        setMention(null);
+        void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
+        toast.error(errText(e), { duration: 12_000 });
+      } else loudError("Could not add the note", e);
+    },
   });
   const rows = q.data ?? [];
   // The server returns newest first.
@@ -555,13 +596,48 @@ function Timeline({ jobId }: { jobId: string }) {
           if (note.trim()) add.mutate();
         }}
       >
-        <Textarea
-          rows={2}
-          placeholder="Add a note to this ticket…"
-          value={note}
-          maxLength={5000}
-          onChange={(e) => setNote(e.target.value)}
-        />
+        <div className="relative">
+          <Textarea
+            ref={boxRef}
+            rows={2}
+            placeholder="Add a note to this ticket… type @ to tell someone"
+            value={note}
+            maxLength={5000}
+            onChange={(e) =>
+              typed(e.target.value, e.target.selectionStart ?? e.target.value.length)
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setMention(null);
+              if ((e.key === "Enter" || e.key === "Tab") && suggestions[0]) {
+                e.preventDefault();
+                pick(suggestions[0].name);
+              }
+            }}
+            onBlur={() => setTimeout(() => setMention(null), 150)}
+          />
+          {suggestions.length > 0 && (
+            <ul
+              role="listbox"
+              aria-label="People to mention"
+              className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border bg-popover text-sm shadow-md"
+            >
+              {suggestions.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="block w-full px-3 py-2 text-left hover:bg-accent"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      pick(p.name);
+                    }}
+                  >
+                    @{p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <Button type="submit" size="sm" disabled={!note.trim() || add.isPending}>
           {add.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
           Add note
