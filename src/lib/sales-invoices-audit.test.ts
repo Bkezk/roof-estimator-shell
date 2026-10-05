@@ -155,8 +155,9 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
     expect(read("src/components/service/service-tabs.tsx")).toMatch(
       /\{ title: "Invoices", to: "\/service\/invoices", icon: Receipt, show: seesInvoices \}/,
     );
-    expect(read("src/components/service-page.tsx")).toContain(
-      "<ServiceTabs toInvoice={seesInvoices(profile) ? toInvoiceCount : 0} />",
+    // The count behind the Invoices tab is read by the tabs, only for seesInvoices.
+    expect(read("src/components/service/service-tabs.tsx")).toContain(
+      "enabled: !!session && seesInvoices(profile),",
     );
   });
   it("the send dialog reads Service Rates (the default message) only for a manager", () => {

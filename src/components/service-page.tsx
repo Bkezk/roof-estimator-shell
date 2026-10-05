@@ -76,11 +76,9 @@ import { isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/acce
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
-  AWAITING_INVOICE_KEY,
   deleteServiceJob,
   getCrewRateDefaults,
   getServiceJob,
-  listAwaitingInvoice,
   listJobCrew,
   listDeletedServiceJobs,
   listServiceJobMaterials,
@@ -336,14 +334,6 @@ function ServiceList({
     queryFn: () => listDeletedFn(),
     enabled: !!session,
   });
-  // The Invoices tab's "awaiting invoice" count: the database's count of Done tickets, not the
-  // length of the 1,000-row list above (audit, Oct 2). Only for those who see invoices.
-  const awaitingFn = useServerFn(listAwaitingInvoice);
-  const awaiting = useQuery({
-    queryKey: AWAITING_INVOICE_KEY,
-    queryFn: () => awaitingFn(),
-    enabled: !!session && seesInvoices(profile),
-  });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["service-jobs"] });
     void qc.invalidateQueries({ queryKey: ["service-jobs-deleted"] });
@@ -465,8 +455,6 @@ function ServiceList({
     setMineOverride(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
-  // Done = waiting to be invoiced (finalising moves a ticket to Invoiced); counted by the server.
-  const toInvoiceCount = awaiting.data?.count ?? 0;
 
   return (
     <div className="space-y-6">
@@ -482,7 +470,7 @@ function ServiceList({
             ticket itself.
           </p>
           <div className="mt-2">
-            <ServiceTabs toInvoice={seesInvoices(profile) ? toInvoiceCount : 0} />
+            <ServiceTabs />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

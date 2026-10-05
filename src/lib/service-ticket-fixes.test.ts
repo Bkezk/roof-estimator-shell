@@ -399,8 +399,11 @@ describe("8. Awaiting invoice: the count is the database's, not the loaded list'
     const page = readFileSync("src/components/service/invoices-page.tsx", "utf8");
     expect(page).toContain("const waitingCount = jobsQ.data?.count ?? 0;");
     expect(page).toContain("count={waitingCount}");
+    // Owner, Oct 5: the tabs read the count themselves, so it shows on every Service page.
+    const tabs = readFileSync("src/components/service/service-tabs.tsx", "utf8");
+    expect(tabs).toContain("const toInvoice = awaiting.data?.count ?? 0;");
+    expect(tabs).toContain("queryKey: AWAITING_INVOICE_KEY,");
     const svc = readFileSync("src/components/service-page.tsx", "utf8");
-    expect(svc).toContain("const toInvoiceCount = awaiting.data?.count ?? 0;");
     expect(svc).not.toContain('jobs.filter((j) => asStage(j.stage) === "done").length');
   });
 });

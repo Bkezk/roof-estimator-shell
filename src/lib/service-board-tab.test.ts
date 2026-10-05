@@ -1,7 +1,8 @@
 /**
  * Owner, Oct 5: "have the list of tickets and search that sits directly above the list of tickets
- * moved to a tab between the tickets and invoices tab" — the Tech Board (with its Unassigned
- * list and search) is the middle tab of the Service page, not a fold above the list — "also the
+ * moved to a tab between the tickets and invoices tab", then "make the tech board the first tab" —
+ * the Tech Board (with its Unassigned list and search) is the first tab of the Service page, not a
+ * fold above the list — "also the
  * list of unassigned tickets on the tech board can we have them color coded by status".
  */
 import { readFileSync } from "node:fs";
@@ -13,8 +14,8 @@ const list = read("src/components/service-page.tsx");
 const board = read("src/components/service/board-page.tsx");
 
 describe("the Service tabs", () => {
-  it("are Tickets, Tech Board, Invoices — in that order", () => {
-    const order = ['title: "Tickets"', 'title: "Tech Board"', 'title: "Invoices"'].map((t) =>
+  it("are Tech Board, Tickets, Invoices — in that order (owner, Oct 5: the board first)", () => {
+    const order = ['title: "Tech Board"', 'title: "Tickets"', 'title: "Invoices"'].map((t) =>
       tabs.indexOf(t),
     );
     expect(order.every((i) => i > 0)).toBe(true);
@@ -34,6 +35,14 @@ describe("the Service tabs", () => {
     expect(read("src/routes/service.board.tsx")).toContain('createFileRoute("/service/board")');
     expect(board).toContain("<ServiceTabs />");
   });
+  it("the Invoices count shows on every page with the tabs, not only the ticket list (owner, Oct 5)", () => {
+    // The tabs read it themselves; no page passes it in.
+    expect(tabs).toContain("const toInvoice = awaiting.data?.count ?? 0;");
+    expect(tabs).toContain("export function ServiceTabs() {");
+    for (const f of [list, board, read("src/components/service/invoices-page.tsx")])
+      expect(f).toContain("<ServiceTabs />");
+    expect(tabs).toContain('{t.to === "/service/invoices" && toInvoice ? (');
+  });
 });
 
 describe("the ticket list page", () => {
@@ -45,7 +54,7 @@ describe("the ticket list page", () => {
     expect(board).not.toContain("embedded");
   });
   it("keeps the search and filter row directly above the tickets", () => {
-    expect(list).toMatch(/<ServiceTabs toInvoice=/);
+    expect(list).toContain("<ServiceTabs />");
     const filters = list.indexOf("Search\n");
     const groups = list.indexOf("aria-label={`${STAGE_LABELS[stage]} tickets`}");
     expect(filters).toBeGreaterThan(0);
