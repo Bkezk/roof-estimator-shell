@@ -161,3 +161,24 @@ export function parseRateText(text: string): number | null | undefined {
   if (!Number.isFinite(n) || n < 0) return undefined;
   return Math.round(n * 100) / 100;
 }
+
+/**
+ * Who the time is billed for, under the Time list (owner, Oct 5: "we really don't need the
+ * helpers box at all since we are naming the crew members who are present"). With a named crew
+ * every entry bills each member (invoice-labor.ts); an older ticket without a crew still bills
+ * the helpers its entries carry, which is said so. null when there is nothing to say.
+ */
+export function billedCrewLine(
+  crew: readonly { name: string; sort: number }[],
+  entries: readonly { helper_count: number }[],
+): string | null {
+  if (crew.length)
+    return `Billed for: ${[...crew]
+      .sort((a, b) => a.sort - b.sort)
+      .map((m) => m.name)
+      .join(", ")}`;
+  const most = entries.reduce((m, e) => Math.max(m, e.helper_count ?? 0), 0);
+  return most > 0
+    ? `Billed for the technician and ${most === 1 ? "a helper" : `${most} helpers`} (an older ticket without a named crew)`
+    : null;
+}

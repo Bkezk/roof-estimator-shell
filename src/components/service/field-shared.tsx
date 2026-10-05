@@ -25,6 +25,8 @@ import { marksSummary, parsePhotoMarks, photoOrdinals } from "@/lib/photo-annota
 import { MarksOverlay, PhotoLightbox } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
+import { listJobCrew } from "@/lib/service.functions";
+import { billedCrewLine } from "@/lib/service-crew";
 import {
   deleteTimeEntry,
   listTimeEntries,
@@ -349,10 +351,16 @@ export function TimeEntries({
     queryFn: () => listFn({ data: { id: jobId } }),
     enabled: !!session,
   });
+  const crewFn = useServerFn(listJobCrew);
+  const crewQ = useQuery({
+    queryKey: fieldKeys.crew(jobId),
+    queryFn: () => crewFn({ data: { id: jobId } }),
+    enabled: !!session,
+  });
   const [adding, setAdding] = useState(false);
   const rows = q.data ?? [];
   const total = (k: string) => rows.filter((r) => r.kind === k).reduce((s, r) => s + r.hours, 0);
-  const manHours = rows.reduce((s, r) => s + r.hours * (1 + r.helper_count), 0);
+  const billedFor = crewQ.data ? billedCrewLine(crewQ.data, rows) : null;
 
   if (q.error)
     return <p className="text-sm text-destructive">Could not load time: {errText(q.error)}</p>;
@@ -363,7 +371,7 @@ export function TimeEntries({
         <p className="text-sm">
           <span className="font-medium">Travel</span> {fmtHours(total("travel"))} ·{" "}
           <span className="font-medium">Labor</span> {fmtHours(total("labor"))}
-          <span className="text-muted-foreground"> · {fmtHours(manHours)} with helpers</span>
+          {billedFor && <span className="block text-muted-foreground">{billedFor}</span>}
         </p>
       )}
       {rows.length === 0 && !adding && (
@@ -398,9 +406,6 @@ export function TimeEntries({
               <li key={r.id} className="flex flex-wrap justify-between gap-2 px-3 py-1.5">
                 <span>
                   {KIND_LABEL[r.kind] ?? r.kind} · {fmtHours(r.hours)}
-                  {r.helper_count
-                    ? ` · ${r.helper_count} helper${r.helper_count > 1 ? "s" : ""}`
-                    : ""}
                 </span>
                 <span className="text-muted-foreground">
                   {shortDay(r.on_date)}
@@ -432,7 +437,7 @@ function TimeFields({
   disabled: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[110px_90px_90px_1fr]">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-[110px_90px_1fr]">
       <label className="space-y-1 text-xs text-muted-foreground">
         Kind
         <Select
@@ -470,18 +475,7 @@ function TimeFields({
           }}
         />
       </label>
-      <label className="space-y-1 text-xs text-muted-foreground">
-        Helpers
-        <NumberField
-          value={vals.helper_count}
-          max={9}
-          inputMode="numeric"
-          disabled={disabled}
-          className="h-11 text-base text-foreground sm:h-9 sm:text-sm"
-          onChange={(n) => onChange({ ...vals, helper_count: Math.round(n) })}
-          onBlur={() => onCommit?.(vals)}
-        />
-      </label>
+      {/* No Helpers box (owner, Oct 5): the named crew is who is billed (billedCrewLine). */}
       <label className="space-y-1 text-xs text-muted-foreground">
         Date
         <Input
