@@ -29,6 +29,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
+import { weekLabel } from "@/lib/board-week";
 import {
   assignServiceJob,
   listServiceJobs,
@@ -57,19 +58,6 @@ const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), 
 const mondayOf = (d: Date) => addDays(d, -((d.getDay() + 6) % 7));
 const shortDay = (ymd: string) =>
   fromYmd(ymd).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-const weekLabel = (days: string[]) => {
-  const a = fromYmd(days[0]!);
-  const b = fromYmd(days[6]!);
-  const sameMonth = a.getMonth() === b.getMonth();
-  const left = a.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  const right = b.toLocaleDateString(
-    "en-US",
-    sameMonth
-      ? { day: "numeric", year: "numeric" }
-      : { month: "short", day: "numeric", year: "numeric" },
-  );
-  return `${left} – ${right}`;
-};
 const openedOn = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -355,7 +343,7 @@ function Board({ week }: { week?: string | undefined }) {
         >
           Next <ChevronRight className="h-4 w-4" />
         </Button>
-        <span className="ml-1 text-sm font-medium">{weekLabel(days)}</span>
+        <span className="ml-1 text-sm font-medium">{weekLabel(days[0]!, days[6]!)}</span>
         {assign.isPending && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
@@ -423,7 +411,7 @@ function Board({ week }: { week?: string | undefined }) {
               className="grid min-w-[980px]"
               style={{ gridTemplateColumns: "150px repeat(7, minmax(110px, 1fr))" }}
               role="grid"
-              aria-label={`Tech Board, week of ${weekLabel(days)}`}
+              aria-label={`Tech Board, week of ${weekLabel(days[0]!, days[6]!)}`}
             >
               <div className="sticky left-0 z-10 border-b bg-background p-2 text-xs font-medium text-muted-foreground">
                 Technician
