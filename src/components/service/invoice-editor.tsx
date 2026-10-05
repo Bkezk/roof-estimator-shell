@@ -1050,7 +1050,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirm === "rebuild"
-                ? "The lines are thrown away and built again from the ticket's time entries and materials at today's rates. Line edits are lost (the header and description stay): correct hours and quantities on the ticket (its Time and Materials), then rebuild."
+                ? "The lines are built again from the ticket's time entries and materials at today's rates: correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay; the header and description stay too."
                 : confirm === "delete"
                   ? deleteDraftNote(job.number, no)
                   : `The invoice is frozen at ${money(t.total)} and its PDF stored; the ticket moves to Invoiced. To change it afterwards, void it.`}

@@ -1368,6 +1368,7 @@ export type Database = {
           on_date: string | null;
           qty: number;
           rate: number;
+          rate_overridden: boolean;
           sort: number;
           source: string | null;
           taxable: boolean;
@@ -1384,6 +1385,7 @@ export type Database = {
           on_date?: string | null;
           qty?: number;
           rate?: number;
+          rate_overridden?: boolean;
           sort?: number;
           source?: string | null;
           taxable?: boolean;
@@ -1400,6 +1402,7 @@ export type Database = {
           on_date?: string | null;
           qty?: number;
           rate?: number;
+          rate_overridden?: boolean;
           sort?: number;
           source?: string | null;
           taxable?: boolean;

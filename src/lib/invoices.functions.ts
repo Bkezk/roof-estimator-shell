@@ -25,6 +25,7 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
+import { mergeRebuild, rateWasChanged, type RebuildLine } from "@/lib/invoice-rebuild";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -458,7 +459,10 @@ export const getInvoice = createServerFn({ method: "GET" })
     return withLines(context.supabase, inv);
   });
 
-/** Throw away a draft's lines and rebuild them from the ticket (after more time or material). */
+/**
+ * Rebuild a draft's lines from the ticket (after its time or material was corrected). Lines
+ * added by hand on the invoice and prices changed by hand are kept (invoice-rebuild.ts).
+ */
 export const rebuildInvoiceLines = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
@@ -474,13 +478,40 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
-    const lines = await buildLinesFromJob(sb, inv.service_job_id);
+    const built = await buildLinesFromJob(sb, inv.service_job_id);
+    const { data: oldLines, error: oErr } = await sb
+      .from("invoice_lines")
+      .select("*")
+      .eq("invoice_id", inv.id);
+    if (oErr) throw new Error(oErr.message);
+    // Owner, Oct 5: the hand-added lines and the prices changed by hand stay.
+    const hasFlag = (oldLines ?? []).some((l) => "rate_overridden" in l);
+    const lines = mergeRebuild((oldLines ?? []) as RebuildLine[], built as RebuildLine[]).map(
+      (l) => {
+        const { rate_overridden, ...rest } = l;
+        const row = {
+          sort: rest.sort,
+          kind: rest.kind,
+          description: rest.description,
+          qty: rest.qty,
+          unit: rest.unit,
+          rate: rest.rate,
+          total: rest.total,
+          cost_rate: rest.cost_rate,
+          cost_total: rest.cost_total,
+          on_date: rest.on_date,
+          source: rest.source,
+          taxable: rest.taxable,
+          invoice_id: inv.id,
+        };
+        return hasFlag ? { ...row, rate_overridden: !!rate_overridden } : row;
+      },
+    );
     // The lines are thrown away and made again (new ids): the log shows each removed and added.
-    await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
+    const { error: dErr } = await sb.from("invoice_lines").delete().eq("invoice_id", inv.id);
+    if (dErr) throw new Error(dErr.message);
     if (lines.length) {
-      const { error: lErr } = await sb
-        .from("invoice_lines")
-        .insert(lines.map((l) => ({ ...l, invoice_id: inv.id })));
+      const { error: lErr } = await sb.from("invoice_lines").insert(lines);
       if (lErr) throw new Error(lErr.message);
     }
     const t = totals(lines, Number(inv.tax_rate));
@@ -580,6 +611,9 @@ export const saveInvoice = createServerFn({ method: "POST" })
           taxable: l.taxable,
         };
         const prev = l.id != null ? old.get(l.id) : undefined;
+        // A price changed by hand is remembered, so Rebuild from ticket keeps it (owner, Oct 5).
+        // Only once the column exists (20261005170000): before that the row has no such key.
+        if (prev && "rate_overridden" in prev) row.rate_overridden = rateWasChanged(prev, l.rate);
         if (prev && !kept.has(prev.id)) {
           kept.add(prev.id);
           if (lineChanged(prev, row)) edits.push({ id: prev.id, row });

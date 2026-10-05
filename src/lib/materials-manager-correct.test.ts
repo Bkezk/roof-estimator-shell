@@ -45,7 +45,7 @@ describe("a manager corrects any line on the ticket", () => {
 describe("the invoice follows the ticket", () => {
   it("Rebuild says to correct hours and quantities on the ticket", () => {
     expect(readFileSync("src/components/service/invoice-editor.tsx", "utf8")).toContain(
-      "correct hours and quantities on the ticket (its Time and Materials), then rebuild",
+      "correct hours and quantities on the ticket (its Time and Materials), then rebuild. Lines you added here and prices you changed here stay",
     );
   });
 });
