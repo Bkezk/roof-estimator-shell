@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
+import { applyPipeStackEdit, pipeStackEditProblem } from "@/lib/pipe-stack-edit";
 import {
   Select,
   SelectContent,
@@ -210,7 +211,13 @@ function LaborLink(props: {
   );
 }
 
-/** Pipe Stacks (§12.3): entry form (Qty / Usage / Color / Open-Closed / Size) → Save → list. */
+const PIPE_COLORS = ["White", "Tan", "Gray", "Dark Gray", "Terra Cotta"];
+
+/**
+ * Pipe Stacks (§12.3): entry form (Qty / Usage / Color / Open-Closed / Size) → Save → list. Each
+ * saved row has Edit (owner, Oct 6: Open / Closed, size, quantity, colour change in place; the
+ * row keeps its id, labor % and usage — lib/pipe-stack-edit.ts) and Remove.
+ */
 function PipeStacksScreen(
   props: AccessoriesScreensProps & { upd: (fn: (d: AccessoriesState) => void) => void },
 ) {
@@ -223,6 +230,20 @@ function PipeStacksScreen(
   const [size, setSize] = useState<number | null>(null);
   const sizes = refData?.pipeStackSizes ?? [];
   const sizeRef = sizes.find((s) => s.size === size);
+  // The row being edited (by id) and its draft; one row at a time.
+  const [editing, setEditing] = useState<{
+    id: string;
+    open: boolean;
+    size: number;
+    quantity: number;
+    color: string;
+  } | null>(null);
+  const editProblem = editing
+    ? pipeStackEditProblem({ quantity: editing.quantity, size: editing.size }, sizes)
+    : null;
+  const editClosedOnly = editing
+    ? (sizes.find((s) => s.size === editing.size)?.closedOnly ?? false)
+    : false;
   return (
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">Pipe Stacks</h3>
@@ -259,7 +280,7 @@ function PipeStacksScreen(
             </SelectTrigger>
             <SelectContent>
               {/* No Rock Ply pipe stacks exist in the legacy catalog (confirmed 2026-09-21). */}
-              {["White", "Tan", "Gray", "Dark Gray", "Terra Cotta"].map((c) => (
+              {PIPE_COLORS.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -338,32 +359,145 @@ function PipeStacksScreen(
           </tr>
         </thead>
         <tbody>
-          {state.pipeStacks.map((ps, i) => (
-            <tr key={ps.id}>
-              <td className="border px-2 py-0.5">{ps.usage}</td>
-              <td className="border px-2 py-0.5">{ps.color}</td>
-              <td className="border px-2 py-0.5">{ps.open ? "Open" : "Closed"}</td>
-              <td className="border px-2 py-0.5">{ps.size}"</td>
-              <td className="border px-2 py-0.5 text-right">{ps.quantity}</td>
-              <td className="border px-2 py-0.5">
-                <LaborLink
-                  hours={result?.pipeStacks.perStackHours[ps.id] ?? 0}
-                  pct={ps.adjustPct}
-                  onPct={(v) => upd((d) => (d.pipeStacks[i]!.adjustPct = v))}
-                />
-              </td>
-              <td className="border px-1 py-0.5">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 text-xs"
-                  onClick={() => upd((d) => d.pipeStacks.splice(i, 1))}
-                >
-                  Remove
-                </Button>
-              </td>
-            </tr>
-          ))}
+          {state.pipeStacks.map((ps, i) =>
+            editing?.id === ps.id ? (
+              <tr key={ps.id} data-editing="pipe-stack">
+                <td className="border px-2 py-0.5">{ps.usage}</td>
+                <td className="border px-1 py-0.5">
+                  <Select
+                    value={editing.color}
+                    onValueChange={(v) => setEditing({ ...editing, color: v })}
+                  >
+                    <SelectTrigger className="h-6 w-28 text-xs" aria-label="Color">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PIPE_COLORS.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="border px-1 py-0.5">
+                  <Select
+                    value={editing.open && !editClosedOnly ? "Open" : "Closed"}
+                    onValueChange={(v) => setEditing({ ...editing, open: v === "Open" })}
+                    disabled={editClosedOnly}
+                  >
+                    <SelectTrigger className="h-6 w-24 text-xs" aria-label="Open/Closed">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Closed">Closed</SelectItem>
+                      <SelectItem value="Open">Open</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="border px-1 py-0.5">
+                  <Select
+                    value={String(editing.size)}
+                    onValueChange={(v) => setEditing({ ...editing, size: Number(v) })}
+                  >
+                    <SelectTrigger className="h-6 w-28 text-xs" aria-label="Size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sizes.map((s) => (
+                        <SelectItem key={s.size} value={String(s.size)}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </td>
+                <td className="border px-1 py-0.5">
+                  <NumberField
+                    className="h-6 w-16 px-1 text-right text-xs"
+                    inputMode="numeric"
+                    aria-label="Quantity"
+                    value={editing.quantity}
+                    onChange={(v) => setEditing({ ...editing, quantity: v })}
+                  />
+                </td>
+                <td className="border px-2 py-0.5">
+                  <LaborLink
+                    hours={result?.pipeStacks.perStackHours[ps.id] ?? 0}
+                    pct={ps.adjustPct}
+                    onPct={(v) => upd((d) => (d.pipeStacks[i]!.adjustPct = v))}
+                  />
+                </td>
+                <td className="whitespace-nowrap border px-1 py-0.5">
+                  <Button
+                    size="sm"
+                    className="h-6 text-xs"
+                    disabled={!!editProblem}
+                    title={editProblem ?? undefined}
+                    onClick={() => {
+                      upd((d) => {
+                        const at = d.pipeStacks.findIndex((p) => p.id === editing.id);
+                        if (at < 0) return;
+                        d.pipeStacks[at] = applyPipeStackEdit(d.pipeStacks[at]!, editing, sizes);
+                      });
+                      setEditing(null);
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-xs"
+                    onClick={() => setEditing(null)}
+                  >
+                    Cancel
+                  </Button>
+                </td>
+              </tr>
+            ) : (
+              <tr key={ps.id}>
+                <td className="border px-2 py-0.5">{ps.usage}</td>
+                <td className="border px-2 py-0.5">{ps.color}</td>
+                <td className="border px-2 py-0.5">{ps.open ? "Open" : "Closed"}</td>
+                <td className="border px-2 py-0.5">{ps.size}"</td>
+                <td className="border px-2 py-0.5 text-right">{ps.quantity}</td>
+                <td className="border px-2 py-0.5">
+                  <LaborLink
+                    hours={result?.pipeStacks.perStackHours[ps.id] ?? 0}
+                    pct={ps.adjustPct}
+                    onPct={(v) => upd((d) => (d.pipeStacks[i]!.adjustPct = v))}
+                  />
+                </td>
+                <td className="whitespace-nowrap border px-1 py-0.5">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-xs"
+                    onClick={() =>
+                      setEditing({
+                        id: ps.id,
+                        open: ps.open,
+                        size: ps.size,
+                        quantity: ps.quantity,
+                        color: ps.color,
+                      })
+                    }
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-xs"
+                    onClick={() => upd((d) => d.pipeStacks.splice(i, 1))}
+                  >
+                    Remove
+                  </Button>
+                </td>
+              </tr>
+            ),
+          )}
         </tbody>
       </table>
       <p className="text-xs text-muted-foreground">

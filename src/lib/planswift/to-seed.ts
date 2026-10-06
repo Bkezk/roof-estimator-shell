@@ -47,6 +47,7 @@ import {
   type MembraneGuess,
   type PlanSwiftTarget,
 } from "./classify";
+import { pipeStackOpenFromName } from "@/lib/pipe-stack-edit";
 import type { PlanSwiftRow, PlanSwiftSheet } from "./parse";
 
 /** What a bid imported from PlanSwift remembers (SavedBidState.importInfo). */
@@ -673,7 +674,16 @@ export function planSwiftSeed(
     return h !== undefined ? { ...k, dimCIn: h } : k;
   });
 
-  const pipeStacks = base.pipeStacks.map((p, i) => ({ ...p, id: `planswift-pipe-${i + 1}` }));
+  // Owner, Oct 6: a PlanSwift pipe stack is OPEN unless its row says closed (the drawing takeoff
+  // keeps the entry form's default).
+  const pipeNameById = new Map(
+    counts.filter((c) => c.role === "pipe").map((c) => [c.objectIds[0], c.name] as const),
+  );
+  const pipeStacks = base.pipeStacks.map((p, i) => ({
+    ...p,
+    id: `planswift-pipe-${i + 1}`,
+    open: pipeStackOpenFromName(pipeNameById.get(p.takeoffObjectId ?? "") ?? ""),
+  }));
   const drains = base.drains.map((p, i) => ({ ...p, id: `planswift-drain-${i + 1}` }));
   const baseUnmapped = base.unmapped.map((u) => ({
     ...u,
