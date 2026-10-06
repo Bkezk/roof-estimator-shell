@@ -19,6 +19,8 @@ const auditRow = (flat: string) => {
 
 const PATH = "supabase/migrations/20261005130000_ticket_audit.sql";
 const flat = flatSql(PATH);
+/** The live definition: 20261006200000_audit_ticket_readable.sql re-creates audit_row() (owner, Oct 6). */
+const LIVE = "supabase/migrations/20261006200000_audit_ticket_readable.sql";
 
 const BRANCHES =
   "when 'service_jobs' then v_entity := 'ticket'; v_entity_id := (v_row ->> 'id')::uuid; v_label := rtrim('Ticket ' || coalesce(v_row ->> 'number', '')); when 'service_time_entries' then v_entity := 'ticket_time'; v_entity_id := (v_row ->> 'service_job_id')::uuid; v_parent := 'service_job_id'; select j.number::text into v_inv from public.service_jobs j where j.id = v_entity_id; if not found then if tg_op = 'DELETE' then return null; end if; v_inv := ''; end if; v_label := rtrim('Ticket ' || v_inv) || ' time ''' || coalesce(v_old ->> 'kind', v_new ->> 'kind', '') || ''''; ";
@@ -37,6 +39,22 @@ describe("the migration", () => {
     expect(after).toContain(BRANCHES);
     expect(after.replace(BRANCHES, "")).toBe(before);
     expect(flat).toContain("revoke all on function public.audit_row() from public;");
+  });
+  it("the live audit_row (20261006200000) keeps both ticket branches: it is 20261005130000's plus only the Oct 6 changes (owner, Oct 6)", () => {
+    const live = auditRow(flatSql(LIVE));
+    expect(live).toContain(BRANCHES);
+    // The Oct 6 changes (audit-ticket-readable.test.ts pins each): stage_changed_at skipped, the
+    // Property label, the property_sites and site_warranties branches. Undo them and the body is
+    // this migration's.
+    const undone = live
+      .replace(", 'stage_changed_at'];", "];")
+      .replace(
+        "v_label := 'Property ''' || coalesce(v_old",
+        "v_label := 'Site ''' || coalesce(v_old",
+      )
+      .replace(/when 'property_sites' then .*?(?=when 'crm_site_contacts')/, "")
+      .replace(/when 'site_warranties' then .*?(?=when 'crm_site_contacts')/, "");
+    expect(undone).toBe(auditRow(flat));
   });
   it("triggers on tickets and their time entries, replayable", () => {
     expect(flat).toContain(
