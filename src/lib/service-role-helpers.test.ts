@@ -67,16 +67,24 @@ describe("stamp_dispatch(): the system stamps, users as before", () => {
 });
 
 describe("the migration", () => {
-  it("is the last word on both functions (no later migration redefines them)", () => {
+  it("is the last word on stamp_dispatch; technician_options' last word keeps the system clause", () => {
     const files = readdirSync(DIR)
       .filter((f) => f.endsWith(".sql"))
       .sort();
-    for (const name of ["technician_options", "stamp_dispatch"]) {
-      const defs = files.filter((f) =>
+    const defs = (name: string) =>
+      files.filter((f) =>
         readFileSync(`${DIR}/${f}`, "utf8").includes(`create or replace function public.${name}(`),
       );
-      expect(defs.at(-1), name).toBe(FILE);
-    }
+    expect(defs("stamp_dispatch").at(-1)).toBe(FILE);
+    // 20261006191000_dispatch_service_access.sql narrows the roster to people who can read
+    // tickets (owner, Oct 6); it must keep the system / no-request clause this file added.
+    const last = defs("technician_options").at(-1)!;
+    expect(last).toBe("20261006191000_dispatch_service_access.sql");
+    const body = squash(fn(readFileSync(`${DIR}/${last}`, "utf8"), "technician_options"));
+    expect(body).toContain("coalesce(auth.role(), '') = 'service_role'");
+    expect(body).toContain(
+      "auth.uid() is null and coalesce(auth.role(), '') not in ('anon', 'authenticated')",
+    );
   });
   it("adds the failure record columns idempotently", () => {
     for (const col of [
