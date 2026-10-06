@@ -290,11 +290,20 @@ export function compareWork(a: WorkItem, b: WorkItem): number {
 /**
  * Every row as one sorted list. A ticket's follow-up timer is dropped when that ticket is already
  * on the list for the same person: the ticket row carries it (its state line, Snooze / Close).
+ * The other way round for a Done ticket under review (owner, Oct 6): when the rows hold its open
+ * "Authorize ticket #…" follow-up (kind "invoice"), that row is the one to act on, under Needs
+ * authorization, and the ticket's own Done row is dropped — the authorizer on the Everyone view
+ * saw the ticket twice, once in each group.
  */
 export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = localYmd): WorkItem[] {
   const names = rows.names ?? {};
-  const listedTickets = rows.tickets.filter((t) =>
-    (WORK_TICKET_STAGES as readonly string[]).includes(t.stage),
+  const underReview = new Set(
+    rows.followups.filter((f) => f.kind === "invoice" && f.status === "open").map((f) => f.item_id),
+  );
+  const listedTickets = rows.tickets.filter(
+    (t) =>
+      (WORK_TICKET_STAGES as readonly string[]).includes(t.stage) &&
+      !(t.stage === "done" && underReview.has(t.id)),
   );
   const ticketTimers = new Map<string, FollowupIn>();
   for (const f of rows.followups)
