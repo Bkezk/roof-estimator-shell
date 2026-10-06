@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   FileSpreadsheet,
   FileUp,
   Layers,
@@ -17,6 +18,7 @@ import { toast } from "sonner";
 import {
   DELETED_BID_RETENTION_DAYS,
   deleteBid,
+  duplicateBid,
   listBids,
   setBidStatus,
   listDeletedBids,
@@ -226,6 +228,17 @@ function BidsPage() {
     },
     onError: (e: unknown) =>
       toast.error(e instanceof Error ? e.message : "Could not change status"),
+  });
+  // Duplicate (owner, Oct 6): a new draft copy, opened in the estimator to be renamed.
+  const duplicateFn = useServerFn(duplicateBid);
+  const duplicate = useMutation({
+    mutationFn: (id: string) => duplicateFn({ data: { id } }),
+    onSuccess: (copy) => {
+      toast.success(`Copied as "${copy.name}" — opening the copy`);
+      refresh();
+      void navigate({ to: "/estimate", search: { bid: copy.id } });
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Could not duplicate the bid"),
   });
   const del = useMutation({
     mutationFn: (id: string) => deleteBidFn({ data: { id } }),
@@ -670,6 +683,20 @@ function BidsPage() {
                                 </SelectContent>
                               </Select>
                             </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Duplicate this bid (a new draft copy)"
+                              disabled={duplicate.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                duplicate.mutate(bid.id);
+                              }}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              <Copy className="h-4 w-4" />
+                              <span className="sr-only">Duplicate</span>
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"

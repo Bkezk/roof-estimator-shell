@@ -5,6 +5,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Json } from "@/integrations/supabase/types";
 import { BID_STATUSES } from "@/lib/bid-status";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
+import { duplicateBidRow } from "@/lib/duplicate-bid";
 
 // All bid operations require a signed-in user. The user-scoped Supabase client
 // from the auth middleware runs under RLS, so the database is the final guard.
@@ -221,6 +222,43 @@ export const deleteBid = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
     if (!count) throw new Error("Bid not found (it may already have been deleted).");
     return { id: data.id };
+  });
+
+/**
+ * Duplicate a bid as a new draft (owner, Oct 6): the same payload, total, customer, site and
+ * building under "<name> (copy)"; status, lost reason and the takeoff / opportunity links are not
+ * copied (lib/duplicate-bid.ts). Returns the new row; the Bids page opens it.
+ */
+export const duplicateBid = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d) => getBidSchema.parse(d))
+  .handler(async ({ data, context }) => {
+    const { data: source, error } = await context.supabase
+      .from("bids")
+      .select("*")
+      .eq("id", data.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!source) throw new Error("Bid not found (it may have been deleted).");
+    const { data: me } = await context.supabase
+      .from("profiles")
+      .select("full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const { data: copy, error: insErr } = await context.supabase
+      .from("bids")
+      .insert(
+        duplicateBidRow(
+          source,
+          (me?.full_name ?? "").trim() || me?.email || null,
+          new Date().toISOString(),
+        ),
+      )
+      .select()
+      .single();
+    if (insErr) throw new Error(insErr.message);
+    return copy;
   });
 
 /** Bring a soft-deleted bid back to the list. */
