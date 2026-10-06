@@ -68,6 +68,8 @@ import {
   Target,
   Trash2,
   Wrench,
+  Columns2,
+  Rows2,
   X,
 } from "lucide-react";
 
@@ -1201,6 +1203,40 @@ const draftKey = (d: Draft) =>
     customer: d.customer && [d.customer.account_id, d.customer.site_id],
   });
 
+/**
+ * The office ticket's layout on a wide screen (owner, Oct 6): the folding sections (Aerial,
+ * Materials, Purchase orders …) beside the form ("side", as since Oct 1) or below it
+ * ("stacked"). Remembered on this device; read after mount so the server's first paint matches.
+ */
+type TicketLayout = "side" | "stacked";
+/** Side by side on xl: the form ~60 %, the sections ≥ 380 px and in view (owner, Oct 1). */
+const SIDE_PANES =
+  "space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0";
+const SIDE_ASIDE = "min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]";
+/** Stacked: the form, then the sections, one column as wide as the form. */
+const STACKED_PANES = "max-w-5xl space-y-6";
+const STACKED_ASIDE = "min-w-0 space-y-4";
+const TICKET_LAYOUT_KEY = "bid-o-matic:ticket-layout";
+function useTicketLayout(): [TicketLayout, (l: TicketLayout) => void] {
+  const [layout, setLayout] = useState<TicketLayout>("side");
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(TICKET_LAYOUT_KEY) === "stacked") setLayout("stacked");
+    } catch {
+      // Storage blocked: side by side.
+    }
+  }, []);
+  const set = (l: TicketLayout) => {
+    setLayout(l);
+    try {
+      window.localStorage.setItem(TICKET_LAYOUT_KEY, l);
+    } catch {
+      // Storage blocked: the choice lasts for this visit.
+    }
+  };
+  return [layout, set];
+}
+
 function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Seed }) {
   const { session, profile, can } = useAuth();
   const navigate = useNavigate();
@@ -1242,6 +1278,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [layout, setLayout] = useTicketLayout();
 
   // The named crew. An existing ticket's rows load after the ticket; until then (and for a
   // technician, who answers on the close-out instead) nothing about the crew is sent.
@@ -1959,6 +1996,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // on the left and the folding sections in a column on the right. A technician, and a new
   // ticket (no sections yet), keep one column.
   const twoPane = officeOrAdmin && !!job;
+  // Owner, Oct 6: a toggle by Delete puts the sections below the form instead (remembered).
+  const stacked = twoPane && layout === "stacked";
 
   const ticketForm = (
     <form
@@ -2101,6 +2140,20 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   <Trash2 className="mr-1 h-4 w-4" /> Delete
                 </Button>
               )}
+              {twoPane && (
+                // Only where the two layouts differ (xl and up; narrower screens always stack).
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="hidden xl:inline-flex"
+                  aria-pressed={stacked}
+                  aria-label={stacked ? "Sections beside the form" : "Sections below the form"}
+                  title={stacked ? "Sections beside the form" : "Sections below the form"}
+                  onClick={() => setLayout(stacked ? "side" : "stacked")}
+                >
+                  {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -2175,12 +2228,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         // at least 380 px; its top stays in view while the form scrolls, and it scrolls with
         // the page). Below xl they stack, the form first. Each section keeps its one-line
         // summary and remembered open state; Close out stays a header button.
-        <div className="space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0">
+        // Owner, Oct 6: or the same sections below the form ("stacked", the toggle by Delete).
+        <div className={stacked ? STACKED_PANES : SIDE_PANES}>
           <div className="min-w-0">{ticketForm}</div>
-          <aside
-            className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]"
-            aria-label="Ticket sections"
-          >
+          <aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE} aria-label="Ticket sections">
             <AerialSection job={job} canEdit={canEdit} />
             <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
             <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />

@@ -60,6 +60,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SECTION_TONES } from "@/components/service/section-tones";
 import { Button } from "@/components/ui/button";
 
 /** Mounted on every ticket; decides whether the invoice applies here. */
@@ -92,7 +93,10 @@ function AuthorizeCard({ job }: { job: ServiceJobWithTech }) {
     onError: (e) => toast.error(`Could not authorize the ticket: ${errText(e)}`),
   });
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Invoice">
+    <section
+      className={`space-y-3 rounded-lg border p-4 ${SECTION_TONES["invoice"]!.edge}`}
+      aria-label="Invoice"
+    >
       <h2 className="flex items-center gap-2 font-semibold">
         <ShieldCheck className="h-4 w-4" /> Needs authorization
       </h2>
@@ -212,7 +216,10 @@ function InvoiceCard({ job }: { job: ServiceJobWithTech }) {
   const busy = make.isPending || another.isPending || remove.isPending;
 
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Invoice">
+    <section
+      className={`space-y-3 rounded-lg border p-4 ${SECTION_TONES["invoice"]!.edge}`}
+      aria-label="Invoice"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="flex items-center gap-2 font-semibold">
           <Receipt className="h-4 w-4" /> Invoice

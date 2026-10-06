@@ -195,7 +195,9 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
   });
 
   it("an xl: two-pane grid: the form in the first pane, the sections column (≥ 380 px) in the second", () => {
-    const grid = panes.match(/<div className="([^"]*xl:grid[^"]*)">/);
+    // Since Oct 6 the classes are constants, switched by the layout toggle (side by default).
+    expect(panes).toContain("<div className={stacked ? STACKED_PANES : SIDE_PANES}>");
+    const grid = src.match(/const SIDE_PANES =\s*"([^"]*xl:grid[^"]*)";/);
     expect(grid).not.toBeNull();
     expect(grid![1]).toContain("xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)]");
     expect(grid![1]).toContain("xl:items-start");
@@ -204,7 +206,10 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
     expect(formAt).toBeGreaterThan(0);
     expect(asideAt).toBeGreaterThan(formAt);
     const aside = panes.slice(asideAt, panes.indexOf("</aside>"));
-    expect(aside).toContain("xl:sticky xl:top-4 xl:min-w-[380px]");
+    expect(aside).toContain("className={stacked ? STACKED_ASIDE : SIDE_ASIDE}");
+    expect(src).toContain(
+      'const SIDE_ASIDE = "min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]";',
+    );
     expect(aside).not.toContain("{ticketForm}");
   });
 
