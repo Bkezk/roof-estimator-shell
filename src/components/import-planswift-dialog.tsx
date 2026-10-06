@@ -306,7 +306,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
             )}
             {canPickCustomer && hit && (
               <div className="space-y-1">
-                <Label htmlFor="planswift-site">Site (optional)</Label>
+                <Label htmlFor="planswift-site">Property (optional)</Label>
                 <SiteSelect
                   id="planswift-site"
                   accountId={hit.account_id}

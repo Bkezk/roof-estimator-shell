@@ -10,7 +10,7 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 describe("siteProblem — a ticket names the site when the customer has several (owner, Oct 1)", () => {
   it("several sites and none picked: the message names the count", () => {
     expect(siteProblem({ siteCount: 3, site_id: null })).toBe(
-      "Pick the site — this customer has 3",
+      "Pick the property — this customer has 3",
     );
     expect(siteProblem({ siteCount: 2, site_id: undefined })).toBe(siteRequiredMessage(2));
     expect(siteProblem({ siteCount: 2, site_id: "" })).toBe(siteRequiredMessage(2));

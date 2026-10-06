@@ -59,10 +59,10 @@ export function SiteForm(props: {
   const save = useMutation({
     mutationFn: () => saveFn({ data: sitePayload(props.accountId, props.site?.id ?? null, f) }),
     onSuccess: (row) => {
-      toast.success(props.site ? "Site saved" : "Site added");
+      toast.success(props.site ? "Property saved" : "Property added");
       props.onDone(true, row);
     },
-    onError: (e) => toast.error(`Could not save the site: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not save the property: ${errText(e)}`),
   });
   const idp = props.site?.id ?? "new";
   return (
@@ -73,14 +73,14 @@ export function SiteForm(props: {
         // In a dialog over another form (an opportunity's), React still bubbles the submit to it.
         e.stopPropagation();
         if (!f.name.trim()) {
-          toast.error("The site needs a name");
+          toast.error("The property needs a name");
           return;
         }
         save.mutate();
       }}
     >
       <div className="space-y-1">
-        <Label htmlFor={`site-${idp}-name`}>Site name</Label>
+        <Label htmlFor={`site-${idp}-name`}>Property name</Label>
         <Input
           id={`site-${idp}-name`}
           maxLength={CRM_MAX.name}
@@ -163,7 +163,7 @@ export function SiteForm(props: {
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={save.isPending}>
           {save.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          {props.site ? "Save site" : "Add site"}
+          {props.site ? "Save property" : "Add property"}
         </Button>
         <Button
           type="button"

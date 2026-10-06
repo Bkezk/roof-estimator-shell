@@ -282,7 +282,7 @@ export const saveOpportunity = createServerFn({ method: "POST" })
         .maybeSingle();
       if (sErr) throw new Error(sErr.message);
       if (!s || s.account_id !== account_id)
-        throw new Error("That site does not belong to the customer");
+        throw new Error("That property does not belong to the customer");
       site_id = fields.site_id;
     } else {
       // The customer's live sites (the count is all of them; two rows are enough to read).

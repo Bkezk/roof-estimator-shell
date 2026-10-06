@@ -45,7 +45,7 @@ export const PAGE_HELP: Record<Page, string> = {
   takeoff: "Measure plan sheets and aerial screenshots; create a bid from the drawing",
   service:
     "Service tickets (repairs): create, assign and close them; log material used off a vehicle",
-  customers: "The customer hub: accounts, sites and contacts that bids and tickets link to",
+  customers: "The customer hub: accounts, properties and contacts that bids and tickets link to",
 };
 
 export const ROLES = ["admin", "manager", "user"] as const;

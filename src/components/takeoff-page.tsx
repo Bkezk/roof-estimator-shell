@@ -786,7 +786,7 @@ function NewTakeoffDialog(props: {
             />
             <p className="text-xs text-muted-foreground">
               {canPickCustomer
-                ? "Optional. Starts as the customer (and site) you picked plus today's date; change it to the job if you like."
+                ? "Optional. Starts as the customer (and property) you picked plus today's date; change it to the job if you like."
                 : "Required. Name the job, not the plan file."}
             </p>
           </div>

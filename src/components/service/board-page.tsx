@@ -379,7 +379,7 @@ function Board({ week }: { week?: string | undefined }) {
             />
             <Input
               type="search"
-              placeholder="Search #, customer, site…"
+              placeholder="Search #, customer, property…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 bg-background"

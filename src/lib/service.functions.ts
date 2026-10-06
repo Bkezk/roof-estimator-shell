@@ -286,7 +286,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
           .eq("id", fields.site_id)
           .maybeSingle();
         if (!s || s.account_id !== fields.account_id)
-          throw new Error("That site does not belong to the customer");
+          throw new Error("That property does not belong to the customer");
         site_name = s.name;
         site_address = siteAddressLine(s) || null;
       } else {

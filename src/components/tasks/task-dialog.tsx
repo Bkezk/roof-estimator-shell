@@ -268,7 +268,9 @@ export function TaskDialog(props: {
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={f.account_id ? "Pick a site" : "Pick a company first"}>
+                  <SelectValue
+                    placeholder={f.account_id ? "Pick a property" : "Pick a company first"}
+                  >
                     {f.site_id ? (f.site_name ?? "Site") : f.account_id ? "No property" : undefined}
                   </SelectValue>
                 </SelectTrigger>
@@ -283,7 +285,7 @@ export function TaskDialog(props: {
               </Select>
               {sites.error && (
                 <p className="text-xs text-destructive">
-                  Could not load the sites: {errText(sites.error)}
+                  Could not load the properties: {errText(sites.error)}
                 </p>
               )}
             </div>

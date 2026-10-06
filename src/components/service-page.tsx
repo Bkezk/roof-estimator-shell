@@ -539,7 +539,7 @@ function ServiceList({
                   Search
                   <Input
                     type="search"
-                    placeholder="Ticket #, customer, site, description, CenterPoint #…"
+                    placeholder="Ticket #, customer, property, description, CenterPoint #…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="bg-background"
@@ -1019,7 +1019,7 @@ function NewForAccount({
   }, [detail.error]);
   useEffect(() => {
     if (siteMissing)
-      toast.error("That site is no longer on file for this customer — pick the site", {
+      toast.error("That property is no longer on file for this customer — pick the property", {
         duration: 10_000,
       });
   }, [siteMissing]);
@@ -1068,11 +1068,11 @@ function NewForAccount({
     },
     ...(fromOpp ? { from_opportunity_id: fromOpp.from_opportunity_id } : {}),
     ...(siteMissing
-      ? { tone: "error" as const, note: "That site is no longer on file; pick the site." }
+      ? { tone: "error" as const, note: "That property is no longer on file; pick the property." }
       : opportunity
         ? {
             tone: "info" as const,
-            note: `${fromOpportunityLabel(opportunity.title)}: customer, site and description filled in. Add the technician and day.`,
+            note: `${fromOpportunityLabel(opportunity.title)}: customer, property and description filled in. Add the technician and day.`,
           }
         : {}),
   };
@@ -1195,7 +1195,7 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
   },
   tone: "info",
   note: j.account_id
-    ? `Copied from ticket #${j.number}: customer, site, contact, PO #, labor rate and type. Add the description, then the technician and day.`
+    ? `Copied from ticket #${j.number}: customer, property, contact, PO #, labor rate and type. Add the description, then the technician and day.`
     : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, labor rate and type are copied.`,
 });
 
@@ -2420,7 +2420,7 @@ function CustomerBlock(props: {
       })()}
       <div className="space-y-1">
         <label htmlFor="ticket-site" className="text-xs font-medium">
-          Site
+          Property
         </label>
         <SiteSelect
           id="ticket-site"

@@ -361,7 +361,7 @@ export const siteSchema = z
   .object({
     id: z.string().uuid().optional(),
     account_id: z.string().uuid(),
-    name: z.string().trim().min(1, "Site name is required").max(CRM_MAX.name),
+    name: z.string().trim().min(1, "Property name is required").max(CRM_MAX.name),
     address1: keepText(CRM_MAX.address1),
     address2: keepText(CRM_MAX.address2),
     city: keepText(CRM_MAX.city),

@@ -69,12 +69,14 @@ export function SiteSelect(props: {
   const [adding, setAdding] = useState(false);
   if (detail.error)
     return (
-      <p className="text-xs text-destructive">Could not load the sites: {errText(detail.error)}</p>
+      <p className="text-xs text-destructive">
+        Could not load the properties: {errText(detail.error)}
+      </p>
     );
   if (detail.data && sites.length === 0 && !props.value)
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <p className="text-xs text-muted-foreground">No sites on file for this customer.</p>
+        <p className="text-xs text-muted-foreground">No properties on file for this customer.</p>
         {mayAdd && (
           <>
             <Button
@@ -89,7 +91,7 @@ export function SiteSelect(props: {
             <Dialog open={adding} onOpenChange={setAdding}>
               <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
                 <DialogHeader>
-                  <DialogTitle>New site</DialogTitle>
+                  <DialogTitle>New property</DialogTitle>
                   <DialogDescription>
                     The building or address the work happens at. It is saved on the customer.
                   </DialogDescription>
@@ -128,10 +130,12 @@ export function SiteSelect(props: {
         aria-invalid={props.invalid || undefined}
         className={`${props.invalid ? "border-destructive" : ""} ${props.className ?? ""}`}
       >
-        <SelectValue placeholder={detail.isLoading ? "Loading the sites…" : "Pick the site…"} />
+        <SelectValue
+          placeholder={detail.isLoading ? "Loading the properties…" : "Pick the property…"}
+        />
       </SelectTrigger>
       <SelectContent>
-        {!props.required && <SelectItem value="none">No site</SelectItem>}
+        {!props.required && <SelectItem value="none">No property</SelectItem>}
         {sites.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             {siteOptionLabel(s.name, siteAddressLine(s), codeOf(s.county_code_id))}
@@ -139,7 +143,7 @@ export function SiteSelect(props: {
         ))}
         {/* A site since removed from the customer stays readable on an old record. */}
         {!known && !detail.isLoading && props.value && (
-          <SelectItem value={props.value}>Former site</SelectItem>
+          <SelectItem value={props.value}>Former property</SelectItem>
         )}
       </SelectContent>
     </Select>

@@ -46,7 +46,7 @@ describe("opportunitySiteProblem — every opportunity names its site (owner, Oc
   });
   it("a customer with several sites needs one picked, with the count", () => {
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 3 })).toBe(
-      "Pick the site — this customer has 3",
+      "Pick the property — this customer has 3",
     );
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 2 })).toBe(
       siteRequiredMessage(2),
@@ -57,7 +57,7 @@ describe("opportunitySiteProblem — every opportunity names its site (owner, Oc
     expect(autoSiteId([{ id: SITE }])).toBe(SITE);
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 1 })).toBeNull();
     expect(opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 0 })).toBe(
-      "Add a site to this customer first",
+      "Add a property to this customer first",
     );
   });
 });
@@ -106,7 +106,7 @@ describe("saveOpportunity enforces the rules", () => {
     );
     expect(src).toMatch(/\.from\("crm_sites"\)\s*\.select\("id", \{ count: "exact" \}\)/);
     expect(src).toContain('.is("deleted_at", null)');
-    expect(src).toContain("That site does not belong to the customer");
+    expect(src).toContain("That property does not belong to the customer");
     expect(src).toMatch(/const patch = \{\s*account_id,\s*site_id,/);
     // An update never writes a null assignee.
     expect(src).not.toContain("assignee_id: fields.assignee_id ?? null");

@@ -123,9 +123,9 @@ describe("1–3. the rules: customer, site and contact are required", () => {
     expect(form.opportunitySiteProblem({ account_id: null, site_id: null, siteCount: 3 })).toBe(
       form.OPP_CUSTOMER_REQUIRED,
     );
-    expect(form.OPP_SITE_NEEDED).toBe("Add a site to this customer first");
+    expect(form.OPP_SITE_NEEDED).toBe("Add a property to this customer first");
     expect(form.opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 0 })).toBe(
-      "Add a site to this customer first",
+      "Add a property to this customer first",
     );
     expect(form.opportunitySiteProblem({ account_id: ACC, site_id: null, siteCount: 2 })).toBe(
       siteRequiredMessage(2),
@@ -179,7 +179,7 @@ describe("1–3. saveOpportunity refuses; nothing written", () => {
   });
   it("a customer with no site", async () => {
     await expect(call(opps.saveOpportunity, { ...base, account_id: ACC_NO_SITE })).rejects.toThrow(
-      "Add a site to this customer first",
+      "Add a property to this customer first",
     );
     expect(oppWrites()).toEqual([]);
   });
@@ -255,7 +255,7 @@ describe("2. the site: SiteSelect's Add site opens the Customers page's site for
     const src = read("src/components/crm/site-form.tsx");
     expect(src).toContain("export function SiteForm(");
     for (const part of [
-      "<Label htmlFor={`site-${idp}-name`}>Site name</Label>",
+      "<Label htmlFor={`site-${idp}-name`}>Property name</Label>",
       'aria-label="Address line 1"',
       'aria-label="City"',
       'aria-label="State"',

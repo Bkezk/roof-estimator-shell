@@ -161,8 +161,10 @@ describe("county code server input", () => {
 
   it("a code a site uses is not deleted, with the count", () => {
     expect(countyCodeInUseMessage(0)).toBeNull();
-    expect(countyCodeInUseMessage(1)).toBe("In use on 1 site — change those sites first");
-    expect(countyCodeInUseMessage(3)).toBe("In use on 3 sites — change those sites first");
+    expect(countyCodeInUseMessage(1)).toBe("In use on 1 property — change those properties first");
+    expect(countyCodeInUseMessage(3)).toBe(
+      "In use on 3 properties — change those properties first",
+    );
   });
 });
 

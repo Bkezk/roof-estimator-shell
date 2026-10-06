@@ -62,11 +62,27 @@ describe("on the ticket page", () => {
   const src = read("src/components/service/ticket-field-sections.tsx");
   it("a folding section under the Timeline, for tickets with a site", () => {
     expect(src).toContain("{job.site_id && <EarlierAtSite jobId={job.id} />}");
-    expect(src).toContain('title="Earlier at this site"');
+    expect(src).toContain('title="Earlier at this property"');
     expect(src).toContain('storageKey="earlier"');
-    expect(src).toContain("No earlier tickets at this site.");
+    expect(src).toContain("No earlier tickets at this property.");
   });
   it("each row opens that ticket", () => {
     expect(src).toMatch(/<Link\s+to="\/service"\s+search=\{\{ id: r\.id \}\}/);
+  });
+});
+
+describe("Sites are called Properties (owner, Oct 6)", () => {
+  it("in the interface; the data keeps its names", () => {
+    const read = (p: string) => readFileSync(p, "utf8");
+    const customers = read("src/components/customers-page.tsx");
+    expect(customers).toContain('<MapPin className="h-4 w-4" /> Properties');
+    expect(customers).not.toMatch(/>\s*Sites\s*</);
+    expect(read("src/components/crm/site-select.tsx")).toContain('"Pick the property…"');
+    expect(read("src/components/service-page.tsx")).toMatch(
+      /htmlFor="ticket-site"[^>]*>\s*Property\s*</,
+    );
+    expect(read("src/components/service/invoices-page.tsx")).not.toContain(
+      'font-medium">Site</th>',
+    );
   });
 });
