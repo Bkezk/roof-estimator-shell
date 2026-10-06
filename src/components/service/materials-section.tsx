@@ -56,6 +56,7 @@ import {
   amountText,
   catalogKey,
   cellKey,
+  cellName,
   fmtNum,
   matchesSearch,
   onHandText,
@@ -94,6 +95,8 @@ function writeVehicle(id: string) {
 /** A row of the list: a truck stock row, or a cell this ticket used that the truck ran out of. */
 interface ListRow extends LocatedCell {
   key: string;
+  /** The service material name, or null (the catalog label stands): cellName. */
+  label: string | null;
   category: string;
   unit: string;
   on_hand: number;
@@ -221,6 +224,7 @@ export function MaterialsSection({
       location_id: r.location_id,
       screen_id: r.screen_id,
       row_label: r.row_label,
+      label: r.label,
       price_col: r.price_col,
       category: r.category,
       unit: r.unit,
@@ -241,6 +245,7 @@ export function MaterialsSection({
         location_id: m.location_id,
         screen_id: m.screen_id,
         row_label: m.row_label,
+        label: m.label,
         price_col: m.price_col,
         category: categoryOf.get(m.screen_id) ?? "",
         unit: m.unit,
@@ -329,6 +334,7 @@ export function MaterialsSection({
               location_id: r.location_id,
               screen_id: r.screen_id,
               row_label: r.row_label,
+              label: r.label,
               price_col: r.price_col,
               qty: res.qty,
               unit: res.unit,
@@ -383,14 +389,14 @@ export function MaterialsSection({
     const onHand = onHandUnits(r);
     if (checkStock && units > onHand + EPS) {
       loudError(
-        `Not enough ${r.row_label}`,
+        `Not enough ${cellName(r)}`,
         new Error(
           `only ${amountText(Math.max(0, onHand), r.piece, r.unit)} on ${locName(r.location_id)} — take the rest from the shop or another truck`,
         ),
       );
       return;
     }
-    enqueue(r.key, units, `Could not log ${r.row_label}`, () => record(r, units, "consumed"));
+    enqueue(r.key, units, `Could not log ${cellName(r)}`, () => record(r, units, "consumed"));
   };
 
   /** Take `units` back off this ticket (they stay on the truck). */
@@ -398,12 +404,12 @@ export function MaterialsSection({
     if (!(units > EPS)) return;
     if (units > usedUnits(r) + EPS) {
       loudError(
-        `Cannot take back ${r.row_label}`,
+        `Cannot take back ${cellName(r)}`,
         new Error(`this ticket has only ${amountText(Math.max(0, usedUnits(r)), r.piece, r.unit)}`),
       );
       return;
     }
-    enqueue(r.key, -units, `Could not take back ${r.row_label}`, async () => {
+    enqueue(r.key, -units, `Could not take back ${cellName(r)}`, async () => {
       // Planned when its turn comes, so it sees the entries the taps before it made.
       const now = qc.getQueryData<JobMaterialRow[]>(fieldKeys.materials(jobId)) ?? [];
       const plan = planReduce(ownFreshEntries(now, r, r.piece, myName), units, canRelease);
@@ -460,6 +466,7 @@ export function MaterialsSection({
           location_id: m.location_id,
           screen_id: m.screen_id,
           row_label: m.row_label,
+          label: m.label,
           price_col: m.price_col,
           category: "",
           unit: m.unit,
@@ -544,7 +551,7 @@ export function MaterialsSection({
                       const want = suggestedUnits(u.avg_qty, piece);
                       const have = r ? usedUnits(r) : 0;
                       const done = have >= want - EPS;
-                      const label = `${u.row_label}${u.price_col !== "price" ? ` (${u.price_col})` : ""} · ${amountText(want, piece, r?.unit ?? u.unit)}`;
+                      const label = `${cellName(u)} · ${amountText(want, piece, r?.unit ?? u.unit)}`;
                       return (
                         <Button
                           key={key}
@@ -561,12 +568,12 @@ export function MaterialsSection({
                           title={`Used on ${u.tickets} earlier ${u.tickets === 1 ? "ticket" : "tickets"} with this repair`}
                           onClick={() => {
                             if (done) {
-                              toast.info(`${u.row_label}: already on this ticket`);
+                              toast.info(`${cellName(u)}: already on this ticket`);
                               return;
                             }
                             if (!r || onHandUnits(r) <= EPS) {
                               toast.warning(
-                                `${u.row_label} is not on ${locName(vehicleId)} — take it from the shop or another truck`,
+                                `${cellName(u)} is not on ${locName(vehicleId)} — take it from the shop or another truck`,
                                 { duration: 8000 },
                               );
                               return;
@@ -707,8 +714,7 @@ export function MaterialsSection({
                 return (
                   <li key={cellKey(m)} className="flex justify-between gap-3 px-3 py-2">
                     <span className="min-w-0">
-                      {m.row_label}
-                      {m.price_col !== "price" ? ` (${m.price_col})` : ""}
+                      {cellName(m)}
                       <span className="block text-xs text-muted-foreground">
                         from {locName(m.location_id)}
                       </span>
@@ -817,7 +823,7 @@ function TruckRow({
   const unitWord = unitLabel(used, row.piece, row.unit);
   const small = [
     row.category,
-    row.price_col !== "price" ? row.price_col : null,
+    !row.label && row.price_col !== "price" ? row.price_col : null,
     row.item_no ? `#${row.item_no}` : null,
   ]
     .filter(Boolean)
@@ -841,7 +847,7 @@ function TruckRow({
     <li className={`space-y-2 px-3 py-3 ${used > EPS ? "bg-primary/5" : ""}`}>
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="font-medium leading-snug">{row.row_label}</p>
+          <p className="font-medium leading-snug">{cellName(row)}</p>
           {small && <p className="truncate text-xs text-muted-foreground">{small}</p>}
           {fromText ? (
             <p className="text-sm text-muted-foreground">{fromText}</p>
@@ -861,7 +867,7 @@ function TruckRow({
             variant="outline"
             size="icon"
             className="h-12 w-12"
-            aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${row.row_label} fewer`}
+            aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${cellName(row)} fewer`}
             disabled={used <= EPS}
             onClick={() => onReduce(Math.min(1, used))}
           >
@@ -890,7 +896,7 @@ function TruckRow({
             variant={used > EPS ? "default" : "outline"}
             size="icon"
             className="h-12 w-12"
-            aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${row.row_label} more`}
+            aria-label={`One ${unitLabel(1, row.piece, row.unit)} of ${cellName(row)} more`}
             onClick={() => onAdd(1)}
           >
             <Plus className="h-5 w-5" />

@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ClipboardList, Receipt, Settings2, Truck } from "lucide-react";
+import { ClipboardList, Package, Receipt, Settings2, Truck } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listLocations } from "@/lib/inventory.functions";
 import { ServiceRatesSettings } from "@/components/service-rates-settings";
 import { InspectionChecklistSettings } from "@/components/service/inspection-checklist-settings";
+import { MaterialPricingSettings } from "@/components/service/material-pricing-settings";
 import { VehicleDriversCard } from "@/components/inventory/vehicle-drivers-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -17,8 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
  * (admins only — setVehicleDrivers is an admin write) Vehicles & drivers. ?tab= deep-links a tab;
  * /admin/service-rates redirects here. Access is the central gate's (pageForPath: /setup →
  * manager: admins and managers, as Service Rates was).
+ *
+ * Material pricing (owner, Oct 6): the service material price list repair tickets bill from,
+ * separate from Estimate Pricing (the bids').
  */
-export const SETUP_TABS = ["rates", "inspection", "vehicles"] as const;
+export const SETUP_TABS = ["rates", "materials", "inspection", "vehicles"] as const;
 export type SetupTab = (typeof SETUP_TABS)[number];
 
 export const Route = createFileRoute("/setup")({
@@ -50,8 +54,8 @@ function SetupPage() {
           <Settings2 className="h-6 w-6" /> Setup
         </h1>
         <p className="text-sm text-muted-foreground">
-          How service work is priced and run: the rates invoices are built from, what an inspection
-          asks about{isAdmin ? ", and who drives each vehicle" : ""}.
+          How service work is priced and run: the rates and material prices invoices are built from,
+          what an inspection asks about{isAdmin ? ", and who drives each vehicle" : ""}.
         </p>
       </div>
       <Tabs
@@ -64,6 +68,9 @@ function SetupPage() {
           <TabsTrigger value="rates" className="gap-1.5">
             <Receipt className="h-4 w-4" aria-hidden /> Service rates
           </TabsTrigger>
+          <TabsTrigger value="materials" className="gap-1.5">
+            <Package className="h-4 w-4" aria-hidden /> Material pricing
+          </TabsTrigger>
           <TabsTrigger value="inspection" className="gap-1.5">
             <ClipboardList className="h-4 w-4" aria-hidden /> Inspection checklist
           </TabsTrigger>
@@ -75,6 +82,9 @@ function SetupPage() {
         </TabsList>
         <TabsContent value="rates" className="mt-4">
           <ServiceRatesSettings />
+        </TabsContent>
+        <TabsContent value="materials" className="mt-4">
+          <MaterialPricingSettings />
         </TabsContent>
         <TabsContent value="inspection" className="mt-4">
           <InspectionChecklistSettings />

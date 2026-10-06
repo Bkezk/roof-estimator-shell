@@ -23,6 +23,8 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import { stageProblem } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
+import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
 export { TECH_STAGES } from "@/lib/ticket-stage";
@@ -650,6 +652,8 @@ export interface JobMaterialRow {
   screen_id: string;
   row_label: string;
   price_col: string;
+  /** The service material name for the cell, or null (the catalog label stands). */
+  label: string | null;
   qty: number;
   unit: string;
   counted_note: string | null;
@@ -669,7 +673,8 @@ export const listServiceJobMaterials = createServerFn({ method: "GET" })
       .eq("service_job_id", data.id)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    const byMaterial = materialsByCell(await loadServiceMaterialLinks(context.supabase));
+    return (rows ?? []).map((r) => ({ ...r, label: serviceLabel(byMaterial, r) }));
   });
 
 /** A crew member as the ticket shows it. `bill_rate` is null for anyone but a manager (no money). */

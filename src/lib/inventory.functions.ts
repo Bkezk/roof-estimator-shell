@@ -28,6 +28,14 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
 import { easternYmd } from "@/lib/field-day";
+import {
+  SERVICE_CATEGORY,
+  SERVICE_STOCK_SCREEN,
+  materialsByCell,
+  serviceLabel,
+  unitWord,
+} from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 export const MOVEMENT_REASONS = [
   "leftover",
@@ -149,6 +157,8 @@ async function categories(sb: SupabaseClient<Database>) {
   if (error) throw new Error(error.message);
   const m = new Map<string, string>();
   for (const s of data ?? []) m.set(s.id, s.category);
+  // Service materials with no bid-catalog twin (owner, Oct 6: service-materials.ts).
+  m.set(SERVICE_STOCK_SCREEN, SERVICE_CATEGORY);
   return m;
 }
 
@@ -296,14 +306,11 @@ export const addMovement = createServerFn({ method: "POST" })
   .validator((d) => addSchema.parse(d))
   .handler(async ({ data, context }) => {
     const sb = context.supabase;
-    const [{ data: me }, { data: screen, error }] = await Promise.all([
-      sb
-        .from("profiles")
-        .select("role, access, full_name, email")
-        .eq("id", context.userId)
-        .maybeSingle(),
-      sb.from("pricing_catalog").select("data").eq("id", data.screen_id).maybeSingle(),
-    ]);
+    const { data: me } = await sb
+      .from("profiles")
+      .select("role, access, full_name, email")
+      .eq("id", context.userId)
+      .maybeSingle();
     // Inventory or Service access records leftovers and what a crew takes for a job; Estimate
     // access (or admin) records anything (adjustments, write-offs, returns).
     if (
@@ -321,41 +328,12 @@ export const addMovement = createServerFn({ method: "POST" })
       !jobRelease
     )
       throw new Error("Only an estimator can adjust counts or write stock off");
-    if (error) throw new Error(error.message);
-    if (!screen) throw new Error("Catalog screen not found");
     const locationId = data.location_id ?? SHOP_LOCATION_ID;
     const location = await locationOf(sb, locationId);
     if (data.bid_id && data.service_job_id) throw new Error("Pick one job, not both");
-    const d = screen.data as {
-      kind?: string;
-      columns?: string[];
-      rows?: Record<string, unknown>[];
-      products?: { name: string; unit_type?: unknown }[];
-    };
-    // Adhesives count in the product's own unit (its catalog unit_type: "5-gal. Box Set",
-    // "4-Cartridge Case", "50-Gal Drum Set"); every other screen in its per-screen unit.
-    let unit = stockUnitFor(data.screen_id);
-    let piece: PieceDef | null = null;
-    if (d.kind === "adhesives") {
-      const product = (d.products ?? []).find((p) => p.name === data.row_label);
-      if (!product) throw new Error(`"${data.row_label}" is not on the Adhesives screen`);
-      if (typeof product.unit_type === "string" && product.unit_type.trim()) {
-        unit = product.unit_type.trim();
-        piece = pieceDefFromUnitType(product.unit_type);
-      }
-    } else {
-      const cols = d.columns ?? [];
-      const keys = rowKeys(cols, d.rows ?? []);
-      const rowIdx = keys.indexOf(data.row_label);
-      if (rowIdx < 0) throw new Error(`"${data.row_label}" is not on this screen`);
-      if (!cols.includes(data.price_col) || data.price_col === labelColOf(cols))
-        throw new Error(`"${data.price_col}" is not a price column on this screen`);
-      const packCol = PACK_QTY_COLS.find((c) => cols.includes(c));
-      const packRaw = packCol ? (d.rows ?? [])[rowIdx]?.[packCol] : undefined;
-      const packQty =
-        typeof packRaw === "number" ? packRaw : packRaw != null ? Number(packRaw) : null;
-      piece = pieceDefFromPack(packCol, Number.isFinite(packQty) ? packQty : null);
-    }
+    // The cell's unit and pack: a catalog cell's per-screen unit (Adhesives: the product's own
+    // unit type), or a service material's own unit (cellUnit).
+    const { unit, piece } = await cellUnit(sb, data);
     // Pieces convert to a decimal of the pack from the catalog's own pack size.
     let counted = data.qty;
     if (data.in_pieces) {
@@ -487,6 +465,14 @@ async function cellUnit(
   sb: SupabaseClient<Database>,
   cell: { screen_id: string; row_label: string; price_col: string },
 ): Promise<{ unit: string; piece: PieceDef | null }> {
+  // A service material with no bid-catalog twin: stocked in its own unit, whole units only.
+  if (cell.screen_id === SERVICE_STOCK_SCREEN) {
+    const m = (await loadServiceMaterialLinks(sb)).find(
+      (x) => !x.stock_screen_id && x.name === cell.row_label,
+    );
+    if (!m) throw new Error(`"${cell.row_label}" is not on the service material list`);
+    return { unit: unitWord(m.unit), piece: null };
+  }
   const { data: screen, error } = await sb
     .from("pricing_catalog")
     .select("data")
@@ -882,6 +868,11 @@ export interface TruckStockRow extends StockRow {
   piece: PieceDef | null;
   /** Catalog item number when there is exactly one for the cell. */
   item_no: string | null;
+  /**
+   * The service material name for the cell (owner, Oct 6: CenterPoint's names on repair tickets),
+   * or null: the row keeps the catalog's label.
+   */
+  label: string | null;
 }
 export const myTruckStock = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -901,13 +892,15 @@ export const myTruckStock = createServerFn({ method: "GET" })
       .select("id, name")
       .in("id", vehicles);
     const names = new Map((locs ?? []).map((l) => [l.id, l.name]));
-    const [{ data: moves, error }, cats] = await Promise.all([
+    const [{ data: moves, error }, cats, materials] = await Promise.all([
       sb
         .from("inventory_movements")
         .select("location_id, screen_id, row_label, price_col, qty, unit, created_at, item_no")
         .in("location_id", vehicles),
       categories(sb),
+      loadServiceMaterialLinks(sb),
     ]);
+    const byMaterial = materialsByCell(materials);
     if (error) throw new Error(error.message);
     const byCell = new Map<string, TruckStockRow>();
     for (const m of moves ?? []) {
@@ -927,6 +920,7 @@ export const myTruckStock = createServerFn({ method: "GET" })
           item_nos: [],
           item_no: m.item_no,
           piece: null,
+          label: serviceLabel(byMaterial, m),
         };
         byCell.set(key, row);
       }

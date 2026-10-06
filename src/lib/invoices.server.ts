@@ -52,6 +52,13 @@ import {
 import { pieceFromCountedNotes, type PieceDef } from "@/lib/stock-units";
 import { timeLines, type RateTable } from "@/lib/invoice-labor";
 import { easternYmd } from "@/lib/field-day";
+import {
+  SERVICE_STOCK_SCREEN,
+  materialForCell,
+  materialsByCell,
+  packCostFor,
+} from "@/lib/service-materials";
+import { loadServiceMaterials } from "@/lib/service-materials.server";
 import { toBase64 } from "@/lib/webpush";
 
 type Client = SupabaseClient<Database>;
@@ -236,16 +243,28 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
     byCell.set(key, cur);
   }
   const markup = Number(settings.material_markup);
+  // Service materials are priced from Setup › Material pricing, not Estimate Pricing (owner,
+  // Oct 6: "they price differently"). A cell no service material covers (stock from the bid
+  // catalog only) keeps the catalog's cost.
+  const byMaterial = materialsByCell(await loadServiceMaterials(sb));
   for (const c of byCell.values()) {
     if (!(c.qty > 0)) continue;
-    const [cost, catalogPiece] = await Promise.all([cellCost(sb, c), cellPiece(sb, c)]);
+    const material = materialForCell(byMaterial, c);
+    const own = c.screen_id === SERVICE_STOCK_SCREEN;
+    const [catalogCost, catalogPiece] = await Promise.all([
+      material ? null : cellCost(sb, c),
+      own ? null : cellPiece(sb, c),
+    ]);
     // Counted in pieces when the catalog says how many a pack holds (else what the tech's
     // counted_note "50 fasteners" beside -0.05 box says); otherwise in packs as before.
     const piece = catalogPiece ?? pieceFromCountedNotes(c.notes);
+    // The service price is per piece / unit as CenterPoint lists it; the ledger is in packs.
+    const cost = material ? packCostFor(material.cost, piece) : (catalogCost ?? 0);
+    const named = material ? { ...c, row_label: material.name, price_col: "" } : c;
     lines.push({
       sort: sort++,
       kind: "material",
-      ...materialLineFor(c, c.qty, cost ?? 0, markup, piece),
+      ...materialLineFor(named, c.qty, cost, markup, piece),
       // The day the material was last taken, in the office's time zone (not UTC's day).
       on_date: easternYmd(new Date(c.last)),
       source: `cell:${c.screen_id}|${c.row_label}|${c.price_col}`,

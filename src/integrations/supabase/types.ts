@@ -3121,6 +3121,49 @@ export type Database = {
           },
         ];
       };
+      /** Service material price list (20261006130000_service_materials.sql). */
+      service_materials: {
+        Row: {
+          active: boolean;
+          cost: number;
+          created_at: string;
+          id: string;
+          name: string;
+          sort: number;
+          stock_price_col: string | null;
+          stock_row_label: string | null;
+          stock_screen_id: string | null;
+          unit: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          cost?: number;
+          created_at?: string;
+          id?: string;
+          name: string;
+          sort?: number;
+          stock_price_col?: string | null;
+          stock_row_label?: string | null;
+          stock_screen_id?: string | null;
+          unit: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          cost?: number;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          sort?: number;
+          stock_price_col?: string | null;
+          stock_row_label?: string | null;
+          stock_screen_id?: string | null;
+          unit?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       service_rates: {
         Row: {
           bill_rate: number;
@@ -3970,6 +4013,20 @@ export type Database = {
           updated_at: string | null;
           usage_count: number | null;
           work_completed: string | null;
+        };
+        Relationships: [];
+      };
+      /** service_materials without cost (20261006130000_service_materials.sql). */
+      service_materials_catalog: {
+        Row: {
+          active: boolean | null;
+          id: string | null;
+          name: string | null;
+          sort: number | null;
+          stock_price_col: string | null;
+          stock_row_label: string | null;
+          stock_screen_id: string | null;
+          unit: string | null;
         };
         Relationships: [];
       };

@@ -31,6 +31,8 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import type { ItemNumberRow, PriceTarget } from "@/lib/admin-item-numbers.functions";
+import { listServiceMaterialNames } from "@/lib/service-materials.functions";
+import { serviceStockTargets } from "@/lib/service-materials";
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import {
   addMovement,
@@ -173,6 +175,7 @@ export function InventoryPage(props: {
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
   const targetsFn = useServerFn(listPriceTargets);
+  const serviceNamesFn = useServerFn(listServiceMaterialNames);
   const itemNosFn = useServerFn(listItemNumbers);
   const jobsFn = useServerFn(listJobOptions);
   const defaultsFn = useServerFn(myServiceDefaults);
@@ -189,6 +192,11 @@ export function InventoryPage(props: {
     queryFn: () => movesFn({ data: {} }),
   });
   const targetsQ = useQuery({ queryKey: ["price-targets"], queryFn: () => targetsFn() });
+  // Service materials with no bid-catalog twin (owner, Oct 6): stocked here too.
+  const serviceNamesQ = useQuery({
+    queryKey: ["service-material-names"],
+    queryFn: () => serviceNamesFn(),
+  });
   const itemNosQ = useQuery({ queryKey: ["item-numbers"], queryFn: () => itemNosFn() });
   const jobsQ = useQuery({ queryKey: ["inventory-jobs"], queryFn: () => jobsFn() });
   // The vehicle(s) I drive today and my open tickets: what "Take from" starts on.
@@ -201,7 +209,10 @@ export function InventoryPage(props: {
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
   };
-  const targets = useMemo(() => targetsQ.data ?? [], [targetsQ.data]);
+  const targets: PriceTarget[] = useMemo(
+    () => [...(targetsQ.data ?? []), ...serviceStockTargets(serviceNamesQ.data ?? [])],
+    [targetsQ.data, serviceNamesQ.data],
+  );
   const itemNumbers = useMemo(() => itemNosQ.data ?? [], [itemNosQ.data]);
   const products = useMemo(() => productOptions(targets, itemNumbers), [targets, itemNumbers]);
   const pieceOf = (screenId: string, rowLabel: string): PieceDef | null =>
