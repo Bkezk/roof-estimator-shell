@@ -61,7 +61,12 @@ export const TYPE_LABELS: Record<ServiceType, string> = {
 };
 
 /** A job row with the technician's display name joined. */
-export type ServiceJobWithTech = ServiceJobRow & { technician_name: string | null };
+export type ServiceJobWithTech = ServiceJobRow & {
+  technician_name: string | null;
+  /** The property's city and state, on the ticket list (owner, Oct 6: "at a glance"). */
+  site_city?: string | null;
+  site_state?: string | null;
+};
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 
@@ -107,6 +112,21 @@ async function withTechNames(
   }));
 }
 
+/** Each ticket's property city and state (one read of the properties the list names). */
+async function withPlaces(
+  sb: SupabaseClient<Database>,
+  rows: ServiceJobWithTech[],
+): Promise<ServiceJobWithTech[]> {
+  const ids = [...new Set(rows.map((r) => r.site_id).filter((x): x is string => !!x))];
+  if (!ids.length) return rows;
+  const { data } = await sb.from("crm_sites").select("id, city, state").in("id", ids);
+  const by = new Map((data ?? []).map((s) => [s.id, s]));
+  return rows.map((r) => {
+    const s = r.site_id ? by.get(r.site_id) : undefined;
+    return s ? { ...r, site_city: s.city, site_state: s.state } : r;
+  });
+}
+
 /** Every ticket for the office; a technician's own tickets only (RLS filters the rows). */
 export const listServiceJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -119,7 +139,7 @@ export const listServiceJobs = createServerFn({ method: "GET" })
       .order("updated_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
-    return withTechNames(context.supabase, data ?? []);
+    return withPlaces(context.supabase, await withTechNames(context.supabase, data ?? []));
   });
 
 /**

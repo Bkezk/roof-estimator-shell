@@ -106,7 +106,7 @@ import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.f
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
-import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";
+import { openedLine, openerName, shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
 import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
@@ -807,11 +807,18 @@ function TicketListRow({
 }) {
   const navigate = useNavigate();
   const stage = asStage(j.stage);
+  // Owner, Oct 6: the pertinent details at a glance, no money — technician, day, Job #, PO # (the
+  // ticket's own, not a materials PO), CenterPoint #; the stage date beside the stage.
   const meta = [
     j.technician_name ?? "Unassigned",
     j.scheduled_date ? dayWithWindow(day(j.scheduled_date), j.arrival_window) : "No date",
+    j.job_number ? `Job # ${j.job_number}` : null,
+    j.po_number ? `PO # ${j.po_number}` : null,
     j.centerpoint_ticket ? `CenterPoint #${j.centerpoint_ticket}` : null,
   ].filter(Boolean);
+  const cityState = [j.site_city, j.site_state].filter((x) => x && x.trim()).join(", ");
+  const place = [j.site_name, j.location_name].filter(Boolean).join(" › ");
+  const since = shortDate(j.stage_changed_at);
   // Owner, Sep 28: the whole card opens the ticket, as on Bids (no Open button).
   const open = () => void navigate({ to: "/service", search: { id: j.id } });
   return (
@@ -837,23 +844,25 @@ function TicketListRow({
             {typeLabel(j.service_type)}
           </Badge>
           <StageBadge stage={stage} fieldStatus={j.field_status} />
+          {since && (
+            <span className="text-xs text-muted-foreground" title="The day it entered this stage">
+              since {since}
+            </span>
+          )}
           <OverdueBadge days={ticketOverdueDays({ ...j, stage }, today)} what="Was due" />
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
           )}
         </div>
-        {(j.site_name || j.description) && (
-          <p className="text-sm">
-            {j.site_name && (
-              <span className="inline-flex items-center gap-1 text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5" />
-                {j.site_name}
-                {j.description ? " · " : ""}
-              </span>
-            )}
-            {j.description}
+        {(place || cityState) && (
+          <p className="inline-flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            {place && <span className="text-foreground">{place}</span>}
+            {place && cityState ? " · " : ""}
+            {cityState}
           </p>
         )}
+        {j.description && <p className="text-sm">{j.description}</p>}
         <p className="text-sm text-muted-foreground">
           {meta.join(" · ")} · Updated {when(j.updated_at)}
           {j.updated_by_name ? ` by ${j.updated_by_name}` : ""}

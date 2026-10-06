@@ -2978,6 +2978,7 @@ export type Database = {
           arrival_window: string | null;
           location_id: string | null;
           location_name: string | null;
+          stage_changed_at: string | null;
           contacted_at: string | null;
           escalated_at: string | null;
           centerpoint_invoice: string | null;
@@ -3027,6 +3028,7 @@ export type Database = {
           arrival_window?: string | null;
           location_id?: string | null;
           location_name?: string | null;
+          stage_changed_at?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;
@@ -3076,6 +3078,7 @@ export type Database = {
           arrival_window?: string | null;
           location_id?: string | null;
           location_name?: string | null;
+          stage_changed_at?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;

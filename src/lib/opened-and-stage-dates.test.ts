@@ -426,7 +426,7 @@ describe("the ticket page: 'Opened … by …' under the title, the stage strip 
   const src = read("src/components/service-page.tsx");
   it("imports the helpers, the strip and the timeline's reader", () => {
     expect(src).toContain(
-      'import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";',
+      'import { openedLine, openerName, shortDate, ticketStageStrip } from "@/lib/stage-dates";',
     );
     expect(src).toContain('import { StageStrip } from "@/components/stage-strip";');
     expect(src).toContain('import { listJobEvents } from "@/lib/service-field.functions";');
