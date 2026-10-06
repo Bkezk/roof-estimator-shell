@@ -414,8 +414,15 @@ export function mailingLines(
 export const ACCOUNT_ALREADY_DELETED = "This customer was already deleted";
 /** Any change to a deleted customer, its sites or its contacts. */
 export const ACCOUNT_DELETED = "This customer was deleted; an admin or a manager can restore it";
-/** Ticket stages that keep a customer from being deleted (the open work). */
-export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/**
+ * Ticket stages that keep a customer from being deleted (the open work). Authorized too (owner,
+ * Oct 6): a reviewed ticket that is not yet invoiced is still owed money. Work Overview's own set
+ * (work-counts.ts) stays at three: the owner keeps those lists as they are.
+ */
+export const OPEN_TICKET_STAGES = ["open", "scheduled", "done", "authorized"] as const;
+/** A ticket at this stage keeps its customer (the pure twin of the delete query's `.in`). */
+export const keepsCustomer = (stage: string): boolean =>
+  (OPEN_TICKET_STAGES as readonly string[]).includes(stage);
 /** Opportunity statuses that keep a customer from being deleted. */
 export const OPEN_OPPORTUNITY_STATUSES = ["open", "contacted", "quoted"] as const;
 
