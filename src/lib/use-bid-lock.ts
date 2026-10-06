@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 
+import { bidLockSessionKey } from "@/lib/bid-lock-session";
 import { acquireBidLock, releaseBidLock } from "@/lib/bid-locks.functions";
 
 /** Renew a held lock this often (well inside the server TTL). */
@@ -27,11 +28,17 @@ export function useBidLock(args: {
 }): { sessionKey: string; holder: LockHolder | null; readOnly: boolean } {
   const acquireFn = useServerFn(acquireBidLock);
   const releaseFn = useServerFn(releaseBidLock);
-  const [sessionKey] = useState(() =>
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+  // This tab's key, kept in sessionStorage so a refresh is the same session and gets the lock
+  // straight back instead of "Read only: <you> is editing" for 45 s (owner, Oct 6).
+  const [sessionKey] = useState(() => {
+    let storage: Storage | null = null;
+    try {
+      storage = typeof window === "undefined" ? null : window.sessionStorage;
+    } catch {
+      storage = null;
+    }
+    return bidLockSessionKey(storage);
+  });
   const [holder, setHolder] = useState<LockHolder | null>(null);
   const onAcquiredRef = useRef(args.onAcquired);
   onAcquiredRef.current = args.onAcquired;
