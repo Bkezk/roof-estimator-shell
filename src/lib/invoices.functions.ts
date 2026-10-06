@@ -1039,8 +1039,11 @@ export const getServiceRates = createServerFn({ method: "GET" })
     }): Promise<{
       rates: ServiceRateRow[];
       settings: ServiceSettingsRow;
-      /** Admins and managers: who may be the authorizer (M9). [] until its migration. */
-      managers: { id: string; name: string }[];
+      /**
+       * Admins and managers: who may be the authorizer (M9). [] until its migration. The email
+       * lets the picker say whether the default authorizer is a user yet (default-authorizer.ts).
+       */
+      managers: { id: string; name: string; email: string }[];
     }> => {
       await ratesManager(context);
       const [{ data: rates, error }, { data: settings }, mgrs] = await Promise.all([
@@ -1058,6 +1061,7 @@ export const getServiceRates = createServerFn({ method: "GET" })
       const managers = (mgrs.error ? [] : (mgrs.data ?? [])).map((m) => ({
         id: m.id,
         name: (m.full_name ?? "").trim() || m.email,
+        email: m.email,
       }));
       return { rates: rates ?? [], settings, managers };
     },

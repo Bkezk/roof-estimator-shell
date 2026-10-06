@@ -18,6 +18,7 @@ import {
   setServiceRates,
   type ServiceRateRow,
 } from "@/lib/invoices.functions";
+import { authorizerFallbackLabel } from "@/lib/default-authorizer";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -133,6 +134,13 @@ export function ServiceRatesSettings() {
     }
     save.mutate();
   };
+
+  // Who authorizes when nothing is picked (QA audit bug 6, owner Oct 6): Brandon by name once
+  // his profile is an admin / manager, else "not added as a user yet; until then every admin".
+  const fallback = authorizerFallbackLabel(
+    { authorizer_id: s?.authorizer_id || null },
+    q.data?.managers ?? [],
+  );
 
   return (
     <Card>
@@ -262,6 +270,8 @@ export function ServiceRatesSettings() {
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
+                  {/* Nothing picked: who it falls to (QA audit bug 6, owner Oct 6). */}
+                  {fallback ? <>{fallback}. </> : null}
                   Gets &quot;ready for your review&quot; when a ticket is Done and the Needs
                   authorization tab on Work Overview. Any manager can still mark a ticket
                   Authorized.

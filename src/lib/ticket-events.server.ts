@@ -108,7 +108,11 @@ export async function afterTicketStage(
       );
   }
   // The review timer (follow-up kind "invoice"): open while the ticket sits at Done, closed
-  // otherwise; on the authorizer's Work Overview under "Needs authorization".
+  // otherwise; on the authorizer's Work Overview under "Needs authorization". One follow-up per
+  // ticket (syncFollowup keys on it), so one assignee: the first authorizer. The order is the
+  // database's (settings → Brandon → admins by created_at, id; 20261006210000_default_authorizer
+  // .sql) — QA audit bug 6 (owner, Oct 6): it was unordered, so with two admins and nothing set
+  // the item flipped between them on any save. The rpc missing or empty: the office, as before.
   const assignee =
     authorizers[0] ??
     (row.created_by && office.some((u) => u.id === row.created_by) ? row.created_by : null) ??

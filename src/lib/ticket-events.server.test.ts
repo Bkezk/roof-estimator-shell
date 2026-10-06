@@ -5,6 +5,7 @@
  * (20261002090000_service_role_helpers.sql fixes the SQL) and the code then did nothing,
  * silently. These run it with a mocked client and check both paths.
  */
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const notify = vi.hoisted(() =>
@@ -77,6 +78,35 @@ describe("a ticket reaching Done", () => {
       title: "Authorize Ticket #101 Acme — Leak",
     });
     expect(errorLog).not.toHaveBeenCalled();
+  });
+
+  // QA audit bug 6 (owner, Oct 6): with no authorizer set, ticket_authorizers() returned every
+  // admin in no order and the follow-up went to whichever came first, so with two admins it
+  // flipped between them on any save. The database now orders the list (the set person, else
+  // Brandon, else admins by created_at, id); the code takes the first and tells them all.
+  it("two authorizers: the follow-up goes to the first one, in the database's order; both get the notice", async () => {
+    const rpc = vi.fn(async (fn: string) =>
+      fn === "ticket_authorizers"
+        ? { data: ["admin-1", "admin-2"], error: null }
+        : { data: ROSTER, error: null },
+    );
+    await afterTicketStage(row(), "scheduled", TECH, { rpc } as unknown as Client);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toEqual(["admin-1", "admin-2"]);
+    expect(syncFollowup).toHaveBeenCalledTimes(1);
+    expect(syncFollowup.mock.calls[0]![0]).toMatchObject({ assigneeId: "admin-1", closing: false });
+    // The same list the other way round: the first, not an arbitrary one.
+    vi.clearAllMocks();
+    const rpc2 = vi.fn(async (fn: string) =>
+      fn === "ticket_authorizers"
+        ? { data: ["admin-2", "admin-1"], error: null }
+        : { data: ROSTER, error: null },
+    );
+    await afterTicketStage(row(), "scheduled", TECH, { rpc: rpc2 } as unknown as Client);
+    expect(syncFollowup.mock.calls[0]![0]).toMatchObject({ assigneeId: "admin-2" });
+    // The code leans on the database's order; the comment says so.
+    const src = readFileSync("src/lib/ticket-events.server.ts", "utf8");
+    expect(src).toContain("settings → Brandon → admins by created_at");
   });
 
   it("opened by a technician: the invoice follow-up goes to the first office user", async () => {

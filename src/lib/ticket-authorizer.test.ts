@@ -3,7 +3,7 @@
  * be the go to person to authorize"; "should we have it appear under a Needs authorization tab
  * on the work overview page instead of done - waiting on the office?").
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const notify = vi.hoisted(() =>
@@ -167,8 +167,33 @@ describe("the setting and the database", () => {
     );
     expect(sql).toContain("create or replace function public.ticket_authorizers()");
     expect(sql).toContain("where s.id = 1 and p.role in ('admin', 'manager')");
-    expect(sql).toContain("where p.role = 'admin' and not exists (select 1 from chosen);");
     expect(sql).toContain("security definer");
+  });
+  // QA audit bug 6 (owner, Oct 6): 20261006210000_default_authorizer.sql is the last word on
+  // ticket_authorizers(): the set person, else Brandon (Brandon@flatroofonline.com) once he is
+  // an admin or manager, else every admin ordered by created_at, id — so the "Needs
+  // authorization" follow-up no longer flips between two admins on every save.
+  it("its last definer is 20261006210000, which keeps the set person first and orders the admins", () => {
+    const dir = "supabase/migrations";
+    const defs = readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+      .filter((f) =>
+        readFileSync(`${dir}/${f}`, "utf8").includes(
+          "create or replace function public.ticket_authorizers(",
+        ),
+      );
+    const last = defs.at(-1)!;
+    expect(last).toBe("20261006210000_default_authorizer.sql");
+    const body = flat(read(`${dir}/${last}`));
+    expect(body).toContain("where s.id = 1 and p.role in ('admin', 'manager')");
+    expect(body).toContain("lower(p.email) = 'brandon@flatroofonline.com'");
+    expect(body).toContain("where p.role = 'admin' and not exists (select 1 from chosen)");
+    expect(body).toContain("order by created_at, id");
+    expect(body).toContain("security definer set search_path = public");
+    expect(body).toContain(
+      "grant execute on function public.ticket_authorizers() to authenticated, service_role;",
+    );
   });
   it("Setup › Service rates: 'Authorizes Done tickets', Every admin or a manager; only admins / managers saved", () => {
     const ui = read("src/components/service-rates-settings.tsx");
