@@ -117,13 +117,13 @@ export function materialLineFor(
   else qty = r4(qty);
   const cost_rate = r4(packCost / piece.perPack);
   const rate = r4((packCost * (1 + markup)) / piece.perPack);
-  // "Price/Box" says no more than "per box" does; a colour or size column stays.
+  // "Price/Box" or "Cost/Sq. Ft." says no more than "per box" does; a colour or size column stays.
   const variant =
-    cell.price_col && cell.price_col !== cell.row_label && !/^price\b/i.test(cell.price_col)
+    cell.price_col && cell.price_col !== cell.row_label && !/^(price|cost)\b/i.test(cell.price_col)
       ? ` (${cell.price_col})`
       : "";
   return {
-    description: `${cell.row_label}${variant}${item} — ${count(piece.perPack)} ${plural(piece.perPack, piece.name)} per ${packWord(cell.unit)}`,
+    description: `${cell.row_label}${variant}${item} — ${packNote(piece, cell.unit)}`,
     qty,
     unit: piece.name,
     rate,
@@ -133,8 +133,44 @@ export function materialLineFor(
   };
 }
 
-/** The piece names a material line can be written in (stock-units.ts). */
-const PIECE_NAMES = new Set(["fastener", "cartridge", "gallon", "part"]);
+/**
+ * The pack note after a line's name. Pieces in a pack: "1,000 fasteners per box". A piece that
+ * is bigger than the stock unit (an ISO board, 32 sq ft of stock kept by the sq ft: perPack
+ * 1/32) reads the other way round, "32 sq ft per board" — not "0.031 boards per sq ft" (owner,
+ * Oct 6). The inverse is a whole number when within 1 %, else two decimals.
+ */
+function packNote(piece: PieceDef, unit: string): string {
+  if (piece.perPack >= 1)
+    return `${count(piece.perPack)} ${plural(piece.perPack, piece.name)} per ${packWord(unit)}`;
+  let per = 1 / piece.perPack;
+  const whole = Math.round(per);
+  per = whole > 0 && Math.abs(per - whole) / whole < 0.01 ? whole : r2(per);
+  return `${count(per)} ${unitText(per, packWord(unit))} per ${piece.name}`;
+}
+
+/**
+ * The piece names a material line can be written in (stock-units.ts: fastener, cartridge,
+ * gallon, part; service-materials.ts piece_name: board, roll, pad …) and the stock units that
+ * take a plain "s" (STOCK_UNIT_BY_SCREEN: tube, bag, piece, package, pail). Not "box", "each",
+ * "ft" or "sq ft", which do not.
+ */
+const PIECE_NAMES = new Set([
+  "fastener",
+  "cartridge",
+  "gallon",
+  "part",
+  "board",
+  "roll",
+  "pad",
+  "sheet",
+  "bundle",
+  "tube",
+  "bag",
+  "piece",
+  "package",
+  "pail",
+  "bucket",
+]);
 
 /** A line's unit for display: a piece name pluralised ("50 fasteners"), any other unit as is. */
 export function unitText(qty: number, unit: string): string {
