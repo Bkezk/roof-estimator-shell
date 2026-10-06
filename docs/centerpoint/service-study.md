@@ -12,6 +12,10 @@ earlier study (`centerpoint-report.md`, screenshots `screenshots/01…77`) is ci
 Tickets used: **5484** (open, New Service, technician assigned, a callback after a completed
 visit), **5431** (completed and invoiced), **5493 / 5494** (completed, on the Tech Board).
 
+**Oct 6 addendum (§K):** the owner created test ticket **5496** so the buttons that were left
+alone on Oct 5 could be pressed. That pass was *not* read-only; it changed 5496 only. §K
+corrects §F, §I and "Not seen".
+
 ---
 
 ## A. Service List ("TICKETS")
@@ -248,7 +252,8 @@ bottom; each step gets a green tick when done [55]–[61].
 On the completed ticket 5431 the wizard opens straight on Close Ticket with all seven ticks
 [61]; on 5484 it opens on Leak Repairs with steps 3–5 unticked (resolution photos missing).
 
-*Not seen, on purpose:* the Material picker, the Add PO fields, the Roof Inspection screen and
+*Seen Oct 6 on test ticket 5496 — see §K* (Complete Service checks only Number of Techs ≥ 1
+and does not move the stage). *Not seen on Oct 5, on purpose:* the Material picker, the Add PO fields, the Roof Inspection screen and
 what Complete Service validates — each is a button with no link behind it, and pressing it may
 create a record. The material list itself is the account's Material Library (Settings, [67]);
 the earlier study counted 142 items. Check-out name: the History entry has "Checked in with"
@@ -333,7 +338,8 @@ signature image; "**<ticket> created by <user>**". Stage moves are *not* on the 
 <address>", subject, time. On 5484: "New Service: 5484" ×5, "Service Accepted" ×2, "Service
 Completed" ×4, "Service Authorized" ×4 — all to internal @flatroofonline.com addresses, none to
 the customer, though the ticket's Notifications field is **On**. Recipients differ per stage
-(5 for New Service, 2 for Accepted).
+(5 for New Service, 2 for Accepted). *Oct 6:* with Notifications **Off**, 5496 sent no stage
+emails at all — only the creation emails sent while it was still On [88] (§K).
 
 **Activity tab** [35][36]: a field-level audit — DATE, ACTIVITY (Created / Updated / Deleted),
 RESOURCE, USER, "View Changes" → FIELD / OLD VALUE / NEW VALUE (e.g. "Stage Name Completed →
@@ -365,6 +371,93 @@ Scoreboard, Materials Usage, Service Backlog, Inventoried Repairs, AR / Aging [B
 | Service Backlog [64] | summary by type: Type, Estimated Cost, Estimated Sales, Estimated Margin (Leak 81, Scope 2, Inspection 2, All 85: $56,756.70 / $53,860.43 / −5 %); rows: TICKET ID, TICKET TYPE, COMPANY ("Bill To …"), PROPERTY, CITY, ZIP CODE, STATE, SALES REP, TECHNICIAN, ESTIMATED START DATE, ETA, ACCEPTED DATE, STARTED DATE, ESTIMATED COST, ESTIMATED PRICE, SALES PRICE, ESTIMATED MARGIN ($), ESTIMATED MARGIN (%) | same filter dialog and Archived chip as the Service List |
 | Inventoried Repairs [65] | COMPANY, CITY, STATE, ZIP CODE, ACCOUNT MANAGER, EMERGENCY, PROACTIVE, GRADE, TOTAL | none visible; still loading when read |
 | Materials Usage [66] | TICKET, DATE ADDED, TECHNICIAN, TRUCK ID, MATERIAL, MATERIAL CODE, COST, QUANTITY, UNITS | week (◀ ● ▶); empty this week |
+
+## K. Test ticket 5496 (Oct 6)
+
+Ticket 5496, "Test Report", 5K, Inc / 1474 W Cumberland Gap Pkwy, type Leak, created by the
+owner's login, CenterPoint 5.10.054444. The owner's rules for it: no technician assigned, no
+email sent, an invoice may be looked at but not sent. Notifications was set to **Off** before
+anything else [73]. What was done to it, in order: Accepted → Workflow Check In (looked, not
+filled) → Close Ticket (closing note "TEST - study of the close-out, ignore", Number of Techs
+1) → Complete Service → Choose Stage ▸ Completed → Mark as Authorized. No material, PO,
+inspection photo or invoice was saved. **5496 is left at Authorized with no invoice**; archive
+or delete it in CenterPoint when done.
+
+**Notifications Off stops the stage emails.** The Notifications tab after all of the above lists
+only the five "New Service: 5496" emails sent at creation, before it was switched Off [88]. No
+"Service Accepted", "Service Completed" or "Service Authorized" mail went out. This corrects
+§I, which read "On" on 5484 and assumed the emails went out regardless; and S2 below — the
+setting is the office's way to keep a ticket quiet.
+
+**Accepted with no technician** [74]: Technician and ETA rows are empty, and the only button
+next to the stage strip is the ⋮ menu. A fresh ticket offers no "Mark as Scheduled" — that
+comes with assigning a technician (not done).
+
+**Stage menu** [84][85]: ⋮ → **Go Back** (one stage back) or **Choose Stage** — the full list of
+nine: New Service, Accepted, Scheduled, En Route, In Progress, Completed, Authorized,
+Invoiced, Closed. Any stage can be chosen from any other, no technician needed. After
+Completed the one button is **Mark as Authorized** [86]; after Authorized it is **Mark as
+Invoiced**, and the **Invoice** bar with **+ Create** appears for the first time [87] — the
+invoice block only exists from Authorized on. (Create was not pressed.)
+
+**Complete Service does not move the stage.** It saved the close-out, wrote the Timeline entry
+"Service Completed | Number of Technicians on the job:1 | Checked in with: | Notes: | Checked
+out with: | Notes:TEST - study of the close-out, ignore" and returned to the Tickets list, but
+the stage stayed **Accepted** [83]. On real tickets the technician's app moves En Route → In
+Progress → Completed; from the desktop the office sets Completed by hand.
+
+**What Complete Service checks** [76][77]: only **Number of Techs ≥ 1** — the button is greyed
+until it is. Closing notes, repairs, photos, signature, check-in name and time are all
+optional; the steps' green ticks are a guide, not a gate. The close-out autosaves (a tick
+appeared on the thumbs-up step as soon as a field was filled).
+
+**Check In** [75]: "Repairs >" is disabled until a Site Contact Name is typed.
+
+**Add Material** [78]: dialog "Material Information" — **Material** (optional search over the
+Material Library, quick-tag chips EPDM / Firestone / DL / Cleaning / Asphalt / TPO / Sealant /
+Black Jack / Tar …, rows "<name> - $<price>/ <unit>", 133 items), **Name*** (free text, so a
+material not in the library can be typed), **Quantity***; Submit / Back. No truck, no unit
+field of its own.
+
+**Add PO** [79]: "PO Information" — Date* (today), PO#*, Title, Price*, Notes, Receipt (upload),
+Approved? toggle; Submit / Back.
+
+**Roof Inspection** [80]–[82] leaves the ticket for the property's **Sections** page: aerial
+photo, "Please select the section you are inspecting", list "1 - Section 1", Edit Sections,
+Close Ticket. Each section is a six-step wizard:
+
+| Step | Title / hint | Fields |
+|---|---|---|
+| 1 | Overview Photos (0 / 4) — "Take four photos, one at each of the corners facing inward." | Take Overview Photo; Next disabled until 4 |
+| 2 | Observation Photos | at least 2 photos; videos |
+| 3 | Composition | (not opened) |
+| 4 | Issues — "Capture deficiencies…" | Take Issue Photo; Show Corrected |
+| 5 | Grading — "Give an expert assessment of the condition of the roof." | Membrane, Flashings, Sheet Metal, Overall Grade, Estimated Replacement; key **A** New / Like New, **B** Good, **C** Fair, **D** Poor, near end of life, **F** Failed |
+| 6 | Recommendations | SqFt, Replacement Budget, Recommendation; Complete Section |
+
+then "Submit Inspection" for the whole roof. No photo was taken, so nothing was saved.
+
+**Audit** [89][90]: every change above is an "Updated" row on Activity; View Changes on the last
+shows "Last Stage Change 13:01:07 → 13:01:16" and "Stage Name Completed → Authorized". The
+Timeline shows the Service Completed entry but no stage moves (as §I said).
+
+**What this changes for the portal**
+- **M2 stands, and is already stricter than CenterPoint.** CenterPoint's Complete asks only for
+  a crew count; the portal's "Before you finish" warning (missing After photo, signature,
+  closing notes) gives more than CenterPoint does, and the crew is already required by the
+  named-crew step. Nothing to add.
+- **S2 is a real per-ticket switch**, not a dead one. The portal sends no stage emails at all
+  (design §9), so there is still nothing to switch off; keep it skipped.
+- **M9 matches.** CenterPoint has the same Completed → Authorized → Invoiced order, the invoice
+  appears only at Authorized, and the office can jump to any stage — the same as the portal's
+  manager stage select and its "invoice needs Authorized" rule.
+- **Inspection grading** (A–F per membrane / flashings / sheet metal / overall, estimated
+  replacement year and budget per section) is richer than the portal's Inspection ticket type.
+  The portal's inspection is a checklist of OK / Issue / N/A with notes [src/lib/inspection.ts].
+  New gap **M10**, below, for the owner to decide (open question 10).
+- **Add Material's free-text Name** lets a tech record something not in the library; on the
+  portal a ticket's materials come from shop or truck stock only, and anything else is an
+  "Add line" on the invoice. Owner to decide (open question 11).
 
 ---
 
@@ -419,6 +512,7 @@ at 6000 so they never collide with CenterPoint's.
 | M7 | List filters by **technician** and by dates [4] | type, stage, Mine, Overdue | a Technician select in the list filters (no date ranges — the stage groups already sort by date) |
 | M8 | design doc §4 vs what is billed (table above) | doc says travel bills at 135/95/85 | correct `service-module-design.md` §4 to the travel rates actually used |
 | M9 | **Authorized** (added Oct 5 from the owner's workflow): the owner reviews a Completed ticket before the manager invoices it [24][R-§2] | Done went straight to "To invoice" | an Authorized stage between Done and Invoiced, set by the owner (Brandon) or a manager; his "Needs authorization" tab on Work Overview; Closed by hand |
+| M10 | **Roof grading per section** (added Oct 6, §K): Membrane, Flashings, Sheet Metal, Overall A–F, Estimated Replacement, SqFt, Replacement Budget, Recommendation; four corner overview photos [80]–[82] | Inspection = checklist OK / Issue / N/A + notes, one per ticket [inspection.ts] | *not built — owner to decide:* an A–F grade, replacement year and budget per section on the Inspection ticket, so a report can list roofs graded D/F |
 
 ## 2. Portal is better — keep
 
@@ -442,7 +536,7 @@ at 6000 so they never collide with CenterPoint's.
 | # | CenterPoint | Why skip |
 |---|---|---|
 | S1 | stage emails to 2–5 office users on every stage [34] | design §9: the only outbound email is the invoice; the portal notifies on assignment and on Done |
-| S2 | Notifications On / Internal / Off per ticket | no customer email seen even with "On" (5484) |
+| S2 | Notifications On / Internal / Off per ticket — Off does silence the stage emails (5496, §K) | no customer email seen even with "On" (5484); the portal sends no stage emails, so there is nothing to switch off |
 | S3 | Service Map [52] | used "sometimes" (report §1); the Today card opens Google Maps |
 | S4 | Scoreboard, Backlog, Materials Usage, Inventoried Repairs [63]–[66] | §9: "each is a saved filter or a one-query page later"; two were empty this week |
 | S5 | Service Documents [26] | empty on both tickets |
@@ -468,10 +562,15 @@ For RoAnna Sims:
 8. **Not to Exceed** — do any customers give an NTE amount?
 9. **Urgent helper travel** — the portal bills $40; CenterPoint showed $45 and $35, never $40. Which is right?
 
+Added Oct 6 (§K), for the owner:
+10. **M10** — do you want CenterPoint's A–F roof grading (per section, with replacement year and budget) on the portal's Inspection tickets?
+11. **Materials not in stock** — should a tech be able to type a material that is in no truck or shop list, or is "Add line" on the invoice enough?
+
 ## Not seen
 
 - The technician app and its phone layout (G); "Generate Link" not pressed.
-- What **Complete Service** validates, the **Roof Inspection** screen, the **Add Material** picker and the **Add PO** fields — buttons with no link; pressing may create records.
+- ~~What Complete Service validates, the Roof Inspection screen, the Add Material picker and the Add PO fields~~ — seen Oct 6 on test ticket 5496 (§K).
+- The invoice editor's **Create** on a fresh ticket (5496 reached Authorized; Create was not pressed), the Composition step of an inspection, and anything that needs a technician assigned (Scheduled, Generate Link, the Tech Board drop).
 - Drag-and-drop on the Tech Board — a drop changes a ticket.
 - Role permissions — "Lists & Access" on an employee did not open outside edit mode.
 - Whether editing an invoiced ticket changes its invoice.
