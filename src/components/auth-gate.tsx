@@ -7,6 +7,7 @@ import { canAccess, homeFor, isAdmin, managesTickets, pageForPath } from "@/lib/
 import { dispatchRemindersIfDue } from "@/lib/followups.functions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationsBell } from "@/components/notifications-bell";
+import { GlobalSearch } from "@/components/global-search";
 import { Button } from "@/components/ui/button";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 
@@ -95,7 +96,11 @@ function AuthedShell({ children }: { children: ReactNode }) {
           <header className="flex h-14 items-center gap-3 border-b px-4">
             <SidebarTrigger />
             <span className="font-semibold">JBK Portal</span>
-            <div className="ml-auto flex items-center gap-1">
+            {/* One search over everything, Ctrl / ⌘ K (owner, Oct 6, as CenterPoint's header). */}
+            <div className="flex flex-1 justify-center px-2">
+              <GlobalSearch />
+            </div>
+            <div className="flex items-center gap-1">
               <NotificationsBell />
             </div>
           </header>
