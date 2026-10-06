@@ -72,7 +72,7 @@ describe("the Unassigned rail is colour-coded by stage", () => {
   });
   it("carries a legend of the board's colours, en route and on site among them", () => {
     expect(board).toMatch(
-      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend\s+stages=\{\["open", "scheduled", "en_route", "on_site", "done", "authorized"\]\}/,
+      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend\s+stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
     expect(board).toMatch(
       /function StageLegend\(\{ stages \}: \{ stages: readonly StageToneKey\[\] \}\)/,

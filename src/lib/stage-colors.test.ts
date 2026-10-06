@@ -46,7 +46,8 @@ describe("used on the board, the ticket list and the stage strip", () => {
       '<Check className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Done" />',
     );
     expect(board).toMatch(
-      /stages=\{\["open", "scheduled", "en_route", "on_site", "done", "authorized"\]\}/,
+      // Every stage's colour in the key (owner, Oct 6: Invoiced was missing).
+      /stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
   });
   it("the ticket list's stage badge and the ticket's stage strip", () => {
