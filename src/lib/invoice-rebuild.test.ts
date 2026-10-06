@@ -35,6 +35,13 @@ describe("mergeRebuild", () => {
     );
     expect(out[0]).toMatchObject({ qty: 3, rate: 95, total: 285, rate_overridden: true });
   });
+  it("…and its cost per unit (the editor rescaled it with the typed rate; owner, Oct 6)", () => {
+    const out = mergeRebuild(
+      [line({ qty: 2, rate: 95, total: 190, cost_rate: 54.29, rate_overridden: true })],
+      [line({ qty: 3, rate: 85, total: 255, cost_rate: 48.57, cost_total: 145.71 })],
+    );
+    expect(out[0]).toMatchObject({ cost_rate: 54.29, cost_total: 162.87 });
+  });
   it("a price not changed by hand takes today's rate", () => {
     const out = mergeRebuild([line({ rate: 80, rate_overridden: false })], [line({ rate: 85 })]);
     expect(out[0]!.rate).toBe(85);
@@ -77,9 +84,11 @@ describe("rateWasChanged", () => {
 describe("wired in", () => {
   const fns = readFileSync("src/lib/invoices.functions.ts", "utf8");
   it("saving a draft remembers a price changed by hand (once the column exists)", () => {
-    // Since Oct 6 a rate that only follows the invoice's markup is not "changed by hand".
-    expect(fns).toMatch(
-      /if \(prev && "rate_overridden" in prev\)\s+row\.rate_overridden =\s+rateWasChanged\(prev, l\.rate\) &&\s+!rateFromMarkup\(/,
+    // Since Oct 6 (QA audit) the editor says which rate was typed (rate_overridden) and the save
+    // writes that flag through savedLineRow (invoice-typed-price.test.ts).
+    expect(fns).toContain("const row: LineWrite = savedLineRow(inv.id, i, l, prev);");
+    expect(readFileSync("src/lib/invoice-rebuild.ts", "utf8")).toContain(
+      'if (prev && "rate_overridden" in prev) row.rate_overridden = l.rate_overridden === true;',
     );
   });
   it("the rebuild merges instead of throwing everything away", () => {

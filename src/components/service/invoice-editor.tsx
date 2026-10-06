@@ -419,6 +419,13 @@ interface LineDraft {
   source: string | null;
   /** The saved line's rate and cost per unit (null on a new line): rescaleCost's base. */
   orig: { rate: number; cost_rate: number } | null;
+  /**
+   * The rate was typed by hand on a ticket line (owner, Oct 6): a markup change and Rebuild
+   * from ticket leave it alone. Set when the Rate box is edited, cleared when a markup change
+   * re-prices the line; saved with the line. A line saved before the column existed has none
+   * (undefined at run time): applyMarkup then falls back to its ratio test.
+   */
+  rate_overridden: boolean;
 }
 interface HeadDraft {
   invoice_date: string;
@@ -450,6 +457,7 @@ const lineFrom = (l: InvoiceLineRow): LineDraft => ({
   taxable: l.taxable,
   source: l.source,
   orig: { rate: Number(l.rate), cost_rate: Number(l.cost_rate) },
+  rate_overridden: l.rate_overridden,
 });
 const headFrom = (inv: InvoiceRow): HeadDraft => ({
   invoice_date: inv.invoice_date,
@@ -547,11 +555,15 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         // moves with the rate, so Cost and Margin stay truthful (owner, Oct 1: the $273).
         if (l.orig && ("qty" in patch || "unit" in patch || "rate" in patch))
           next.cost_rate = rescaleCost({ source: l.source, ...l.orig }, next.rate);
+        // A rate typed on a ticket's line (material, labor, travel) is the office's from here
+        // on: a markup change and Rebuild from ticket keep it (owner, Oct 6).
+        if ("rate" in patch && l.source) next.rate_overridden = true;
         return next;
       }),
     );
-  // The markup changed: the ticket's material lines priced by the old markup follow (a price
-  // typed by hand stays); their new rate is the base for a later hand edit.
+  // The markup changed: the ticket's material lines that follow the markup are re-priced (a
+  // price typed by hand, rate_overridden, stays); their new rate is the base for a later hand
+  // edit.
   const setMarkup = (pct: number) => {
     const before = fromPct(head.markup_pct);
     setH("markup_pct", pct);
@@ -622,6 +634,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         on_date: l.on_date,
         taxable: l.taxable,
         source: l.source,
+        rate_overridden: l.rate_overridden,
       })),
     };
   };
@@ -748,6 +761,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         taxable: true,
         source: null,
         orig: null,
+        rate_overridden: false,
       },
     ]);
     setNewKey(key);

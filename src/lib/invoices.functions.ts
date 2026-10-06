@@ -25,8 +25,7 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
-import { mergeRebuild, rateWasChanged, type RebuildLine } from "@/lib/invoice-rebuild";
-import { rateFromMarkup } from "@/lib/invoice-materials";
+import { mergeRebuild, savedLineRow, type RebuildLine } from "@/lib/invoice-rebuild";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -239,8 +238,12 @@ const LINE_COLS = [
   "source",
   "taxable",
 ] as const;
-/** Does the line as saved differ from the stored one (numbers compared as numbers)? */
+/**
+ * Does the line as saved differ from the stored one (numbers compared as numbers)? A flip of
+ * the typed-by-hand flag alone counts (owner, Oct 6): it is what Rebuild from ticket reads.
+ */
 function lineChanged(prev: InvoiceLineRow, next: LineWrite): boolean {
+  if ("rate_overridden" in next && !!prev.rate_overridden !== !!next.rate_overridden) return true;
   return LINE_COLS.some((k) => {
     const a = prev[k] ?? null;
     const b = next[k] ?? null;
@@ -545,6 +548,12 @@ const lineSchema = z.object({
     .optional(),
   taxable: z.boolean().default(true),
   source: z.string().max(200).nullable().optional(),
+  /**
+   * Typed by hand (owner, Oct 6): the editor sets it when the Rate box of a ticket line is
+   * edited and clears it when a markup change re-prices the line. Saved as sent, so a markup
+   * change and Rebuild from ticket leave the typed price alone.
+   */
+  rate_overridden: z.boolean().default(false),
 });
 const saveSchema = z.object({
   id: z.string().uuid(),
@@ -587,8 +596,6 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("This invoice is final; void it to change it");
     const { totals } = await import("@/lib/invoices.server");
-    const markup =
-      data.material_markup ?? (inv.material_markup == null ? 0.75 : Number(inv.material_markup));
     if (data.lines) {
       const { data: oldLines, error: oErr } = await sb
         .from("invoice_lines")
@@ -604,32 +611,11 @@ export const saveInvoice = createServerFn({ method: "POST" })
       const fresh: LineWrite[] = [];
       const edits: { id: number; row: LineWrite }[] = [];
       data.lines.forEach((l, i) => {
-        const row: LineWrite = {
-          invoice_id: inv.id,
-          sort: i,
-          kind: l.kind,
-          description: l.description,
-          qty: l.qty,
-          unit: l.unit,
-          rate: l.rate,
-          total: Math.round(l.qty * l.rate * 100) / 100,
-          cost_rate: l.cost_rate,
-          cost_total: Math.round(l.qty * l.cost_rate * 100) / 100,
-          on_date: l.on_date ?? null,
-          source: l.source ?? null,
-          taxable: l.taxable,
-        };
         const prev = l.id != null ? old.get(l.id) : undefined;
-        // A price changed by hand is remembered, so Rebuild from ticket keeps it (owner, Oct 5).
-        // Only once the column exists (20261005170000): before that the row has no such key.
-        // A rate that only follows this invoice's markup is not "changed by hand".
-        if (prev && "rate_overridden" in prev)
-          row.rate_overridden =
-            rateWasChanged(prev, l.rate) &&
-            !rateFromMarkup(
-              { kind: l.kind, source: l.source ?? null, rate: l.rate, cost_rate: l.cost_rate },
-              markup,
-            );
+        // A price typed by hand is remembered as the editor says (rate_overridden), so Rebuild
+        // from ticket keeps it (owner, Oct 5; Oct 6: the flag, not a ratio test). Only once the
+        // column exists (20261005170000): before that the row has no such key (savedLineRow).
+        const row: LineWrite = savedLineRow(inv.id, i, l, prev);
         if (prev && !kept.has(prev.id)) {
           kept.add(prev.id);
           if (lineChanged(prev, row)) edits.push({ id: prev.id, row });

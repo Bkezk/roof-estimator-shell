@@ -180,7 +180,11 @@ export function markupRate(costRate: number, markup: number, perPiece: boolean):
   return perPiece ? r4(costRate * (1 + markup)) : r2(costRate * (1 + markup));
 }
 
-/** Does this rate come from the markup (not typed by hand)? Half a cent either way. */
+/**
+ * Does this rate come from the markup (not typed by hand)? Half a cent either way. Only a
+ * fallback now, for lines saved before invoice_lines.rate_overridden said so (owner, Oct 6: a
+ * typed price whose cost was rescaled has exactly this ratio again, so the test alone lost it).
+ */
 export function rateFromMarkup(
   l: { kind: string; source: string | null; rate: number | null; cost_rate: number },
   markup: number,
@@ -191,16 +195,25 @@ export function rateFromMarkup(
 
 /**
  * The invoice's material markup changed (owner, Oct 6: "change prices and markups per invoice"):
- * each ticket material line whose rate came from the old markup is priced again at the new one;
- * a rate changed by hand, labor, travel and hand-added lines stay as they are.
+ * each ticket material line that follows the markup is priced again at the new one; a rate
+ * typed by hand (`rate_overridden`), labor, travel and hand-added lines stay as they are. A line
+ * loaded without the flag (saved before the column) follows the markup when its rate matches the
+ * old one (rateFromMarkup). A re-priced line follows the markup from here on (flag false).
  */
 export function applyMarkup<
-  T extends { kind: string; source: string | null; rate: number | null; cost_rate: number },
+  T extends {
+    kind: string;
+    source: string | null;
+    rate: number | null;
+    cost_rate: number;
+    rate_overridden?: boolean;
+  },
 >(lines: readonly T[], oldMarkup: number, newMarkup: number): T[] {
   return lines.map((l) => {
-    if (!rateFromMarkup(l, oldMarkup)) return l;
-    const perPiece =
-      Math.abs((l.rate ?? 0) - r2(l.rate ?? 0)) > 1e-9 || l.cost_rate !== r2(l.cost_rate);
-    return { ...l, rate: markupRate(l.cost_rate, newMarkup, perPiece) };
+    if (!isTicketMaterial(l) || l.rate === null) return l;
+    if (l.rate_overridden === true) return l;
+    if (l.rate_overridden === undefined && !rateFromMarkup(l, oldMarkup)) return l;
+    const perPiece = Math.abs(l.rate - r2(l.rate)) > 1e-9 || l.cost_rate !== r2(l.cost_rate);
+    return { ...l, rate: markupRate(l.cost_rate, newMarkup, perPiece), rate_overridden: false };
   });
 }

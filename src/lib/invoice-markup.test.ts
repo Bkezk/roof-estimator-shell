@@ -28,6 +28,8 @@ describe("a draft's markup re-prices the ticket's material lines", () => {
   });
   it("leaves a price typed by hand, labor, travel and hand-added lines alone", () => {
     const lines = [
+      { ...mat(20, 10), rate_overridden: true },
+      // Saved before the flag existed: the ratio says it was typed (20 ≠ 17.50).
       mat(20, 10),
       { kind: "labor", source: "time:1", rate: 85, cost_rate: 85 },
       { kind: "other", source: null, rate: 50, cost_rate: 0 },
@@ -54,7 +56,9 @@ describe("the wiring", () => {
       "markup: inv.material_markup == null ? null : Number(inv.material_markup),",
     );
     expect(fns).toContain("material_markup: z.number().min(0).max(10).optional(),");
-    expect(fns).toContain("!rateFromMarkup(");
+    // Since Oct 6 (QA audit) the save takes the editor's typed-by-hand flag, not a ratio test
+    // (invoice-typed-price.test.ts); rateFromMarkup is applyMarkup's fallback for old lines.
+    expect(fns).not.toContain("rateFromMarkup(");
     expect(read("src/lib/invoices.server.ts")).toContain(
       "const markup = opts.markup ?? Number(settings.material_markup);",
     );
