@@ -2,7 +2,7 @@
  * Setup › Service rates (Admin › Service Rates until Oct 5), owner Oct 2: "there's a ton of white
  * space". Layout only: the page is capped at max-w-5xl; the twelve rates are one compact table (Rate kind | Role | four rate
  * columns, the Tech / Helper pair under one kind label, small right-aligned boxes, "$ per hour"
- * as the caption); markup / tax, terms / contact line and subject / message sit side by side
+ * as the caption); authorizer / tax, terms / contact line and subject / message sit side by side
  * on md+; the CenterPoint note is one line. Every label, hint and number box stays.
  */
 import { readFileSync } from "node:fs";
@@ -52,9 +52,9 @@ describe("the settings below the table", () => {
     expect(grid).toMatch(/^<div className="grid [^"]*\bmd:grid-cols-2\b/);
     expect(grid).not.toContain("col-span-2");
   });
-  it("pair markup / tax, terms / contact line, subject / message, in that order", () => {
+  it("pair authorizer / tax, terms / contact line, subject / message, in that order", () => {
     const order = [
-      "Material markup %",
+      "Authorizes Done tickets",
       "Tax rate %",
       "Payment terms",
       "Invoice contact line",
@@ -67,7 +67,6 @@ describe("the settings below the table", () => {
   it("the message is a 3-row textarea; every hint is still there", () => {
     expect(grid).toMatch(/<Textarea[^>]*rows=\{3\}/);
     for (const hint of [
-      "Materials bill at cost × (1 + markup): 75 % bills a $10 part at $17.50.",
       "On the taxable lines of new invoices; a tax-exempt customer gets 0.",
       "Printed on the invoice PDF.",
       '{"{number}"} is replaced with the invoice number.',
@@ -82,5 +81,12 @@ describe("the CenterPoint note", () => {
     expect(flat).toMatch(
       /<p className="[^"]*\btruncate\b[^"]*">\s*Defaults came from the CenterPoint invoices in the report; confirm the helper travel rates with the office\.\s*<\/p>/,
     );
+  });
+});
+
+describe("the material markup (owner, Oct 6: moved to Material pricing)", () => {
+  it("is no longer on Service rates", () => {
+    expect(ui).not.toContain("Material markup %");
+    expect(ui).not.toContain("material_markup");
   });
 });

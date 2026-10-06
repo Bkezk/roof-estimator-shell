@@ -170,3 +170,37 @@ export function rescaleCost(
     return line.cost_rate;
   return r4((line.cost_rate * newRate) / rate);
 }
+
+/** A ticket material line (built from the ticket's material ledger). */
+export const isTicketMaterial = (l: { kind: string; source: string | null }) =>
+  l.kind === "material" && !!l.source?.startsWith("cell:");
+
+/** The rate a ticket material line bills at for a markup: per piece to 4 decimals, else cents. */
+export function markupRate(costRate: number, markup: number, perPiece: boolean): number {
+  return perPiece ? r4(costRate * (1 + markup)) : r2(costRate * (1 + markup));
+}
+
+/** Does this rate come from the markup (not typed by hand)? Half a cent either way. */
+export function rateFromMarkup(
+  l: { kind: string; source: string | null; rate: number | null; cost_rate: number },
+  markup: number,
+): boolean {
+  if (!isTicketMaterial(l) || l.rate === null) return false;
+  return Math.abs(l.rate - l.cost_rate * (1 + markup)) <= 0.005 + 1e-9;
+}
+
+/**
+ * The invoice's material markup changed (owner, Oct 6: "change prices and markups per invoice"):
+ * each ticket material line whose rate came from the old markup is priced again at the new one;
+ * a rate changed by hand, labor, travel and hand-added lines stay as they are.
+ */
+export function applyMarkup<
+  T extends { kind: string; source: string | null; rate: number | null; cost_rate: number },
+>(lines: readonly T[], oldMarkup: number, newMarkup: number): T[] {
+  return lines.map((l) => {
+    if (!rateFromMarkup(l, oldMarkup)) return l;
+    const perPiece =
+      Math.abs((l.rate ?? 0) - r2(l.rate ?? 0)) > 1e-9 || l.cost_rate !== r2(l.cost_rate);
+    return { ...l, rate: markupRate(l.cost_rate, newMarkup, perPiece) };
+  });
+}

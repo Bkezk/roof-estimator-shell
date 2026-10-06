@@ -2,7 +2,8 @@
  * Setup › Material pricing (owner, Oct 6: "on the setup page have a tab that says material
  * pricing and seed it with the prices for those materials"): the service material price list a
  * repair ticket bills from — CenterPoint's 133 to start. Cost per unit; "Bills at" is cost ×
- * (1 + the material markup on Service rates). Estimate Pricing (the bids') is separate and
+ * (1 + the material markup, set here; moved from Service rates on Oct 6 — a draft invoice can
+ * change it for itself). Estimate Pricing (the bids') is separate and
  * untouched. Edit, add (at the top), hide (a hidden material is kept for tickets and stock that
  * already name it). Group: where a material with no bid-catalog twin sits on the Inventory page
  * (Underlayment, Sealants, Cleaning Supplies …); a twin sits under the catalog's own group.
@@ -63,10 +64,18 @@ export function MaterialPricingSettings() {
   const [dirty, setDirty] = useState(false);
   const [filter, setFilter] = useState("");
   const [showHidden, setShowHidden] = useState(false);
+  /** The markup, percent, as typed. */
+  const [markupText, setMarkupText] = useState("");
   useEffect(() => {
-    if (q.data && !dirty) setRows(q.data.items.map(toRow));
+    if (q.data && !dirty) {
+      setRows(q.data.items.map(toRow));
+      setMarkupText(String(Math.round(q.data.markup * 100000) / 1000));
+    }
   }, [q.data, dirty]);
-  const markup = q.data?.markup ?? 0.75;
+  const markupPct = Number(markupText);
+  const markupOk =
+    markupText.trim() !== "" && Number.isFinite(markupPct) && markupPct >= 0 && markupPct <= 1000;
+  const markup = markupOk ? markupPct / 100 : (q.data?.markup ?? 0.75);
   const groups = useMemo(
     () =>
       [...new Set((rows ?? []).map((r) => r.category.trim()).filter(Boolean))].sort((a, b) =>
@@ -111,7 +120,8 @@ export function MaterialPricingSettings() {
           category: r.category.trim() || null,
         };
       });
-      return saveFn({ data: { items } });
+      if (!markupOk) throw new Error("Type the material markup as a percent (0 to 1000)");
+      return saveFn({ data: { items, markup: markupPct / 100 } });
     },
     onSuccess: (saved) => {
       qc.setQueryData(KEY, { items: saved, markup });
@@ -154,10 +164,9 @@ export function MaterialPricingSettings() {
       <CardHeader>
         <CardTitle>Material pricing</CardTitle>
         <CardDescription>
-          What repair tickets bill for material. Cost is per unit; Bills at is the cost plus the{" "}
-          {Math.round(markup * 1000) / 10}% material markup set on the Service rates tab (cost ×{" "}
-          {Math.round((1 + markup) * 100) / 100}). Bids are priced on Estimate Pricing — nothing
-          here changes them.
+          What repair tickets bill for material. Cost is per unit; Bills at is the cost plus the
+          material markup (cost × {Math.round((1 + markup) * 1000) / 1000}). A draft invoice can use
+          its own markup. Bids are priced on Estimate Pricing — nothing here changes them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -171,6 +180,25 @@ export function MaterialPricingSettings() {
           </p>
         ) : (
           <>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="space-y-1">
+                <span className="block text-sm font-medium">Material markup %</span>
+                <Input
+                  aria-label="Material markup %"
+                  className="h-9 w-28 tabular-nums"
+                  inputMode="decimal"
+                  aria-invalid={!markupOk || undefined}
+                  value={markupText}
+                  onChange={(e) => {
+                    setMarkupText(e.target.value);
+                    setDirty(true);
+                  }}
+                />
+              </label>
+              <p className="pb-2 text-xs text-muted-foreground">
+                75 % bills a $10 part at $17.50. New invoices start with it.
+              </p>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <Button type="button" variant="outline" size="sm" onClick={addRow}>
                 <Plus className="mr-1 h-4 w-4" /> Add material

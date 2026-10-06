@@ -119,7 +119,8 @@ describe("Setup › Material pricing", () => {
     expect(tab.indexOf("Add material")).toBeLessThan(tab.indexOf("<ul"));
     expect(tab).toMatch(/setRows\(\(rs\) => \[\n\s+\{[\s\S]*?\},\n\s+\.\.\.\(rs \?\? \[\]\),/);
   });
-  it("says where Bills at comes from: the markup on the Service rates tab", () => {
-    expect(tab).toContain("material markup set on the Service rates tab");
+  it("says where Bills at comes from: the material markup (on this tab since Oct 6)", () => {
+    expect(tab).toContain("Bills at is the cost plus the");
+    expect(tab).toContain("material markup (cost ×");
   });
 });

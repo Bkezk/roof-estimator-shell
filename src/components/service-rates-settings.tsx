@@ -1,7 +1,7 @@
 /**
  * Admin › General › Service rates (docs/service-module-design.md §4): the twelve hourly rates
  * the invoice uses (Standard / Urgent / Emergency × Tech / Helper × Travel / Labor, each with a
- * bill and a cost rate), the material markup, the default tax rate, the payment terms, the
+ * bill and a cost rate), the default tax rate, the payment terms, the
  * contact line on the PDF and the invoice email. Admins and Estimate Pricing users (the server
  * refuses everyone else). A draft invoice picks up changes when it is rebuilt from its ticket.
  */
@@ -52,7 +52,6 @@ interface RateDraft {
   cost: number;
 }
 interface SettingsDraft {
-  markup_pct: number;
   tax_pct: number;
   payment_terms: string;
   invoice_contact: string;
@@ -82,7 +81,6 @@ export function ServiceRatesSettings() {
       ),
     );
     setS({
-      markup_pct: toPct(d.settings.material_markup),
       tax_pct: toPct(d.settings.tax_rate),
       payment_terms: d.settings.payment_terms,
       invoice_contact: d.settings.invoice_contact ?? "",
@@ -108,7 +106,6 @@ export function ServiceRatesSettings() {
             cost_rate: r.cost,
           })),
           settings: {
-            material_markup: fromPct(s.markup_pct),
             tax_rate: fromPct(s.tax_pct),
             payment_terms: s.payment_terms.trim(),
             invoice_contact: s.invoice_contact.trim() || null,
@@ -134,10 +131,6 @@ export function ServiceRatesSettings() {
       toast.error("The email subject cannot be empty");
       return;
     }
-    if (s.markup_pct > 1000) {
-      toast.error("Material markup is at most 1000 %");
-      return;
-    }
     save.mutate();
   };
 
@@ -146,8 +139,8 @@ export function ServiceRatesSettings() {
       <CardHeader>
         <CardTitle>Service rates</CardTitle>
         <CardDescription>
-          The hourly rates, markup and wording a ticket's invoice is built with. The ticket's Labor
-          rate (Standard / Urgent / Emergency) picks the row; each extra technician is billed as a
+          The hourly rates and wording a ticket's invoice is built with. The ticket's Labor rate
+          (Standard / Urgent / Emergency) picks the row; each extra technician is billed as a
           Helper. A draft invoice picks up changes when it is rebuilt from its ticket.
         </CardDescription>
       </CardHeader>
@@ -272,19 +265,6 @@ export function ServiceRatesSettings() {
                   Gets &quot;ready for your review&quot; when a ticket is Done and the Needs
                   authorization tab on Work Overview. Any manager can still mark a ticket
                   Authorized.
-                </p>
-              </div>
-              <div className="space-y-1">
-                <Label>Material markup %</Label>
-                <NumberField
-                  value={s.markup_pct}
-                  max={1000}
-                  step="0.1"
-                  inputMode="decimal"
-                  onChange={(v) => setS2("markup_pct", v)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Materials bill at cost × (1 + markup): 75 % bills a $10 part at $17.50.
                 </p>
               </div>
               <div className="space-y-1">

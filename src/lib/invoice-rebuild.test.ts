@@ -77,8 +77,9 @@ describe("rateWasChanged", () => {
 describe("wired in", () => {
   const fns = readFileSync("src/lib/invoices.functions.ts", "utf8");
   it("saving a draft remembers a price changed by hand (once the column exists)", () => {
-    expect(fns).toContain(
-      'if (prev && "rate_overridden" in prev) row.rate_overridden = rateWasChanged(prev, l.rate);',
+    // Since Oct 6 a rate that only follows the invoice's markup is not "changed by hand".
+    expect(fns).toMatch(
+      /if \(prev && "rate_overridden" in prev\)\s+row\.rate_overridden =\s+rateWasChanged\(prev, l\.rate\) &&\s+!rateFromMarkup\(/,
     );
   });
   it("the rebuild merges instead of throwing everything away", () => {

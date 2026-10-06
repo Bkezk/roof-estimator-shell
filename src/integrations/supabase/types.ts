@@ -1450,6 +1450,7 @@ export type Database = {
           subtotal: number;
           tax_amount: number;
           tax_rate: number;
+          material_markup: number | null;
           total: number;
           updated_at: string;
           updated_by_name: string | null;
@@ -1484,6 +1485,7 @@ export type Database = {
           subtotal?: number;
           tax_amount?: number;
           tax_rate?: number;
+          material_markup?: number | null;
           total?: number;
           updated_at?: string;
           updated_by_name?: string | null;
@@ -1518,6 +1520,7 @@ export type Database = {
           subtotal?: number;
           tax_amount?: number;
           tax_rate?: number;
+          material_markup?: number | null;
           total?: number;
           updated_at?: string;
           updated_by_name?: string | null;

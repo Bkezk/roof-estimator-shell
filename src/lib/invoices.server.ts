@@ -150,8 +150,15 @@ export async function cellPiece(
   return screen ? pieceFromCatalog(screen.data as CatalogData, cell) : null;
 }
 
-/** Build the lines a ticket's time entries and materials produce today. */
-export async function buildLinesFromJob(sb: Client, jobId: string): Promise<LineInsert[]> {
+/**
+ * Build the lines a ticket's time entries and materials produce today. `markup` is the invoice's
+ * own material markup (owner, Oct 6: per invoice); without it, Setup › Material pricing's.
+ */
+export async function buildLinesFromJob(
+  sb: Client,
+  jobId: string,
+  opts: { markup?: number | null } = {},
+): Promise<LineInsert[]> {
   const { data: job, error } = await sb
     .from("service_jobs")
     .select("*")
@@ -243,7 +250,7 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
     if (m.created_at > cur.last) cur.last = m.created_at;
     byCell.set(key, cur);
   }
-  const markup = Number(settings.material_markup);
+  const markup = opts.markup ?? Number(settings.material_markup);
   // Service materials are priced from Setup › Material pricing, not Estimate Pricing (owner,
   // Oct 6: "they price differently"). A cell no service material covers (stock from the bid
   // catalog only) keeps the catalog's cost.

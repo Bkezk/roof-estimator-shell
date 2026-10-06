@@ -75,7 +75,15 @@ export type ServiceMaterialInput = z.input<typeof itemSchema>;
 /** Save the list: changed rows update, rows without an id are added (at the end). */
 export const saveServiceMaterials = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ items: z.array(itemSchema).max(2000) }).parse(d))
+  .validator((d: unknown) =>
+    z
+      .object({
+        items: z.array(itemSchema).max(2000),
+        /** The default material markup (0.75 = 75 %), moved here from Service rates (Oct 6). */
+        markup: z.number().min(0).max(10).optional(),
+      })
+      .parse(d),
+  )
   .handler(async ({ data, context }): Promise<ServiceMaterial[]> => {
     await pricingManager(context);
     const sb = context.supabase;
@@ -91,6 +99,13 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
       own.set(it.name, (own.get(it.name) ?? 0) + 1);
     }
     for (const [name, n] of own) if (n > 1) throw new Error(NAME_TAKEN(name));
+    if (data.markup !== undefined) {
+      const { error } = await sb
+        .from("service_settings")
+        .update({ material_markup: data.markup, updated_at: new Date().toISOString() })
+        .eq("id", 1);
+      if (error) throw new Error(error.message);
+    }
     let sort = current.reduce((m, r) => Math.max(m, r.sort), -1) + 1;
     for (const it of data.items) {
       const was = it.id ? byId.get(it.id) : undefined;
