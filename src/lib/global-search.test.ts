@@ -11,6 +11,7 @@ import {
   groupHits,
   hitHref,
   hitRoute,
+  numberPrefixFilter,
   parseGlobalQuery,
   rankHits,
   searchFilter,
@@ -42,7 +43,7 @@ describe("parseGlobalQuery", () => {
 describe("searchFilter", () => {
   it("tickets: the number exactly plus Job #, PO #, customer, property, address, description, CenterPoint #s", () => {
     const f = searchFilter("ticket", parseGlobalQuery("6008"));
-    expect(f.startsWith("number.eq.6008,")).toBe(true);
+    expect(f.startsWith("number.eq.6008,and(number.gte.60080,number.lte.60089),")).toBe(true);
     for (const c of [
       "job_number",
       "po_number",
@@ -58,13 +59,27 @@ describe("searchFilter", () => {
   it("text only: no number clause; invoices search their display number and bill-to", () => {
     expect(searchFilter("ticket", parseGlobalQuery("leak"))).not.toContain("number.eq");
     const inv = searchFilter("invoice", parseGlobalQuery("6006.2"));
+    // bill_to / property are jsonb: their name key, never the whole column (owner's phone, Oct 6:
+    // "operator does not exist: jsonb ~~* unknown").
+    expect(inv).toContain("bill_to->>name.ilike.%6006_2%");
+    expect(inv).toContain("property->>name.ilike.%6006_2%");
+    expect(inv).not.toMatch(/,bill_to\.ilike|,property\.ilike/);
     // The dot is a reserved character and becomes "_" (any one character): still finds 6006.2.
     expect(inv).toContain("display_number.ilike.%6006_2%");
-    expect(inv).toContain("bill_to.ilike.%6006_2%");
     expect(inv).not.toContain("number.eq");
     expect(searchFilter("customer", parseGlobalQuery("hardee"))).toBe(
       "name.ilike.%hardee%,contact_name.ilike.%hardee%,phone.ilike.%hardee%,email.ilike.%hardee%,city.ilike.%hardee%",
     );
+  });
+});
+
+describe("numberPrefixFilter", () => {
+  it("60 finds 60, 600–609, 6000–6099 … (every number that starts with 60) up to nine digits", () => {
+    expect(numberPrefixFilter("60", 5)).toBe(
+      "number.eq.60,and(number.gte.600,number.lte.609),and(number.gte.6000,number.lte.6099),and(number.gte.60000,number.lte.60999)",
+    );
+    expect(numberPrefixFilter("6008", 4)).toBe("number.eq.6008");
+    expect(numberPrefixFilter("007", 4)).toBe("number.eq.7,and(number.gte.70,number.lte.79)");
   });
 });
 
@@ -147,6 +162,8 @@ describe("the wiring", () => {
     expect(ui).toContain('e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)');
     expect(ui).toContain("shouldFilter={false}");
     expect(ui).toContain("router.navigate({ href })");
+    // Every row says what it is.
+    expect(ui).toContain("{SEARCH_KIND_ONE[h.kind]}");
   });
   it("the server function reads every kind with the caller's client (row security), each capped and never deleted rows", () => {
     const fn = read("./global-search.functions.ts");

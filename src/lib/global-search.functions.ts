@@ -28,6 +28,9 @@ export interface GlobalSearchResult {
 
 type Row = Record<string, unknown>;
 const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+/** The name inside a jsonb party (invoices.bill_to / property). */
+const jsonName = (v: unknown) =>
+  v && typeof v === "object" ? s((v as { name?: unknown }).name) : "";
 const joinParts = (...parts: Array<string | null | undefined>) =>
   parts
     .map((p) => s(p))
@@ -223,7 +226,7 @@ export const globalSearch = createServerFn({ method: "GET" })
         kind: "invoice",
         id: s(r["id"]),
         title: `Invoice ${s(r["display_number"]) || String(r["number"] ?? "")}`,
-        subtitle: joinParts(s(r["bill_to"]), s(r["property"]), s(r["status"])),
+        subtitle: joinParts(jsonName(r["bill_to"]), jsonName(r["property"]), s(r["status"])),
         ...hitRoute("invoice", { id: s(r["id"]) }),
       });
     for (const r of vendors)

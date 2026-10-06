@@ -27,6 +27,18 @@ export const SEARCH_KINDS = [
 ] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
+/** One row's kind, shown as a tag on every result (owner, Oct 6: "it needs to show what it is"). */
+export const SEARCH_KIND_ONE: Record<SearchKind, string> = {
+  ticket: "Ticket",
+  customer: "Customer",
+  property: "Property",
+  contact: "Contact",
+  opportunity: "Opportunity",
+  bid: "Project Bid",
+  invoice: "Invoice",
+  vendor: "Vendor",
+};
+
 export const SEARCH_KIND_LABELS: Record<SearchKind, string> = {
   ticket: "Tickets",
   customer: "Customers",
@@ -52,8 +64,10 @@ export interface ParsedQuery {
   text: string;
   /** The ilike pattern for every text column (reserved characters neutralised). */
   like: string;
-  /** "6008" or "#6008": a ticket / invoice number to match exactly as well. */
+  /** "6008" or "#6008": a ticket / invoice number — matched exactly and as a prefix (60 → 6000–6999). */
   number: number | null;
+  /** The digits as typed (for the prefix ranges). */
+  digits: string | null;
   tooShort: boolean;
 }
 
@@ -65,6 +79,7 @@ export function parseGlobalQuery(raw: string): ParsedQuery {
     text,
     like: ilikePattern(text.replace(/^#\s*/, "")),
     number,
+    digits: m ? m[1]! : null,
     tooShort: text.replace(/^#\s*/, "").length < SEARCH_MIN,
   };
 }
@@ -87,15 +102,32 @@ export const SEARCH_COLUMNS: Record<SearchKind, readonly string[]> = {
   contact: ["name", "email", "mobile", "office_phone"],
   opportunity: ["title", "description"],
   bid: ["name"],
-  invoice: ["display_number", "bill_to", "property", "po_number", "job_code"],
+  // bill_to and property are jsonb on invoices: their name key (a plain ilike on jsonb fails
+  // with "operator does not exist: jsonb ~~* unknown" — owner's phone, Oct 6).
+  invoice: ["display_number", "bill_to->>name", "property->>name", "po_number", "job_code"],
   vendor: ["name", "contact_name", "city"],
 };
 
-/** The .or() filter for a kind: its text columns, plus the exact number for tickets / invoices. */
+/**
+ * The integer `number` column matched by the digits typed, as a prefix: "60" → 60, 600–609,
+ * 6000–6099 … every number that starts with 60 (ticket and invoice numbers cannot be ilike'd).
+ * PostgREST or() terms.
+ */
+export function numberPrefixFilter(digits: string, maxDigits = 9): string {
+  const terms = [`number.eq.${Number(digits)}`];
+  for (let k = 1; digits.length + k <= maxDigits; k++) {
+    const lo = Number(digits + "0".repeat(k));
+    const hi = Number(digits + "9".repeat(k));
+    terms.push(`and(number.gte.${lo},number.lte.${hi})`);
+  }
+  return terms.join(",");
+}
+
+/** The .or() filter for a kind: its text columns, plus the number (exact and prefix) for tickets / invoices. */
 export function searchFilter(kind: SearchKind, q: ParsedQuery): string {
   const text = orIlike(SEARCH_COLUMNS[kind], q.like);
-  if (q.number !== null && (kind === "ticket" || kind === "invoice"))
-    return `number.eq.${q.number},${text}`;
+  if (q.digits !== null && (kind === "ticket" || kind === "invoice"))
+    return `${numberPrefixFilter(q.digits)},${text}`;
   return text;
 }
 

@@ -21,11 +21,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { globalSearch } from "@/lib/global-search.functions";
+import { Badge } from "@/components/ui/badge";
 import {
   groupHits,
   hitHref,
   parseGlobalQuery,
   SEARCH_KIND_LABELS,
+  SEARCH_KIND_ONE,
   SEARCH_MIN,
 } from "@/lib/global-search";
 
@@ -132,7 +134,16 @@ export function GlobalSearch() {
                           onSelect={() => go(hitHref(h))}
                           className="flex flex-col items-start gap-0.5 py-2"
                         >
-                          <span className="font-medium">{h.title}</span>
+                          <span className="flex w-full items-center gap-2">
+                            <span className="flex-1 truncate font-medium">{h.title}</span>
+                            {/* What the row is (owner, Oct 6: "is that a service ticket, customer, opportunity…"). */}
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 px-1.5 py-0 text-[10px] font-normal"
+                            >
+                              {SEARCH_KIND_ONE[h.kind]}
+                            </Badge>
+                          </span>
                           {h.subtitle && (
                             <span className="truncate text-xs text-muted-foreground">
                               {h.subtitle}
