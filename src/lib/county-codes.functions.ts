@@ -93,5 +93,5 @@ export const deleteCountyCode = createServerFn({ method: "POST" })
 /** Why a code cannot be deleted, or null when no site uses it. */
 export function countyCodeInUseMessage(siteCount: number): string | null {
   if (siteCount <= 0) return null;
-  return `In use on ${siteCount} site${siteCount === 1 ? "" : "s"} — change those sites first`;
+  return `In use on ${siteCount} propert${siteCount === 1 ? "y" : "ies"} — change those properties first`;
 }

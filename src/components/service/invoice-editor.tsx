@@ -50,7 +50,7 @@ import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
 import { getAccount, listContacts } from "@/lib/crm.functions";
-import { rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
+import { applyMarkup, rateText, rescaleCost, unitText } from "@/lib/invoice-materials";
 import { invoiceLabel, remainingInvoiceAfterVoid } from "@/lib/invoice-numbering";
 import {
   computeTotals,
@@ -140,6 +140,8 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+/** An invoice made before 20261006150000_invoice_markup.sql had the markup of the day: 75 %. */
+const DEFAULT_MARKUP = 0.75;
 const LINE_KINDS = ["travel", "labor", "material", "other"] as const;
 type LineKind = (typeof LINE_KINDS)[number];
 const asKind = (s: string): LineKind =>
@@ -427,6 +429,11 @@ interface HeadDraft {
   payment_terms: string;
   /** Percent, e.g. 7.5. */
   tax_pct: number;
+  /**
+   * This invoice's material markup, percent (owner, Oct 6: "change prices and markups per
+   * invoice"); starts at Setup › Material pricing's.
+   */
+  markup_pct: number;
   /** Bill to: a vendor's id, or null for the customer account. */
   bill_to_vendor_id: string | null;
 }
@@ -452,6 +459,7 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
   description: inv.description ?? "",
   payment_terms: inv.payment_terms ?? "",
   tax_pct: toPct(inv.tax_rate),
+  markup_pct: toPct(inv.material_markup ?? DEFAULT_MARKUP),
   bill_to_vendor_id: inv.bill_to_vendor_id ?? null,
 });
 const editKey = (h: HeadDraft, lines: LineDraft[]) =>
@@ -542,6 +550,19 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         return next;
       }),
     );
+  // The markup changed: the ticket's material lines priced by the old markup follow (a price
+  // typed by hand stays); their new rate is the base for a later hand edit.
+  const setMarkup = (pct: number) => {
+    const before = fromPct(head.markup_pct);
+    setH("markup_pct", pct);
+    setLines((ls) =>
+      applyMarkup(ls, before, fromPct(pct)).map((l, i) =>
+        l === ls[i] || l.rate === null
+          ? l
+          : { ...l, orig: { rate: l.rate, cost_rate: l.cost_rate } },
+      ),
+    );
+  };
   const [newKey, setNewKey] = useState<string | null>(null);
 
   const [busy, setBusy] = useState<
@@ -587,6 +608,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       description: head.description.trim() || null,
       payment_terms: head.payment_terms.trim() || null,
       tax_rate: fromPct(head.tax_pct),
+      material_markup: fromPct(head.markup_pct),
       bill_to_vendor_id: head.bill_to_vendor_id,
       lines: lines.map((l) => ({
         // A saved line's id (its key is "l<id>"); new lines have none. The audit log uses it.
@@ -829,6 +851,20 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 The customer is marked tax exempt
               </p>
             )}
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Material markup %</Label>
+            <NumberField
+              value={head.markup_pct}
+              max={1000}
+              step="0.1"
+              inputMode="decimal"
+              onChange={setMarkup}
+            />
+            <p className="text-xs text-muted-foreground">
+              For this invoice: the ticket&apos;s material lines are priced again; a price typed by
+              hand stays.
+            </p>
           </div>
         </div>
         <div className="space-y-1">

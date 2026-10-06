@@ -25,6 +25,7 @@
  * Env: APP_URL, CRON_SECRET; for local runs CHROMIUM_PATH (a Chromium binary) and PW_ARGS
  * (extra browser flags, e.g. "--ignore-certificate-errors --no-sandbox" behind a proxy).
  */
+import { isRetiredLeadSource } from "../src/lib/leads-retired";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 
 import {
@@ -544,9 +545,10 @@ async function post(payload: unknown): Promise<string> {
 }
 
 async function main() {
-  const portals = BROWSER_SOURCES.filter((s) => !only || s === only).map(
-    (s: BrowserSource) => BROWSER_PORTALS[s],
-  );
+  // Retired portals (Metro Nashville, Louisville Metro — owner, Oct 6) are not read.
+  const portals = BROWSER_SOURCES.filter(
+    (s) => !isRetiredLeadSource(s) && (!only || s === only),
+  ).map((s: BrowserSource) => BROWSER_PORTALS[s]);
   const browser: Browser = await chromium.launch({
     ...(process.env["CHROMIUM_PATH"] ? { executablePath: process.env["CHROMIUM_PATH"] } : {}),
     args: (process.env["PW_ARGS"] ?? "").split(/\s+/).filter(Boolean),

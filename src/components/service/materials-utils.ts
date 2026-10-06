@@ -197,13 +197,29 @@ export function planReduce(
 }
 
 /** Does every search word appear in the row's name, category, colour / size or item #? */
+/**
+ * What a row is called on a repair ticket: the service material name (owner, Oct 6: CenterPoint's
+ * names; src/lib/service-materials.ts) when there is one, else the catalog label with its colour /
+ * size column ('2" Closed/Open (Tan Price)').
+ */
+export function cellName(r: { label?: string | null; row_label: string; price_col: string }) {
+  if (r.label) return r.label;
+  return r.price_col && r.price_col !== "price" ? `${r.row_label} (${r.price_col})` : r.row_label;
+}
+
 export function matchesSearch(
-  row: { row_label: string; category: string; price_col: string; item_no: string | null },
+  row: {
+    label?: string | null;
+    row_label: string;
+    category: string;
+    price_col: string;
+    item_no: string | null;
+  },
   q: string,
 ): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const hay =
-    `${row.row_label} ${row.category} ${row.price_col} ${row.item_no ?? ""}`.toLowerCase();
+    `${row.label ?? ""} ${row.row_label} ${row.category} ${row.price_col} ${row.item_no ?? ""}`.toLowerCase();
   return words.every((w) => hay.includes(w));
 }

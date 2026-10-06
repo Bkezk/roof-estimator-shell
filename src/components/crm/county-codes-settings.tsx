@@ -262,7 +262,7 @@ export function CountyCodesSettings() {
               Delete the county code {toDelete ? countyCodeLabel(toDelete) : ""}?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Refused if a site still uses it; change those sites first.
+              Refused if a property still uses it; change those properties first.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

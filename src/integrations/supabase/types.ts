@@ -1450,6 +1450,7 @@ export type Database = {
           subtotal: number;
           tax_amount: number;
           tax_rate: number;
+          material_markup: number | null;
           total: number;
           updated_at: string;
           updated_by_name: string | null;
@@ -1484,6 +1485,7 @@ export type Database = {
           subtotal?: number;
           tax_amount?: number;
           tax_rate?: number;
+          material_markup?: number | null;
           total?: number;
           updated_at?: string;
           updated_by_name?: string | null;
@@ -1518,6 +1520,7 @@ export type Database = {
           subtotal?: number;
           tax_amount?: number;
           tax_rate?: number;
+          material_markup?: number | null;
           total?: number;
           updated_at?: string;
           updated_by_name?: string | null;
@@ -2934,11 +2937,48 @@ export type Database = {
           },
         ];
       };
+      /** Named sites inside a property (20261006170000_property_sites.sql). */
+      property_sites: {
+        Row: {
+          created_at: string;
+          deleted_at: string | null;
+          id: string;
+          name: string;
+          notes: string | null;
+          property_id: string;
+          sort: number;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name: string;
+          notes?: string | null;
+          property_id: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name?: string;
+          notes?: string | null;
+          property_id?: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       service_jobs: {
         Row: {
           account_id: string | null;
           assigned_at: string | null;
           arrival_window: string | null;
+          location_id: string | null;
+          location_name: string | null;
+          stage_changed_at: string | null;
           contacted_at: string | null;
           escalated_at: string | null;
           centerpoint_invoice: string | null;
@@ -2986,6 +3026,9 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           arrival_window?: string | null;
+          location_id?: string | null;
+          location_name?: string | null;
+          stage_changed_at?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;
@@ -3033,6 +3076,9 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           arrival_window?: string | null;
+          location_id?: string | null;
+          location_name?: string | null;
+          stage_changed_at?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;
@@ -3120,6 +3166,58 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      /** Service material price list (20261006130000_service_materials.sql). */
+      service_materials: {
+        Row: {
+          active: boolean;
+          category: string | null;
+          piece_name: string | null;
+          stock_per_unit: number | null;
+          cost: number;
+          created_at: string;
+          id: string;
+          name: string;
+          sort: number;
+          stock_price_col: string | null;
+          stock_row_label: string | null;
+          stock_screen_id: string | null;
+          unit: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          category?: string | null;
+          piece_name?: string | null;
+          stock_per_unit?: number | null;
+          cost?: number;
+          created_at?: string;
+          id?: string;
+          name: string;
+          sort?: number;
+          stock_price_col?: string | null;
+          stock_row_label?: string | null;
+          stock_screen_id?: string | null;
+          unit: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          category?: string | null;
+          piece_name?: string | null;
+          stock_per_unit?: number | null;
+          cost?: number;
+          created_at?: string;
+          id?: string;
+          name?: string;
+          sort?: number;
+          stock_price_col?: string | null;
+          stock_row_label?: string | null;
+          stock_screen_id?: string | null;
+          unit?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       service_rates: {
         Row: {
@@ -3970,6 +4068,23 @@ export type Database = {
           updated_at: string | null;
           usage_count: number | null;
           work_completed: string | null;
+        };
+        Relationships: [];
+      };
+      /** service_materials without cost (20261006130000_service_materials.sql). */
+      service_materials_catalog: {
+        Row: {
+          active: boolean | null;
+          category: string | null;
+          piece_name: string | null;
+          stock_per_unit: number | null;
+          id: string | null;
+          name: string | null;
+          sort: number | null;
+          stock_price_col: string | null;
+          stock_row_label: string | null;
+          stock_screen_id: string | null;
+          unit: string | null;
         };
         Relationships: [];
       };

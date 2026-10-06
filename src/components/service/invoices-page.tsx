@@ -281,7 +281,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
                 <th className="px-3 py-2 font-medium">#</th>
                 <th className="px-3 py-2 font-medium">Date</th>
                 <th className="px-3 py-2 font-medium">Customer</th>
-                <th className="px-3 py-2 font-medium">Site</th>
+                <th className="px-3 py-2 font-medium">Property</th>
                 <th className="px-3 py-2 text-right font-medium">Total</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2 font-medium">Paid</th>
@@ -402,7 +402,7 @@ function ToInvoiceTable(props: {
           <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
             <th className="px-3 py-2 font-medium">Ticket</th>
             <th className="px-3 py-2 font-medium">Customer</th>
-            <th className="px-3 py-2 font-medium">Site</th>
+            <th className="px-3 py-2 font-medium">Property</th>
             <th className="px-3 py-2 font-medium">Technician</th>
             <th className="px-3 py-2 font-medium">Done</th>
             <th className="px-3 py-2 text-right font-medium">Waiting</th>

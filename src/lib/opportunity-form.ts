@@ -42,7 +42,7 @@ export function assigneeProblem(input: {
 }
 
 export const OPP_CUSTOMER_REQUIRED = "Pick or add the customer";
-export const OPP_SITE_NEEDED = "Add a site to this customer first";
+export const OPP_SITE_NEEDED = "Add a property to this customer first";
 /** The customer rule (hasContactMethod) for a customer saved before it (older data). */
 export const OPP_CUSTOMER_NO_CONTACT = "This customer needs a phone or an email first";
 

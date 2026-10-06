@@ -3,6 +3,7 @@
  * (docs/service-module-design.md §5.3): photo thumbnails, the time-entry editor and the ticket
  * page's section box (optionally collapsible, its open state remembered per section).
  */
+import { sectionTone } from "@/components/service/section-tones";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -124,6 +125,7 @@ export function Box({
   defaultOpen = true,
   summary,
   storageKey,
+  tone: toneKey,
 }: {
   title: string;
   icon: LucideIcon;
@@ -136,23 +138,26 @@ export function Box({
   summary?: React.ReactNode;
   /** Remembers the open state under this key (localStorage). */
   storageKey?: string | undefined;
+  /** Its colour (SECTION_TONES key); else the storage key's. */
+  tone?: string | undefined;
 }) {
   const [open, setOpen] = useState(() => initialOpen(storageKey, defaultOpen));
+  const t = sectionTone(toneKey ?? storageKey);
   const hasSummary = summary !== undefined && summary !== null && summary !== false;
 
   if (!collapsible)
     return (
-      <section className="space-y-3 rounded-lg border p-4" aria-label={title}>
+      <section className={`space-y-3 rounded-lg border p-4 ${t?.edge ?? ""}`} aria-label={title}>
         {hasSummary ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 font-semibold">
-              <Icon className="h-4 w-4" /> {title}
+              <Icon className={`h-4 w-4 ${t?.icon ?? ""}`} /> {title}
             </h2>
             <span className="text-sm text-muted-foreground">{summary}</span>
           </div>
         ) : (
           <h2 className="flex items-center gap-2 font-semibold">
-            <Icon className="h-4 w-4" /> {title}
+            <Icon className={`h-4 w-4 ${t?.icon ?? ""}`} /> {title}
           </h2>
         )}
         {children}
@@ -166,16 +171,16 @@ export function Box({
     if (storageKey) writeSection(storageKey, next);
   };
   return (
-    <section className="rounded-lg border" aria-label={title}>
+    <section className={`overflow-hidden rounded-lg border ${t?.edge ?? ""}`} aria-label={title}>
       <h2>
         <button
           type="button"
-          className="flex w-full items-center justify-between gap-3 rounded-lg p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={`flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${t?.head ?? ""}`}
           aria-expanded={open}
           onClick={toggle}
         >
           <span className="flex shrink-0 items-center gap-2 font-semibold">
-            <Icon className="h-4 w-4" /> {title}
+            <Icon className={`h-4 w-4 ${t?.icon ?? ""}`} /> {title}
           </span>
           <span className="flex min-w-0 items-center gap-2 text-sm font-normal text-muted-foreground">
             {hasSummary && <span className="min-w-0 truncate">{summary}</span>}
@@ -183,7 +188,7 @@ export function Box({
           </span>
         </button>
       </h2>
-      {open && <div className="space-y-3 px-4 pb-4">{children}</div>}
+      {open && <div className={`space-y-3 px-4 pb-4 ${t ? "pt-3" : ""}`}>{children}</div>}
     </section>
   );
 }

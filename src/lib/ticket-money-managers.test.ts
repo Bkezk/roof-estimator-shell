@@ -189,7 +189,7 @@ describe("creating tickets is a manager's", () => {
       /\{canNewTicket && \(\s*<Button asChild size="sm">\s*<Link to="\/service" search=\{\{ new: 1, account: a\.id \}\}>/,
     );
     expect(cust).toMatch(
-      /\{canNewTicket && \(\s*<Button[\s\S]{0,120}title="New service ticket at this site"/,
+      /\{canNewTicket && \(\s*<Button[\s\S]{0,120}title="New service ticket at this property"/,
     );
   });
   it("the server refuses a non-manager's create and repair ticket", () => {

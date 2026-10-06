@@ -13,7 +13,7 @@ export const TICKET_DESCRIPTION_MAX = 500;
 export const TICKET_STAGE_HINT = "Scheduled once a technician is set, otherwise Open.";
 
 export const siteRequiredMessage = (siteCount: number) =>
-  `Pick the site — this customer has ${siteCount}`;
+  `Pick the property — this customer has ${siteCount}`;
 
 /** The problem with a ticket's site, or null. `siteCount` = the customer's live sites. */
 export function siteProblem(input: {

@@ -3219,10 +3219,8 @@ export async function refreshLeads(
       if (!jobs.length) throw new Error("no jobs parsed (page layout changed?)");
       return { rows: jobs.map((j) => planroomLead(j, s.roof_keywords)) };
     }),
-    attempt("louisville_permits", "Louisville permits", async () => {
-      const permits = await fetchLouisville(s);
-      return { rows: permits.map((p) => louisvilleLead(p, s.roof_keywords)) };
-    }),
+    // Louisville permits: retired (owner, Oct 6; lib/leads-retired.ts) — fetchLouisville and
+    // louisvilleLead stay for the re-roof pass and in case it comes back.
     ...CAMPUS_PLANROOMS.map((portal) =>
       attempt("campus_planrooms", `${portal.label} planroom`, async () => {
         // An empty list is normal for the small portals.
@@ -3296,10 +3294,7 @@ export async function refreshLeads(
         };
       }),
     ),
-    attempt("nashville_permits", "Nashville permits", async () => {
-      const permits = await fetchNashville(s);
-      return { rows: permits.map((p) => nashvilleLead(p, s.roof_keywords)) };
-    }),
+    // Nashville permits: retired (owner, Oct 6; lib/leads-retired.ts).
     // Tennessee, round two.
     attempt("chattanooga_permits", "Chattanooga permits", async () => {
       const permits = await fetchChattanooga(Number(s.nashville_min_cost));
@@ -3394,7 +3389,6 @@ export async function refreshLeads(
   const saved = await saveLeadRows(admin, pulled, { partial });
   const counts = saved.counts;
   const planroomCount = counts["ky_planroom"] ?? 0;
-  const louisvilleCount = counts["louisville_permits"] ?? 0;
   const { fresh, newRoof, gone, notified } = saved;
 
   // With a planroom login in Lovable Cloud, read each open roof job's page for its owner
@@ -3418,13 +3412,13 @@ export async function refreshLeads(
   } catch (e) {
     failed.push(`Re-roof marking ${e instanceof Error ? e.message : String(e)}`);
   }
-  const note = `${planroomCount} planroom, ${louisvilleCount} Louisville, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["nashville_permits"] ?? 0} Nashville, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${reroofMarked > 0 ? `, ${reroofMarked} building${reroofMarked === 1 ? "" : "s"} marked re-roofed` : ""}${failed.length ? `; ${failed.join("; ")}` : ""}`;
+  const note = `${planroomCount} planroom, ${counts["lynn_bids"] ?? 0} Lynn, ${counts["bgky_bids"] ?? 0} Bowling Green, ${counts["paducah_bids"] ?? 0} Paducah, ${counts["lexington_bids"] ?? 0} Lexington, ${counts["campus_planrooms"] ?? 0} campus, ${samKey ? (samDue ? `${counts["sam_gov"] ?? 0} SAM.gov (KY+TN)` : `SAM.gov not pulled (once a day; next after ${samNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`) : "SAM.gov off (no key)"}, ${bidnetDue ? `${counts["bidnet"] ?? 0} BidNet (TN+KY; ${bidnetClosingsRead} closing times read)` : `BidNet not pulled (once a day; next after ${bidnetNext.toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET)`}, TN: ${counts["tn_stream"] ?? 0} STREAM, ${counts["ut_bids"] ?? 0} UT, ${counts["chattanooga_permits"] ?? 0} Chattanooga, ${counts["knox_county_bids"] ?? 0} Knox County, ${counts["tn_university_bids"] ?? 0} TN universities, ${fresh.length} new (${newRoof.length} roof), ${gone} gone, ${enriched} job pages read${reroofMarked > 0 ? `, ${reroofMarked} building${reroofMarked === 1 ? "" : "s"} marked re-roofed` : ""}${failed.length ? `; ${failed.join("; ")}` : ""}`;
   // The problems go in a list of their own (lead_settings.last_fetch_problems): the page's red
   // line reads it instead of picking them out of the note.
   await admin.rpc("stamp_lead_fetch", { note, problems: failed });
   return {
     planroom: planroomCount,
-    louisville: louisvilleCount,
+    louisville: 0,
     lynn: counts["lynn_bids"] ?? 0,
     bowling_green: counts["bgky_bids"] ?? 0,
     paducah: counts["paducah_bids"] ?? 0,

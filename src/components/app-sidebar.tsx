@@ -62,7 +62,8 @@ import {
 const estimatorItems = [
   // Takeoff sits above Bids (owner, Sep 25): measure first, then bid.
   { title: "Takeoffs", url: "/takeoff", icon: Ruler, page: "takeoff" as const },
-  { title: "Bids", url: "/bids", icon: FileText, page: "estimate" as const },
+  // Owner, Oct 6: "change Bids to Project Bids" (the URL stays /bids).
+  { title: "Project Bids", url: "/bids", icon: FileText, page: "estimate" as const },
 ];
 // Customers group (owner, Sep 28): one group in the order the work flows — Customers, Service
 // (tickets, with the Tech Board and Invoices as tabs), Opportunities, then Setup

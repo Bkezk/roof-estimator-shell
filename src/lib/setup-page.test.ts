@@ -24,11 +24,14 @@ const rep = { role: "user", access: ["customers", "service"], technician: false 
 const tech = { role: "user", access: ["service"], technician: true } as const;
 
 describe("the /setup page", () => {
-  it("is a registered route with the three tabs, Service rates first", () => {
+  it("is a registered route with its tabs, Service rates first", () => {
     expect(tree).toContain("import { Route as SetupRouteImport } from './routes/setup'");
     expect(setup).toContain('createFileRoute("/setup")');
-    expect(setup).toMatch(/SETUP_TABS = \["rates", "inspection", "vehicles"\] as const/);
+    expect(setup).toMatch(
+      /SETUP_TABS = \["rates", "materials", "inspection", "vehicles"\] as const/,
+    );
     expect(setup).toContain('<TabsTrigger value="rates"');
+    expect(setup).toContain('<TabsTrigger value="materials"');
     expect(setup).toContain('<TabsTrigger value="inspection"');
     expect(setup).toContain('<TabsTrigger value="vehicles"');
     expect(setup).toMatch(/const active: SetupTab = [\s\S]*?\(tab \?\? "rates"\)/);

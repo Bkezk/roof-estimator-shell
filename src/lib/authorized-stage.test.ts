@@ -118,9 +118,11 @@ describe("the ticket page at Done", () => {
     expect(block).toContain("Waiting for a manager to authorize it.");
   });
   it("the board and the list give Authorized its own look", () => {
-    expect(read("src/components/service/board-page.tsx")).toMatch(
-      /\n {2}authorized:\s*\n?\s*"border-teal-300/,
+    // Since Oct 6 one table (stage-colors.ts) colours the board and the list: Authorized teal.
+    expect(read("src/lib/stage-colors.ts")).toMatch(
+      /\n {2}authorized: tone\(\n\s*"border-teal-300/,
     );
-    expect(read("src/components/service-page.tsx")).toContain('authorized: "secondary",');
+    expect(read("src/components/service/board-page.tsx")).toContain("STAGE_TONES[toneKey].chip");
+    expect(read("src/components/service-page.tsx")).toContain("STAGE_TONES[key].chip");
   });
 });

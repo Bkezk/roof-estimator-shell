@@ -38,14 +38,14 @@ export const PAGE_LABELS: Record<Page, string> = {
 };
 
 export const PAGE_HELP: Record<Page, string> = {
-  estimate: "Bids and the estimator — and listed as an estimator on Setup",
+  estimate: "Project Bids and the estimator — and listed as an estimator on Setup",
   pricing: "Labor, Duro-Last and Non-DL pricing, price list import",
   inventory: "Stock ledger — every signed-in user has it (owner, Oct 1)",
   prospect: "Buildings, roofs and tasks — the territory roof database",
   takeoff: "Measure plan sheets and aerial screenshots; create a bid from the drawing",
   service:
     "Service tickets (repairs): create, assign and close them; log material used off a vehicle",
-  customers: "The customer hub: accounts, sites and contacts that bids and tickets link to",
+  customers: "The customer hub: accounts, properties and contacts that bids and tickets link to",
 };
 
 export const ROLES = ["admin", "manager", "user"] as const;

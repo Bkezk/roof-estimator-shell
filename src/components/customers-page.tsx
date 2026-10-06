@@ -89,6 +89,7 @@ import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties } from "@/components/crm/site-warranties";
+import { PropertySites } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
   AccountManagerSelect,
@@ -211,7 +212,7 @@ export function CustomersPage({
             <Contact className="h-6 w-6" /> Customers
           </h1>
           <p className="text-sm text-muted-foreground">
-            Companies and individuals, their sites, and the tickets and bids linked to them.
+            Companies and individuals, their properties, and the tickets and bids linked to them.
           </p>
         </div>
         <Button size="lg" className="text-base font-semibold" onClick={() => setAdding(true)}>
@@ -445,7 +446,7 @@ function AccountDetailPane({ id }: { id: string }) {
           <Trash2 className="h-4 w-4 shrink-0 text-destructive" aria-hidden />
           <span className="min-w-0 flex-1">
             <span className="font-medium">{deletedLine(d.account.deleted_at, d.deleted_by)}.</span>{" "}
-            It is out of the list and the searches, with its sites and contacts, and read-only.
+            It is out of the list and the searches, with its properties and contacts, and read-only.
             {canRestore ? "" : " An admin or a manager can restore it."}
           </span>
           {canRestore && (
@@ -483,9 +484,10 @@ function AccountDetailPane({ id }: { id: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{d.account.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              The customer disappears from the list and the searches, with its sites and contacts.
-              Its tickets and bids keep the customer name they were saved with. A customer with open
-              tickets or open opportunities cannot be deleted. An admin or a manager can restore it.
+              The customer disappears from the list and the searches, with its properties and
+              contacts. Its tickets and bids keep the customer name they were saved with. A customer
+              with open tickets or open opportunities cannot be deleted. An admin or a manager can
+              restore it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -983,9 +985,9 @@ function ContactsSection({
   });
   const siteName = new Map(sites.map((s) => [s.id, s.name]));
   const siteList = (ids: string[]) => {
-    if (ids.length === 0) return "All sites";
+    if (ids.length === 0) return "All properties";
     const names = ids.flatMap((sid) => siteName.get(sid) ?? []);
-    return names.length ? names.join(", ") : "A deleted site";
+    return names.length ? names.join(", ") : "A deleted property";
   };
   const rows = contacts.data ?? [];
 
@@ -1016,8 +1018,8 @@ function ContactsSection({
         rows.length === 0 &&
         editing !== "new" && (
           <p className="text-sm text-muted-foreground">
-            No contacts yet. Add the people you call: the site contact, who approves work, who gets
-            the invoice.
+            No contacts yet. Add the people you call: the property contact, who approves work, who
+            gets the invoice.
           </p>
         )
       )}
@@ -1136,7 +1138,7 @@ function ContactsSection({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete the contact “{toDelete?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              They disappear from this customer and from the site contact choices on tickets.
+              They disappear from this customer and from the property contact choices on tickets.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1280,15 +1282,15 @@ function ContactForm(props: {
         </Label>
       </div>
       <fieldset className="space-y-1">
-        <legend className="text-sm font-medium">Sites</legend>
+        <legend className="text-sm font-medium">Properties</legend>
         {props.sites.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            This customer has no sites yet; the contact covers the whole account.
+            This customer has no properties yet; the contact covers the whole account.
           </p>
         ) : (
           <>
             <p className="text-xs text-muted-foreground">
-              Tick the sites they are the contact for; none ticked = all sites.
+              Tick the properties they are the contact for; none ticked = all properties.
             </p>
             <div className="grid gap-1 sm:grid-cols-2">
               {props.sites.map((s) => (
@@ -1364,18 +1366,18 @@ function SitesSection({
   const remove = useMutation({
     mutationFn: (id: string) => deleteFn({ data: { id } }),
     onSuccess: () => {
-      toast.success("Site deleted");
+      toast.success("Property deleted");
       setToDelete(null);
       refresh();
     },
-    onError: (e) => toast.error(`Could not delete the site: ${errText(e)}`),
+    onError: (e) => toast.error(`Could not delete the property: ${errText(e)}`),
   });
 
   return (
-    <section className="space-y-3 rounded-lg border p-4" aria-label="Sites">
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Properties">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 font-semibold">
-          <MapPin className="h-4 w-4" /> Sites
+          <MapPin className="h-4 w-4" /> Properties
           <span className="text-xs font-normal text-muted-foreground">{sites.length}</span>
         </h2>
         {!readOnly && editing !== "new" && (
@@ -1386,7 +1388,7 @@ function SitesSection({
       </div>
       {sites.length === 0 && editing !== "new" && (
         <p className="text-sm text-muted-foreground">
-          No sites yet. A site is a building or address the work happens at.
+          No properties yet. A property is a building or address the work happens at.
         </p>
       )}
       <div className="space-y-2">
@@ -1425,7 +1427,9 @@ function SitesSection({
                   </p>
                 )}
                 {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
-                <SiteWarranties siteId={s.id} readOnly={readOnly} />
+                <SiteWarranties siteId={s.id} />
+                {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
+                <PropertySites propertyId={s.id} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (
@@ -1433,7 +1437,7 @@ function SitesSection({
                     asChild
                     size="sm"
                     variant="outline"
-                    title="New service ticket at this site"
+                    title="New service ticket at this property"
                   >
                     <Link to="/service" search={{ new: 1, account: accountId, site: s.id }}>
                       <Wrench className="mr-1 h-4 w-4" /> New ticket
@@ -1445,7 +1449,7 @@ function SitesSection({
                     <Button
                       size="sm"
                       variant="ghost"
-                      title="Edit this site"
+                      title="Edit this property"
                       aria-label={`Edit ${s.name}`}
                       onClick={() => setEditing(s.id)}
                     >
@@ -1455,7 +1459,7 @@ function SitesSection({
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:text-destructive"
-                      title="Delete this site"
+                      title="Delete this property"
                       aria-label={`Delete ${s.name}`}
                       onClick={() => setToDelete(s)}
                     >
@@ -1487,9 +1491,9 @@ function SitesSection({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete the site “{toDelete?.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>Delete the property “{toDelete?.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              Tickets at this site keep the site name and address they were saved with.
+              Tickets at this property keep the property name and address they were saved with.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

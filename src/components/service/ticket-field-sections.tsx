@@ -104,7 +104,7 @@ export function ContactSelect({
   if (!q.isLoading && !q.error && all.length === 0 && !value)
     return (
       <div className="space-y-1">
-        <p className="text-xs font-medium">Site contact</p>
+        <p className="text-xs font-medium">Property contact</p>
         <p className="text-xs text-muted-foreground">
           No contacts on this customer yet; add them on the customer's page.
         </p>
@@ -113,7 +113,7 @@ export function ContactSelect({
   return (
     <div className="space-y-1">
       <label htmlFor="ticket-contact" className="text-xs font-medium">
-        Site contact
+        Property contact
       </label>
       <Select
         value={value || "none"}
@@ -129,7 +129,7 @@ export function ContactSelect({
             <SelectItem key={c.id} value={c.id}>
               {c.name}
               {phoneOf(c) ? ` · ${phoneOf(c)}` : ""}
-              {here(c) ? " (this site)" : c.is_billing ? " (billing)" : ""}
+              {here(c) ? " (this property)" : c.is_billing ? " (billing)" : ""}
             </SelectItem>
           ))}
           {/* A contact since removed from the account stays readable on an old ticket. */}
@@ -720,7 +720,7 @@ function EarlierAtSite({ jobId }: { jobId: string }) {
   );
   return (
     <Box
-      title="Earlier at this site"
+      title="Earlier at this property"
       icon={MapPinned}
       collapsible
       defaultOpen={false}
@@ -734,7 +734,7 @@ function EarlierAtSite({ jobId }: { jobId: string }) {
       ) : q.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No earlier tickets at this site.</p>
+        <p className="text-sm text-muted-foreground">No earlier tickets at this property.</p>
       ) : (
         <ol className="divide-y">
           {rows.map((r) => {

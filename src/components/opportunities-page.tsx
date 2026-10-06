@@ -1134,7 +1134,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   <Link
                     to="/estimate"
                     search={bidPrefillFromOpportunity(opp)}
-                    title="A new bid for this opportunity's customer and site"
+                    title="A new bid for this opportunity's customer and property"
                   >
                     <FilePlus2 className="mr-1 h-4 w-4" /> Start a bid
                   </Link>
@@ -1146,7 +1146,7 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                 <Link
                   to="/service"
                   search={ticketPrefillFromOpportunity(opp)}
-                  title="A new service ticket for this opportunity's customer and site"
+                  title="A new service ticket for this opportunity's customer and property"
                 >
                   <Wrench className="mr-1 h-4 w-4" /> Start a ticket
                 </Link>
@@ -1341,7 +1341,7 @@ function OppCustomerBlock(props: {
       )}
       <div className="space-y-1">
         <label htmlFor="opp-site" className="text-xs font-medium">
-          Site
+          Property
         </label>
         <SiteSelect
           id="opp-site"

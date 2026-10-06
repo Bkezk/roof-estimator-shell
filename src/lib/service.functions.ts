@@ -23,6 +23,8 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import { stageProblem } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
+import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 /** The stages a technician may set (ticket-stage.ts; Invoiced and Closed are a manager's). */
 export { TECH_STAGES } from "@/lib/ticket-stage";
@@ -59,7 +61,12 @@ export const TYPE_LABELS: Record<ServiceType, string> = {
 };
 
 /** A job row with the technician's display name joined. */
-export type ServiceJobWithTech = ServiceJobRow & { technician_name: string | null };
+export type ServiceJobWithTech = ServiceJobRow & {
+  technician_name: string | null;
+  /** The property's city and state, on the ticket list (owner, Oct 6: "at a glance"). */
+  site_city?: string | null;
+  site_state?: string | null;
+};
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 
@@ -105,6 +112,21 @@ async function withTechNames(
   }));
 }
 
+/** Each ticket's property city and state (one read of the properties the list names). */
+async function withPlaces(
+  sb: SupabaseClient<Database>,
+  rows: ServiceJobWithTech[],
+): Promise<ServiceJobWithTech[]> {
+  const ids = [...new Set(rows.map((r) => r.site_id).filter((x): x is string => !!x))];
+  if (!ids.length) return rows;
+  const { data } = await sb.from("crm_sites").select("id, city, state").in("id", ids);
+  const by = new Map((data ?? []).map((s) => [s.id, s]));
+  return rows.map((r) => {
+    const s = r.site_id ? by.get(r.site_id) : undefined;
+    return s ? { ...r, site_city: s.city, site_state: s.state } : r;
+  });
+}
+
 /** Every ticket for the office; a technician's own tickets only (RLS filters the rows). */
 export const listServiceJobs = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -117,7 +139,7 @@ export const listServiceJobs = createServerFn({ method: "GET" })
       .order("updated_at", { ascending: false })
       .limit(1000);
     if (error) throw new Error(error.message);
-    return withTechNames(context.supabase, data ?? []);
+    return withPlaces(context.supabase, await withTechNames(context.supabase, data ?? []));
   });
 
 /**
@@ -191,6 +213,8 @@ const jobSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid().nullable().optional(),
   site_id: z.string().uuid().nullable().optional(),
+  /** The site inside the property (property_sites; owner, Oct 6). Left out: as it is. */
+  location_id: z.string().uuid().nullable().optional(),
   /** The site contact (crm_contacts of the account). */
   contact_id: z.string().uuid().nullable().optional(),
   /** Labor rate kind for the invoice (service_rates): standard | urgent | emergency. */
@@ -284,7 +308,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
           .eq("id", fields.site_id)
           .maybeSingle();
         if (!s || s.account_id !== fields.account_id)
-          throw new Error("That site does not belong to the customer");
+          throw new Error("That property does not belong to the customer");
         site_name = s.name;
         site_address = siteAddressLine(s) || null;
       } else {
@@ -300,6 +324,18 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       }
     } else {
       fields.site_id = null;
+    }
+    // The site inside the property (owner, Oct 6): one of that property's, its name kept.
+    let location_name: string | null = null;
+    if (fields.location_id) {
+      const { data: loc } = await sb
+        .from("property_sites")
+        .select("name, property_id")
+        .eq("id", fields.location_id)
+        .maybeSingle();
+      if (!loc || loc.property_id !== fields.site_id)
+        throw new Error("That site is not at this property — pick the site again");
+      location_name = loc.name;
     }
     if (!customer_name.trim()) throw new Error("Pick or add the customer");
     // Every ticket has a date (owner, Oct 1); a technician's save leaves it as it is.
@@ -320,6 +356,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       customer_name,
       site_name,
       site_address,
+      ...(fields.location_id !== undefined
+        ? { location_id: fields.location_id, location_name }
+        : {}),
       description: fields.description,
       service_type: fields.service_type,
       po_number: fields.po_number ?? null,
@@ -650,6 +689,8 @@ export interface JobMaterialRow {
   screen_id: string;
   row_label: string;
   price_col: string;
+  /** The service material name for the cell, or null (the catalog label stands). */
+  label: string | null;
   qty: number;
   unit: string;
   counted_note: string | null;
@@ -669,7 +710,8 @@ export const listServiceJobMaterials = createServerFn({ method: "GET" })
       .eq("service_job_id", data.id)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return rows ?? [];
+    const byMaterial = materialsByCell(await loadServiceMaterialLinks(context.supabase));
+    return (rows ?? []).map((r) => ({ ...r, label: serviceLabel(byMaterial, r) }));
   });
 
 /** A crew member as the ticket shows it. `bill_rate` is null for anyone but a manager (no money). */

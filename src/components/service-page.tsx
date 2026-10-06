@@ -54,6 +54,8 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  Check,
+  CheckCheck,
   ClipboardCheck,
   CopyPlus,
   Loader2,
@@ -68,6 +70,8 @@ import {
   Target,
   Trash2,
   Wrench,
+  Columns2,
+  Rows2,
   X,
 } from "lucide-react";
 
@@ -102,11 +106,13 @@ import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.f
 import { fromOpportunityLabel, ticketSeedFromOpportunity } from "@/lib/opportunity-form";
 import { listTechnicians } from "@/lib/auth.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
-import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";
+import { openedLine, openerName, shortDate, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
+import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
+import { PropertySiteSelect } from "@/components/crm/property-site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
@@ -211,14 +217,34 @@ const asRateKind = (s: string | null | undefined): RateKind =>
 const locationLabel = (id: string) =>
   id === "shop" ? "Shop" : id.startsWith("veh-") ? `Vehicle ${id.slice(4).toUpperCase()}` : id;
 
-const STAGE_BADGE: Record<ServiceStage, "default" | "secondary" | "outline"> = {
-  open: "default",
-  scheduled: "secondary",
-  done: "secondary",
-  authorized: "secondary",
-  invoiced: "outline",
-  closed: "outline",
-};
+/**
+ * A ticket's stage as a coloured badge (owner, Oct 6: stage-colors.ts, CenterPoint's colour
+ * families; a Scheduled ticket says where the tech is; Done ✓, Authorized ✓✓).
+ */
+/** The stage strip's dot colour per stage (stage-colors.ts). */
+const STAGE_DOTS: Record<string, string> = Object.fromEntries(
+  Object.entries(STAGE_TONES).map(([k, t]) => [k, t.dot]),
+);
+
+function StageBadge({
+  stage,
+  fieldStatus,
+}: {
+  stage: ServiceStage;
+  fieldStatus: string | null | undefined;
+}) {
+  const key = ticketToneKey({ stage, field_status: fieldStatus });
+  const mark = stageMark(stage);
+  return (
+    <Badge variant="outline" className={`gap-0.5 px-1.5 py-0 text-[11px] ${STAGE_TONES[key].chip}`}>
+      {mark === "check" && <Check className="h-3 w-3" aria-hidden />}
+      {mark === "double-check" && <CheckCheck className="h-3 w-3" aria-hidden />}
+      {key === "en_route" || key === "on_site"
+        ? `${STAGE_LABELS[stage]} · ${FIELD_TONE_LABELS[key]}`
+        : STAGE_LABELS[stage]}
+    </Badge>
+  );
+}
 
 export function ServicePage({
   id,
@@ -514,7 +540,7 @@ function ServiceList({
                   Search
                   <Input
                     type="search"
-                    placeholder="Ticket #, customer, site, description, CenterPoint #…"
+                    placeholder="Ticket #, customer, property, description, CenterPoint #…"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="bg-background"
@@ -781,11 +807,18 @@ function TicketListRow({
 }) {
   const navigate = useNavigate();
   const stage = asStage(j.stage);
+  // Owner, Oct 6: the pertinent details at a glance, no money — technician, day, Job #, PO # (the
+  // ticket's own, not a materials PO), CenterPoint #; the stage date beside the stage.
   const meta = [
     j.technician_name ?? "Unassigned",
     j.scheduled_date ? dayWithWindow(day(j.scheduled_date), j.arrival_window) : "No date",
+    j.job_number ? `Job # ${j.job_number}` : null,
+    j.po_number ? `PO # ${j.po_number}` : null,
     j.centerpoint_ticket ? `CenterPoint #${j.centerpoint_ticket}` : null,
   ].filter(Boolean);
+  const cityState = [j.site_city, j.site_state].filter((x) => x && x.trim()).join(", ");
+  const place = [j.site_name, j.location_name].filter(Boolean).join(" › ");
+  const since = shortDate(j.stage_changed_at);
   // Owner, Sep 28: the whole card opens the ticket, as on Bids (no Open button).
   const open = () => void navigate({ to: "/service", search: { id: j.id } });
   return (
@@ -810,26 +843,26 @@ function TicketListRow({
           <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-medium">
             {typeLabel(j.service_type)}
           </Badge>
-          <Badge variant={STAGE_BADGE[stage]} className="px-1.5 py-0 text-[11px]">
-            {STAGE_LABELS[stage]}
-          </Badge>
+          <StageBadge stage={stage} fieldStatus={j.field_status} />
+          {since && (
+            <span className="text-xs text-muted-foreground" title="The day it entered this stage">
+              since {since}
+            </span>
+          )}
           <OverdueBadge days={ticketOverdueDays({ ...j, stage }, today)} what="Was due" />
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
           )}
         </div>
-        {(j.site_name || j.description) && (
-          <p className="text-sm">
-            {j.site_name && (
-              <span className="inline-flex items-center gap-1 text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5" />
-                {j.site_name}
-                {j.description ? " · " : ""}
-              </span>
-            )}
-            {j.description}
+        {(place || cityState) && (
+          <p className="inline-flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            {place && <span className="text-foreground">{place}</span>}
+            {place && cityState ? " · " : ""}
+            {cityState}
           </p>
         )}
+        {j.description && <p className="text-sm">{j.description}</p>}
         <p className="text-sm text-muted-foreground">
           {meta.join(" · ")} · Updated {when(j.updated_at)}
           {j.updated_by_name ? ` by ${j.updated_by_name}` : ""}
@@ -996,7 +1029,7 @@ function NewForAccount({
   }, [detail.error]);
   useEffect(() => {
     if (siteMissing)
-      toast.error("That site is no longer on file for this customer — pick the site", {
+      toast.error("That property is no longer on file for this customer — pick the property", {
         duration: 10_000,
       });
   }, [siteMissing]);
@@ -1045,11 +1078,11 @@ function NewForAccount({
     },
     ...(fromOpp ? { from_opportunity_id: fromOpp.from_opportunity_id } : {}),
     ...(siteMissing
-      ? { tone: "error" as const, note: "That site is no longer on file; pick the site." }
+      ? { tone: "error" as const, note: "That property is no longer on file; pick the property." }
       : opportunity
         ? {
             tone: "info" as const,
-            note: `${fromOpportunityLabel(opportunity.title)}: customer, site and description filled in. Add the technician and day.`,
+            note: `${fromOpportunityLabel(opportunity.title)}: customer, property and description filled in. Add the technician and day.`,
           }
         : {}),
   };
@@ -1068,6 +1101,8 @@ function BackToList() {
 
 interface Draft {
   customer: AccountPickerValue | null;
+  /** The site inside the property (property_sites; owner, Oct 6); "" = none. */
+  location_id: string;
   /** The picked hit, shown in the card until the account itself has loaded. */
   hit: AccountHit | null;
   /** The site contact (crm_contacts); "" = none. */
@@ -1100,6 +1135,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
           : null,
         hit: null,
         contact_id: job.contact_id ?? "",
+        location_id: job.location_id ?? "",
         description: job.description,
         service_type: asType(job.service_type),
         labor_rate_kind: asRateKind(job.labor_rate_kind),
@@ -1116,6 +1152,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         customer: null,
         hit: null,
         contact_id: "",
+        location_id: "",
         description: "",
         service_type: "leak",
         labor_rate_kind: "standard",
@@ -1166,13 +1203,14 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
         }
       : null,
     contact_id: j.account_id ? (j.contact_id ?? "") : "",
+    location_id: j.account_id ? (j.location_id ?? "") : "",
     po_number: j.po_number ?? "",
     labor_rate_kind: asRateKind(j.labor_rate_kind),
     service_type: asType(j.service_type),
   },
   tone: "info",
   note: j.account_id
-    ? `Copied from ticket #${j.number}: customer, site, contact, PO #, labor rate and type. Add the description, then the technician and day.`
+    ? `Copied from ticket #${j.number}: customer, property, contact, PO #, labor rate and type. Add the description, then the technician and day.`
     : `Ticket #${j.number} was not linked to a customer profile (“${j.customer_name}”); pick the customer. PO #, labor rate and type are copied.`,
 });
 
@@ -1200,6 +1238,40 @@ const draftKey = (d: Draft) =>
     hit: null,
     customer: d.customer && [d.customer.account_id, d.customer.site_id],
   });
+
+/**
+ * The office ticket's layout on a wide screen (owner, Oct 6): the folding sections (Aerial,
+ * Materials, Purchase orders …) beside the form ("side", as since Oct 1) or below it
+ * ("stacked"). Remembered on this device; read after mount so the server's first paint matches.
+ */
+type TicketLayout = "side" | "stacked";
+/** Side by side on xl: the form ~60 %, the sections ≥ 380 px and in view (owner, Oct 1). */
+const SIDE_PANES =
+  "space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0";
+const SIDE_ASIDE = "min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]";
+/** Stacked: the form, then the sections, one column as wide as the form. */
+const STACKED_PANES = "mx-auto max-w-5xl space-y-6";
+const STACKED_ASIDE = "min-w-0 space-y-4";
+const TICKET_LAYOUT_KEY = "bid-o-matic:ticket-layout";
+function useTicketLayout(): [TicketLayout, (l: TicketLayout) => void] {
+  const [layout, setLayout] = useState<TicketLayout>("side");
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(TICKET_LAYOUT_KEY) === "stacked") setLayout("stacked");
+    } catch {
+      // Storage blocked: side by side.
+    }
+  }, []);
+  const set = (l: TicketLayout) => {
+    setLayout(l);
+    try {
+      window.localStorage.setItem(TICKET_LAYOUT_KEY, l);
+    } catch {
+      // Storage blocked: the choice lasts for this visit.
+    }
+  };
+  return [layout, set];
+}
 
 function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Seed }) {
   const { session, profile, can } = useAuth();
@@ -1242,6 +1314,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const dirty = draftKey(draft) !== savedKey;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [layout, setLayout] = useTicketLayout();
 
   // The named crew. An existing ticket's rows load after the ticket; until then (and for a
   // technician, who answers on the close-out instead) nothing about the crew is sent.
@@ -1371,6 +1444,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         account_id: draft.customer?.account_id ?? null,
         site_id: draft.customer?.site_id ?? null,
         contact_id: draft.customer ? draft.contact_id || null : null,
+        location_id: draft.customer?.site_id ? draft.location_id || null : null,
         // A ticket from before customer profiles keeps its typed name until one is picked.
         ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
         description: draft.description,
@@ -1661,13 +1735,18 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           contactId={draft.contact_id}
           siteMessage={siteMessage}
           disabled={ro}
+          locationId={draft.location_id}
+          locationName={job?.location_name ?? null}
+          onLocation={(v) => set("location_id", v)}
           onChangeCustomer={() => {
             setChangingCustomer(true);
-            setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "" }));
+            setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "", location_id: "" }));
           }}
           onPickSite={(site, accountName) =>
             setDraft((d) => ({
               ...d,
+              // Another property: its own sites (or none).
+              location_id: d.customer?.site_id === site.id ? d.location_id : "",
               customer: d.customer
                 ? {
                     account_id: d.customer.account_id,
@@ -1959,6 +2038,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // on the left and the folding sections in a column on the right. A technician, and a new
   // ticket (no sections yet), keep one column.
   const twoPane = officeOrAdmin && !!job;
+  // Owner, Oct 6: a toggle by Delete puts the sections below the form instead (remembered).
+  const stacked = twoPane && layout === "stacked";
 
   const ticketForm = (
     <form
@@ -2037,7 +2118,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     ));
 
   return (
-    <div className="space-y-6">
+    // Stacked (owner, Oct 6): the whole ticket is one centred column.
+    <div className={stacked ? "mx-auto max-w-5xl space-y-6" : "space-y-6"}>
       <div className="space-y-2">
         <BackToList />
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2084,7 +2166,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                     to="/service"
                     search={{ new: 1, from: job.id }}
                     title={
-                      job.site_id ? "New ticket for this site" : "New ticket for this customer"
+                      job.site_id ? "New ticket for this property" : "New ticket for this customer"
                     }
                   >
                     <CopyPlus className="mr-1 h-4 w-4" />
@@ -2099,6 +2181,20 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   onClick={() => setConfirmDelete(true)}
                 >
                   <Trash2 className="mr-1 h-4 w-4" /> Delete
+                </Button>
+              )}
+              {twoPane && (
+                // Only where the two layouts differ (xl and up; narrower screens always stack).
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="hidden xl:inline-flex"
+                  aria-pressed={stacked}
+                  aria-label={stacked ? "Sections beside the form" : "Sections below the form"}
+                  title={stacked ? "Sections beside the form" : "Sections below the form"}
+                  onClick={() => setLayout(stacked ? "side" : "stacked")}
+                >
+                  {stacked ? <Columns2 className="h-4 w-4" /> : <Rows2 className="h-4 w-4" />}
                 </Button>
               )}
             </div>
@@ -2157,7 +2253,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         {isTech && jobStage === "done" && (
           <p className="text-sm text-muted-foreground">Done — the office invoices and closes it.</p>
         )}
-        {job && <StageStrip cells={stageCells} label="Stages" />}
+        {job && <StageStrip cells={stageCells} label="Stages" tones={STAGE_DOTS} />}
       </div>
 
       {ro && (
@@ -2175,12 +2271,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         // at least 380 px; its top stays in view while the form scrolls, and it scrolls with
         // the page). Below xl they stack, the form first. Each section keeps its one-line
         // summary and remembered open state; Close out stays a header button.
-        <div className="space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0">
+        // Owner, Oct 6: or the same sections below the form ("stacked", the toggle by Delete).
+        <div className={stacked ? STACKED_PANES : SIDE_PANES}>
           <div className="min-w-0">{ticketForm}</div>
-          <aside
-            className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]"
-            aria-label="Ticket sections"
-          >
+          <aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE} aria-label="Ticket sections">
             <AerialSection job={job} canEdit={canEdit} />
             <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
             <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
@@ -2278,6 +2372,11 @@ function CustomerBlock(props: {
   contactId: string;
   /** Why the site still needs picking (lib/ticket-form.ts siteProblem), or null. */
   siteMessage: string | null;
+  /** The site inside the property; "" = none. */
+  locationId: string;
+  /** The saved site's name, for a site since removed from the property. */
+  locationName: string | null;
+  onLocation: (id: string) => void;
   disabled: boolean;
   onChangeCustomer: () => void;
   onPickSite: (site: { id: string; name: string }, accountName: string) => void;
@@ -2347,7 +2446,7 @@ function CustomerBlock(props: {
       })()}
       <div className="space-y-1">
         <label htmlFor="ticket-site" className="text-xs font-medium">
-          Site
+          Property
         </label>
         <SiteSelect
           id="ticket-site"
@@ -2367,6 +2466,14 @@ function CustomerBlock(props: {
         <CountyCodeLine id={site?.county_code_id} className="text-xs" />
         {/* M5 (owner, Oct 5): the site's roof warranty while in force, as CenterPoint shows. */}
         <WarrantyBadges siteId={site?.id} />
+        <PropertySiteSelect
+          id="ticket-property-site"
+          propertyId={props.siteId}
+          value={props.locationId}
+          savedName={props.locationName}
+          disabled={props.disabled}
+          onChange={props.onLocation}
+        />
         {site?.technician_instructions && (
           <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
             <span className="font-medium">Technician instructions: </span>

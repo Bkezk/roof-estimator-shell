@@ -3,7 +3,8 @@
  * CenterPoint's board, the Tech Board tab of the Service page (owner, Oct 5; it used to sit
  * folded above the ticket list). Drag an unassigned ticket from the left rail onto a cell
  * (= technician + day), drag between cells to reschedule, drag back onto the rail to unassign;
- * click a ticket to open it. Colour = stage (STAGE_CHIP; the rail carries a legend and each of
+ * click a ticket to open it. Colour = stage, and on a Scheduled ticket where the tech is (stage-colors.ts, owner Oct 6:
+ * CenterPoint's colour families; Done green with a check mark; the rail carries a legend and each of
  * its chips names its stage — owner, Oct 5: "color coded by status"). The rail lists Open /
  * Scheduled tickets missing a technician or a day, oldest first.
  *
@@ -21,11 +22,20 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronLeft,
+  Check,
+  CheckCheck,
   ChevronRight,
   Inbox,
   Loader2,
   Plus,
 } from "lucide-react";
+import {
+  FIELD_TONE_LABELS,
+  STAGE_TONES,
+  stageMark,
+  ticketToneKey,
+  type StageToneKey,
+} from "@/lib/stage-colors";
 
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets } from "@/lib/access";
@@ -63,20 +73,6 @@ const openedOn = (iso: string) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/**
- * Stage colours: open amber, scheduled blue, done green, invoiced / closed muted (owner, Oct 5:
- * Open used to be grey, which read as "no colour" next to the blue Scheduled chips on the rail).
- */
-const STAGE_CHIP: Record<ServiceStage, string> = {
-  open: "border-amber-300 bg-amber-100 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100",
-  scheduled:
-    "border-blue-300 bg-blue-100 text-blue-950 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-100",
-  done: "border-green-300 bg-green-100 text-green-950 dark:border-green-800 dark:bg-green-950 dark:text-green-100",
-  authorized:
-    "border-teal-300 bg-teal-100 text-teal-950 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-100",
-  invoiced: "border-dashed border-border bg-background text-muted-foreground",
-  closed: "border-dashed border-border bg-background text-muted-foreground",
-};
 /** Only Open / Scheduled tickets move on the board; Done and later are the tech's / billing's. */
 const movable = (j: ServiceJobWithTech) => {
   const s = asStage(j.stage);
@@ -378,10 +374,21 @@ function Board({ week }: { week?: string | undefined }) {
               <Inbox className="h-4 w-4" /> Unassigned
               <span className="text-xs font-normal text-muted-foreground">{unassignedTotal}</span>
             </h2>
-            <StageLegend stages={["open", "scheduled"]} />
+            <StageLegend
+              stages={[
+                "open",
+                "scheduled",
+                "en_route",
+                "on_site",
+                "done",
+                "authorized",
+                "invoiced",
+                "closed",
+              ]}
+            />
             <Input
               type="search"
-              placeholder="Search #, customer, site…"
+              placeholder="Search #, customer, property…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 bg-background"
@@ -570,7 +577,7 @@ function BoardRow(props: {
 
 /** One ticket on the board: "#6001 Customer · description", coloured by stage. */
 /** What the chip colours mean (owner, Oct 5): one swatch per stage, in board order. */
-function StageLegend({ stages }: { stages: readonly ServiceStage[] }) {
+function StageLegend({ stages }: { stages: readonly StageToneKey[] }) {
   return (
     <ul
       className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
@@ -579,10 +586,10 @@ function StageLegend({ stages }: { stages: readonly ServiceStage[] }) {
       {stages.map((s) => (
         <li key={s} className="flex items-center gap-1">
           <span
-            className={`inline-block h-2.5 w-2.5 rounded-sm border ${STAGE_CHIP[s]}`}
+            className={`inline-block h-2.5 w-2.5 rounded-sm border ${STAGE_TONES[s].chip}`}
             aria-hidden
           />
-          {STAGE_LABELS[s]}
+          {s === "en_route" || s === "on_site" ? FIELD_TONE_LABELS[s] : STAGE_LABELS[s]}
         </li>
       ))}
     </ul>
@@ -600,6 +607,8 @@ function TicketChip(props: {
   const j = props.job;
   const stage = asStage(j.stage);
   const canDrag = stage === "open" || stage === "scheduled";
+  const toneKey = ticketToneKey({ stage, field_status: j.field_status });
+  const mark = stageMark(stage);
   const partial = props.detail
     ? j.technician_id
       ? `${j.technician_name ?? "Assigned"} · no day`
@@ -613,7 +622,9 @@ function TicketChip(props: {
     arrival,
     j.site_name,
     j.description,
-    STAGE_LABELS[stage],
+    toneKey === "en_route" || toneKey === "on_site"
+      ? `${STAGE_LABELS[stage]} · ${FIELD_TONE_LABELS[toneKey]}`
+      : STAGE_LABELS[stage],
     canDrag ? "Drag to schedule · click to open" : "Click to open",
   ]
     .filter(Boolean)
@@ -627,10 +638,16 @@ function TicketChip(props: {
       onDragEnd={props.onDragEnd}
       title={title}
       className={`block rounded-md border px-1.5 py-1 text-xs leading-snug shadow-sm transition-opacity hover:ring-1 hover:ring-primary/50 ${
-        STAGE_CHIP[stage]
+        STAGE_TONES[toneKey].chip
       } ${canDrag ? "cursor-grab active:cursor-grabbing" : ""} ${props.dragging ? "opacity-40" : ""}`}
     >
       <span className="line-clamp-2">
+        {mark === "check" && (
+          <Check className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Done" />
+        )}
+        {mark === "double-check" && (
+          <CheckCheck className="mr-0.5 inline h-3.5 w-3.5 align-[-2px]" aria-label="Authorized" />
+        )}
         <span className="font-semibold">#{j.number}</span> {j.customer_name}
         {j.description ? <span className="opacity-80"> · {j.description}</span> : null}
       </span>

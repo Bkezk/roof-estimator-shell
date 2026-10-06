@@ -2,10 +2,11 @@
  * Construction leads (owner, Sep 28: "is there any way to get data on new builds before
  * they're built giving us time to submit a bid?"). Two public feeds, pulled nightly and when
  * this page loads (throttled to six hours on the server): every state-funded project out for bid
- * on the State of KY planroom, and Louisville Metro's large commercial building permits; more
- * Kentucky sources since, and Tennessee's (STREAM, UT campuses, Nashville permits; then BidNet,
- * Chattanooga permits, Knox County and the universities) from Sep 29, all in one list. A lead can be watched, dismissed, or added to My prospects as a building. Nothing here touches bids.
- * Metro Nashville's, Chattanooga's and (Sep 29) Louisville Metro's own bid lists come in from a
+ * on the State of KY planroom; more Kentucky sources since, and Tennessee's (STREAM, UT
+ * campuses; then BidNet, Chattanooga permits, Knox County and the universities) from Sep 29, all
+ * in one list. The Louisville and Nashville sources were retired Oct 6 (lib/leads-retired.ts:
+ * "they apparently don't do work there"). A lead can be watched, dismissed, or added to My
+ * prospects as a building. Nothing here touches bids. Chattanooga's own bid list comes in from a
  * nightly browser job instead (GitHub Actions, scripts/browser-bids.ts); the page warns when
  * they stop arriving. Lexington's city bids are pulled with the rest.
  */
@@ -19,6 +20,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-store";
 import { isAdmin } from "@/lib/access";
 import { BROWSER_SOURCES } from "@/lib/leads-browser";
+import { isRetiredLeadSource } from "@/lib/leads-retired";
 import {
   LEAD_SOURCES,
   leadCounts,
@@ -66,18 +68,15 @@ const ABOUT =
   "Lynn Imaging bids: every project Lynn prints plans for, statewide (housing authorities, cities, counties, districts, private owners), posted the day plans go out for bid. " +
   "Bowling Green and Paducah bids: those cities' own bid pages. " +
   "Lexington city bids: the Lexington-Fayette Urban County Government's current bids and RFPs (the public list on its Ionwave supplier portal; a bid has no public page of its own, so the card opens the list). " +
-  "Louisville Metro bids: Louisville Metro Government's open solicitations with the department and close date (its Bonfire portal, read by the nightly browser job; the card opens the opportunity page). " +
   "University & school planrooms: UK, WKU, NKU, EKU, UofL, Jefferson County Public Schools and KCTCS projects out for bid. " +
   "Federal (SAM.gov): roofing-contractor opportunities with Kentucky or Tennessee as the place of performance. " +
-  "Louisville permit: new and addition commercial building permits from Louisville Metro, issued in the last few months. " +
   "Tennessee — TN state projects (STREAM): every state building project out for bid, with the designer to call; " +
   "UT bids: the University of Tennessee campuses' invitations to bid; " +
-  "Nashville permits: Metro Nashville commercial new, addition, shell and roofing permits over the minimum cost; " +
-  "Chattanooga permits: new non-residential buildings from the Chattanooga-Hamilton County planning agency (runs a month or two behind), over the same minimum cost; " +
+  "Chattanooga permits: new non-residential buildings from the Chattanooga-Hamilton County planning agency (runs a month or two behind), over the minimum construction cost; " +
   "Knox County bids: Knox County's own solicitations; " +
   "TN university bids: ETSU, Tennessee Tech, Austin Peay, MTSU and the Board of Regents (community colleges, TCATs, TSU). " +
   "Cities, counties & schools (BidNet): the Tennessee and Kentucky purchasing groups on BidNet Direct (cities, counties, school districts, utilities), read once a day; BidNet keeps the issuing agency for members, so the card names the group. A job BidNet repeats from a list above (same title, same state) shows once, from that list, which has the contact. " +
-  "Metro Nashville bids and Chattanooga city bids: those cities' own solicitations (the buyer to ask, the close date, Chattanooga's pre-bid meeting), from their Oracle supplier portals; those pages (and Louisville Metro's) only work in a browser, so a nightly job reads them at about 6:15 am Eastern and Refresh does not re-read them. " +
+  "Chattanooga city bids: the city's own solicitations (the buyer to ask, the close date, the pre-bid meeting), from its Oracle supplier portal; that page only works in a browser, so a nightly job reads it at about 6:15 am Eastern and Refresh does not re-read it. " +
   "The app checks the rest every 6 hours when this page is open, and nightly.";
 
 /** The nightly browser job runs once a day; a source not heard from in this long is late. */
@@ -90,13 +89,15 @@ const BROWSER_LATE_MS = 36 * 60 * 60 * 1000;
  */
 function lateBrowserSources(stamps: unknown, now = Date.now()): string | null {
   const s = (stamps && typeof stamps === "object" ? stamps : {}) as Record<string, unknown>;
-  const late = BROWSER_SOURCES.filter((k) => {
-    const at = typeof s[k] === "string" ? Date.parse(s[k]) : NaN;
-    return Number.isFinite(at) && now - at > BROWSER_LATE_MS;
-  }).map(
-    (k) =>
-      `${SOURCE_LABELS[k] ?? k} (last ${formatDistanceToNow(Date.parse(s[k] as string), { addSuffix: true })})`,
-  );
+  const late = BROWSER_SOURCES.filter((k) => !isRetiredLeadSource(k))
+    .filter((k) => {
+      const at = typeof s[k] === "string" ? Date.parse(s[k]) : NaN;
+      return Number.isFinite(at) && now - at > BROWSER_LATE_MS;
+    })
+    .map(
+      (k) =>
+        `${SOURCE_LABELS[k] ?? k} (last ${formatDistanceToNow(Date.parse(s[k] as string), { addSuffix: true })})`,
+    );
   return late.length ? late.join(", ") : null;
 }
 
@@ -279,8 +280,8 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
         <div>
           <h1 className="text-2xl font-semibold">Bid Board</h1>
           <p className="text-sm text-muted-foreground">
-            Projects out for bid across Kentucky and Louisville commercial permits — new roofs
-            before they're built.
+            Projects out for bid across Kentucky and Tennessee, and Chattanooga commercial permits —
+            new roofs before they're built.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -311,7 +312,7 @@ export function LeadsPage(props: { initialRoofOnly?: boolean | undefined }) {
               variant="outline"
               disabled={pressing || reading !== null}
               onClick={() => refresh.mutate(true)}
-              title="Pull the lead sources (Kentucky and Tennessee) now; Metro Nashville, Chattanooga and Louisville Metro city bids come in nightly from a browser job"
+              title="Pull the lead sources (Kentucky and Tennessee) now; Chattanooga city bids come in nightly from a browser job"
             >
               {pressing ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />

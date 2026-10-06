@@ -23,6 +23,8 @@ import { easternYmd, resolveFieldDay } from "@/lib/field-day";
 import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
 import { mentionedIds } from "@/lib/mentions";
+import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -964,6 +966,8 @@ export interface UsualMaterial {
   screen_id: string;
   row_label: string;
   price_col: string;
+  /** The service material name for the cell, or null (the catalog label stands). */
+  label: string | null;
   unit: string;
   /** Average quantity per ticket, in the stock unit (packs). */
   avg_qty: number;
@@ -1007,6 +1011,7 @@ export const usualMaterialsForTemplate = createServerFn({ method: "GET" })
         a.n += 1;
         agg.set(cell, a);
       }
+    const byMaterial = materialsByCell(await loadServiceMaterialLinks(sb));
     return [...agg.entries()]
       .map(([cell, a]) => {
         const [screen_id, row_label, price_col] = cell.split("\u0000") as [string, string, string];
@@ -1014,6 +1019,7 @@ export const usualMaterialsForTemplate = createServerFn({ method: "GET" })
           screen_id,
           row_label,
           price_col,
+          label: serviceLabel(byMaterial, { screen_id, row_label, price_col }),
           unit: a.unit,
           avg_qty: Math.round((a.sum / a.n) * 100) / 100,
           tickets: a.n,

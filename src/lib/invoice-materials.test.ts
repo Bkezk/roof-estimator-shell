@@ -140,13 +140,15 @@ describe("buildLinesFromJob writes material lines with materialLineFor", () => {
     expect(server).toContain("export async function cellPiece(");
     expect(server).toContain("pieceFromCatalog(screen.data as CatalogData, cell)");
     expect(server).toContain("catalogPiece ?? pieceFromCountedNotes(c.notes)");
-    expect(server).toContain("...materialLineFor(c, c.qty, cost ?? 0, markup, piece),");
+    // Priced from the service material list since Oct 6 (service-materials.test.ts).
+    expect(server).toContain("...materialLineFor(named, c.qty, cost, markup, piece),");
     expect(server).toMatch(/\.select\(\s*"[^"]*counted_note[^"]*"/);
   });
   it("Rebuild from ticket uses buildLinesFromJob", () => {
     const fns = read("src/lib/invoices.functions.ts");
     const rebuild = fns.slice(fns.indexOf("export const rebuildInvoiceLines"));
-    expect(rebuild).toContain("await buildLinesFromJob(sb, inv.service_job_id)");
+    // With the invoice's own markup since Oct 6.
+    expect(rebuild).toContain("await buildLinesFromJob(sb, inv.service_job_id, {");
   });
 });
 

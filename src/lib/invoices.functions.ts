@@ -26,6 +26,7 @@ import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
 import { mergeRebuild, rateWasChanged, type RebuildLine } from "@/lib/invoice-rebuild";
+import { rateFromMarkup } from "@/lib/invoice-materials";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -418,6 +419,8 @@ async function createInvoiceFor(
         description: job.closing_notes,
         payment_terms: settings.payment_terms,
         tax_rate: taxRate,
+        // Its own material markup from today's default (owner, Oct 6: per invoice).
+        material_markup: Number(settings.material_markup),
         ...t,
         created_by: userId,
         updated_by_name: byName,
@@ -478,7 +481,9 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("Only a draft can be rebuilt");
     const { buildLinesFromJob, totals } = await import("@/lib/invoices.server");
-    const built = await buildLinesFromJob(sb, inv.service_job_id);
+    const built = await buildLinesFromJob(sb, inv.service_job_id, {
+      markup: inv.material_markup == null ? null : Number(inv.material_markup),
+    });
     const { data: oldLines, error: oErr } = await sb
       .from("invoice_lines")
       .select("*")
@@ -557,6 +562,8 @@ const saveSchema = z.object({
   description: z.string().trim().max(10000).nullable().optional(),
   payment_terms: z.string().trim().max(500).nullable().optional(),
   tax_rate: z.number().min(0).max(1).optional(),
+  /** This invoice's material markup (0.75 = 75 %; owner, Oct 6). */
+  material_markup: z.number().min(0).max(10).optional(),
   bill_to: z.record(z.string(), z.string()).optional(),
   /** Bill To on a draft: a billable vendor's id, or null for the customer account. */
   bill_to_vendor_id: z.string().uuid().nullable().optional(),
@@ -580,6 +587,8 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (!inv) throw new Error("Invoice not found");
     if (inv.status !== "draft") throw new Error("This invoice is final; void it to change it");
     const { totals } = await import("@/lib/invoices.server");
+    const markup =
+      data.material_markup ?? (inv.material_markup == null ? 0.75 : Number(inv.material_markup));
     if (data.lines) {
       const { data: oldLines, error: oErr } = await sb
         .from("invoice_lines")
@@ -613,7 +622,14 @@ export const saveInvoice = createServerFn({ method: "POST" })
         const prev = l.id != null ? old.get(l.id) : undefined;
         // A price changed by hand is remembered, so Rebuild from ticket keeps it (owner, Oct 5).
         // Only once the column exists (20261005170000): before that the row has no such key.
-        if (prev && "rate_overridden" in prev) row.rate_overridden = rateWasChanged(prev, l.rate);
+        // A rate that only follows this invoice's markup is not "changed by hand".
+        if (prev && "rate_overridden" in prev)
+          row.rate_overridden =
+            rateWasChanged(prev, l.rate) &&
+            !rateFromMarkup(
+              { kind: l.kind, source: l.source ?? null, rate: l.rate, cost_rate: l.cost_rate },
+              markup,
+            );
         if (prev && !kept.has(prev.id)) {
           kept.add(prev.id);
           if (lineChanged(prev, row)) edits.push({ id: prev.id, row });
@@ -646,6 +662,7 @@ export const saveInvoice = createServerFn({ method: "POST" })
     const patch: Database["public"]["Tables"]["invoices"]["Update"] = {
       ...t,
       tax_rate: taxRate,
+      ...(data.material_markup === undefined ? {} : { material_markup: data.material_markup }),
       updated_by_name: nameOf(p),
     };
     if (data.invoice_date) patch.invoice_date = data.invoice_date;

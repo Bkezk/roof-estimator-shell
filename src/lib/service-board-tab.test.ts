@@ -63,20 +63,21 @@ describe("the ticket list page", () => {
 });
 
 describe("the Unassigned rail is colour-coded by stage", () => {
-  it("Open has its own colour (amber), Scheduled blue — not grey beside blue", () => {
-    const chip = board.slice(board.indexOf("const STAGE_CHIP"), board.indexOf("const movable"));
-    expect(chip).toMatch(/open:\s*"[^"]*\bbg-amber-100\b[^"]*\bdark:bg-amber-950\b/);
-    expect(chip).toMatch(/scheduled:\s*"[^"]*\bbg-blue-100\b/);
-    expect(chip).not.toMatch(/open:\s*"[^"]*\bbg-muted\b/);
+  // Oct 6: CenterPoint's families (stage-colors.ts) — Open pink, Scheduled orange, not grey.
+  it("Open has its own colour (pink), Scheduled orange — not grey beside it", () => {
+    const tones = readFileSync("src/lib/stage-colors.ts", "utf8");
+    expect(tones).toMatch(/open: tone\(\n\s*"[^"]*\bbg-pink-100\b[^"]*\bdark:bg-pink-950\b/);
+    expect(tones).toMatch(/scheduled: tone\(\n\s*"[^"]*\bbg-orange-100\b/);
+    expect(tones).not.toMatch(/open: tone\(\n\s*"[^"]*\bbg-muted\b/);
   });
-  it("carries a legend of the two stages it can hold", () => {
+  it("carries a legend of the board's colours, en route and on site among them", () => {
     expect(board).toMatch(
-      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend stages=\{\["open", "scheduled"\]\} \/>/,
+      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend\s+stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
     expect(board).toMatch(
-      /function StageLegend\(\{ stages \}: \{ stages: readonly ServiceStage\[\] \}\)/,
+      /function StageLegend\(\{ stages \}: \{ stages: readonly StageToneKey\[\] \}\)/,
     );
-    expect(board).toContain("${STAGE_CHIP[s]}");
+    expect(board).toContain("${STAGE_TONES[s].chip}");
   });
   it("each rail chip names its stage on its detail line", () => {
     expect(board).toMatch(
