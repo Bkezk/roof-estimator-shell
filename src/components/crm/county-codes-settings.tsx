@@ -165,8 +165,8 @@ export function CountyCodesSettings() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        JBK&apos;s county code for each site, picked on the site under Customers. A code a site
-        still uses cannot be deleted.
+        JBK&apos;s county code for each property, picked on the property under Customers. A code a
+        property still uses cannot be deleted.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Input

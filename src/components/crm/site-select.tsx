@@ -86,7 +86,8 @@ export function SiteSelect(props: {
               disabled={props.disabled}
               onClick={() => setAdding(true)}
             >
-              <Plus className="mr-1 h-4 w-4" /> Add site
+              {/* "Property" since Oct 6 (owner, Oct 6); the dialog below says "New property". */}
+              <Plus className="mr-1 h-4 w-4" /> Add property
             </Button>
             <Dialog open={adding} onOpenChange={setAdding}>
               <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">

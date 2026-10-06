@@ -1382,7 +1382,8 @@ function SitesSection({
         </h2>
         {!readOnly && editing !== "new" && (
           <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-            <Plus className="mr-1 h-4 w-4" /> Add site
+            {/* "Property" since Oct 6 (owner, Oct 6): the inner Sites are the site form's. */}
+            <Plus className="mr-1 h-4 w-4" /> Add property
           </Button>
         )}
       </div>
