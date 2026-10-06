@@ -92,15 +92,22 @@ export function startNotice(input: {
 }): { title: string; body: string } {
   const who = input.actorName ?? "The office";
   const tail = `Due ${input.due.toLocaleDateString("en-US")}; reminders every ${input.every} day${input.every === 1 ? "" : "s"} until it is closed.`;
-  return input.reopened
-    ? {
-        title: `${KIND_LABEL[input.kind]} reopened: ${input.title}`,
-        body: `${who} reopened this. ${tail}`,
-      }
-    : {
-        title: `${KIND_LABEL[input.kind]} assigned to you: ${input.title}`,
-        body: `${who} assigned this to you. ${tail}`,
-      };
+  if (input.reopened)
+    return {
+      title: `${KIND_LABEL[input.kind]} reopened: ${input.title}`,
+      body: `${who} reopened this. ${tail}`,
+    };
+  // The review timer (kind "invoice", title "Authorize Ticket #…"): nothing is to be invoiced
+  // yet, so not "To invoice assigned to you" (owner, Oct 6).
+  if (input.kind === "invoice")
+    return {
+      title: `${input.title} — ready for your review`,
+      body: `${who} assigned this to you. ${tail}`,
+    };
+  return {
+    title: `${KIND_LABEL[input.kind]} assigned to you: ${input.title}`,
+    body: `${who} assigned this to you. ${tail}`,
+  };
 }
 
 /**

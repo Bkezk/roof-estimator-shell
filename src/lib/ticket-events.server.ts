@@ -41,11 +41,22 @@ export async function authorizerIds(sb: Client): Promise<string[]> {
   return (data ?? []).filter((x): x is string => typeof x === "string" && !!x);
 }
 
+/**
+ * Why the stage changed, when the stage alone does not say (owner, Oct 6). "void": the last
+ * live invoice was voided and the ticket went back to Authorized (invoices.functions.ts
+ * voidInvoice), so the office hears that, not "authorized — ready to invoice … <voider>
+ * authorized it". Left out for every other stage change.
+ */
+export interface StageEventOptions {
+  reason?: "void";
+}
+
 export async function afterTicketStage(
   row: JobRow,
   prevStage: string | null,
   actor: { id: string; name: string | null },
   sb: Client,
+  opts: StageEventOptions = {},
 ): Promise<void> {
   const admin = await serverClient(sb);
   const office = await officeUsers(admin);
@@ -78,13 +89,19 @@ export async function afterTicketStage(
   if (becameAuthorized) {
     // The manager invoices it next (the Invoices tab's To invoice queue).
     const others = office.map((u) => u.id).filter((id) => id !== actor.id);
+    // A void sent it back here (owner, Oct 6): say so, not "authorized — ready to invoice".
+    const voided = opts.reason === "void";
     if (others.length)
       await notify(
         others,
         {
           kind: "ticket_authorized",
-          title: `${ticketTitle(row)} authorized — ready to invoice`,
-          body: `${actor.name ?? "The office"} authorized it. Make the invoice from the ticket.`,
+          title: voided
+            ? `${ticketTitle(row)} back to Authorized — its invoice was voided by ${actor.name ?? "the office"}.`
+            : `${ticketTitle(row)} authorized — ready to invoice`,
+          body: voided
+            ? `${actor.name ?? "The office"} voided its invoice. The ticket is Authorized again; make a new invoice from the ticket when it is ready.`
+            : `${actor.name ?? "The office"} authorized it. Make the invoice from the ticket.`,
           url: `/service?id=${row.id}`,
         },
         admin,

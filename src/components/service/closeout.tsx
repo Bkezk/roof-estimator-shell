@@ -87,6 +87,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { missingForComplete } from "@/lib/closeout-check";
+import { officeStageMessage } from "@/lib/office-stage-message";
 import {
   clock,
   errText,
@@ -228,7 +229,7 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
         <p className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
           <Lock className="h-4 w-4 shrink-0" />
           {officeStage
-            ? "The office has invoiced or closed this ticket; ask the office if something needs changing."
+            ? `${officeStageMessage(job.stage)}; ask the office if something needs changing.`
             : `This ticket is assigned to ${job.technician_name ?? "someone else"}; only they or the office can close it out.`}
         </p>
       )}

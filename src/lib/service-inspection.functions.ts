@@ -16,6 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import { officeStageMessage } from "@/lib/office-stage-message";
 import { ticketDateProblem } from "@/lib/ticket-date";
 import {
   inspectionComplete,
@@ -210,10 +211,9 @@ export const saveTicketInspection = createServerFn({ method: "POST" })
     if (isTech(p)) {
       if (job.technician_id !== context.userId)
         throw new Error("This ticket is assigned to someone else");
+      // Authorized is still under review (owner, Oct 6): the message says which it is.
       if (["authorized", "invoiced", "closed"].includes(job.stage))
-        throw new Error(
-          "The office has invoiced or closed this ticket; ask the office to change it",
-        );
+        throw new Error(`${officeStageMessage(job.stage)}; ask the office to change it`);
     }
     const ins: Inspection = {
       v: 1,
