@@ -72,7 +72,19 @@ const itemSchema = z.object({
 });
 export type ServiceMaterialInput = z.input<typeof itemSchema>;
 
-/** Save the list: changed rows update, rows without an id are added (at the end). */
+/**
+ * The sort of the first of `adding` materials added now: above the first row (min − adding; the
+ * column is a plain integer, negatives are fine), the rest counting up to min − 1, so the rows
+ * the screen put at the top stay at the top, in their order, after the save (owner, Oct 6, QA
+ * audit: it was max + 1 and the new material jumped to the bottom). An empty list starts at 0.
+ * Pure: tested in material-add-top.test.ts.
+ */
+export function newMaterialSort(current: readonly { sort: number }[], adding = 1): number {
+  if (!current.length) return 0;
+  return current.reduce((m, r) => Math.min(m, r.sort), Infinity) - Math.max(1, adding);
+}
+
+/** Save the list: changed rows update, rows without an id are added (at the top, in order). */
 export const saveServiceMaterials = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -106,7 +118,7 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
         .eq("id", 1);
       if (error) throw new Error(error.message);
     }
-    let sort = current.reduce((m, r) => Math.max(m, r.sort), -1) + 1;
+    let sort = newMaterialSort(current, data.items.filter((it) => !it.id).length);
     for (const it of data.items) {
       const was = it.id ? byId.get(it.id) : undefined;
       if (it.id && !was) throw new Error("That material is no longer on the list — reload");
