@@ -40,8 +40,10 @@ import { newBidFromSeed, type SeedFactories } from "@/lib/takeoff/seed-to-bid";
 import type { SavedBidState } from "@/lib/proposal-bid";
 import {
   describeTarget,
+  parseInchNumber,
   PLANSWIFT_TARGET_LABELS,
   type ClassifiedRow,
+  type InsulationGuess,
   type MembraneGuess,
   type PlanSwiftTarget,
 } from "./classify";
@@ -206,6 +208,57 @@ export function matchBoard(
   if (exact) return exact;
   const starts = boardNames.filter((b) => boardKey(b).startsWith(g));
   return starts.find((b) => /4'\s*x\s*8'/i.test(b)) ?? starts[0] ?? null;
+}
+
+/**
+ * A thickness no single board has, as a stack of the list's boards (owner, Oct 6: "there's no such
+ * thing as 6 inch underlayment, it would be two layers of 3 inch"): the fewest boards, and among
+ * those the most even split — 6" → 3" + 3", 5" → 2 1/2" + 2 1/2", 4 1/2" → 2" + 2 1/2". Only for
+ * the flat insulation boards (ISO, Rigid); null when no stack of up to four boards adds up.
+ */
+export function splitBoardThickness(
+  thicknessIn: number,
+  kind: InsulationGuess["kind"],
+  boardNames: readonly string[],
+): string[] | null {
+  const family = kind === "iso" ? /^\s*(\S.*?)"\s*ISO\s*$/i : /^\s*(\S.*?)"\s*Rigid\s*$/i;
+  if (kind !== "iso" && kind !== "eps" && kind !== "xps") return null;
+  const boards: Array<{ name: string; t: number }> = [];
+  for (const name of boardNames) {
+    const m = family.exec(name);
+    const t = m ? parseInchNumber(m[1]!) : null;
+    if (t !== null && t > 0) boards.push({ name, t });
+  }
+  if (!boards.length) return null;
+  const close = (a: number, b: number) => Math.abs(a - b) < 0.01;
+  let best: Array<{ name: string; t: number }> | null = null;
+  const walk = (
+    from: number,
+    left: number,
+    stack: Array<{ name: string; t: number }>,
+    max: number,
+  ) => {
+    if (close(left, 0)) {
+      if (stack.length) {
+        const spread = Math.max(...stack.map((b) => b.t)) - Math.min(...stack.map((b) => b.t));
+        const bestSpread = best
+          ? Math.max(...best.map((b) => b.t)) - Math.min(...best.map((b) => b.t))
+          : Infinity;
+        if (!best || spread < bestSpread - 1e-9) best = [...stack];
+      }
+      return;
+    }
+    if (stack.length >= max || left < 0) return;
+    for (let i = from; i < boards.length; i++) {
+      const b = boards[i]!;
+      if (b.t > left + 0.01) continue;
+      stack.push(b);
+      walk(i, left - b.t, stack, max);
+      stack.pop();
+    }
+  };
+  for (let n = 2; n <= 4 && !best; n++) walk(0, thicknessIn, [], n);
+  return best ? (best as Array<{ name: string; t: number }>).map((b) => b.name) : null;
 }
 
 /** The membrane / system a section row names, validated against the live labor combos. */
@@ -501,6 +554,15 @@ export function planSwiftSeed(
     for (const g of m?.layers ?? []) {
       const board = matchBoard(g.boardName, opts.boardNames);
       if (!board) {
+        // No single board that thick: the list's boards stacked to it (6" → 3" + 3").
+        const stack = opts.boardNames
+          ? splitBoardThickness(g.thicknessIn, g.kind, opts.boardNames)
+          : null;
+        if (stack) {
+          for (let k = 0; k < g.count; k++) for (const b of stack) layers.push(layerOf(b, att));
+          layerNotes.push(`${g.text}: no single board that thick — ${stack.join(" + ")}.`);
+          continue;
+        }
         layerNotes.push(
           `${g.text}: no "${g.boardName}" board in the list — add the layer by hand.`,
         );

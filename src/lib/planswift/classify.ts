@@ -105,6 +105,8 @@ export interface ClassifiedRow {
   details: RowDetails;
   /** Set when the target came from the user's earlier choice for this name. */
   remembered?: boolean;
+  /** The classifier's own target when the memory overrode it (so only real changes are kept). */
+  guessed?: PlanSwiftTarget;
 }
 
 // ── Number helpers ────────────────────────────────────────────────────────────────────────────

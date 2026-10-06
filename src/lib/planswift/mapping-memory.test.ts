@@ -4,6 +4,7 @@ import { classifyRows } from "./classify";
 import { readPlanSwiftHandoff, stashPlanSwiftHandoff, type PlanSwiftHandoff } from "./handoff";
 import {
   applyMappingMemory,
+  LEGACY_MAPPING_STORAGE_KEY,
   MAPPING_MEMORY_LIMIT,
   MAPPING_STORAGE_KEY,
   readMappingMemory,
@@ -44,7 +45,7 @@ const row = (sheetRow: number, name: string, qty: number, units: "SQ FT" | "FT" 
     wallArea: null,
   }) satisfies PlanSwiftRow;
 
-describe("mapping memory (planswift.mapping)", () => {
+describe("mapping memory (planswift.mapping.v2)", () => {
   it("remembers choices per normalised name and pre-fills the next import", () => {
     const st = new MemStorage();
     const first = classifyRows([
@@ -96,6 +97,75 @@ describe("mapping memory (planswift.mapping)", () => {
     expect(Object.keys(mem)).toHaveLength(MAPPING_MEMORY_LIMIT);
     expect(mem["gutter"]).toBeUndefined();
     expect(mem[`name ${MAPPING_MEMORY_LIMIT + 4}`]).toBe("skip");
+  });
+
+  it("only a CHANGE is remembered: a row left on the importer's guess is not (owner, Oct 6)", () => {
+    // Brian's first import of the Monticello file: every row's target was stored, the wrong
+    // guesses included, so the second import came back wrong "by his choice".
+    const st = new MemStorage();
+    const cs = classifyRows([
+      row(2, 'Roof Type 1 - 50 Mil DL, Min 6" ISO, 1/8th per Ft Tappered Iso', 4157.86, "SQ FT"),
+      row(3, "Metal MTL1/ MTL2 22Ga V-groove", 205.46, "SQ FT"),
+      row(4, "ATR Hub", 1, "EA"),
+    ]);
+    rememberMappings(
+      st,
+      cs.map((c) => ({ key: c.key, target: c.target, guessed: c.target })),
+    );
+    expect(readMappingMemory(st)).toEqual({});
+    // The estimator changes one row: only that one is kept.
+    rememberMappings(st, [
+      { key: cs[0]!.key, target: cs[0]!.target, guessed: cs[0]!.target },
+      { key: cs[2]!.key, target: "skip", guessed: cs[2]!.target },
+    ]);
+    expect(readMappingMemory(st)).toEqual({ "atr hub": "skip" });
+  });
+
+  it("setting a remembered name back to the guess forgets it", () => {
+    const st = new MemStorage();
+    rememberMappings(st, [{ key: "atr hub", target: "skip", guessed: "accessory" }]);
+    expect(readMappingMemory(st)).toEqual({ "atr hub": "skip" });
+    rememberMappings(st, [{ key: "atr hub", target: "accessory", guessed: "accessory" }]);
+    expect(readMappingMemory(st)).toEqual({});
+  });
+
+  it("a memory override keeps the importer's own guess on the row, so Create can tell them apart", () => {
+    const st = new MemStorage();
+    rememberMappings(st, [{ key: "atr hub", target: "skip", guessed: "accessory" }]);
+    const [r] = applyMappingMemory(
+      classifyRows([row(2, "ATR Hub", 1, "EA")]),
+      readMappingMemory(st),
+    );
+    expect([r!.target, r!.guessed, r!.remembered]).toEqual(["skip", "accessory", true]);
+  });
+
+  it("the first version's memory (guesses included) is left unread", () => {
+    const st = new MemStorage();
+    st.setItem(
+      LEGACY_MAPPING_STORAGE_KEY,
+      JSON.stringify({
+        "roof type dl min iso th per ft tappered iso": "tapered",
+        "metal mtl mtl ga v groove": "section",
+      }),
+    );
+    expect(MAPPING_STORAGE_KEY).toBe("planswift.mapping.v2");
+    expect(readMappingMemory(st)).toEqual({});
+    const cs = applyMappingMemory(
+      classifyRows([
+        row(
+          2,
+          'Roof Type 1 - 50 Mil DL, Min 6" ISO, 1/8th per Ft Tappered Iso, 1/4" Dens Deck',
+          4157.86,
+          "SQ FT",
+        ),
+        row(3, "Metal MTL1/ MTL2 @ Addenda 2 22Ga V-groove", 205.46, "SQ FT"),
+      ]),
+      readMappingMemory(st),
+    );
+    expect(cs.map((c) => [c.target, c.remembered ?? false])).toEqual([
+      ["section", false],
+      ["metals", false],
+    ]);
   });
 
   it("bad or blocked storage just forgets", () => {

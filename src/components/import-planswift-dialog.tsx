@@ -5,7 +5,8 @@
  * "Create bid" on a takeoff does. The customer is optional (owner, Oct 5: "get rid of that for
  * now and just have the imported planswift file make an untitled bid"): without one the bid
  * starts as "Untitled bid", unlinked, to be named and linked on its Setup screen. The choices
- * are remembered per row name in this browser (`planswift.mapping`) for the next export.
+ * the estimator changes are remembered per row name in this browser (`planswift.mapping.v2`)
+ * for the next export.
  */
 import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
@@ -208,9 +209,14 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     setBusy(true);
     try {
       const name = planSwiftBidName(bidName, account?.label, fileName);
+      // Only the rows the estimator changed are remembered (the importer's own guesses are not).
       rememberMappings(
         safeStorage("local"),
-        rows.map((r) => ({ key: r.row.key, target: r.target })),
+        rows.map((r) => ({
+          key: r.row.key,
+          target: r.target,
+          guessed: r.row.guessed ?? r.row.target,
+        })),
       );
       const session = safeStorage("session");
       if (!session) throw new Error("This browser blocks tab storage, which the import needs.");

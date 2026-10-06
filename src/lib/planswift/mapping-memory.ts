@@ -1,14 +1,20 @@
 /**
- * The PlanSwift importer's memory (per browser): the target the estimator chose for each
- * normalised row name (`normalizeRowName`), so the next export with similar names — the same
- * estimator types the same names job after job — opens pre-filled with those choices.
- * Pure over a Storage-like object so it can be tested without a browser; every read and write is
- * guarded (private windows and blocked storage just forget).
+ * The PlanSwift importer's memory (per browser): the target the estimator CHOSE for a normalised
+ * row name (`normalizeRowName`) when it differed from the importer's own guess, so the next export
+ * with similar names — the same estimator types the same names job after job — opens pre-filled
+ * with those choices. Only real changes are kept (owner, Oct 6): the first version remembered
+ * every row's target, guesses included, so a wrong guess on one import ("Roof Type 1 …" as a
+ * tapered quote, the metal panel as the roof) came back as "your choice" on the next, over the
+ * corrected importer. Hence the key's `.v2`: the old entries are left unread. Pure over a
+ * Storage-like object so it can be tested without a browser; every read and write is guarded
+ * (private windows and blocked storage just forget).
  */
 
 import { PLANSWIFT_TARGETS, type ClassifiedRow, type PlanSwiftTarget } from "./classify";
 
-export const MAPPING_STORAGE_KEY = "planswift.mapping";
+export const MAPPING_STORAGE_KEY = "planswift.mapping.v2";
+/** The first version's key: guesses were remembered as choices, so it is ignored, never read. */
+export const LEGACY_MAPPING_STORAGE_KEY = "planswift.mapping";
 /** Oldest names are dropped past this many. */
 export const MAPPING_MEMORY_LIMIT = 400;
 
@@ -35,16 +41,23 @@ export function readMappingMemory(storage: StorageLike | null | undefined): Mapp
 }
 
 /**
- * Remember the final choices of one import. "Place by hand" is not a choice (it is what is left
- * when nothing fits), so it is never remembered; a name chosen again moves to the newest end.
+ * Remember the final choices of one import. Only a target that differs from the importer's own
+ * guess (`guessed`) is a choice: a row left on its guess is not remembered, and a name whose
+ * target is set back to the guess is forgotten (that is how a wrong memory is undone). "Place by
+ * hand" is not a choice either (it is what is left when nothing fits); a name chosen again moves
+ * to the newest end.
  */
 export function rememberMappings(
   storage: StorageLike | null | undefined,
-  choices: ReadonlyArray<{ key: string; target: PlanSwiftTarget }>,
+  choices: ReadonlyArray<{ key: string; target: PlanSwiftTarget; guessed?: PlanSwiftTarget }>,
 ): MappingMemory {
   const mem = readMappingMemory(storage);
   for (const c of choices) {
-    if (!c.key || c.target === "unmatched") continue;
+    if (!c.key) continue;
+    if (c.target === "unmatched" || (c.guessed !== undefined && c.target === c.guessed)) {
+      delete mem[c.key];
+      continue;
+    }
     delete mem[c.key];
     mem[c.key] = c.target;
   }
@@ -73,6 +86,7 @@ export function applyMappingMemory(
       confidence: "high",
       reason: "your choice for this name last time",
       remembered: true,
+      guessed: r.target,
     };
   });
 }

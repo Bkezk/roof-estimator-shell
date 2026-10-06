@@ -13,7 +13,30 @@ import { describe, expect, it } from "vitest";
 
 import { classifyRows, describeTarget, parseMembrane, parseParapetProfile } from "./classify";
 import { readPlanSwiftWorkbook } from "./parse";
-import { planSwiftSeed, type PlanSwiftChoice } from "./to-seed";
+import { planSwiftSeed, splitBoardThickness, type PlanSwiftChoice } from "./to-seed";
+
+/** The live Estimate Pricing board list (underlayment_board_group, Oct 6): no 6" ISO exists. */
+const LIVE_BOARDS = [
+  '1/2" ISO',
+  '1" ISO',
+  '1 1/2" ISO',
+  '2" ISO',
+  '2 1/2" ISO',
+  '2.7" ISO',
+  '3" ISO',
+  '3 1/2" ISO',
+  '4" ISO',
+  "ISO Quote 4'x 8'",
+  "1/2\" HD ISO 4'x 4'",
+  '1" Rigid',
+  '2" Rigid',
+  '3" Rigid',
+  '4" Rigid',
+  '1/4" Dens Deck',
+  '3/8" Dens Deck',
+  "Tapered ISO",
+  "Tapered Crickets",
+];
 
 const fixture = (name: string) =>
   new Uint8Array(readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url))));
@@ -125,6 +148,46 @@ describe("monticello.xlsx — the owner's export, row by row", async () => {
     );
     // The old import's tell-tale: nothing is a 100 × 2 ft strip any more.
     expect(seed.warnings.join("\n")).not.toContain("100.13");
+  });
+});
+
+describe('"Min 6" ISO" with the live board list (owner, Oct 6: "it would be two layers of 3 inch")', async () => {
+  const sheet = await readPlanSwiftWorkbook(fixture("monticello.xlsx"));
+  const cs = classifyRows(sheet.rows);
+  const seed = planSwiftSeed(
+    sheet,
+    cs.map((c) => ({ row: c, target: c.target })),
+    { fileName: "Monicello Banking Company 2026.xlsx", boardNames: LIVE_BOARDS, labor: LABOR },
+  );
+  it('Roof Type 1 is 3" ISO + 3" ISO, the tapered quote, then 1/4" Dens Deck; Roof Type 2 2" ISO', () => {
+    expect(seed.sections.map((s) => s.layers!.map((l) => l.board))).toEqual([
+      ['3" ISO', '3" ISO', "Tapered ISO", '1/4" Dens Deck'],
+      ['2" ISO', "Tapered ISO", '1/4" Dens Deck'],
+    ]);
+    expect(seed.sections[0]!.notes).toContain(
+      '6" ISO: no single board that thick — 3" ISO + 3" ISO.',
+    );
+    expect(seed.sections[0]!.notes).not.toContain("add the layer by hand");
+  });
+  it("splitBoardThickness: the fewest boards, then the most even split", () => {
+    expect(splitBoardThickness(6, "iso", LIVE_BOARDS)).toEqual(['3" ISO', '3" ISO']);
+    expect(splitBoardThickness(5, "iso", LIVE_BOARDS)).toEqual(['2 1/2" ISO', '2 1/2" ISO']);
+    expect(splitBoardThickness(4.5, "iso", LIVE_BOARDS)).toEqual(['2" ISO', '2 1/2" ISO']);
+    expect(splitBoardThickness(7, "iso", LIVE_BOARDS)).toEqual(['3 1/2" ISO', '3 1/2" ISO']);
+    expect(splitBoardThickness(9, "iso", LIVE_BOARDS)).toEqual(['3" ISO', '3" ISO', '3" ISO']);
+    expect(splitBoardThickness(6, "eps", LIVE_BOARDS)).toEqual(['3" Rigid', '3" Rigid']);
+    // Not a flat insulation board, or nothing adds up: left for the by-hand note.
+    expect(splitBoardThickness(6, "densdeck", LIVE_BOARDS)).toBeNull();
+    expect(splitBoardThickness(0.3, "iso", LIVE_BOARDS)).toBeNull();
+  });
+});
+
+describe("the import dialog remembers only what the estimator changed", () => {
+  it("passes the importer's guess beside each target", () => {
+    const src = readFileSync("src/components/import-planswift-dialog.tsx", "utf8");
+    expect(src).toMatch(
+      /rememberMappings\(\s*safeStorage\("local"\),\s*rows\.map\(\(r\) => \(\{\s*key: r\.row\.key,\s*target: r\.target,\s*guessed: r\.row\.guessed \?\? r\.row\.target,\s*\}\)\),\s*\);/,
+    );
   });
 });
 
