@@ -39,7 +39,7 @@ export const PLANSWIFT_TARGET_LABELS: Record<PlanSwiftTarget, string> = {
   coping: "Coping",
   gutter: "Gutter",
   downspout: "Downspout (Metals)",
-  twopiece: "Two-piece metal (Metals)",
+  twopiece: "Two-piece metal (Base & Snap Cover)",
   metals: "Metals line",
   curb: "Curb",
   drain: "Drain",
@@ -367,7 +367,7 @@ const FT_METALS: Array<{ re: RegExp; kind: string }> = [
 
 const SHEET_METALS = "Non-DL › Sheet Metals";
 const METALS_DOWNSPOUTS = "Metals › Downspouts";
-const METALS_TWO_PIECE = "Metals › Two-Piece Metals";
+const SNAP_COVER = "Accessories › Base & Snap Cover";
 
 /** Downspout words: "Downspouts", "Down spouts", "D.S.". */
 const DOWNSPOUT_RE = /down\s*spouts?|\bd\.?s\.?\b/i;
@@ -545,7 +545,7 @@ function classifyTarget(
         {
           ...(size !== undefined ? { twoPieceIn: size } : {}),
           kind: "Two-piece metal",
-          where: METALS_TWO_PIECE,
+          where: SNAP_COVER,
         },
       );
     }
@@ -730,7 +730,7 @@ export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.tar
       return `${what} (${METALS_DOWNSPOUTS})`;
     }
     case "twopiece":
-      return `two-piece edge metal${d.twoPieceIn !== undefined ? ` ${formatInches(d.twoPieceIn)}"` : " (no size in the name)"}, ${q} — compression metal and cover (${METALS_TWO_PIECE})`;
+      return `two-piece edge metal${d.twoPieceIn !== undefined ? ` ${formatInches(d.twoPieceIn)}"` : " (no size in the name)"}, ${q} — base and covers (${SNAP_COVER})`;
     case "metals":
       return `${d.kind ?? r.name} ${q} (a Sheet Metals line)`;
     case "nondl":

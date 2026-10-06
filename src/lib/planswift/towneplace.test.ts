@@ -22,7 +22,7 @@ import {
   downspoutRows,
   planSwiftSeed,
   savedFromPlanSwiftSeed,
-  twoPieceRows,
+  twoPieceAdditionalFt,
   walkPadRowFor,
   type PlanSwiftChoice,
 } from "./to-seed";
@@ -100,7 +100,7 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
     expect([r.target, r.confidence]).toEqual(["twopiece", "high"]);
     expect(r.details.twoPieceIn).toBe(6);
     expect(describeTarget(r, r.target)).toBe(
-      'two-piece edge metal 6", 1,437.55 ft — compression metal and cover (Metals › Two-Piece Metals)',
+      'two-piece edge metal 6", 1,437.55 ft — base and covers (Accessories › Base & Snap Cover)',
     );
   });
 
@@ -147,23 +147,11 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
       expect(seed.nonDlCustom).toEqual({});
     });
 
-    it("Metals list: the 6\" compression metal and its cover, each 1,437.55 ft at the catalog's prices", () => {
-      expect(seed.metals).toEqual([
-        {
-          description: 'Two-Piece Metals — 6" 2-Piece Compression',
-          price: 3.25,
-          laborPerUnit: 0.05,
-          laborRate: 45,
-          quantity: 1437.55,
-        },
-        {
-          description: 'Two-Piece Metals — 6" 2-Piece Compression — Cover',
-          price: 4.7,
-          laborPerUnit: 0.05,
-          laborRate: 45,
-          quantity: 1437.55,
-        },
-      ]);
+    it('Base & Snap Cover: 1,437.55 ft of 6" two-piece, covers on (not Metals lines, not Non-DL)', () => {
+      expect(seed.twoPieceFt).toEqual({ "6": 1437.55 });
+      expect(seed.warnings).toContain(
+        '6" 2-piece: 1,437.55 ft on Accessories › Base & Snap Cover (6", covers on) — the parapets terminated in 6" two-piece count there by themselves; the rest is Additional Required.',
+      );
     });
 
     it('Accessories › Walk Pads: 10 of the 30" x 60" White pad, with a warning to check size and colour', () => {
@@ -198,11 +186,11 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
       expect(bare.curbs).toHaveLength(2);
       expect(bare.nonDlCustom).toEqual({});
       expect(bare.metalsCalc.downspouts).toEqual([]);
-      expect(bare.metals).toEqual([]);
+      // Two-piece needs no catalog: the engine prices Base & Snap Cover itself.
+      expect(bare.twoPieceFt).toEqual({ "6": 1437.55 });
       expect(bare.walkPads).toEqual({});
       expect(bare.unmapped.map((u) => u.label)).toEqual([
         "12 × Drains",
-        '6" 2-piece: 1,437.55 ft',
         "10 × Walkpads",
         "Gutter: 200.96 ft",
         '7 × 3" X 4" Drops',
@@ -214,7 +202,7 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
       );
     });
 
-    it("the bid made from the seed carries the downspouts, the two-piece lines and the walk pads", () => {
+    it("the bid made from the seed carries the downspouts, the two-piece footage and the walk pads", () => {
       let seq = 1;
       const newSection = (d: Partial<BidSectionInput> = {}): BidSectionInput => ({
         id: `s${seq++}`,
@@ -262,6 +250,8 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
         girthInches: 6,
         wallType: 4,
         pieces: 1,
+        // The route's parapet default on this bid: 6" two-piece termination (id 8).
+        termOptionId: 8,
         ...d,
       });
       let cseq = 1;
@@ -315,10 +305,17 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
       const bid = savedFromPlanSwiftSeed(blank, seed, { newSection, newParapet, newCurb });
       expect(bid.metalsCalc!.downspouts!.map((d) => d.size)).toEqual(['4"X4"', '3"X4"']);
       expect(bid.metalsCalc!.downspouts![1]).toEqual(seed.metalsCalc.downspouts[0]);
-      expect(bid.metals!.map((m) => [m.description, m.quantity])).toEqual([
-        ['Two-Piece Metals — 6" 2-Piece Compression', 1437.55],
-        ['Two-Piece Metals — 6" 2-Piece Compression — Cover', 1437.55],
-      ]);
+      // Base & Snap Cover 6": covers on; Additional Required = the sheet's run less the parapets
+      // the engine already counts (every parapet here is terminated in 6" two-piece, id 8).
+      const parapetFt = bid
+        .parapets!.filter((p) => p.termOptionId === 8)
+        .reduce((t, p) => t + (p.termLengthFt ?? p.lengthFt), 0);
+      expect(parapetFt).toBeGreaterThan(1000);
+      const snap6 = bid.accessoriesCalc!.snapCover!["6"]!;
+      expect(snap6.coversOn).toBe(true);
+      expect(snap6.additionalFt).toBe(Math.round((1437.55 - parapetFt) * 100) / 100);
+      expect(bid.accessoriesCalc!.snapCover!["3"]!.coversOn).toBe(false);
+      expect(bid.metals).toEqual([]);
       expect(bid.accessoriesCalc!.walkPads!.qty).toEqual({
         '60" x 60" Gray - Walk Pad': 2,
         '30" x 60" White - Walk Pad': 10,
@@ -345,6 +342,18 @@ describe("the readers behind it", () => {
     expect(twoPieceSize("2-piece")).toBeUndefined();
   });
 
+  it("twoPieceAdditionalFt: the sheet's run less the parapets terminated in that size, never below 0", () => {
+    const parapets = [
+      { lengthFt: 630, termOptionId: 8 },
+      { lengthFt: 430, termOptionId: 8, termLengthFt: 400 },
+      { lengthFt: 130, termOptionId: 11 },
+    ];
+    expect(twoPieceAdditionalFt(1437.55, "6", parapets)).toBe(407.55);
+    expect(twoPieceAdditionalFt(1437.55, "3", parapets)).toBe(1307.55);
+    expect(twoPieceAdditionalFt(1437.55, "4", parapets)).toBe(1437.55);
+    expect(twoPieceAdditionalFt(900, "6", parapets)).toBe(0);
+  });
+
   it("the catalog lookups", () => {
     expect(downspoutRows(METALS, '3"X4"').map((i) => i.description)).toEqual([
       '3"X4" Downspout - Open',
@@ -355,9 +364,6 @@ describe("the readers behind it", () => {
     ]);
     expect(downspoutRows(METALS, '5"X7"')).toEqual([]);
     expect(downspoutRows(undefined, '3"X4"')).toEqual([]);
-    expect(twoPieceRows(METALS, 6)!.base.description).toBe('6" 2-Piece Compression');
-    expect(twoPieceRows(METALS, 6)!.cover!.description).toBe('6" 2-Piece Compression — Cover');
-    expect(twoPieceRows(METALS, 7)).toBeNull();
   });
 
   it("walkPadRowFor: size and colour from the name, else 30 x 60 in the bid's colour, else White", () => {

@@ -21,11 +21,15 @@
 
 import type { Attachment } from "@/lib/engine/estimate";
 import type { MetalsCatalogItem } from "@/lib/engine/adapters";
-import { normalizeAccessoriesState } from "@/lib/engine/accessories";
+import {
+  normalizeAccessoriesState,
+  SNAP_SIZES,
+  SNAP_TERMINATION_ID,
+  type SnapSize,
+} from "@/lib/engine/accessories";
 import {
   MAX_UNDERLAYMENT_LAYERS,
   type BidSectionInput,
-  type MetalLine,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
 import { normalizeMetalsState, type DownspoutEntryState } from "@/lib/engine/metals";
@@ -87,8 +91,13 @@ export interface PlanSwiftBidSeed extends TakeoffBidSeed {
    * Metals screen's, not Non-DL): downspouts by size — lengths and their drops / elbows.
    */
   metalsCalc: { downspouts: DownspoutEntryState[] };
-  /** Two-piece edge metal for the Metals screen's list: compression metal and its cover. */
-  metals: MetalLine[];
+  /**
+   * Two-piece edge metal by size, in feet (`6" 2-piece` 1,437.55 ft): Accessories › Base & Snap
+   * Cover, where the engine prices the compression metal, its covers and corners (legacy
+   * TwoPieceMetal). The parapets whose termination is that size already count there, so the
+   * bid gets the sheet's footage less theirs as "Additional Required" (savedFromPlanSwiftSeed).
+   */
+  twoPieceFt: Partial<Record<SnapSize, number>>;
   /** Walk pad counts by Accessories › Walk Pads row. */
   walkPads: Record<string, number>;
   importInfo: PlanSwiftImportInfo;
@@ -352,25 +361,6 @@ export function downspoutRows(
 }
 
 /**
- * The two-piece rows for a size: the compression metal (`6" 2-Piece Compression`) and its cover
- * (`6" 2-Piece Compression — Cover`, as buildMetalsCatalog prefixes sub-rows).
- */
-export function twoPieceRows(
-  catalog: readonly MetalsCatalogItem[] | undefined,
-  sizeIn: number,
-): { base: MetalsCatalogItem; cover: MetalsCatalogItem | undefined } | null {
-  if (!catalog) return null;
-  const rows = catalog.filter((i) => /two-?piece/i.test(i.category));
-  const baseRe = new RegExp(`^${formatInches(sizeIn)}"\\s*2-?piece\\s*compression$`, "i");
-  const base = rows.find((i) => baseRe.test(i.description.trim()));
-  if (!base) return null;
-  const cover = rows.find(
-    (i) => i.description.startsWith(base.description) && /—\s*cover$/i.test(i.description),
-  );
-  return { base, cover };
-}
-
-/**
  * The Accessories › Walk Pads row a sheet row means (owner, Oct 6: "walk pads were not picked up
  * with the import"): 60" x 60" when the name says so, else 30" x 60"; the colour the name says
  * (White / Gray / Tan / Safety), else the bid's colour, else White; "Fully Skirted" only when the
@@ -515,7 +505,7 @@ export function planSwiftSeed(
     }
     return e;
   };
-  const metalLines: MetalLine[] = [];
+  const twoPieceFt: Partial<Record<SnapSize, number>> = {};
   const walkPads: Record<string, number> = {};
   const parapetRows: ClassifiedRow[] = [];
   const curbRows: ClassifiedRow[] = [];
@@ -684,40 +674,27 @@ export function planSwiftSeed(
         break;
       }
       case "twopiece": {
-        // Owner's Towneplace file: `6" 2-piece` 1,437.55 ft — the Metals screen's 6" 2-Piece
-        // Compression and its Cover, each at the sheet's length (both pieces run the edge).
-        const where = "Metals › Two-Piece Metals";
-        if (d.twoPieceIn === undefined) {
+        // Owner's Towneplace file: `6" 2-piece` 1,437.55 ft — Accessories › Base & Snap Cover, the
+        // 6" size, covers on; the engine adds its 3 % and rounds to the next 10 ft as legacy did.
+        const where = "Accessories › Base & Snap Cover";
+        const size =
+          d.twoPieceIn !== undefined
+            ? SNAP_SIZES.find((k) => Number(k) === d.twoPieceIn)
+            : undefined;
+        if (!size) {
           unmapped.push({
             label: rowLabel(c),
-            detail: `Two-piece edge metal with no size in the name — add on ${where}.`,
+            detail:
+              d.twoPieceIn === undefined
+                ? `Two-piece edge metal with no size in the name — add on ${where}.`
+                : `Two-piece edge metal ${formatInches(d.twoPieceIn)}" — the bid has 3" to 8" two-piece; add on ${where}.`,
           });
           break;
         }
-        const found = twoPieceRows(opts.metalsCatalog, d.twoPieceIn);
-        if (!found) {
-          unmapped.push({
-            label: rowLabel(c),
-            detail: opts.metalsCatalog
-              ? `Two-piece edge metal ${formatInches(d.twoPieceIn)}" — no such size in the Metals catalog; add on ${where}.`
-              : `Two-piece edge metal ${formatInches(d.twoPieceIn)}" — add on ${where} (the Metals catalog was not loaded).`,
-          });
-          break;
-        }
-        for (const item of [found.base, found.cover]) {
-          if (!item) continue;
-          metalLines.push({
-            description: `${item.category} — ${item.description}`,
-            price: item.unitCost,
-            laborPerUnit: item.laborPerUnit,
-            laborRate: item.laborRate,
-            quantity: round2(r.qty),
-          });
-        }
-        if (!found.cover)
-          warnings.push(
-            `${collapse(r.name)}: the Metals catalog has no Cover row for ${formatInches(d.twoPieceIn)}" — add the cover on ${where}.`,
-          );
+        twoPieceFt[size] = round2((twoPieceFt[size] ?? 0) + r.qty);
+        warnings.push(
+          `${collapse(r.name)}: ${num(round2(r.qty))} ft on ${where} (${size}", covers on) — the parapets terminated in ${size}" two-piece count there by themselves; the rest is Additional Required.`,
+        );
         break;
       }
       case "accessory": {
@@ -941,6 +918,7 @@ export function planSwiftSeed(
     0,
   );
   const walkPadCount = Object.values(walkPads).reduce((a, b) => a + b, 0);
+  const twoPieceTotal = Object.values(twoPieceFt).reduce((a, b) => a + (b ?? 0), 0);
 
   const summaryParts = [
     sections.length
@@ -958,7 +936,7 @@ export function planSwiftSeed(
       : null,
     downspoutFt > 0 ? `${num(round2(downspoutFt))} ft of downspout` : null,
     downspoutParts > 0 ? `${downspoutParts} downspout drops / elbows` : null,
-    metalLines.length ? `${num(round2(metalLines[0]!.quantity))} ft of two-piece metal` : null,
+    twoPieceTotal > 0 ? `${num(round2(twoPieceTotal))} ft of two-piece metal` : null,
     walkPadCount > 0 ? `${walkPadCount} walk pads` : null,
     allUnmapped.length ? `${allUnmapped.length} to place by hand` : null,
   ].filter((x): x is string => !!x);
@@ -993,7 +971,7 @@ export function planSwiftSeed(
     summary,
     nonDlCustom,
     metalsCalc: { downspouts },
-    metals: metalLines,
+    twoPieceFt,
     walkPads,
     importInfo,
     warnings,
@@ -1042,13 +1020,23 @@ export function savedFromPlanSwiftSeed(
       ...(custom[g] ?? []),
       ...rows.map((r) => ({ ...r, laborRate: r.laborRate || saved.laborRate })),
     ];
-  // Metals screen: the sheet's downspouts join any the bid has; two-piece lines join the list;
-  // walk pads join Accessories › Walk Pads (owner, Oct 6).
+  // Metals screen: the sheet's downspouts join any the bid has; walk pads join Accessories ›
+  // Walk Pads; two-piece metal goes on Base & Snap Cover (owner, Oct 6).
   const metalsCalc = normalizeMetalsState(merged.metalsCalc ?? saved.metalsCalc);
   const acc = normalizeAccessoriesState(merged.accessoriesCalc ?? saved.accessoriesCalc);
   const walkQty = { ...acc.walkPads.qty };
   for (const [desc, n] of Object.entries(seed.walkPads ?? {}))
     walkQty[desc] = (walkQty[desc] ?? 0) + n;
+  const snapCover = { ...acc.snapCover };
+  for (const [size, ft] of Object.entries(seed.twoPieceFt ?? {}) as Array<[SnapSize, number]>) {
+    if (!(ft > 0)) continue;
+    const extra = twoPieceAdditionalFt(ft, size, merged.parapets ?? []);
+    snapCover[size] = {
+      ...snapCover[size],
+      coversOn: true,
+      additionalFt: round2((snapCover[size].additionalFt || 0) + extra),
+    };
+  }
   return {
     ...merged,
     nonDlCalc: { rows: saved.nonDlCalc?.rows ?? {}, custom },
@@ -1056,8 +1044,25 @@ export function savedFromPlanSwiftSeed(
       ...metalsCalc,
       downspouts: [...metalsCalc.downspouts, ...(seed.metalsCalc?.downspouts ?? [])],
     },
-    metals: [...(merged.metals ?? saved.metals ?? []), ...(seed.metals ?? [])],
-    accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty } },
+    accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty }, snapCover },
     importInfo: seed.importInfo,
   };
+}
+
+/**
+ * Base & Snap Cover's "Additional Required" for a sheet's two-piece footage: the sheet measured
+ * the whole run, and the engine already counts every parapet whose termination is that size
+ * (legacy "Calculated Total" = roof sides + parapets), so only the rest is typed in. Never
+ * negative: when the parapets alone exceed the sheet, nothing is added.
+ */
+export function twoPieceAdditionalFt(
+  sheetFt: number,
+  size: SnapSize,
+  parapets: ReadonlyArray<{ lengthFt?: number; termOptionId?: number; termLengthFt?: number }>,
+): number {
+  const id = SNAP_TERMINATION_ID[size];
+  const counted = parapets
+    .filter((p) => p.termOptionId === id)
+    .reduce((s, p) => s + (p.termLengthFt ?? p.lengthFt ?? 0), 0);
+  return Math.max(0, round2(sheetFt - counted));
 }
