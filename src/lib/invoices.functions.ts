@@ -93,11 +93,14 @@ async function stageEvent(
   jobId: string,
   prevStage: string | null,
   actor: { id: string; name: string | null },
+  // A void says so, so the office reads "back to Authorized — its invoice was voided" rather
+  // than "authorized — ready to invoice" (owner, Oct 6).
+  opts?: { reason?: "void" },
 ) {
   const { data: row } = await sb.from("service_jobs").select("*").eq("id", jobId).maybeSingle();
   if (!row) return null;
   const { afterTicketStage } = await import("@/lib/ticket-events.server");
-  await afterTicketStage(row, prevStage, actor, sb);
+  await afterTicketStage(row, prevStage, actor, sb, opts);
   return row;
 }
 
@@ -911,7 +914,13 @@ export const voidInvoice = createServerFn({ method: "POST" })
         p_invoice: null,
       });
       if (sErr) throw ticketFailed(sErr.message);
-      await stageEvent(sb, inv.service_job_id, prevStage, { id: context.userId, name: nameOf(p) });
+      await stageEvent(
+        sb,
+        inv.service_job_id,
+        prevStage,
+        { id: context.userId, name: nameOf(p) },
+        { reason: "void" },
+      );
     }
   });
 

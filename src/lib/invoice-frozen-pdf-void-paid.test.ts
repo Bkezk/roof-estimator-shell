@@ -338,7 +338,7 @@ describe("1. a final invoice is its stored PDF; only a draft is drawn", () => {
   it("Send on a draft finalises (stores the PDF) and attaches exactly the stored bytes", async () => {
     setup({
       invoices: [invoice({ status: "draft", pdf_path: null, finalized_at: null })],
-      stage: "done",
+      stage: "authorized",
       objects: {},
     });
     await call(sendInvoice, { id: INV, to: ["ap@acme.example"] });

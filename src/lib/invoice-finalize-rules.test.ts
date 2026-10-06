@@ -217,7 +217,7 @@ function setup(opts: { profile?: Row; inv?: Row; lines?: Row[]; stage?: string }
         number: 6000,
         customer_name: "Acme",
         description: "Leak",
-        stage: opts.stage ?? "done",
+        stage: opts.stage ?? "authorized",
         account_id: null,
         technician_id: TECH,
         created_by: OFFICE,
