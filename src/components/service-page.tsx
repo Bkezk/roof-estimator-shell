@@ -1214,7 +1214,7 @@ const SIDE_PANES =
   "space-y-6 xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(380px,2fr)] xl:items-start xl:gap-8 xl:space-y-0";
 const SIDE_ASIDE = "min-w-0 space-y-4 xl:sticky xl:top-4 xl:min-w-[380px]";
 /** Stacked: the form, then the sections, one column as wide as the form. */
-const STACKED_PANES = "max-w-5xl space-y-6";
+const STACKED_PANES = "mx-auto max-w-5xl space-y-6";
 const STACKED_ASIDE = "min-w-0 space-y-4";
 const TICKET_LAYOUT_KEY = "bid-o-matic:ticket-layout";
 function useTicketLayout(): [TicketLayout, (l: TicketLayout) => void] {
@@ -2076,7 +2076,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     ));
 
   return (
-    <div className="space-y-6">
+    // Stacked (owner, Oct 6): the whole ticket is one centred column.
+    <div className={stacked ? "mx-auto max-w-5xl space-y-6" : "space-y-6"}>
       <div className="space-y-2">
         <BackToList />
         <div className="flex flex-wrap items-center justify-between gap-3">

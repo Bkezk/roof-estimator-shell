@@ -22,7 +22,10 @@ describe("the ticket's layout toggle", () => {
   });
   it("switches the same sections between beside and below the form, remembered per device", () => {
     expect(page).toContain('const stacked = twoPane && layout === "stacked";');
-    expect(page).toContain('const STACKED_PANES = "max-w-5xl space-y-6";');
+    expect(page).toContain('const STACKED_PANES = "mx-auto max-w-5xl space-y-6";');
+    expect(page).toContain(
+      '<div className={stacked ? "mx-auto max-w-5xl space-y-6" : "space-y-6"}>',
+    );
     expect(page).toContain('const TICKET_LAYOUT_KEY = "bid-o-matic:ticket-layout";');
     expect(page).toContain("window.localStorage.setItem(TICKET_LAYOUT_KEY, l);");
   });
