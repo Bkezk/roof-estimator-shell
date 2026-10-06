@@ -193,6 +193,8 @@ const jobSchema = z.object({
   id: z.string().uuid().optional(),
   account_id: z.string().uuid().nullable().optional(),
   site_id: z.string().uuid().nullable().optional(),
+  /** The site inside the property (property_sites; owner, Oct 6). Left out: as it is. */
+  location_id: z.string().uuid().nullable().optional(),
   /** The site contact (crm_contacts of the account). */
   contact_id: z.string().uuid().nullable().optional(),
   /** Labor rate kind for the invoice (service_rates): standard | urgent | emergency. */
@@ -303,6 +305,18 @@ export const saveServiceJob = createServerFn({ method: "POST" })
     } else {
       fields.site_id = null;
     }
+    // The site inside the property (owner, Oct 6): one of that property's, its name kept.
+    let location_name: string | null = null;
+    if (fields.location_id) {
+      const { data: loc } = await sb
+        .from("property_sites")
+        .select("name, property_id")
+        .eq("id", fields.location_id)
+        .maybeSingle();
+      if (!loc || loc.property_id !== fields.site_id)
+        throw new Error("That site is not at this property — pick the site again");
+      location_name = loc.name;
+    }
     if (!customer_name.trim()) throw new Error("Pick or add the customer");
     // Every ticket has a date (owner, Oct 1); a technician's save leaves it as it is.
     const dateProblem = ticketDateProblem({ id, scheduled_date: fields.scheduled_date });
@@ -322,6 +336,9 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       customer_name,
       site_name,
       site_address,
+      ...(fields.location_id !== undefined
+        ? { location_id: fields.location_id, location_name }
+        : {}),
       description: fields.description,
       service_type: fields.service_type,
       po_number: fields.po_number ?? null,

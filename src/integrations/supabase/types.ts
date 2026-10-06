@@ -2937,11 +2937,47 @@ export type Database = {
           },
         ];
       };
+      /** Named sites inside a property (20261006170000_property_sites.sql). */
+      property_sites: {
+        Row: {
+          created_at: string;
+          deleted_at: string | null;
+          id: string;
+          name: string;
+          notes: string | null;
+          property_id: string;
+          sort: number;
+          updated_at: string;
+        };
+        Insert: {
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name: string;
+          notes?: string | null;
+          property_id: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Update: {
+          created_at?: string;
+          deleted_at?: string | null;
+          id?: string;
+          name?: string;
+          notes?: string | null;
+          property_id?: string;
+          sort?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       service_jobs: {
         Row: {
           account_id: string | null;
           assigned_at: string | null;
           arrival_window: string | null;
+          location_id: string | null;
+          location_name: string | null;
           contacted_at: string | null;
           escalated_at: string | null;
           centerpoint_invoice: string | null;
@@ -2989,6 +3025,8 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           arrival_window?: string | null;
+          location_id?: string | null;
+          location_name?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;
@@ -3036,6 +3074,8 @@ export type Database = {
           account_id?: string | null;
           assigned_at?: string | null;
           arrival_window?: string | null;
+          location_id?: string | null;
+          location_name?: string | null;
           contacted_at?: string | null;
           escalated_at?: string | null;
           centerpoint_invoice?: string | null;

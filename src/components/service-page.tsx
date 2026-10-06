@@ -112,6 +112,7 @@ import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
+import { PropertySiteSelect } from "@/components/crm/property-site-select";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
@@ -1091,6 +1092,8 @@ function BackToList() {
 
 interface Draft {
   customer: AccountPickerValue | null;
+  /** The site inside the property (property_sites; owner, Oct 6); "" = none. */
+  location_id: string;
   /** The picked hit, shown in the card until the account itself has loaded. */
   hit: AccountHit | null;
   /** The site contact (crm_contacts); "" = none. */
@@ -1123,6 +1126,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
           : null,
         hit: null,
         contact_id: job.contact_id ?? "",
+        location_id: job.location_id ?? "",
         description: job.description,
         service_type: asType(job.service_type),
         labor_rate_kind: asRateKind(job.labor_rate_kind),
@@ -1139,6 +1143,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         customer: null,
         hit: null,
         contact_id: "",
+        location_id: "",
         description: "",
         service_type: "leak",
         labor_rate_kind: "standard",
@@ -1189,6 +1194,7 @@ const seedFromTicket = (j: ServiceJobWithTech): Seed => ({
         }
       : null,
     contact_id: j.account_id ? (j.contact_id ?? "") : "",
+    location_id: j.account_id ? (j.location_id ?? "") : "",
     po_number: j.po_number ?? "",
     labor_rate_kind: asRateKind(j.labor_rate_kind),
     service_type: asType(j.service_type),
@@ -1429,6 +1435,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         account_id: draft.customer?.account_id ?? null,
         site_id: draft.customer?.site_id ?? null,
         contact_id: draft.customer ? draft.contact_id || null : null,
+        location_id: draft.customer?.site_id ? draft.location_id || null : null,
         // A ticket from before customer profiles keeps its typed name until one is picked.
         ...(!draft.customer && job ? { customer_name: job.customer_name } : {}),
         description: draft.description,
@@ -1719,13 +1726,18 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           contactId={draft.contact_id}
           siteMessage={siteMessage}
           disabled={ro}
+          locationId={draft.location_id}
+          locationName={job?.location_name ?? null}
+          onLocation={(v) => set("location_id", v)}
           onChangeCustomer={() => {
             setChangingCustomer(true);
-            setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "" }));
+            setDraft((d) => ({ ...d, customer: null, hit: null, contact_id: "", location_id: "" }));
           }}
           onPickSite={(site, accountName) =>
             setDraft((d) => ({
               ...d,
+              // Another property: its own sites (or none).
+              location_id: d.customer?.site_id === site.id ? d.location_id : "",
               customer: d.customer
                 ? {
                     account_id: d.customer.account_id,
@@ -2145,7 +2157,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                     to="/service"
                     search={{ new: 1, from: job.id }}
                     title={
-                      job.site_id ? "New ticket for this site" : "New ticket for this customer"
+                      job.site_id ? "New ticket for this property" : "New ticket for this customer"
                     }
                   >
                     <CopyPlus className="mr-1 h-4 w-4" />
@@ -2351,6 +2363,11 @@ function CustomerBlock(props: {
   contactId: string;
   /** Why the site still needs picking (lib/ticket-form.ts siteProblem), or null. */
   siteMessage: string | null;
+  /** The site inside the property; "" = none. */
+  locationId: string;
+  /** The saved site's name, for a site since removed from the property. */
+  locationName: string | null;
+  onLocation: (id: string) => void;
   disabled: boolean;
   onChangeCustomer: () => void;
   onPickSite: (site: { id: string; name: string }, accountName: string) => void;
@@ -2440,6 +2457,14 @@ function CustomerBlock(props: {
         <CountyCodeLine id={site?.county_code_id} className="text-xs" />
         {/* M5 (owner, Oct 5): the site's roof warranty while in force, as CenterPoint shows. */}
         <WarrantyBadges siteId={site?.id} />
+        <PropertySiteSelect
+          id="ticket-property-site"
+          propertyId={props.siteId}
+          value={props.locationId}
+          savedName={props.locationName}
+          disabled={props.disabled}
+          onChange={props.onLocation}
+        />
         {site?.technician_instructions && (
           <p className="whitespace-pre-line rounded border bg-background px-2 py-1 text-xs">
             <span className="font-medium">Technician instructions: </span>

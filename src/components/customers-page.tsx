@@ -89,6 +89,7 @@ import { listAccountTakeoffs } from "@/lib/takeoff.functions";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { SiteWarranties } from "@/components/crm/site-warranties";
+import { PropertySites } from "@/components/crm/property-sites";
 import { SiteForm } from "@/components/crm/site-form";
 import {
   AccountManagerSelect,
@@ -1427,6 +1428,8 @@ function SitesSection({
                 )}
                 {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
                 <SiteWarranties siteId={s.id} readOnly={readOnly} />
+                {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
+                <PropertySites propertyId={s.id} readOnly={readOnly} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (
