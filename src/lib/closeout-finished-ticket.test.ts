@@ -170,10 +170,11 @@ describe("the close-out screen", () => {
       /row\.stage === "done"\s*\?\s*"Done — the office invoices and closes it"\s*:\s*`Close-out saved — the ticket stays \$\{STAGE_LABELS\[asStage\(row\.stage\)\]\}`/,
     );
   });
-  it("a technician goes back to Today; anyone else (a manager) back to the ticket", () => {
-    expect(src).toMatch(
-      /if \(profile\?\.technician\) void navigate\(\{ to: "\/service\/today" \}\);\s*else void navigate\(\{ to: "\/service", search: \{ id: job\.id \} \}\);/,
-    );
+  it("a technician goes back to Today; the office back to the ticket (closeoutDestination, by isOffice)", () => {
+    // Owner, Oct 6: an admin who is also ticked Technician lands on the ticket, not Today —
+    // the matrix is in closeout-admin-tech.test.ts.
+    expect(src).toContain("void navigate(closeoutDestination(profile, job.id));");
+    expect(src).not.toMatch(/if \(profile\?\.technician\) void navigate/);
   });
 });
 

@@ -222,6 +222,8 @@ const template = (): Row => ({
   centerpoint_template_id: null,
   created_at: "2026-09-27T00:00:00Z",
   updated_at: "2026-09-27T00:00:00Z",
+  // Roof-type tags (20261006120000); the price-free view carries them too (20261006220000).
+  tags: ["General"],
 });
 const catalogRow = (): Row => {
   const { unit_price: _drop, ...rest } = template();
