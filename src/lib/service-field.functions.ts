@@ -24,6 +24,7 @@ import { easternYmd, resolveFieldDay } from "@/lib/field-day";
 import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
 import { mentionedIds } from "@/lib/mentions";
+import { mentionRoster } from "@/lib/auth.functions";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
@@ -880,13 +881,17 @@ export const addJobNote = createServerFn({ method: "POST" })
     const job = await ownJob(context, data.id);
     await logEvent(context, data.id, { kind: "note", note: data.note }, nameOf(p));
     // @mentions (M3, owner Oct 5): everyone named after an "@" hears about it, not the writer.
+    // The roster is everyone with Service or Customers access (owner, Oct 6: mention_options,
+    // the same list the note box offers), not the dispatch roster.
     if (!data.note.includes("@")) return { mentioned: 0 };
-    const { data: roster, error } = await context.supabase.rpc("technician_options");
-    if (error) throw new Error(`Note added, but the mentions were not sent: ${error.message}`);
-    const people = (roster ?? []).map((r) => ({
-      id: r.id,
-      name: (r.full_name ?? "").trim() || r.email,
-    }));
+    let people: { id: string; name: string }[];
+    try {
+      people = await mentionRoster(context.supabase);
+    } catch (e) {
+      throw new Error(
+        `Note added, but the mentions were not sent: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     const ids = mentionedIds(data.note, people).filter((id) => id !== context.userId);
     if (!ids.length) return { mentioned: 0 };
     const { notify } = await import("@/lib/notify.server");

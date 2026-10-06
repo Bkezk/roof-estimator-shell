@@ -35,7 +35,7 @@ import {
   type ServiceType,
 } from "@/lib/service.functions";
 import { Link } from "@tanstack/react-router";
-import { listTechnicians } from "@/lib/auth.functions";
+import { listMentionPeople } from "@/lib/auth.functions";
 import { AuditHistory } from "@/components/audit-history";
 import { insertMention, mentionQuery, suggestPeople } from "@/lib/mentions";
 import { historyDay, historyDayText, historySnippet, SITE_HISTORY_LIMIT } from "@/lib/site-history";
@@ -540,9 +540,11 @@ function Timeline({ jobId }: { jobId: string }) {
   });
   const [note, setNote] = useState("");
   // @mentions (M3, owner Oct 5): "@" opens a short list of people; picking one writes the name.
-  const peopleFn = useServerFn(listTechnicians);
+  // Everyone with Service or Customers access (owner, Oct 6: mention_options), not the dispatch
+  // roster — the server (addJobNote) resolves the names against the same list.
+  const peopleFn = useServerFn(listMentionPeople);
   const peopleQ = useQuery({
-    queryKey: ["technician-options"],
+    queryKey: ["mention-options"],
     queryFn: () => peopleFn(),
     enabled: !!session,
     staleTime: 5 * 60_000,

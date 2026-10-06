@@ -302,3 +302,33 @@ export const listTechnicians = createServerFn({ method: "GET" })
       technician: r.technician,
     }));
   });
+
+/** Someone a ticket note can @mention (mentions.ts Person). */
+export interface MentionPerson {
+  id: string;
+  name: string;
+}
+
+/**
+ * Everyone a ticket note can @mention (owner, Oct 6): anyone with Service or Customers access,
+ * from `mention_options()` (SECURITY DEFINER; 20261006193000_mention_options.sql). It was the
+ * dispatch roster (technician_options), which lists only who can be assigned a ticket. The rpc is
+ * not in the generated types yet (src/integrations/supabase/types.ts is regenerated from the
+ * database after the migration is applied), hence the one typed cast here.
+ */
+export async function mentionRoster(sb: SupabaseClient<Database>): Promise<MentionPerson[]> {
+  type Row = { id: string; full_name: string | null; email: string };
+  const client = sb as unknown as {
+    rpc: (fn: "mention_options") => PromiseLike<{
+      data: Row[] | null;
+      error: { message: string } | null;
+    }>;
+  };
+  const { data, error } = await client.rpc("mention_options");
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => ({ id: r.id, name: (r.full_name ?? "").trim() || r.email }));
+}
+
+export const listMentionPeople = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(({ context }): Promise<MentionPerson[]> => mentionRoster(context.supabase));

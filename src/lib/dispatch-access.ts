@@ -19,3 +19,11 @@ export const technicianNeedsService = (u: AccessLike | null | undefined): boolea
 /** The same pages plus Service (once): what "Give Service access" saves. */
 export const withService = (access: readonly Page[]): Page[] =>
   access.includes("service") ? [...access] : [...access, "service"];
+
+/**
+ * Who a ticket note can @mention (owner, Oct 6): anyone with Service or Customers access — admins
+ * and managers included. The twin of mention_options() (20261006193000_mention_options.sql); the
+ * dispatch roster (technician_options) is who can be assigned a ticket, which is narrower.
+ */
+export const canBeMentioned = (p: AccessLike | null | undefined): boolean =>
+  canAccess(p, "service") || canAccess(p, "customers");
