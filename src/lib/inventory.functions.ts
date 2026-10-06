@@ -10,7 +10,8 @@
  * only reduces what the ordering summary says to buy.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { canAccess } from "@/lib/access";
+import { canAccess, managesTickets } from "@/lib/access";
+import { fieldEditProblem } from "@/lib/field-edit-lock";
 import {
   PACK_QTY_COLS,
   stockUnitFor,
@@ -38,6 +39,7 @@ import {
   unitWord,
 } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
+import { readCrew } from "@/lib/service-crew.server";
 
 export const MOVEMENT_REASONS = [
   "leftover",
@@ -314,7 +316,7 @@ export const addMovement = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: me } = await sb
       .from("profiles")
-      .select("role, access, full_name, email")
+      .select("role, access, technician, full_name, email")
       .eq("id", context.userId)
       .maybeSingle();
     // Inventory or Service access records leftovers and what a crew takes for a job; Estimate
@@ -324,6 +326,28 @@ export const addMovement = createServerFn({ method: "POST" })
       !(canAccess(me, "inventory") || canAccess(me, "estimate") || canAccess(me, "service"))
     )
       throw new Error("Forbidden: Inventory access required");
+    // Material against a ticket follows the ticket's lock (owner, Oct 6; field-edit-lock.ts): a
+    // technician only on a ticket they are on (lead or crew) while it is Open / Scheduled / Done,
+    // a manager before Invoiced, nobody on an Invoiced / Closed ticket. A manager's entry on
+    // someone else's ticket is a correction and goes on the ticket's timeline (below).
+    let correction = false;
+    if (data.service_job_id) {
+      const { data: job, error: jErr } = await sb
+        .from("service_jobs")
+        .select("id, stage, technician_id")
+        .eq("id", data.service_job_id)
+        .maybeSingle();
+      if (jErr) throw new Error(jErr.message);
+      if (!job) throw new Error("Service job not found");
+      const onTicket =
+        job.technician_id === context.userId ||
+        (await readCrew(sb, job.id, { rates: false })).some(
+          (c) => c.technician_id === context.userId,
+        );
+      const problem = fieldEditProblem(me, job.stage, onTicket);
+      if (problem) throw new Error(problem);
+      correction = managesTickets(me) && !onTicket;
+    }
     // A service job's "released" (a tech putting a piece back on the truck) is allowed for
     // everyone who may log material; it may never exceed what that ticket took from the cell.
     const jobRelease = data.reason === "released" && !!data.service_job_id;
@@ -429,6 +453,19 @@ export const addMovement = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (insErr) throw new Error(insErr.message);
+    if (correction && data.service_job_id) {
+      // The same row shape as service-field.functions.ts logEvent (kind "edit" on the Timeline).
+      const signed = `${qty < 0 ? "−" : "+"}${Math.round(Math.abs(qty) * 1000) / 1000}`;
+      const { error: evErr } = await sb.from("service_job_events").insert({
+        service_job_id: data.service_job_id,
+        kind: "edit",
+        note: `Materials corrected: ${data.row_label} ${signed} ${unit}`,
+        by_user: context.userId,
+        by_name: me.full_name?.trim() || me.email,
+        meta: { reason: data.reason, qty, unit, location_id: locationId, movement_id: inserted.id },
+      });
+      if (evErr) throw new Error(`Material recorded, but not on the timeline: ${evErr.message}`);
+    }
     return { ok: true, id: inserted.id, qty, unit };
   });
 

@@ -15,6 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
@@ -52,9 +53,10 @@ const nameOf = (p: { full_name: string | null; email: string }) =>
  */
 const phoneDay = z.string().max(32).optional();
 
+type Me = Awaited<ReturnType<typeof me>>;
 /** A technician may only touch their own ticket; office users and admins any. */
-async function ownJob(ctx: Ctx, id: string): Promise<ServiceJobRow> {
-  const p = await me(ctx);
+async function ownJob(ctx: Ctx, id: string, profile?: Me): Promise<ServiceJobRow> {
+  const p = profile ?? (await me(ctx));
   const { data: job, error } = await ctx.supabase
     .from("service_jobs")
     .select("*")
@@ -65,6 +67,18 @@ async function ownJob(ctx: Ctx, id: string): Promise<ServiceJobRow> {
   if (!isOffice(p) && job.technician_id !== ctx.userId)
     throw new Error("This ticket is assigned to someone else");
   return job;
+}
+/**
+ * ownJob, then the stage lock on time, repairs and materials (owner, Oct 6; field-edit-lock.ts):
+ * a technician while the ticket is Open / Scheduled / Done, a manager before Invoiced, the office
+ * never on Invoiced / Closed. The database twin is ticket_open_for_tech (20261006192000).
+ */
+async function editableJob(ctx: Ctx, id: string): Promise<{ job: ServiceJobRow; p: Me }> {
+  const p = await me(ctx);
+  const job = await ownJob(ctx, id, p);
+  const problem = fieldEditProblem(p, job.stage, job.technician_id === ctx.userId);
+  if (problem) throw new Error(problem);
+  return { job, p };
 }
 /** Hours between two stamps, to the quarter hour, never under a quarter. */
 export function quarterHours(from: string | Date, to: string | Date): number {
@@ -385,7 +399,7 @@ export const saveTimeEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => timeSchema.parse(d))
   .handler(async ({ data, context }): Promise<TimeEntryRow> => {
-    const job = await ownJob(context, data.service_job_id);
+    const { job } = await editableJob(context, data.service_job_id);
     const sb = context.supabase;
     const { id, ...fields } = data;
     const row = { ...fields, note: fields.note ?? null, source: "manual" as const };
@@ -419,7 +433,7 @@ export const deleteTimeEntry = createServerFn({ method: "POST" })
     z.object({ id: z.number().int(), service_job_id: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }): Promise<void> => {
-    await ownJob(context, data.service_job_id);
+    await editableJob(context, data.service_job_id);
     const { error } = await context.supabase
       .from("service_time_entries")
       .delete()
@@ -558,7 +572,7 @@ export const saveJobRepair = createServerFn({ method: "POST" })
     const { id, day, ...fields } = data;
     // The phone's day (field-day.ts), checked first so a refused day changes nothing.
     const completedOn = fields.completed_on ?? resolveFieldDay(day);
-    const job = await ownJob(context, data.service_job_id);
+    const { job } = await editableJob(context, data.service_job_id);
     const sb = context.supabase;
     const row = {
       ...fields,
@@ -598,7 +612,7 @@ export const deleteJobRepair = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), service_job_id: z.string().uuid() }).parse(d),
   )
   .handler(async ({ data, context }): Promise<void> => {
-    await ownJob(context, data.service_job_id);
+    await editableJob(context, data.service_job_id);
     const { error } = await context.supabase
       .from("service_job_repairs")
       .delete()
