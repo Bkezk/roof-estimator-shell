@@ -38,10 +38,15 @@ describe("named sites inside a property", () => {
     expect(s).toContain("throw new Error(SITE_NAME_TWICE(it.name));");
     expect(s).toContain("if (isMissingTable(error)) return [];");
   });
-  it("Customers shows and edits a property's sites; the ticket picks one under its property", () => {
+  it("Customers lists a property's sites, edited in the property form; the ticket picks one", () => {
     expect(read("src/components/customers-page.tsx")).toContain(
-      "<PropertySites propertyId={s.id} readOnly={readOnly} />",
+      "<PropertySites propertyId={s.id} />",
     );
+    // Owner, Oct 6: sites are added when the property is made or edited (the pencil).
+    const form = read("src/components/crm/site-form.tsx");
+    expect(form).toContain('<Plus className="mr-1 h-3.5 w-3.5" /> Add site');
+    expect(form).toContain("await saveSitesFn({");
+    expect(read("src/components/crm/property-sites.tsx")).not.toContain("Edit sites");
     const page = read("src/components/service-page.tsx");
     expect(page).toContain("<PropertySiteSelect");
     expect(page).toContain(

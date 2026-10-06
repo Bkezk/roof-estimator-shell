@@ -1427,9 +1427,9 @@ function SitesSection({
                   </p>
                 )}
                 {/* M5 (owner, Oct 5): the roof warranties; their badge shows on the tickets. */}
-                <SiteWarranties siteId={s.id} readOnly={readOnly} />
+                <SiteWarranties siteId={s.id} />
                 {/* Owner, Oct 6: the named sites inside the property (a ticket picks one). */}
-                <PropertySites propertyId={s.id} readOnly={readOnly} />
+                <PropertySites propertyId={s.id} />
               </div>
               <div className="flex items-center gap-1">
                 {canNewTicket && (

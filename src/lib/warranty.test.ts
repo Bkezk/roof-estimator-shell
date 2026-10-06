@@ -86,14 +86,15 @@ describe("the table", () => {
 });
 
 describe("on the screens", () => {
-  it("Customers › a site: the warranties with Add / Edit / Delete", () => {
-    expect(read("src/components/customers-page.tsx")).toContain(
-      "<SiteWarranties siteId={s.id} readOnly={readOnly} />",
-    );
-    const ui = read("src/components/crm/site-warranties.tsx");
-    expect(ui).toContain("Add warranty");
-    expect(ui).toContain('aria-label="Edit warranty"');
-    expect(ui).toContain('aria-label="Delete warranty"');
+  // Owner, Oct 6: added and changed in the property's own form (Add property / the pencil); the
+  // property's row lists them read-only.
+  it("Customers › a property: the warranties listed; added and changed in the property form", () => {
+    expect(read("src/components/customers-page.tsx")).toContain("<SiteWarranties siteId={s.id} />");
+    expect(read("src/components/crm/site-warranties.tsx")).not.toContain("Add warranty");
+    const form = read("src/components/crm/site-form.tsx");
+    expect(form).toContain('<Plus className="mr-1 h-3.5 w-3.5" /> Add warranty');
+    expect(form).toContain("await saveWFn({");
+    expect(form).toContain("await delWFn({ data: { id } });");
   });
   it("the ticket and the technician's Today card show the badge", () => {
     expect(read("src/components/service-page.tsx")).toContain(
