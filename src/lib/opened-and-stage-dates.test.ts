@@ -455,9 +455,12 @@ describe("the ticket page: 'Opened … by …' under the title, the stage strip 
     );
   });
   it("the strip closes the header, on every width; the stage picker stays", () => {
-    const strip = src.indexOf('<StageStrip cells={stageCells} label="Stages" />');
+    // Coloured by stage since Oct 6 (stage-colors.ts).
+    const strip = src.indexOf(
+      '<StageStrip cells={stageCells} label="Stages" tones={STAGE_DOTS} />',
+    );
     expect(strip).toBeGreaterThan(src.indexOf('aria-label="Ticket numbers"'));
-    expect(src.slice(strip, strip + 80)).toMatch(/\/>}\s*\n\s*<\/div>/);
+    expect(src.slice(strip, strip + 110)).toMatch(/\/>}\s*\n\s*<\/div>/);
     expect(src).toContain("value={asStage(job.stage)}");
     expect(src).toContain("onValueChange={(v) => stageMut.mutate(v as ServiceStage)}");
   });

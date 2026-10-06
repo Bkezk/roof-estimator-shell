@@ -54,6 +54,8 @@ import {
   ChevronDown,
   ChevronRight,
   CircleHelp,
+  Check,
+  CheckCheck,
   ClipboardCheck,
   CopyPlus,
   Loader2,
@@ -106,6 +108,7 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { listJobEvents } from "@/lib/service-field.functions";
 import { openedLine, openerName, ticketStageStrip } from "@/lib/stage-dates";
 import { StageStrip } from "@/components/stage-strip";
+import { FIELD_TONE_LABELS, STAGE_TONES, stageMark, ticketToneKey } from "@/lib/stage-colors";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { RATE_KIND_LABELS, RATE_KINDS } from "@/lib/invoices.functions";
 import { SiteSelect } from "@/components/crm/site-select";
@@ -213,14 +216,34 @@ const asRateKind = (s: string | null | undefined): RateKind =>
 const locationLabel = (id: string) =>
   id === "shop" ? "Shop" : id.startsWith("veh-") ? `Vehicle ${id.slice(4).toUpperCase()}` : id;
 
-const STAGE_BADGE: Record<ServiceStage, "default" | "secondary" | "outline"> = {
-  open: "default",
-  scheduled: "secondary",
-  done: "secondary",
-  authorized: "secondary",
-  invoiced: "outline",
-  closed: "outline",
-};
+/**
+ * A ticket's stage as a coloured badge (owner, Oct 6: stage-colors.ts, CenterPoint's colour
+ * families; a Scheduled ticket says where the tech is; Done ✓, Authorized ✓✓).
+ */
+/** The stage strip's dot colour per stage (stage-colors.ts). */
+const STAGE_DOTS: Record<string, string> = Object.fromEntries(
+  Object.entries(STAGE_TONES).map(([k, t]) => [k, t.dot]),
+);
+
+function StageBadge({
+  stage,
+  fieldStatus,
+}: {
+  stage: ServiceStage;
+  fieldStatus: string | null | undefined;
+}) {
+  const key = ticketToneKey({ stage, field_status: fieldStatus });
+  const mark = stageMark(stage);
+  return (
+    <Badge variant="outline" className={`gap-0.5 px-1.5 py-0 text-[11px] ${STAGE_TONES[key].chip}`}>
+      {mark === "check" && <Check className="h-3 w-3" aria-hidden />}
+      {mark === "double-check" && <CheckCheck className="h-3 w-3" aria-hidden />}
+      {key === "en_route" || key === "on_site"
+        ? `${STAGE_LABELS[stage]} · ${FIELD_TONE_LABELS[key]}`
+        : STAGE_LABELS[stage]}
+    </Badge>
+  );
+}
 
 export function ServicePage({
   id,
@@ -812,9 +835,7 @@ function TicketListRow({
           <Badge variant="outline" className="px-1.5 py-0 text-[11px] font-medium">
             {typeLabel(j.service_type)}
           </Badge>
-          <Badge variant={STAGE_BADGE[stage]} className="px-1.5 py-0 text-[11px]">
-            {STAGE_LABELS[stage]}
-          </Badge>
+          <StageBadge stage={stage} fieldStatus={j.field_status} />
           <OverdueBadge days={ticketOverdueDays({ ...j, stage }, today)} what="Was due" />
           {untouched && (
             <UntouchedBadge assignedAt={untouched.assigned_at} limitDays={untouched.limit_days} />
@@ -2211,7 +2232,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         {isTech && jobStage === "done" && (
           <p className="text-sm text-muted-foreground">Done — the office invoices and closes it.</p>
         )}
-        {job && <StageStrip cells={stageCells} label="Stages" />}
+        {job && <StageStrip cells={stageCells} label="Stages" tones={STAGE_DOTS} />}
       </div>
 
       {ro && (

@@ -10,10 +10,29 @@
  * stays the way to change the stage.
  */
 import { shortDate, type StripCell } from "@/lib/stage-dates";
-import { stepLooks } from "@/lib/stage-strip";
+import { DOT_AHEAD, stepLooks } from "@/lib/stage-strip";
 
-export function StageStrip({ cells, label }: { cells: readonly StripCell[]; label: string }) {
+/**
+ * `tones`: a colour per step key for its dot once reached or current (owner, Oct 6: a ticket's
+ * stages in their stage-colors.ts colours); without it, the neutral looks.
+ */
+export function StageStrip({
+  cells,
+  label,
+  tones,
+}: {
+  cells: readonly StripCell[];
+  label: string;
+  tones?: Readonly<Record<string, string>> | undefined;
+}) {
   const looks = stepLooks(cells);
+  const dotOf = (key: string, look: (typeof looks)[number]) => {
+    const t = tones?.[key];
+    if (!t || look.state === "ahead" || look.dot === DOT_AHEAD) return look.dot;
+    return look.state === "current"
+      ? `${t} ring-2 ring-offset-2 ring-offset-background ring-foreground/30`
+      : t;
+  };
   return (
     <ol aria-label={label} className="flex max-w-3xl flex-wrap gap-y-3 text-xs">
       {cells.map((c, i) => {
@@ -28,7 +47,10 @@ export function StageStrip({ cells, label }: { cells: readonly StripCell[]; labe
             className={`flex min-w-[7rem] flex-col ${last ? "flex-none pr-2" : "flex-1"}`}
           >
             <div className="flex h-4 items-center">
-              <span aria-hidden className={`h-2.5 w-2.5 shrink-0 rounded-full ${look.dot}`} />
+              <span
+                aria-hidden
+                className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotOf(c.key, look)}`}
+              />
               {!last && <span aria-hidden className={`ml-2 mr-3 h-px flex-1 ${look.line}`} />}
             </div>
             <span className={`mt-1.5 leading-tight ${look.label}`}>{c.label}</span>
