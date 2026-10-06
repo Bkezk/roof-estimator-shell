@@ -66,6 +66,17 @@ export function stageProblem(
 }
 
 /**
+ * A technician's edit of a ticket at an office stage is refused (owner, Oct 6): a plain user
+ * ticked Technician (the office — anyone else — still saves it, as before). saveServiceJob's
+ * check; RLS service_jobs_update says the same (20261006190000_stage_backwards_lock.sql).
+ */
+export const techStageLocked = (
+  p: AccessLike | null | undefined,
+  stage: string | null | undefined,
+): boolean =>
+  !!p?.technician && !managesTickets(p) && OFFICE_STAGES.includes(stage as ServiceStage);
+
+/**
  * The stages the picker offers: those `p` may set from the ticket's current stage, plus that
  * stage itself (a non-manager on an Authorized / Invoiced / Closed ticket sees it alone).
  */

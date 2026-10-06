@@ -20,6 +20,7 @@ import {
   stageChoices,
   stageLocked,
   stageProblem,
+  techStageLocked,
 } from "@/lib/ticket-stage";
 
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
@@ -101,9 +102,13 @@ describe("the server", () => {
       "A technician cannot change a ticket once it is Authorized, Invoiced or Closed",
     );
     const fn = serverFn(svc, "saveServiceJob");
-    expect(fn).toMatch(
-      /if \(!isOffice\(p\) && OFFICE_STAGES\.includes\(cur\.stage as ServiceStage\)\)\s*throw new Error\(TECH_LOCKED_MESSAGE\);/,
+    expect(fn).toContain(
+      "if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);",
     );
+    expect(techStageLocked(tech, "authorized")).toBe(true);
+    expect(techStageLocked(tech, "done")).toBe(false);
+    expect(techStageLocked(office, "closed")).toBe(false);
+    expect(techStageLocked(managerTech, "closed")).toBe(false);
     // Before the save itself (nothing is written first).
     expect(fn.indexOf("TECH_LOCKED_MESSAGE")).toBeLessThan(fn.indexOf(".update(scheduledNow"));
   });

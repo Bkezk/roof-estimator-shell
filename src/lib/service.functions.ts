@@ -21,7 +21,7 @@ import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
-import { OFFICE_STAGES, TECH_LOCKED_MESSAGE, stageProblem } from "@/lib/ticket-stage";
+import { TECH_LOCKED_MESSAGE, stageProblem, techStageLocked } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
@@ -390,8 +390,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         );
       // Owner, Oct 6: a technician cannot change a ticket once it is Authorized, Invoiced or
       // Closed (RLS service_jobs_update says the same, 20261006190000); the office still may.
-      if (!isOffice(p) && OFFICE_STAGES.includes(cur.stage as ServiceStage))
-        throw new Error(TECH_LOCKED_MESSAGE);
+      if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);
       // Owner, Oct 1: once a ticket has a date, only an admin or a manager moves it.
       const moveProblem = dateMoveProblem({
         profile: p,
