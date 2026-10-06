@@ -1093,6 +1093,9 @@ function EstimatePage() {
       });
       setLinkedBuildingId(loadedBid.building_id ?? null);
     }
+    // The row as this tab loaded it: a later save sends it so a stale copy never overwrites
+    // another save (owner, Oct 6, Towneplace).
+    loadedUpdatedAt.current = loadedBid.updated_at ?? null;
     // The profile link is on the row, not in `data`: read it even for an empty payload. As
     // loaded it is not a change (linkDirty off); its profile fills the bid's blanks once.
     const seq = setLink(loadedBid.account_id ?? null, loadedBid.site_id ?? null, "", false);
@@ -1342,6 +1345,7 @@ function EstimatePage() {
     staleTime: Infinity,
   });
   const planswiftSeededFor = useRef<string | null>(null);
+  const loadedUpdatedAt = useRef<string | null>(null);
   useEffect(() => {
     if (!planswiftParam || bidParam || planswiftHandoff === undefined) return;
     if (planswiftSeededFor.current === planswiftParam) return;
@@ -2131,6 +2135,7 @@ function EstimatePage() {
       const row = await saveBidFn({
         data: {
           ...(bidId ? { id: bidId } : {}),
+          ...(bidId && loadedUpdatedAt.current ? { expectUpdatedAt: loadedUpdatedAt.current } : {}),
           sessionKey: bidLock.sessionKey,
           name: bidName.trim() || "Untitled bid",
           data: payload as unknown as Record<string, unknown>,
@@ -2147,6 +2152,7 @@ function EstimatePage() {
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
       toast.success("Bid saved");
+      if (row?.updated_at) loadedUpdatedAt.current = row.updated_at;
       lastSavedJson.current = savedJson;
       dirtyRef.current = false;
       if (!snapshot && snap) setSnapshot(snap);

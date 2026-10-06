@@ -67,7 +67,23 @@ const saveBidSchema = z.object({
   lostReason: z.string().trim().max(300).nullable().optional(),
   /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
   sessionKey: z.string().min(8).max(80).optional(),
+  /**
+   * The row's updated_at as this tab loaded it (owner, Oct 6: a Towneplace bid "went back in and
+   * a lot of things were missing … saved again and the total changed"). A save whose copy is
+   * older than the row refuses, so a stale tab never writes over another save.
+   */
+  expectUpdatedAt: z.string().datetime({ offset: true }).optional(),
 });
+
+/** The message a stale save gets; the tab reloads the bid and the estimator re-applies the change. */
+export const BID_STALE_MESSAGE = (who: string | null, at: string) =>
+  `Not saved: ${who?.trim() || "someone"} saved this bid at ${new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}, after you opened it. Reload the bid to see their changes, then make yours again.`;
+
+/** Is the saving tab's copy older than the row? (Pure, so it is tested.) */
+export function bidSaveIsStale(expectUpdatedAt: string | undefined, rowUpdatedAt: string | null) {
+  if (!expectUpdatedAt || !rowUpdatedAt) return false;
+  return new Date(rowUpdatedAt).getTime() > new Date(expectUpdatedAt).getTime() + 1000;
+}
 
 /** Create a new bid or update an existing one (by id) with the full estimator payload. */
 export const saveBid = createServerFn({ method: "POST" })
@@ -103,6 +119,16 @@ export const saveBid = createServerFn({ method: "POST" })
         throw new Error(
           `Read only: ${other.holderName} is currently editing this bid — your changes were not saved.`,
         );
+      if (data.expectUpdatedAt) {
+        const { data: cur, error: cErr } = await context.supabase
+          .from("bids")
+          .select("updated_at, updated_by_name")
+          .eq("id", data.id)
+          .maybeSingle();
+        if (cErr) throw new Error(cErr.message);
+        if (cur && bidSaveIsStale(data.expectUpdatedAt, cur.updated_at))
+          throw new Error(BID_STALE_MESSAGE(cur.updated_by_name, cur.updated_at));
+      }
       const { data: bid, error } = await context.supabase
         .from("bids")
         .update(payload)
