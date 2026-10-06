@@ -132,11 +132,24 @@ async function closeTicketFollowup(
 }
 
 /**
+ * Why a draft on a ticket at `stage` may not be finalised (null = it may): a Done ticket is
+ * reviewed (Authorized) before it is invoiced (INVOICE_STAGES; owner, Oct 5). createInvoiceFor
+ * checks this when the draft is made; finalizeDraft checks it again (owner, Oct 6, QA audit: an
+ * older draft on a ticket still at Done was finalised straight past Authorized). An invoice with
+ * no ticket (stage null) is unaffected. Pure: tested in invoice-finalize-authorized.test.ts.
+ */
+export function finalizeStageProblem(stage: string | null | undefined): string | null {
+  if (stage == null) return null;
+  return INVOICE_STAGES.includes(stage) ? null : INVOICE_NEEDS_AUTH;
+}
+
+/**
  * Finalise a draft: the one routine behind Finalize and Send on a draft (audit, Oct 2: Send
  * skipped the no-lines check and left the ticket's follow-up open). Refuses an invoice with no
- * lines before anything is written; stores the PDF; stamps the invoice final; moves the ticket
- * to Invoiced through the rpc (ticketStageFromInvoice: sales / project managers too); runs the
- * stage automation (the invoice follow-up) and closes the ticket's follow-up.
+ * lines, or on a ticket not yet Authorized (finalizeStageProblem), before anything is written;
+ * stores the PDF; stamps the invoice final; moves the ticket to Invoiced through the rpc
+ * (ticketStageFromInvoice: sales / project managers too); runs the stage automation (the
+ * invoice follow-up) and closes the ticket's follow-up.
  */
 async function finalizeDraft(
   sb: SupabaseClient<Database>,
@@ -145,6 +158,9 @@ async function finalizeDraft(
 ): Promise<InvoiceRow> {
   if (b.invoice.status !== "draft") throw new Error("Already final");
   if (!b.lines.length) throw new Error("The invoice has no lines");
+  // The ticket's stage as loaded with the bundle (loadBundle reads it fresh for this call).
+  const stageProblem = finalizeStageProblem(b.invoice.service_job_id ? b.job.stage : null);
+  if (stageProblem) throw new Error(stageProblem);
   const { renderInvoicePdf } = await import("@/lib/invoices.server");
   const pdf = await renderInvoicePdf(sb, b);
   const path = pdfPath(b.invoice);
