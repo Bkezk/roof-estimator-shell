@@ -57,9 +57,9 @@ export type PropertySiteInput = z.input<typeof itemSchema>;
  * the tickets at that site too; the sites here are the ones whose tickets get the new name.
  * Pure (site-rename-refresh.test.ts).
  */
-export function renamedSites(
+export function renamedSites<T extends { id?: string | undefined; name: string }>(
   current: { id: string; name: string }[],
-  items: { id?: string; name: string }[],
+  items: T[],
 ): { id: string; name: string }[] {
   const was = new Map(current.map((s) => [s.id, s.name]));
   return items
