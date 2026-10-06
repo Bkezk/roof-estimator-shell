@@ -86,8 +86,10 @@ describe("stageChoices / stageLocked (the picker)", () => {
     for (const p of [office, sales, tech]) {
       expect(stageChoices(p, "done")).toEqual(["open", "scheduled", "done"]);
       expect(stageChoices(p, null)).toEqual(["open", "scheduled", "done"]);
-      expect(stageChoices(p, "invoiced")).toEqual(["open", "scheduled", "done", "invoiced"]);
-      expect(stageChoices(p, "closed")).toEqual(["open", "scheduled", "done", "closed"]);
+      // Owner, Oct 6: out of Authorized / Invoiced / Closed is a manager's move, so the ticket's
+      // own stage is the only choice (stage-backwards-lock.test.ts).
+      expect(stageChoices(p, "invoiced")).toEqual(["invoiced"]);
+      expect(stageChoices(p, "closed")).toEqual(["closed"]);
       expect(stageLocked(p, "invoiced")).toBe(true);
       expect(stageLocked(p, "closed")).toBe(true);
       expect(stageLocked(p, "done")).toBe(false);

@@ -8,7 +8,13 @@
  * Finalising an invoice still marks the ticket Invoiced (marking it paid, Closed) for whoever
  * may finalise: that goes through `public.set_ticket_stage_from_invoice` (SECURITY DEFINER,
  * checks the invoice), not through this rule. The database twin of this rule is the trigger
- * `service_jobs_stage_rule` (migration 20261001080000_audit_triggers_stage_rule.sql).
+ * `service_jobs_stage_rule` (migration 20261001080000_audit_triggers_stage_rule.sql; since
+ * 20261006190000_stage_backwards_lock.sql it guards the way out too).
+ *
+ * Both ways (owner, Oct 6): once a ticket is Authorized, Invoiced or Closed, only a manager or an
+ * admin moves it anywhere else — a technician had moved their own Authorized ticket back to Done
+ * and their Closed ticket back to Open. The ticket's current stage decides, so `stageProblem`
+ * needs it (`current`) wherever a ticket already exists.
  *
  * Pure: no database, no server imports (unit tested in ticket-stage.test.ts).
  */
@@ -34,10 +40,17 @@ const ALL_STAGES: readonly ServiceStage[] = [...TECH_STAGES, ...OFFICE_STAGES];
 export const TECH_STAGE_MESSAGE =
   "A technician can mark a ticket Done; the office invoices and closes it";
 export const MANAGER_STAGE_MESSAGE = "Only a manager authorizes, invoices or closes a ticket";
+/**
+ * A technician's edit of a ticket at an office stage (owner, Oct 6): the office changes it now
+ * (saveServiceJob; the twin of RLS service_jobs_update, 20261006190000_stage_backwards_lock.sql).
+ */
+export const TECH_LOCKED_MESSAGE =
+  "A technician cannot change a ticket once it is Authorized, Invoiced or Closed";
 
 /**
  * Why `p` may not move a ticket to `stage` (null = they may). `current` is the ticket's stage
- * now (undefined / null for a new ticket); keeping it is never refused.
+ * now (undefined / null for a new ticket); keeping it is never refused. Out of Authorized,
+ * Invoiced or Closed (owner, Oct 6): a manager's or an admin's, whatever the target.
  */
 export function stageProblem(
   p: AccessLike | null | undefined,
@@ -46,16 +59,21 @@ export function stageProblem(
 ): string | null {
   if (current != null && stage === current) return null;
   if (managesTickets(p)) return null;
+  if (current != null && OFFICE_STAGES.includes(current as ServiceStage))
+    return MANAGER_STAGE_MESSAGE;
   if (!isOffice(p)) return TECH_STAGES.includes(stage) ? null : TECH_STAGE_MESSAGE;
   return OFFICE_STAGES.includes(stage) ? MANAGER_STAGE_MESSAGE : null;
 }
 
-/** The stages the picker offers: those `p` may set, plus the ticket's own stage. */
+/**
+ * The stages the picker offers: those `p` may set from the ticket's current stage, plus that
+ * stage itself (a non-manager on an Authorized / Invoiced / Closed ticket sees it alone).
+ */
 export function stageChoices(
   p: AccessLike | null | undefined,
   current: ServiceStage | null,
 ): ServiceStage[] {
-  return ALL_STAGES.filter((s) => s === current || !stageProblem(p, s));
+  return ALL_STAGES.filter((s) => s === current || !stageProblem(p, s, current));
 }
 
 /** The ticket sits at a stage `p` may not set (Invoiced / Closed for a non-manager): read-only. */
