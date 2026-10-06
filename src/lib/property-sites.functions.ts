@@ -3,7 +3,8 @@
  * CenterPoint told them apart by the ticket's description). Named places at one property — a
  * branch, a building — that a ticket can name (service_jobs.location_id). Customers or Service
  * access writes them, as the property itself. A removed site is hidden, never deleted: tickets
- * keep its name. Before 20261006170000_property_sites.sql is applied the list reads as empty.
+ * keep its name; a renamed site renames itself on its live tickets (owner, Oct 6). Before
+ * 20261006170000_property_sites.sql is applied the list reads as empty.
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -49,6 +50,22 @@ const itemSchema = z.object({
     .transform((v) => v || null),
 });
 export type PropertySiteInput = z.input<typeof itemSchema>;
+
+/**
+ * The kept sites whose name changed, with the new name (owner, Oct 6). A ticket snapshots the
+ * site's name (service_jobs.location_name, written on the ticket's save), so a rename must reach
+ * the tickets at that site too; the sites here are the ones whose tickets get the new name.
+ * Pure (site-rename-refresh.test.ts).
+ */
+export function renamedSites(
+  current: { id: string; name: string }[],
+  items: { id?: string; name: string }[],
+): { id: string; name: string }[] {
+  const was = new Map(current.map((s) => [s.id, s.name]));
+  return items
+    .filter((it) => it.id && was.has(it.id) && was.get(it.id) !== it.name)
+    .map((it) => ({ id: it.id!, name: it.name }));
+}
 
 /** Save a property's sites: kept ones update, new ones are added, missing ones are hidden. */
 export const savePropertySites = createServerFn({ method: "POST" })
@@ -107,6 +124,17 @@ export const savePropertySites = createServerFn({ method: "POST" })
         .update({ deleted_at: new Date().toISOString() })
         .in("id", gone);
       if (dErr) throw new Error(dErr.message);
+    }
+    // A renamed site renames itself on its live tickets (owner, Oct 6): location_name is the
+    // ticket's snapshot of the name, rewritten otherwise only when the ticket is saved. The same
+    // client: the caller has Customers or Service write, which service_jobs' RLS accepts.
+    for (const r of renamedSites(current ?? [], data.items)) {
+      const { error: jErr } = await sb
+        .from("service_jobs")
+        .update({ location_name: r.name })
+        .eq("location_id", r.id)
+        .is("deleted_at", null);
+      if (jErr) throw new Error(`The site is renamed, but its tickets were not: ${jErr.message}`);
     }
     const { data: rows, error: rErr } = await sb
       .from("property_sites")
