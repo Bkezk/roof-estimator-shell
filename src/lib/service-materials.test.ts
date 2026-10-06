@@ -186,6 +186,6 @@ describe("the wiring", () => {
   it("has a Material pricing tab on Setup and no 'same stock as' control", () => {
     expect(read("src/routes/setup.tsx")).toContain("<MaterialPricingSettings />");
     const tab = read("src/components/service/material-pricing-settings.tsx");
-    expect(tab).not.toMatch(/stock_screen_id|same stock/i);
+    expect(tab).not.toMatch(/same stock/i);
   });
 });

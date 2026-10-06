@@ -913,7 +913,10 @@ function RecordDialog(props: {
     () => props.stock.filter((s) => s.location_id === countAt),
     [props.stock, countAt],
   );
-  const target = ref ? props.targets.find((t) => t.screen_id === ref.screen_id) : undefined;
+  // Service materials come in several groups on one screen ("service"): the group with the row.
+  const target = ref
+    ? props.targets.find((t) => t.screen_id === ref.screen_id && t.rows.includes(ref.row_label))
+    : undefined;
   const unit = ref ? (target?.row_units?.[ref.row_label] ?? stockUnitFor(ref.screen_id)) : "";
   const piece = ref ? (target?.pieces?.[ref.row_label] ?? null) : null;
   const inPieces = !!piece && countMode === "pieces";

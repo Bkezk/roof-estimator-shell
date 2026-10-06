@@ -57,6 +57,7 @@ import {
   materialForCell,
   materialsByCell,
   packCostFor,
+  servicePiece,
 } from "@/lib/service-materials";
 import { loadServiceMaterials } from "@/lib/service-materials.server";
 import { toBase64 } from "@/lib/webpush";
@@ -257,7 +258,9 @@ export async function buildLinesFromJob(sb: Client, jobId: string): Promise<Line
     ]);
     // Counted in pieces when the catalog says how many a pack holds (else what the tech's
     // counted_note "50 fasteners" beside -0.05 box says); otherwise in packs as before.
-    const piece = catalogPiece ?? pieceFromCountedNotes(c.notes);
+    // A material counted in its own unit against the catalog's stock (an ISO board = 32 sq ft)
+    // bills in that unit.
+    const piece = servicePiece(material) ?? catalogPiece ?? pieceFromCountedNotes(c.notes);
     // The service price is per piece / unit as CenterPoint lists it; the ledger is in packs.
     const cost = material ? packCostFor(material.cost, piece) : (catalogCost ?? 0);
     const named = material ? { ...c, row_label: material.name, price_col: "" } : c;

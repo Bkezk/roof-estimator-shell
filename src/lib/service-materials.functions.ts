@@ -67,6 +67,8 @@ const itemSchema = z.object({
   unit: z.string().trim().min(1).max(30),
   cost: z.number().finite().min(0).max(1_000_000),
   active: z.boolean(),
+  /** Inventory group for a material with no bid-catalog twin (Underlayment, Sealants …). */
+  category: z.string().trim().max(80).nullable().optional(),
 });
 export type ServiceMaterialInput = z.input<typeof itemSchema>;
 
@@ -98,12 +100,19 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
           was.name === it.name &&
           was.unit === it.unit &&
           Number(was.cost) === it.cost &&
-          was.active === it.active
+          was.active === it.active &&
+          (was.category ?? null) === (it.category ?? null)
         )
           continue;
         const { error } = await sb
           .from("service_materials")
-          .update({ name: it.name, unit: it.unit, cost: it.cost, active: it.active })
+          .update({
+            name: it.name,
+            unit: it.unit,
+            cost: it.cost,
+            active: it.active,
+            category: it.category ?? null,
+          })
           .eq("id", was.id);
         if (error) throw new Error(error.message);
       } else {
@@ -112,6 +121,7 @@ export const saveServiceMaterials = createServerFn({ method: "POST" })
           unit: it.unit,
           cost: it.cost,
           active: it.active,
+          category: it.category ?? null,
           sort: sort++,
         });
         if (error) throw new Error(error.message);

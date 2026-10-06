@@ -29,7 +29,9 @@ import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
 import { easternYmd } from "@/lib/field-day";
 import {
-  SERVICE_CATEGORY,
+  serviceCategoryOf,
+  servicePiece,
+  materialForCell,
   SERVICE_STOCK_SCREEN,
   materialsByCell,
   serviceLabel,
@@ -149,17 +151,21 @@ export interface MovementRow {
   can_undo?: boolean;
 }
 
+/** A stock row's category: its catalog screen's, or a service material's own group. */
 async function categories(sb: SupabaseClient<Database>) {
-  const { data, error } = await sb
-    .from("pricing_catalog")
-    .select("id, category")
-    .eq("branch", "duro_last");
+  const [{ data, error }, materials] = await Promise.all([
+    sb.from("pricing_catalog").select("id, category").eq("branch", "duro_last"),
+    loadServiceMaterialLinks(sb),
+  ]);
   if (error) throw new Error(error.message);
   const m = new Map<string, string>();
   for (const s of data ?? []) m.set(s.id, s.category);
-  // Service materials with no bid-catalog twin (owner, Oct 6: service-materials.ts).
-  m.set(SERVICE_STOCK_SCREEN, SERVICE_CATEGORY);
-  return m;
+  // Service materials with no bid-catalog twin (owner, Oct 6: ISO is Underlayment, Acetone is
+  // Cleaning Supplies …; service-materials.ts).
+  return (screenId: string, rowLabel: string): string =>
+    screenId === SERVICE_STOCK_SCREEN
+      ? serviceCategoryOf(materials, rowLabel)
+      : (m.get(screenId) ?? screenId);
 }
 
 /** Stock on hand per catalog cell (only cells that have ever moved). */
@@ -184,7 +190,7 @@ export const listStock = createServerFn({ method: "GET" })
         row = {
           location_id: m.location_id,
           screen_id: m.screen_id,
-          category: cats.get(m.screen_id) ?? m.screen_id,
+          category: cats(m.screen_id, m.row_label),
           row_label: m.row_label,
           price_col: m.price_col,
           unit: m.unit,
@@ -254,7 +260,7 @@ export const listMovements = createServerFn({ method: "GET" })
         me?.role === "admin" ||
         (r.created_by === context.userId && now - Date.parse(r.created_at) < 24 * 3600 * 1000),
       screen_id: r.screen_id,
-      category: cats.get(r.screen_id) ?? r.screen_id,
+      category: cats(r.screen_id, r.row_label),
       row_label: r.row_label,
       price_col: r.price_col,
       item_no: r.item_no,
@@ -508,7 +514,12 @@ async function cellUnit(
       typeof packRaw === "number" ? packRaw : packRaw != null ? Number(packRaw) : null;
     piece = pieceDefFromPack(packCol, Number.isFinite(packQty) ? packQty : null);
   }
-  return { unit, piece };
+  // A service material counted in its own unit against this stock (an ISO board = 32 sq ft):
+  // the truck and ticket count it in that unit (owner, Oct 6).
+  const own = servicePiece(
+    materialForCell(materialsByCell(await loadServiceMaterialLinks(sb)), cell),
+  );
+  return { unit, piece: own ?? piece };
 }
 
 const transferSchema = cellSchema.extend({
@@ -911,7 +922,7 @@ export const myTruckStock = createServerFn({ method: "GET" })
           location_id: m.location_id,
           location_name: names.get(m.location_id) ?? m.location_id,
           screen_id: m.screen_id,
-          category: cats.get(m.screen_id) ?? m.screen_id,
+          category: cats(m.screen_id, m.row_label),
           row_label: m.row_label,
           price_col: m.price_col,
           unit: m.unit,

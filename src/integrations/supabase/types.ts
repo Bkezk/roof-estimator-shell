@@ -3125,6 +3125,9 @@ export type Database = {
       service_materials: {
         Row: {
           active: boolean;
+          category: string | null;
+          piece_name: string | null;
+          stock_per_unit: number | null;
           cost: number;
           created_at: string;
           id: string;
@@ -3138,6 +3141,9 @@ export type Database = {
         };
         Insert: {
           active?: boolean;
+          category?: string | null;
+          piece_name?: string | null;
+          stock_per_unit?: number | null;
           cost?: number;
           created_at?: string;
           id?: string;
@@ -3151,6 +3157,9 @@ export type Database = {
         };
         Update: {
           active?: boolean;
+          category?: string | null;
+          piece_name?: string | null;
+          stock_per_unit?: number | null;
           cost?: number;
           created_at?: string;
           id?: string;
@@ -4020,6 +4029,9 @@ export type Database = {
       service_materials_catalog: {
         Row: {
           active: boolean | null;
+          category: string | null;
+          piece_name: string | null;
+          stock_per_unit: number | null;
           id: string | null;
           name: string | null;
           sort: number | null;

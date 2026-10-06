@@ -25,6 +25,18 @@ export interface ServiceMaterialLink {
   stock_screen_id: string | null;
   stock_row_label: string | null;
   stock_price_col: string | null;
+  /**
+   * Its group on the Inventory page when it has no bid-catalog twin (Underlayment, Sealants,
+   * Cleaning Supplies …; owner, Oct 6); a twin shows under the catalog's own category.
+   */
+  category?: string | null;
+  /**
+   * Stock units in one of its units when they differ: an ISO board is 32 sq ft of the catalog's
+   * ISO, which bids count by the sq ft. Null = the same unit.
+   */
+  stock_per_unit?: number | null;
+  /** What one of its units is called on a truck / ticket when stock_per_unit is set ("board"). */
+  piece_name?: string | null;
 }
 export interface ServiceMaterial extends ServiceMaterialLink {
   id: string;
@@ -109,8 +121,9 @@ export function unitWord(unit: string): string {
 
 /**
  * The Inventory page's product search gains the service materials that have no bid-catalog twin
- * (a twin is already there under its catalog name), as one "Service materials" group counted in
- * each material's own unit — the shape of a catalog price target.
+ * (a twin is already there under its catalog name), one group per category (Underlayment,
+ * Sealants, Cleaning Supplies …), counted in each material's own unit — the shape of a catalog
+ * price target.
  */
 export function serviceStockTargets(list: readonly ServiceMaterialLink[]): {
   screen_id: string;
@@ -123,15 +136,35 @@ export function serviceStockTargets(list: readonly ServiceMaterialLink[]): {
   const own = list
     .filter((m) => m.active && !m.stock_screen_id)
     .sort((a, b) => a.name.localeCompare(b.name));
-  if (!own.length) return [];
-  return [
-    {
+  const groups = new Map<string, ServiceMaterialLink[]>();
+  for (const m of own) {
+    const c = m.category?.trim() || SERVICE_CATEGORY;
+    groups.set(c, [...(groups.get(c) ?? []), m]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, ms]) => ({
       screen_id: SERVICE_STOCK_SCREEN,
-      category: SERVICE_CATEGORY,
-      rows: own.map((m) => m.name),
+      category,
+      rows: ms.map((m) => m.name),
       price_cols: [SERVICE_STOCK_COL],
       values: {},
-      row_units: Object.fromEntries(own.map((m) => [m.name, unitWord(m.unit)])),
-    },
-  ];
+      row_units: Object.fromEntries(ms.map((m) => [m.name, unitWord(m.unit)])),
+    }));
+}
+
+/**
+ * A material counted in its own unit against stock kept in another (an ISO board = 32 sq ft):
+ * the piece the truck and ticket count in, so 2 boards take 64 sq ft and bill as 2 boards.
+ */
+export function servicePiece(m: ServiceMaterialLink | undefined): PieceDef | null {
+  const k = m?.stock_per_unit;
+  if (!m || !k || !(k > 0) || k === 1) return null;
+  return { name: m.piece_name?.trim() || unitWord(m.unit), perPack: 1 / k };
+}
+
+/** A "service" stock row's category: its material's group, else "Service materials". */
+export function serviceCategoryOf(list: readonly ServiceMaterialLink[], rowLabel: string): string {
+  const m = list.find((x) => !x.stock_screen_id && x.name === rowLabel);
+  return m?.category?.trim() || SERVICE_CATEGORY;
 }
