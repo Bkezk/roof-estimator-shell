@@ -39,6 +39,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { isOffice } from "@/lib/access";
+import { closeoutDestination } from "@/lib/closeout-destination";
 import {
   REPAIR_TAGS,
   readRepairTag,
@@ -349,8 +350,9 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       );
       // A technician goes back to their day; the office (owner, Oct 5: a manager closing out
       // from the ticket) back to the ticket, where the stage and the Close-out fold now agree.
-      if (profile?.technician) void navigate({ to: "/service/today" });
-      else void navigate({ to: "/service", search: { id: job.id } });
+      // The office is isOffice, not "no Technician tick" (owner, Oct 6: an admin ticked
+      // Technician landed on Today) — closeout-destination.ts.
+      void navigate(closeoutDestination(profile, job.id));
     },
     onError: (e) =>
       loudError("Could not complete the ticket (your typing is kept on this phone)", e),
