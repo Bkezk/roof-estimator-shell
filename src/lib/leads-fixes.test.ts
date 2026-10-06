@@ -373,7 +373,18 @@ function recorder() {
       const calls: string[] = [`from(${table})`];
       queries.push(calls);
       const q: Record<string, unknown> = {};
-      for (const m of ["select", "eq", "in", "is", "or", "limit", "order", "single", "ilike"])
+      for (const m of [
+        "select",
+        "eq",
+        "in",
+        "is",
+        "or",
+        "not",
+        "limit",
+        "order",
+        "single",
+        "ilike",
+      ])
         q[m] = (...args: unknown[]) => {
           calls.push(`${m}(${args.map((a) => JSON.stringify(a)).join(",")})`);
           return q;
@@ -432,14 +443,17 @@ describe("lead filters shared by the list and the counts", () => {
     expect(shared(list)).toHaveLength(3);
   });
 
-  it("no filters: nothing extra", () => {
+  it("no filters: only the retired sources are left out (owner, Oct 6; retired-lead-sources.test.ts)", () => {
     const calls: string[] = [];
     const q = {
       eq: (...a: unknown[]) => (calls.push(`eq${JSON.stringify(a)}`), q),
       or: (...a: unknown[]) => (calls.push(`or${JSON.stringify(a)}`), q),
+      not: (...a: unknown[]) => (calls.push(`not${JSON.stringify(a)}`), q),
     };
     applyLeadFilters(q, {});
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([
+      'not["source","in","(louisville_permits,louisville_bids,nashville_permits,nashville_bids)"]',
+    ]);
   });
 });
 

@@ -38,7 +38,7 @@ export const PAGE_LABELS: Record<Page, string> = {
 };
 
 export const PAGE_HELP: Record<Page, string> = {
-  estimate: "Bids and the estimator — and listed as an estimator on Setup",
+  estimate: "Project Bids and the estimator — and listed as an estimator on Setup",
   pricing: "Labor, Duro-Last and Non-DL pricing, price list import",
   inventory: "Stock ledger — every signed-in user has it (owner, Oct 1)",
   prospect: "Buildings, roofs and tasks — the territory roof database",

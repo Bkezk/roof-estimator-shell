@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { assertPageAccess } from "@/lib/auth.functions";
+import { isRetiredLeadSource, RETIRED_LEAD_SOURCES_IN } from "@/lib/leads-retired";
 
 export type LeadRow = Database["public"]["Tables"]["leads"]["Row"];
 export type LeadSettingsRow = Database["public"]["Tables"]["lead_settings"]["Row"];
@@ -40,7 +41,8 @@ export const SOURCE_LABELS: Record<string, string> = {
   lexington_bids: "Lexington city bids",
   louisville_bids: "Louisville Metro bids",
 };
-export const LEAD_SOURCES = Object.keys(SOURCE_LABELS);
+/** The Source picker's choices: every source but the retired ones (lib/leads-retired.ts). */
+export const LEAD_SOURCES = Object.keys(SOURCE_LABELS).filter((k) => !isRetiredLeadSource(k));
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
 async function prospectAccess(ctx: Ctx) {
@@ -226,12 +228,21 @@ export function leadSearchFilter(q: string | null | undefined): string | null {
   return LEAD_SEARCH_FIELDS.map((f) => `${f}.ilike.%${term}%`).join(",");
 }
 
-/** Source, state and search on a leads query: the one place the list and its counts filter. */
+/**
+ * Source, state and search on a leads query: the one place the list and its counts filter. With
+ * no source picked, the retired sources' rows are left out (owner, Oct 6: no Louisville, no
+ * Nashville); a retired source asked for by name is still answered (an old link).
+ */
 export function applyLeadFilters<
-  Q extends { eq(column: string, value: string): Q; or(filters: string): Q },
+  Q extends {
+    eq(column: string, value: string): Q;
+    or(filters: string): Q;
+    not(column: string, operator: string, value: string): Q;
+  },
 >(q: Q, f: LeadFilter): Q {
   let out = q;
   if (f.source) out = out.eq("source", f.source);
+  else out = out.not("source", "in", RETIRED_LEAD_SOURCES_IN);
   if (f.state) out = out.eq("state", f.state);
   const search = leadSearchFilter(f.q);
   if (search) out = out.or(search);

@@ -64,14 +64,14 @@ const importedFrom = (data: unknown): string | null => {
 export const Route = createFileRoute("/bids")({
   head: () => ({
     meta: [
-      { title: "Saved Bids — JBK Portal" },
+      { title: "Project Bids — JBK Portal" },
       {
         name: "description",
         content: "View and manage saved Duro-Last roofing estimates.",
       },
       {
         property: "og:title",
-        content: "Saved Bids — JBK Portal",
+        content: "Project Bids — JBK Portal",
       },
       {
         property: "og:description",
@@ -357,7 +357,7 @@ function BidsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold tracking-tight">Saved Bids</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Project Bids</h1>
         <div className="flex flex-wrap items-center gap-2">
           {combineSel.length > 0 && (
             <>

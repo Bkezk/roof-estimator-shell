@@ -1,7 +1,9 @@
 /**
  * Admin settings for the Leads page (owner, Sep 28), opened from the gear like the storm
- * thresholds: the roof keywords the planroom titles are matched against, which Louisville
- * permits count (types, minimum size, how far back), and which Nashville permits count (types
+ * thresholds: the roof keywords the planroom titles are matched against and the Chattanooga
+ * permit cost floor. (The Louisville and Nashville permit settings left this form Oct 6 with
+ * their sources — lib/leads-retired.ts; the columns keep their old values.) Formerly: which
+ * Louisville permits count (types, minimum size, how far back), and which Nashville permits count (types
  * and a minimum construction cost: that layer has no square footage; the window is shared).
  * The cost floor applies to Chattanooga's new non-residential permits too (their window is a
  * fixed 180 days: that layer runs a month or two behind). They apply from the next refresh.
@@ -34,10 +36,7 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
   const saveFn = useServerFn(setLeadSettings);
   const s = props.settings;
   const [keywords, setKeywords] = useState(s.roof_keywords.join(", "));
-  const [types, setTypes] = useState(s.louisville_types.join(", "));
-  const [minSqft, setMinSqft] = useState(Number(s.louisville_min_sqft));
-  const [days, setDays] = useState(Number(s.louisville_days));
-  const [nashTypes, setNashTypes] = useState(s.nashville_types.join(", "));
+  // The Chattanooga permit threshold lives in the nashville_min_cost column (it was shared).
   const [nashMinCost, setNashMinCost] = useState(Number(s.nashville_min_cost));
 
   const save = useMutation({
@@ -53,33 +52,23 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
   const submit = () => {
     const problems: string[] = [];
     const kw = list(keywords);
-    const ty = list(types);
-    const nty = list(nashTypes);
     if (!kw.length) problems.push("add at least one roof keyword");
     if (kw.length > 50 || kw.some((k) => k.length > 40))
       problems.push("roof keywords: at most 50, each up to 40 characters");
-    if (!ty.length) problems.push("add at least one Louisville permit type");
-    if (ty.length > 20 || ty.some((t) => t.length > 60))
-      problems.push("permit types: at most 20, each up to 60 characters");
-    if (!nty.length) problems.push("add at least one Nashville permit type");
-    if (nty.length > 20 || nty.some((t) => t.length > 60))
-      problems.push("Nashville permit types: at most 20, each up to 60 characters");
     if (!Number.isFinite(nashMinCost) || nashMinCost < 0 || nashMinCost > 100_000_000)
-      problems.push("Nashville / Chattanooga min cost must be $0 to $100,000,000");
-    if (!Number.isFinite(minSqft) || minSqft < 0 || minSqft > 1_000_000)
-      problems.push("min sq ft must be 0 to 1,000,000");
-    if (!Number.isInteger(days) || days < 7 || days > 365)
-      problems.push("window must be 7 to 365 days");
+      problems.push("Chattanooga min cost must be $0 to $100,000,000");
     if (problems.length) {
       toast.error(`Check the settings: ${problems.join("; ")}`);
       return;
     }
+    // The retired Louisville / Nashville settings are saved back as they were (the columns
+    // and the server's checks still want them).
     save.mutate({
       roof_keywords: kw,
-      louisville_types: ty,
-      louisville_min_sqft: minSqft,
-      louisville_days: days,
-      nashville_types: nty,
+      louisville_types: s.louisville_types,
+      louisville_min_sqft: Number(s.louisville_min_sqft),
+      louisville_days: Number(s.louisville_days),
+      nashville_types: s.nashville_types,
       nashville_min_cost: nashMinCost,
     });
   };
@@ -94,47 +83,11 @@ export function LeadSettingsPanel(props: { settings: LeadSettingsRow; onClose: (
           </Label>
           <Input className="h-8" value={keywords} onChange={(e) => setKeywords(e.target.value)} />
         </div>
-        <div className="sm:col-span-2">
-          <Label className="text-xs text-muted-foreground">
-            Louisville permit types (comma-separated)
-          </Label>
-          <Input className="h-8" value={types} onChange={(e) => setTypes(e.target.value)} />
-        </div>
-        <div>
-          <Label className="text-xs text-muted-foreground">Min building size (sq ft)</Label>
-          <NumberField
-            className="h-8"
-            value={minSqft}
-            blankZero={false}
-            max={1_000_000}
-            step="500"
-            inputMode="numeric"
-            onChange={(v) => setMinSqft(Math.round(v))}
-          />
-        </div>
-        <div>
-          <Label className="text-xs text-muted-foreground">Permit window (days back)</Label>
-          <NumberField
-            className="h-8"
-            value={days}
-            blankZero={false}
-            min={0}
-            max={365}
-            inputMode="numeric"
-            invalid={days < 7 || days > 365}
-            onChange={(v) => setDays(Math.round(v))}
-          />
-        </div>
-        <div className="sm:col-span-2">
-          <Label className="text-xs text-muted-foreground">
-            Nashville permit types (comma-separated, as Metro Codes spells them)
-          </Label>
-          <Input className="h-8" value={nashTypes} onChange={(e) => setNashTypes(e.target.value)} />
-        </div>
+        {/* The Louisville and Nashville permit settings are gone from here (sources retired,
+            owner Oct 6); their saved values ride along unchanged below. */}
         <div>
           <Label className="text-xs text-muted-foreground">
-            Min construction cost for Nashville and Chattanooga permits ($; Chattanooga looks back
-            180 days)
+            Min construction cost for Chattanooga permits ($; looks back 180 days)
           </Label>
           <NumberField
             className="h-8"

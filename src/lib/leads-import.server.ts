@@ -3,6 +3,7 @@
  * here so the tests can call it: cron authentication, the zod check of the browser job's
  * payload (src/lib/leads-browser.ts), then importBrowserBids (leads.server.ts).
  */
+import { isRetiredLeadSource } from "@/lib/leads-retired";
 import { authenticateCron } from "@/lib/cron-auth";
 import { browserImportSchema } from "@/lib/leads-browser";
 
@@ -31,6 +32,14 @@ export async function importRequest(request: Request): Promise<Response> {
       },
       { status: 400 },
     );
+  // Owner, Oct 6: Metro Nashville's and Louisville Metro's portals are retired — a run of the
+  // old browser job still gets a clean answer, and saves nothing.
+  if (isRetiredLeadSource(parsed.data.source))
+    return Response.json({
+      ok: true,
+      skipped: `${parsed.data.source} is retired — rows not saved`,
+      at: new Date().toISOString(),
+    });
   try {
     const { hasServiceRole } = await import("@/lib/notify.server");
     if (!hasServiceRole())
