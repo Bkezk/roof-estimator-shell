@@ -143,7 +143,6 @@ describe("Work Overview: the Needs authorization tab", () => {
     expect(listGroups([], "2026-10-05", { authorize: true }).map((g) => g.bucket)).toEqual([
       "authorize",
       "overdue",
-      "today",
       "week",
       "later",
       "nodate",

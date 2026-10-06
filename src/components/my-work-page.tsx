@@ -1,6 +1,6 @@
 /**
  * Work Overview (owner, Sep 30): the signed-in person's own tickets (as lead technician), open tasks
- * and open follow-ups in one list, grouped Overdue / Today / This week / Later / No date (a Done
+ * and open follow-ups in one list, grouped Overdue / This week / Later / No date (a Done
  * ticket last, never overdue), or on a month calendar where a click on a day lists that day.
  * Every signed-in user lands here. Admins and managers also get a "Show" picker (Mine /
  * Everyone / one person); the server returns only the caller's own items to anyone else.
@@ -46,6 +46,7 @@ import {
   monthGrid,
   compareWork,
   defaultBucket,
+  presetBucket,
   ymdParts,
   BUCKET_EMPTY,
   BUCKET_LABELS,
@@ -212,9 +213,10 @@ function ListView({
   preset: BucketPreset | null;
   onClearPreset: () => void;
 }) {
-  // Owner (Oct 1): all six headings, always, in the same order, across the top. On a desktop
-  // (lg and up) all six are columns side by side, each with its items under it ("all 6 across
-  // the top instead of having to click each one"); on a phone they are a row of tabs and the
+  // Owner (Oct 1): every heading, always, in the same order, across the top — five since Oct 6
+  // (no Today: what is due today tops This week). On a desktop (lg and up) they are columns side
+  // by side, each with its items under it ("all 6 across the top instead of having to click
+  // each one"); on a phone they are a row of tabs and the
   // selected tab's items show below. An empty group shows its muted line. A preset (?bucket=)
   // picks the tab and marks the column; picking another tab clears it.
   const groups = useMemo(() => listGroups(items, today, { authorize }), [items, today, authorize]);
@@ -249,14 +251,14 @@ function ListView({
     <>
       {/* Desktop: six columns across, every group's items in view at once. */}
       <div
-        className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 6 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}
+        className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}
       >
         {groups.map((g) => (
           <section
             key={g.bucket}
             aria-labelledby={`work-col-${g.bucket}`}
             className={`min-w-0 space-y-2 rounded-lg border p-2 ${
-              preset === g.bucket ? "ring-2 ring-primary" : ""
+              preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""
             }`}
           >
             <h2

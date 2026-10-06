@@ -243,9 +243,10 @@ describe("My Work grouping", () => {
       utcDay,
     );
     const groups = groupWork(items, today);
+    // Owner, Oct 6: no Today group — today's task sits in This week.
     expect(groups.map((g) => g.label)).toEqual([
       "Overdue",
-      "Today",
+      "This week",
       "Later",
       "No date",
       "Done — waiting on the office",

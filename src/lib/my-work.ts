@@ -336,6 +336,22 @@ const BUCKET_ORDER: WorkBucket[] = [
   "nodate",
   "done",
 ];
+/**
+ * The List's groups (owner, Oct 6: "get rid of the today section in the work overview list,
+ * instead just keep the this week and sort it by due first"): no Today — what is due today sits
+ * at the top of This week (`compareWork` sorts by date). `bucketOf` still tells today apart for
+ * the Owner view's Due today column.
+ */
+export const LIST_BUCKETS: WorkBucket[] = BUCKET_ORDER.filter((b) => b !== "today");
+
+/** The List's bucket for an item: `bucketOf`, with today folded into This week. */
+export const listBucketOf = (
+  item: Pick<WorkItem, "date" | "done" | "needsAuth">,
+  today: string,
+): WorkBucket => {
+  const b = bucketOf(item, today);
+  return b === "today" ? "week" : b;
+};
 
 /** The Saturday that ends `today`'s week (weeks run Sunday to Saturday, like the calendar). */
 export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
@@ -364,16 +380,16 @@ export interface WorkGroup {
   items: WorkItem[];
 }
 
-/** The List view: non-empty groups in order, each sorted by `compareWork`. */
+/** The List view: non-empty groups in order, each sorted by `compareWork` (due first). */
 export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
   const by = new Map<WorkBucket, WorkItem[]>();
   for (const it of items) {
-    const b = bucketOf(it, today);
+    const b = listBucketOf(it, today);
     const list = by.get(b) ?? [];
     list.push(it);
     by.set(b, list);
   }
-  return BUCKET_ORDER.filter((b) => by.has(b)).map((b) => ({
+  return LIST_BUCKETS.filter((b) => by.has(b)).map((b) => ({
     bucket: b,
     label: BUCKET_LABELS[b],
     items: [...(by.get(b) ?? [])].sort(compareWork),
@@ -382,13 +398,14 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
 
 /**
  * The List's headings (owner, Oct 1: "how many sub headings are there? I see Later and No date
- * only"): all six groups, always, in the same order — an empty one shows "(0)" and this line.
+ * only"): every List group, always, in the same order — an empty one shows "(0)" and this line.
+ * (Five since Oct 6: Today is folded into This week.)
  */
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   authorize: "Nothing waiting for your review.",
   overdue: "Nothing overdue.",
   today: "Nothing due today.",
-  week: "Nothing else this week.",
+  week: "Nothing due this week.",
   later: "Nothing scheduled later.",
   nodate: "Everything has a date.",
   done: "Nothing waiting on the office.",
@@ -405,7 +422,7 @@ export function listGroups(
   opts: { authorize?: boolean } = {},
 ): WorkGroup[] {
   const filled = new Map(groupWork(items, today).map((g) => [g.bucket, g]));
-  return BUCKET_ORDER.filter(
+  return LIST_BUCKETS.filter(
     (b) => b !== "authorize" || opts.authorize || filled.has("authorize"),
   ).map((b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] });
 }
@@ -416,20 +433,24 @@ export type BucketPreset = "today" | "overdue";
 export const parseBucketPreset = (v: unknown): BucketPreset | undefined =>
   v === "today" || v === "overdue" ? v : undefined;
 
+/** The List bucket a preset opens: the Owner view's "Due today" link lands on This week. */
+export const presetBucket = (preset: BucketPreset): WorkBucket =>
+  preset === "today" ? "week" : preset;
+
 /** The List's groups under a preset: only that bucket's group (none when it is empty). */
 export function presetGroups(groups: WorkGroup[], preset?: BucketPreset | null): WorkGroup[] {
-  return preset ? groups.filter((g) => g.bucket === preset) : groups;
+  return preset ? groups.filter((g) => g.bucket === presetBucket(preset)) : groups;
 }
 
 /**
  * The List's headings run across the top (owner, Oct 1: "the categories horizontally across the
  * top instead of vertically"); one is selected and its items show below. The tab to start on:
  * the preset (?bucket=, the Owner view's links) when there is one, else the first group in
- * order with anything in it (Overdue before Today…), else Today.
+ * order with anything in it (Overdue before This week…), else This week.
  */
 export function defaultBucket(groups: WorkGroup[], preset?: BucketPreset | null): WorkBucket {
-  if (preset) return preset;
-  return groups.find((g) => g.items.length > 0)?.bucket ?? "today";
+  if (preset) return presetBucket(preset);
+  return groups.find((g) => g.items.length > 0)?.bucket ?? "week";
 }
 
 // ---- calendar ------------------------------------------------------------------------------

@@ -78,13 +78,12 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
   });
 });
 
-describe("List: all six headings, always, in the same order", () => {
+describe("List: every heading, always, in the same order (five since Oct 6: no Today)", () => {
   const today = "2026-10-01";
-  it("an empty list still has the six groups, each with (0) and its empty line", () => {
+  it("an empty list still has the five groups, each with (0) and its empty line", () => {
     const groups = listGroups([], today);
     expect(groups.map((g) => g.label)).toEqual([
       "Overdue",
-      "Today",
       "This week",
       "Later",
       "No date",
@@ -93,7 +92,7 @@ describe("List: all six headings, always, in the same order", () => {
     expect(groups.every((g) => g.items.length === 0)).toBe(true);
     for (const g of groups) expect(BUCKET_EMPTY[g.bucket]).toMatch(/\.$/);
   });
-  it("only Later and No date filled: the other four are still there, empty", () => {
+  it("only Later and No date filled: the other three are still there, empty", () => {
     const items = mergeWork({
       tickets: [],
       tasks: [
@@ -121,16 +120,15 @@ describe("List: all six headings, always, in the same order", () => {
     const groups = listGroups(items, today);
     expect(groups.map((g) => [g.bucket, g.items.length])).toEqual([
       ["overdue", 0],
-      ["today", 0],
       ["week", 0],
       ["later", 1],
       ["nodate", 1],
       ["done", 0],
     ]);
   });
-  it("the tab to start on: the preset, else the first group with anything, else Today", () => {
+  it("the tab to start on: the preset, else the first group with anything, else This week", () => {
     const empty = listGroups([], today);
-    expect(defaultBucket(empty, null)).toBe("today");
+    expect(defaultBucket(empty, null)).toBe("week");
     expect(defaultBucket(empty, "overdue")).toBe("overdue");
     const items = mergeWork({
       tickets: [],
@@ -148,7 +146,8 @@ describe("List: all six headings, always, in the same order", () => {
       followups: [],
     });
     expect(defaultBucket(listGroups(items, today), null)).toBe("later");
-    expect(defaultBucket(listGroups(items, today), "today")).toBe("today");
+    // The Owner view's "Due today" link (?bucket=today) opens This week, where today's items top the list.
+    expect(defaultBucket(listGroups(items, today), "today")).toBe("week");
     const late = mergeWork({
       tickets: [],
       tasks: [
@@ -175,7 +174,7 @@ describe("List: all six headings, always, in the same order", () => {
     });
     expect(defaultBucket(listGroups(late, today), null)).toBe("overdue");
   });
-  it("the page: six columns across on a desktop, a row of tabs on a phone", () => {
+  it("the page: five columns across on a desktop (six with Needs authorization), a row of tabs on a phone", () => {
     const page = read("src/components/my-work-page.tsx");
     const list = page.slice(
       page.indexOf("function ListView"),
@@ -185,12 +184,15 @@ describe("List: all six headings, always, in the same order", () => {
     expect(list).not.toContain("groupWork(");
     expect(list).not.toContain("presetGroups(");
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.
-    // Seven when the Needs authorization column shows (M9, owner Oct 5).
+    // Six when the Needs authorization column shows (M9, owner Oct 5); five otherwise since
+    // Today was folded into This week (owner, Oct 6).
     expect(list).toContain(
-      'className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 6 ? "xl:grid-cols-7" : "xl:grid-cols-6"}`}',
+      'className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}',
     );
     expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
-    expect(list).toContain('preset === g.bucket ? "ring-2 ring-primary" : ""');
+    expect(list).toContain(
+      'preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""',
+    );
     // Phone: tabs, the picked one's items below.
     expect(list).toContain('<div className="space-y-4 lg:hidden">');
     expect(list).toContain(
