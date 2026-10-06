@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, Trash2, UserPlus } from "lucide-react";
 
 import {
   listUsers,
@@ -26,6 +26,7 @@ import {
   type Page,
   type Role,
 } from "@/lib/access";
+import { TECH_NEEDS_SERVICE, technicianNeedsService, withService } from "@/lib/dispatch-access";
 import { useAuth } from "@/lib/auth-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -350,6 +351,34 @@ function UsersPage() {
                             accessMut.mutate({ id: u.id, role: r, access: a, technician: t })
                           }
                         />
+                        {technicianNeedsService(u) && (
+                          // Owner, Oct 6: a technician without Service access is left off the
+                          // dispatch picker and sees no ticket (dispatch-access.ts); say so here.
+                          <div
+                            role="alert"
+                            className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            <span>{TECH_NEEDS_SERVICE}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 px-2 text-xs"
+                              disabled={accessMut.isPending}
+                              onClick={() =>
+                                accessMut.mutate({
+                                  id: u.id,
+                                  role: u.role,
+                                  access: withService(u.access),
+                                  technician: u.technician,
+                                })
+                              }
+                            >
+                              Give Service access
+                            </Button>
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell className="w-32 align-top">
                         {u.technician ? (
