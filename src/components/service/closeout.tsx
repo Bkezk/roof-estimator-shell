@@ -40,6 +40,13 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { isOffice } from "@/lib/access";
 import {
+  REPAIR_TAGS,
+  readRepairTag,
+  repairMatchesTag,
+  writeRepairTag,
+  type RepairTag,
+} from "@/lib/repair-tags";
+import {
   SERVICE_STAGES,
   STAGE_LABELS,
   TECH_STAGES,
@@ -561,6 +568,30 @@ function Chip({
   );
 }
 
+/** A roof-type chip above the repair picker (owner, Oct 6): the pressed one filters the list. */
+function TagChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={active ? "default" : "outline"}
+      aria-pressed={active}
+      className="h-8 rounded-full px-3 text-xs"
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
 function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: number }) {
   const { session } = useAuth();
   const qc = useQueryClient();
@@ -586,9 +617,19 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     enabled: !!session,
     staleTime: 5 * 60_000,
   });
+  // Roof-type chips (owner, Oct 6: "the repair tags … please fix"): the chosen chip filters
+  // the top list and the search on the server (listRepairTemplates' tag) and is remembered on
+  // this phone (repair-tags.ts). All until the stored chip is read, after mount (no storage on
+  // the server render).
+  const [tag, setTag] = useState<RepairTag | null>(null);
+  useEffect(() => setTag(readRepairTag()), []);
+  const pickTag = (t: RepairTag | null) => {
+    setTag(t);
+    writeRepairTag(t);
+  };
   const favs = useQuery({
-    queryKey: ["repair-templates", "top"],
-    queryFn: () => templatesFn({ data: { limit: 24 } }),
+    queryKey: ["repair-templates", "top", tag],
+    queryFn: () => templatesFn({ data: { limit: 24, tag: tag ?? undefined } }),
     enabled: !!session,
     staleTime: 5 * 60_000,
   });
@@ -599,8 +640,8 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     return () => clearTimeout(t);
   }, [search]);
   const found = useQuery({
-    queryKey: ["repair-templates", "q", q],
-    queryFn: () => templatesFn({ data: { q, limit: 30 } }),
+    queryKey: ["repair-templates", "q", q, tag],
+    queryFn: () => templatesFn({ data: { q, limit: 30, tag: tag ?? undefined } }),
     enabled: !!session && q.length >= 2,
     staleTime: 60_000,
   });
@@ -634,7 +675,8 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     onError: (e) => loudError("Could not add the repair", e),
   });
 
-  const recentRows = recent.data ?? [];
+  // The ticket's usual repairs are not re-fetched per chip: hide the ones outside it here.
+  const recentRows = (recent.data ?? []).filter((t) => repairMatchesTag(t.tags, tag));
   const recentIds = new Set(recentRows.map((t) => t.id));
   const favRows = (favs.data ?? []).filter((t) => !recentIds.has(t.id));
   const rows = repairs.data ?? [];
@@ -675,6 +717,16 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
       )}
 
       <div className="space-y-3">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roof type">
+          <TagChip active={tag === null} onClick={() => pickTag(null)}>
+            All
+          </TagChip>
+          {REPAIR_TAGS.map((t) => (
+            <TagChip key={t.value} active={tag === t.value} onClick={() => pickTag(t.value)}>
+              {t.label}
+            </TagChip>
+          ))}
+        </div>
         {recentRows.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

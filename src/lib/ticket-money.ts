@@ -32,6 +32,9 @@ export function catalogTemplate(r: CatalogTemplateRow): TemplateRow {
     centerpoint_template_id: r.centerpoint_template_id ?? null,
     created_at: r.created_at ?? "",
     updated_at: r.updated_at ?? "",
+    // Roof-type tags (owner, Oct 6) for the picker's chips; a view that predates
+    // 20261006220000_repair_catalog_tags.sql has none: untagged (shown under every chip).
+    tags: r.tags ?? [],
   };
 }
 

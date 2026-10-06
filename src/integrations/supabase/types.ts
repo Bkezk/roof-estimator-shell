@@ -2437,6 +2437,7 @@ export type Database = {
           favorite: boolean;
           id: string;
           name: string;
+          tags: string[];
           unit: string;
           unit_price: number | null;
           updated_at: string;
@@ -2452,6 +2453,7 @@ export type Database = {
           favorite?: boolean;
           id?: string;
           name: string;
+          tags?: string[];
           unit?: string;
           unit_price?: number | null;
           updated_at?: string;
@@ -2467,6 +2469,7 @@ export type Database = {
           favorite?: boolean;
           id?: string;
           name?: string;
+          tags?: string[];
           unit?: string;
           unit_price?: number | null;
           updated_at?: string;
@@ -4064,6 +4067,7 @@ export type Database = {
           favorite: boolean | null;
           id: string | null;
           name: string | null;
+          tags: string[] | null;
           unit: string | null;
           updated_at: string | null;
           usage_count: number | null;

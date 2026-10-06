@@ -17,6 +17,7 @@ import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
 import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
+import { REPAIR_TAG_VALUES } from "@/lib/repair-tags";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { MAX_HELPERS, confirmedCrew } from "@/lib/service-crew";
 import { isAnnotatableRole, photoMarksSchema, serializePhotoMarks } from "@/lib/photo-annotations";
@@ -443,7 +444,11 @@ export const deleteTimeEntry = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
-/** Repair templates: favourites and the most used first, then a name search. */
+/**
+ * Repair templates: favourites and the most used first, then a name search. `tag` (owner,
+ * Oct 6: the picker's roof-type chips, repair-tags.ts) keeps only the repairs tagged with that
+ * roof type, on the server, so the limit applies after the filter.
+ */
 export const listRepairTemplates = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) =>
@@ -451,6 +456,7 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
       .object({
         q: z.string().trim().max(120).optional(),
         limit: z.number().int().min(1).max(500).optional(),
+        tag: z.enum(REPAIR_TAG_VALUES).optional(),
       })
       .parse(d ?? {}),
   )
@@ -462,7 +468,7 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
     const like = data.q ? `%${data.q.replace(/[%_,]/g, " ")}%` : null;
     // Prices are a manager's (owner, Oct 1): a manager reads the table (unit_price), anyone
     // else the price-free catalog view (RLS repair_templates_read no longer shows a technician
-    // the table). Same filters and order on both.
+    // the table; the view carries tags since 20261006220000). Same filters and order on both.
     let rows: RepairTemplateRow[];
     if (manager) {
       let q = sb
@@ -474,6 +480,7 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
         .order("name")
         .limit(limit);
       if (like) q = q.ilike("name", like);
+      if (data.tag) q = q.contains("tags", [data.tag]);
       const { data: r, error } = await q;
       if (error) throw new Error(error.message);
       rows = r ?? [];
@@ -487,6 +494,7 @@ export const listRepairTemplates = createServerFn({ method: "GET" })
         .order("name")
         .limit(limit);
       if (like) q = q.ilike("name", like);
+      if (data.tag) q = q.contains("tags", [data.tag]);
       const { data: r, error } = await q;
       if (error) throw new Error(error.message);
       rows = (r ?? []).map(catalogTemplate);
