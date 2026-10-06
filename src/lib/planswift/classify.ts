@@ -18,6 +18,8 @@ export const PLANSWIFT_TARGETS = [
   "parapet",
   "coping",
   "gutter",
+  "downspout",
+  "twopiece",
   "metals",
   "curb",
   "drain",
@@ -36,6 +38,8 @@ export const PLANSWIFT_TARGET_LABELS: Record<PlanSwiftTarget, string> = {
   parapet: "Parapet",
   coping: "Coping",
   gutter: "Gutter",
+  downspout: "Downspout (Metals)",
+  twopiece: "Two-piece metal (Metals)",
   metals: "Metals line",
   curb: "Curb",
   drain: "Drain",
@@ -85,6 +89,17 @@ export interface RowDetails {
   /** For metals / accessory / Non-DL rows: what it is and where the bid keeps it. */
   kind?: string;
   where?: string;
+  /**
+   * Downspout rows (owner, Oct 6, Towneplace Suites: "it put the drops into curbs and downspouts
+   * into the NDL"): the Metals screen's downspout size (`3"X4"`, as the catalog spells it) and
+   * which of its rows the sheet row is — a length ("Downspout - Open" / "- Closed") or a counted
+   * part ("Drop/Outlet", an elbow). No size in the name: `dsSize` stays unset.
+   */
+  dsSize?: string;
+  dsPart?: "length" | "Drop/Outlet" | "elbow" | "count";
+  dsClosed?: boolean;
+  /** Two-piece edge metal (`6" 2-piece`): the size (in) of the Metals screen's compression row. */
+  twoPieceIn?: number;
   /** The tapered quote's underlayment entry (NeedQuote board). */
   quoteBoard?: string;
   /**
@@ -334,7 +349,6 @@ const has = (re: RegExp, s: string) => re.test(s);
 
 /** FT rows that are sheet metal (Non-DL › Sheet Metals lines), with their display names. */
 const FT_METALS: Array<{ re: RegExp; kind: string }> = [
-  { re: /down\s*spouts?|\bd\.?s\.?\b/i, kind: "Downspouts" },
   { re: /drip\s*edge/i, kind: "Drip edge" },
   { re: /\brakes?\b/i, kind: "Rake" },
   { re: /head\s*wall/i, kind: "Head wall flashing" },
@@ -352,6 +366,66 @@ const FT_METALS: Array<{ re: RegExp; kind: string }> = [
 ];
 
 const SHEET_METALS = "Non-DL › Sheet Metals";
+const METALS_DOWNSPOUTS = "Metals › Downspouts";
+const METALS_TWO_PIECE = "Metals › Two-Piece Metals";
+
+/** Downspout words: "Downspouts", "Down spouts", "D.S.". */
+const DOWNSPOUT_RE = /down\s*spouts?|\bd\.?s\.?\b/i;
+/** Counted downspout parts: drops / outlets, elbows. */
+const DOWNSPOUT_PART_RE = /\bdrops?\b|\boutlets?\b|\belbows?\b/i;
+/** `6" 2-piece`, `6 in two piece`, `2-Piece Compression 6"`: two-piece edge metal. */
+const TWO_PIECE_RE = /(?:\b2|\btwo)[\s-]*piece/i;
+
+/**
+ * The Metals screen's downspout size for a `W" X D"` in the name (`3" X 4" Drops`, `3" x 4"
+ * Downspouts`): spelt as the catalog spells it (`3"X4"`). Only a two-number size, both sides
+ * 8" or less — anything bigger or with a height is a curb's footprint, not a downspout.
+ */
+export function downspoutSize(d: RowDetails): string | undefined {
+  if (d.widthIn === undefined || d.lengthIn === undefined || d.heightIn !== undefined)
+    return undefined;
+  if (d.widthIn > 8 || d.lengthIn > 8) return undefined;
+  return `${formatInches(d.widthIn)}"X${formatInches(d.lengthIn)}"`;
+}
+
+/** The size of a two-piece edge metal in the name: `6" 2-piece` → 6; none → undefined. */
+export function twoPieceSize(name: string): number | undefined {
+  const before = new RegExp(`${NUM}\\s*${INCH_MARK}?\\s*(?:\\b2|\\btwo)[\\s-]*piece`, "i").exec(
+    name,
+  );
+  const after = new RegExp(`(?:\\b2|\\btwo)[\\s-]*piece[^\\d]*${NUM}\\s*${INCH_MARK}`, "i").exec(
+    name,
+  );
+  const n = Number(before?.[1] ?? after?.[1]);
+  return n > 0 ? n : undefined;
+}
+
+/** A downspout row's details: its size (if the name has one) and which Metals row it is. */
+function downspoutDetails(
+  name: string,
+  d: RowDetails,
+  part: NonNullable<RowDetails["dsPart"]>,
+): RowDetails {
+  const size = downspoutSize(d);
+  // The size is a downspout profile, not a curb footprint: the curb fields go.
+  const { widthIn: _w, lengthIn: _l, ...rest } = d;
+  const kept: RowDetails = size !== undefined ? rest : d;
+  return {
+    ...kept,
+    ...(size !== undefined ? { dsSize: size } : {}),
+    dsPart: part,
+    dsClosed: /\bclosed\b/i.test(name),
+    kind:
+      part === "length"
+        ? "Downspouts"
+        : part === "count"
+          ? "Downspouts (a count)"
+          : part === "elbow"
+            ? "Elbows"
+            : "Drop/Outlet",
+    where: METALS_DOWNSPOUTS,
+  };
+}
 
 function classifyTarget(
   row: PlanSwiftRow,
@@ -450,6 +524,31 @@ function classifyTarget(
         kind: "Walk pads",
         where: "Accessories › Walk Pads",
       });
+    // Downspouts are the Metals screen's (owner, Oct 6, Towneplace Suites: "downspouts into the
+    // NDL" was wrong), by size when the name has one (`3" x 4" Downspouts`).
+    if (has(DOWNSPOUT_RE, n) && !has(/boot/i, n)) {
+      const dd = downspoutDetails(n, d, "length");
+      return dd.dsSize
+        ? { ...out("downspout", "high", `downspouts ${dd.dsSize}`), details: dd }
+        : { ...out("downspout", "medium", "downspouts with no size in the name"), details: dd };
+    }
+    // Two-piece edge metal (`6" 2-piece`, owner's Towneplace file): the Metals screen's
+    // compression metal and its cover, never "place by hand".
+    if (has(TWO_PIECE_RE, n)) {
+      const size = twoPieceSize(n);
+      return out(
+        "twopiece",
+        size !== undefined ? "high" : "medium",
+        size !== undefined
+          ? `two-piece edge metal ${formatInches(size)}"`
+          : "two-piece edge metal with no size",
+        {
+          ...(size !== undefined ? { twoPieceIn: size } : {}),
+          kind: "Two-piece metal",
+          where: METALS_TWO_PIECE,
+        },
+      );
+    }
     for (const m of FT_METALS)
       if (m.re.test(n))
         return out("metals", m.kind === "Expansion joint" ? "medium" : "high", m.kind, {
@@ -460,6 +559,30 @@ function classifyTarget(
   }
 
   if (row.unitKind === "ea") {
+    // Drops / outlets, elbows and downspout counts belong to Metals › Downspouts, never Curbs
+    // (owner, Oct 6, Towneplace Suites: `3" X 4" Drops` ×7 was filed as a 3 × 4 in curb).
+    if (!has(/boot/i, n) && (has(DOWNSPOUT_PART_RE, n) || has(DOWNSPOUT_RE, n))) {
+      const part: NonNullable<RowDetails["dsPart"]> = has(/\belbows?\b/i, n)
+        ? "elbow"
+        : has(/\bdrops?\b|\boutlets?\b/i, n)
+          ? "Drop/Outlet"
+          : "count";
+      const dd = downspoutDetails(n, d, part);
+      const what =
+        part === "count"
+          ? "downspouts (a count)"
+          : part === "elbow"
+            ? "downspout elbows"
+            : "downspout drops / outlets";
+      return {
+        ...out(
+          "downspout",
+          dd.dsSize ? "high" : "medium",
+          dd.dsSize ? `${what} ${dd.dsSize}` : `${what} with no size in the name`,
+        ),
+        details: dd,
+      };
+    }
     if (d.widthIn !== undefined && d.lengthIn !== undefined)
       return out("curb", "high", "a unit with a W × L × H size — a curb");
     if (
@@ -474,11 +597,6 @@ function classifyTarget(
         d.sizeIn !== undefined ? "a pipe stack with its size" : "a pipe stack with no size",
       );
     if (has(/boot/i, n)) return out("unmatched", "low", "downspout boots have no place in the bid");
-    if (has(/down\s*spouts?|\bd\.?s\.?\b/i, n))
-      return out("metals", "medium", "downspouts (a count)", {
-        kind: "Downspouts",
-        where: SHEET_METALS,
-      });
     if (has(/collector|conductor\s*head|scupper/i, n))
       return out("metals", "medium", "collector heads / scuppers", {
         kind: has(/scupper/i, n) ? "Scuppers" : "Collector heads",
@@ -603,6 +721,16 @@ export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.tar
       return `coping ${q} (a Sheet Metals line)`;
     case "gutter":
       return `gutter ${q} (Metals › Gutters)`;
+    case "downspout": {
+      const size = d.dsSize ? ` ${d.dsSize}` : " (no size in the name)";
+      const what =
+        d.dsPart === "length"
+          ? `downspout${size}${d.dsClosed ? " closed" : " open"}, ${q}`
+          : `${d.dsPart === "elbow" ? "elbows" : d.dsPart === "Drop/Outlet" ? "drops / outlets" : "downspouts"}${size}, ×${num(r.qty)}`;
+      return `${what} (${METALS_DOWNSPOUTS})`;
+    }
+    case "twopiece":
+      return `two-piece edge metal${d.twoPieceIn !== undefined ? ` ${formatInches(d.twoPieceIn)}"` : " (no size in the name)"}, ${q} — compression metal and cover (${METALS_TWO_PIECE})`;
     case "metals":
       return `${d.kind ?? r.name} ${q} (a Sheet Metals line)`;
     case "nondl":

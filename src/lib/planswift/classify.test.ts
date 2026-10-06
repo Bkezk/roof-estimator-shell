@@ -49,7 +49,7 @@ describe("test_pS.xlsx — every row", async () => {
       ['Parapet 02 ( 6"_/ 36" )', "parapet", "high"],
       ['Parapet 03 ( 6"_/ 66" )', "parapet", "high"],
       ["Gutter", "gutter", "high"],
-      ["Down spouts/ splash blocks", "metals", "medium"],
+      ["Down spouts/ splash blocks", "downspout", "medium"],
       ["Exhaust fans 26 X 26 X 12", "curb", "high"],
       ["Roof Hatch 42 X 42 X 12", "curb", "high"],
       ["Drains", "drain", "high"],
@@ -92,7 +92,7 @@ describe("test_pS.xlsx — every row", async () => {
       [42, 42, 12, 1],
     ]);
     expect(cs[2]!.details.quoteBoard).toBe("Tapered ISO");
-    expect(cs[7]!.details.kind).toBe("Downspouts");
+    expect(cs[7]!.details.kind).toBe("Downspouts (a count)");
   });
 
   it("the review screen's wording", () => {
@@ -104,7 +104,7 @@ describe("test_pS.xlsx — every row", async () => {
       'parapet skirt 6", vertical 36", 415.49 ft',
       'parapet skirt 6", vertical 66", 114.83 ft',
       "gutter 200.96 ft (Metals › Gutters)",
-      "Downspouts 7 EA (a Sheet Metals line)",
+      "downspouts (no size in the name), ×7 (Metals › Downspouts)",
       "curb 26 × 26 × 12 in, ×10",
       "curb 42 × 42 × 12 in, ×1",
       "drains ×12",
@@ -143,7 +143,7 @@ describe("knox.xlsx — every row", async () => {
       ["Roof Drains", "drain", "high"],
       ["Collector Heads", "metals", "medium"],
       ["gutter", "gutter", "high"],
-      ["Down spouts", "metals", "high"],
+      ["Down spouts", "downspout", "medium"],
       ["Cast Iron DS Boots", "unmatched", "low"],
       ["Roof Type 3 ( Standing Seam Metal )", "section", "high"],
       ["Metal Roof Rake", "metals", "high"],

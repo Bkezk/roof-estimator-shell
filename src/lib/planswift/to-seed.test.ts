@@ -157,19 +157,15 @@ describe("test_pS.xlsx → seed", async () => {
     ]);
   });
 
-  it("coping and downspouts as Sheet Metals lines; drains and gutter listed to place", () => {
+  it("coping as a Sheet Metals line; a downspout COUNT, drains and gutter listed to place", () => {
+    // Downspouts are the Metals screen's, never Non-DL (owner, Oct 6); a count with no length
+    // cannot be placed there, so it is listed.
     expect(seed.nonDlCustom).toEqual({
       sheetMetal: [
         { description: "Coping/2-piece", qty: 1344.01, unitCost: 0, laborPerUnit: 0, laborRate: 0 },
-        {
-          description: "Down spouts/ splash blocks",
-          qty: 7,
-          unitCost: 0,
-          laborPerUnit: 0,
-          laborRate: 0,
-        },
       ],
     });
+    expect(seed.metalsCalc.downspouts).toEqual([]);
     expect(seed.drains).toEqual([]);
     expect(seed.unmapped).toEqual([
       {
@@ -178,12 +174,16 @@ describe("test_pS.xlsx → seed", async () => {
           "Drain — add on Accessories › Roof Drains & Boots (no boot and ring were picked — pick them on each drain).",
       },
       { label: "Gutter: 200.96 ft", detail: "Gutter — add on Metals › Gutters." },
+      {
+        label: "7 × Down spouts/ splash blocks",
+        detail: "Downspouts counted, not measured — enter their length on Metals › Downspouts.",
+      },
     ]);
   });
 
   it("summary, account, import record", () => {
     expect(seed.summary).toBe(
-      'From PlanSwift "test_pS.xlsx": 1 section, 13,445.64 sq ft; 1,134.88 ft of parapet; 11 curbs; 1 tapered quote layer; 2 Non-DL lines; 2 to place by hand.',
+      'From PlanSwift "test_pS.xlsx": 1 section, 13,445.64 sq ft; 1,134.88 ft of parapet; 11 curbs; 1 tapered quote layer; 1 Non-DL line; 3 to place by hand.',
     );
     expect(seed.accountId).toBe("11111111-1111-4111-8111-111111111111");
     const info = seed.importInfo;
@@ -219,6 +219,7 @@ describe("test_pS.xlsx → seed", async () => {
     expect(s.unmapped.map((u) => u.label)).toEqual([
       "12 × Drains",
       "tapperd Iso/ Crickets: 5,185.38 sq ft",
+      "7 × Down spouts/ splash blocks",
     ]);
     expect(s.sections[0]!.layers!.some((l) => l.quote)).toBe(false);
     expect(s.importInfo.mapping.find((m) => m.name === "Gutter")!.target).toBe("skip");
@@ -294,7 +295,6 @@ describe("knox.xlsx → seed", async () => {
     expect(seed.nonDlCustom.sheetMetal!.map((l) => [l.description, l.qty])).toEqual([
       ["Coping Cap", 909.21],
       ["Collector Heads", 6],
-      ["Down spouts", 148.38],
       ["Metal Roof Rake", 27.28],
       ["Drip edge", 26.05],
       ["Head wall", 26.05],
@@ -318,6 +318,8 @@ describe("knox.xlsx → seed", async () => {
       "6 × Roof Drains",
       "1 × ATR Hub",
       "gutter: 27.22 ft",
+      // A downspout length with no size in its name: the Metals screen needs the size.
+      "Down spouts: 148.38 ft",
       "7 × Cast Iron DS Boots",
       "cap measurment: 3.22 ft",
     ]);
@@ -437,7 +439,6 @@ describe("the bid made from the seed", async () => {
     ]);
     expect(bid.nonDlCalc!.custom!.sheetMetal!.map((l) => [l.description, l.laborRate])).toEqual([
       ["Coping/2-piece", 45],
-      ["Down spouts/ splash blocks", 45],
     ]);
     expect(bid.importInfo).toBe(seed.importInfo);
   });

@@ -15,7 +15,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, FileSpreadsheet, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { getEngineAdminData } from "@/lib/engine.functions";
+import { getAccessoryCatalog, getEngineAdminData, getMetalsCatalog } from "@/lib/engine.functions";
 import { useAuth } from "@/lib/auth-store";
 import type { AccountHit } from "@/lib/crm.functions";
 import { readPlanSwiftWorkbook, type PlanSwiftSheet } from "@/lib/planswift/parse";
@@ -103,6 +103,27 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     queryFn: () => getAdminFn(),
     enabled: props.open,
   });
+  // The Metals screen catalog (downspouts by size, two-piece metal) and the walk pad rows, so
+  // those sheet rows land on their screens with prices (owner, Oct 6, Towneplace Suites).
+  const getMetalsFn = useServerFn(getMetalsCatalog);
+  const { data: metalsCatalog } = useQuery({
+    queryKey: ["metals-catalog"],
+    queryFn: () => getMetalsFn(),
+    enabled: props.open,
+  });
+  const getAccessoriesFn = useServerFn(getAccessoryCatalog);
+  const { data: accessoryCatalog } = useQuery({
+    queryKey: ["accessory-catalog"],
+    queryFn: () => getAccessoriesFn(),
+    enabled: props.open,
+  });
+  const walkPadRows = useMemo(
+    () =>
+      (accessoryCatalog ?? [])
+        .filter((i) => /walk\s*pad/i.test(i.description))
+        .map((i) => i.description),
+    [accessoryCatalog],
+  );
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
@@ -191,6 +212,8 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
             ? { boardNames: Object.keys(liveAdmin.underlaymentPrices) }
             : {}),
           ...(liveAdmin?.labor ? { labor: liveAdmin.labor } : {}),
+          ...(metalsCatalog ? { metalsCatalog } : {}),
+          ...(walkPadRows.length ? { walkPadRows } : {}),
           ...(account ? { accountId: account.account_id } : {}),
         }),
         error: null,
@@ -198,7 +221,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     } catch (e) {
       return { seed: null, error: errText(e) };
     }
-  }, [sheet, rows, fileName, liveAdmin, account]);
+  }, [sheet, rows, fileName, liveAdmin, metalsCatalog, walkPadRows, account]);
 
   const create = () => {
     if (busy) return;

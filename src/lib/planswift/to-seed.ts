@@ -20,11 +20,15 @@
  */
 
 import type { Attachment } from "@/lib/engine/estimate";
+import type { MetalsCatalogItem } from "@/lib/engine/adapters";
+import { normalizeAccessoriesState } from "@/lib/engine/accessories";
 import {
   MAX_UNDERLAYMENT_LAYERS,
   type BidSectionInput,
+  type MetalLine,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
+import { normalizeMetalsState, type DownspoutEntryState } from "@/lib/engine/metals";
 import { defaultEdges } from "@/lib/engine/edges";
 import type { NonDlCustomRow, NonDlGroup } from "@/lib/engine/nondl";
 import { bidSeedFromTakeoff, type TakeoffBidSeed } from "@/lib/takeoff/create-bid";
@@ -40,6 +44,7 @@ import { newBidFromSeed, type SeedFactories } from "@/lib/takeoff/seed-to-bid";
 import type { SavedBidState } from "@/lib/proposal-bid";
 import {
   describeTarget,
+  formatInches,
   parseInchNumber,
   PLANSWIFT_TARGET_LABELS,
   type ClassifiedRow,
@@ -77,6 +82,15 @@ export interface PlanSwiftImportInfo {
 export interface PlanSwiftBidSeed extends TakeoffBidSeed {
   /** Non-DL custom lines by group (coping / sheet metal → sheetMetal, panels → customApps). */
   nonDlCustom: Partial<Record<NonDlGroup, NonDlCustomRow[]>>;
+  /**
+   * Metals screen state from the sheet (owner, Oct 6, Towneplace Suites: downspouts are the
+   * Metals screen's, not Non-DL): downspouts by size — lengths and their drops / elbows.
+   */
+  metalsCalc: { downspouts: DownspoutEntryState[] };
+  /** Two-piece edge metal for the Metals screen's list: compression metal and its cover. */
+  metals: MetalLine[];
+  /** Walk pad counts by Accessories › Walk Pads row. */
+  walkPads: Record<string, number>;
   importInfo: PlanSwiftImportInfo;
   /** Everything worth a second look, also kept on importInfo. */
   warnings: string[];
@@ -98,6 +112,16 @@ export interface PlanSwiftSeedOptions {
   boardNames?: readonly string[];
   /** Live labor combos (admin.labor): which systems / attachments / mils exist. */
   labor?: Record<string, { thicknessLaborByMil: Record<number, number> }>;
+  /**
+   * The live Metals screen catalog (getMetalsCatalog): downspout rows by size and the two-piece
+   * rows, so downspouts, drops and two-piece metal land on the Metals screen with their prices.
+   * Absent: those rows are listed to place by hand.
+   */
+  metalsCatalog?: readonly MetalsCatalogItem[];
+  /** The live Accessories › Walk Pads rows (descriptions), so a walk pad count lands there. */
+  walkPadRows?: readonly string[];
+  /** The bid's colour, for walk pads whose name says none ("White" when absent). */
+  color?: string;
   accountId?: string | null;
   importedAt?: string;
 }
@@ -312,6 +336,77 @@ const layerOf = (board: string, att: UnderlaymentLayer["attachment"]): Underlaym
 
 // ── The seed ─────────────────────────────────────────────────────────────────────────────────
 
+const normDesc = (s: string) => s.toLowerCase().replace(/\s+/g, "").replace(/×/g, "x");
+
+/**
+ * The Metals catalog rows of a downspout size (`3"X4"`): the catalog groups them under
+ * "Downspouts 3"X4"" (buildMetalsCatalog).
+ */
+export function downspoutRows(
+  catalog: readonly MetalsCatalogItem[] | undefined,
+  size: string,
+): MetalsCatalogItem[] {
+  if (!catalog) return [];
+  const want = normDesc(`downspouts ${size}`);
+  return catalog.filter((i) => normDesc(i.category) === want);
+}
+
+/**
+ * The two-piece rows for a size: the compression metal (`6" 2-Piece Compression`) and its cover
+ * (`6" 2-Piece Compression — Cover`, as buildMetalsCatalog prefixes sub-rows).
+ */
+export function twoPieceRows(
+  catalog: readonly MetalsCatalogItem[] | undefined,
+  sizeIn: number,
+): { base: MetalsCatalogItem; cover: MetalsCatalogItem | undefined } | null {
+  if (!catalog) return null;
+  const rows = catalog.filter((i) => /two-?piece/i.test(i.category));
+  const baseRe = new RegExp(`^${formatInches(sizeIn)}"\\s*2-?piece\\s*compression$`, "i");
+  const base = rows.find((i) => baseRe.test(i.description.trim()));
+  if (!base) return null;
+  const cover = rows.find(
+    (i) => i.description.startsWith(base.description) && /—\s*cover$/i.test(i.description),
+  );
+  return { base, cover };
+}
+
+/**
+ * The Accessories › Walk Pads row a sheet row means (owner, Oct 6: "walk pads were not picked up
+ * with the import"): 60" x 60" when the name says so, else 30" x 60"; the colour the name says
+ * (White / Gray / Tan / Safety), else the bid's colour, else White; "Fully Skirted" only when the
+ * name says skirted. Null when the list has no such row.
+ */
+export function walkPadRowFor(
+  name: string,
+  rows: readonly string[] | undefined,
+  color: string | undefined,
+): string | null {
+  if (!rows?.length) return null;
+  const n = name.toLowerCase();
+  const big = /60\s*["”]?\s*[x×]\s*60/.test(n);
+  const colour = /safety/.test(n)
+    ? "safety"
+    : /gr[ae]y/.test(n)
+      ? "gray"
+      : /\btan\b/.test(n)
+        ? "tan"
+        : /white/.test(n)
+          ? "white"
+          : (color ?? "white").toLowerCase();
+  const skirted = /skirt/.test(n);
+  const pads = rows.filter((r) => /walk\s*pad/i.test(r));
+  const pick = (c: string) =>
+    pads.find((r) => {
+      const k = normDesc(r);
+      return (
+        (big ? k.startsWith('60"x60"') : k.startsWith('30"x60"')) &&
+        k.includes(c) &&
+        /skirted/.test(k) === skirted
+      );
+    });
+  return pick(colour) ?? (colour !== "white" ? pick("white") : undefined) ?? null;
+}
+
 export function planSwiftSeed(
   sheet: Pick<PlanSwiftSheet, "sheetName" | "hasLinearTotal" | "warnings">,
   choices: readonly PlanSwiftChoice[],
@@ -410,6 +505,18 @@ export function planSwiftSeed(
 
   const linears: LinearQuantity[] = [];
   const counts: CountQuantity[] = [];
+  // Metals screen: downspout entries by size, two-piece lines; Accessories: walk pad counts.
+  const downspoutBySize = new Map<string, DownspoutEntryState>();
+  const downspoutEntry = (size: string) => {
+    let e = downspoutBySize.get(size);
+    if (!e) {
+      e = { size, lengthByDesc: {}, accQty: {} };
+      downspoutBySize.set(size, e);
+    }
+    return e;
+  };
+  const metalLines: MetalLine[] = [];
+  const walkPads: Record<string, number> = {};
   const parapetRows: ClassifiedRow[] = [];
   const curbRows: ClassifiedRow[] = [];
   const tapered: PlanSwiftChoice[] = [];
@@ -493,12 +600,143 @@ export function planSwiftSeed(
       case "nondl":
         addLine("customApps", collapse(r.name), r.qty);
         break;
-      case "accessory":
+      case "downspout": {
+        // Owner, Oct 6 (Towneplace Suites): downspouts and their drops are the Metals screen's
+        // Downspouts, by size — never Non-DL, never a curb.
+        const where = "Metals › Downspouts";
+        if (d.dsPart === "count") {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: `Downspouts counted, not measured — enter their length on ${where}.`,
+          });
+          break;
+        }
+        if (!d.dsSize) {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: `${d.kind ?? "Downspouts"} with no size in the name — pick the size on ${where}.`,
+          });
+          break;
+        }
+        const rows = downspoutRows(opts.metalsCatalog, d.dsSize);
+        if (!rows.length) {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: opts.metalsCatalog
+              ? `${d.kind ?? "Downspouts"} ${d.dsSize} — the Metals catalog has no ${d.dsSize} downspout; add it on ${where}.`
+              : `${d.kind ?? "Downspouts"} ${d.dsSize} — add on ${where} (the Metals catalog was not loaded).`,
+          });
+          break;
+        }
+        const e = downspoutEntry(d.dsSize);
+        if (d.dsPart === "length") {
+          const want = d.dsClosed ? /downspout\s*-\s*closed/i : /downspout\s*-\s*open/i;
+          const row =
+            rows.find((i) => want.test(i.description)) ??
+            rows.find((i) => /downspout/i.test(i.description));
+          if (!row) {
+            unmapped.push({
+              label: rowLabel(c),
+              detail: `Downspouts ${d.dsSize} — no length row in the Metals catalog; add on ${where}.`,
+            });
+            break;
+          }
+          e.lengthByDesc[row.description] = round2((e.lengthByDesc[row.description] ?? 0) + r.qty);
+          if (!d.dsClosed)
+            warnings.push(
+              `${collapse(r.name)}: read as "${row.description}" — change it to Closed on ${where} if these are closed.`,
+            );
+        } else if (d.dsPart === "Drop/Outlet") {
+          const row = rows.find((i) => /drop|outlet/i.test(i.description));
+          if (!row) {
+            unmapped.push({
+              label: rowLabel(c),
+              detail: `Drops ${d.dsSize} — no Drop/Outlet row in the Metals catalog; add on ${where}.`,
+            });
+            break;
+          }
+          e.accQty[row.description] = (e.accQty[row.description] ?? 0) + Math.round(r.qty);
+        } else {
+          // An elbow: the catalog has 45° / 80°, A / B styles — only a name that says which is placed.
+          const deg = /45/.test(r.name) ? "45" : /80/.test(r.name) ? "80" : null;
+          const style = /\bb[\s-]*style|\bb\b/i.test(r.name)
+            ? "B"
+            : /\ba[\s-]*style|\ba\b/i.test(r.name)
+              ? "A"
+              : null;
+          const row =
+            deg && style
+              ? rows.find(
+                  (i) =>
+                    i.description.includes(`${deg}°`) &&
+                    new RegExp(`\\b${style}-Style`, "i").test(i.description),
+                )
+              : undefined;
+          if (!row) {
+            unmapped.push({
+              label: rowLabel(c),
+              detail: `Elbows ${d.dsSize} — pick the style (45° / 80°, A / B) on ${where}.`,
+            });
+            break;
+          }
+          e.accQty[row.description] = (e.accQty[row.description] ?? 0) + Math.round(r.qty);
+        }
+        break;
+      }
+      case "twopiece": {
+        // Owner's Towneplace file: `6" 2-piece` 1,437.55 ft — the Metals screen's 6" 2-Piece
+        // Compression and its Cover, each at the sheet's length (both pieces run the edge).
+        const where = "Metals › Two-Piece Metals";
+        if (d.twoPieceIn === undefined) {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: `Two-piece edge metal with no size in the name — add on ${where}.`,
+          });
+          break;
+        }
+        const found = twoPieceRows(opts.metalsCatalog, d.twoPieceIn);
+        if (!found) {
+          unmapped.push({
+            label: rowLabel(c),
+            detail: opts.metalsCatalog
+              ? `Two-piece edge metal ${formatInches(d.twoPieceIn)}" — no such size in the Metals catalog; add on ${where}.`
+              : `Two-piece edge metal ${formatInches(d.twoPieceIn)}" — add on ${where} (the Metals catalog was not loaded).`,
+          });
+          break;
+        }
+        for (const item of [found.base, found.cover]) {
+          if (!item) continue;
+          metalLines.push({
+            description: `${item.category} — ${item.description}`,
+            price: item.unitCost,
+            laborPerUnit: item.laborPerUnit,
+            laborRate: item.laborRate,
+            quantity: round2(r.qty),
+          });
+        }
+        if (!found.cover)
+          warnings.push(
+            `${collapse(r.name)}: the Metals catalog has no Cover row for ${formatInches(d.twoPieceIn)}" — add the cover on ${where}.`,
+          );
+        break;
+      }
+      case "accessory": {
+        if (d.kind === "Walk pads") {
+          const row = walkPadRowFor(r.name, opts.walkPadRows, opts.color);
+          if (row) {
+            walkPads[row] = (walkPads[row] ?? 0) + Math.round(r.qty);
+            warnings.push(
+              `${collapse(r.name)}: ${num(Math.round(r.qty))} placed as "${row}" — change the size or colour on Accessories › Walk Pads if the job uses another.`,
+            );
+            break;
+          }
+        }
         unmapped.push({
           label: rowLabel(c),
           detail: `${d.kind ?? "Accessory"} — add on ${d.where ?? "Accessories"}.`,
         });
         break;
+      }
       case "unmatched":
         unmapped.push({
           label: rowLabel(c),
@@ -693,6 +931,16 @@ export function planSwiftSeed(
     ),
   }));
   const allUnmapped = [...baseUnmapped, ...unmapped];
+  const downspouts = [...downspoutBySize.values()];
+  const downspoutFt = downspouts.reduce(
+    (s, e) => s + Object.values(e.lengthByDesc).reduce((a, b) => a + b, 0),
+    0,
+  );
+  const downspoutParts = downspouts.reduce(
+    (s, e) => s + Object.values(e.accQty).reduce((a, b) => a + b, 0),
+    0,
+  );
+  const walkPadCount = Object.values(walkPads).reduce((a, b) => a + b, 0);
 
   const summaryParts = [
     sections.length
@@ -708,6 +956,10 @@ export function planSwiftSeed(
     Object.values(nonDlCustom).flat().length
       ? `${Object.values(nonDlCustom).flat().length} Non-DL line${Object.values(nonDlCustom).flat().length === 1 ? "" : "s"}`
       : null,
+    downspoutFt > 0 ? `${num(round2(downspoutFt))} ft of downspout` : null,
+    downspoutParts > 0 ? `${downspoutParts} downspout drops / elbows` : null,
+    metalLines.length ? `${num(round2(metalLines[0]!.quantity))} ft of two-piece metal` : null,
+    walkPadCount > 0 ? `${walkPadCount} walk pads` : null,
     allUnmapped.length ? `${allUnmapped.length} to place by hand` : null,
   ].filter((x): x is string => !!x);
   const summary = `From PlanSwift "${opts.fileName}": ${summaryParts.join("; ")}.`;
@@ -740,6 +992,9 @@ export function planSwiftSeed(
     unmapped: allUnmapped,
     summary,
     nonDlCustom,
+    metalsCalc: { downspouts },
+    metals: metalLines,
+    walkPads,
     importInfo,
     warnings,
   };
@@ -787,9 +1042,22 @@ export function savedFromPlanSwiftSeed(
       ...(custom[g] ?? []),
       ...rows.map((r) => ({ ...r, laborRate: r.laborRate || saved.laborRate })),
     ];
+  // Metals screen: the sheet's downspouts join any the bid has; two-piece lines join the list;
+  // walk pads join Accessories › Walk Pads (owner, Oct 6).
+  const metalsCalc = normalizeMetalsState(merged.metalsCalc ?? saved.metalsCalc);
+  const acc = normalizeAccessoriesState(merged.accessoriesCalc ?? saved.accessoriesCalc);
+  const walkQty = { ...acc.walkPads.qty };
+  for (const [desc, n] of Object.entries(seed.walkPads ?? {}))
+    walkQty[desc] = (walkQty[desc] ?? 0) + n;
   return {
     ...merged,
     nonDlCalc: { rows: saved.nonDlCalc?.rows ?? {}, custom },
+    metalsCalc: {
+      ...metalsCalc,
+      downspouts: [...metalsCalc.downspouts, ...(seed.metalsCalc?.downspouts ?? [])],
+    },
+    metals: [...(merged.metals ?? saved.metals ?? []), ...(seed.metals ?? [])],
+    accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty } },
     importInfo: seed.importInfo,
   };
 }
