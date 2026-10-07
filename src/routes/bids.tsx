@@ -8,7 +8,10 @@ import {
   Copy,
   FileSpreadsheet,
   FileUp,
+  Folder,
+  FolderOpen,
   Layers,
+  List,
   PlusCircle,
   RotateCcw,
   Trash2,
@@ -27,6 +30,19 @@ import {
 } from "@/lib/bids.functions";
 import { useAuth } from "@/lib/auth-store";
 import { BID_STATUSES, STATUS_LABELS, asBidStatus, type BidStatus } from "@/lib/bid-status";
+import {
+  bidsInYear,
+  FOLDER_GROUP_LABELS,
+  FOLDER_GROUPS,
+  foldersFor,
+  readBidsView,
+  readFolderGroup,
+  writeBidsView,
+  writeFolderGroup,
+  yearFolders,
+  type BidsView,
+  type FolderGroup,
+} from "@/lib/bids-folders";
 import { Button } from "@/components/ui/button";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
 import { ImportBaxDialog } from "@/components/import-bax-dialog";
@@ -202,6 +218,20 @@ function BidsPage() {
   const [combineSel, setCombineSel] = useState<string[]>([]);
   // Collapsed status groups (default: none, i.e. every group expanded).
   const [collapsed, setCollapsed] = useState<BidStatus[]>(readCollapsed);
+  // List or year folders (owner, Oct 7), remembered like the ticket's layout toggle.
+  const storage = typeof window === "undefined" ? null : window.localStorage;
+  const [view, setViewState] = useState<BidsView>(() => readBidsView(storage));
+  const [folderYear, setFolderYear] = useState<number | null>(null);
+  const [folderGroup, setFolderGroupState] = useState<FolderGroup>(() => readFolderGroup(storage));
+  const setView = (v: BidsView) => {
+    setViewState(v);
+    setFolderYear(null);
+    writeBidsView(storage, v);
+  };
+  const setFolderGroup = (g: FolderGroup) => {
+    setFolderGroupState(g);
+    writeFolderGroup(storage, g);
+  };
   const toggleGroup = (status: BidStatus) =>
     setCollapsed((prev) => {
       const next = prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status];
@@ -354,6 +384,115 @@ function BidsPage() {
     setPriceMax("");
   };
 
+  /** One bid's card, in the list and in the folder view (owner, Oct 7). */
+  const renderBid = (bid: (typeof bids)[number]) => {
+    const st = asBidStatus(bid.status);
+    return (
+      <div
+        key={bid.id}
+        role="link"
+        tabIndex={0}
+        title="Open this bid"
+        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            void navigate({ to: "/estimate", search: { bid: bid.id } });
+          }
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            className="h-4 w-4 shrink-0 cursor-pointer"
+            aria-label={`Select ${bid.name} to combine`}
+            title="Tick to combine with other bids"
+            checked={combineSel.includes(bid.id)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={() => toggleCombine(bid.id)}
+          />
+          <div>
+            <p className="font-medium">{bid.name}</p>
+            <p className="text-sm text-muted-foreground">
+              Customer: {customerOf(bid) || "—"} · Estimator: {estimatorOf(bid) || "—"} · Created{" "}
+              {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
+              {new Date(bid.updated_at).toLocaleString(undefined, {
+                dateStyle: "short",
+                timeStyle: "short",
+              })}
+              {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
+              {st === "lost" && bid.lost_reason ? ` · Lost: ${bid.lost_reason}` : ""}
+              {importedFrom(bid.data) ? ` · Imported from ${importedFrom(bid.data)}` : ""}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-6">
+          {/* Stored at save time — the estimator recomputes live, so an engine change
+    (or an empty-data row) can differ from this until the bid is re-saved. */}
+          <span
+            className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
+            title="Total as of the last save — open the bid for the live figure"
+          >
+            {money(Number(bid.grand_total ?? 0))}
+            <span className="ml-1 text-[10px] font-normal text-muted-foreground">(last saved)</span>
+          </span>
+          {/* Status changes here save at once and stamp "Last saved … by". */}
+          <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            <Select
+              value={st}
+              onValueChange={(v) =>
+                v === "lost"
+                  ? setLostFor({ id: bid.id, name: bid.name })
+                  : setStatus.mutate({ id: bid.id, status: v as BidStatus })
+              }
+            >
+              <SelectTrigger className="h-8 w-[130px] text-xs" aria-label="Bid status">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BID_STATUSES.map((v) => (
+                  <SelectItem key={v} value={v}>
+                    {STATUS_LABELS[v]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Duplicate this bid (a new draft copy)"
+            disabled={duplicate.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              duplicate.mutate(bid.id);
+            }}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Copy className="h-4 w-4" />
+            <span className="sr-only">Duplicate</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            title="Delete this bid"
+            disabled={del.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDelete({ id: bid.id, name: bid.name });
+            }}
+          >
+            <Trash2 className="h-4 w-4" />
+            <span className="sr-only">Delete</span>
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -437,6 +576,27 @@ function BidsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            View
+            <Button
+              type="button"
+              variant="outline"
+              className="bg-background"
+              aria-pressed={view === "folders"}
+              title={view === "folders" ? "Show the list" : "Show folders by year"}
+              onClick={() => setView(view === "folders" ? "list" : "folders")}
+            >
+              {view === "folders" ? (
+                <>
+                  <FolderOpen className="mr-1 h-4 w-4" /> Folders
+                </>
+              ) : (
+                <>
+                  <List className="mr-1 h-4 w-4" /> List
+                </>
+              )}
+            </Button>
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Status
@@ -566,6 +726,77 @@ function BidsPage() {
             Clear filters
           </Button>
         </div>
+      ) : view === "folders" && folderYear === null ? (
+        /* Year folders (owner, Oct 7): one per year with bids; a click opens it. */
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Bids by year">
+          {yearFolders(filtered).map((f) => (
+            <button
+              key={f.year}
+              type="button"
+              className="flex items-center gap-3 rounded-lg border p-4 text-left transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setFolderYear(f.year)}
+              title={`Open ${f.year}`}
+            >
+              <Folder className="h-8 w-8 shrink-0 text-muted-foreground" aria-hidden />
+              <span>
+                <span className="block text-lg font-semibold">{f.year}</span>
+                <span className="block text-xs text-muted-foreground">
+                  {f.count} bid{f.count === 1 ? "" : "s"} · {money(f.total)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : view === "folders" && folderYear !== null ? (
+        /* Inside a year: group by month / customer / status / estimator / roof system. */
+        <div className="grid gap-6">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+              onClick={() => setFolderYear(null)}
+            >
+              <Folder className="h-4 w-4" aria-hidden /> All years
+            </button>
+            <span className="text-muted-foreground">›</span>
+            <span className="inline-flex items-center gap-1 font-semibold">
+              <FolderOpen className="h-4 w-4" aria-hidden /> {folderYear}
+            </span>
+            <span className="ml-auto flex flex-wrap items-center gap-1">
+              <span className="mr-1 text-xs text-muted-foreground">Group by</span>
+              {FOLDER_GROUPS.map((g) => (
+                <Button
+                  key={g}
+                  type="button"
+                  size="sm"
+                  variant={folderGroup === g ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  aria-pressed={folderGroup === g}
+                  onClick={() => setFolderGroup(g)}
+                >
+                  {FOLDER_GROUP_LABELS[g]}
+                </Button>
+              ))}
+            </span>
+          </div>
+          {foldersFor(bidsInYear(filtered, folderYear), folderGroup, (b) => ({
+            customer: customerOf(b),
+            estimator: estimatorOf(b),
+            systems: roofSystemsOf(b),
+            status: STATUS_LABELS[asBidStatus(b.status)],
+          })).map((g) => (
+            <section key={g.label} aria-label={`${g.label} bids`}>
+              <h2 className="mb-3 flex items-center gap-2 border-b border-border pb-1.5">
+                <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="text-sm font-semibold">{g.label}</span>
+                <span className="text-xs font-normal text-muted-foreground">
+                  {g.rows.length} bid{g.rows.length === 1 ? "" : "s"}
+                </span>
+              </h2>
+              <div className="grid gap-3">{sortBids(g.rows, sortBy).map(renderBid)}</div>
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="grid gap-8">
           {groups.map(({ status, rows }) => {
@@ -595,126 +826,7 @@ function BidsPage() {
                 </h2>
                 {open && (
                   <div id={`bids-group-${status}`} className="grid gap-3">
-                    {rows.map((bid) => {
-                      const st = asBidStatus(bid.status);
-                      return (
-                        <div
-                          key={bid.id}
-                          role="link"
-                          tabIndex={0}
-                          title="Open this bid"
-                          className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-lg border p-4 transition-all duration-150 hover:scale-[1.015] hover:border-primary/40 hover:bg-muted/40 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => navigate({ to: "/estimate", search: { bid: bid.id } })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              void navigate({ to: "/estimate", search: { bid: bid.id } });
-                            }
-                          }}
-                        >
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 shrink-0 cursor-pointer"
-                              aria-label={`Select ${bid.name} to combine`}
-                              title="Tick to combine with other bids"
-                              checked={combineSel.includes(bid.id)}
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                              onChange={() => toggleCombine(bid.id)}
-                            />
-                            <div>
-                              <p className="font-medium">{bid.name}</p>
-                              <p className="text-sm text-muted-foreground">
-                                Customer: {customerOf(bid) || "—"} · Estimator:{" "}
-                                {estimatorOf(bid) || "—"} · Created{" "}
-                                {new Date(bid.created_at).toLocaleDateString()} · Last saved{" "}
-                                {new Date(bid.updated_at).toLocaleString(undefined, {
-                                  dateStyle: "short",
-                                  timeStyle: "short",
-                                })}
-                                {bid.updated_by_name ? ` by ${bid.updated_by_name}` : ""}
-                                {st === "lost" && bid.lost_reason
-                                  ? ` · Lost: ${bid.lost_reason}`
-                                  : ""}
-                                {importedFrom(bid.data)
-                                  ? ` · Imported from ${importedFrom(bid.data)}`
-                                  : ""}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-6">
-                            {/* Stored at save time — the estimator recomputes live, so an engine change
-                      (or an empty-data row) can differ from this until the bid is re-saved. */}
-                            <span
-                              className="min-w-[120px] text-right text-sm font-semibold tabular-nums"
-                              title="Total as of the last save — open the bid for the live figure"
-                            >
-                              {money(Number(bid.grand_total ?? 0))}
-                              <span className="ml-1 text-[10px] font-normal text-muted-foreground">
-                                (last saved)
-                              </span>
-                            </span>
-                            {/* Status changes here save at once and stamp "Last saved … by". */}
-                            <div
-                              onClick={(e) => e.stopPropagation()}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <Select
-                                value={st}
-                                onValueChange={(v) =>
-                                  v === "lost"
-                                    ? setLostFor({ id: bid.id, name: bid.name })
-                                    : setStatus.mutate({ id: bid.id, status: v as BidStatus })
-                                }
-                              >
-                                <SelectTrigger
-                                  className="h-8 w-[130px] text-xs"
-                                  aria-label="Bid status"
-                                >
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {BID_STATUSES.map((v) => (
-                                    <SelectItem key={v} value={v}>
-                                      {STATUS_LABELS[v]}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              title="Duplicate this bid (a new draft copy)"
-                              disabled={duplicate.isPending}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                duplicate.mutate(bid.id);
-                              }}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <Copy className="h-4 w-4" />
-                              <span className="sr-only">Duplicate</span>
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive hover:text-destructive"
-                              title="Delete this bid"
-                              disabled={del.isPending}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDelete({ id: bid.id, name: bid.name });
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              <span className="sr-only">Delete</span>
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {rows.map(renderBid)}
                   </div>
                 )}
               </section>
