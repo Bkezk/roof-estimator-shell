@@ -3,75 +3,84 @@
 Owner, Oct 7 2026: a copy of everything in the portal, saved nightly on our server, two days deep
 (tonight replaces the older of the two), so a bad or empty save can never wipe the data. The
 server is the Windows machine the office drives come from (`\\server`: J:, X: "JBK Community",
-Y: Peachtree). The backup goes into **one new folder on X:** and nowhere else.
+Y: Peachtree). The backup goes into **one new folder on X:** and nowhere else. Nothing has to be
+installed: the script is Windows PowerShell, which every Windows machine has.
 
-What is in a backup folder (`X:\JBK Portal Backups\backup-2026-10-07\`):
+What a backup folder holds (`X:\JBK Portal Backups\backup-2026-10-07\`):
 
-| File | What |
+| What | Where |
 | --- | --- |
-| `db.dump` | The whole portal database (schema `public`): bids, tickets, customers, properties, contacts, opportunities, invoices, settings, the audit log, inventory, leads. PostgreSQL custom format, restorable with `pg_restore`. |
-| `storage\service\…`, `storage\takeoffs\…` | Ticket photos, signatures, receipts, invoice PDFs, takeoff plans — the files as uploaded. |
-| `manifest.json` | When, the dump size, the row counts of the key tables, how many files. Tomorrow's run compares against it. |
+| Every table of the portal — bids, tickets, customers, properties, contacts, opportunities, invoices, settings, the audit log, inventory, repairs, materials — as JSON, 1,000 rows a file | `db\<table>\page-0001.json …` |
+| The column types of every table | `db\schema.json` |
+| Ticket photos, signatures, receipts, invoice PDFs, takeoff plans — the files as uploaded | `storage\service\…`, `storage\takeoffs\…` |
+| When, how big, the row count of every table, how many files | `manifest.json` |
 
-In the root: `backup.log` (every run), `status.json` (the last run), `weekly\` (Sunday dumps, the
-newest five), and `LAST-BACKUP-FAILED.txt` only when the last run failed.
+In the root: `backup.log` (every run), `status.json` (the last run), `weekly\` (Sunday copies of
+the tables, the newest five), and `LAST-BACKUP-FAILED.txt` only while the last run has failed.
 
-User logins (the `auth` schema) are Supabase's own and are not in the dump; Lovable Cloud backs
-those up itself. Everything the office types is in `public`, which is what the dump holds.
+Left out on purpose (`SkipTables`): the public map data the portal re-loads itself every month
+(address points, buildings, storm hits and reports, permits, leads). It is hundreds of megabytes
+and comes back from its sources; everything the office typed is in the backup. User logins live in
+Lovable Cloud's own auth tables, which it backs up itself; the `profiles` table (names, roles,
+access) is in the backup.
 
-> The dump contains the `app_secrets` table and the config file holds the database password and
-> the service key. Keep the folder and the script folder readable by you and the backup account
-> only (step 5).
+> The backup contains the `app_secrets` table and the config file holds the service key, which
+> can read everything. Keep both folders readable by you and the backup account only (step 5).
 
-## 1. Install the PostgreSQL 17 command-line tools (once)
+## Does the machine have to be on?
 
-The portal runs PostgreSQL 17, so the tools must be 17 too (an older `pg_dump` refuses).
+The backup runs at 2:00 AM on whichever machine holds the scheduled task, so that machine has to
+be on then. The server is on around the clock — that is why it runs there, not on a desk PC. If
+it is ever off at 2:00 AM, the task is set to run as soon as the machine comes back (step 6). Days
+with the machine off simply have no backup; the two slots then hold the two most recent runs, and
+nothing is lost or overwritten by the gap.
 
-1. On the server, download the PostgreSQL 17 installer for Windows from EnterpriseDB (the
-   installer Lovable's docs and postgresql.org point to).
-2. Run it and tick **only "Command Line Tools"** (untick the server, pgAdmin and Stack Builder).
-3. Confirm `C:\Program Files\PostgreSQL\17\bin\pg_dump.exe` exists.
+## Step 1 — Get the two values from Lovable (you, on your own PC)
 
-## 2. Get the two credentials (you, never pasted anywhere but the config file)
+1. **Project URL**: in this repository's `.env`, `VITE_SUPABASE_URL` — it looks like
+   `https://xxxxxxxx.supabase.co`. (It is also under Cloud in the Lovable project.)
+2. **Service role key**: Lovable → your project → Cloud → Secrets / API keys → the `service_role`
+   key (a long string starting `eyJ…`). It reads every table and every file, so it goes only
+   into the config file on the server (step 3). Never paste it into chat, email or the repository.
 
-1. **Database connection string**: in Lovable, open the project → Cloud → the database settings
-   → "Connection string". Take the **session pooler** form (host `…pooler.supabase.com`, port
-   5432, user `postgres.<project>`), with the database password filled in. The direct host is
-   IPv6-only and most offices cannot reach it.
-2. **Service role key**: Cloud → API keys → `service_role`. It reads every storage file; it stays
-   on the server only.
+## Step 2 — Put the script on the server
 
-## 3. Put the script on the server
+Log on to the server (at its screen or by Remote Desktop) with an account that can create folders
+on the X: share.
 
-1. Make the folder `C:\JBK\backup\` on the server and copy into it, from this repository:
-   `scripts/backup/jbk-backup.ps1` and `scripts/backup/jbk-backup.config.example.json`.
-2. Copy the example to `jbk-backup.config.json` and fill it in:
+1. Make the folder `C:\JBK\backup`.
+2. Save these two files from the repository into it (GitHub → the file → "Raw" → right-click →
+   Save as):
+   - `scripts/backup/jbk-backup.ps1`
+   - `scripts/backup/jbk-backup.config.example.json`
+3. Right-click `jbk-backup.ps1` → Properties → tick **Unblock** → OK (Windows marks downloaded
+   scripts; this clears it).
+4. Make the destination folder: on the server the X: share is a local folder (open the share's
+   Properties → Sharing to see its path, e.g. `D:\Shares\JBK Community`); create
+   `JBK Portal Backups` inside it. Use that **local path** in the config so the task does not
+   depend on a mapped drive letter.
+
+## Step 3 — Fill in the config
+
+Copy `jbk-backup.config.example.json` to `jbk-backup.config.json` (same folder) and edit it in
+Notepad:
 
 ```json
 {
-  "DestinationRoot": "X:\\JBK Portal Backups",
-  "PgBinDir": "C:\\Program Files\\PostgreSQL\\17\\bin",
-  "DatabaseUrl": "postgresql://postgres.PROJECT:PASSWORD@HOST:5432/postgres",
-  "SupabaseUrl": "https://PROJECT.supabase.co",
-  "SupabaseServiceKey": "…",
-  "Buckets": ["service", "takeoffs"],
-  "KeyTables": ["bids", "service_jobs", "crm_accounts", "crm_sites", "invoices", "profiles"],
-  "WeeklyKeep": 5,
-  "MinTableDataEntries": 50
+  "DestinationRoot": "D:\\Shares\\JBK Community\\JBK Portal Backups",
+  "SupabaseUrl": "https://xxxxxxxx.supabase.co",
+  "SupabaseServiceKey": "eyJ…",
+  …leave the rest as it is…
 }
 ```
 
-   On the server itself the X: share is a local folder (something like `D:\Shares\JBK Community`);
-   use that local path for `DestinationRoot` when the task runs on the server, so it does not
-   depend on a mapped drive letter. `jbk-backup.config.json` is git-ignored and must never be
-   committed.
-3. Create the destination folder by hand (`X:\JBK Portal Backups`). The script refuses to run
-   against a drive root or a folder that does not exist.
+Backslashes in paths are doubled in JSON (`\\`). `jbk-backup.config.json` is git-ignored and must
+never be committed.
 
-## 4. Run it by hand first, watching
+## Step 4 — Run it by hand first, watching
 
-Open PowerShell on the server and run a dry run — everything is fetched and checked, nothing is
-rotated:
+Open PowerShell on the server (Start → type PowerShell) and run a dry run — everything is
+fetched and checked, nothing is rotated:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -79,60 +88,71 @@ cd C:\JBK\backup
 .\jbk-backup.ps1 -DryRun
 ```
 
-Read `backup.log`, open the `_incoming-…` folder and look at `db.dump`'s size (hundreds of MB —
-the map data is most of it) and the `storage` folder. Then run it for real:
+You should see lines like `Tables: 81, rows: 12,345`, `Bucket service: 6 files`, and
+`Finished: OK`. Open the destination folder: an `_incoming-…` folder with `db\`, `storage\` and
+`manifest.json`. Open `db\bids\page-0001.json` in Notepad and check your bids are in it. Then run
+it for real:
 
 ```powershell
 .\jbk-backup.ps1
 ```
 
-You should see `backup-2026-10-07\` and `status.json` with `"ok": true`. Run it once more and
-you have two slots; a third run replaces the older one.
+Now there is `backup-2026-10-07\` and `status.json` says `"ok": true`. Run it once more and you
+have two slots; the third run replaces the older one. Delete the `_incoming-…` dry-run folder by
+hand when you are done looking (it is the only thing the script does not tidy).
 
-## 5. Lock the folders down
+If anything fails, `backup.log` says what, and `LAST-BACKUP-FAILED.txt` appears. The two most
+common: a wrong key ("Secret API key required" or "Invalid API key") and a `DestinationRoot` that
+does not exist yet.
 
-Only you and the account that runs the task should read the script folder (it holds the
-password) and the backup folder (it holds the dump). In an elevated PowerShell on the server,
-with `JBK\backup-svc` as the task account (step 6) and `JBK\braden` as you:
+## Step 5 — Lock the folders down
+
+Only you and the account that runs the task should read the script folder (it holds the key)
+and the backup folder (it holds the data). Make a plain user for the task first: Computer
+Management → Local Users and Groups → Users → New User `backup-svc`, a long password, "Password
+never expires", **not** in Administrators. Then, in PowerShell run as administrator (replace
+`JBK\braden` with your own account and the path with your local share path):
 
 ```powershell
-icacls "C:\JBK\backup" /inheritance:r /grant:r "JBK\braden:(OI)(CI)F" "JBK\backup-svc:(OI)(CI)RX" "SYSTEM:(OI)(CI)F"
-icacls "D:\Shares\JBK Community\JBK Portal Backups" /inheritance:r /grant:r "JBK\braden:(OI)(CI)F" "JBK\backup-svc:(OI)(CI)M" "SYSTEM:(OI)(CI)F"
+icacls "C:\JBK\backup" /inheritance:r /grant:r "JBK\braden:(OI)(CI)F" "backup-svc:(OI)(CI)RX" "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F"
+icacls "D:\Shares\JBK Community\JBK Portal Backups" /inheritance:r /grant:r "JBK\braden:(OI)(CI)F" "backup-svc:(OI)(CI)M" "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F"
 ```
 
-(Adjust the account names and the local path of the X: share.)
+(`F` full, `M` modify, `RX` read and run.) If the server is not in a domain, write the account
+as `SERVER\braden`.
 
-## 6. Schedule it nightly
+## Step 6 — Schedule it nightly
 
-Task Scheduler on the server → Create Task:
+Task Scheduler on the server → Create Task (not "Basic"):
 
-- General: name `JBK Portal nightly backup`; "Run whether user is logged on or not"; a dedicated
-  standard user (not an administrator) that has Modify on the backup folder and Read on the
-  script folder.
-- Triggers: Daily at 2:00 AM.
-- Actions: Start a program — `powershell.exe` with arguments
+- **General**: name `JBK Portal nightly backup`. "Run whether user is logged on or not". Change
+  User to `backup-svc`. Leave "Run with highest privileges" unticked.
+- **Triggers** → New: Daily, 2:00 AM.
+- **Actions** → New: Start a program. Program: `powershell.exe`. Arguments:
   `-NoProfile -ExecutionPolicy Bypass -File "C:\JBK\backup\jbk-backup.ps1"`.
-- Settings: "Stop the task if it runs longer than 4 hours"; "If the task fails, restart every 30
-  minutes, up to 2 times".
+- **Conditions**: untick "Start the task only if the computer is on AC power" (servers report
+  oddly); tick "Wake the computer to run this task".
+- **Settings**: tick "Run task as soon as possible after a scheduled start is missed"; "Stop the
+  task if it runs longer than 4 hours"; "If the task fails, restart every 30 minutes, up to 2
+  times".
+- OK, enter `backup-svc`'s password. Right-click the task → Run, then check `status.json`.
 
-The task's "Last Run Result" is `0x0` after a good night and `0x1` after a failed one, and
-`LAST-BACKUP-FAILED.txt` in the backup root says why.
+"Last Run Result" shows `0x0` after a good night and `0x1` after a failed one.
 
-## 7. What a failure does, and what it never does
+## Step 7 — What a failure does, and what the script never does
 
-- A night that fails (no internet, a bad dump, a row count that fell below 90 % of last night's,
-  a storage download that came back short) leaves **both** earlier backups exactly as they were.
-  Its own folder stays as `_failed-…` for a week so you can see what came down.
-- The script never writes to the portal: `pg_dump` and `psql SELECT count(*)` read the database,
-  and the storage files are downloaded. A test in the repository (`src/lib/backup-script.test.ts`)
-  checks that the script holds no `INSERT`, `UPDATE`, `DELETE` or `DROP`.
-- The only deletions are its own `backup-*`, `_failed-*` and `weekly\*-db.dump` entries, and every
-  deletion first checks the path is inside `DestinationRoot`. It never touches J:, Y: or anything
-  else on the share.
+- A night that fails (no internet, a table that came down short, a row count under 90 % of last
+  night's, a file that downloaded short) leaves **both** earlier backups exactly as they were. Its
+  own folder stays as `_failed-…` for a week so you can see what came down.
+- The script never writes to the portal: every call to the cloud is a read. A test in the
+  repository (`src/lib/backup-script.test.ts`) checks that it holds no write statements.
+- The only deletions are its own `backup-*`, `_failed-*` and `weekly\*-db` entries, and every one
+  first checks the path is inside `DestinationRoot`. It refuses to run against a drive root. It
+  never touches J:, Y: or anything else on the share.
 
-## 8. Restoring
+## Step 8 — Restoring
 
-Restoring goes into a fresh database, never over the live one, and is a conversation with
-Claude or whoever is helping at the time: `pg_restore --no-owner --no-privileges -d <new db>
-db.dump`, then the storage files are uploaded back. Test it once a quarter: restore the latest
-dump into a local PostgreSQL on the server and check a few bids and tickets open.
+A restore goes into a fresh portal database, never over the live one, and is a conversation with
+Claude or whoever is helping at the time: the JSON pages are loaded table by table through the
+same data API, then the storage files are uploaded back. Test it once a quarter by opening a
+`db\bids\page-0001.json` and a photo from the newest slot; if both open, the backup is readable.

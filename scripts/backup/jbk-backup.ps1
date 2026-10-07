@@ -7,36 +7,36 @@
   then when it goes to save 10/9 it overwrites 10/7 … to be efficient with memory and prevent
   an empty or corrupted save from wiping all our data."
 
-  What it does, every night:
-    1. Dumps the whole database (schema public: bids, tickets, customers, invoices, settings,
-       the audit log …) with pg_dump into a temporary "_incoming" folder.
-    2. Checks the dump before trusting it: pg_restore can read its catalog and it holds at least
-       MinTableDataEntries tables; its size is at least half of last night's; and the live row
-       counts of the key tables are at least 90 % of last night's and never zero where last night
-       had rows. Counts are written to manifest.json.
+  Needs nothing installed: Windows PowerShell 5.1 (on every Windows machine) and the portal's
+  service key. Every night it:
+    1. Downloads every table of the portal's database through its data API, 1,000 rows a page,
+       into db\<table>\page-0001.json … (plus db\schema.json with the column types) in a
+       temporary "_incoming" folder. Tables in SkipTables (the public map data the portal
+       re-loads itself every month) are left out so the backup stays small and quick.
+    2. Checks the copy before trusting it: at least MinTables tables came down, every table's
+       rows match what the API said it holds, the folder is at least half of last night's size,
+       and the key tables' row counts are at least 90 % of last night's and never zero where last
+       night had rows. Counts go to manifest.json.
     3. Downloads the storage buckets (ticket photos, signatures, receipts, PDFs, takeoff plans),
        reusing last night's copy of any file whose size has not changed.
     4. Only then rotates: with two slots already present the OLDER one is removed, and the
        incoming folder becomes backup-YYYY-MM-DD. A failed night leaves both old slots untouched,
        keeps its folder as _failed-…, and writes LAST-BACKUP-FAILED.txt with the reason.
-    5. Sundays: a copy of the dump goes to weekly\ (the newest WeeklyKeep are kept), so damage
-       noticed a week later still has a clean copy.
+    5. Sundays: a copy of the db\ folder goes to weekly\ (the newest WeeklyKeep are kept), so
+       damage noticed a week later still has a clean copy.
     6. status.json and backup.log in the root say what happened.
 
   Safety rails (owner, Oct 7: "we need to make sure we cant do damage to the server"):
-    - It only READS from the cloud (pg_dump, psql SELECT, storage downloads). It never writes to
-      the portal's database or storage.
-    - It writes only inside DestinationRoot, and refuses a root that is a drive root (X:\) or
-      the share of another program's data. The only deletions are its own backup-*, _failed-*
-      and weekly\ entries under that root.
-    - Credentials live in jbk-backup.config.json beside this script, on the server only (see
-      docs/backup/windows-server-setup.md for the folder permissions). They are never in the
-      repository.
+    - It only READS from the cloud (GET requests). It never writes to the portal.
+    - It writes only inside DestinationRoot, and refuses a root that is a drive root (X:\). The
+      only deletions are its own backup-*, _failed-* and weekly\ entries under that root.
+    - The service key lives in jbk-backup.config.json beside this script, on the server only
+      (see docs/backup/windows-server-setup.md for the folder permissions). Never in the repo.
 
 .PARAMETER ConfigPath
   The JSON config (default: jbk-backup.config.json next to this script).
 .PARAMETER DryRun
-  Do everything except rotate: the dump and files land in an _incoming folder you can inspect.
+  Do everything except rotate: the copy lands in an _incoming folder you can inspect.
 #>
 [CmdletBinding()]
 param(
@@ -46,6 +46,7 @@ param(
 
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $started = Get-Date
 $stamp = $started.ToString('yyyy-MM-dd')
 $script:LogFile = $null
@@ -58,32 +59,30 @@ function Write-Log([string]$msg) {
 
 # ---------------------------------------------------------------- config and guards
 if (-not (Test-Path -LiteralPath $ConfigPath)) {
-  throw "Config not found: $ConfigPath (copy jbk-backup.config.example.json and fill it in)"
+  throw "Config not found: $ConfigPath (copy jbk-backup.config.example.json to jbk-backup.config.json and fill it in)"
 }
 $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-foreach ($k in 'DestinationRoot', 'PgBinDir', 'DatabaseUrl', 'SupabaseUrl', 'SupabaseServiceKey') {
+foreach ($k in 'DestinationRoot', 'SupabaseUrl', 'SupabaseServiceKey') {
   if (-not $cfg.$k) { throw "Config is missing $k" }
 }
+if ($cfg.SupabaseServiceKey -like 'PASTE-*') { throw "Put the service role key into the config first" }
 $root = [string]$cfg.DestinationRoot
 $buckets = @($cfg.Buckets); if (-not $buckets) { $buckets = @('service', 'takeoffs') }
 $keyTables = @($cfg.KeyTables); if (-not $keyTables) { $keyTables = @('bids', 'service_jobs', 'crm_accounts', 'invoices') }
+$skipTables = @($cfg.SkipTables)
 $weeklyKeep = if ($cfg.WeeklyKeep) { [int]$cfg.WeeklyKeep } else { 5 }
-$minTables = if ($cfg.MinTableDataEntries) { [int]$cfg.MinTableDataEntries } else { 50 }
+$minTables = if ($cfg.MinTables) { [int]$cfg.MinTables } else { 50 }
+$pageSize = 1000
 
-# The root must be a real folder below a drive or share root — never a drive root itself, so
-# a typo like "X:\" can never make the rotation delete other folders on the share.
+# The root must be a real folder below a drive or share root — never a drive root itself, so a
+# typo like "X:\" can never make the rotation remove other folders on the share.
 $rootItem = Get-Item -LiteralPath $root -ErrorAction SilentlyContinue
-if (-not $rootItem -or -not $rootItem.PSIsContainer) { throw "DestinationRoot does not exist or is not a folder: $root" }
-if ($rootItem.Parent -eq $null -or [System.IO.Path]::GetPathRoot($rootItem.FullName).TrimEnd('\') -eq $rootItem.FullName.TrimEnd('\')) {
+if (-not $rootItem -or -not $rootItem.PSIsContainer) { throw "DestinationRoot does not exist or is not a folder: $root (create it first)" }
+if ([System.IO.Path]::GetPathRoot($rootItem.FullName).TrimEnd('\') -eq $rootItem.FullName.TrimEnd('\')) {
   throw "DestinationRoot must be a folder inside the drive, not the drive itself: $root"
 }
 $root = $rootItem.FullName.TrimEnd('\')
 $script:LogFile = Join-Path $root 'backup.log'
-
-$pgDump = Join-Path $cfg.PgBinDir 'pg_dump.exe'
-$pgRestore = Join-Path $cfg.PgBinDir 'pg_restore.exe'
-$psql = Join-Path $cfg.PgBinDir 'psql.exe'
-foreach ($exe in $pgDump, $pgRestore, $psql) { if (-not (Test-Path -LiteralPath $exe)) { throw "Not found: $exe (install the PostgreSQL 17 command-line tools)" } }
 
 function Assert-UnderRoot([string]$path) {
   $full = [System.IO.Path]::GetFullPath($path)
@@ -97,6 +96,13 @@ function Remove-UnderRoot([string]$path) {
   Write-Log "Removing $full"
   Remove-Item -LiteralPath $full -Recurse -Force
 }
+function Get-FolderBytes([string]$path) {
+  $sum = (Get-ChildItem -LiteralPath $path -Recurse -File | Measure-Object -Property Length -Sum).Sum
+  if ($sum) { return [int64]$sum } else { return [int64]0 }
+}
+
+$base = ([string]$cfg.SupabaseUrl).TrimEnd('/')
+$headers = @{ Authorization = "Bearer $($cfg.SupabaseServiceKey)"; apikey = $cfg.SupabaseServiceKey }
 
 $slots = @(Get-ChildItem -LiteralPath $root -Directory -Filter 'backup-*' | Sort-Object Name)
 $previous = if ($slots.Count -gt 0) { $slots[-1] } else { $null }
@@ -104,45 +110,73 @@ $incoming = Join-Path $root ("_incoming-" + $started.ToString('yyyy-MM-dd-HHmm')
 $null = New-Item -ItemType Directory -Path $incoming
 Write-Log "Backup started → $incoming (previous: $(if ($previous) { $previous.Name } else { 'none' }))"
 
-$status = [ordered]@{ ok = $false; at = $started.ToString('o'); slot = $null; dbBytes = 0; counts = @{}; objects = 0; reused = 0; error = $null; durationSec = 0 }
+$status = [ordered]@{ ok = $false; at = $started.ToString('o'); slot = $null; bytes = 0; tables = 0; rows = 0; counts = @{}; objects = 0; reused = 0; error = $null; durationSec = 0 }
 
 try {
-  # ------------------------------------------------------------ 1. the database dump
-  $dumpPath = Join-Path $incoming 'db.dump'
-  Write-Log "pg_dump → db.dump"
-  & $pgDump --format=custom --no-owner --no-privileges --schema=public --file=$dumpPath $cfg.DatabaseUrl
-  if ($LASTEXITCODE -ne 0) { throw "pg_dump failed with exit code $LASTEXITCODE" }
-  $dumpBytes = (Get-Item -LiteralPath $dumpPath).Length
-  $status.dbBytes = $dumpBytes
-  Write-Log ("db.dump: {0:N0} bytes" -f $dumpBytes)
-
-  # ------------------------------------------------------------ 2. checks before trusting it
-  $listing = & $pgRestore --list $dumpPath
-  if ($LASTEXITCODE -ne 0) { throw "pg_restore --list failed: the dump cannot be read" }
-  $tableData = @($listing | Where-Object { $_ -match ' TABLE DATA ' }).Count
-  if ($tableData -lt $minTables) { throw "The dump holds only $tableData tables' data (expected at least $minTables)" }
-  Write-Log "Dump catalog OK: $tableData tables with data"
+  # ------------------------------------------------------------ 1. the tables, through the data API
+  $dbDir = Join-Path $incoming 'db'
+  $null = New-Item -ItemType Directory -Path $dbDir
+  # The table list: the config's Tables when given, else what the data API describes (its
+  # OpenAPI document; the service key is required for it). The column types go to schema.json.
+  $defs = $null
+  try {
+    $api = Invoke-RestMethod -Method Get -Uri "$base/rest/v1/" -Headers $headers
+    if ($api.definitions) { $defs = $api.definitions }
+    elseif ($api.components -and $api.components.schemas) { $defs = $api.components.schemas }
+  } catch { Write-Log "The data API's table description was not available: $($_.Exception.Message)" }
+  if ($defs) { ($defs | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath (Join-Path $dbDir 'schema.json') -Encoding UTF8 }
+  $tables = @()
+  if ($cfg.Tables) { $tables = @($cfg.Tables) }
+  elseif ($defs) { $tables = @($defs.PSObject.Properties.Name | Sort-Object) }
+  else { throw "No table list: put Tables in the config, or check the service key (the data API refused to describe the tables)" }
+  $tables = @($tables | Where-Object { $skipTables -notcontains $_ })
+  if ($tables.Count -lt $minTables) { throw "Only $($tables.Count) tables listed (expected at least $minTables)" }
+  Write-Log "Tables to copy: $($tables.Count) (skipping: $($skipTables -join ', '))"
 
   $counts = [ordered]@{}
-  foreach ($t in $keyTables) {
-    if ($t -notmatch '^[a-z_][a-z0-9_]*$') { throw "Bad key table name: $t" }
-    $n = & $psql --no-psqlrc --tuples-only --no-align --command "select count(*) from public.$t" $cfg.DatabaseUrl
-    if ($LASTEXITCODE -ne 0) { throw "Row count failed for $t" }
-    $counts[$t] = [int64](($n | Select-Object -First 1).Trim())
+  $totalRows = [int64]0
+  foreach ($t in $tables) {
+    $hasId = $true
+    if ($defs -and $defs.PSObject.Properties[$t]) { $hasId = $null -ne $defs.$t.properties.PSObject.Properties['id'] }
+    $order = if ($hasId) { '&order=id.asc' } else { '' }
+    $tDir = Join-Path $dbDir $t
+    $null = New-Item -ItemType Directory -Path $tDir
+    # The first page also brings the exact row count (Content-Range: 0-999/12345).
+    $first = Invoke-WebRequest -Method Get -Uri "$base/rest/v1/${t}?select=*&limit=$pageSize&offset=0$order" -Headers ($headers + @{ Prefer = 'count=exact' }) -UseBasicParsing
+    $range = [string]$first.Headers['Content-Range']
+    $expected = if ($range -match '/(\d+)$') { [int64]$Matches[1] } else { -1 }
+    $page = 1
+    $got = [int64]0
+    $content = $first.Content
+    while ($true) {
+      $rows = @((ConvertFrom-Json $content))
+      $got += $rows.Count
+      Set-Content -LiteralPath (Join-Path $tDir ("page-{0:D4}.json" -f $page)) -Value $content -Encoding UTF8
+      if ($rows.Count -lt $pageSize) { break }
+      $page++
+      $resp = Invoke-WebRequest -Method Get -Uri "$base/rest/v1/${t}?select=*&limit=$pageSize&offset=$(($page - 1) * $pageSize)$order" -Headers $headers -UseBasicParsing
+      $content = $resp.Content
+    }
+    if ($expected -ge 0 -and $got -ne $expected) { throw "$t came down with $got rows but the API holds $expected" }
+    $counts[$t] = $got
+    $totalRows += $got
   }
-  $status.counts = $counts
-  Write-Log ("Row counts: " + (($counts.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', '))
+  $status.tables = $tables.Count; $status.rows = $totalRows
+  Write-Log ("Tables: {0}, rows: {1:N0}" -f $tables.Count, $totalRows)
+  Write-Log ("Key tables: " + (($keyTables | ForEach-Object { "$_=$($counts[$_])" }) -join ', '))
 
+  # ------------------------------------------------------------ 2. compared with last night
+  $dbBytes = Get-FolderBytes $dbDir
   if ($previous) {
     $prevManifestPath = Join-Path $previous.FullName 'manifest.json'
     if (Test-Path -LiteralPath $prevManifestPath) {
       $prev = Get-Content -LiteralPath $prevManifestPath -Raw | ConvertFrom-Json
-      if ($prev.dbBytes -and $dumpBytes -lt 0.5 * [int64]$prev.dbBytes) {
-        throw ("The dump is {0:N0} bytes, under half of last night's {1:N0}: not trusted" -f $dumpBytes, [int64]$prev.dbBytes)
+      if ($prev.dbBytes -and $dbBytes -lt 0.5 * [int64]$prev.dbBytes) {
+        throw ("The tables came to {0:N0} bytes, under half of last night's {1:N0}: not trusted" -f $dbBytes, [int64]$prev.dbBytes)
       }
       foreach ($t in $keyTables) {
         $was = $prev.counts.$t
-        if ($was -ne $null -and [int64]$was -gt 0) {
+        if ($null -ne $was -and [int64]$was -gt 0) {
           $now = [int64]$counts[$t]
           if ($now -eq 0) { throw "$t has 0 rows tonight but had $was last night: not trusted" }
           if ($now -lt 0.9 * [int64]$was) { throw "$t has $now rows tonight, under 90 % of last night's ${was}: not trusted" }
@@ -153,8 +187,6 @@ try {
   }
 
   # ------------------------------------------------------------ 3. storage files
-  $headers = @{ Authorization = "Bearer $($cfg.SupabaseServiceKey)"; apikey = $cfg.SupabaseServiceKey }
-  $base = ([string]$cfg.SupabaseUrl).TrimEnd('/')
   $objects = 0; $reused = 0
   function Get-BucketObjects([string]$bucket, [string]$prefix) {
     $out = @(); $offset = 0
@@ -163,8 +195,8 @@ try {
       $page = Invoke-RestMethod -Method Post -Uri "$base/storage/v1/object/list/$bucket" -Headers $headers -ContentType 'application/json' -Body $body
       foreach ($e in @($page)) {
         $name = if ($prefix) { "$prefix/$($e.name)" } else { $e.name }
-        if ($e.id -eq $null) { $out += Get-BucketObjects $bucket $name }   # a folder
-        else { $out += [pscustomobject]@{ path = $name; size = [int64]($e.metadata.size); updated = $e.updated_at } }
+        if ($null -eq $e.id) { $out += Get-BucketObjects $bucket $name }   # a folder
+        else { $out += [pscustomobject]@{ path = $name; size = [int64]($e.metadata.size) } }
       }
       if (@($page).Count -lt 1000) { break }
       $offset += 1000
@@ -175,15 +207,16 @@ try {
     $list = @(Get-BucketObjects $bucket '')
     Write-Log "Bucket ${bucket}: $($list.Count) files"
     foreach ($o in $list) {
-      $dest = Assert-UnderRoot (Join-Path $incoming (Join-Path 'storage' (Join-Path $bucket ($o.path -replace '/', '\'))))
+      $rel = Join-Path 'storage' (Join-Path $bucket ($o.path -replace '/', '\'))
+      $dest = Assert-UnderRoot (Join-Path $incoming $rel)
       $null = New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)
-      $prevFile = if ($previous) { Join-Path $previous.FullName (Join-Path 'storage' (Join-Path $bucket ($o.path -replace '/', '\'))) } else { $null }
+      $prevFile = if ($previous) { Join-Path $previous.FullName $rel } else { $null }
       if ($prevFile -and (Test-Path -LiteralPath $prevFile) -and ((Get-Item -LiteralPath $prevFile).Length -eq $o.size)) {
         Copy-Item -LiteralPath $prevFile -Destination $dest
         $reused++
       } else {
         $enc = ($o.path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
-        Invoke-WebRequest -Uri "$base/storage/v1/object/$bucket/$enc" -Headers $headers -OutFile $dest
+        Invoke-WebRequest -Method Get -Uri "$base/storage/v1/object/$bucket/$enc" -Headers $headers -OutFile $dest -UseBasicParsing
         if ((Get-Item -LiteralPath $dest).Length -ne $o.size) { throw "Downloaded size differs for $bucket/$($o.path)" }
       }
       $objects++
@@ -193,7 +226,9 @@ try {
   Write-Log "Storage: $objects files ($reused reused from last night)"
 
   # ------------------------------------------------------------ manifest
-  $manifest = [ordered]@{ at = $started.ToString('o'); dbBytes = $dumpBytes; tableData = $tableData; counts = $counts; objects = $objects; postgres = 'pg_dump --format=custom --schema=public' }
+  $status.bytes = Get-FolderBytes $incoming
+  $status.counts = $counts
+  $manifest = [ordered]@{ at = $started.ToString('o'); dbBytes = $dbBytes; totalBytes = $status.bytes; tables = $tables.Count; rows = $totalRows; counts = $counts; objects = $objects; skipped = $skipTables; format = 'PostgREST JSON pages (select=*, 1000 rows a page) + storage files' }
   $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $incoming 'manifest.json') -Encoding UTF8
 
   if ($DryRun) {
@@ -212,12 +247,12 @@ try {
     $status.slot = $slotName
     Write-Log "Promoted → $slotName"
 
-    # ---------------------------------------------------------- 5. the Sunday copy of the dump
+    # ---------------------------------------------------------- 5. the Sunday copy of the tables
     if ($started.DayOfWeek -eq 'Sunday') {
       $weekly = Join-Path $root 'weekly'
       $null = New-Item -ItemType Directory -Force -Path $weekly
-      Copy-Item -LiteralPath (Join-Path (Join-Path $root $slotName) 'db.dump') -Destination (Join-Path $weekly "$stamp-db.dump")
-      $old = @(Get-ChildItem -LiteralPath $weekly -File -Filter '*-db.dump' | Sort-Object Name -Descending | Select-Object -Skip $weeklyKeep)
+      Copy-Item -LiteralPath (Join-Path (Join-Path $root $slotName) 'db') -Destination (Join-Path $weekly "$stamp-db") -Recurse
+      $old = @(Get-ChildItem -LiteralPath $weekly -Directory -Filter '*-db' | Sort-Object Name -Descending | Select-Object -Skip $weeklyKeep)
       foreach ($f in $old) { Remove-UnderRoot $f.FullName }
       Write-Log "Weekly copy kept ($weeklyKeep newest)"
     }
