@@ -23,6 +23,7 @@ import {
 
 import type { AutosaveState } from "@/lib/autosave";
 import { marksSummary, parsePhotoMarks, photoOrdinals } from "@/lib/photo-annotations";
+import { photoDragData, setPhotoDrag } from "@/lib/photo-drag";
 import { MarksOverlay, PhotoLightbox } from "@/components/service/photo-markup";
 
 import { useAuth } from "@/lib/auth-store";
@@ -241,12 +242,27 @@ export function PhotoThumb({
     ).get(photo.id) ??
     1;
   return (
-    <div className={`relative ${box} shrink-0 overflow-hidden rounded-md border bg-muted`}>
+    <div
+      className={`relative ${box} shrink-0 overflow-hidden rounded-md border bg-muted ${url.data ? "cursor-grab active:cursor-grabbing" : ""}`}
+      // Owner, Oct 7: drag a photo out onto the desktop to save it (Chrome / Edge: DownloadURL).
+      draggable={!!url.data}
+      onDragStart={(e) => {
+        if (!url.data) return;
+        setPhotoDrag(
+          e.dataTransfer,
+          photoDragData(url.data, ticketNumber, photo.role, n, photo.storage_path),
+          url.data,
+        );
+      }}
+    >
       {url.data ? (
         <button
           type="button"
           className="block h-full w-full"
-          title={marks.length ? "Open the photo (marked)" : "Open the photo"}
+          title={
+            (marks.length ? "Open the photo (marked)" : "Open the photo") +
+            " — or drag it to your desktop to save it"
+          }
           onClick={() => setOpen(true)}
         >
           <img
