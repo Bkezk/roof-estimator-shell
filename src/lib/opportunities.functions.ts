@@ -238,8 +238,9 @@ export type OpportunityInput = z.input<typeof oppSchema>;
 
 /**
  * Create (no id) or update. A new opportunity with no expected close gets today +
- * crm_settings.opportunity_close_days. The assignee is required (lib/opportunity-form.ts
- * assigneeProblem). So are the customer (OPP_CUSTOMER_REQUIRED), a way to reach them by the
+ * crm_settings.opportunity_close_days. The assignee is optional since Oct 7 (the front desk logs
+ * a call with nobody on it; Work Overview lists it under Unassigned — lib/opportunity-form.ts
+ * assigneeProblem). Required are the customer (OPP_CUSTOMER_REQUIRED), a way to reach them by the
  * customer rule, hasContactMethod (OPP_CUSTOMER_NO_CONTACT, for older data), and the site, which
  * is the customer's: one live site is filled in, several need one picked, none needs one added
  * (opportunityProblem; owner, Oct 2 — every save from now on; older rows still open). The

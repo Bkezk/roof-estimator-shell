@@ -329,6 +329,8 @@ const settingsSchema = z.object({
   // Untouched limits and escalation (owner, Sep 28).
   ticket_untouched_days: z.number().int().min(0).max(365),
   opportunity_untouched_days: z.number().int().min(0).max(365),
+  // Owner, Oct 7: nobody's work is flagged Overdue on Work Overview after this many days.
+  unassigned_overdue_days: z.number().int().min(0).max(365),
   escalate_to_admins: z.boolean(),
   escalate_user_ids: z.array(z.string().uuid()).max(50),
 });

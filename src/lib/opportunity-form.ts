@@ -30,15 +30,18 @@ type BidPrefill = Pick<
 export { autoSiteId, siteProblem, siteRequiredMessage } from "@/lib/ticket-form";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
 
-export const ASSIGNEE_REQUIRED = "Pick who follows this up";
-
-/** The problem with an opportunity's assignee, or null. */
-export function assigneeProblem(input: {
+/**
+ * The problem with an opportunity's assignee, or null. Since Oct 7 there is none: the front
+ * desk logs a call without a person on it (owner: "they can put them in w/o assignment and then
+ * the managers/owners can see that as a need assignment"), and the opportunity sits under
+ * Unassigned on Work Overview until someone is picked. Before (Oct 1) an assignee was required;
+ * the shape stays so the form and the server keep one place to ask.
+ */
+export function assigneeProblem(_input: {
   id?: string | null | undefined;
   assignee_id?: string | null | undefined;
 }): string | null {
-  if (input.assignee_id === undefined) return input.id ? null : ASSIGNEE_REQUIRED;
-  return input.assignee_id ? null : ASSIGNEE_REQUIRED;
+  return null;
 }
 
 export const OPP_CUSTOMER_REQUIRED = "Pick or add the customer";

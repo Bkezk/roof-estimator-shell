@@ -38,6 +38,7 @@ import {
   KIND_LABELS,
   addMonths,
   cellItems,
+  flagUnassigned,
   initials,
   itemsByDay,
   listGroups,
@@ -85,12 +86,15 @@ const KIND_CLASS: Record<WorkKind, string> = {
   task: "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200",
   followup:
     "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
+  opportunity:
+    "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
 };
 const KIND_DOT: Record<WorkKind, string> = {
   ticket: "bg-blue-500",
   inspection: "bg-violet-500",
   task: "bg-amber-500",
   followup: "bg-emerald-500",
+  opportunity: "bg-rose-500",
 };
 /** A calendar item's left bar: its kind's badge colour. */
 const KIND_BAR: Record<WorkKind, string> = {
@@ -98,7 +102,12 @@ const KIND_BAR: Record<WorkKind, string> = {
   inspection: "border-l-violet-500",
   task: "border-l-amber-500",
   followup: "border-l-emerald-500",
+  opportunity: "border-l-rose-500",
 };
+
+/** How many columns the desktop List grid needs for its groups (five to seven). */
+const listGridClass = (count: number): string =>
+  count >= 7 ? "xl:grid-cols-7" : count === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5";
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (read as a calendar day, no time zone shift). */
 const dayLabel = (ymd: string) => {
@@ -181,7 +190,14 @@ function WorkRow({
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{item.date ? dayLabel(item.date) : "No date"}</span>
           <span>{item.status}</span>
-          {showWho && <span>{item.assigneeName ?? "(unknown)"}</span>}
+          {item.unassigned ? (
+            <span className="font-medium text-destructive">Unassigned</span>
+          ) : (
+            showWho && <span>{item.assigneeName ?? "(unknown)"}</span>
+          )}
+          {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
+            (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
+          {item.flag && <span className="font-medium text-destructive">Overdue</span>}
         </div>
         {f && <FollowupState f={f} today={today} />}
       </a>
@@ -202,11 +218,14 @@ function ListView({
   preset,
   onClearPreset,
   authorize = false,
+  unassigned = false,
 }: {
   items: WorkItem[];
   today: string;
   /** The caller reviews Done tickets: the Needs authorization tab shows, empty or not (M9). */
   authorize?: boolean;
+  /** Everyone but a technician-only user: the Unassigned group shows, empty or not (Oct 7). */
+  unassigned?: boolean;
   showWho: boolean;
   manage: ManageFollowup | null;
   /** ?bucket=today|overdue: the tab to open on (the Owner view's links). */
@@ -219,7 +238,10 @@ function ListView({
   // each one"); on a phone they are a row of tabs and the
   // selected tab's items show below. An empty group shows its muted line. A preset (?bucket=)
   // picks the tab and marks the column; picking another tab clears it.
-  const groups = useMemo(() => listGroups(items, today, { authorize }), [items, today, authorize]);
+  const groups = useMemo(
+    () => listGroups(items, today, { authorize, unassigned }),
+    [items, today, authorize, unassigned],
+  );
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
   const [prevPreset, setPrevPreset] = useState(preset);
@@ -238,7 +260,11 @@ function ListView({
     setPicked(b);
     if (preset && b !== preset) onClearPreset();
   };
-  const isAlert = (g: WorkGroup) => g.bucket === "overdue" && g.items.length > 0;
+  // Red: anything overdue, or unassigned work past the "needs assignment" timer.
+  const isAlert = (g: WorkGroup) =>
+    g.bucket === "overdue"
+      ? g.items.length > 0
+      : g.bucket === "unassigned" && g.items.some((i) => i.flag);
   const rows = (g: WorkGroup) =>
     g.items.length === 0 ? (
       <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>
@@ -250,9 +276,7 @@ function ListView({
   return (
     <>
       {/* Desktop: six columns across, every group's items in view at once. */}
-      <div
-        className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}
-      >
+      <div className={`hidden gap-3 lg:grid lg:grid-cols-3 ${listGridClass(groups.length)}`}>
         {groups.map((g) => (
           <section
             key={g.bucket}
@@ -519,8 +543,11 @@ export function MyWorkPage(props: {
     if (errMsg) toast.error(`Could not load your work: ${errMsg}`);
   }, [errMsg]);
 
-  const items = useMemo(() => (q.data ? mergeWork(q.data) : []), [q.data]);
   const today = localYmd(new Date());
+  const items = useMemo(
+    () => (q.data ? flagUnassigned(mergeWork(q.data), today, q.data.unassignedOverdueDays) : []),
+    [q.data, today],
+  );
 
   // Follow-ups are management's (owner, Oct 1): Snooze / Close only under seesEveryone (admin or
   // manager); the server (canManageFollowup) and the database trigger refuse anyone else.
@@ -670,6 +697,7 @@ export function MyWorkPage(props: {
           preset={props.bucket}
           onClearPreset={() => props.onBucket(null)}
           authorize={!!q.data?.authorizer}
+          unassigned={!!q.data?.unassigned}
         />
       )}
 

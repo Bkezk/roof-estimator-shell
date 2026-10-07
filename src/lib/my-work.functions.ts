@@ -14,14 +14,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { seesEveryone } from "@/lib/access";
+import { isOffice, seesEveryone } from "@/lib/access";
 import {
+  UNASSIGNED_OVERDUE_DAYS_DEFAULT,
   WORK_TICKET_STAGES,
   visibleUserIds,
   type FollowupIn,
+  type OppIn,
   type TaskIn,
   type TicketIn,
+  type UnassignedRows,
 } from "@/lib/my-work";
+import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 
 export interface WorkPerson {
   id: string;
@@ -43,6 +47,14 @@ export interface MyWorkResult {
   scope: string[] | "all";
   /** Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? */
   authorizer: boolean;
+  /**
+   * Nobody's work (owner, Oct 7): tickets without a technician and open opportunities without an
+   * assignee, for everyone but a technician-only user (`isOffice`), whatever `who` asks for —
+   * null for a technician. No date window: an unassigned ticket stays listed however old.
+   */
+  unassigned: UnassignedRows | null;
+  /** Setup's "needs assignment" timer: unassigned work is flagged overdue after this many days. */
+  unassignedOverdueDays: number;
 }
 
 const LIMIT = 1000;
@@ -95,13 +107,63 @@ export const listMyWork = createServerFn({ method: "GET" })
       .limit(LIMIT);
     if (scope !== "all") fq = fq.in("assignee_id", scope);
 
+    // Unassigned work (owner, Oct 7): everyone but a technician-only user. RLS still applies — a
+    // user without Customers or Estimate access reads no opportunities and simply gets none.
+    const showUnassigned = isOffice(me);
+    const uTickets = showUnassigned
+      ? sb
+          .from("service_jobs")
+          .select(
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, created_at",
+          )
+          .is("deleted_at", null)
+          .in("stage", [...WORK_TICKET_STAGES])
+          .is("technician_id", null)
+          .order("scheduled_date", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : Promise.resolve({ data: [] as TicketIn[], error: null });
+    const uOpps = showUnassigned
+      ? sb
+          .from("crm_opportunities")
+          .select("id, title, status, expected_close, account_id, created_at")
+          .is("deleted_at", null)
+          .in("status", [...OPEN_OPP_STATUSES])
+          .is("assignee_id", null)
+          .order("expected_close", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : Promise.resolve({
+          data: [] as {
+            id: string;
+            title: string;
+            status: string;
+            expected_close: string | null;
+            account_id: string | null;
+            created_at: string;
+          }[],
+          error: null,
+        });
+    // The "needs assignment" timer (Setup › Reminders; 20261007100000_unassigned_overdue.sql).
+    // Until that migration is applied the column is missing and the default stands.
+    const uDays = showUnassigned
+      ? sb.from("crm_settings").select("unassigned_overdue_days").eq("id", 1).maybeSingle()
+      : Promise.resolve({ data: null, error: null });
+
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth] = await Promise.all([
+    const [tickets, tasks, followups, auth, unTickets, unOpps, days] = await Promise.all([
       tq,
       kq,
       fq,
       sb.rpc("ticket_authorizers"),
+      uTickets,
+      uOpps,
+      uDays,
     ]);
+    const unassignedOverdueDays =
+      !days.error && typeof days.data?.unassigned_overdue_days === "number"
+        ? days.data.unassigned_overdue_days
+        : UNASSIGNED_OVERDUE_DAYS_DEFAULT;
+    if (unTickets.error) throw new Error(`Unassigned tickets: ${unTickets.error.message}`);
+    if (unOpps.error) throw new Error(`Unassigned opportunities: ${unOpps.error.message}`);
     const authorizer =
       !auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId);
     if (tickets.error) throw new Error(`Tickets: ${tickets.error.message}`);
@@ -114,7 +176,12 @@ export const listMyWork = createServerFn({ method: "GET" })
       ...new Set((tasks.data ?? []).map((t) => t.building_id).filter((x): x is string => !!x)),
     ];
     const accountIds = [
-      ...new Set((followups.data ?? []).map((f) => f.account_id).filter((x): x is string => !!x)),
+      ...new Set(
+        [
+          ...(followups.data ?? []).map((f) => f.account_id),
+          ...(unOpps.data ?? []).map((o) => o.account_id),
+        ].filter((x): x is string => !!x),
+      ),
     ];
     const [buildings, accounts, people] = await Promise.all([
       buildingIds.length
@@ -161,6 +228,20 @@ export const listMyWork = createServerFn({ method: "GET" })
       canPick,
       scope,
       authorizer,
+      unassigned: showUnassigned
+        ? {
+            tickets: (unTickets.data ?? []) as TicketIn[],
+            opportunities: (unOpps.data ?? []).map((o): OppIn => ({
+              id: o.id,
+              title: o.title,
+              status: o.status,
+              expected_close: o.expected_close,
+              account_name: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
+              created_at: o.created_at,
+            })),
+          }
+        : null,
+      unassignedOverdueDays,
     };
   });
 

@@ -180,14 +180,15 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
       page.indexOf("function ListView"),
       page.indexOf("function CalendarView"),
     );
-    expect(list).toContain("listGroups(items, today, { authorize })");
+    expect(list).toContain("listGroups(items, today, { authorize, unassigned })");
     expect(list).not.toContain("groupWork(");
     expect(list).not.toContain("presetGroups(");
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.
     // Six when the Needs authorization column shows (M9, owner Oct 5); five otherwise since
     // Today was folded into This week (owner, Oct 6).
+    // Seven with Unassigned as well (owner, Oct 7): listGridClass picks 5, 6 or 7.
     expect(list).toContain(
-      'className={`hidden gap-3 lg:grid lg:grid-cols-3 ${groups.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5"}`}',
+      "className={`hidden gap-3 lg:grid lg:grid-cols-3 ${listGridClass(groups.length)}`}",
     );
     expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
     expect(list).toContain(
@@ -209,10 +210,10 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     );
     expect(list).toContain("{rows(g)}");
     expect(list).toContain("{rows(group)}");
-    // Overdue reads red when there is anything in it.
-    expect(list).toContain(
-      'const isAlert = (g: WorkGroup) => g.bucket === "overdue" && g.items.length > 0;',
-    );
+    // Overdue reads red when there is anything in it; Unassigned (Oct 7) when something in it
+    // has waited past Setup's "needs assignment" timer.
+    expect(list).toContain('g.bucket === "overdue"\n      ? g.items.length > 0');
+    expect(list).toContain('g.bucket === "unassigned" && g.items.some((i) => i.flag)');
     // Picking another tab drops a ?bucket= preset; a new preset wins over an earlier pick.
     expect(list).toContain("if (preset && b !== preset) onClearPreset();");
     expect(list).toContain("if (prevPreset !== preset) {");

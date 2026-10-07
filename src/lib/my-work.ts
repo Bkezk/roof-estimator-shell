@@ -10,17 +10,31 @@
  */
 import { seesEveryone } from "@/lib/access";
 
-export type WorkKind = "ticket" | "inspection" | "task" | "followup";
+export type WorkKind = "ticket" | "inspection" | "task" | "followup" | "opportunity";
 
 export const KIND_LABELS: Record<WorkKind, string> = {
   ticket: "Ticket",
   inspection: "Inspection",
   task: "Task",
   followup: "Follow-up",
+  opportunity: "Opportunity",
 };
 
-/** Same-day order: tickets, inspections, tasks, follow-ups. */
-const KIND_ORDER: Record<WorkKind, number> = { ticket: 0, inspection: 1, task: 2, followup: 3 };
+/** Same-day order: tickets, inspections, tasks, follow-ups, opportunities. */
+const KIND_ORDER: Record<WorkKind, number> = {
+  ticket: 0,
+  inspection: 1,
+  task: 2,
+  followup: 3,
+  opportunity: 4,
+};
+
+/** An open opportunity's status as the row shows it (the Opportunities page's labels). */
+const OPP_STATUS_LABELS: Record<string, string> = {
+  open: "Open",
+  contacted: "Contacted",
+  quoted: "Quoted",
+};
 
 /** The ticket stages Work Overview lists (Invoiced / Closed are the office's, not anyone's to-do). */
 export const WORK_TICKET_STAGES = ["open", "scheduled", "done"] as const;
@@ -90,6 +104,8 @@ export interface TicketIn {
   stage: string;
   scheduled_date: string | null;
   technician_id: string | null;
+  /** When it was entered (sent for unassigned tickets: the "needs assignment" timer). */
+  created_at?: string | null;
 }
 
 export interface TaskIn {
@@ -138,12 +154,37 @@ const workFollowup = (f: FollowupIn): WorkFollowup => ({
   snoozed_until: f.snoozed_until ?? null,
 });
 
+/** An open opportunity nobody is assigned to (the Unassigned group; owner, Oct 7). */
+export interface OppIn {
+  id: string;
+  title: string;
+  status: string;
+  expected_close: string | null;
+  account_name?: string | null;
+  /** When it was entered: the "needs assignment" timer runs from this day. */
+  created_at?: string | null;
+}
+
+/**
+ * Work nobody is assigned to (owner, Oct 7: "sometimes opportunities are made and are unassigned
+ * so can we also have an unassigned group on the work overview list that includes services and
+ * opportunities"): tickets without a technician and open opportunities without an assignee. The
+ * server sends them to everyone but a technician-only user; they sit in their own group whatever
+ * their date, so an unassigned ticket a week overdue is never out of sight (the owner counted
+ * three overdue items and saw two: the third had no technician and the list skipped it).
+ */
+export interface UnassignedRows {
+  tickets: TicketIn[];
+  opportunities: OppIn[];
+}
+
 export interface WorkRows {
   tickets: TicketIn[];
   tasks: TaskIn[];
   followups: FollowupIn[];
   /** Display names by profile id (for "Everyone" / another person's view). */
   names?: Record<string, string>;
+  unassigned?: UnassignedRows | null;
 }
 
 // ---- items ---------------------------------------------------------------------------------
@@ -170,6 +211,12 @@ export interface WorkItem {
    * "Needs authorization" (M9, owner Oct 5).
    */
   needsAuth?: boolean;
+  /** Nobody's yet (a ticket without a technician, an opportunity without an assignee). */
+  unassigned?: boolean;
+  /** The day an unassigned item was entered (YYYY-MM-DD), for the "needs assignment" timer. */
+  since?: string | null;
+  /** Flagged overdue: past its day, or unassigned longer than Setup allows (`unassignedOverdue`). */
+  flag?: boolean;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -277,6 +324,68 @@ export function followupItem(
   };
 }
 
+/** An unassigned open opportunity as a row: its expected close is its day. */
+export function opportunityItem(o: OppIn, toYmd: (iso: string) => string = localYmd): WorkItem {
+  return {
+    key: `opportunity:${o.id}`,
+    kind: "opportunity",
+    title: o.title,
+    where: joinWhere(o.account_name),
+    date: o.expected_close,
+    status: OPP_STATUS_LABELS[o.status] ?? o.status,
+    done: false,
+    href: `/opportunities?id=${o.id}`,
+    assigneeId: null,
+    assigneeName: null,
+    followup: null,
+    unassigned: true,
+    since: o.created_at ? toYmd(o.created_at) : null,
+  };
+}
+
+/** Setup's default for the "needs assignment" timer (crm_settings.unassigned_overdue_days). */
+export const UNASSIGNED_OVERDUE_DAYS_DEFAULT = 1;
+
+/**
+ * Is nobody's work flagged overdue (owner, Oct 7: "a timer in setup for when needs assignment
+ * should get the overdue flag just by nature of being unassigned")? Yes when it is past its own
+ * day (a scheduled date or expected close before today), or when it has waited `days` or more
+ * days for a person since it was entered: entered Oct 5 with 1 day allowed → flagged from Oct 6;
+ * 0 days → the day it is entered.
+ */
+export function unassignedOverdue(
+  item: Pick<WorkItem, "date" | "since" | "unassigned">,
+  today: string,
+  days: number = UNASSIGNED_OVERDUE_DAYS_DEFAULT,
+): boolean {
+  if (!item.unassigned) return false;
+  if (item.date && item.date < today) return true;
+  if (!item.since) return false;
+  return addDays(item.since, Math.max(0, Math.floor(days))) <= today;
+}
+
+/** Every item with its `flag` set: nobody's work past the "needs assignment" timer. */
+export function flagUnassigned(items: WorkItem[], today: string, days?: number): WorkItem[] {
+  return items.map((i) => (i.unassigned ? { ...i, flag: unassignedOverdue(i, today, days) } : i));
+}
+
+/** The Unassigned group's rows: tickets without a technician, open opportunities without an assignee. */
+export function unassignedItems(
+  rows: UnassignedRows | null | undefined,
+  toYmd: (iso: string) => string = localYmd,
+): WorkItem[] {
+  if (!rows) return [];
+  const tickets = rows.tickets
+    .filter((t) => (WORK_TICKET_STAGES as readonly string[]).includes(t.stage) && !t.technician_id)
+    .map((t) => ({
+      ...ticketItem(t, {}, null, toYmd),
+      unassigned: true,
+      since: t.created_at ? toYmd(t.created_at) : null,
+    }));
+  const opps = rows.opportunities.map((o) => opportunityItem(o, toYmd));
+  return [...tickets, ...opps].sort(compareWork);
+}
+
 /** Date first (no date last), then tickets → inspections → tasks → follow-ups, then title. */
 export function compareWork(a: WorkItem, b: WorkItem): number {
   if (a.date !== b.date) {
@@ -318,14 +427,23 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
     .filter((f) => f.status === "open")
     .filter((f) => !(f.kind === "ticket" && listed.has(`${f.item_id}|${f.assignee_id}`)))
     .map((f) => followupItem(f, names, toYmd));
-  return [...tickets, ...tasks, ...followups].sort(compareWork);
+  // Unassigned work comes separately and never doubles an assigned row (a ticket is either
+  // somebody's or nobody's).
+  const assignedKeys = new Set(tickets.map((t) => t.key));
+  const unassigned = unassignedItems(rows.unassigned, toYmd).filter(
+    (u) => !assignedKeys.has(u.key),
+  );
+  return [...tickets, ...tasks, ...followups, ...unassigned].sort(compareWork);
 }
 
 // ---- grouping ------------------------------------------------------------------------------
 
-export type WorkBucket = "authorize" | "overdue" | "today" | "week" | "later" | "nodate" | "done";
+export type WorkBucket =
+  "unassigned" | "authorize" | "overdue" | "today" | "week" | "later" | "nodate" | "done";
 
 export const BUCKET_LABELS: Record<WorkBucket, string> = {
+  // Owner, Oct 7: nobody's work first — it needs a person before it needs a date.
+  unassigned: "Unassigned",
   // M9 (owner, Oct 5): "a Needs authorization tab on the work overview page".
   authorize: "Needs authorization",
   overdue: "Overdue",
@@ -337,6 +455,7 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
 };
 
 const BUCKET_ORDER: WorkBucket[] = [
+  "unassigned",
   "authorize",
   "overdue",
   "today",
@@ -355,7 +474,7 @@ export const LIST_BUCKETS: WorkBucket[] = BUCKET_ORDER.filter((b) => b !== "toda
 
 /** The List's bucket for an item: `bucketOf`, with today folded into This week. */
 export const listBucketOf = (
-  item: Pick<WorkItem, "date" | "done" | "needsAuth">,
+  item: Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned">,
   today: string,
 ): WorkBucket => {
   const b = bucketOf(item, today);
@@ -371,9 +490,11 @@ export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
  * its own last group.
  */
 export function bucketOf(
-  item: Pick<WorkItem, "date" | "done" | "needsAuth">,
+  item: Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned">,
   today: string,
 ): WorkBucket {
+  // Nobody's work sits under Unassigned whatever its date (overdue or not): the fix is a person.
+  if (item.unassigned) return "unassigned";
   if (item.needsAuth) return "authorize";
   if (item.done) return "done";
   if (!item.date) return "nodate";
@@ -411,6 +532,7 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
  * (Five since Oct 6: Today is folded into This week.)
  */
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
+  unassigned: "Everything has someone on it.",
   authorize: "Nothing waiting for your review.",
   overdue: "Nothing overdue.",
   today: "Nothing due today.",
@@ -421,18 +543,23 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
 };
 
 /**
- * All six List groups in order, empty ones included, each sorted by `compareWork`. "Needs
- * authorization" comes first and only for the person who authorizes (`opts.authorize`) or when
- * something is in it (a manager looking at that person's work).
+ * The List groups in order, empty ones included, each sorted by `compareWork`. "Unassigned" comes
+ * first, for everyone but a technician-only user (`opts.unassigned`; owner, Oct 7) or when
+ * something is in it; "Needs authorization" next, only for the person who authorizes
+ * (`opts.authorize`) or when something is in it (a manager looking at that person's work).
  */
 export function listGroups(
   items: WorkItem[],
   today: string,
-  opts: { authorize?: boolean } = {},
+  opts: { authorize?: boolean; unassigned?: boolean } = {},
 ): WorkGroup[] {
   const filled = new Map(groupWork(items, today).map((g) => [g.bucket, g]));
-  return LIST_BUCKETS.filter(
-    (b) => b !== "authorize" || opts.authorize || filled.has("authorize"),
+  return LIST_BUCKETS.filter((b) =>
+    b === "authorize"
+      ? opts.authorize || filled.has("authorize")
+      : b === "unassigned"
+        ? opts.unassigned || filled.has("unassigned")
+        : true,
   ).map((b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] });
 }
 

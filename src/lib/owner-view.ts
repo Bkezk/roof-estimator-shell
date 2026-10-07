@@ -124,6 +124,9 @@ const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
   inspection: "tickets",
   task: "tasks",
   followup: "followups",
+  // An unassigned opportunity has no person, so it never reaches a per-person count; the key is
+  // here only so the table covers every kind.
+  opportunity: "followups",
 };
 
 /**

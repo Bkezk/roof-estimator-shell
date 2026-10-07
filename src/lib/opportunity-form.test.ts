@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 
 import { parseEstimateSearch } from "./estimate-search";
 import {
-  ASSIGNEE_REQUIRED,
   assigneeProblem,
   autoSiteId,
   bidPrefillFromOpportunity,
@@ -19,19 +18,19 @@ const ID = "6f1c1d2e-8a4b-4c3d-9e2f-1a2b3c4d5e6f";
 const ACC = "0b9a8c7d-6e5f-4a3b-8c2d-1e0f9a8b7c6d";
 const SITE = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
 
-describe("assigneeProblem — someone always follows an opportunity up (owner, Oct 1)", () => {
-  it("a new opportunity needs an assignee", () => {
-    expect(ASSIGNEE_REQUIRED).toBe("Pick who follows this up");
-    expect(assigneeProblem({})).toBe(ASSIGNEE_REQUIRED);
-    expect(assigneeProblem({ assignee_id: null })).toBe(ASSIGNEE_REQUIRED);
-    expect(assigneeProblem({ assignee_id: "" })).toBe(ASSIGNEE_REQUIRED);
+describe("assigneeProblem — the front desk may enter an opportunity with nobody on it (owner, Oct 7)", () => {
+  // Oct 1 required an assignee; Oct 7: "they can put them in w/o assignment and then the
+  // managers/owners can see that as a need assignment" (Work Overview's Unassigned group).
+  it("a new opportunity may have no assignee", () => {
+    expect(assigneeProblem({})).toBeNull();
+    expect(assigneeProblem({ assignee_id: null })).toBeNull();
+    expect(assigneeProblem({ assignee_id: "" })).toBeNull();
     expect(assigneeProblem({ assignee_id: ACC })).toBeNull();
   });
-  it("an update may leave it out (unchanged) but may not clear it", () => {
+  it("and an update is free to leave it, set it or clear it", () => {
     expect(assigneeProblem({ id: ID })).toBeNull();
     expect(assigneeProblem({ id: ID, assignee_id: ACC })).toBeNull();
-    expect(assigneeProblem({ id: ID, assignee_id: null })).toBe(ASSIGNEE_REQUIRED);
-    expect(assigneeProblem({ id: ID, assignee_id: "" })).toBe(ASSIGNEE_REQUIRED);
+    expect(assigneeProblem({ id: ID, assignee_id: null })).toBeNull();
   });
 });
 
@@ -179,7 +178,7 @@ describe("the opportunity page (owner, Oct 1)", () => {
     expect(page).not.toMatch(/<Textarea\b/);
   });
 
-  it("the assignee is required: no Unassigned choice, message inline, Create off", () => {
+  it("the assignee box: no reminder-free 'Unassigned' choice, one inline message slot, Create gated", () => {
     expect(page).not.toContain("Unassigned: no follow-up reminders");
     expect(editor).not.toContain('<SelectItem value="none">Unassigned</SelectItem>');
     expect(editor).toContain('{assigneeMessage && <p className="text-xs text-destructive">');

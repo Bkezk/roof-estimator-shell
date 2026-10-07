@@ -51,7 +51,7 @@ type Field = {
   key: NumericKey;
   label: string;
   min: number;
-  group: "opportunity" | "ticket" | "untouched";
+  group: "opportunity" | "ticket" | "untouched" | "unassigned";
 };
 const FIELDS: Field[] = [
   {
@@ -86,6 +86,12 @@ const FIELDS: Field[] = [
     min: 0,
     group: "untouched",
   },
+  {
+    key: "unassigned_overdue_days",
+    label: "Unassigned work is flagged overdue after N days without a person",
+    min: 0,
+    group: "unassigned",
+  },
 ];
 const EMPTY: CrmSettingsInput = {
   opportunity_close_days: 0,
@@ -95,6 +101,7 @@ const EMPTY: CrmSettingsInput = {
   ticket_every_days: 0,
   ticket_untouched_days: 0,
   opportunity_untouched_days: 0,
+  unassigned_overdue_days: 0,
   escalate_to_admins: false,
   escalate_user_ids: [],
 };
@@ -129,6 +136,7 @@ export function RemindersSettings() {
         ticket_every_days: s.ticket_every_days,
         ticket_untouched_days: s.ticket_untouched_days,
         opportunity_untouched_days: s.opportunity_untouched_days,
+        unassigned_overdue_days: s.unassigned_overdue_days ?? 1,
         escalate_to_admins: s.escalate_to_admins,
         escalate_user_ids: s.escalate_user_ids ?? [],
       });
@@ -226,6 +234,19 @@ export function RemindersSettings() {
               <p className="text-xs text-muted-foreground">
                 A scheduled ticket is due on its scheduled day and reminds from then.
               </p>
+
+              <div className="space-y-4 rounded-lg border p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold">Needs assignment</p>
+                  <p className="text-sm text-muted-foreground">
+                    The front desk can enter a ticket or an opportunity without a person on it. It
+                    sits under &ldquo;Unassigned&rdquo; on Work Overview for managers and office
+                    staff until someone is assigned, and after this many days waiting it is flagged
+                    overdue there. 0 flags it the day it is entered.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">{daysFields("unassigned")}</div>
+              </div>
 
               <div className="space-y-4 rounded-lg border p-4">
                 <div className="space-y-1">

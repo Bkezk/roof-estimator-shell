@@ -31,7 +31,16 @@ const task = (id: string, due: string | null) => ({
 
 describe("the List without Today", () => {
   it("has five groups: Overdue, This week, Later, No date, Done", () => {
-    expect(LIST_BUCKETS).toEqual(["authorize", "overdue", "week", "later", "nodate", "done"]);
+    // Unassigned (Oct 7) and Needs authorization (Oct 5) lead, each shown only to those it is for.
+    expect(LIST_BUCKETS).toEqual([
+      "unassigned",
+      "authorize",
+      "overdue",
+      "week",
+      "later",
+      "nodate",
+      "done",
+    ]);
     expect(listGroups([], today).map((g) => g.label)).toEqual([
       "Overdue",
       "This week",
@@ -76,7 +85,11 @@ describe("the List without Today", () => {
   });
   it("the page lays out five columns and rings the preset's column", () => {
     const page = readFileSync("src/components/my-work-page.tsx", "utf8");
-    expect(page).toContain('groups.length > 5 ? "xl:grid-cols-6" : "xl:grid-cols-5"');
+    // Five columns, six with Needs authorization, seven with Unassigned too (Oct 7).
+    expect(page).toContain("listGridClass(groups.length)");
+    expect(page).toContain(
+      'count >= 7 ? "xl:grid-cols-7" : count === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5"',
+    );
     expect(page).toContain(
       'preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""',
     );

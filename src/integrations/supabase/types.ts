@@ -927,6 +927,7 @@ export type Database = {
           ticket_every_days: number;
           ticket_untouched_days: number;
           opportunity_untouched_days: number;
+          unassigned_overdue_days: number;
           escalate_to_admins: boolean;
           escalate_user_ids: string[];
           ticket_first_days: number;
@@ -941,6 +942,7 @@ export type Database = {
           ticket_every_days?: number;
           ticket_untouched_days?: number;
           opportunity_untouched_days?: number;
+          unassigned_overdue_days?: number;
           escalate_to_admins?: boolean;
           escalate_user_ids?: string[];
           ticket_first_days?: number;
@@ -955,6 +957,7 @@ export type Database = {
           ticket_every_days?: number;
           ticket_untouched_days?: number;
           opportunity_untouched_days?: number;
+          unassigned_overdue_days?: number;
           escalate_to_admins?: boolean;
           escalate_user_ids?: string[];
           ticket_first_days?: number;
