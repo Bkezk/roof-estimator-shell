@@ -73,7 +73,9 @@ foreach ($k in 'DestinationRoot', 'AppUrl', 'BackupSecret') {
 if ($cfg.AppUrl -like '*PASTE*' -or $cfg.BackupSecret -like '*PASTE*') { throw "Put the portal address and the backup password into the config first" }
 if (([string]$cfg.BackupSecret).Length -lt 24) { throw "BackupSecret must be at least 24 characters (the portal refuses shorter ones)" }
 $root = [string]$cfg.DestinationRoot
-$buckets = @($cfg.Buckets); if (-not $buckets) { $buckets = @('service', 'takeoffs') }
+# Tables and buckets come from the portal each night (so one added later is backed up without
+# touching this config); the config's Tables / Buckets are only the fallback when it lists none.
+$cfgBuckets = @($cfg.Buckets); if (-not $cfgBuckets) { $cfgBuckets = @('service', 'takeoffs') }
 $keyTables = @($cfg.KeyTables); if (-not $keyTables) { $keyTables = @('bids', 'service_jobs', 'crm_accounts', 'invoices') }
 $skipTables = @($cfg.SkipTables)
 $weeklyKeep = if ($cfg.WeeklyKeep) { [int]$cfg.WeeklyKeep } else { 5 }
@@ -133,8 +135,8 @@ try {
   foreach ($d in @($desc.tables)) { $idTables[$d.name] = [bool]$d.hasId }
   if ($defs) { ($defs | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath (Join-Path $dbDir 'schema.json') -Encoding UTF8 }
   $tables = @()
-  if ($cfg.Tables) { $tables = @($cfg.Tables) }
-  elseif ($desc.tables) { $tables = @($desc.tables | ForEach-Object { $_.name } | Sort-Object) }
+  if ($desc.tables) { $tables = @($desc.tables | ForEach-Object { $_.name } | Sort-Object) }
+  elseif ($cfg.Tables) { $tables = @($cfg.Tables); Write-Log "The portal listed no tables; using the config's Tables" }
   else { throw "No table list: the portal described no tables and the config has no Tables" }
   $tables = @($tables | Where-Object { $skipTables -notcontains $_ })
   if ($tables.Count -lt $minTables) { throw "Only $($tables.Count) tables listed (expected at least $minTables)" }
@@ -194,6 +196,12 @@ try {
 
   # ------------------------------------------------------------ 3. storage files
   $objects = 0; $reused = 0
+  $buckets = @()
+  try {
+    $bl = Invoke-RestMethod -Method Get -Uri "${door}?what=buckets" -Headers $headers
+    $buckets = @($bl.buckets)
+  } catch { Write-Log "The portal did not list the buckets: $($_.Exception.Message)" }
+  if (-not $buckets) { $buckets = $cfgBuckets; Write-Log "Using the config's Buckets" }
   function Get-BucketObjects([string]$bucket, [string]$prefix) {
     $out = @(); $offset = 0
     while ($true) {

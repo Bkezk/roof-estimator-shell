@@ -94,6 +94,20 @@ describe("/api/backup — what it reads", () => {
     expect(h.get("apikey")).toBe("service-key-xyz");
     expect(h.get("authorization")).toBe("Bearer service-key-xyz");
   });
+  it("buckets: every storage bucket's name, so a new bucket needs no config change", async () => {
+    const { f, calls } = fakeFetch(() =>
+      Response.json([
+        { id: "takeoffs", name: "takeoffs", public: false },
+        { id: "service", name: "service", public: false },
+        { id: "x", name: "Bad Name" },
+      ]),
+    );
+    const res = await backupRequest(GET("what=buckets"), ENV, f);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ buckets: ["service", "takeoffs"] });
+    expect(calls[0]!.url).toBe("https://proj.supabase.co/storage/v1/bucket");
+    expect(calls[0]!.init.method).toBe("GET");
+  });
   it("rows: one page of up to 1,000 rows with the exact count passed through", async () => {
     const { f, calls } = fakeFetch(
       () =>

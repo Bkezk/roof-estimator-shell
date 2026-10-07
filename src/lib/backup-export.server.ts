@@ -10,6 +10,7 @@
  *
  * Four read-only questions, all GET (`what=`):
  *   tables                          every table the data API describes ({ name, hasId }) + schema
+ *   buckets                         every storage bucket's name
  *   rows&table=&offset=&order=id    one page of up to 1,000 rows, Content-Range passed through
  *   files&bucket=&prefix=&offset=   one page of a storage folder listing
  *   file&bucket=&path=              one stored file, streamed
@@ -124,6 +125,18 @@ export async function backupRequest(
     return Response.json(tableList(await res.json()));
   }
 
+  if (what === "buckets") {
+    // Every storage bucket, so a bucket added later is backed up without touching the config.
+    const res = await fetchImpl(`${base}/storage/v1/bucket`, { method: "GET", headers: upstream });
+    if (!res.ok) return passThrough(res, "Storage did not list the buckets");
+    const list = (await res.json()) as { name?: unknown }[];
+    const buckets = (Array.isArray(list) ? list : [])
+      .map((b) => (typeof b.name === "string" ? b.name : ""))
+      .filter((n) => NAME_RE.test(n))
+      .sort();
+    return Response.json({ buckets });
+  }
+
   if (what === "rows") {
     const table = q.get("table") ?? "";
     if (!NAME_RE.test(table)) return bad("table must be a plain table name");
@@ -188,7 +201,7 @@ export async function backupRequest(
     return new Response(res.body, { status: 200, headers });
   }
 
-  return bad("what must be tables, rows, files or file");
+  return bad("what must be tables, buckets, rows, files or file");
 }
 
 async function passThrough(res: Response, why: string): Promise<Response> {

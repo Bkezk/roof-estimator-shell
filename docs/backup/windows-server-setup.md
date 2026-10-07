@@ -27,6 +27,12 @@ What a backup folder holds (`X:\JBK Portal Backups\backup-2026-10-07\`):
 In the root: `backup.log` (every run), `status.json` (the last run), `weekly\` (Sunday copies of
 the tables, the newest five), and `LAST-BACKUP-FAILED.txt` only while the last run has failed.
 
+**Portal updates need no change here.** The script asks the portal each night which tables and
+storage buckets exist, so a table or bucket added in a later update is backed up automatically.
+The `Tables` and `Buckets` lists in the config are only a fallback for a night the portal lists
+none. The two lists worth a glance after a big change are `KeyTables` (the row-count checks) and
+`SkipTables` (below).
+
 Left out on purpose (`SkipTables`): the public map data the portal re-loads itself every month
 (address points, buildings, storm hits and reports, permits, leads). It is hundreds of megabytes
 and comes back from its sources; everything the office typed is in the backup. User logins live in

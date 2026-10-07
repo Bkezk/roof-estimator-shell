@@ -13,6 +13,11 @@ describe("scripts/backup/jbk-backup.ps1", () => {
   it("only reads, through the portal's /api/backup door, with the backup password — never the master key", () => {
     expect(src).toContain("'/api/backup'");
     expect(src).toContain("?what=tables");
+    expect(src).toContain("?what=buckets");
+    // The portal's lists win; the config's Tables / Buckets are only the fallback (owner, Oct 7:
+    // "if i continue to make updates to the app will i have to change this?" — no).
+    expect(src.indexOf("if ($desc.tables)")).toBeLessThan(src.indexOf("elseif ($cfg.Tables)"));
+    expect(src).toContain("if (-not $buckets) { $buckets = $cfgBuckets");
     expect(src).toContain("?what=rows&table=$t&limit=$pageSize&offset=");
     expect(src).toContain("?what=files&bucket=$bucket&prefix=");
     expect(src).toContain("?what=file&bucket=$bucket&path=");
