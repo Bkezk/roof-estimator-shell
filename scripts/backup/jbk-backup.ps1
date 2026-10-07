@@ -7,9 +7,13 @@
   then when it goes to save 10/9 it overwrites 10/7 … to be efficient with memory and prevent
   an empty or corrupted save from wiping all our data."
 
-  Needs nothing installed: Windows PowerShell 5.1 (on every Windows machine) and the portal's
-  service key. Every night it:
-    1. Downloads every table of the portal's database through its data API, 1,000 rows a page,
+  Needs nothing installed: Windows PowerShell 5.1 (on every Windows machine) and the backup
+  password. Lovable Cloud does not hand out the database's master key, so the portal's own server
+  (which holds it) answers at <portal>/api/backup to this password alone — a value the owner makes
+  up and sets in Lovable Cloud › Secrets as BACKUP_SECRET and here in the config as BackupSecret
+  (owner, Oct 7: "could we not do the portal side backup door and i just set the password?").
+  Every night it:
+    1. Downloads every table of the portal's database through that door, 1,000 rows a page,
        into db\<table>\page-0001.json … (plus db\schema.json with the column types) in a
        temporary "_incoming" folder. Tables in SkipTables (the public map data the portal
        re-loads itself every month) are left out so the backup stays small and quick.
@@ -27,10 +31,11 @@
     6. status.json and backup.log in the root say what happened.
 
   Safety rails (owner, Oct 7: "we need to make sure we cant do damage to the server"):
-    - It only READS from the cloud (GET requests). It never writes to the portal.
+    - It only READS from the cloud (GET requests to the portal's read-only /api/backup). It never
+      writes to the portal, and it never holds the database's master key.
     - It writes only inside DestinationRoot, and refuses a root that is a drive root (X:\). The
       only deletions are its own backup-*, _failed-* and weekly\ entries under that root.
-    - The service key lives in jbk-backup.config.json beside this script, on the server only
+    - The backup password lives in jbk-backup.config.json beside this script, on the server only
       (see docs/backup/windows-server-setup.md for the folder permissions). Never in the repo.
 
 .PARAMETER ConfigPath
@@ -62,10 +67,11 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
   throw "Config not found: $ConfigPath (copy jbk-backup.config.example.json to jbk-backup.config.json and fill it in)"
 }
 $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-foreach ($k in 'DestinationRoot', 'SupabaseUrl', 'SupabaseServiceKey') {
+foreach ($k in 'DestinationRoot', 'AppUrl', 'BackupSecret') {
   if (-not $cfg.$k) { throw "Config is missing $k" }
 }
-if ($cfg.SupabaseServiceKey -like 'PASTE-*') { throw "Put the service role key into the config first" }
+if ($cfg.AppUrl -like '*PASTE*' -or $cfg.BackupSecret -like '*PASTE*') { throw "Put the portal address and the backup password into the config first" }
+if (([string]$cfg.BackupSecret).Length -lt 24) { throw "BackupSecret must be at least 24 characters (the portal refuses shorter ones)" }
 $root = [string]$cfg.DestinationRoot
 $buckets = @($cfg.Buckets); if (-not $buckets) { $buckets = @('service', 'takeoffs') }
 $keyTables = @($cfg.KeyTables); if (-not $keyTables) { $keyTables = @('bids', 'service_jobs', 'crm_accounts', 'invoices') }
@@ -101,8 +107,9 @@ function Get-FolderBytes([string]$path) {
   if ($sum) { return [int64]$sum } else { return [int64]0 }
 }
 
-$base = ([string]$cfg.SupabaseUrl).TrimEnd('/')
-$headers = @{ Authorization = "Bearer $($cfg.SupabaseServiceKey)"; apikey = $cfg.SupabaseServiceKey }
+# The portal's backup door (src/routes/api.backup.ts): GET ?what=tables | rows | files | file.
+$door = ([string]$cfg.AppUrl).TrimEnd('/') + '/api/backup'
+$headers = @{ Authorization = "Bearer $($cfg.BackupSecret)" }
 
 $slots = @(Get-ChildItem -LiteralPath $root -Directory -Filter 'backup-*' | Sort-Object Name)
 $previous = if ($slots.Count -gt 0) { $slots[-1] } else { $null }
@@ -113,22 +120,22 @@ Write-Log "Backup started → $incoming (previous: $(if ($previous) { $previous.
 $status = [ordered]@{ ok = $false; at = $started.ToString('o'); slot = $null; bytes = 0; tables = 0; rows = 0; counts = @{}; objects = 0; reused = 0; error = $null; durationSec = 0 }
 
 try {
-  # ------------------------------------------------------------ 1. the tables, through the data API
+  # ------------------------------------------------------------ 1. the tables, through the portal's door
   $dbDir = Join-Path $incoming 'db'
   $null = New-Item -ItemType Directory -Path $dbDir
-  # The table list: the config's Tables when given, else what the data API describes (its
-  # OpenAPI document; the service key is required for it). The column types go to schema.json.
-  $defs = $null
-  try {
-    $api = Invoke-RestMethod -Method Get -Uri "$base/rest/v1/" -Headers $headers
-    if ($api.definitions) { $defs = $api.definitions }
-    elseif ($api.components -and $api.components.schemas) { $defs = $api.components.schemas }
-  } catch { Write-Log "The data API's table description was not available: $($_.Exception.Message)" }
+  # The table list: what the portal describes (?what=tables: every table with whether it has an
+  # id column, plus the column types, saved as schema.json), or the config's Tables when given.
+  # A wrong password stops here with "401 (Unauthorized)"; a missing BACKUP_SECRET in Lovable
+  # with "500" and the reason in the body.
+  $desc = Invoke-RestMethod -Method Get -Uri "${door}?what=tables" -Headers $headers
+  $defs = $desc.schema
+  $idTables = @{}
+  foreach ($d in @($desc.tables)) { $idTables[$d.name] = [bool]$d.hasId }
   if ($defs) { ($defs | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath (Join-Path $dbDir 'schema.json') -Encoding UTF8 }
   $tables = @()
   if ($cfg.Tables) { $tables = @($cfg.Tables) }
-  elseif ($defs) { $tables = @($defs.PSObject.Properties.Name | Sort-Object) }
-  else { throw "No table list: put Tables in the config, or check the service key (the data API refused to describe the tables)" }
+  elseif ($desc.tables) { $tables = @($desc.tables | ForEach-Object { $_.name } | Sort-Object) }
+  else { throw "No table list: the portal described no tables and the config has no Tables" }
   $tables = @($tables | Where-Object { $skipTables -notcontains $_ })
   if ($tables.Count -lt $minTables) { throw "Only $($tables.Count) tables listed (expected at least $minTables)" }
   Write-Log "Tables to copy: $($tables.Count) (skipping: $($skipTables -join ', '))"
@@ -136,13 +143,12 @@ try {
   $counts = [ordered]@{}
   $totalRows = [int64]0
   foreach ($t in $tables) {
-    $hasId = $true
-    if ($defs -and $defs.PSObject.Properties[$t]) { $hasId = $null -ne $defs.$t.properties.PSObject.Properties['id'] }
-    $order = if ($hasId) { '&order=id.asc' } else { '' }
+    $hasId = if ($idTables.ContainsKey($t)) { $idTables[$t] } else { $true }
+    $order = if ($hasId) { '&order=id' } else { '' }
     $tDir = Join-Path $dbDir $t
     $null = New-Item -ItemType Directory -Path $tDir
     # The first page also brings the exact row count (Content-Range: 0-999/12345).
-    $first = Invoke-WebRequest -Method Get -Uri "$base/rest/v1/${t}?select=*&limit=$pageSize&offset=0$order" -Headers ($headers + @{ Prefer = 'count=exact' }) -UseBasicParsing
+    $first = Invoke-WebRequest -Method Get -Uri "${door}?what=rows&table=$t&limit=$pageSize&offset=0$order" -Headers $headers -UseBasicParsing
     $range = [string]$first.Headers['Content-Range']
     $expected = if ($range -match '/(\d+)$') { [int64]$Matches[1] } else { -1 }
     $page = 1
@@ -154,7 +160,7 @@ try {
       Set-Content -LiteralPath (Join-Path $tDir ("page-{0:D4}.json" -f $page)) -Value $content -Encoding UTF8
       if ($rows.Count -lt $pageSize) { break }
       $page++
-      $resp = Invoke-WebRequest -Method Get -Uri "$base/rest/v1/${t}?select=*&limit=$pageSize&offset=$(($page - 1) * $pageSize)$order" -Headers $headers -UseBasicParsing
+      $resp = Invoke-WebRequest -Method Get -Uri "${door}?what=rows&table=$t&limit=$pageSize&offset=$(($page - 1) * $pageSize)$order" -Headers $headers -UseBasicParsing
       $content = $resp.Content
     }
     if ($expected -ge 0 -and $got -ne $expected) { throw "$t came down with $got rows but the API holds $expected" }
@@ -191,8 +197,7 @@ try {
   function Get-BucketObjects([string]$bucket, [string]$prefix) {
     $out = @(); $offset = 0
     while ($true) {
-      $body = @{ prefix = $prefix; limit = 1000; offset = $offset; sortBy = @{ column = 'name'; order = 'asc' } } | ConvertTo-Json -Compress
-      $page = Invoke-RestMethod -Method Post -Uri "$base/storage/v1/object/list/$bucket" -Headers $headers -ContentType 'application/json' -Body $body
+      $page = Invoke-RestMethod -Method Get -Uri "${door}?what=files&bucket=$bucket&prefix=$([uri]::EscapeDataString($prefix))&offset=$offset" -Headers $headers
       foreach ($e in @($page)) {
         $name = if ($prefix) { "$prefix/$($e.name)" } else { $e.name }
         if ($null -eq $e.id) { $out += Get-BucketObjects $bucket $name }   # a folder
@@ -215,8 +220,7 @@ try {
         Copy-Item -LiteralPath $prevFile -Destination $dest
         $reused++
       } else {
-        $enc = ($o.path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/'
-        Invoke-WebRequest -Method Get -Uri "$base/storage/v1/object/$bucket/$enc" -Headers $headers -OutFile $dest -UseBasicParsing
+        Invoke-WebRequest -Method Get -Uri "${door}?what=file&bucket=$bucket&path=$([uri]::EscapeDataString($o.path))" -Headers $headers -OutFile $dest -UseBasicParsing
         if ((Get-Item -LiteralPath $dest).Length -ne $o.size) { throw "Downloaded size differs for $bucket/$($o.path)" }
       }
       $objects++
@@ -228,7 +232,7 @@ try {
   # ------------------------------------------------------------ manifest
   $status.bytes = Get-FolderBytes $incoming
   $status.counts = $counts
-  $manifest = [ordered]@{ at = $started.ToString('o'); dbBytes = $dbBytes; totalBytes = $status.bytes; tables = $tables.Count; rows = $totalRows; counts = $counts; objects = $objects; skipped = $skipTables; format = 'PostgREST JSON pages (select=*, 1000 rows a page) + storage files' }
+  $manifest = [ordered]@{ at = $started.ToString('o'); dbBytes = $dbBytes; totalBytes = $status.bytes; tables = $tables.Count; rows = $totalRows; counts = $counts; objects = $objects; skipped = $skipTables; format = 'JSON pages from the portal /api/backup door (select=*, 1000 rows a page) + storage files' }
   $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $incoming 'manifest.json') -Encoding UTF8
 
   if ($DryRun) {

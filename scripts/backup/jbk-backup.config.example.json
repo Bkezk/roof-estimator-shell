@@ -1,7 +1,7 @@
 {
   "DestinationRoot": "X:\\JBK Portal Backups",
-  "SupabaseUrl": "https://PROJECT.supabase.co",
-  "SupabaseServiceKey": "PASTE-THE-SERVICE-ROLE-KEY-HERE",
+  "AppUrl": "https://PASTE-THE-PORTAL-ADDRESS-HERE",
+  "BackupSecret": "PASTE-THE-SAME-PASSWORD-YOU-PUT-IN-LOVABLE-SECRETS",
   "Buckets": [
     "service",
     "takeoffs"

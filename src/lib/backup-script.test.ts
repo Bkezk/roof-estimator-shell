@@ -10,18 +10,23 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 
 describe("scripts/backup/jbk-backup.ps1", () => {
   const src = read("../../scripts/backup/jbk-backup.ps1");
-  it("only reads from the portal: GET pages of every table, a GET per file — no writes", () => {
-    expect(src).toContain("select=*&limit=$pageSize&offset=");
-    expect(src).toContain("Prefer = 'count=exact'");
+  it("only reads, through the portal's /api/backup door, with the backup password — never the master key", () => {
+    expect(src).toContain("'/api/backup'");
+    expect(src).toContain("?what=tables");
+    expect(src).toContain("?what=rows&table=$t&limit=$pageSize&offset=");
+    expect(src).toContain("?what=files&bucket=$bucket&prefix=");
+    expect(src).toContain("?what=file&bucket=$bucket&path=");
+    expect(src).toContain('Authorization = "Bearer $($cfg.BackupSecret)"');
+    expect(src).not.toMatch(/SupabaseServiceKey|service_role|apikey/i);
+    expect(src).not.toMatch(/rest\/v1|storage\/v1/);
     expect(src).not.toMatch(
       /\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b|\bdrop\s+(table|role|schema)\b|\btruncate\b|\balter\s+(table|role)\b/i,
     );
-    expect(src).not.toMatch(/Invoke-(RestMethod|WebRequest)[^\n]*-Method\s+(Put|Delete|Patch)/i);
-    expect(src).not.toMatch(/storage\/v1\/object\/(upload|move|copy)/);
-    // The one POST is the storage listing (that endpoint is a read).
-    const posts = src.match(/-Method Post[^\n]*/g) ?? [];
-    expect(posts).toHaveLength(1);
-    expect(posts[0]).toContain("storage/v1/object/list/");
+    // Every call to the cloud is a GET.
+    const calls = src.match(/Invoke-(RestMethod|WebRequest)[^\n]*/g) ?? [];
+    expect(calls.length).toBeGreaterThanOrEqual(5);
+    for (const c of calls) expect(c).toMatch(/-Method Get\b/);
+    expect(src).toContain("BackupSecret must be at least 24 characters");
   });
   it("writes only inside the configured root, never a drive root, and deletes only its own entries", () => {
     expect(src).toContain(
@@ -52,18 +57,28 @@ describe("scripts/backup/jbk-backup.ps1", () => {
     expect(src).not.toMatch(/pg_dump|pg_restore|psql/);
     expect(read("../../.gitignore")).toContain("scripts/backup/jbk-backup.config.json");
     const guide = read("../../docs/backup/windows-server-setup.md");
+    expect(guide).toContain("BACKUP_SECRET");
+    expect(guide).toContain('"BackupSecret"');
+    expect(guide).toContain('"AppUrl"');
+    expect(guide).not.toContain("SupabaseServiceKey");
     expect(guide).toContain("-DryRun");
     expect(guide).toContain("never touches J:, Y:");
     expect(guide).toContain("Run task as soon as possible after a scheduled start is missed");
     expect(guide).not.toContain("Command Line Tools");
     const example = JSON.parse(read("../../scripts/backup/jbk-backup.config.example.json")) as {
       DestinationRoot: string;
+      AppUrl: string;
+      BackupSecret: string;
+      SupabaseServiceKey?: string;
       Buckets: string[];
       Tables: string[];
       SkipTables: string[];
       KeyTables: string[];
     };
     expect(example.DestinationRoot).toBe("X:\\JBK Portal Backups");
+    expect(example.AppUrl).toContain("PASTE");
+    expect(example.BackupSecret).toContain("PASTE");
+    expect(example.SupabaseServiceKey).toBeUndefined();
     expect(example.Buckets).toEqual(["service", "takeoffs"]);
     expect(example.Tables.length).toBeGreaterThan(80);
     for (const t of example.KeyTables) expect(example.Tables).toContain(t);

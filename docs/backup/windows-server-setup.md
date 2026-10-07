@@ -6,6 +6,15 @@ server is the Windows machine the office drives come from (`\\server`: J:, X: "J
 Y: Peachtree). The backup goes into **one new folder on X:** and nowhere else. Nothing has to be
 installed: the script is Windows PowerShell, which every Windows machine has.
 
+How it reaches the data: Lovable Cloud does not hand out the database's master key (Supabase:
+"Service role and API keys are not accessible for Lovable Cloud–managed projects"), but the
+portal's own server holds it, the way it does for the reminder emails. So the portal has a
+read-only backup door, `<portal address>/api/backup`, that answers only to a **backup password**
+you make up (owner, Oct 7: "could we not do the portal side backup door and i just set the
+password?"). The password goes in two places: Lovable Cloud › Secrets as `BACKUP_SECRET`, and the
+script's config on the server as `BackupSecret`. The script never sees the master key, every call
+it makes is a read, and the portal logs every call (allowed or refused) with the caller's address.
+
 What a backup folder holds (`X:\JBK Portal Backups\backup-2026-10-07\`):
 
 | What | Where |
@@ -24,8 +33,10 @@ and comes back from its sources; everything the office typed is in the backup. U
 Lovable Cloud's own auth tables, which it backs up itself; the `profiles` table (names, roles,
 access) is in the backup.
 
-> The backup contains the `app_secrets` table and the config file holds the service key, which
-> can read everything. Keep both folders readable by you and the backup account only (step 5).
+> The backup contains the `app_secrets` table and the config file holds the backup password, which
+> reads everything. Keep both folders readable by you and the backup account only (step 5). If the
+> password ever leaks, change it in Lovable Cloud › Secrets and in the config: the old one stops
+> working the moment the portal is republished.
 
 ## Does the machine have to be on?
 
@@ -35,33 +46,22 @@ it is ever off at 2:00 AM, the task is set to run as soon as the machine comes b
 with the machine off simply have no backup; the two slots then hold the two most recent runs, and
 nothing is lost or overwritten by the gap.
 
-## Step 1 — The two values the script needs (read this first)
+## Step 1 — Make the backup password and put it in Lovable (you, on your own PC)
 
-1. **Project URL**: `https://bpmsurjmfkciakkewwtb.supabase.co`. It is public (the repository's `.env`
-   has it as `VITE_SUPABASE_URL`, and every page of the portal sends it to the browser).
-2. **Service role key** — **not available while the portal runs on Lovable Cloud.** Supabase's own
-   troubleshooting page for Lovable Cloud projects says: "Service role and API keys are not
-   accessible for Lovable Cloud–managed projects", the project does not appear in a Supabase
-   dashboard, and external database connections are not supported. Lovable Cloud › Secrets lists
-   the key for the app's own server to use, but does not show its value. **So this script cannot run
-   yet.** The three ways forward, for the owner to pick (Oct 7 chat):
-   - **Lovable's own export, by hand.** Cloud › Overview › Advanced settings › "Export project
-     data" (docs.lovable.dev › Features › Advanced settings › Export Lovable Cloud data). One export
-     per 24 hours, up to 5 GB, a `.backup` file (PostgreSQL `pg_restore` format) with the schema, every
-     table, the security policies and the users; the link arrives by email. It leaves out stored
-     files (photos, PDFs, plans) and secrets. Lovable Cloud also keeps its own database backups
-     (Cloud › Database › "restore backups").
-   - **Move the portal onto our own Supabase project.** Then we own the dashboard, the service key,
-     Supabase's daily backups and point-in-time recovery, and this script runs as written. Lovable
-     says there is no one-click move: export, connect the new project, rebuild the schema (our
-     migrations folder is that schema), load the data, copy the files.
-   - **A portal-side backup door** (an `/api/backup` route on the app's own server, which already
-     holds the key, opened by a separate password). Claude's safety review refused to build this
-     on Oct 7 because it is a new way to read every table with one password; it stays an option
-     only if the owner wants to pursue it with a human developer.
+1. **Make up the password.** At least 24 characters; a password manager's generator, or three or
+   four unrelated words with numbers, is fine. Write it down somewhere safe for step 3; it is never
+   pasted into chat, email or the repository.
+2. **Set it in Lovable**: Lovable → your project → Cloud → Secrets → Add secret. Name
+   `BACKUP_SECRET`, value the password. This is the same place `CRON_SECRET` was added on Sep 29.
+3. **Publish** the portal (Lovable → Publish) so the server picks the new secret up.
+4. **The portal address** (`AppUrl` in step 3) is the address you open the portal at in the
+   browser, e.g. `https://portal.example.com` — without anything after the domain.
 
-   When a key is in hand it goes only into the config file on the server (step 3). Never paste it
-   into chat, email or the repository.
+Why a password and not a key: Lovable Cloud does not hand out the database's master key, so the
+portal's own server reads on the script's behalf (see the top of this page). Other ways to a copy,
+for the record: Lovable's own "Export project data" (Cloud › Overview › Advanced settings; one
+export per 24 hours, up to 5 GB, tables only, no stored files), and moving the portal onto our own
+Supabase project, which would hand us the key and Supabase's native backups.
 
 ## Step 2 — Put the script on the server
 
@@ -88,8 +88,8 @@ Notepad:
 ```json
 {
   "DestinationRoot": "D:\\Shares\\JBK Community\\JBK Portal Backups",
-  "SupabaseUrl": "https://xxxxxxxx.supabase.co",
-  "SupabaseServiceKey": "eyJ…",
+  "AppUrl": "https://the-portal-address",
+  "BackupSecret": "the password from step 1",
   …leave the rest as it is…
 }
 ```
@@ -122,8 +122,9 @@ have two slots; the third run replaces the older one. Delete the `_incoming-…`
 hand when you are done looking (it is the only thing the script does not tidy).
 
 If anything fails, `backup.log` says what, and `LAST-BACKUP-FAILED.txt` appears. The two most
-common: a wrong key ("Secret API key required" or "Invalid API key") and a `DestinationRoot` that
-does not exist yet.
+common: a wrong password ("401 (Unauthorized)": the config and Lovable Secrets disagree, or the
+portal was not republished after adding the secret; "500" with "BACKUP_SECRET is not set": the
+secret is missing in Lovable) and a `DestinationRoot` that does not exist yet.
 
 ## Step 5 — Lock the folders down
 
