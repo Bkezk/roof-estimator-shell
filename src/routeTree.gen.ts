@@ -32,6 +32,7 @@ import { Route as AdminRemindersRouteImport } from './routes/admin.reminders'
 import { Route as AdminServiceRatesRouteImport } from './routes/admin.service-rates'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ProspectLeadsRouteImport } from './routes/prospect_.leads'
 import { Route as ServiceBoardRouteImport } from './routes/service.board'
 import { Route as ServiceInvoicesRouteImport } from './routes/service.invoices'
@@ -156,6 +157,11 @@ const AdminUsersRoute = AdminUsersRouteImport.update({
   path: '/admin/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBackupRoute = ApiBackupRouteImport.update({
+  id: '/api/backup',
+  path: '/api/backup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProspectLeadsRoute = ProspectLeadsRouteImport.update({
   id: '/prospect_/leads',
   path: '/prospect/leads',
@@ -221,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/backup': typeof ApiBackupRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -254,6 +261,7 @@ export interface FileRoutesByTo {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/backup': typeof ApiBackupRoute
   '/prospect/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -288,6 +296,7 @@ export interface FileRoutesById {
   '/admin/service-rates': typeof AdminServiceRatesRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/api/backup': typeof ApiBackupRoute
   '/prospect_/leads': typeof ProspectLeadsRoute
   '/service/board': typeof ServiceBoardRoute
   '/service/invoices': typeof ServiceInvoicesRoute
@@ -323,6 +332,7 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/api/backup'
     | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/api/backup'
     | '/prospect/leads'
     | '/service/board'
     | '/service/invoices'
@@ -389,6 +400,7 @@ export interface FileRouteTypes {
     | '/admin/service-rates'
     | '/admin/settings'
     | '/admin/users'
+    | '/api/backup'
     | '/prospect_/leads'
     | '/service/board'
     | '/service/invoices'
@@ -423,6 +435,7 @@ export interface RootRouteChildren {
   AdminServiceRatesRoute: typeof AdminServiceRatesRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  ApiBackupRoute: typeof ApiBackupRoute
   ProspectLeadsRoute: typeof ProspectLeadsRoute
   ApiCronLeadsRoute: typeof ApiCronLeadsRoute
   ApiCronLeadsImportRoute: typeof ApiCronLeadsImportRoute
@@ -593,6 +606,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminUsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/backup': {
+      id: '/api/backup'
+      path: '/api/backup'
+      fullPath: '/api/backup'
+      preLoaderRoute: typeof ApiBackupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/prospect_/leads': {
       id: '/prospect_/leads'
       path: '/prospect/leads'
@@ -691,6 +711,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminServiceRatesRoute: AdminServiceRatesRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
+  ApiBackupRoute: ApiBackupRoute,
   ProspectLeadsRoute: ProspectLeadsRoute,
   ApiCronLeadsRoute: ApiCronLeadsRoute,
   ApiCronLeadsImportRoute: ApiCronLeadsImportRoute,
