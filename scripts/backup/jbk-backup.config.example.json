@@ -1,0 +1,11 @@
+{
+  "DestinationRoot": "X:\\JBK Portal Backups",
+  "PgBinDir": "C:\\Program Files\\PostgreSQL\\17\\bin",
+  "DatabaseUrl": "postgresql://postgres.PROJECT:PASSWORD@HOST:5432/postgres",
+  "SupabaseUrl": "https://PROJECT.supabase.co",
+  "SupabaseServiceKey": "PASTE-THE-SERVICE-ROLE-KEY-HERE",
+  "Buckets": ["service", "takeoffs"],
+  "KeyTables": ["bids", "service_jobs", "crm_accounts", "crm_sites", "invoices", "profiles"],
+  "WeeklyKeep": 5,
+  "MinTableDataEntries": 50
+}

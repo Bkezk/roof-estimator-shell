@@ -37,3 +37,6 @@ package-lock.json
 # PlanSwift generator inputs/outputs (owner export + generated templates)
 scripts/planswift/sample/
 scripts/planswift/out/
+
+# The office backup script's secrets live only on the server (docs/backup/windows-server-setup.md).
+scripts/backup/jbk-backup.config.json
