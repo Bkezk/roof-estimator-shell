@@ -362,7 +362,11 @@ function ListView({
       {/* Desktop: the shown columns across, every group's items in view at once. */}
       <div className="hidden space-y-3 lg:block">
         {layoutBar}
-        <div className={`grid gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}>
+        {/* Owner (Oct 7): a column grows with its items until it reaches the bottom of the screen,
+          then scrolls inside itself, heading and count staying put (items-start keeps a short
+          column short beside a long one). The 13rem is the shell header, the title, the toolbar
+          and the paddings above the columns. */}
+        <div className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}>
           {shown.map((g) => (
             <section
               key={g.bucket}
@@ -380,7 +384,7 @@ function ListView({
                 e.preventDefault();
                 drop(g.bucket);
               }}
-              className={`min-w-0 space-y-2 rounded-lg border p-2 transition-shadow ${
+              className={`flex max-h-[calc(100vh-13rem)] min-w-0 flex-col rounded-lg border transition-shadow ${
                 preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""
               } ${over === g.bucket && dragging && dragging !== g.bucket ? "ring-2 ring-primary/60" : ""} ${
                 dragging === g.bucket ? "opacity-60" : ""
@@ -396,7 +400,7 @@ function ListView({
                   setDragging(g.bucket);
                 }}
                 onDragEnd={endDrag}
-                className={`flex cursor-grab items-center justify-between gap-1 border-b px-1 pb-2 text-sm font-semibold active:cursor-grabbing ${
+                className={`flex shrink-0 cursor-grab items-center justify-between gap-1 border-b px-3 py-2 text-sm font-semibold active:cursor-grabbing ${
                   isAlert(g) ? "text-destructive" : ""
                 }`}
               >
@@ -422,7 +426,7 @@ function ListView({
                   </button>
                 </span>
               </h2>
-              {rows(g)}
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">{rows(g)}</div>
             </section>
           ))}
         </div>

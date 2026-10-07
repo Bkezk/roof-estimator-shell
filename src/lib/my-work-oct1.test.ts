@@ -188,7 +188,12 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     // Today was folded into This week (owner, Oct 6).
     // As many as the user shows (owner, Oct 7: drag to reorder, X to hide): listGridClass.
     expect(list).toContain(
-      "className={`grid gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}",
+      "className={`grid items-start gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}",
+    );
+    // Owner, Oct 7: a column grows to the bottom of the screen, then scrolls inside itself.
+    expect(list).toContain("flex max-h-[calc(100vh-13rem)] min-w-0 flex-col rounded-lg border");
+    expect(list).toContain(
+      '<div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">{rows(g)}</div>',
     );
     expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
     expect(list).toContain(
