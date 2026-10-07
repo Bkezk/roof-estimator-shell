@@ -195,7 +195,12 @@ export function EstimateReviewLedger(props: {
     onVolume: (v: boolean) => void;
   };
   markup: { mode: MarkupMode; value: number; onChange: (mode: MarkupMode, value: number) => void };
-  perDiem: { rate: number; onChange: (v: number) => void };
+  perDiem: {
+    rate: number;
+    onChange: (v: number) => void;
+    /** Dollars the Setup per-diem chart added to the charge (owner, Oct 7); 0 / absent = none. */
+    chartAddOn?: number | undefined;
+  };
   commission: { pct: number; onChange: (v: number) => void };
   extraShipping: { value: number; onChange: (v: number) => void };
   /** Opens the settings panel (warranty, labor rate, templates…) — the non-grid knobs. */
@@ -419,6 +424,11 @@ export function EstimateReviewLedger(props: {
                   </span>
                   {usd(est.money.perDiemValue)}
                 </button>
+                {(props.perDiem.chartAddOn ?? 0) > 0 && (
+                  <div className="text-right text-[11px] text-muted-foreground">
+                    incl. {usd(props.perDiem.chartAddOn!)} from the per diem chart
+                  </div>
+                )}
                 {perDiemOpen && (
                   <PerDiemCalcDialog
                     open

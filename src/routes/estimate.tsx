@@ -70,6 +70,7 @@ import { readPlanSwiftHandoff } from "@/lib/planswift/handoff";
 import { parseEstimateSearch, type EstimateSearch } from "@/lib/estimate-search";
 import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
+import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
@@ -537,6 +538,8 @@ function EstimatePage() {
   const [volumeDiscount, setVolumeDiscount] = useState(false);
   const [perDiem, setPerDiem] = useState(0);
   const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
+  // The Setup per-diem chart's total joins the Per-Diem Charge (owner, Oct 7); default on.
+  const [perDiemFromChart, setPerDiemFromChart] = useState(true);
   const [commissionInMarkup, setCommissionInMarkup] = useState(false);
   const [adjustLaborPct, setAdjustLaborPct] = useState(0);
   const [adjustSetupPct, setAdjustSetupPct] = useState(0);
@@ -1018,6 +1021,7 @@ function EstimatePage() {
     setStdSizeDiscount(d.stdSizeDiscount ?? false);
     setVolumeDiscount(d.volumeDiscount ?? false);
     setPerDiem(d.perDiem ?? 0);
+    setPerDiemFromChart(d.perDiemFromChart ?? true);
     setExtraShipping(d.extraShipping ?? 0);
     setPerDiemInMarkup(d.perDiemInMarkup ?? true);
     setCommissionInMarkup(d.commissionInMarkup ?? false);
@@ -1664,6 +1668,7 @@ function EstimatePage() {
     volumeDiscount,
     perDiem,
     perDiemInMarkup,
+    perDiemFromChart,
     commissionInMarkup,
     adjustLaborPct,
     adjustSetupPct,
@@ -1786,7 +1791,16 @@ function EstimatePage() {
 
   const result = useMemo(() => {
     if (!admin) return null;
-    const build = buildEstimateInputs(bid, admin);
+    // Two passes when the Setup per-diem chart adds to the Per-Diem Charge (owner, Oct 7):
+    // the man-days first, then the rate that bills hand rate × man-days + the chart's total.
+    const run = runEstimateWithChartPerDiem(
+      bid,
+      saved,
+      (b) => buildEstimateInputs(b, admin),
+      (b) => computeEstimate(b.inputs),
+    );
+    const build = run.build;
+    const perDiemBid = run.bid;
     const {
       inputs,
       warnings,
@@ -1799,16 +1813,18 @@ function EstimatePage() {
     } = build;
     const accessoriesResult = build.accessories;
     const adhesiveWholeUnits = build.adhesiveWholeUnits;
-    const r = computeEstimate(inputs);
+    const r = run.r;
     return {
       r,
       build,
+      /** What the Setup per-diem chart added to the Per-Diem Charge (0 = nothing). */
+      perDiemChartAddOn: run.chartAddOn,
       // The legacy Estimate Review ledger rows (attribution of the amounts billed above).
       ledger: buildReviewLedger({
-        bid,
+        bid: perDiemBid,
         result: build,
         est: r,
-        crewRate: bid.crewLaborRatePerHour,
+        crewRate: perDiemBid.crewLaborRatePerHour,
       }),
       // Per-section install hours (legacy per-section Man Hours); inputs.sections is
       // built 1:1 in order from bid.sections.
@@ -2852,6 +2868,18 @@ function EstimatePage() {
                           }
                           disabled={readOnly}
                         />
+                        {/* Owner, Oct 7: the chart's total joins the Review's Per-Diem Charge. */}
+                        <div className="mt-2 flex items-center gap-2">
+                          <Switch
+                            id="pd-from-chart"
+                            checked={perDiemFromChart}
+                            onCheckedChange={setPerDiemFromChart}
+                            disabled={readOnly}
+                          />
+                          <Label htmlFor="pd-from-chart" className="text-xs">
+                            Add the chart&apos;s total to the Per-Diem Charge on Review
+                          </Label>
+                        </div>
                       </div>
                     ) : (
                       <Button
@@ -5681,7 +5709,11 @@ function EstimatePage() {
                       setMarkup(val);
                     },
                   }}
-                  perDiem={{ rate: perDiem, onChange: setPerDiem }}
+                  perDiem={{
+                    rate: perDiem,
+                    onChange: setPerDiem,
+                    chartAddOn: result.perDiemChartAddOn,
+                  }}
                   commission={{ pct: commission, onChange: setCommission }}
                   extraShipping={{ value: extraShipping, onChange: setExtraShipping }}
                   onOpenSettings={() => setShowPricingSettings(true)}

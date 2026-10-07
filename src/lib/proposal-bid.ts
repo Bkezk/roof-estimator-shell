@@ -139,6 +139,11 @@ export interface SavedBidState {
   volumeDiscount?: boolean;
   perDiem?: number;
   perDiemInMarkup?: boolean;
+  /**
+   * The Setup per-diem chart's total joins the Review's Per-Diem Charge (owner, Oct 7); absent =
+   * true. src/lib/per-diem-from-chart.ts.
+   */
+  perDiemFromChart?: boolean;
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
   /** Per-bid setup / inspection time adjustments % (legacy per-item overrides). */

@@ -9,6 +9,7 @@ import { Printer, ArrowLeft } from "lucide-react";
 import { getEngineAdminData } from "@/lib/engine.functions";
 import { getBid, getCompanyInfo, getWarrantyData } from "@/lib/bids.functions";
 import { buildEstimateInputs, NON_DL_LS2_CATEGORIES } from "@/lib/engine/bid-builder";
+import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { buildProposalPricing } from "@/lib/engine/proposal";
 import {
@@ -105,9 +106,16 @@ function ProposalPage() {
     // the estimator, so the proposal price cannot drift), else against live admin data.
     const cd = resolveBidComputeData(saved, admin, warrantyData);
     if (!cd.admin) return null;
+    // The Setup per-diem chart's total joins the Per-Diem Charge here as on Review (owner, Oct 7).
+    const run = runEstimateWithChartPerDiem(
+      buildBidInput(saved, cd.warranty),
+      saved,
+      (b) => buildEstimateInputs(b, cd.admin!),
+      (b) => computeEstimate(b.inputs),
+    );
     const { inputs, parapetMaterial, metalsMaterial, adhesiveMaterial, slipSheetMaterial } =
-      buildEstimateInputs(buildBidInput(saved, cd.warranty), cd.admin);
-    const r = computeEstimate(inputs);
+      run.build;
+    const r = run.r;
 
     const accessoryMaterial = saved.accessories.reduce((s, a) => s + a.price * a.quantity, 0);
     const accessoryLaborHours = saved.accessories.reduce(

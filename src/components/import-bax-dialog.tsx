@@ -15,6 +15,7 @@ import { getWarrantyData, importBids } from "@/lib/bids.functions";
 import { STATUS_LABELS } from "@/lib/bid-status";
 import { buildBidInput, type SavedBidState } from "@/lib/proposal-bid";
 import { buildEstimateInputs } from "@/lib/engine/bid-builder";
+import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
 import { computeEstimate } from "@/lib/engine/estimate";
 import { readBaxXml } from "@/lib/bax/zip";
 import {
@@ -117,15 +118,20 @@ export function ImportBaxDialog(props: { open: boolean; onClose: () => void }) {
           ...buildBidInput(payload, warranty?.warranty ?? liveWarranty ?? null),
           ...(fastenerLookup?.length ? { fastenerLookup } : {}),
         };
-        const build = buildEstimateInputs(bidInput, pricing.admin);
-        const r = computeEstimate(build.inputs);
+        const run = runEstimateWithChartPerDiem(
+          bidInput,
+          payload,
+          (b) => buildEstimateInputs(b, pricing.admin),
+          (b) => computeEstimate(b.inputs),
+        );
+        const r = run.r;
         out.push({
           fileName: file.name,
           conversion,
           payload,
           grandTotal: r.money.grandTotal,
           error: null,
-          notes: [...build.warnings, ...pricing.notes],
+          notes: [...run.build.warnings, ...pricing.notes],
         });
       } catch (e) {
         out.push({
