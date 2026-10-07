@@ -35,13 +35,33 @@ it is ever off at 2:00 AM, the task is set to run as soon as the machine comes b
 with the machine off simply have no backup; the two slots then hold the two most recent runs, and
 nothing is lost or overwritten by the gap.
 
-## Step 1 — Get the two values from Lovable (you, on your own PC)
+## Step 1 — The two values the script needs (read this first)
 
-1. **Project URL**: in this repository's `.env`, `VITE_SUPABASE_URL` — it looks like
-   `https://xxxxxxxx.supabase.co`. (It is also under Cloud in the Lovable project.)
-2. **Service role key**: Lovable → your project → Cloud → Secrets / API keys → the `service_role`
-   key (a long string starting `eyJ…`). It reads every table and every file, so it goes only
-   into the config file on the server (step 3). Never paste it into chat, email or the repository.
+1. **Project URL**: `https://bpmsurjmfkciakkewwtb.supabase.co`. It is public (the repository's `.env`
+   has it as `VITE_SUPABASE_URL`, and every page of the portal sends it to the browser).
+2. **Service role key** — **not available while the portal runs on Lovable Cloud.** Supabase's own
+   troubleshooting page for Lovable Cloud projects says: "Service role and API keys are not
+   accessible for Lovable Cloud–managed projects", the project does not appear in a Supabase
+   dashboard, and external database connections are not supported. Lovable Cloud › Secrets lists
+   the key for the app's own server to use, but does not show its value. **So this script cannot run
+   yet.** The three ways forward, for the owner to pick (Oct 7 chat):
+   - **Lovable's own export, by hand.** Cloud › Overview › Advanced settings › "Export project
+     data" (docs.lovable.dev › Features › Advanced settings › Export Lovable Cloud data). One export
+     per 24 hours, up to 5 GB, a `.backup` file (PostgreSQL `pg_restore` format) with the schema, every
+     table, the security policies and the users; the link arrives by email. It leaves out stored
+     files (photos, PDFs, plans) and secrets. Lovable Cloud also keeps its own database backups
+     (Cloud › Database › "restore backups").
+   - **Move the portal onto our own Supabase project.** Then we own the dashboard, the service key,
+     Supabase's daily backups and point-in-time recovery, and this script runs as written. Lovable
+     says there is no one-click move: export, connect the new project, rebuild the schema (our
+     migrations folder is that schema), load the data, copy the files.
+   - **A portal-side backup door** (an `/api/backup` route on the app's own server, which already
+     holds the key, opened by a separate password). Claude's safety review refused to build this
+     on Oct 7 because it is a new way to read every table with one password; it stays an option
+     only if the owner wants to pursue it with a human developer.
+
+   When a key is in hand it goes only into the config file on the server (step 3). Never paste it
+   into chat, email or the repository.
 
 ## Step 2 — Put the script on the server
 
