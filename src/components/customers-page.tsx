@@ -352,7 +352,8 @@ function AccountList({ activeId }: { activeId?: string | undefined }) {
                 {[
                   a.city,
                   a.account_manager_id ? (userName.get(a.account_manager_id) ?? null) : null,
-                  `${a.site_count} site${a.site_count === 1 ? "" : "s"}`,
+                  // "Property" since Oct 6 (owner, Oct 7: the list still said "2 sites").
+                  `${a.site_count} propert${a.site_count === 1 ? "y" : "ies"}`,
                   a.open_jobs ? `${a.open_jobs} open ticket${a.open_jobs === 1 ? "" : "s"}` : null,
                 ]
                   .filter(Boolean)

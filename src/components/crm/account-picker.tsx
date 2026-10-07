@@ -247,7 +247,7 @@ export function AccountPicker(props: {
                 <span className="font-medium">{h.account_name}</span>
                 <span className="text-muted-foreground">
                   {" "}
-                  ({h.kind}){h.site_count > 1 ? ` · ${h.site_count} sites` : ""}
+                  ({h.kind}){h.site_count > 1 ? ` · ${h.site_count} properties` : ""}
                 </span>
               </span>
             </div>

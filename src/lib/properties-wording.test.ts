@@ -28,6 +28,14 @@ describe("a crm_sites row is a Property", () => {
     );
     expect(src).not.toContain("for each site");
   });
+  it("the customer list and the customer picker count properties, not sites (owner, Oct 7)", () => {
+    const list = read("src/components/customers-page.tsx");
+    expect(list).toContain('`${a.site_count} propert${a.site_count === 1 ? "y" : "ies"}`');
+    expect(list).not.toContain('site${a.site_count === 1 ? "" : "s"}');
+    const picker = read("src/components/crm/account-picker.tsx");
+    expect(picker).toContain("` · ${h.site_count} properties`");
+    expect(picker).not.toContain("} sites`");
+  });
   it("the inner Sites of a property keep their word", () => {
     expect(read("src/components/crm/site-form.tsx")).toContain(
       '<Plus className="mr-1 h-3.5 w-3.5" /> Add site',
