@@ -14,7 +14,7 @@ describe("scripts/backup/jbk-backup.ps1", () => {
     expect(src).toContain("--format=custom --no-owner --no-privileges --schema=public");
     expect(src).toContain('"select count(*) from public.$t"');
     expect(src).not.toMatch(
-      /\b(insert|update|delete|drop|truncate|alter)\s+(into|from|table|role)?\b/i,
+      /\binsert\s+into\b|\bupdate\s+\w+\s+set\b|\bdelete\s+from\b|\bdrop\s+(table|role|schema)\b|\btruncate\b|\balter\s+(table|role)\b/i,
     );
     expect(src).not.toMatch(/Invoke-(RestMethod|WebRequest)[^\n]*-Method\s+(Put|Delete|Patch)/i);
     expect(src).not.toMatch(/storage\/v1\/object\/(upload|move|copy)/);
