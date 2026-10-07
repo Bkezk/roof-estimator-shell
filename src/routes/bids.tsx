@@ -578,27 +578,6 @@ function BidsPage() {
             </Select>
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            View
-            <Button
-              type="button"
-              variant="outline"
-              className="bg-background"
-              aria-pressed={view === "folders"}
-              title={view === "folders" ? "Show the list" : "Show folders by year"}
-              onClick={() => setView(view === "folders" ? "list" : "folders")}
-            >
-              {view === "folders" ? (
-                <>
-                  <FolderOpen className="mr-1 h-4 w-4" /> Folders
-                </>
-              ) : (
-                <>
-                  <List className="mr-1 h-4 w-4" /> List
-                </>
-              )}
-            </Button>
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Status
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[150px] bg-background">
@@ -701,6 +680,27 @@ function BidsPage() {
               />
             </div>
           </fieldset>
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            View
+            <Button
+              type="button"
+              variant="outline"
+              className="bg-background"
+              aria-pressed={view === "folders"}
+              title={view === "folders" ? "Show the list" : "Show folders by year"}
+              onClick={() => setView(view === "folders" ? "list" : "folders")}
+            >
+              {view === "folders" ? (
+                <>
+                  <FolderOpen className="mr-1 h-4 w-4" /> Folders
+                </>
+              ) : (
+                <>
+                  <List className="mr-1 h-4 w-4" /> List
+                </>
+              )}
+            </Button>
+          </label>
           {anyFilter && (
             <Button variant="ghost" size="sm" onClick={clearFilters} className="mb-0.5">
               Clear filters

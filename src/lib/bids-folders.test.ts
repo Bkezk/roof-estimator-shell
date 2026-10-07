@@ -18,13 +18,22 @@ import {
   yearFolders,
 } from "./bids-folders";
 
-const bid = (id: string, created: string, total: number, extra: Record<string, unknown> = {}) => ({
-  id,
-  created_at: created,
-  grand_total: total,
-  ...extra,
-});
-const rows = [
+interface R {
+  id: string;
+  created_at: string;
+  grand_total: number;
+  customer: string;
+  estimator: string;
+  systems: string[];
+  status: string;
+}
+const bid = (
+  id: string,
+  created: string,
+  total: number,
+  extra: Pick<R, "customer" | "estimator" | "systems" | "status">,
+): R => ({ id, created_at: created, grand_total: total, ...extra });
+const rows: R[] = [
   bid("a", "2026-10-06T12:00:00Z", 100, {
     customer: "Owens",
     estimator: "Brian",
@@ -44,7 +53,6 @@ const rows = [
     status: "Draft",
   }),
 ];
-type R = (typeof rows)[number];
 const facts = (b: R) => ({
   customer: b.customer,
   estimator: b.estimator,
