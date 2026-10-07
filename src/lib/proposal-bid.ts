@@ -144,6 +144,8 @@ export interface SavedBidState {
    * true. src/lib/per-diem-from-chart.ts.
    */
   perDiemFromChart?: boolean;
+  /** Unusual-number warnings the estimator waved through, by rule and value (bid-sanity.ts). */
+  sanityAcknowledged?: string[];
   commissionInMarkup?: boolean;
   adjustLaborPct?: number;
   /** Per-bid setup / inspection time adjustments % (legacy per-item overrides). */

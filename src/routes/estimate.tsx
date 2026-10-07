@@ -71,6 +71,13 @@ import { parseEstimateSearch, type EstimateSearch } from "@/lib/estimate-search"
 import { savedFromPlanSwiftSeed } from "@/lib/planswift/to-seed";
 import { emptyPerDiemChart, normalizePerDiemChart } from "@/lib/per-diem-chart";
 import { runEstimateWithChartPerDiem } from "@/lib/per-diem-from-chart";
+import {
+  acknowledgeAll,
+  bidSanityWarnings,
+  sanityFactsFromSaved,
+  unacknowledged,
+  type SanityWarning,
+} from "@/lib/bid-sanity";
 import { PerDiemChartEditor, PerDiemChartView } from "@/components/per-diem-chart";
 import { LaborAdjustDialog } from "@/components/labor-adjust-dialog";
 import { LostReasonDialog } from "@/components/lost-reason-dialog";
@@ -540,6 +547,12 @@ function EstimatePage() {
   const [perDiemInMarkup, setPerDiemInMarkup] = useState(true);
   // The Setup per-diem chart's total joins the Per-Diem Charge (owner, Oct 7); default on.
   const [perDiemFromChart, setPerDiemFromChart] = useState(true);
+  // Unusual numbers waved through on this bid (owner, Oct 7); the save asks about the rest.
+  const [sanityAcknowledged, setSanityAcknowledged] = useState<string[]>([]);
+  const [sanityPrompt, setSanityPrompt] = useState<{
+    warnings: SanityWarning[];
+    after?: (() => void) | undefined;
+  } | null>(null);
   const [commissionInMarkup, setCommissionInMarkup] = useState(false);
   const [adjustLaborPct, setAdjustLaborPct] = useState(0);
   const [adjustSetupPct, setAdjustSetupPct] = useState(0);
@@ -1022,6 +1035,7 @@ function EstimatePage() {
     setVolumeDiscount(d.volumeDiscount ?? false);
     setPerDiem(d.perDiem ?? 0);
     setPerDiemFromChart(d.perDiemFromChart ?? true);
+    setSanityAcknowledged(Array.isArray(d.sanityAcknowledged) ? d.sanityAcknowledged : []);
     setExtraShipping(d.extraShipping ?? 0);
     setPerDiemInMarkup(d.perDiemInMarkup ?? true);
     setCommissionInMarkup(d.commissionInMarkup ?? false);
@@ -1669,6 +1683,7 @@ function EstimatePage() {
     perDiem,
     perDiemInMarkup,
     perDiemFromChart,
+    ...(sanityAcknowledged.length ? { sanityAcknowledged } : {}),
     commissionInMarkup,
     adjustLaborPct,
     adjustSetupPct,
@@ -2119,10 +2134,29 @@ function EstimatePage() {
   };
 
   /** Save the bid (create on first save). Resolves true on success, false when the save failed. */
-  const handleSave = async (): Promise<boolean> => {
+  /** The unusual-number warnings on the bid as it stands (owner, Oct 7). */
+  const sanityWarnings = bidSanityWarnings(sanityFactsFromSaved(saved, result?.r ?? null));
+  const handleSave = async (opts?: {
+    /** Save anyway: wave the listed warnings through and remember them on the bid. */
+    acknowledge?: SanityWarning[];
+    /** What to do after a save that the warning dialog interrupted. */
+    after?: () => void;
+  }): Promise<boolean> => {
     if (readOnly) {
       toast.error(`Read only: ${bidLock.holder?.name ?? "another user"} is editing this bid.`);
       return false;
+    }
+    // Unusual numbers: ask first; "Save anyway" comes back here with them acknowledged.
+    let ack = sanityAcknowledged;
+    if (opts?.acknowledge) {
+      ack = acknowledgeAll(sanityAcknowledged, [...sanityWarnings, ...opts.acknowledge]);
+      setSanityAcknowledged(ack);
+    } else {
+      const open = unacknowledged(sanityWarnings, sanityAcknowledged);
+      if (open.length) {
+        setSanityPrompt({ warnings: open, after: opts?.after });
+        return false;
+      }
     }
     setSaving(true);
     // Send the link only when it changed here (see linkDirty). Cleared now so a pick made while
@@ -2140,6 +2174,7 @@ function EstimatePage() {
           : null);
       const payload: SavedBidState = {
         ...saved,
+        ...(ack.length ? { sanityAcknowledged: ack } : {}),
         ...(snap
           ? {
               adminSnapshot: snap.admin,
@@ -2207,7 +2242,7 @@ function EstimatePage() {
   // Previous / Next save the bid before moving (every step is a checkpoint); a failed save
   // stays put.
   const saveAndGo = async (target: number) => {
-    if (await handleSave()) goStep(target);
+    if (await handleSave({ after: () => goStep(target) })) goStep(target);
   };
 
   // Estimate Review figures (legacy "Export To Excel"): the same figures as the Bid-total panel.
@@ -2555,9 +2590,20 @@ function EstimatePage() {
             );
           })}
           {/* Save is always in reach here (owner: no scrolling to save). */}
+          {sanityWarnings.length > 0 && (
+            <button
+              type="button"
+              className="ml-auto inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+              title={sanityWarnings.map((w) => w.title).join("\n")}
+              onClick={() => setSanityPrompt({ warnings: sanityWarnings })}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+              {sanityWarnings.length} check{sanityWarnings.length === 1 ? "" : "s"}
+            </button>
+          )}
           <Button
-            className="ml-auto"
-            onClick={handleSave}
+            className={sanityWarnings.length > 0 ? "" : "ml-auto"}
+            onClick={() => void handleSave()}
             disabled={saving || readOnly}
             title={
               readOnly
@@ -3602,6 +3648,47 @@ function EstimatePage() {
 
           {/* Legacy Button1_Click: "Pressing OK will apply these Material Defaults to ALL
               existing Roof Sections - Roof System, Design Table, Membrane Type, Color" */}
+          {/* Unusual numbers before a save (owner, Oct 7): ask, show each one, never block. */}
+          <AlertDialog
+            open={sanityPrompt !== null}
+            onOpenChange={(o) => !o && setSanityPrompt(null)}
+          >
+            <AlertDialogContent className="sm:max-w-lg">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are these numbers right?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Before this bid is saved, these look unusual. Go back to fix them, or save anyway
+                  — a number waved through is not asked about again unless it changes.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <ul className="max-h-[50vh] space-y-2 overflow-y-auto text-sm">
+                {(sanityPrompt?.warnings ?? []).map((w) => (
+                  <li
+                    key={w.key}
+                    className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
+                  >
+                    <p className="font-medium">{w.title}</p>
+                    <p className="text-xs text-muted-foreground">{w.detail}</p>
+                  </li>
+                ))}
+              </ul>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setSanityPrompt(null)}>Go back</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    const p = sanityPrompt;
+                    setSanityPrompt(null);
+                    if (!p) return;
+                    void handleSave({ acknowledge: p.warnings }).then((ok) => {
+                      if (ok) p.after?.();
+                    });
+                  }}
+                >
+                  Save anyway
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <AlertDialog open={confirmApplySections} onOpenChange={setConfirmApplySections}>
             <AlertDialogContent>
               <AlertDialogHeader>
