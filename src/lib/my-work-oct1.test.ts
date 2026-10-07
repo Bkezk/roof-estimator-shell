@@ -186,9 +186,9 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.
     // Six when the Needs authorization column shows (M9, owner Oct 5); five otherwise since
     // Today was folded into This week (owner, Oct 6).
-    // Seven with Unassigned as well (owner, Oct 7): listGridClass picks 5, 6 or 7.
+    // As many as the user shows (owner, Oct 7: drag to reorder, X to hide): listGridClass.
     expect(list).toContain(
-      "className={`hidden gap-3 lg:grid lg:grid-cols-3 ${listGridClass(groups.length)}`}",
+      "className={`grid gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}",
     );
     expect(list).toContain("aria-labelledby={`work-col-${g.bucket}`}");
     expect(list).toContain(
@@ -202,7 +202,8 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     expect(list).toContain('role="tab"');
     expect(list).toContain("aria-selected={selected}");
     expect(list).toContain("({g.items.length})");
-    expect(list).toContain("const bucket = picked ?? defaultBucket(groups, preset);");
+    // The tab to start on is among the columns the user shows (Oct 7 layout).
+    expect(list).toContain("const bucket = picked ?? defaultBucket(shown, preset);");
     expect(list).toContain('role="tabpanel"');
     // Each group's items, or its muted empty line, come from one place for both layouts.
     expect(list).toContain(

@@ -2259,6 +2259,7 @@ export type Database = {
           role: string;
           technician: boolean;
           theme: string;
+          work_layout: Json | null;
           updated_at: string;
         };
         Insert: {
@@ -2274,6 +2275,7 @@ export type Database = {
           role?: string;
           technician?: boolean;
           theme?: string;
+          work_layout?: Json | null;
           updated_at?: string;
         };
         Update: {
@@ -2289,6 +2291,7 @@ export type Database = {
           role?: string;
           technician?: boolean;
           theme?: string;
+          work_layout?: Json | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -4203,6 +4206,7 @@ export type Database = {
       stamp_dispatch: { Args: never; Returns: undefined };
       set_job_crew: { Args: { p_job: string; p_rows: Json }; Returns: undefined };
       set_my_theme: { Args: { p_theme: string }; Returns: undefined };
+      set_my_work_layout: { Args: { p_layout: Json | null }; Returns: undefined };
       set_my_notify_prefs: {
         Args: { p_email: boolean | null; p_push: boolean | null };
         Returns: { notify_email: boolean; notify_push: boolean }[];

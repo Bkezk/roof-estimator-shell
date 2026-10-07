@@ -454,13 +454,14 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   done: "Done — waiting on the office",
 };
 
+// Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done".
 const BUCKET_ORDER: WorkBucket[] = [
   "unassigned",
-  "authorize",
   "overdue",
   "today",
   "week",
   "later",
+  "authorize",
   "nodate",
   "done",
 ];

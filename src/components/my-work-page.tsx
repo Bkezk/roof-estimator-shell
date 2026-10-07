@@ -14,7 +14,7 @@
  * state in src/lib/followup-rules.ts.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -23,11 +23,14 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  GripVertical,
   List,
   ListTodo,
   Loader2,
   Plus,
+  RotateCcw,
   Users,
+  X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -59,6 +62,18 @@ import {
   type WorkKind,
 } from "@/lib/my-work";
 import { effectiveView, type MyWorkView } from "@/lib/owner-view";
+import {
+  applyWorkLayout,
+  defaultWorkLayout,
+  hideBucket,
+  isDefaultWorkLayout,
+  moveBucket,
+  readStoredWorkLayout,
+  showBucket,
+  writeStoredWorkLayout,
+  type WorkLayout,
+} from "@/lib/work-layout";
+import { getMyWorkLayout, setMyWorkLayout } from "@/lib/work-layout.functions";
 import { CloseFollowupDialog, SnoozeMenu } from "@/components/followup-controls";
 import { useFollowupActions } from "@/components/followups-shared";
 import { OwnerView } from "@/components/owner-view";
@@ -105,9 +120,18 @@ const KIND_BAR: Record<WorkKind, string> = {
   opportunity: "border-l-rose-500",
 };
 
-/** How many columns the desktop List grid needs for its groups (five to seven). */
+/** How many columns the desktop List grid needs for the columns shown (one to seven). */
+const GRID_COLS: Record<number, string> = {
+  1: "xl:grid-cols-1",
+  2: "xl:grid-cols-2",
+  3: "xl:grid-cols-3",
+  4: "xl:grid-cols-4",
+  5: "xl:grid-cols-5",
+  6: "xl:grid-cols-6",
+  7: "xl:grid-cols-7",
+};
 const listGridClass = (count: number): string =>
-  count >= 7 ? "xl:grid-cols-7" : count === 6 ? "xl:grid-cols-6" : "xl:grid-cols-5";
+  GRID_COLS[Math.min(7, Math.max(1, count))] ?? "xl:grid-cols-7";
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (read as a calendar day, no time zone shift). */
 const dayLabel = (ymd: string) => {
@@ -219,6 +243,8 @@ function ListView({
   onClearPreset,
   authorize = false,
   unassigned = false,
+  layout,
+  onLayout,
 }: {
   items: WorkItem[];
   today: string;
@@ -231,6 +257,9 @@ function ListView({
   /** ?bucket=today|overdue: the tab to open on (the Owner view's links). */
   preset: BucketPreset | null;
   onClearPreset: () => void;
+  /** The user's column order and hidden columns (owner, Oct 7), and how to change them. */
+  layout: WorkLayout;
+  onLayout: (next: WorkLayout) => void;
 }) {
   // Owner (Oct 1): every heading, always, in the same order, across the top — five since Oct 6
   // (no Today: what is due today tops This week). On a desktop (lg and up) they are columns side
@@ -238,9 +267,17 @@ function ListView({
   // each one"); on a phone they are a row of tabs and the
   // selected tab's items show below. An empty group shows its muted line. A preset (?bucket=)
   // picks the tab and marks the column; picking another tab clears it.
+  // Owner (Oct 7): the columns are the user's to arrange — drag a heading onto another column
+  // to move it, the X in a heading hides that column, the "Hidden" chips bring one back, and
+  // "Reset layout" restores the default order (lib/work-layout.ts).
   const groups = useMemo(
     () => listGroups(items, today, { authorize, unassigned }),
     [items, today, authorize, unassigned],
+  );
+  const keep = preset ? presetBucket(preset) : null;
+  const { shown, hidden } = useMemo(
+    () => applyWorkLayout(groups, layout, keep),
+    [groups, layout, keep],
   );
   const [picked, setPicked] = useState<WorkBucket | null>(null);
   // A new preset (an Owner-view link while already here) wins over an earlier pick.
@@ -249,13 +286,14 @@ function ListView({
     setPrevPreset(preset);
     setPicked(null);
   }
-  const bucket = picked ?? defaultBucket(groups, preset);
-  // listGroups always has all six, so the find never misses; the fallback is for the types.
-  const group = groups.find((g) => g.bucket === bucket) ?? {
-    bucket,
-    label: BUCKET_LABELS[bucket],
-    items: [],
-  };
+  const bucket = picked ?? defaultBucket(shown, preset);
+  // The shown groups cover every pick; the fallback is for the types.
+  const group = shown.find((g) => g.bucket === bucket) ??
+    groups.find((g) => g.bucket === bucket) ?? {
+      bucket,
+      label: BUCKET_LABELS[bucket],
+      items: [],
+    };
   const pick = (b: WorkBucket) => {
     setPicked(b);
     if (preset && b !== preset) onClearPreset();
@@ -273,38 +311,128 @@ function ListView({
         <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
       ))
     );
+
+  // Drag a heading onto another column: it lands before a column that was ahead of it, after
+  // one that was behind it (moveBucket), so dropping on the last column makes it last.
+  const [dragging, setDragging] = useState<WorkBucket | null>(null);
+  const [over, setOver] = useState<WorkBucket | null>(null);
+  const endDrag = () => {
+    setDragging(null);
+    setOver(null);
+  };
+  const drop = (target: WorkBucket) => {
+    if (dragging && dragging !== target) onLayout(moveBucket(layout, dragging, target));
+    endDrag();
+  };
+  const customized = !isDefaultWorkLayout(layout);
+  const layoutBar = (hidden.length > 0 || customized) && (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {hidden.length > 0 && <span>Hidden:</span>}
+      {hidden.map((g) => (
+        <Button
+          key={g.bucket}
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => onLayout(showBucket(layout, g.bucket))}
+        >
+          <Plus className="h-3.5 w-3.5" /> {g.label}
+          {g.items.length > 0 && (
+            <span className="tabular-nums text-muted-foreground">({g.items.length})</span>
+          )}
+        </Button>
+      ))}
+      {customized && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={() => onLayout(defaultWorkLayout())}
+        >
+          <RotateCcw className="h-3.5 w-3.5" /> Reset layout
+        </Button>
+      )}
+    </div>
+  );
+
   return (
     <>
-      {/* Desktop: six columns across, every group's items in view at once. */}
-      <div className={`hidden gap-3 lg:grid lg:grid-cols-3 ${listGridClass(groups.length)}`}>
-        {groups.map((g) => (
-          <section
-            key={g.bucket}
-            aria-labelledby={`work-col-${g.bucket}`}
-            className={`min-w-0 space-y-2 rounded-lg border p-2 ${
-              preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""
-            }`}
-          >
-            <h2
-              id={`work-col-${g.bucket}`}
-              className={`flex items-baseline justify-between gap-2 border-b px-1 pb-2 text-sm font-semibold ${
-                isAlert(g) ? "text-destructive" : ""
+      {/* Desktop: the shown columns across, every group's items in view at once. */}
+      <div className="hidden space-y-3 lg:block">
+        {layoutBar}
+        <div className={`grid gap-3 lg:grid-cols-3 ${listGridClass(shown.length)}`}>
+          {shown.map((g) => (
+            <section
+              key={g.bucket}
+              aria-labelledby={`work-col-${g.bucket}`}
+              onDragOver={(e) => {
+                if (!dragging) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (over !== g.bucket) setOver(g.bucket);
+              }}
+              onDragLeave={() => {
+                if (over === g.bucket) setOver(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                drop(g.bucket);
+              }}
+              className={`min-w-0 space-y-2 rounded-lg border p-2 transition-shadow ${
+                preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""
+              } ${over === g.bucket && dragging && dragging !== g.bucket ? "ring-2 ring-primary/60" : ""} ${
+                dragging === g.bucket ? "opacity-60" : ""
               }`}
             >
-              <span className="min-w-0 break-words">{g.label}</span>
-              <span className="shrink-0 font-normal tabular-nums text-muted-foreground">
-                {g.items.length}
-              </span>
-            </h2>
-            {rows(g)}
-          </section>
-        ))}
+              <h2
+                id={`work-col-${g.bucket}`}
+                draggable
+                title="Drag to move this column"
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", g.bucket);
+                  setDragging(g.bucket);
+                }}
+                onDragEnd={endDrag}
+                className={`flex cursor-grab items-center justify-between gap-1 border-b px-1 pb-2 text-sm font-semibold active:cursor-grabbing ${
+                  isAlert(g) ? "text-destructive" : ""
+                }`}
+              >
+                <span className="flex min-w-0 items-center gap-1">
+                  <GripVertical
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 break-words">{g.label}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="font-normal tabular-nums text-muted-foreground">
+                    {g.items.length}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Hide ${g.label}`}
+                    title="Hide this column (bring it back from the Hidden chips)"
+                    onClick={() => onLayout(hideBucket(layout, g.bucket))}
+                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </h2>
+              {rows(g)}
+            </section>
+          ))}
+        </div>
       </div>
 
       {/* Phone and tablet: a row of tabs, the selected group's items below. */}
       <div className="space-y-4 lg:hidden">
+        {layoutBar}
         <div role="tablist" aria-label="Group" className="flex flex-wrap gap-1 border-b">
-          {groups.map((g) => {
+          {shown.map((g) => {
             const selected = g.bucket === bucket;
             const alert = isAlert(g);
             return (
@@ -549,6 +677,38 @@ export function MyWorkPage(props: {
     [q.data, today],
   );
 
+  // The user's column layout (owner, Oct 7): the browser's copy first, then the profile's copy
+  // once it arrives (it wins); every change goes to both.
+  const userId = profile?.id ?? session?.user.id ?? "";
+  const storage = typeof window === "undefined" ? null : window.localStorage;
+  const [layout, setLayout] = useState<WorkLayout>(() => defaultWorkLayout());
+  useEffect(() => {
+    if (!userId) return;
+    const stored = readStoredWorkLayout(storage, userId);
+    if (stored) setLayout(stored);
+  }, [storage, userId]);
+  const layoutFn = useServerFn(getMyWorkLayout);
+  const saveLayoutFn = useServerFn(setMyWorkLayout);
+  const savedLayout = useQuery({
+    queryKey: ["work-layout", userId],
+    queryFn: () => layoutFn(),
+    enabled: !!session && !!userId,
+    staleTime: 5 * 60_000,
+  });
+  useEffect(() => {
+    const l = savedLayout.data?.layout;
+    if (l && userId) {
+      setLayout(l);
+      writeStoredWorkLayout(storage, userId, l);
+    }
+  }, [savedLayout.data, storage, userId]);
+  const saveLayout = useMutation({ mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }) });
+  const onLayout = (l: WorkLayout) => {
+    setLayout(l);
+    if (userId) writeStoredWorkLayout(storage, userId, l);
+    saveLayout.mutate(l);
+  };
+
   // Follow-ups are management's (owner, Oct 1): Snooze / Close only under seesEveryone (admin or
   // manager); the server (canManageFollowup) and the database trigger refuse anyone else.
   const canManage = seesEveryone(profile);
@@ -698,6 +858,8 @@ export function MyWorkPage(props: {
           onClearPreset={() => props.onBucket(null)}
           authorize={!!q.data?.authorizer}
           unassigned={!!q.data?.unassigned}
+          layout={layout}
+          onLayout={onLayout}
         />
       )}
 

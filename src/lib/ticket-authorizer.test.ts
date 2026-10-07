@@ -140,16 +140,19 @@ describe("Work Overview: the Needs authorization tab", () => {
     expect(bucketOf(followupItem({ ...timer, kind: "ticket" }), "2026-10-05")).toBe("today");
   });
   it("first for the authorizer, even empty; hidden for everyone else unless it has items", () => {
+    // Its place since Oct 7: after Later, before No date (the owner's default order).
     expect(listGroups([], "2026-10-05", { authorize: true }).map((g) => g.bucket)).toEqual([
-      "authorize",
       "overdue",
       "week",
       "later",
+      "authorize",
       "nodate",
       "done",
     ]);
     expect(listGroups([], "2026-10-05").map((g) => g.bucket)).not.toContain("authorize");
-    expect(listGroups([followupItem(timer)], "2026-10-05")[0]!.bucket).toBe("authorize");
+    const withTimer = listGroups([followupItem(timer)], "2026-10-05");
+    expect(withTimer.map((g) => g.bucket)).toContain("authorize");
+    expect(withTimer.find((g) => g.bucket === "authorize")!.items).toHaveLength(1);
   });
   it("the server says whether the caller authorizes; the page passes it on", () => {
     const fns = read("src/lib/my-work.functions.ts");
