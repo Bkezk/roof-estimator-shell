@@ -75,7 +75,7 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   edges: defaultEdges(0, 0),
   perimCorners: [false, false, false, false],
   isQuickBid: true,
-  complexity: 3,
+  complexity: 2,
   ...defaults,
 });
 let pseq = 1;

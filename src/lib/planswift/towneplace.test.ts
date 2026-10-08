@@ -230,7 +230,7 @@ describe("towneplace.xlsx — the owner's export, row by row", async () => {
         edges: defaultEdges(0, 0),
         perimCorners: [false, false, false, false],
         isQuickBid: true,
-        complexity: 3,
+        complexity: 2,
         ...d,
       });
       let pseq = 1;

@@ -295,12 +295,12 @@ const newSection = (defaults: Partial<BidSectionInput> = {}): BidSectionInput =>
   pullTest: 350,
   designTable: 60,
   // Legacy Edge Options: four sides (A/C = Length, B/D = Width), no corners, Quick Bid.
-  // Complexity "Medium" (index 3; legacy started at "Moderate" 2 — owner's departure, docs
-  // §22.38; only priced on systems with complexity factors).
+  // Complexity "Moderate" (index 2, as legacy; the Sep 22 "Medium" departure of docs §22.38 was
+  // reversed by the owner on Oct 8, docs §22.56; only priced on systems with complexity factors).
   edges: defaultEdges(0, 0),
   perimCorners: [false, false, false, false],
   isQuickBid: true,
-  complexity: 3,
+  complexity: 2,
   ...defaults,
 });
 

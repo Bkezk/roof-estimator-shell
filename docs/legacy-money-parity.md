@@ -3682,3 +3682,18 @@ Duro-Last's 28" tab 1.5125 / 60" 1.0 / 120" 0.8), complexity (1 / 1.1 / 1.25 / 1
 none), thickness (45 / 60 = 1, 80 = 1.075 vs 40 = 1 / 50 = 1.15 / 60 = 1.25) and no sheet-size
 column (×1). Pineville's section now bills 16.23 h on Duro-Tech TPO. Test:
 `web-membranes-base-hours.test.ts`.
+
+### 22.56 Complexity: legacy ladder on the web membranes, new sections start at Moderate (2026-10-08)
+
+Owner, after §22.55: "have the complexity ladders match and can we have the complexity default to
+moderate instead of medium for all types". (a) Migration `20261008140000_web_membranes_complexity_ladder.sql`
+(applied live) puts the legacy RSComplexityFactor ladder — Open 0.9 / Minor 0.98 / Moderate 1 /
+Medium 1.2 / Heavy 2.4 / Extreme 4 — on both combos of Duro-Tech TPO, Non-DL TPO and EPDM Rubber
+in place of the guide's 1 / 1.1 / 1.25 / 1.4 / 1.6 / 2, so a Moderate section bills ×1 on every
+system (Duro-Last / Duro-Bond / Duro-Roof have no ladder and bill ×1; Duro-Tuff / Duro-Fleece
+already carry this one). The engine's hard-coded fallback `RS_COMPLEXITY_FACTORS[6..8]` keeps the
+guide ladder (engine untouched) but only applies when a combo carries no six-entry list; the live
+combos do. (b) `newSection` starts at complexity index 2 "Moderate" again, as legacy — the
+§22.38 "Medium" departure is reversed. Saved sections keep their stored index. Pineville's TPO
+section (Moderate) now bills 12 × 1.4 × 1 / 2,500 × 1,932 = 12.98 h. Test:
+`section-complexity-default.test.ts`.
