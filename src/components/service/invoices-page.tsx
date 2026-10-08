@@ -74,10 +74,13 @@ import { Label } from "@/components/ui/label";
 export function InvoicesPage({
   toInvoice = false,
   invoiceId,
+  status,
 }: {
   toInvoice?: boolean;
   /** ?id=: that invoice, full width. */
   invoiceId?: string | undefined;
+  /** ?status=: the chip the list opens on ("unpaid" = final + sent; the Owner view's tile). */
+  status?: StatusFilter | undefined;
 }) {
   const { profile } = useAuth();
   if (!seesInvoices(profile))
@@ -91,10 +94,10 @@ export function InvoicesPage({
       </div>
     );
   if (invoiceId) return <InvoiceEditorPage id={invoiceId} />;
-  return <InvoiceList toInvoice={toInvoice} />;
+  return <InvoiceList toInvoice={toInvoice} initialStatus={status ?? "all"} />;
 }
 
-type StatusFilter = "all" | InvoiceStatus;
+type StatusFilter = "all" | InvoiceStatus | "unpaid";
 
 function Chip(props: {
   active: boolean;
@@ -117,14 +120,20 @@ function Chip(props: {
   );
 }
 
-function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
+function InvoiceList({
+  toInvoice,
+  initialStatus,
+}: {
+  toInvoice: boolean;
+  initialStatus: StatusFilter;
+}) {
   const { session } = useAuth();
   const navigate = useNavigate();
   const listFn = useServerFn(listInvoices);
   const awaitingFn = useServerFn(listAwaitingInvoice);
   // The invoice status chips; the Awaiting invoice chip is the URL's (?tab=to-invoice) so the
   // Invoices tab's count lands on it.
-  const [status, setStatusState] = useState<StatusFilter>("all");
+  const [status, setStatusState] = useState<StatusFilter>(initialStatus);
   const setStatus = (s: StatusFilter) => {
     setStatusState(s);
     if (toInvoice) void navigate({ to: "/service/invoices", search: {}, replace: true });
@@ -206,6 +215,13 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
           <Chip active={!toInvoice && status === "all"} onClick={() => setStatus("all")}>
             All
+          </Chip>
+          <Chip
+            active={!toInvoice && status === "unpaid"}
+            title="Final or sent, not yet marked paid"
+            onClick={() => setStatus(!toInvoice && status === "unpaid" ? "all" : "unpaid")}
+          >
+            Unpaid
           </Chip>
           {INVOICE_STATUSES.map((s) => (
             <Chip

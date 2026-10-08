@@ -973,7 +973,7 @@ export const listInvoices = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z
       .object({
-        status: z.enum(INVOICE_STATUSES).optional(),
+        status: z.enum([...INVOICE_STATUSES, "unpaid"]).optional(),
         from: z.string().optional(),
         to: z.string().optional(),
       })
@@ -987,7 +987,9 @@ export const listInvoices = createServerFn({ method: "GET" })
       .order("invoice_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1000);
-    if (data.status) q = q.eq("status", data.status);
+    // "unpaid" (the Unpaid chip / the Owner view's tile): final or sent, not yet marked paid.
+    if (data.status === "unpaid") q = q.in("status", ["final", "sent"]);
+    else if (data.status) q = q.eq("status", data.status);
     if (data.from) q = q.gte("invoice_date", data.from);
     if (data.to) q = q.lte("invoice_date", data.to);
     const { data: rows, error } = await q;

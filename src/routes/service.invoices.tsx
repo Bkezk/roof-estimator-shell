@@ -15,6 +15,6 @@ export const Route = createFileRoute("/service/invoices")({
 });
 
 function InvoicesRoute() {
-  const { tab, id } = Route.useSearch();
-  return <InvoicesPage toInvoice={tab === "to-invoice"} invoiceId={id} />;
+  const { tab, id, status } = Route.useSearch();
+  return <InvoicesPage toInvoice={tab === "to-invoice"} invoiceId={id} status={status} />;
 }

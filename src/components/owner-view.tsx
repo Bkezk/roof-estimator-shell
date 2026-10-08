@@ -51,6 +51,7 @@ import {
 } from "@/lib/owner-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { OwnerBusiness } from "@/components/owner-business";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -121,11 +122,39 @@ export function OwnerView() {
     toggle(id);
   };
 
+  // Owner, Oct 8: a second tab, Business — the money, the pipeline and what is going stale.
+  const [tab, setTab] = useState<"people" | "business">("people");
+  const tabs = (
+    <div className="inline-flex rounded-md border p-0.5" role="group" aria-label="Owner view">
+      {(["people", "business"] as const).map((t) => (
+        <Button
+          key={t}
+          size="sm"
+          variant={tab === t ? "default" : "ghost"}
+          aria-pressed={tab === t}
+          onClick={() => setTab(t)}
+        >
+          {t === "people" ? "People" : "Business"}
+        </Button>
+      ))}
+    </div>
+  );
+  if (tab === "business")
+    return (
+      <div className="space-y-3">
+        {tabs}
+        <OwnerBusiness />
+      </div>
+    );
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {/* Blank until the numbers arrive (never a placeholder 0). */}
-        <p className="min-h-5 text-sm font-medium">{totals ? digestLine(totals) : ""}</p>
+        <div className="flex flex-wrap items-center gap-3">
+          {tabs}
+          {/* Blank until the numbers arrive (never a placeholder 0). */}
+          <p className="min-h-5 text-sm font-medium">{totals ? digestLine(totals) : ""}</p>
+        </div>
         {data && data.rows.length > 0 && (
           <Button
             size="sm"

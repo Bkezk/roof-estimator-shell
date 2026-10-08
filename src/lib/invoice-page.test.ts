@@ -38,7 +38,9 @@ describe("invoiceSearch (the /service/invoices route's search)", () => {
   it("is the route's validateSearch, and the route passes the id to the Invoices page", () => {
     const route = read("src/routes/service.invoices.tsx");
     expect(route).toContain("validateSearch: invoiceSearch,");
-    expect(route).toContain('<InvoicesPage toInvoice={tab === "to-invoice"} invoiceId={id} />');
+    expect(route).toContain(
+      '<InvoicesPage toInvoice={tab === "to-invoice"} invoiceId={id} status={status} />',
+    );
   });
 });
 
