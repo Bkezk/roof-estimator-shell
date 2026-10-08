@@ -74,25 +74,25 @@ describe("what a tick brings with it", () => {
 });
 
 describe("the presets", () => {
-  it("Office: the day-to-day pages and Invoices, not Estimate Pricing; Technician: Service + the tick", () => {
+  it("Office: every day-to-day page, Project Bids and Estimate Pricing included, and Invoices; Technician: Service + the tick", () => {
     const office = ACCESS_PRESETS.find((p) => p.key === "office")!;
     const tech = ACCESS_PRESETS.find((p) => p.key === "technician")!;
     expect(office.access).toEqual([
       "estimate",
+      "pricing",
       "customers",
       "service",
       "invoices",
       "prospect",
       "takeoff",
     ]);
-    expect(office.access).not.toContain("pricing");
     expect(office.technician).toBe(false);
     expect(tech.access).toEqual(["service"]);
     expect(tech.technician).toBe(true);
-    expect(seesInvoices({ role: "user", access: [...office.access], technician: false })).toBe(
-      true,
-    );
-    expect(canAccess({ role: "user", access: [...office.access] }, "pricing")).toBe(false);
+    const o = { role: "user", access: [...office.access], technician: false };
+    expect(seesInvoices(o)).toBe(true);
+    expect(canAccess(o, "estimate")).toBe(true); // Project Bids
+    expect(canAccess(o, "pricing")).toBe(true); // Estimate Pricing (owner, Oct 8)
   });
   it("Admin › Users offers them on the Add user form and routes every change through impliedAccess", () => {
     const src = read("src/routes/admin.users.tsx").replace(/\s+/g, " ");

@@ -54,9 +54,9 @@ export const PAGE_HELP: Record<Page, string> = {
 
 /**
  * One-click setups for a new user (owner, Oct 8: "we dont really have PM or sales roles" — the
- * company has office people, technicians and the owner). Office: the day-to-day pages and
- * invoices; Technician: tickets, on the board. Both plain users; Estimate Pricing is never in a
- * preset (tick it by hand).
+ * company has office people, technicians and the owner). Office: every day-to-day page, Project
+ * Bids (Estimate) and Estimate Pricing included ("office should also include project bids and
+ * estimate pricing"), and Invoices; Technician: tickets, on the board. Both plain users.
  */
 export const ACCESS_PRESETS: ReadonlyArray<{
   key: "office" | "technician";
@@ -68,8 +68,8 @@ export const ACCESS_PRESETS: ReadonlyArray<{
   {
     key: "office",
     label: "Office",
-    help: "Estimate, Customers, Service, Invoices, Prospecting, Takeoff",
-    access: ["estimate", "customers", "service", "invoices", "prospect", "takeoff"],
+    help: "Project Bids (Estimate), Estimate Pricing, Customers, Service, Invoices, Prospecting, Takeoff",
+    access: ["estimate", "pricing", "customers", "service", "invoices", "prospect", "takeoff"],
     technician: false,
   },
   {
