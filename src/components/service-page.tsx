@@ -220,7 +220,7 @@ const locationLabel = (id: string) =>
 
 /**
  * A ticket's stage as a coloured badge (owner, Oct 6: stage-colors.ts, CenterPoint's colour
- * families; a Scheduled ticket says where the tech is; Done ✓, Authorized ✓✓).
+ * families; Done ✓, Authorized ✓✓).
  */
 /** The stage strip's dot colour per stage (stage-colors.ts). */
 const STAGE_DOTS: Record<string, string> = Object.fromEntries(
@@ -240,9 +240,7 @@ function StageBadge({
     <Badge variant="outline" className={`gap-0.5 px-1.5 py-0 text-[11px] ${STAGE_TONES[key].chip}`}>
       {mark === "check" && <Check className="h-3 w-3" aria-hidden />}
       {mark === "double-check" && <CheckCheck className="h-3 w-3" aria-hidden />}
-      {key === "en_route" || key === "on_site"
-        ? `${STAGE_LABELS[stage]} · ${FIELD_TONE_LABELS[key]}`
-        : STAGE_LABELS[stage]}
+      {STAGE_LABELS[stage]}
     </Badge>
   );
 }
@@ -1289,8 +1287,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const claimFn = useServerFn(claimServiceJob);
   const claimMut = useMutation({
     mutationFn: (id: string) => claimFn({ data: { id, date: null } }),
-    onSuccess: () => {
+    onSuccess: (row) => {
       toast.success("Yours — it is on your list now");
+      // The draft follows the claim at once (the page's own save would otherwise send the old,
+      // empty technician back).
+      set("technician_id", row.technician_id ?? "");
       void qc.invalidateQueries();
     },
     onError: (e: Error) => toast.error(e.message || "Could not claim the ticket"),
@@ -1558,6 +1559,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   };
 
   const ro = !canEdit;
+  /** Who the ticket is on right now: the saved ticket's technician; the draft's on a new one. */
+  const assignedId = job ? job.technician_id : draft.technician_id;
   // Close-out: the lead technician (not once the office has invoiced) and managers / admins —
   // the server's rule (setJobCrew, ownJob); an office user who is not a manager sees no button.
   const showCloseOut = canCloseOut(profile, job);
@@ -1956,8 +1959,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">Technician</p>
             <p className="flex min-h-9 flex-wrap items-center gap-2 text-sm">
-              {draft.technician_id
-                ? (techOptions.find((t) => t.id === draft.technician_id)?.name ??
+              {/* The ticket's own technician, not the draft's: the draft is built once when the
+                page opens, and a claim (here or on Work Overview) changes the ticket under it
+                (owner, Oct 8: "it just says unassigned and you"). */}
+              {assignedId
+                ? (techOptions.find((t) => t.id === assignedId)?.name ??
                   job?.technician_name ??
                   "Former assignee")
                 : "Unassigned"}

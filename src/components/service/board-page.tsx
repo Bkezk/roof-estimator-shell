@@ -375,16 +375,7 @@ function Board({ week }: { week?: string | undefined }) {
               <span className="text-xs font-normal text-muted-foreground">{unassignedTotal}</span>
             </h2>
             <StageLegend
-              stages={[
-                "open",
-                "scheduled",
-                "en_route",
-                "on_site",
-                "done",
-                "authorized",
-                "invoiced",
-                "closed",
-              ]}
+              stages={["open", "scheduled", "done", "authorized", "invoiced", "closed"]}
             />
             <Input
               type="search"
@@ -622,9 +613,7 @@ function TicketChip(props: {
     arrival,
     j.site_name,
     j.description,
-    toneKey === "en_route" || toneKey === "on_site"
-      ? `${STAGE_LABELS[stage]} · ${FIELD_TONE_LABELS[toneKey]}`
-      : STAGE_LABELS[stage],
+    STAGE_LABELS[stage],
     canDrag ? "Drag to schedule · click to open" : "Click to open",
   ]
     .filter(Boolean)

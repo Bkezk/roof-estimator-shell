@@ -135,6 +135,11 @@ describe("where it is used", () => {
       '{job && job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}',
     );
     expect(page).toContain("{job && !job.technician_id && !manager && canClaim(profile) && (");
+    // The line reads the TICKET's technician, not the page draft's (a claim changes the ticket
+    // under a draft built when the page opened — "it just says unassigned and you").
+    expect(page).toContain("const assignedId = job ? job.technician_id : draft.technician_id;");
+    expect(page).toContain("{assignedId ? (techOptions.find((t) => t.id === assignedId)?.name ??");
+    expect(page).toContain('set("technician_id", row.technician_id ?? "");');
     expect(page).toContain("onClick={() => claimMut.mutate(job.id)}");
     // Not in the manager's dispatch box: a manager assigns instead.
     expect(page).not.toContain(

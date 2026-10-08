@@ -140,10 +140,6 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
   const address = j.site_address || "";
   const mapQuery = address || [j.site_name, j.customer_name].filter(Boolean).join(", ");
   const phone = j.contact_phone || j.account_phone;
-  const stamps = [
-    j.en_route_at ? `En route ${clock(j.en_route_at)}` : null,
-    j.on_site_at ? `On site ${clock(j.on_site_at)}` : null,
-  ].filter(Boolean);
   const overdue = !!j.scheduled_date && j.scheduled_date < today;
   // The arrival window (M1), when the office set one.
   const arrival = arrivalLabel(j.arrival_window);
@@ -266,12 +262,6 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
         <CheckCircle2 className="mr-2 h-6 w-6" />
         Open ticket
       </Button>
-
-      {stamps.length > 0 && (
-        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-          <span>{stamps.join(" · ")}</span>
-        </div>
-      )}
     </article>
   );
 }

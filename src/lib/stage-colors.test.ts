@@ -20,8 +20,9 @@ describe("stage colours in CenterPoint's families", () => {
   });
   it("a Scheduled card changes colour as the tech goes en route, then on site", () => {
     expect(ticketToneKey({ stage: "scheduled", field_status: null })).toBe("scheduled");
-    expect(ticketToneKey({ stage: "scheduled", field_status: "en_route" })).toBe("en_route");
-    expect(ticketToneKey({ stage: "scheduled", field_status: "on_site" })).toBe("on_site");
+    // Owner, Oct 8: the field steps are gone; a stamp an older ticket carries changes nothing.
+    expect(ticketToneKey({ stage: "scheduled", field_status: "en_route" })).toBe("scheduled");
+    expect(ticketToneKey({ stage: "scheduled", field_status: "on_site" })).toBe("scheduled");
     expect(ticketToneKey({ stage: "done", field_status: "on_site" })).toBe("done");
     expect(STAGE_TONES.en_route.chip).toContain("bg-amber-100");
     expect(STAGE_TONES.on_site.chip).toContain("bg-violet-100");
@@ -47,7 +48,7 @@ describe("used on the board, the ticket list and the stage strip", () => {
     );
     expect(board).toMatch(
       // Every stage's colour in the key (owner, Oct 6: Invoiced was missing).
-      /stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
+      /stages=\{\[\s*"open",\s*"scheduled",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
   });
   it("the ticket list's stage badge and the ticket's stage strip", () => {

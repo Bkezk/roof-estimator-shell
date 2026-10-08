@@ -70,9 +70,9 @@ describe("the Unassigned rail is colour-coded by stage", () => {
     expect(tones).toMatch(/scheduled: tone\(\n\s*"[^"]*\bbg-orange-100\b/);
     expect(tones).not.toMatch(/open: tone\(\n\s*"[^"]*\bbg-muted\b/);
   });
-  it("carries a legend of the board's colours, en route and on site among them", () => {
+  it("carries a legend of the board's colours (the stages only; owner, Oct 8: no En route / On site)", () => {
     expect(board).toMatch(
-      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend\s+stages=\{\[\s*"open",\s*"scheduled",\s*"en_route",\s*"on_site",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
+      /<Inbox className="h-4 w-4" \/> Unassigned[\s\S]*?<StageLegend\s+stages=\{\[\s*"open",\s*"scheduled",\s*"done",\s*"authorized",\s*"invoiced",\s*"closed",?\s*\]\}/,
     );
     expect(board).toMatch(
       /function StageLegend\(\{ stages \}: \{ stages: readonly StageToneKey\[\] \}\)/,
