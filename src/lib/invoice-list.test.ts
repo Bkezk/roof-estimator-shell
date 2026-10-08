@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { invoiceMatches } from "@/lib/invoice-list";
+import { invoiceMatches, sortInvoices } from "@/lib/invoice-list";
 
 const read = (p: string) => readFileSync(p, "utf8");
 
@@ -57,5 +57,68 @@ describe("the Invoices list wears the search box", () => {
   it("a search input filters the rows shown, and the footer sums what is shown", () => {
     expect(page).toContain('placeholder="Search number, customer, property, PO #, Job #"');
     expect(page).toContain("const rows = (list.data ?? []).filter((r) => invoiceMatches(r, q));");
+  });
+});
+
+describe("sortInvoices — click a column heading to sort, again to reverse", () => {
+  const mk = (label: string, invoice_date: string, customer_name: string, total: number) => ({
+    label,
+    invoice_date,
+    customer_name,
+    site_name: null,
+    po_number: null,
+    job_code: null,
+    total,
+    status: "sent",
+    sent_at: null,
+  });
+  const a = mk("4895", "2026-02-23", "Microtel Inn", 356.9);
+  const b = mk("4548.2", "2024-06-13", "Eagle Realty", 1025.86);
+  const c = mk("4548", "2024-06-13", "eagle realty", 12);
+  const d = mk("10001", "2026-10-08", "5K, Inc", 0);
+  it("the number sorts as a number, then its .2 / .3 suffix (4548, 4548.2, 4895, 10001)", () => {
+    expect(sortInvoices([d, a, b, c], "number", "asc").map((r) => r.label)).toEqual([
+      "4548",
+      "4548.2",
+      "4895",
+      "10001",
+    ]);
+  });
+  it("money sorts by amount, not as text", () => {
+    expect(sortInvoices([a, b, c, d], "total", "desc").map((r) => r.total)).toEqual([
+      1025.86, 356.9, 12, 0,
+    ]);
+  });
+  it("text ignores case; a tie keeps the date order; nothing is changed in place", () => {
+    const input = [a, b, c, d];
+    const out = sortInvoices(input, "customer", "asc");
+    expect(out.map((r) => r.customer_name)).toEqual([
+      "5K, Inc",
+      "Eagle Realty",
+      "eagle realty",
+      "Microtel Inn",
+    ]);
+    expect(input).toEqual([a, b, c, d]);
+  });
+  it("blanks go last whichever way the column is sorted", () => {
+    const po = [
+      { ...a, po_number: null },
+      { ...b, po_number: "B-2" },
+      { ...c, po_number: "A-1" },
+    ];
+    expect(sortInvoices(po, "po", "asc").map((r) => r.po_number)).toEqual(["A-1", "B-2", null]);
+    expect(sortInvoices(po, "po", "desc").map((r) => r.po_number)).toEqual(["B-2", "A-1", null]);
+  });
+});
+
+describe("the Invoices list: sortable headings, Customer PO and Job # columns", () => {
+  const page = read("src/components/service/invoices-page.tsx");
+  it("the rows shown are sorted; the headings are buttons that sort", () => {
+    expect(page).toContain("const shown = sortInvoices(rows, sort.key, sort.dir);");
+    expect(page).toContain("<SortHead");
+    for (const h of ['label="Customer PO"', 'label="Job #"']) expect(page).toContain(h);
+  });
+  it("the default is newest first, as before", () => {
+    expect(page).toContain('useState<InvoiceSort>({ key: "date", dir: "desc" })');
   });
 });

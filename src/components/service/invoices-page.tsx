@@ -22,13 +22,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { FileDown, Loader2, Receipt } from "lucide-react";
+import { ArrowDown, ArrowUp, FileDown, Loader2, Receipt } from "lucide-react";
 import { ServiceTabs } from "@/components/service/service-tabs";
 
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
-import { invoiceMatches } from "@/lib/invoice-list";
+import {
+  invoiceMatches,
+  sortInvoices,
+  type InvoiceSort,
+  type InvoiceSortKey,
+} from "@/lib/invoice-list";
 import {
   AWAITING_INVOICE_KEY,
   listAwaitingInvoice,
@@ -129,6 +134,10 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [q, setQ] = useState("");
+  const [sort, setSort] = useState<InvoiceSort>({ key: "date", dir: "desc" });
+  // A click on a heading sorts by it (A–Z, oldest, smallest first); a second click reverses.
+  const sortBy = (key: InvoiceSortKey) =>
+    setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }));
   const [exportOpen, setExportOpen] = useState(false);
 
   const list = useQuery({
@@ -161,6 +170,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   const totalSum = sum((r) => Number(r.total));
   const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
   const openSum = sum((r) => (r.status === "final" || r.status === "sent" ? Number(r.total) : 0));
+  const shown = sortInvoices(rows, sort.key, sort.dir);
   const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
   const open = (serviceJobId: string) =>
     void navigate({ to: "/service", search: { id: serviceJobId } });
@@ -289,22 +299,24 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className="w-full min-w-[1040px] text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2 font-medium">#</th>
-                <th className="px-3 py-2 font-medium">Date</th>
-                <th className="px-3 py-2 font-medium">Customer</th>
-                <th className="px-3 py-2 font-medium">Property</th>
-                <th className="px-3 py-2 text-right font-medium">Total</th>
-                <th className="px-3 py-2 font-medium">Status</th>
+                <SortHead label="#" k="number" sort={sort} onSort={sortBy} />
+                <SortHead label="Date" k="date" sort={sort} onSort={sortBy} />
+                <SortHead label="Customer" k="customer" sort={sort} onSort={sortBy} />
+                <SortHead label="Property" k="property" sort={sort} onSort={sortBy} />
+                <SortHead label="Customer PO" k="po" sort={sort} onSort={sortBy} />
+                <SortHead label="Job #" k="job" sort={sort} onSort={sortBy} />
+                <SortHead label="Total" k="total" sort={sort} onSort={sortBy} right />
+                <SortHead label="Status" k="status" sort={sort} onSort={sortBy} />
                 <th className="px-3 py-2 font-medium">Paid</th>
-                <th className="px-3 py-2 font-medium">Sent</th>
+                <SortHead label="Sent" k="sent" sort={sort} onSort={sortBy} />
                 <th className="px-3 py-2 font-medium">Sage</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
+              {shown.map((r) => {
                 const s = asInvoiceStatus(r.status);
                 return (
                   <tr
@@ -331,6 +343,8 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
                       )}
                     </td>
                     <td className="px-3 py-2">{r.site_name || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{r.po_number || "—"}</td>
+                    <td className="whitespace-nowrap px-3 py-2">{r.job_code || "—"}</td>
                     <td
                       className={`px-3 py-2 text-right tabular-nums ${s === "void" ? "line-through" : ""}`}
                     >
@@ -362,7 +376,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
             </tbody>
             <tfoot>
               <tr className="border-t bg-muted/40 text-sm font-medium">
-                <td className="px-3 py-2" colSpan={4}>
+                <td className="px-3 py-2" colSpan={6}>
                   {live.length} invoice{live.length === 1 ? "" : "s"}
                   {rows.length !== live.length ? " (void left out)" : ""}
                 </td>
@@ -378,6 +392,33 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
 
       {exportOpen && <ExportDialog onClose={() => setExportOpen(false)} />}
     </div>
+  );
+}
+
+/** A column heading that sorts the list; the arrow shows the column and direction in use. */
+function SortHead(props: {
+  label: string;
+  k: InvoiceSortKey;
+  sort: InvoiceSort;
+  onSort: (k: InvoiceSortKey) => void;
+  right?: boolean;
+}) {
+  const on = props.sort.key === props.k;
+  const Arrow = props.sort.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th
+      className={`px-3 py-2 font-medium ${props.right ? "text-right" : ""}`}
+      aria-sort={on ? (props.sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <button
+        type="button"
+        className={`inline-flex items-center gap-1 hover:text-foreground ${on ? "text-foreground" : ""}`}
+        onClick={() => props.onSort(props.k)}
+      >
+        {props.label}
+        {on && <Arrow className="h-3 w-3" aria-hidden />}
+      </button>
+    </th>
   );
 }
 
