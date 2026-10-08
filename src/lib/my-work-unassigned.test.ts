@@ -166,6 +166,32 @@ describe("Unassigned work on Work Overview", () => {
     expect(page).toContain("unassigned={!!q.data?.unassigned}");
   });
 
+  it("an assigned opportunity's row wears the Opportunity badge too, not Follow-up (owner, Oct 8)", () => {
+    const base = {
+      id: "f1",
+      title: "Corbin middle",
+      url: "/opportunities?id=o1",
+      due_at: "2026-09-30T12:00:00Z",
+      status: "open",
+      item_id: "o1",
+      assignee_id: "brian",
+    };
+    const rows = mergeWork({
+      tickets: [],
+      tasks: [],
+      followups: [
+        { ...base, kind: "opportunity" },
+        { ...base, id: "f2", kind: "ticket", title: "Ticket #6005", item_id: "t1" },
+        { ...base, id: "f3", kind: "invoice", title: "Authorize ticket #6005", item_id: "t1" },
+      ],
+    });
+    const by = Object.fromEntries(rows.map((r) => [r.key, r]));
+    expect(by["followup:f1"]).toMatchObject({ kind: "opportunity", title: "Corbin middle" });
+    expect(by["followup:f1"]!.followup?.status).toBe("open");
+    expect(by["followup:f2"]).toMatchObject({ kind: "followup" });
+    expect(by["followup:f3"]).toMatchObject({ kind: "followup", needsAuth: true });
+  });
+
   it("a ticket is either somebody's or nobody's: an assigned ticket never doubles under Unassigned", () => {
     const t = ticket({ technician_id: "ro" });
     const items = mergeWork({

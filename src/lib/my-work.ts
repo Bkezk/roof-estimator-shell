@@ -309,7 +309,10 @@ export function followupItem(
 ): WorkItem {
   return {
     key: `followup:${f.id}`,
-    kind: "followup",
+    // An opportunity's timer is the opportunity's row on the list (owner, Oct 8: "the
+    // opportunity on the work overview doesn't appear as an opportunity it just has a
+    // followup badge"); a ticket's timer and the office's "invoice it" timer stay follow-ups.
+    kind: f.kind === "opportunity" ? "opportunity" : "followup",
     title: f.title,
     where: joinWhere(f.account_name),
     date: toYmd(f.due_at),

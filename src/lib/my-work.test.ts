@@ -108,8 +108,9 @@ describe("My Work items", () => {
       date: "2026-10-02",
       href: "/prospect?building=b1",
     });
+    // An opportunity's follow-up is the opportunity's row: it wears the Opportunity badge (Oct 8).
     expect(byKey["followup:f1"]).toMatchObject({
-      kind: "followup",
+      kind: "opportunity",
       date: "2026-09-28",
       href: "/opportunities?id=o1",
     });

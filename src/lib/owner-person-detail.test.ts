@@ -196,7 +196,8 @@ describe("detail groups hold exactly what the row's numbers count", () => {
   it("Bob's groups, item by item", () => {
     const g = detailGroups(BOB, items, opps, TODAY, followups);
     expect(g.today.map((i) => i.key)).toEqual(["ticket:t1", "ticket:t2", "task:k1", "followup:f1"]);
-    expect(g.today.map((i) => i.kind)).toEqual(["ticket", "inspection", "task", "followup"]);
+    // An opportunity's follow-up row wears the Opportunity badge (owner, Oct 8).
+    expect(g.today.map((i) => i.kind)).toEqual(["ticket", "inspection", "task", "opportunity"]);
     // Oldest first; the overdue opportunity rides in Overdue with its own badge and link.
     expect(g.overdue.map((i) => i.key)).toEqual([
       "opportunity:o1",
