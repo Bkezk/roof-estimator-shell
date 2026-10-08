@@ -76,7 +76,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
+import { canClaim, isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
@@ -100,6 +100,7 @@ import {
   type ServiceJobWithTech,
   type ServiceStage,
   type ServiceType,
+  claimServiceJob,
 } from "@/lib/service.functions";
 import { getAccount, siteAddressLine, type AccountHit } from "@/lib/crm.functions";
 import { getOpportunity, type OpportunityWithNames } from "@/lib/opportunities.functions";
@@ -1284,6 +1285,16 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
 
   const isTech = !isOffice(profile);
   const officeOrAdmin = !isTech;
+  // Owner, Oct 8: an office person ticked Technician takes an unassigned ticket for themselves.
+  const claimFn = useServerFn(claimServiceJob);
+  const claimMut = useMutation({
+    mutationFn: (id: string) => claimFn({ data: { id, date: null } }),
+    onSuccess: () => {
+      toast.success("Yours — it is on your list now");
+      void qc.invalidateQueries();
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not claim the ticket"),
+  });
   // Owner, Oct 1: dispatch (technician, crew), every rate (crew $/hour, labor rate), Repeat (a
   // new ticket) and Delete are a manager's; officeOrAdmin is visibility and layout only.
   const manager = managesTickets(profile);
@@ -1663,7 +1674,20 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const showRate = !!crew && !!draft.technician_id;
   const techRow = (
     <div className="flex items-center gap-2">
-      <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
+        {job && !job.technician_id && !manager && canClaim(profile) && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={claimMut.isPending}
+            onClick={() => claimMut.mutate(job.id)}
+          >
+            Claim
+          </Button>
+        )}
+      </div>
       {crew && showRate && (
         <>
           <div className="w-28 shrink-0">

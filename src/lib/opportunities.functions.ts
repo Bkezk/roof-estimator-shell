@@ -17,7 +17,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess, seesEveryone } from "@/lib/access";
+import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canAccess, canClaim, seesEveryone } from "@/lib/access";
 import { opportunityDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
@@ -29,6 +29,7 @@ import {
 } from "@/lib/opportunity-form";
 import { hasContactMethod } from "@/lib/crm-account";
 import { addDays } from "@/lib/my-work";
+import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
 import { localYmd as easternYmd } from "@/lib/tasks";
 
 export type OpportunityRow = Database["public"]["Tables"]["crm_opportunities"]["Row"];
@@ -585,4 +586,55 @@ export const restoreOpportunity = createServerFn({ method: "POST" })
       .select("id");
     if (error) throw new Error(error.message);
     if (!rows?.length) throw new Error("This opportunity is not deleted");
+  });
+
+/**
+ * Claim an unassigned opportunity for yourself (owner, Oct 8; the Work Overview unassigned
+ * list and calendar). Anyone `canClaim`; the opportunity must be open and have no assignee. A
+ * dropped day becomes its expected close; no day keeps whatever it had. The update is the
+ * caller's own under crm_opportunities_write (Customers access).
+ */
+export const claimOpportunity = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }) => {
+    const p = await me(context);
+    if (!canClaim(p)) throw new Error(CLAIM_NEEDS_TICK);
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("crm_opportunities")
+      .select("assignee_id, status, deleted_at")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur || cur.deleted_at) throw new Error("Opportunity not found");
+    if (cur.assignee_id) throw new Error(CLAIM_TAKEN);
+    if (!(OPEN_OPP_STATUSES as readonly string[]).includes(cur.status))
+      throw new Error("Only an open opportunity can be claimed");
+    const { data: row, error } = await sb
+      .from("crm_opportunities")
+      .update({
+        assignee_id: context.userId,
+        assigned_at: new Date().toISOString(),
+        updated_by_name: nameOf(p),
+        ...(data.date ? { expected_close: data.date } : {}),
+      })
+      .eq("id", data.id)
+      .is("assignee_id", null)
+      .select("id, assignee_id, expected_close")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(CLAIM_TAKEN);
+    return row;
   });

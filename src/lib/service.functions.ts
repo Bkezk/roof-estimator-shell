@@ -15,7 +15,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import {
+  CLAIM_NEEDS_TICK,
+  CLAIM_TAKEN,
+  canAccess,
+  canClaim,
+  isOffice,
+  managesTickets,
+} from "@/lib/access";
 import { assignDateProblem, ticketDateProblem } from "@/lib/ticket-date";
 import { dateMoveNote, dateMoveProblem } from "@/lib/followup-rules";
 import { siteProblem, TICKET_DESCRIPTION_MAX } from "@/lib/ticket-form";
@@ -629,6 +636,71 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       name: nameOf(p),
     });
     // Row 0 of a named crew mirrors the technician (the board shows and moves the lead).
+    const { syncCrewLead } = await import("@/lib/service-crew.server");
+    await syncCrewLead(sb, row.id, row.technician_id);
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
+    return withTechName(sb, row);
+  });
+
+/**
+ * Claim an unassigned ticket for yourself (owner, Oct 8: an office person ticked Technician
+ * "should be able to go in and claim it if need be"; the Work Overview calendar drops one onto
+ * a day). Anyone `canClaim` — ticked Technician, not technician-only, with Service. The ticket
+ * must have no technician and be open or scheduled; a dropped day becomes its date (the same
+ * date rule as dispatch), no day keeps whatever it had. The update is the office's own under
+ * the row rules (no new grant): crew lead, follow-up and date log as dispatch does.
+ */
+export const claimServiceJob = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
+    const p = await serviceWrite(context);
+    if (!canClaim(p)) throw new Error(CLAIM_NEEDS_TICK);
+    if (data.date) {
+      const dateProblem = assignDateProblem(data.date);
+      if (dateProblem) throw new Error(dateProblem);
+    }
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("service_jobs")
+      .select("stage, scheduled_date, technician_id")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Ticket not found");
+    if (cur.technician_id) throw new Error(CLAIM_TAKEN);
+    if (cur.stage !== "open" && cur.stage !== "scheduled")
+      throw new Error("Only an open ticket can be claimed");
+    const scheduled_date = data.date ?? cur.scheduled_date;
+    const { data: row, error } = await sb
+      .from("service_jobs")
+      .update({
+        technician_id: context.userId,
+        scheduled_date,
+        stage: scheduled_date ? "scheduled" : "open",
+        updated_by_name: nameOf(p),
+      })
+      .eq("id", data.id)
+      .is("technician_id", null)
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(CLAIM_TAKEN);
+    await logTicketDateMove(sb, row.id, cur.scheduled_date, row.scheduled_date, {
+      id: context.userId,
+      name: nameOf(p),
+    });
     const { syncCrewLead } = await import("@/lib/service-crew.server");
     await syncCrewLead(sb, row.id, row.technician_id);
     await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);

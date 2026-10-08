@@ -34,9 +34,11 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isAdmin, seesEveryone } from "@/lib/access";
+import { canClaim, isAdmin, seesEveryone } from "@/lib/access";
 import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
+import { claimServiceJob } from "@/lib/service.functions";
+import { claimOpportunity } from "@/lib/opportunities.functions";
 import {
   KIND_LABELS,
   addMonths,
@@ -174,16 +176,22 @@ function FollowupState({ f, today }: { f: WorkFollowup; today: string }) {
  * One item: type badge, title, customer / property, date, status (and whose, when not mine), the
  * follow-up state, and — for admins and managers — Snooze / Close under the link.
  */
+/** How an unassigned item is taken: the row's Claim button (no date) or a drop on a calendar day. */
+type ClaimWork = (item: WorkItem, date: string | null) => void;
+
 function WorkRow({
   item,
   showWho,
   today,
   manage,
+  claim = null,
 }: {
   item: WorkItem;
   showWho: boolean;
   today: string;
   manage: ManageFollowup | null;
+  /** Owner, Oct 8: people ticked Technician who see the unassigned list take it for themselves. */
+  claim?: ClaimWork | null;
 }) {
   const navigate = useNavigate();
   const f = item.followup && item.followup.status === "open" ? item.followup : null;
@@ -230,6 +238,19 @@ function WorkRow({
           {manage(f)}
         </div>
       )}
+      {item.unassigned && claim && (
+        <div className="flex items-center justify-end border-t px-3 py-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            title="Take it for yourself; it keeps its date"
+            onClick={() => claim(item, null)}
+          >
+            Claim
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -245,8 +266,10 @@ function ListView({
   unassigned = false,
   layout,
   onLayout,
+  claim = null,
 }: {
   items: WorkItem[];
+  claim?: ClaimWork | null;
   today: string;
   /** The caller reviews Done tickets: the Needs authorization tab shows, empty or not (M9). */
   authorize?: boolean;
@@ -308,7 +331,14 @@ function ListView({
       <p className="text-sm text-muted-foreground">{BUCKET_EMPTY[g.bucket]}</p>
     ) : (
       g.items.map((it) => (
-        <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+        <WorkRow
+          key={it.key}
+          item={it}
+          showWho={showWho}
+          today={today}
+          manage={manage}
+          claim={claim}
+        />
       ))
     );
 
@@ -482,12 +512,19 @@ function CalendarView({
   today,
   showWho,
   manage,
+  claim = null,
+  unassignedPane = false,
 }: {
   items: WorkItem[];
   today: string;
   showWho: boolean;
   manage: ManageFollowup | null;
+  /** Owner, Oct 8: the unassigned list beside the calendar; a drop on a day claims it for that day. */
+  claim?: ClaimWork | null;
+  unassignedPane?: boolean;
 }) {
+  const unassigned = useMemo(() => items.filter((i) => i.unassigned), [items]);
+  const dragKey = "text/x-work-key";
   const [month, setMonth] = useState(() => today.slice(0, 7));
   const [day, setDay] = useState(today);
   const byDay = useMemo(() => itemsByDay(items), [items]);
@@ -501,6 +538,38 @@ function CalendarView({
     // header, the page title and toolbar, this row of month buttons and the paddings), the weeks
     // divide that height, and the day's items sit beside the grid on xl and up, scrolling inside.
     <div className="flex flex-col gap-4 xl:h-[calc(100vh-15rem)] xl:min-h-[30rem] xl:flex-row">
+      {/* Owner, Oct 8: "the unassigned list on the left of the calendar so people can drag and
+        drop it onto their own calendar". Dragging a row onto a day takes it and dates it there. */}
+      {claim && unassignedPane && (
+        <aside className="flex min-h-0 flex-col gap-2 xl:w-64 xl:shrink-0" aria-label="Unassigned">
+          <h2 className="flex h-10 shrink-0 items-center text-sm font-semibold">
+            Unassigned{" "}
+            <span className="ml-1 font-normal text-muted-foreground">({unassigned.length})</span>
+          </h2>
+          <p className="shrink-0 text-xs text-muted-foreground">
+            Drag one onto a day to take it and put it there, or Claim to take it as is.
+          </p>
+          <div className="min-h-0 flex-1 space-y-2 xl:overflow-y-auto xl:pr-1">
+            {unassigned.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing waiting.</p>
+            ) : (
+              unassigned.map((it) => (
+                <div
+                  key={it.key}
+                  draggable
+                  className="cursor-grab active:cursor-grabbing"
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData(dragKey, it.key);
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                >
+                  <WorkRow item={it} showWho={false} today={today} manage={null} claim={claim} />
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+      )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
         <div className="flex items-center justify-between gap-2">
           <Button
@@ -560,6 +629,24 @@ function CalendarView({
                       key={d}
                       type="button"
                       onClick={() => setDay(d)}
+                      onDragOver={
+                        claim
+                          ? (e) => {
+                              if (e.dataTransfer.types.includes(dragKey)) e.preventDefault();
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        claim
+                          ? (e) => {
+                              const key = e.dataTransfer.getData(dragKey);
+                              const it = unassigned.find((u) => u.key === key);
+                              if (!it) return;
+                              e.preventDefault();
+                              claim(it, d);
+                            }
+                          : undefined
+                      }
                       aria-pressed={d === day}
                       aria-label={`${dayLabel(d)}: ${list.length} item${list.length === 1 ? "" : "s"}`}
                       className={`flex min-h-24 min-w-0 flex-col items-stretch gap-1 overflow-hidden border-r p-1 text-left last:border-r-0 xl:min-h-0 ${
@@ -632,7 +719,14 @@ function CalendarView({
           ) : (
             <div className="grid gap-2 lg:grid-cols-2 xl:grid-cols-1">
               {dayItems.map((it) => (
-                <WorkRow key={it.key} item={it} showWho={showWho} today={today} manage={manage} />
+                <WorkRow
+                  key={it.key}
+                  item={it}
+                  showWho={showWho}
+                  today={today}
+                  manage={manage}
+                  claim={claim}
+                />
               ))}
             </div>
           )}
@@ -674,6 +768,25 @@ export function MyWorkPage(props: {
   useEffect(() => {
     if (errMsg) toast.error(`Could not load your work: ${errMsg}`);
   }, [errMsg]);
+
+  // Owner, Oct 8: claiming unassigned work (the row's Claim, or a drop on a calendar day).
+  const claimTicketFn = useServerFn(claimServiceJob);
+  const claimOppFn = useServerFn(claimOpportunity);
+  const claimMut = useMutation({
+    mutationFn: async (v: { item: WorkItem; date: string | null }) => {
+      const id = v.item.key.slice(v.item.key.indexOf(":") + 1);
+      if (v.item.kind === "opportunity") await claimOppFn({ data: { id, date: v.date } });
+      else await claimTicketFn({ data: { id, date: v.date } });
+    },
+    onSuccess: (_r, v) => {
+      toast.success(v.date ? `Yours, on ${dayLabel(v.date)}` : "Yours — it is on your list now");
+      void qc.invalidateQueries({ queryKey: ["my-work"] });
+    },
+    onError: (e: Error) => toast.error(e.message || "Could not claim it"),
+  });
+  const claim: ClaimWork | null = canClaim(profile)
+    ? (item, date) => claimMut.mutate({ item, date })
+    : null;
 
   const today = localYmd(new Date());
   const items = useMemo(
@@ -850,7 +963,14 @@ export function MyWorkPage(props: {
           </Button>
         </div>
       ) : view === "calendar" ? (
-        <CalendarView items={items} today={today} showWho={showWho} manage={manage} />
+        <CalendarView
+          items={items}
+          today={today}
+          showWho={showWho}
+          manage={manage}
+          claim={claim}
+          unassignedPane={!!q.data?.unassigned}
+        />
       ) : (
         // Nothing at all still shows the six headings, each "(0)" with its empty line.
         <ListView
@@ -864,6 +984,7 @@ export function MyWorkPage(props: {
           unassigned={!!q.data?.unassigned}
           layout={layout}
           onLayout={onLayout}
+          claim={claim}
         />
       )}
 

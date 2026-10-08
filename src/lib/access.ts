@@ -198,12 +198,39 @@ export const seesEveryone = (p: AccessLike | null | undefined): boolean =>
 
 /**
  * The office: sees every ticket (visibility only — creating, dispatching and money are
- * `managesTickets`). Everyone except a technician who is neither an admin nor a manager (that
- * technician sees and edits only their own tickets). The twin of RLS
+ * `managesTickets`). Everyone except a technician-only user (`isFieldOnly`: that technician
+ * sees and edits only their own tickets). The twin of RLS
  * `not is_technician() or is_admin() or is_manager()`.
  */
-export const isOffice = (p: AccessLike | null | undefined): boolean =>
-  !!p && (!p.technician || seesEveryone(p));
+export const isOffice = (p: AccessLike | null | undefined): boolean => !!p && !isFieldOnly(p);
+
+/** The pages a technician-only user may hold: Service, and Inventory (everyone's). */
+const FIELD_PAGES: readonly string[] = ["service", "inventory"];
+
+/**
+ * A technician-only user (owner, Oct 8: "can office keep full visibility even when ticked
+ * technician"): a plain user ticked Technician whose pages go no further than Service and
+ * Inventory. An office person, a manager or an owner ticked Technician is on the board and can
+ * be assigned, but sees and reads everything their kind does. The twin of
+ * `public.is_technician()` (20261008190000).
+ */
+export const isFieldOnly = (p: AccessLike | null | undefined): boolean =>
+  !!p &&
+  p.role === "user" &&
+  !!p.technician &&
+  (p.access ?? []).every((a) => FIELD_PAGES.includes(a));
+
+/**
+ * Who can take unassigned work for themselves (owner, Oct 8: "they should be able to go in and
+ * claim it if need be"): anyone ticked Technician who is not technician-only (an office person,
+ * a manager or an owner on the board) with Service access — the people who see the unassigned
+ * list. A technician-only user never sees an unassigned ticket, so there is nothing to claim.
+ */
+export const canClaim = (p: AccessLike | null | undefined): boolean =>
+  !!p && !!p.technician && isOffice(p) && canAccess(p, "service");
+
+export const CLAIM_NEEDS_TICK = "Claiming is for people ticked Technician who see every ticket";
+export const CLAIM_TAKEN = "Someone already has it";
 
 /**
  * Who runs the tickets and their money: admins and managers only (owner, Oct 1: "only the
