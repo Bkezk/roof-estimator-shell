@@ -52,7 +52,7 @@ describe("the full-width invoice page", () => {
     expect(ed).toContain("function FinalInvoice(");
     expect(ed).toContain("interface LineDraft {");
     expect(ed).toMatch(/<AuditHistory entity="invoice" entityId=\{data\.invoice\.id\}/);
-    // The header links back to the ticket; the chips switch between the ticket's invoices.
+    // The title Invoice #… links to the ticket (owner, Oct 8); the chips switch between its invoices.
     expect(ed).toMatch(/to="\/service"\s+search=\{\{ id: job\.id \}\}/);
     expect(ed).toContain("Ticket #{job.number}");
     expect(ed).toMatch(/to="\/service\/invoices"\s+search=\{\{ id: x\.id \}\}/);

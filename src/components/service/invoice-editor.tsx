@@ -326,21 +326,23 @@ export function InvoiceEditorPage({ id }: { id: string }) {
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Link
-          to="/service"
-          search={{ id: job.id }}
-          className="inline-flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4 shrink-0" />
-          <span className="truncate">
+        {/* Back to the Invoices list; the title opens the ticket (owner, Oct 8). */}
+        {backToList}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-2xl font-bold tracking-tight tabular-nums">
+            <Link
+              to="/service"
+              search={{ id: job.id }}
+              title={`Open ticket #${job.number}`}
+              className="underline-offset-4 hover:underline"
+            >
+              Invoice #{invoiceLabel(inv)}
+            </Link>
+          </h1>
+          <span className="text-sm text-muted-foreground">
             Ticket #{job.number}
             {job.customer_name ? ` · ${job.customer_name}` : ""}
           </span>
-        </Link>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-2xl font-bold tracking-tight tabular-nums">
-            Invoice #{invoiceLabel(inv)}
-          </h1>
           <InvoiceStatusBadge status={inv.status} />
           {inv.updated_by_name && (
             <span className="text-xs text-muted-foreground">
