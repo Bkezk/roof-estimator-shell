@@ -1577,10 +1577,22 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
   return (
     <div className="space-y-4">
+      {/* Only a draft is edited (owner, Oct 8: "i dont see how you can edit an invoice"). */}
       {status === "void" && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
           This invoice is void. It stays on record under its number and is left out of the Sage
-          export.
+          export. To bill this ticket, open it (the title above) and choose Make the invoice.
+        </p>
+      )}
+      {(status === "final" || status === "sent") && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change
+          it, Void it below and make a new invoice from the ticket.
+        </p>
+      )}
+      {status === "paid" && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This invoice is paid, so it can't be edited. A correction goes through Sage.
         </p>
       )}
       <BillTo inv={inv} />
