@@ -3674,7 +3674,7 @@ TPO against 12.4–13.8 h on Duro-Bond: the TPO combo's seeded base 27 h (§22.3
 while Duro-Bond runs its own layout-plus-plates model at 10 h / 2,500. Owner's calibration: the
 Duro-Last mechanical combo was set to 12 h on Admin › Labor › Roof Deck Labor, and "durotech tpo,
 non dl tpo, and epdm should all be 12 instead of 10 or 27". Migration
-`20261008120000_web_membranes_base_hours_12.sql` (applied live) sets `base_hours_per_2500` = 12
+`20261008130000_web_membranes_base_hours_12.sql` (applied live) sets `base_hours_per_2500` = 12
 on the three mechanical combos (were 27 / 27.5 / 31); the multipliers stay as seeded, and they
 differ from Duro-Last's: deck (Steel 1.05 vs 1.064, Concrete 1.325 vs 2, Gypsum / Retrofit 1.225
 vs 1.8 / 1.25), roll width (TPO 30" 2.8 / 60" 1.4 / 120" 0.95 and EPDM 120" 1.0 / 240" 0.85 vs

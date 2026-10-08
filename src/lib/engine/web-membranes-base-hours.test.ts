@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { buildLaborTables, type LaborCombo } from "./adapters";
 import { bandLookup, mechLaborRate, onCenterLookup, roofSectionLaborHours } from "./labor";
 
-const FILE = "supabase/migrations/20261008120000_web_membranes_base_hours_12.sql";
+const FILE = "supabase/migrations/20261008130000_web_membranes_base_hours_12.sql";
 const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
 const flat = (s: string) =>
   s
