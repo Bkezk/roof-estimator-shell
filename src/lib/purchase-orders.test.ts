@@ -333,7 +333,17 @@ describe("the customer's invoice PDF: no purchase orders, no cost, no margin", (
       },
       lines: [
         { description: "Labor", qty: 3, unit: "HR", rate: 95, total: 285, on_date: null },
-        { description: "Pipe boot", qty: 2, unit: "EA", rate: 50, total: 100, on_date: null },
+        // Shown on the invoice (owner, Oct 8); the Labor line is off, so it prints in the one
+        // "Services and materials" row.
+        {
+          description: "Pipe boot",
+          qty: 2,
+          unit: "EA",
+          rate: 50,
+          total: 100,
+          on_date: null,
+          show_on_invoice: true,
+        },
       ],
       job: { signature_path: null, checked_in_with: null, checked_out_with: null },
       repairs: [],
@@ -344,6 +354,8 @@ describe("the customer's invoice PDF: no purchase orders, no cost, no margin", (
     const text = await pdfText(await renderInvoicePdf({} as never, b));
     expect(text).toContain("Grand Total");
     expect(text).toContain("Pipe boot");
+    expect(text).toContain("Services and materials");
+    expect(text).toContain("$285.00");
     expect(text).toContain("$391.00");
     expect(text).toContain("CUST-77"); // the customer's own PO # (not ours) stays
     expect(text).not.toMatch(/purchase order|approved|cost|margin|internal/i);
