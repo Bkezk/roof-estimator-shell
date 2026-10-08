@@ -3664,3 +3664,21 @@ feet apart (Duro-Bond manual, Parapet Fastening options 1 and 3: 18" o.c., rows 
 Open: the durotuff branch `Ceil(AdjustedHeight/24)` is recorded without an Ft2In step; with a
 feet-valued AdjustedHeight that is one row for any wall under 24 ft. Left as ported (inches)
 until re-read against the binary.
+
+### 22.55 Web-only membranes: base hours 12 per 2,500 sq ft (2026-10-08)
+
+Owner (Pineville Independent Preschool): "why is duratech tpo labor almost 3x durabonds labor".
+The section (84 × 23 ft, wood, 60 mil, 60" roll, 18" o.c., Moderate) billed 36.51 h on Duro-Tech
+TPO against 12.4–13.8 h on Duro-Bond: the TPO combo's seeded base 27 h (§22.34, the guide's
+24–30 midpoint) × the Duro-Tuff-cloned 60" width 1.4 × Moderate 1.25 = 47.25 h / 2,500 sq ft,
+while Duro-Bond runs its own layout-plus-plates model at 10 h / 2,500. Owner's calibration: the
+Duro-Last mechanical combo was set to 12 h on Admin › Labor › Roof Deck Labor, and "durotech tpo,
+non dl tpo, and epdm should all be 12 instead of 10 or 27". Migration
+`20261008120000_web_membranes_base_hours_12.sql` (applied live) sets `base_hours_per_2500` = 12
+on the three mechanical combos (were 27 / 27.5 / 31); the multipliers stay as seeded, and they
+differ from Duro-Last's: deck (Steel 1.05 vs 1.064, Concrete 1.325 vs 2, Gypsum / Retrofit 1.225
+vs 1.8 / 1.25), roll width (TPO 30" 2.8 / 60" 1.4 / 120" 0.95 and EPDM 120" 1.0 / 240" 0.85 vs
+Duro-Last's 28" tab 1.5125 / 60" 1.0 / 120" 0.8), complexity (1 / 1.1 / 1.25 / 1.4 / 1.6 / 2 vs
+none), thickness (45 / 60 = 1, 80 = 1.075 vs 40 = 1 / 50 = 1.15 / 60 = 1.25) and no sheet-size
+column (×1). Pineville's section now bills 16.23 h on Duro-Tech TPO. Test:
+`web-membranes-base-hours.test.ts`.
