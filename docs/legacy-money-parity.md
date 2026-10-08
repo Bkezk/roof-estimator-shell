@@ -3699,3 +3699,20 @@ section (Moderate) now bills 12 × 1.4 × 1 / 2,500 × 2,244 = 15.08 h; Duro-Tuf
 bills 15.85 h (10 × 1.4 × 1.25 (60 mil) / 2,500 × its 2,265 sq ft strip layout) — the two differ
 only by base 12 vs 10, thickness 1.0 vs 1.25 and the strip vs roll-goods quantity. Test:
 `section-complexity-default.test.ts`.
+
+### 22.57 Duro-Tuff base 12 h; Duro-Tech TPO 60 mil ×1.25 (2026-10-08)
+
+Owner: "Why is duro tech and duro tuff showing different labor amounts on the Pineville job
+sections" — the real builder on the section gave 15.08 h (TPO: 12 × 1.4 × 1.0 / 2,500 × 2,244)
+against 15.85 h (Duro-Tuff: 10 × 1.4 × 1.25 / 2,500 × 2,265): base, the 60 mil factor and the
+strip-vs-roll quantity. "We also adjusted in estimate pricing the labor from 10 to 12 and saved
+and it doesn't appear to have effected anything even after clicking update pricing": the bid's
+frozen snapshot had been refreshed (pricingAsOf 16:16Z, TPO base 12, legacy ladder), but the
+edit had landed on Duro-Last — the Roof Deck Labor picker opens on its first combo — and the bid
+has no Duro-Last section; Duro-Tuff still read blank (10). "Change tpo 60 mil thickness to
+Match": migration `20261008150000_tuff_base_12_tpo_60mil.sql` (applied live) sets the Duro-Tuff
+mechanical base to 12 and the Duro-Tech TPO 60 mil factor to 1.25 on both attachments (45 mil 1,
+80 mil 1.075 unchanged; Non-DL TPO / EPDM untouched). Pineville now: TPO 18.85 h, Duro-Tuff
+19.03 h — the 1 % left is DuroTuffSystem.CalculateMembraneQty's strip layout (2,265 sq ft)
+against the roll-goods calc (2,244 sq ft). Test: `pineville-labor.test.ts` (real
+buildEstimateInputs on the section, before and after).
