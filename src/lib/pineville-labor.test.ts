@@ -218,4 +218,33 @@ describe("Pineville's section on Duro-Tech TPO and Duro-Tuff", () => {
     expect(sql).toContain("where c.roof_system = 'Duro-Tech TPO'");
     expect(sql).not.toMatch(/Non-DL TPO|EPDM|Duro-Last|Duro-Bond|Duro-Roof|Duro-Fleece/);
   });
+  it("and the follow-up does the same 60 mil factor on Non-DL TPO and EPDM Rubber, both attachments (owner: 'do the same')", () => {
+    const sql = flat(read("supabase/migrations/20261008160000_ndl_tpo_epdm_60mil.sql"));
+    expect(sql).toContain(
+      "case when (t->>'mil') = '60' then jsonb_set(t, '{multiplier}', '1.25'::jsonb) else t end",
+    );
+    expect(sql).toContain("where c.roof_system in ('Non-DL TPO', 'EPDM Rubber')");
+    expect(sql).not.toContain("attachment");
+    expect(sql).not.toMatch(/Duro-Tech|Duro-Last|Duro-Bond|Duro-Roof|Duro-Tuff|Duro-Fleece/);
+    // Only the 60 mil entry moves: a 1.25 landing on 45 / 80 / 75 / 90 would be a wider ladder change.
+    expect(sql).not.toMatch(/'45'|'75'|'80'|'90'/);
+    // The engine reads the factor straight from the ladder: 60 mil ×1.25 on an EPDM-shaped table.
+    const epdm = buildLaborTables(
+      {
+        roof_system: "EPDM Rubber",
+        attachment: "mechanical",
+        base: { tab_value: 120, tab_multiplier: 1 },
+        base_hours_per_2500: 12,
+        thickness_multipliers: [
+          { mil: 45, multiplier: 1 },
+          { mil: 60, multiplier: 1.25 },
+          { mil: 75, multiplier: 1.05 },
+          { mil: 90, multiplier: 1.1 },
+        ],
+      },
+      deckOrder,
+    );
+    expect(epdm.thicknessLaborByMil).toEqual({ 45: 1, 60: 1.25, 75: 1.05, 90: 1.1 });
+    expect(epdm.baseHoursPer2500).toBe(12);
+  });
 });

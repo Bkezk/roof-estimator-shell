@@ -3716,3 +3716,9 @@ mechanical base to 12 and the Duro-Tech TPO 60 mil factor to 1.25 on both attach
 19.03 h — the 1 % left is DuroTuffSystem.CalculateMembraneQty's strip layout (2,265 sq ft)
 against the roll-goods calc (2,244 sq ft). Test: `pineville-labor.test.ts` (real
 buildEstimateInputs on the section, before and after).
+
+Addendum (same day): "do the same for non dl tpo and epdm" — migration
+`20261008160000_ndl_tpo_epdm_60mil.sql` (applied live) sets the 60 mil factor to 1.25 on Non-DL
+TPO and EPDM Rubber, both attachments; the other entries stay as seeded, so the ladders now read
+TPO 45 / 60 / 80 = 1 / 1.25 / 1.075 and EPDM 45 / 60 / 75 / 90 = 1 / 1.25 / 1.05 / 1.1 — the
+heavier mils bill LESS labor than 60 mil until the owner sets them (flagged to the owner).
