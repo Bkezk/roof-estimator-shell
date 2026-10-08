@@ -42,7 +42,7 @@ describe("the three web-only membranes bill 12 h per 2,500 sq ft", () => {
     };
     expect(buildLaborTables(combo, ["Wood"]).baseHoursPer2500).toBe(12);
   });
-  it("Pineville's section (1,932 sq ft, 60\" roll, Moderate) drops from 36.51 h to 16.23 h", () => {
+  it("the rate chain on Pineville's raw 1,932 sq ft (60\" roll, Moderate 1.25) drops from 36.51 h to 16.23 h; the engine bills the 2,244 sq ft membrane-with-overlap, 42.41 → 18.85 h", () => {
     // Live multipliers (mech_tab_multi rs 6: 30 → 2.8, 60 → 1.4, 120 → 0.95; spacing 18 → 1;
     // complexity Moderate 1.25; Wood 1; 60 mil 1).
     const tab = [

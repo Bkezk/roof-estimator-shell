@@ -3668,8 +3668,8 @@ until re-read against the binary.
 ### 22.55 Web-only membranes: base hours 12 per 2,500 sq ft (2026-10-08)
 
 Owner (Pineville Independent Preschool): "why is duratech tpo labor almost 3x durabonds labor".
-The section (84 × 23 ft, wood, 60 mil, 60" roll, 18" o.c., Moderate) billed 36.51 h on Duro-Tech
-TPO against 12.4–13.8 h on Duro-Bond: the TPO combo's seeded base 27 h (§22.34, the guide's
+The section (84 × 23 ft, wood, 60 mil, 60" roll, 18" o.c., Moderate; labor bills the 2,244 sq ft
+MembraneWithOverlap, §20.1) billed 42.41 h on Duro-Tech TPO against 12.4–13.8 h on Duro-Bond: the TPO combo's seeded base 27 h (§22.34, the guide's
 24–30 midpoint) × the Duro-Tuff-cloned 60" width 1.4 × Moderate 1.25 = 47.25 h / 2,500 sq ft,
 while Duro-Bond runs its own layout-plus-plates model at 10 h / 2,500. Owner's calibration: the
 Duro-Last mechanical combo was set to 12 h on Admin › Labor › Roof Deck Labor, and "durotech tpo,
@@ -3680,7 +3680,7 @@ differ from Duro-Last's: deck (Steel 1.05 vs 1.064, Concrete 1.325 vs 2, Gypsum 
 vs 1.8 / 1.25), roll width (TPO 30" 2.8 / 60" 1.4 / 120" 0.95 and EPDM 120" 1.0 / 240" 0.85 vs
 Duro-Last's 28" tab 1.5125 / 60" 1.0 / 120" 0.8), complexity (1 / 1.1 / 1.25 / 1.4 / 1.6 / 2 vs
 none), thickness (45 / 60 = 1, 80 = 1.075 vs 40 = 1 / 50 = 1.15 / 60 = 1.25) and no sheet-size
-column (×1). Pineville's section now bills 16.23 h on Duro-Tech TPO. Test:
+column (×1). Pineville's section now bills 18.85 h on Duro-Tech TPO (12 × 1.4 × 1.25 / 2,500 × 2,244). Test:
 `web-membranes-base-hours.test.ts`.
 
 ### 22.56 Complexity: legacy ladder on the web membranes, new sections start at Moderate (2026-10-08)
@@ -3695,5 +3695,7 @@ already carry this one). The engine's hard-coded fallback `RS_COMPLEXITY_FACTORS
 guide ladder (engine untouched) but only applies when a combo carries no six-entry list; the live
 combos do. (b) `newSection` starts at complexity index 2 "Moderate" again, as legacy — the
 §22.38 "Medium" departure is reversed. Saved sections keep their stored index. Pineville's TPO
-section (Moderate) now bills 12 × 1.4 × 1 / 2,500 × 1,932 = 12.98 h. Test:
+section (Moderate) now bills 12 × 1.4 × 1 / 2,500 × 2,244 = 15.08 h; Duro-Tuff on the same section
+bills 15.85 h (10 × 1.4 × 1.25 (60 mil) / 2,500 × its 2,265 sq ft strip layout) — the two differ
+only by base 12 vs 10, thickness 1.0 vs 1.25 and the strip vs roll-goods quantity. Test:
 `section-complexity-default.test.ts`.
