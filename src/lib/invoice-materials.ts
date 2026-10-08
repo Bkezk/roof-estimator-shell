@@ -195,14 +195,21 @@ export function rateText(n: number | string | null | undefined): string {
  * by hand: it moves with the rate (cost × newRate / rate), so a box line re-entered as 3 screws
  * at $15 does not keep the $91-a-box cost (owner, Oct 1: "where is the cost of 273 coming
  * from?"). `line` is the line as built (its rate and cost per unit before the edit). Any other
- * line, a rate of 0 or a blank new rate keeps the cost as it was.
+ * line, a rate of 0 or a blank new rate keeps the cost as it was. A line re-priced to $0 is
+ * given away ("no charge"), not made free to JBK, so it keeps its cost too.
  */
 export function rescaleCost(
   line: { source: string | null; rate: number | null; cost_rate: number },
   newRate: number | null,
 ): number {
   const rate = line.rate ?? 0;
-  if (!line.source?.startsWith("cell:") || !(rate > 0) || newRate === null || newRate === rate)
+  if (
+    !line.source?.startsWith("cell:") ||
+    !(rate > 0) ||
+    newRate === null ||
+    newRate === 0 ||
+    newRate === rate
+  )
     return line.cost_rate;
   return r4((line.cost_rate * newRate) / rate);
 }

@@ -167,6 +167,11 @@ describe("rescaleCost — a ticket line edited by hand keeps a truthful cost", (
     expect(rescaleCost(built, 159.25)).toBe(91);
     expect(rescaleCost(built, null)).toBe(91);
   });
+  it("a ticket line re-priced to $0 (no charge) keeps its cost, so the margin stays true", () => {
+    // 7 patches billed $5.25, cost $3 each: given away, the $21 of cost must stay.
+    expect(rescaleCost({ source: "cell:a|b|c", rate: 5.25, cost_rate: 3 }, 0)).toBe(3);
+    expect(rescaleCost(built, 0)).toBe(91);
+  });
   it("a labor line, a new line and a zero-rate line keep their cost", () => {
     expect(rescaleCost({ source: "time:12", rate: 95, cost_rate: 40 }, 50)).toBe(40);
     expect(rescaleCost({ source: null, rate: null, cost_rate: 0 }, 20)).toBe(0);
