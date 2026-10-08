@@ -39,6 +39,13 @@ import {
   suggestPlanSwiftBidName,
   type PlanSwiftChoice,
 } from "@/lib/planswift/to-seed";
+import {
+  pickFor,
+  sheetDownspoutSizes,
+  unresolvedRows,
+  type PickLists,
+  type ReviewRow,
+} from "@/lib/planswift/picks";
 import { stashPlanSwiftHandoff } from "@/lib/planswift/handoff";
 import { AccountPicker, type AccountPickerValue } from "@/components/crm/account-picker";
 import { SiteSelect } from "@/components/crm/site-select";
@@ -70,6 +77,9 @@ const num = (x: number) =>
 
 /** The review screen's order: what builds the bid first, "place by hand" and skip last. */
 const TARGET_ORDER: PlanSwiftTarget[] = [...PLANSWIFT_TARGETS];
+
+/** A review row: a choice whose target may still be unanswered. */
+type ReviewChoice = Omit<PlanSwiftChoice, "target"> & { target: PlanSwiftTarget | null };
 
 const CONFIDENCE_STYLE: Record<Confidence, string> = {
   high: "text-emerald-700 dark:text-emerald-400",
@@ -128,7 +138,9 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
   const fileRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [sheet, setSheet] = useState<PlanSwiftSheet | null>(null);
-  const [rows, setRows] = useState<PlanSwiftChoice[]>([]);
+  // The review rows: a row the classifier is unsure of starts with NO target (owner, Oct 8: "if
+  // it doesn't know it'll ask"), and a row whose target needs a pick carries it (lib/planswift/picks.ts).
+  const [rows, setRows] = useState<ReviewChoice[]>([]);
   const [readError, setReadError] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
   const [account, setAccount] = useState<AccountPickerValue | null>(null);
@@ -168,7 +180,13 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
       );
       setSheet(s);
       setFileName(file.name);
-      setRows(classified.map((c) => ({ row: c, target: c.target })));
+      setRows(
+        classified.map((c) => ({
+          row: c,
+          // Unsure and not remembered: ask, rather than guess "place by hand".
+          target: c.confidence === "low" && !c.remembered ? null : c.target,
+        })),
+      );
       if (!nameTouched) setBidName(prefillName(account?.label, file.name));
     } catch (e) {
       const msg = `Could not read ${file.name}: ${errText(e)}`;
@@ -198,16 +216,40 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     setRows((prev) => prev.map((r, j) => (j === i ? { row: r.row, target } : r)));
   const setOnSection = (i: number, sheetRow: number) =>
     setRows((prev) => prev.map((r, j) => (j === i ? { ...r, onSection: sheetRow } : r)));
+  const setPick = (i: number, pick: string) =>
+    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, pick } : r)));
 
   const sectionRows = rows.filter((r) => r.target === "section");
+  // What the picks offer: the live lists, and the downspout sizes the sheet itself names.
+  const lists: PickLists = useMemo(
+    () => ({
+      gutterSizesByStyle: liveAdmin?.metals?.gutters?.sizesByStyle,
+      metalsCatalog,
+      drainBoots: liveAdmin?.accessories?.drainBoots.map((b) => b.description),
+      drainRings: liveAdmin?.accessories?.drainRings.map((r) => r.description),
+    }),
+    [liveAdmin, metalsCatalog],
+  );
+  const sheetSizes = useMemo(() => sheetDownspoutSizes(rows), [rows]);
+  // Rows still waiting on the estimator: no target yet, or an empty pick box.
+  const unresolved = useMemo(
+    () => unresolvedRows(rows as ReviewRow[], lists, sheetSizes),
+    [rows, lists, sheetSizes],
+  );
+  // The seed's choices: a row with no target yet is previewed as "place by hand".
+  const choices: PlanSwiftChoice[] = useMemo(
+    () => rows.map((r) => ({ ...r, target: r.target ?? "unmatched" })),
+    [rows],
+  );
 
   // The seed as it stands (live), for its summary and warnings; errors show instead of the list.
   const preview = useMemo(() => {
-    if (!sheet || rows.length === 0) return null;
+    if (!sheet || choices.length === 0) return null;
     try {
       return {
-        seed: planSwiftSeed(sheet, rows, {
+        seed: planSwiftSeed(sheet, choices, {
           fileName,
+          ...(lists.gutterSizesByStyle ? { gutterSizesByStyle: lists.gutterSizesByStyle } : {}),
           ...(liveAdmin?.underlaymentPrices
             ? { boardNames: Object.keys(liveAdmin.underlaymentPrices) }
             : {}),
@@ -228,12 +270,18 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
     } catch (e) {
       return { seed: null, error: errText(e) };
     }
-  }, [sheet, rows, fileName, liveAdmin, metalsCatalog, walkPadRows, account]);
+  }, [sheet, choices, lists, fileName, liveAdmin, metalsCatalog, walkPadRows, account]);
 
   const create = () => {
     if (busy) return;
     if (!preview?.seed) {
       toast.error(preview?.error ?? "Choose a PlanSwift export first.");
+      return;
+    }
+    if (unresolved.length > 0) {
+      toast.error(
+        `${unresolved.length} row${unresolved.length === 1 ? " needs" : "s need"} your pick before the bid is created.`,
+      );
       return;
     }
     setBusy(true);
@@ -242,7 +290,7 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
       // Only the rows the estimator changed are remembered (the importer's own guesses are not).
       rememberMappings(
         safeStorage("local"),
-        rows.map((r) => ({
+        choices.map((r) => ({
           key: r.row.key,
           target: r.target,
           guessed: r.row.guessed ?? r.row.target,
@@ -383,7 +431,11 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                 <tbody className="divide-y">
                   {rows.map((r, i) => {
                     const c: ClassifiedRow = r.row;
-                    const changed = r.target !== c.target;
+                    const changed = r.target !== null && r.target !== c.target;
+                    const ask = r.target === null;
+                    const pick = r.target ? pickFor(c, r.target, lists, sheetSizes) : null;
+                    const pickMissing =
+                      !!pick && !(r.pick && pick.options.some((o) => o.value === r.pick));
                     return (
                       <tr key={c.row.sheetRow} className={r.target === "skip" ? "opacity-60" : ""}>
                         <td className="max-w-[280px] px-2 py-1.5 align-top">
@@ -404,15 +456,15 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                         </td>
                         <td className="min-w-[190px] px-2 py-1.5 align-top">
                           <Select
-                            value={r.target}
+                            value={r.target ?? ""}
                             onValueChange={(v) => setTarget(i, v as PlanSwiftTarget)}
                             disabled={busy}
                           >
                             <SelectTrigger
-                              className="h-8"
+                              className={`h-8 ${ask ? "border-destructive ring-1 ring-destructive" : ""}`}
                               aria-label={`Where “${c.row.name}” goes`}
                             >
-                              <SelectValue />
+                              <SelectValue placeholder="Pick where it goes…" />
                             </SelectTrigger>
                             <SelectContent>
                               {TARGET_ORDER.map((t) => (
@@ -447,9 +499,37 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
                               </SelectContent>
                             </Select>
                           )}
+                          {pick && (
+                            <Select
+                              value={pickMissing ? "" : (r.pick ?? "")}
+                              onValueChange={(v) => setPick(i, v)}
+                              disabled={busy}
+                            >
+                              <SelectTrigger
+                                className={`mt-1 h-8 text-xs ${pickMissing ? "border-destructive ring-1 ring-destructive" : ""}`}
+                                aria-label={`${pick.question} (${c.row.name})`}
+                              >
+                                <SelectValue placeholder={pick.question} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {pick.options.map((o) => (
+                                  <SelectItem key={o.value} value={o.value}>
+                                    {o.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
                         </td>
                         <td className="px-2 py-1.5 align-top text-xs">
-                          <p>{describeTarget(c, r.target)}</p>
+                          {ask ? (
+                            <p className="font-medium text-destructive">Needs your pick</p>
+                          ) : (
+                            <p>{describeTarget(c, r.target ?? c.target)}</p>
+                          )}
+                          {pickMissing && !ask && (
+                            <p className="font-medium text-destructive">{pick!.question}</p>
+                          )}
                           <p className="text-muted-foreground">
                             {changed ? (
                               <span>your choice (guessed {PLANSWIFT_TARGET_LABELS[c.target]})</span>
@@ -507,7 +587,13 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
           <Button variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={create} disabled={busy || !preview?.seed}>
+          {unresolved.length > 0 && (
+            <p className="mr-auto self-center text-xs font-medium text-destructive">
+              {unresolved.length} row{unresolved.length === 1 ? " needs" : "s need"} your pick
+              (marked in red).
+            </p>
+          )}
+          <Button onClick={create} disabled={busy || !preview?.seed || unresolved.length > 0}>
             {busy ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

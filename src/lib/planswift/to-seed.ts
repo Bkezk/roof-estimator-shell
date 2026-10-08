@@ -32,7 +32,12 @@ import {
   type BidSectionInput,
   type UnderlaymentLayer,
 } from "@/lib/engine/bid-builder";
-import { normalizeMetalsState, type DownspoutEntryState } from "@/lib/engine/metals";
+import {
+  normalizeMetalsState,
+  type DownspoutEntryState,
+  type GutterEntryState,
+} from "@/lib/engine/metals";
+import { bootPickSize, parseElbowPick, parseGutterPick } from "./picks";
 import { defaultEdges } from "@/lib/engine/edges";
 import type { NonDlCustomRow, NonDlGroup } from "@/lib/engine/nondl";
 import { bidSeedFromTakeoff, type TakeoffBidSeed } from "@/lib/takeoff/create-bid";
@@ -91,7 +96,7 @@ export interface PlanSwiftBidSeed extends TakeoffBidSeed {
    * Metals screen state from the sheet (owner, Oct 6, Towneplace Suites: downspouts are the
    * Metals screen's, not Non-DL): downspouts by size — lengths and their drops / elbows.
    */
-  metalsCalc: { downspouts: DownspoutEntryState[] };
+  metalsCalc: { downspouts: DownspoutEntryState[]; gutters: GutterEntryState[] };
   /**
    * Two-piece edge metal by size, in feet (`6" 2-piece` 1,437.55 ft): Accessories › Base & Snap
    * Cover, where the engine prices the compression metal, its covers and corners (legacy
@@ -112,6 +117,12 @@ export interface PlanSwiftChoice {
   target: PlanSwiftTarget;
   /** Tapered rows: the sheet row of the section that carries the quote layer (absent = largest). */
   onSection?: number;
+  /**
+   * The estimator's answer when the row needs one (owner, Oct 8: "if it doesn't know it'll ask";
+   * lib/planswift/picks.ts): a gutter's `style|size`, a downspout's size, an elbow's
+   * `size|row`, a drain's boot. Absent: placed as the name allows, or listed to place by hand.
+   */
+  pick?: string;
 }
 
 export interface PlanSwiftSeedOptions {
@@ -136,6 +147,8 @@ export interface PlanSwiftSeedOptions {
    */
   drainBoots?: readonly string[];
   drainRings?: readonly string[];
+  /** Metals › Gutters sizes by style, for a gutter row's pick (owner's Pineville file, Oct 8). */
+  gutterSizesByStyle?: Record<string, readonly string[]>;
   /** The bid's colour, for walk pads whose name says none ("White" when absent). */
   color?: string;
   accountId?: string | null;
@@ -514,6 +527,9 @@ export function planSwiftSeed(
   };
   const twoPieceFt: Partial<Record<SnapSize, number>> = {};
   const walkPads: Record<string, number> = {};
+  // Metals › Gutters: one entry per style / size the estimator picked (owner's Pineville file,
+  // Oct 8: the gutter had gone to Non-DL Sheet Metals).
+  const gutters: GutterEntryState[] = [];
   const parapetRows: ClassifiedRow[] = [];
   const curbRows: ClassifiedRow[] = [];
   const tapered: PlanSwiftChoice[] = [];
@@ -545,10 +561,27 @@ export function planSwiftSeed(
         parapetRows.push(c);
         break;
       }
-      case "gutter":
-        // Listed here rather than as a takeoff gutter run so the label keeps the sheet's number.
-        unmapped.push({ label: rowLabel(c), detail: "Gutter — add on Metals › Gutters." });
+      case "gutter": {
+        // With a style and size picked on the review screen it is a Metals › Gutters entry;
+        // without one it is listed here so the label keeps the sheet's number.
+        const g = parseGutterPick(ch.pick);
+        if (g && (opts.gutterSizesByStyle?.[g.style] ?? []).includes(g.size)) {
+          const existing = gutters.find((x) => x.style === g.style && x.size === g.size);
+          if (existing) existing.lengthFt = round2(existing.lengthFt + r.qty);
+          else gutters.push({ style: g.style, size: g.size, lengthFt: round2(r.qty), accQty: {} });
+          warnings.push(
+            `${collapse(r.name)}: ${num(round2(r.qty))} ft on Metals › Gutters as ${g.style.replace(/-Style$/, "")} ${g.size} — add its miters, end caps and splice plates there.`,
+          );
+          break;
+        }
+        unmapped.push({
+          label: rowLabel(c),
+          detail: opts.gutterSizesByStyle
+            ? "Gutter — pick its style and size on the review screen, or add it on Metals › Gutters."
+            : "Gutter — add on Metals › Gutters.",
+        });
         break;
+      }
       case "curb": {
         const k: CountQuantity = {
           name: collapse(r.name),
@@ -575,9 +608,12 @@ export function planSwiftSeed(
         };
         // A size in the name picks the boot and the same-size ring from the price list (owner,
         // Oct 8); without one, or without that size in the list, the drain is listed to place.
+        // The review screen's pick (a boot) stands in for a size the name lacks.
+        const pickedIn = ch.pick ? bootPickSize(ch.pick) : null;
+        const sizeIn = d.sizeIn ?? (pickedIn !== null ? pickedIn : undefined);
         const picks =
-          d.sizeIn !== undefined
-            ? matchDrainPicks(d.sizeIn, opts.drainBoots ?? [], opts.drainRings ?? [])
+          sizeIn !== undefined
+            ? matchDrainPicks(sizeIn, opts.drainBoots ?? [], opts.drainRings ?? [])
             : null;
         if (picks) {
           k.bootSize = picks.bootSize;
@@ -624,24 +660,28 @@ export function planSwiftSeed(
           });
           break;
         }
-        if (!d.dsSize) {
+        // The review screen's pick fills in what the name lacks: a size for a length or drops,
+        // the size and the row for an elbow (owner's Pineville file, Oct 8: `45's` ×72).
+        const elbowPick = d.dsPart === "elbow" ? parseElbowPick(ch.pick) : null;
+        const dsSize = d.dsSize ?? elbowPick?.size ?? (d.dsPart !== "elbow" ? ch.pick : undefined);
+        if (!dsSize) {
           unmapped.push({
             label: rowLabel(c),
             detail: `${d.kind ?? "Downspouts"} with no size in the name — pick the size on ${where}.`,
           });
           break;
         }
-        const rows = downspoutRows(opts.metalsCatalog, d.dsSize);
+        const rows = downspoutRows(opts.metalsCatalog, dsSize);
         if (!rows.length) {
           unmapped.push({
             label: rowLabel(c),
             detail: opts.metalsCatalog
-              ? `${d.kind ?? "Downspouts"} ${d.dsSize} — the Metals catalog has no ${d.dsSize} downspout; add it on ${where}.`
-              : `${d.kind ?? "Downspouts"} ${d.dsSize} — add on ${where} (the Metals catalog was not loaded).`,
+              ? `${d.kind ?? "Downspouts"} ${dsSize} — the Metals catalog has no ${dsSize} downspout; add it on ${where}.`
+              : `${d.kind ?? "Downspouts"} ${dsSize} — add on ${where} (the Metals catalog was not loaded).`,
           });
           break;
         }
-        const e = downspoutEntry(d.dsSize);
+        const e = downspoutEntry(dsSize);
         if (d.dsPart === "length") {
           const want = d.dsClosed ? /downspout\s*-\s*closed/i : /downspout\s*-\s*open/i;
           const row =
@@ -650,7 +690,7 @@ export function planSwiftSeed(
           if (!row) {
             unmapped.push({
               label: rowLabel(c),
-              detail: `Downspouts ${d.dsSize} — no length row in the Metals catalog; add on ${where}.`,
+              detail: `Downspouts ${dsSize} — no length row in the Metals catalog; add on ${where}.`,
             });
             break;
           }
@@ -664,7 +704,7 @@ export function planSwiftSeed(
           if (!row) {
             unmapped.push({
               label: rowLabel(c),
-              detail: `Drops ${d.dsSize} — no Drop/Outlet row in the Metals catalog; add on ${where}.`,
+              detail: `Drops ${dsSize} — no Drop/Outlet row in the Metals catalog; add on ${where}.`,
             });
             break;
           }
@@ -677,8 +717,9 @@ export function planSwiftSeed(
             : /\ba[\s-]*style|\ba\b/i.test(r.name)
               ? "A"
               : null;
-          const row =
-            deg && style
+          const row = elbowPick
+            ? rows.find((i) => i.description === elbowPick.description)
+            : deg && style
               ? rows.find(
                   (i) =>
                     i.description.includes(`${deg}°`) &&
@@ -688,7 +729,7 @@ export function planSwiftSeed(
           if (!row) {
             unmapped.push({
               label: rowLabel(c),
-              detail: `Elbows ${d.dsSize} — pick the style (45° / 80°, A / B) on ${where}.`,
+              detail: `Elbows ${dsSize} — pick the style (45° / 80°, A / B) on ${where}.`,
             });
             break;
           }
@@ -993,7 +1034,7 @@ export function planSwiftSeed(
     unmapped: allUnmapped,
     summary,
     nonDlCustom,
-    metalsCalc: { downspouts },
+    metalsCalc: { downspouts, gutters },
     twoPieceFt,
     walkPads,
     importInfo,
@@ -1066,6 +1107,7 @@ export function savedFromPlanSwiftSeed(
     metalsCalc: {
       ...metalsCalc,
       downspouts: [...metalsCalc.downspouts, ...(seed.metalsCalc?.downspouts ?? [])],
+      gutters: [...metalsCalc.gutters, ...(seed.metalsCalc?.gutters ?? [])],
     },
     accessoriesCalc: { ...acc, walkPads: { ...acc.walkPads, qty: walkQty }, snapCover },
     importInfo: seed.importInfo,

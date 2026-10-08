@@ -186,7 +186,7 @@ describe("the import dialog remembers only what the estimator changed", () => {
   it("passes the importer's guess beside each target", () => {
     const src = readFileSync("src/components/import-planswift-dialog.tsx", "utf8");
     expect(src).toMatch(
-      /rememberMappings\(\s*safeStorage\("local"\),\s*rows\.map\(\(r\) => \(\{\s*key: r\.row\.key,\s*target: r\.target,\s*guessed: r\.row\.guessed \?\? r\.row\.target,\s*\}\)\),\s*\);/,
+      /rememberMappings\(\s*safeStorage\("local"\),\s*choices\.map\(\(r\) => \(\{\s*key: r\.row\.key,\s*target: r\.target,\s*guessed: r\.row\.guessed \?\? r\.row\.target,\s*\}\)\),\s*\);/,
     );
   });
 });

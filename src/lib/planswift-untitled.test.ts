@@ -31,7 +31,9 @@ describe("the import dialog", () => {
     expect(src).not.toContain("missingCustomer");
     expect(src).not.toContain("Pick the customer this bid is for");
     expect(src).toContain('<Label htmlFor="planswift-customer">Customer (optional)</Label>');
-    expect(src).toContain("<Button onClick={create} disabled={busy || !preview?.seed}>");
+    expect(src).toContain(
+      "<Button onClick={create} disabled={busy || !preview?.seed || unresolved.length > 0}>",
+    );
   });
   it("leaves the name box blank until a customer is picked (no file-name prefill)", () => {
     expect(src).toContain('customerLabel ? suggestPlanSwiftBidName(customerLabel, fileName) : "";');

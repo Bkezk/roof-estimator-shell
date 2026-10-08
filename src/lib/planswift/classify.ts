@@ -363,7 +363,21 @@ const FT_METALS: Array<{ re: RegExp; kind: string }> = [
   { re: /fascia/i, kind: "Fascia" },
   { re: /edge\s*metal|\bflashing\b|\btrim\b/i, kind: "Edge metal" },
   { re: /expansion\s*joint/i, kind: "Expansion joint" },
+  // Metal roofing trim (owner's Pineville file, Oct 8: Ridge, Valley, Snow Rail were "not
+  // recognised"): Sheet Metals lines like the drip edge and rake beside them.
+  { re: /\bridge\b/i, kind: "Ridge" },
+  { re: /\bvalleys?\b/i, kind: "Valley" },
+  { re: /\bhips?\b/i, kind: "Hip" },
+  { re: /\beaves?\b/i, kind: "Eave" },
+  { re: /snow\s*(?:rail|guard|bar)s?/i, kind: "Snow rail" },
+  { re: /\bstarter\b/i, kind: "Starter" },
 ];
+
+/** A metal or shingle roof area: not a membrane section, not its insulation. */
+const METAL_ROOF_RE =
+  /standing\s*seam|metal\s*roof|\bshingles?\b|\bslate\b|tile\s*roof|\bssr\b|\br[\s-]*panel\b/i;
+/** Walk pads, and their misspellings ("Saftey Wal Pads", owner's Pineville file). */
+const WALK_PAD_RE = /wal+k?\s*(?:way|pads?)\b/i;
 
 const SHEET_METALS = "Non-DL › Sheet Metals";
 const METALS_DOWNSPOUTS = "Metals › Downspouts";
@@ -371,8 +385,10 @@ const SNAP_COVER = "Accessories › Base & Snap Cover";
 
 /** Downspout words: "Downspouts", "Down spouts", "D.S.". */
 const DOWNSPOUT_RE = /down\s*spouts?|\bd\.?s\.?\b/i;
+/** Elbows by name or by angle: "Elbows", "45's", "45s", "90°", "45 degree" (owner's Pineville file: `45's` ×72). */
+const ELBOW_RE = /\belbows?\b|\b(?:45|80|90)\s*(?:°|deg(?:ree)?s?\b|'?s\b)/i;
 /** Counted downspout parts: drops / outlets, elbows. */
-const DOWNSPOUT_PART_RE = /\bdrops?\b|\boutlets?\b|\belbows?\b/i;
+const DOWNSPOUT_PART_RE = new RegExp(`\\bdrops?\\b|\\boutlets?\\b|${ELBOW_RE.source}`, "i");
 /** `6" 2-piece`, `6 in two piece`, `2-Piece Compression 6"`: two-piece edge metal. */
 const TWO_PIECE_RE = /(?:\b2|\btwo)[\s-]*piece/i;
 
@@ -448,6 +464,16 @@ function classifyTarget(
       !!m?.systemWords.length ||
       m?.thicknessMil !== undefined ||
       has(/^\s*roof\s*(?:type|area|section|\d)/i, n);
+    // A metal / shingle roof area (owner's Pineville file, Oct 8: "( 1 ) Standing Seam Metal, HT
+    // Underlayment, Coverboard, 2 Layers of 2" ISO, Steel Deck" was read as a tapered quote): a
+    // Contractor Applications line by the square foot, never a membrane section or its insulation.
+    if (!roofArea && has(METAL_ROOF_RE, n))
+      return out(
+        "nondl",
+        "medium",
+        "a metal / shingle roof area — a Contractor Applications line, not a membrane section",
+        { kind: n.trim(), where: "Non-DL › Contractor Applications" },
+      );
     if (has(/tap+er|cricket|saddle/i, n)) {
       const cricketsOnly = has(/cricket|saddle/i, n) && !has(/tap+er/i, n);
       const quoteBoard = cricketsOnly ? "Tapered Crickets" : "Tapered ISO";
@@ -519,7 +545,7 @@ function classifyTarget(
       });
     if (has(/gutter/i, n))
       return out("gutter", "high", "the name says gutter", { where: "Metals › Gutters" });
-    if (has(/walk\s*(?:way|pad)/i, n))
+    if (has(WALK_PAD_RE, n))
       return out("accessory", "medium", "walkway pads", {
         kind: "Walk pads",
         where: "Accessories › Walk Pads",
@@ -561,8 +587,14 @@ function classifyTarget(
   if (row.unitKind === "ea") {
     // Drops / outlets, elbows and downspout counts belong to Metals › Downspouts, never Curbs
     // (owner, Oct 6, Towneplace Suites: `3" X 4" Drops` ×7 was filed as a 3 × 4 in curb).
+    // A gutter's expansion joints (a count) are a Sheet Metals line, like the ft kind.
+    if (has(/expansion\s*joint/i, n))
+      return out("metals", "medium", "expansion joints", {
+        kind: "Expansion joint",
+        where: SHEET_METALS,
+      });
     if (!has(/boot/i, n) && (has(DOWNSPOUT_PART_RE, n) || has(DOWNSPOUT_RE, n))) {
-      const part: NonNullable<RowDetails["dsPart"]> = has(/\belbows?\b/i, n)
+      const part: NonNullable<RowDetails["dsPart"]> = has(ELBOW_RE, n)
         ? "elbow"
         : has(/\bdrops?\b|\boutlets?\b/i, n)
           ? "Drop/Outlet"
@@ -583,6 +615,13 @@ function classifyTarget(
         details: dd,
       };
     }
+    // Walk pads carry a size too (`30" X 60" Saftey Wal Pads`, owner's Pineville file: filed as
+    // a 30 × 60 curb): the name wins over the W × L.
+    if (has(WALK_PAD_RE, n))
+      return out("accessory", "high", "walk pads", {
+        kind: "Walk pads",
+        where: "Accessories › Walk Pads",
+      });
     if (d.widthIn !== undefined && d.lengthIn !== undefined)
       return out("curb", "high", "a unit with a W × L × H size — a curb");
     if (
@@ -608,11 +647,6 @@ function classifyTarget(
       return out("accessory", "medium", "vents", {
         kind: "Vents",
         where: "Accessories › Vents",
-      });
-    if (has(/walk\s*(?:way|pad)/i, n))
-      return out("accessory", "medium", "walk pads", {
-        kind: "Walk pads",
-        where: "Accessories › Walk Pads",
       });
     if (has(/\bhubs?\b/i, n))
       return out("accessory", "low", "a hub — place it where it belongs", {
