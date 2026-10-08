@@ -168,3 +168,18 @@ export function serviceCategoryOf(list: readonly ServiceMaterialLink[], rowLabel
   const m = list.find((x) => !x.stock_screen_id && x.name === rowLabel);
   return m?.category?.trim() || SERVICE_CATEGORY;
 }
+
+/** "Estimate Pricing › Pipe Stacks › 2" Closed/Open › Price" (per 32 sq ft when sold by the board). */
+export function priceSource(m: {
+  stock_screen_id: string | null;
+  stock_row_label: string | null;
+  stock_price_col: string | null;
+  stock_per_unit?: number | null;
+}): string | null {
+  if (!m.stock_screen_id || !m.stock_row_label || !m.stock_price_col) return null;
+  const screen = (m.stock_screen_id.split(":").pop() ?? m.stock_screen_id)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const per = m.stock_per_unit && m.stock_per_unit !== 1 ? ` × ${m.stock_per_unit}` : "";
+  return `Estimate Pricing › ${screen} › ${m.stock_row_label} › ${m.stock_price_col}${per}`;
+}

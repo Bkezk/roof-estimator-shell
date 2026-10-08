@@ -16,7 +16,7 @@ import { Loader2, Plus, Save, Search } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
 import { listServiceMaterials, saveServiceMaterials } from "@/lib/service-materials.functions";
-import { sellPrice, type ServiceMaterial } from "@/lib/service-materials";
+import { sellPrice, type ServiceMaterial, priceSource } from "@/lib/service-materials";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,6 +38,12 @@ interface Row {
   category: string;
   /** Counted in the bid catalog's stock (its group is the catalog's): no Group field. */
   shared: boolean;
+  /**
+   * The Estimate Pricing cell a shared material takes its cost from (owner, Oct 8: "have the
+   * service materials pull through the prices from the estimate pricing"); the cost box is
+   * read-only for it and the database keeps it in step (20261008170000).
+   */
+  source: string | null;
 }
 const toRow = (m: ServiceMaterial): Row => ({
   key: m.id,
@@ -48,6 +54,7 @@ const toRow = (m: ServiceMaterial): Row => ({
   active: m.active,
   category: m.category ?? "",
   shared: !!m.stock_screen_id,
+  source: priceSource(m),
 });
 const costOf = (r: Row) => {
   const n = Number(r.cost.trim().replace(/^\$/, ""));
@@ -99,6 +106,7 @@ export function MaterialPricingSettings() {
         active: true,
         category: "",
         shared: false,
+        source: null,
       },
       ...(rs ?? []),
     ]);
@@ -164,9 +172,11 @@ export function MaterialPricingSettings() {
       <CardHeader>
         <CardTitle>Material pricing</CardTitle>
         <CardDescription>
-          What repair tickets bill for material. Cost is per unit; Bills at is the cost plus the
-          material markup (cost × {Math.round((1 + markup) * 1000) / 1000}). A draft invoice can use
-          its own markup. Bids are priced on Estimate Pricing — nothing here changes them.
+          What repair tickets bill for material. A material that is also on Estimate Pricing takes
+          its price from there (grey box: change it on Estimate Pricing and it follows). Cost is per
+          unit; Bills at is the cost plus the material markup (cost ×{" "}
+          {Math.round((1 + markup) * 1000) / 1000}). A draft invoice can use its own markup. Bids
+          are priced on Estimate Pricing — nothing here changes them.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -271,9 +281,11 @@ export function MaterialPricingSettings() {
                     />
                     <Input
                       aria-label={`Cost of ${r.name || "material"}`}
-                      className="h-9 tabular-nums"
+                      className={`h-9 tabular-nums ${r.source ? "bg-muted text-muted-foreground" : ""}`}
                       inputMode="decimal"
                       value={r.cost}
+                      readOnly={!!r.source}
+                      title={r.source ? `From ${r.source} — change it there` : undefined}
                       onChange={(e) => edit(r.key, { cost: e.target.value })}
                     />
                     <span className="text-sm tabular-nums text-muted-foreground">
