@@ -57,6 +57,7 @@ import {
   type PlanSwiftTarget,
 } from "./classify";
 import { pipeStackOpenFromName } from "@/lib/pipe-stack-edit";
+import { inchToken, matchDrainPicks } from "./drain-picks";
 import type { PlanSwiftRow, PlanSwiftSheet } from "./parse";
 
 /** What a bid imported from PlanSwift remembers (SavedBidState.importInfo). */
@@ -129,6 +130,12 @@ export interface PlanSwiftSeedOptions {
   metalsCatalog?: readonly MetalsCatalogItem[];
   /** The live Accessories › Walk Pads rows (descriptions), so a walk pad count lands there. */
   walkPadRows?: readonly string[];
+  /**
+   * The live Roof Drains & Boots lists (boot and ring descriptions), so a drain row with a size
+   * (`3" Drains`) lands there with the 3" boot and the 3" ring picked (owner, Oct 8).
+   */
+  drainBoots?: readonly string[];
+  drainRings?: readonly string[];
   /** The bid's colour, for walk pads whose name says none ("White" when absent). */
   color?: string;
   accountId?: string | null;
@@ -559,14 +566,30 @@ export function planSwiftSeed(
         curbRows.push(c);
         break;
       }
-      case "drain":
-        counts.push({
+      case "drain": {
+        const k: CountQuantity = {
           name: collapse(r.name),
           role: "drain",
           qty: Math.round(r.qty),
           objectIds: [id],
-        });
+        };
+        // A size in the name picks the boot and the same-size ring from the price list (owner,
+        // Oct 8); without one, or without that size in the list, the drain is listed to place.
+        const picks =
+          d.sizeIn !== undefined
+            ? matchDrainPicks(d.sizeIn, opts.drainBoots ?? [], opts.drainRings ?? [])
+            : null;
+        if (picks) {
+          k.bootSize = picks.bootSize;
+          k.ringSize = picks.ringSize;
+        } else if (d.sizeIn !== undefined && (opts.drainBoots?.length || opts.drainRings?.length)) {
+          warnings.push(
+            `${k.name}: no ${inchToken(d.sizeIn)} drain boot and ring in the price list — pick them on each drain.`,
+          );
+        }
+        counts.push(k);
         break;
+      }
       case "pipe": {
         const p: CountQuantity = {
           name: collapse(r.name),

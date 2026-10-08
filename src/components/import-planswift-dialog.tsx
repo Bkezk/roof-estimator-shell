@@ -214,6 +214,13 @@ export function ImportPlanSwiftDialog(props: { open: boolean; onClose: () => voi
           ...(liveAdmin?.labor ? { labor: liveAdmin.labor } : {}),
           ...(metalsCatalog ? { metalsCatalog } : {}),
           ...(walkPadRows.length ? { walkPadRows } : {}),
+          // Roof Drains & Boots: a sized drain row picks its boot and ring (owner, Oct 8).
+          ...(liveAdmin?.accessories
+            ? {
+                drainBoots: liveAdmin.accessories.drainBoots.map((b) => b.description),
+                drainRings: liveAdmin.accessories.drainRings.map((r) => r.description),
+              }
+            : {}),
           ...(account ? { accountId: account.account_id } : {}),
         }),
         error: null,

@@ -716,7 +716,7 @@ export function describeTarget(c: ClassifiedRow, target: PlanSwiftTarget = c.tar
     case "pipe":
       return `pipe stack ${d.sizeIn !== undefined ? `${formatInches(d.sizeIn)}"` : "(no size)"}, ×${num(r.qty)}`;
     case "drain":
-      return `drains ×${num(r.qty)}`;
+      return `drains${d.sizeIn !== undefined ? ` ${formatInches(d.sizeIn)}"` : ""} ×${num(r.qty)}`;
     case "coping":
       return `coping ${q} (a Sheet Metals line)`;
     case "gutter":
