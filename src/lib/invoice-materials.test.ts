@@ -179,17 +179,37 @@ describe("rescaleCost — a ticket line edited by hand keeps a truthful cost", (
   });
 });
 
-describe("the editor: no per-line cost; cost and margin folded for managers", () => {
+describe("the editor: each line's cost for the office; cost and margin folded for managers", () => {
   const ed = read("src/components/service/invoice-editor.tsx");
   const header = ed.slice(
     ed.indexOf("<span>Kind</span>"),
     ed.indexOf('<span className="sr-only">Remove</span>'),
   );
-  it("the line table has no Cost column or cost box", () => {
+  // Oct 1 the owner said "we don't need cost shown, this goes out to a customer"; Oct 8, after
+  // comparing with CenterPoint (Billable beside Produced on every line): "cost is needed for the
+  // office but on the customer facing invoice it needs to be toggable and defaulted off". The
+  // office (managesTickets, who see margin) sees and types each line's cost; the PDF still never
+  // prints it (below).
+  it("a Cost column and box on each line, for managesTickets only", () => {
     expect(header).toContain("Rate");
-    expect(header).not.toContain("Cost");
-    expect(ed).not.toMatch(/label=\{`Line \$\{i \+ 1\} cost/);
-    expect(ed).not.toContain("setLine(l.key, { cost_rate");
+    expect(header).toContain('{internal && <span className="text-right">Cost</span>}');
+    expect(ed).toContain("const internal = managesTickets(profile);");
+    expect(ed).toMatch(/\{internal && \(\s*<div>\s*<CellLabel>Cost<\/CellLabel>/);
+    expect(ed).toContain("label={`Line ${i + 1} cost`}");
+    expect(ed).toContain("onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}");
+    expect(ed).toContain("${internal ? LINE_COLS_COST : LINE_COLS}");
+  });
+  it("a cost typed on a ticket line is the office's: Rebuild keeps it, a later price edit scales from it", () => {
+    expect(ed).toContain('if ("cost_rate" in patch) {');
+    expect(ed).toContain("if (l.source) next.rate_overridden = true;");
+    expect(ed).toContain("next.orig = { rate: next.rate ?? 0, cost_rate: next.cost_rate };");
+  });
+  it("the final invoice shows each line's cost to managesTickets too", () => {
+    const final = ed.slice(ed.indexOf("function FinalInvoice("), ed.indexOf("// ---- Dialogs"));
+    expect(final).toContain(
+      '{internal && <th className="py-1.5 pr-2 text-right font-medium">Cost</th>}',
+    );
+    expect(final).toContain("{rateText(l.cost_rate)}");
   });
   it("Subtotal / Tax / Total stay; Cost, Margin, Margin / hour sit in a closed fold for managesTickets", () => {
     const totals = ed.slice(ed.indexOf("function Totals("), ed.indexOf("// ---- Final / sent"));

@@ -326,21 +326,23 @@ export function InvoiceEditorPage({ id }: { id: string }) {
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <Link
-          to="/service"
-          search={{ id: job.id }}
-          className="inline-flex max-w-full items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4 shrink-0" />
-          <span className="truncate">
+        {/* Back to the Invoices list; the title opens the ticket (owner, Oct 8). */}
+        {backToList}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-2xl font-bold tracking-tight tabular-nums">
+            <Link
+              to="/service"
+              search={{ id: job.id }}
+              title={`Open ticket #${job.number}`}
+              className="underline-offset-4 hover:underline"
+            >
+              Invoice #{invoiceLabel(inv)}
+            </Link>
+          </h1>
+          <span className="text-sm text-muted-foreground">
             Ticket #{job.number}
             {job.customer_name ? ` · ${job.customer_name}` : ""}
           </span>
-        </Link>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h1 className="text-2xl font-bold tracking-tight tabular-nums">
-            Invoice #{invoiceLabel(inv)}
-          </h1>
           <InvoiceStatusBadge status={inv.status} />
           {inv.updated_by_name && (
             <span className="text-xs text-muted-foreground">
@@ -527,6 +529,9 @@ function OptionalNumber(props: {
 /** The line table's columns on a wide screen; below lg each line is a small card. */
 const LINE_COLS =
   "lg:grid lg:grid-cols-[112px_minmax(220px,1fr)_88px_76px_112px_56px_112px_36px] lg:items-start lg:gap-2";
+/** The same with a Cost column after Rate, for the office (managesTickets; owner, Oct 8). */
+const LINE_COLS_COST =
+  "lg:grid lg:grid-cols-[112px_minmax(200px,1fr)_88px_76px_112px_112px_56px_112px_36px] lg:items-start lg:gap-2";
 
 /** A label above a line's box on a phone (the table header carries it on a wide screen). */
 function CellLabel({ children }: { children: React.ReactNode }) {
@@ -537,6 +542,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const { job } = ctx;
   const inv = data.invoice;
   const no = invoiceLabel(inv);
+  // The office (admins, managers) sees and types each line's cost (owner, Oct 8).
+  const { profile } = useAuth();
+  const internal = managesTickets(profile);
   const deleteFn = useServerFn(voidInvoice);
   const saveFn = useServerFn(saveInvoice);
   const rebuildFn = useServerFn(rebuildInvoiceLines);
@@ -562,6 +570,12 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         // A rate typed on a ticket's line (material, labor, travel) is the office's from here
         // on: a markup change and Rebuild from ticket keep it (owner, Oct 6).
         if ("rate" in patch && l.source) next.rate_overridden = true;
+        // A cost typed by the office is theirs: Rebuild from ticket keeps the line as typed,
+        // and a later price edit scales from this cost (owner, Oct 8).
+        if ("cost_rate" in patch) {
+          if (l.source) next.rate_overridden = true;
+          next.orig = { rate: next.rate ?? 0, cost_rate: next.cost_rate };
+        }
         return next;
       }),
     );
@@ -911,13 +925,14 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         <section className="min-w-0 space-y-2" aria-label="Lines">
           <h2 className="text-sm font-semibold">Lines</h2>
           <div
-            className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${LINE_COLS}`}
+            className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${internal ? LINE_COLS_COST : LINE_COLS}`}
           >
             <span>Kind</span>
             <span>Description</span>
             <span className="text-right">Qty</span>
             <span>Unit</span>
             <span className="text-right">Rate</span>
+            {internal && <span className="text-right">Cost</span>}
             <span className="text-center">Taxable</span>
             <span className="text-right">Total</span>
             <span className="sr-only">Remove</span>
@@ -932,7 +947,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             {lines.map((l, i) => (
               <div
                 key={l.key}
-                className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${LINE_COLS}`}
+                className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
               >
                 <div className="order-first lg:order-none">
                   <CellLabel>Kind</CellLabel>
@@ -1004,6 +1019,17 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                     onChange={(v) => setLine(l.key, { rate: v })}
                   />
                 </div>
+                {internal && (
+                  <div>
+                    <CellLabel>Cost</CellLabel>
+                    <OptionalNumber
+                      value={l.cost_rate}
+                      step="0.01"
+                      label={`Line ${i + 1} cost`}
+                      onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
+                    />
+                  </div>
+                )}
                 <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
                   <Checkbox
                     checked={l.taxable}
@@ -1490,6 +1516,8 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const { job } = ctx;
   const inv = data.invoice;
   const status: InvoiceStatus = asInvoiceStatus(inv.status);
+  const { profile } = useAuth();
+  const internal = managesTickets(profile);
   const renderFn = useServerFn(renderInvoice);
   const sendFn = useServerFn(sendInvoice);
   const paidFn = useServerFn(markInvoicePaid);
@@ -1575,10 +1603,22 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
 
   return (
     <div className="space-y-4">
+      {/* Only a draft is edited (owner, Oct 8: "i dont see how you can edit an invoice"). */}
       {status === "void" && (
         <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
           This invoice is void. It stays on record under its number and is left out of the Sage
-          export.
+          export. To bill this ticket, open it (the title above) and choose Make the invoice.
+        </p>
+      )}
+      {(status === "final" || status === "sent") && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This invoice is {STATUS_LABELS[status].toLowerCase()}, so it can't be edited. To change
+          it, Void it below and make a new invoice from the ticket.
+        </p>
+      )}
+      {status === "paid" && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          This invoice is paid, so it can't be edited. A correction goes through Sage.
         </p>
       )}
       <BillTo inv={inv} />
@@ -1600,6 +1640,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               <th className="py-1.5 pr-2 text-right font-medium">Qty</th>
               <th className="py-1.5 pr-2 font-medium">Unit</th>
               <th className="py-1.5 pr-2 text-right font-medium">Rate</th>
+              {internal && <th className="py-1.5 pr-2 text-right font-medium">Cost</th>}
               <th className="py-1.5 pr-2 text-right font-medium">Amount</th>
               <th className="py-1.5 text-center font-medium">Tax</th>
             </tr>
@@ -1621,6 +1662,11 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 <td className="py-1.5 pr-2 text-right tabular-nums">{Number(l.qty)}</td>
                 <td className="py-1.5 pr-2">{unitText(Number(l.qty), l.unit)}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{rateText(l.rate)}</td>
+                {internal && (
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
+                    {rateText(l.cost_rate)}
+                  </td>
+                )}
                 <td className="py-1.5 pr-2 text-right tabular-nums">{money(l.total)}</td>
                 <td className="py-1.5 text-center">{l.taxable ? "✓" : ""}</td>
               </tr>
