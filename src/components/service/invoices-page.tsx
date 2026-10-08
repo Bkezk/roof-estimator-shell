@@ -28,6 +28,7 @@ import { ServiceTabs } from "@/components/service/service-tabs";
 import { useAuth } from "@/lib/auth-store";
 import { seesInvoices } from "@/lib/access";
 import { AWAITING_INVOICE_TITLE } from "@/lib/invoice-search";
+import { invoiceMatches } from "@/lib/invoice-list";
 import {
   AWAITING_INVOICE_KEY,
   listAwaitingInvoice,
@@ -127,6 +128,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
     void navigate({ to: "/service/invoices", search: { tab: "to-invoice" }, replace: true });
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [q, setQ] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
 
   const list = useQuery({
@@ -151,14 +153,15 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
   });
   const waiting = toInvoiceRows(jobsQ.data?.rows ?? []);
   const waitingCount = jobsQ.data?.count ?? 0;
-  const rows = list.data ?? [];
+  // The search narrows the rows shown, and the footer sums what is shown.
+  const rows = (list.data ?? []).filter((r) => invoiceMatches(r, q));
   // Void invoices are not money owed; they stay out of the footer sums.
   const live = rows.filter((r) => r.status !== "void");
   const sum = (f: (r: (typeof rows)[number]) => number) => live.reduce((n, r) => n + f(r), 0);
   const totalSum = sum((r) => Number(r.total));
   const paidSum = sum((r) => (r.status === "paid" ? Number(r.paid_amount) : 0));
   const openSum = sum((r) => (r.status === "final" || r.status === "sent" ? Number(r.total) : 0));
-  const anyFilter = status !== "all" || !!from || !!to;
+  const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
   const open = (serviceJobId: string) =>
     void navigate({ to: "/service", search: { id: serviceJobId } });
   const openInvoice = (invoiceId: string) =>
@@ -211,6 +214,16 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
           </p>
         ) : (
           <div className="flex flex-wrap items-end gap-3">
+            <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs text-muted-foreground sm:max-w-sm">
+              Search
+              <Input
+                type="search"
+                value={q}
+                placeholder="Search number, customer, property, PO #, Job #"
+                className="bg-background"
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </label>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               Invoice date from
               <Input
@@ -237,6 +250,7 @@ function InvoiceList({ toInvoice }: { toInvoice: boolean }) {
                   setStatus("all");
                   setFrom("");
                   setTo("");
+                  setQ("");
                 }}
               >
                 Clear filters
