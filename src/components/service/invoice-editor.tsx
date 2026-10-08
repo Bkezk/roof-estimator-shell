@@ -529,6 +529,9 @@ function OptionalNumber(props: {
 /** The line table's columns on a wide screen; below lg each line is a small card. */
 const LINE_COLS =
   "lg:grid lg:grid-cols-[112px_minmax(220px,1fr)_88px_76px_112px_56px_112px_36px] lg:items-start lg:gap-2";
+/** The same with a Cost column after Rate, for the office (managesTickets; owner, Oct 8). */
+const LINE_COLS_COST =
+  "lg:grid lg:grid-cols-[112px_minmax(200px,1fr)_88px_76px_112px_112px_56px_112px_36px] lg:items-start lg:gap-2";
 
 /** A label above a line's box on a phone (the table header carries it on a wide screen). */
 function CellLabel({ children }: { children: React.ReactNode }) {
@@ -539,6 +542,9 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const { job } = ctx;
   const inv = data.invoice;
   const no = invoiceLabel(inv);
+  // The office (admins, managers) sees and types each line's cost (owner, Oct 8).
+  const { profile } = useAuth();
+  const internal = managesTickets(profile);
   const deleteFn = useServerFn(voidInvoice);
   const saveFn = useServerFn(saveInvoice);
   const rebuildFn = useServerFn(rebuildInvoiceLines);
@@ -564,6 +570,12 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         // A rate typed on a ticket's line (material, labor, travel) is the office's from here
         // on: a markup change and Rebuild from ticket keep it (owner, Oct 6).
         if ("rate" in patch && l.source) next.rate_overridden = true;
+        // A cost typed by the office is theirs: Rebuild from ticket keeps the line as typed,
+        // and a later price edit scales from this cost (owner, Oct 8).
+        if ("cost_rate" in patch) {
+          if (l.source) next.rate_overridden = true;
+          next.orig = { rate: next.rate ?? 0, cost_rate: next.cost_rate };
+        }
         return next;
       }),
     );
@@ -913,13 +925,14 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         <section className="min-w-0 space-y-2" aria-label="Lines">
           <h2 className="text-sm font-semibold">Lines</h2>
           <div
-            className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${LINE_COLS}`}
+            className={`hidden border-b pb-1.5 text-xs font-medium text-muted-foreground ${internal ? LINE_COLS_COST : LINE_COLS}`}
           >
             <span>Kind</span>
             <span>Description</span>
             <span className="text-right">Qty</span>
             <span>Unit</span>
             <span className="text-right">Rate</span>
+            {internal && <span className="text-right">Cost</span>}
             <span className="text-center">Taxable</span>
             <span className="text-right">Total</span>
             <span className="sr-only">Remove</span>
@@ -934,7 +947,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             {lines.map((l, i) => (
               <div
                 key={l.key}
-                className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${LINE_COLS}`}
+                className={`grid grid-cols-2 gap-2 rounded-md border p-3 lg:rounded-none lg:border-0 lg:border-b lg:px-0 lg:py-1.5 ${internal ? LINE_COLS_COST : LINE_COLS}`}
               >
                 <div className="order-first lg:order-none">
                   <CellLabel>Kind</CellLabel>
@@ -1006,6 +1019,17 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                     onChange={(v) => setLine(l.key, { rate: v })}
                   />
                 </div>
+                {internal && (
+                  <div>
+                    <CellLabel>Cost</CellLabel>
+                    <OptionalNumber
+                      value={l.cost_rate}
+                      step="0.01"
+                      label={`Line ${i + 1} cost`}
+                      onChange={(v) => setLine(l.key, { cost_rate: v ?? 0 })}
+                    />
+                  </div>
+                )}
                 <label className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center">
                   <Checkbox
                     checked={l.taxable}
@@ -1492,6 +1516,8 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
   const { job } = ctx;
   const inv = data.invoice;
   const status: InvoiceStatus = asInvoiceStatus(inv.status);
+  const { profile } = useAuth();
+  const internal = managesTickets(profile);
   const renderFn = useServerFn(renderInvoice);
   const sendFn = useServerFn(sendInvoice);
   const paidFn = useServerFn(markInvoicePaid);
@@ -1614,6 +1640,7 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
               <th className="py-1.5 pr-2 text-right font-medium">Qty</th>
               <th className="py-1.5 pr-2 font-medium">Unit</th>
               <th className="py-1.5 pr-2 text-right font-medium">Rate</th>
+              {internal && <th className="py-1.5 pr-2 text-right font-medium">Cost</th>}
               <th className="py-1.5 pr-2 text-right font-medium">Amount</th>
               <th className="py-1.5 text-center font-medium">Tax</th>
             </tr>
@@ -1635,6 +1662,11 @@ function FinalInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                 <td className="py-1.5 pr-2 text-right tabular-nums">{Number(l.qty)}</td>
                 <td className="py-1.5 pr-2">{unitText(Number(l.qty), l.unit)}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">{rateText(l.rate)}</td>
+                {internal && (
+                  <td className="py-1.5 pr-2 text-right tabular-nums text-muted-foreground">
+                    {rateText(l.cost_rate)}
+                  </td>
+                )}
                 <td className="py-1.5 pr-2 text-right tabular-nums">{money(l.total)}</td>
                 <td className="py-1.5 text-center">{l.taxable ? "✓" : ""}</td>
               </tr>
