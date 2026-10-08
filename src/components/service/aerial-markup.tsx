@@ -47,6 +47,8 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { placePercent, popoverSide, textBoxWidthCh } from "@/lib/aerial-place";
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import type { ServiceJobRow } from "@/lib/service.functions";
 import { listJobPhotos } from "@/lib/service-field.functions";
 import {
@@ -287,7 +289,28 @@ function AerialEditor({
     }
     setViewRaw(v);
   };
-  const [pending, setPending] = useState<{ kind: "pin" | "text"; at: LngLat } | null>(null);
+  // A tag or text being placed (owner, Oct 8): the tag is drawn at once with its menu beside
+  // it, the text box opens at the click; `label` is what has been typed so far.
+  const [pending, setPending] = useState<{
+    kind: "pin" | "text";
+    at: LngLat;
+    label: string;
+  } | null>(null);
+  const addPending = (fields: { label: string; note: string }) => {
+    if (!pending || !fields.label.trim()) {
+      setPending(null);
+      return;
+    }
+    const base = { id: newAnnotationId(), color, at: pending.at };
+    dispatch({
+      type: "add",
+      annotation:
+        pending.kind === "pin"
+          ? { ...base, kind: "pin", label: fields.label.trim(), note: fields.note.trim() }
+          : { ...base, kind: "text", text: fields.label.trim() },
+    });
+    setPending(null);
+  };
   const [pickOpen, setPickOpen] = useState(false);
   // A tag / text row clicked in the lists under the picture: that mark pulses for FLASH_MS.
   const [flash, setFlash] = useState<string | null>(null);
@@ -503,9 +526,71 @@ function AerialEditor({
           areaDraw={areaDraw}
           onArea={areaInput}
           onView={setView}
-          onPlace={(kind, at) => setPending({ kind, at })}
+          onPlace={(kind, at) => setPending({ kind, at, label: "" })}
           flash={flash}
-        />
+          draft={pending}
+        >
+          {pending &&
+            canEdit &&
+            (() => {
+              const [x, y] = project(view, pending.at);
+              const pos = placePercent(x, y, view);
+              if (pending.kind === "pin")
+                return (
+                  <Popover open modal={false}>
+                    <PopoverAnchor asChild>
+                      <span className="pointer-events-none absolute h-0 w-0" style={pos} />
+                    </PopoverAnchor>
+                    <PopoverContent
+                      side={popoverSide(x, view.width)}
+                      align="start"
+                      sideOffset={22}
+                      className="w-80 p-3"
+                      onEscapeKeyDown={() => setPending(null)}
+                      // A click elsewhere: keep a labelled tag, drop an unlabelled one (a click
+                      // on the picture then places the next tag).
+                      onInteractOutside={() => addPending({ label: pending.label, note: "" })}
+                    >
+                      <PlaceForm
+                        kind="pin"
+                        label={pending.label}
+                        onLabel={(label) => setPending({ ...pending, label })}
+                        onAdd={addPending}
+                        onCancel={() => setPending(null)}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                );
+              return (
+                <div className="absolute -translate-y-1/2" style={pos}>
+                  <input
+                    aria-label="Text on the picture"
+                    autoFocus
+                    maxLength={TEXT_MAX}
+                    value={pending.label}
+                    onChange={(e) => setPending({ ...pending, label: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addPending({ label: pending.label, note: "" });
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setPending(null);
+                      }
+                    }}
+                    onBlur={() => addPending({ label: pending.label, note: "" })}
+                    className="rounded border border-dashed border-white/70 bg-black/30 px-1 text-xl font-bold outline-none"
+                    style={{
+                      color: colorHex(color),
+                      textShadow: "0 0 3px #000, 0 0 3px #000",
+                      width: `${textBoxWidthCh(pending.label)}ch`,
+                    }}
+                  />
+                </div>
+              );
+            })()}
+        </Stage>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -596,24 +681,6 @@ function AerialEditor({
             Measured on the aerial: flat, as seen from above (no pitch).
           </p>
         </div>
-      )}
-
-      {pending && canEdit && (
-        <PlaceForm
-          kind={pending.kind}
-          onCancel={() => setPending(null)}
-          onAdd={(fields) => {
-            const base = { id: newAnnotationId(), color, at: pending.at };
-            dispatch({
-              type: "add",
-              annotation:
-                pending.kind === "pin"
-                  ? { ...base, kind: "pin", label: fields.label, note: fields.note }
-                  : { ...base, kind: "text", text: fields.label },
-            });
-            setPending(null);
-          }}
-        />
       )}
 
       {tags.length > 0 && (
@@ -832,6 +899,8 @@ function Stage({
   onView,
   onPlace,
   flash,
+  draft,
+  children,
 }: {
   view: AerialView;
   sources: ImagerySource[];
@@ -844,6 +913,10 @@ function Stage({
   onPlace: (kind: "pin" | "text", at: LngLat) => void;
   /** The mark to pulse (its row was clicked), or null. */
   flash: string | null;
+  /** A tag being placed (owner, Oct 8): drawn at once, with its label as it is typed. */
+  draft: { kind: "pin" | "text"; at: LngLat; label: string } | null;
+  /** Overlays positioned over the picture's box (the tag's menu, the text box). */
+  children?: React.ReactNode;
 }) {
   const svg = useRef<SVGSVGElement>(null);
   const drag = useRef<{ x: number; y: number; view: AerialView } | null>(null);
@@ -944,146 +1017,198 @@ function Stage({
     // keeps the view's shape (its width is capped at the cap height, less the 2 px border,
     // × 4 / 3), so screenToView maps a pointer to view px at any rendered size.
     <div className="max-h-[min(60vh,560px)] overflow-hidden rounded-md border bg-neutral-800">
-      <svg
-        ref={svg}
-        viewBox={`0 0 ${view.width} ${view.height}`}
-        className="mx-auto block h-auto max-h-full w-full touch-none select-none"
+      {/* The picture's own box: the SVG fills it, and overlays (the tag's menu anchor, the text
+        box) are placed over it by percentages (lib/aerial-place.ts). */}
+      <div
+        className="relative mx-auto"
         style={{
-          cursor,
-          aspectRatio: `${view.width} / ${view.height}`,
           maxWidth: `min(100%, calc((min(60vh, 560px) - 2px) * ${view.width / view.height}))`,
         }}
-        role="img"
-        aria-label="Aerial view of the property"
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={up}
-        onPointerLeave={() => {
-          if (tool === "area" && areaPointer.current === null) onArea({ type: "leave" });
-        }}
-        onContextMenu={(e) => {
-          // Right-click finishes an area: no browser menu over the picture.
-          if (tool === "area") e.preventDefault();
-        }}
       >
-        {tiles.map((t) => (
-          <image
-            key={t.key}
-            href={t.url}
-            x={t.left}
-            y={t.top}
-            width={t.size}
-            height={t.size}
-            preserveAspectRatio="none"
-          />
-        ))}
-        {annotations.map((a) => {
-          if (a.kind !== "area") return null;
-          const pts = a.points.map(px);
-          const [lx, ly] = labelAt(pts);
-          return (
-            <g key={a.id}>
-              <path
-                d={`${pathD(pts)} Z`}
-                fill={colorFill(a.color, AREA_FILL_ALPHA)}
-                stroke="rgba(0,0,0,0.55)"
-                strokeWidth={6}
-                strokeLinejoin="round"
-              />
-              <path
-                d={`${pathD(pts)} Z`}
-                fill="none"
-                stroke={colorHex(a.color)}
-                strokeWidth={3}
-                strokeLinejoin="round"
-              />
+        <svg
+          ref={svg}
+          viewBox={`0 0 ${view.width} ${view.height}`}
+          className="block h-auto w-full touch-none select-none"
+          style={{
+            cursor,
+            aspectRatio: `${view.width} / ${view.height}`,
+          }}
+          role="img"
+          aria-label="Aerial view of the property"
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onPointerCancel={up}
+          onPointerLeave={() => {
+            if (tool === "area" && areaPointer.current === null) onArea({ type: "leave" });
+          }}
+          onContextMenu={(e) => {
+            // Right-click finishes an area: no browser menu over the picture.
+            if (tool === "area") e.preventDefault();
+          }}
+        >
+          {tiles.map((t) => (
+            <image
+              key={t.key}
+              href={t.url}
+              x={t.left}
+              y={t.top}
+              width={t.size}
+              height={t.size}
+              preserveAspectRatio="none"
+            />
+          ))}
+          {annotations.map((a) => {
+            if (a.kind !== "area") return null;
+            const pts = a.points.map(px);
+            const [lx, ly] = labelAt(pts);
+            return (
+              <g key={a.id}>
+                <path
+                  d={`${pathD(pts)} Z`}
+                  fill={colorFill(a.color, AREA_FILL_ALPHA)}
+                  stroke="rgba(0,0,0,0.55)"
+                  strokeWidth={6}
+                  strokeLinejoin="round"
+                />
+                <path
+                  d={`${pathD(pts)} Z`}
+                  fill="none"
+                  stroke={colorHex(a.color)}
+                  strokeWidth={3}
+                  strokeLinejoin="round"
+                />
+                <text
+                  x={lx}
+                  y={ly}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={16}
+                  fontWeight={700}
+                  fill="#fff"
+                  style={{ ...halo, pointerEvents: "none" }}
+                >
+                  {areaLabel(areaMarkSqFt(a, view.zoom))}
+                </text>
+              </g>
+            );
+          })}
+          {annotations
+            .filter((a) => a.kind === "free" || a.kind === "line")
+            .map((a) =>
+              a.kind === "free" || a.kind === "line"
+                ? lineOf(a.id, a.points.map(px), colorHex(a.color))
+                : null,
+            )}
+          {annotations.map((a) => {
+            if (a.kind !== "text") return null;
+            const [x, y] = px(a.at);
+            return (
               <text
-                x={lx}
-                y={ly}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={16}
-                fontWeight={700}
-                fill="#fff"
-                style={{ ...halo, pointerEvents: "none" }}
-              >
-                {areaLabel(areaMarkSqFt(a, view.zoom))}
-              </text>
-            </g>
-          );
-        })}
-        {annotations
-          .filter((a) => a.kind === "free" || a.kind === "line")
-          .map((a) =>
-            a.kind === "free" || a.kind === "line"
-              ? lineOf(a.id, a.points.map(px), colorHex(a.color))
-              : null,
-          )}
-        {annotations.map((a) => {
-          if (a.kind !== "text") return null;
-          const [x, y] = px(a.at);
-          return (
-            <text
-              key={a.id}
-              x={x}
-              y={y}
-              fill={colorHex(a.color)}
-              fontSize={20}
-              fontWeight={700}
-              dominantBaseline="middle"
-              style={halo}
-            >
-              {a.text}
-            </text>
-          );
-        })}
-        {annotations.map((a) => {
-          if (a.kind !== "pin") return null;
-          const [x, y] = px(a.at);
-          const dark = a.color === "white" || a.color === "yellow";
-          return (
-            <g key={a.id}>
-              <circle cx={x} cy={y} r={13} fill={colorHex(a.color)} stroke="#000" strokeWidth={2} />
-              <text
+                key={a.id}
                 x={x}
-                y={y + 0.5}
+                y={y}
+                fill={colorHex(a.color)}
+                fontSize={20}
+                fontWeight={700}
+                dominantBaseline="middle"
+                style={halo}
+              >
+                {a.text}
+              </text>
+            );
+          })}
+          {annotations.map((a) => {
+            if (a.kind !== "pin") return null;
+            const [x, y] = px(a.at);
+            const dark = a.color === "white" || a.color === "yellow";
+            return (
+              <g key={a.id}>
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={13}
+                  fill={colorHex(a.color)}
+                  stroke="#000"
+                  strokeWidth={2}
+                />
+                <text
+                  x={x}
+                  y={y + 0.5}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={14}
+                  fontWeight={700}
+                  fill={dark ? "#000" : "#fff"}
+                >
+                  {numbers.get(a.id)}
+                </text>
+                <text
+                  x={x + 17}
+                  y={y}
+                  dominantBaseline="middle"
+                  fontSize={16}
+                  fontWeight={700}
+                  fill="#fff"
+                  style={halo}
+                >
+                  {a.label}
+                </text>
+              </g>
+            );
+          })}
+          {tool === "area" && (
+            <AreaDraft
+              view={view}
+              draw={areaDraw}
+              scale={scale}
+              touch={touch}
+              color={color}
+              links={links}
+            />
+          )}
+          {draft && draft.kind === "pin" && (
+            <g aria-label="New tag being placed">
+              <circle
+                cx={px(draft.at)[0]}
+                cy={px(draft.at)[1]}
+                r={13}
+                fill={colorHex(color)}
+                stroke="#000"
+                strokeWidth={2}
+              />
+              <text
+                x={px(draft.at)[0]}
+                y={px(draft.at)[1] + 0.5}
                 textAnchor="middle"
                 dominantBaseline="middle"
                 fontSize={14}
                 fontWeight={700}
-                fill={dark ? "#000" : "#fff"}
+                fill={color === "white" || color === "yellow" ? "#000" : "#fff"}
               >
-                {numbers.get(a.id)}
+                {numbers.size + 1}
               </text>
-              <text
-                x={x + 17}
-                y={y}
-                dominantBaseline="middle"
-                fontSize={16}
-                fontWeight={700}
-                fill="#fff"
-                style={halo}
-              >
-                {a.label}
-              </text>
+              {draft.label && (
+                <text
+                  x={px(draft.at)[0] + 17}
+                  y={px(draft.at)[1]}
+                  dominantBaseline="middle"
+                  fontSize={16}
+                  fontWeight={700}
+                  fill="#fff"
+                  style={halo}
+                >
+                  {draft.label}
+                </text>
+              )}
             </g>
-          );
-        })}
-        {tool === "area" && (
-          <AreaDraft
-            view={view}
-            draw={areaDraw}
-            scale={scale}
-            touch={touch}
-            color={color}
-            links={links}
-          />
-        )}
-        {flashed && (flashed.kind === "pin" || flashed.kind === "text") && (
-          <FlashRing mark={flashed} at={px(flashed.at)} />
-        )}
-      </svg>
+          )}
+          {flashed && (flashed.kind === "pin" || flashed.kind === "text") && (
+            <FlashRing mark={flashed} at={px(flashed.at)} />
+          )}
+        </svg>
+        {children}
+      </div>
     </div>
   );
 }
@@ -1231,22 +1356,30 @@ function FlashRing({ mark, at: [x, y] }: { mark: Annotation; at: [number, number
 }
 
 /** A tag's label (preset chips or free text) and note, or a text label. */
+/**
+ * The tag's menu (owner, Oct 8: beside the tag, in a popover): the presets, the label (lifted,
+ * so the pin on the picture shows it as it is typed), a note, Add / Cancel.
+ */
 function PlaceForm({
   kind,
+  label,
+  onLabel,
   onAdd,
   onCancel,
 }: {
   kind: "pin" | "text";
+  label: string;
+  onLabel: (label: string) => void;
   onAdd: (f: { label: string; note: string }) => void;
   onCancel: () => void;
 }) {
-  const [label, setLabel] = useState("");
   const [note, setNote] = useState("");
+  const setLabel = onLabel;
   const max = kind === "pin" ? TAG_LABEL_MAX : TEXT_MAX;
   const ok = label.trim().length > 0;
   return (
     <form
-      className="space-y-2 rounded-md border bg-muted/30 p-3"
+      className="space-y-2"
       onSubmit={(e) => {
         e.preventDefault();
         if (ok) onAdd({ label: label.trim(), note: note.trim() });

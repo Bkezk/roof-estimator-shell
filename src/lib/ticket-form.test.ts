@@ -257,7 +257,11 @@ describe("the Aerial picture is capped at about half the screen (owner, Oct 1)",
   const stage = src.slice(src.indexOf("function Stage("), src.indexOf("function AreaDraft("));
 
   it("the picture's container has max-h-[min(60vh,560px)] on the dark ground", () => {
-    const box = stage.match(/<div className="([^"]*)">\s*<svg/);
+    // Since Oct 8 the picture's own box (relative, for the tag menu and text box overlays)
+    // sits between the container and the SVG.
+    const box = stage.match(
+      /<div className="([^"]*)">\s*\{\/\*[\s\S]*?\*\/\}\s*<div\s+className="relative mx-auto"/,
+    );
     expect(box).not.toBeNull();
     expect(box![1]).toContain("max-h-[min(60vh,560px)]");
     expect(box![1]).toContain("overflow-hidden");
@@ -265,13 +269,13 @@ describe("the Aerial picture is capped at about half the screen (owner, Oct 1)",
   });
 
   it("the SVG keeps the view's 4:3 shape, centred, its width capped to the cap height × 4 / 3", () => {
-    expect(stage).toContain(
-      'className="mx-auto block h-auto max-h-full w-full touch-none select-none"',
-    );
+    // The cap × 4 / 3 width is on the picture's box; the SVG fills it (Oct 8).
+    expect(stage).toContain('className="block h-auto w-full touch-none select-none"');
     expect(stage).toContain("aspectRatio: `${view.width} / ${view.height}`");
     expect(stage).toContain(
       "maxWidth: `min(100%, calc((min(60vh, 560px) - 2px) * ${view.width / view.height}))`",
     );
+    expect(stage).toMatch(/className="relative mx-auto"/);
   });
 
   it("pointer math goes through screenToView / screenScale", () => {
