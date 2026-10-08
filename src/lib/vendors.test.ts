@@ -498,9 +498,10 @@ describe("the invoice editor's Bill to (invoice-editor.tsx)", () => {
   const ed = read("src/components/service/invoice-editor.tsx");
   const billTo = between(ed, "function BillTo({", "\nconst INTERNAL_OPEN_KEY");
   it("the draft carries bill_to_vendor_id in its header state and its save", () => {
-    expect(ed).toContain("  bill_to_vendor_id: string | null;\n}");
-    expect(ed).toContain("  bill_to_vendor_id: inv.bill_to_vendor_id ?? null,\n});");
-    expect(ed).toContain("      bill_to_vendor_id: head.bill_to_vendor_id,\n      lines:");
+    // (followed by the Send To edited on this invoice only; invoice-send-to.test.ts)
+    expect(ed).toContain("  bill_to_vendor_id: string | null;\n  /** The Send To");
+    expect(ed).toContain("  bill_to_vendor_id: inv.bill_to_vendor_id ?? null,\n  send_to:");
+    expect(ed).toContain("      bill_to_vendor_id: head.bill_to_vendor_id,\n      // Sent only");
   });
   it("the draft's Bill To: the choice (customer or a billable vendor) and a preview until saved", () => {
     expect(ed).toMatch(

@@ -27,6 +27,7 @@ import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
 import { mergeRebuild, savedLineRow, type RebuildLine } from "@/lib/invoice-rebuild";
 import { stampSent } from "@/lib/invoice-sent";
+import { mergeSendTo } from "@/lib/invoice-send-to";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -593,7 +594,21 @@ const saveSchema = z.object({
   tax_rate: z.number().min(0).max(1).optional(),
   /** This invoice's material markup (0.75 = 75 %; owner, Oct 6). */
   material_markup: z.number().min(0).max(10).optional(),
-  bill_to: z.record(z.string(), z.string()).optional(),
+  /**
+   * The Send To printed on this invoice only (owner, Oct 8): its name and address lines, laid
+   * over the invoice's own copy (mergeSendTo). Instructions and the Sage id are never sent.
+   */
+  send_to: z
+    .object({
+      name: z.string().max(200),
+      address1: z.string().max(200),
+      address2: z.string().max(200),
+      city: z.string().max(100),
+      state: z.string().max(40),
+      zip: z.string().max(20),
+    })
+    .partial()
+    .optional(),
   /** Bill To on a draft: a billable vendor's id, or null for the customer account. */
   bill_to_vendor_id: z.string().uuid().nullable().optional(),
   lines: z.array(lineSchema).max(500).optional(),
@@ -677,7 +692,6 @@ export const saveInvoice = createServerFn({ method: "POST" })
     if (data.job_code !== undefined) patch.job_code = data.job_code;
     if (data.description !== undefined) patch.description = data.description;
     if (data.payment_terms !== undefined) patch.payment_terms = data.payment_terms;
-    if (data.bill_to) patch.bill_to = data.bill_to as unknown as Json;
     // Bill To changed on the draft (account ↔ vendor, or another vendor): the column, and the
     // snapshot taken again from whoever it is billed to now. A final invoice never gets here.
     if (
@@ -702,6 +716,11 @@ export const saveInvoice = createServerFn({ method: "POST" })
         if (aErr) throw new Error(aErr.message);
         patch.bill_to = accountBillTo(account, job.customer_name) as unknown as Json;
       }
+    }
+    // Send To edited on this invoice only: over the copy just taken, else the saved one.
+    if (data.send_to) {
+      const base = (patch.bill_to ?? inv.bill_to ?? {}) as Record<string, unknown>;
+      patch.bill_to = mergeSendTo(base, data.send_to) as unknown as Json;
     }
     const { data: updated, error: uErr } = await sb
       .from("invoices")

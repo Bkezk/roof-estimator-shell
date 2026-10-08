@@ -60,6 +60,7 @@ import {
 } from "@/lib/invoice-totals";
 import { approvedPoTotal } from "@/lib/purchase-orders";
 import { accountBillTo, vendorBillTo, type BillToSnapshot } from "@/lib/vendors";
+import { sendToEdited, sendToOf, type SendTo } from "@/lib/invoice-send-to";
 import { useVendors } from "@/components/crm/use-vendors";
 import { BillToChoice, VendorBilledBadge } from "@/components/service/bill-to-picker";
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
@@ -443,6 +444,8 @@ interface HeadDraft {
   markup_pct: number;
   /** Bill to: a vendor's id, or null for the customer account. */
   bill_to_vendor_id: string | null;
+  /** The Send To printed on this invoice only (owner, Oct 8). */
+  send_to: SendTo;
 }
 let lineSeq = 0;
 const lineFrom = (l: InvoiceLineRow): LineDraft => ({
@@ -469,6 +472,7 @@ const headFrom = (inv: InvoiceRow): HeadDraft => ({
   tax_pct: toPct(inv.tax_rate),
   markup_pct: toPct(inv.material_markup ?? DEFAULT_MARKUP),
   bill_to_vendor_id: inv.bill_to_vendor_id ?? null,
+  send_to: sendToOf(inv.bill_to as Record<string, unknown> | null),
 });
 const editKey = (h: HeadDraft, lines: LineDraft[]) =>
   JSON.stringify([h, lines.map(({ key: _k, ...rest }) => rest)]);
@@ -622,6 +626,10 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
       tax_rate: fromPct(head.tax_pct),
       material_markup: fromPct(head.markup_pct),
       bill_to_vendor_id: head.bill_to_vendor_id,
+      // Sent only when edited, and not while Bill To is being switched (a new copy is taken).
+      ...(!billPreview && sendToEdited(inv.bill_to as Record<string, unknown>, head.send_to)
+        ? { send_to: head.send_to }
+        : {}),
       lines: lines.map((l) => ({
         // A saved line's id (its key is "l<id>"); new lines have none. The audit log uses it.
         ...(l.key.startsWith("l") ? { id: Number(l.key.slice(1)) } : {}),
@@ -782,6 +790,8 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
           onChange: (v) => setH("bill_to_vendor_id", v),
           preview: billPreview,
           customerName: job.customer_name,
+          sendTo: head.send_to,
+          onSendTo: (s) => setH("send_to", s),
         }}
       />
 
@@ -1169,6 +1179,9 @@ function BillTo({
     /** Whom it will be billed to once saved (null = as saved). */
     preview: BillToSnapshot | null;
     customerName: string | null;
+    /** The Send To boxes (this invoice only); editable while Bill To is as saved. */
+    sendTo: SendTo;
+    onSendTo: (s: SendTo) => void;
   };
 }) {
   const b = (draft?.preview ?? inv.bill_to ?? {}) as Record<string, string | undefined>;
@@ -1199,19 +1212,27 @@ function BillTo({
             <VendorBilledBadge name={b["name"]} />
           </div>
         )}
-        <p className="font-medium">{b["name"] || "—"}</p>
-        {[b["address1"], b["address2"], cityLine].filter(Boolean).map((x) => (
-          <p key={x} className="text-muted-foreground">
-            {x}
-          </p>
-        ))}
+        {draft && !draft.preview ? (
+          <SendToBoxes value={draft.sendTo} onChange={draft.onSendTo} />
+        ) : (
+          <>
+            <p className="font-medium">{b["name"] || "—"}</p>
+            {[b["address1"], b["address2"], cityLine].filter(Boolean).map((x) => (
+              <p key={x} className="text-muted-foreground">
+                {x}
+              </p>
+            ))}
+          </>
+        )}
         {b["instructions"] && (
           <p className="whitespace-pre-line text-xs text-amber-700 dark:text-amber-400">
             Billing: {b["instructions"]}
           </p>
         )}
         {draft?.preview && (
-          <p className="mt-1 text-xs text-muted-foreground">Saved with the invoice.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Saved with the invoice. Save first to change the Send To for this invoice.
+          </p>
         )}
       </div>
       <div>
@@ -1220,6 +1241,42 @@ function BillTo({
         {p["address"] && <p className="text-muted-foreground">{p["address"]}</p>}
       </div>
     </div>
+  );
+}
+
+/**
+ * The Send To's six printed lines as boxes on a draft (owner, Oct 8: "editable on one invoice
+ * only like centerpoint"). They change this invoice's copy only.
+ */
+function SendToBoxes({ value, onChange }: { value: SendTo; onChange: (s: SendTo) => void }) {
+  const set = (k: keyof SendTo) => (v: string) => onChange({ ...value, [k]: v });
+  return (
+    <div className="mt-1 space-y-2">
+      <SendToBox label="Name" value={value.name} onChange={set("name")} />
+      <SendToBox label="Address" value={value.address1} onChange={set("address1")} />
+      <SendToBox label="Address line 2" value={value.address2} onChange={set("address2")} />
+      <div className="grid grid-cols-[1fr_72px_96px] gap-2">
+        <SendToBox label="City" value={value.city} onChange={set("city")} />
+        <SendToBox label="State" value={value.state} onChange={set("state")} />
+        <SendToBox label="ZIP" value={value.zip} onChange={set("zip")} />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Prints on this invoice only; the customer's record is not changed.
+      </p>
+    </div>
+  );
+}
+
+function SendToBox(props: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="block space-y-0.5 text-xs text-muted-foreground">
+      <span>{props.label}</span>
+      <Input
+        value={props.value}
+        className="h-8 text-sm text-foreground"
+        onChange={(e) => props.onChange(e.target.value)}
+      />
+    </label>
   );
 }
 
