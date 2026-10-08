@@ -134,3 +134,18 @@ export function savedLineRow(
     row.show_on_invoice = l.show_on_invoice === true;
   return row;
 }
+
+/**
+ * Did a line's flags change (the typed-price flag, Show on invoice)? saveInvoice rewrites only
+ * the lines that changed, and a line whose only change is its Show box must still be saved
+ * (owner, Oct 8: "when i save after clicking show on invoice it doesnt stay checked"). A flag
+ * the new row does not carry (its column not there yet) is not a change.
+ */
+export function lineFlagsChanged(
+  prev: { rate_overridden?: boolean | null; show_on_invoice?: boolean | null },
+  next: { rate_overridden?: boolean | null; show_on_invoice?: boolean | null },
+): boolean {
+  return (["rate_overridden", "show_on_invoice"] as const).some(
+    (k) => k in next && !!prev[k] !== !!next[k],
+  );
+}

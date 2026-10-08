@@ -173,10 +173,14 @@ describe("wired in", () => {
     expect(fns).not.toContain("rateFromMarkup(");
   });
   it("a flag flip alone is a change worth saving", () => {
+    // Oct 8: the flag check moved into lineFlagsChanged, which covers Show on invoice too.
     const body = fns.slice(fns.indexOf("function lineChanged("));
     expect(body.slice(0, body.indexOf("\n}"))).toContain(
-      '"rate_overridden" in next && !!prev.rate_overridden !== !!next.rate_overridden',
+      "if (lineFlagsChanged(prev, next)) return true;",
     );
+    const helper = readFileSync("src/lib/invoice-rebuild.ts", "utf8");
+    expect(helper).toContain('(["rate_overridden", "show_on_invoice"] as const).some(');
+    expect(helper).toContain("(k) => k in next && !!prev[k] !== !!next[k],");
   });
   it("the editor flags a rate edit on a ticket line and sends the flag", () => {
     expect(ed).toContain("rate_overridden: boolean");

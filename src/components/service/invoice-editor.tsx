@@ -66,6 +66,7 @@ import { BillToChoice, VendorBilledBadge } from "@/components/service/bill-to-pi
 import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { fieldKeys } from "@/components/service/field-utils";
 import { InvoicePhotos } from "@/components/service/invoice-photos";
+import { PdfPages } from "@/components/service/pdf-pages";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -1327,8 +1328,9 @@ function SendToBox(props: { label: string; value: string; onChange: (v: string) 
 type PdfView = { blob: Blob; fileName: string };
 
 /**
- * The PDF in the page (owner, Oct 1: a new tab was blocked by a browser extension): an
- * <iframe> on a blob URL that lives as long as the dialog, with Download and a plain link for
+ * The PDF in the page (owner, Oct 1: a new tab was blocked by a browser extension): its pages
+ * drawn with pdf.js (PdfPages; Oct 8, Chrome blocked its own viewer in an <iframe> inside the
+ * Lovable preview), a blob URL that lives as long as the dialog, with Download and a plain link for
  * a tab of its own. Nothing is uploaded or stored; the PDF is the server's render.
  */
 function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: () => void }) {
@@ -1352,14 +1354,9 @@ function PdfPreviewDialog({ view, onClose }: { view: PdfView | null; onClose: ()
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
-          {url && (
-            <iframe
-              key={url}
-              title={view?.fileName ?? "Invoice PDF"}
-              src={url}
-              className="h-full w-full"
-            />
-          )}
+          {/* Drawn with pdf.js: Chrome blocks its own PDF viewer in a sandboxed frame (the
+              Lovable preview; owner, Oct 8). */}
+          {view && <PdfPages blob={view.blob} title={view.fileName} />}
         </div>
         <DialogFooter className="shrink-0 gap-2 sm:justify-between">
           {url && (
