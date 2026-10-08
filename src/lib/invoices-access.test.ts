@@ -8,8 +8,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
-  ACCESS_PRESETS,
+  KIND_LABELS,
+  OFFICE_PAGES,
   PAGES,
+  TECHNICIAN_PAGES,
+  USER_KINDS,
+  kindOf,
+  shapeForKind,
   PAGE_HELP,
   PAGE_LABELS,
   canAccess,
@@ -73,11 +78,13 @@ describe("what a tick brings with it", () => {
   });
 });
 
-describe("the presets", () => {
-  it("Office: every day-to-day page, Project Bids and Estimate Pricing included, and Invoices; Technician: Service + the tick", () => {
-    const office = ACCESS_PRESETS.find((p) => p.key === "office")!;
-    const tech = ACCESS_PRESETS.find((p) => p.key === "technician")!;
-    expect(office.access).toEqual([
+describe("the four kinds of people (owner, Oct 8)", () => {
+  it("Owner, Manager, Office, Technician — one picker, no page ticks", () => {
+    expect(USER_KINDS).toEqual(["owner", "manager", "office", "technician"]);
+    expect(Object.values(KIND_LABELS)).toEqual(["Owner", "Manager", "Office", "Technician"]);
+  });
+  it("Office = every page (Project Bids, Estimate Pricing, Invoices included); Technician = Service + the tick", () => {
+    expect(OFFICE_PAGES).toEqual([
       "estimate",
       "pricing",
       "customers",
@@ -86,20 +93,66 @@ describe("the presets", () => {
       "prospect",
       "takeoff",
     ]);
-    expect(office.technician).toBe(false);
-    expect(tech.access).toEqual(["service"]);
-    expect(tech.technician).toBe(true);
-    const o = { role: "user", access: [...office.access], technician: false };
-    expect(seesInvoices(o)).toBe(true);
-    expect(canAccess(o, "estimate")).toBe(true); // Project Bids
-    expect(canAccess(o, "pricing")).toBe(true); // Estimate Pricing (owner, Oct 8)
+    expect(TECHNICIAN_PAGES).toEqual(["service"]);
+    expect(shapeForKind("owner", false)).toEqual({ role: "admin", access: [], technician: false });
+    expect(shapeForKind("manager", true)).toEqual({
+      role: "manager",
+      access: [],
+      technician: true,
+    });
+    expect(shapeForKind("office", false)).toEqual({
+      role: "user",
+      access: [...OFFICE_PAGES],
+      technician: false,
+    });
+    expect(shapeForKind("office", true).technician).toBe(true);
+    // A technician is always ticked Technician, whatever is passed.
+    expect(shapeForKind("technician", false)).toEqual({
+      role: "user",
+      access: ["service"],
+      technician: true,
+    });
   });
-  it("Admin › Users offers them on the Add user form and routes every change through impliedAccess", () => {
+  it("a technician sees Inventory and (their own) tickets and no price page; office sees everything, runs no ticket money", () => {
+    const tech = shapeForKind("technician", true);
+    expect(canAccess(tech, "inventory")).toBe(true);
+    expect(canAccess(tech, "service")).toBe(true);
+    for (const page of ["pricing", "estimate", "invoices", "customers"] as const)
+      expect(canAccess(tech, page)).toBe(false);
+    expect(seesInvoices(tech)).toBe(false);
+    expect(technicianNeedsService(tech)).toBe(false);
+    const office = shapeForKind("office", false);
+    for (const page of PAGES) expect(canAccess(office, page)).toBe(true);
+    expect(seesInvoices(office)).toBe(true);
+  });
+  it("reads a stored profile back as its kind; Inventory in the list does not matter; odd rows are Custom", () => {
+    expect(kindOf({ role: "admin", access: [] })).toBe("owner");
+    expect(kindOf({ role: "manager", access: [], technician: true })).toBe("manager");
+    expect(
+      kindOf({ role: "user", access: [...OFFICE_PAGES, "inventory"], technician: false }),
+    ).toBe("office");
+    expect(kindOf({ role: "user", access: [...OFFICE_PAGES], technician: true })).toBe("office");
+    expect(kindOf({ role: "user", access: ["service", "inventory"], technician: true })).toBe(
+      "technician",
+    );
+    // The old per-page rows on the owner's screen (Oct 8): Custom until a kind is picked.
+    expect(kindOf({ role: "user", access: ["estimate", "inventory"], technician: true })).toBe(
+      "custom",
+    );
+    expect(kindOf({ role: "user", access: ["prospect"], technician: true })).toBe("custom");
+    expect(kindOf({ role: "user", access: ["service"], technician: false })).toBe("custom");
+    expect(kindOf(null)).toBe("custom");
+    // Round trip.
+    for (const k of USER_KINDS) expect(kindOf(shapeForKind(k, false))).toBe(k);
+  });
+  it("Admin › Users saves through shapeForKind and starts a new user as a technician", () => {
     const src = read("src/routes/admin.users.tsx").replace(/\s+/g, " ");
-    expect(src).toContain("{ACCESS_PRESETS.map((ps) => (");
-    expect(src).toContain("setAccess(impliedAccess(ps.access, ps.technician));");
-    expect(src).toContain("props.onChange(role, impliedAccess(access, technician), technician);");
-    expect(src).not.toMatch(/onChange=\{\(e\) => props\.onChange\(/);
+    expect(src).toContain("const shape = shapeForKind(k, technician);");
+    expect(src).toContain("props.onChange(shape.role, shape.access, shape.technician);");
+    expect(src).toContain('useState<Role>(shapeForKind("technician", true).role)');
+    expect(src).toContain("{USER_KINDS.map((k) => (");
+    expect(src).not.toContain("PAGES.map((p) => (");
+    expect(src).not.toContain("ACCESS_PRESETS");
   });
 });
 

@@ -53,33 +53,88 @@ export const PAGE_HELP: Record<Page, string> = {
 };
 
 /**
- * One-click setups for a new user (owner, Oct 8: "we dont really have PM or sales roles" — the
- * company has office people, technicians and the owner). Office: every day-to-day page, Project
- * Bids (Estimate) and Estimate Pricing included ("office should also include project bids and
- * estimate pricing"), and Invoices; Technician: tickets, on the board. Both plain users.
+ * The four kinds of people (owner, Oct 8: "we need technician who cant see the pricing of anything
+ * but can see inventory and the tickets assigned to them. we have office who has access to
+ * everything as its currently set up, including the technician tick and then manager then owner.
+ * those are really the only 4"). Admin › Users shows ONE picker; underneath, each kind is a
+ * (role, access, technician) shape the security rules already key on:
+ *   owner      → role admin
+ *   manager    → role manager
+ *   office     → role user with every page (Project Bids, Estimate Pricing, Customers, Service,
+ *                Invoices, Prospecting, Takeoff; Inventory is everyone's)
+ *   technician → role user with Service only and the Technician tick: Inventory, their own
+ *                tickets, and no price anywhere (the technician price-free rules).
+ * Owner, manager and office may also be ticked Technician (on the board, assignable).
  */
-export const ACCESS_PRESETS: ReadonlyArray<{
-  key: "office" | "technician";
-  label: string;
-  help: string;
-  access: readonly Page[];
-  technician: boolean;
-}> = [
-  {
-    key: "office",
-    label: "Office",
-    help: "Project Bids (Estimate), Estimate Pricing, Customers, Service, Invoices, Prospecting, Takeoff",
-    access: ["estimate", "pricing", "customers", "service", "invoices", "prospect", "takeoff"],
-    technician: false,
-  },
-  {
-    key: "technician",
-    label: "Technician",
-    help: "Service and the Technician tick: on the board, sees their own tickets",
-    access: ["service"],
-    technician: true,
-  },
+export const USER_KINDS = ["owner", "manager", "office", "technician"] as const;
+export type UserKind = (typeof USER_KINDS)[number];
+
+export const KIND_LABELS: Record<UserKind, string> = {
+  owner: "Owner",
+  manager: "Manager",
+  office: "Office",
+  technician: "Technician",
+};
+
+export const KIND_HELP: Record<UserKind, string> = {
+  owner: "Everything, plus Users & access and Reminders",
+  manager:
+    "Everything but Users and Reminders; sees everyone's tickets, creates and dispatches them and sets their prices",
+  office:
+    "Project Bids, Estimate Pricing, Customers, Service, Invoices, Prospecting, Takeoff and Inventory; sees every ticket, runs none of their money",
+  technician: "Inventory and the tickets assigned to them; no prices anywhere",
+};
+
+export const OFFICE_PAGES: readonly Page[] = [
+  "estimate",
+  "pricing",
+  "customers",
+  "service",
+  "invoices",
+  "prospect",
+  "takeoff",
 ];
+export const TECHNICIAN_PAGES: readonly Page[] = ["service"];
+
+const sameSet = (a: readonly string[], b: readonly string[]): boolean => {
+  const norm = (xs: readonly string[]) =>
+    [...new Set(xs.filter((x) => !(EVERYONE_PAGES as readonly string[]).includes(x)))].sort();
+  const x = norm(a);
+  const y = norm(b);
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+};
+
+/**
+ * Which kind a stored profile is; "custom" for a plain user whose pages match neither Office nor
+ * Technician (rows saved under the old per-page ticks). The picker shows "Custom" for those until
+ * one of the four is chosen.
+ */
+export function kindOf(p: AccessLike | null | undefined): UserKind | "custom" {
+  if (!p) return "custom";
+  if (p.role === "admin") return "owner";
+  if (p.role === "manager") return "manager";
+  const access = p.access ?? [];
+  if (p.technician && sameSet(access, TECHNICIAN_PAGES)) return "technician";
+  if (sameSet(access, OFFICE_PAGES)) return "office";
+  return "custom";
+}
+
+/** The (role, access, technician) a kind saves as; `technician` is the extra tick on the other three. */
+export function shapeForKind(
+  kind: UserKind,
+  technician: boolean,
+): { role: Role; access: Page[]; technician: boolean } {
+  switch (kind) {
+    case "owner":
+      return { role: "admin", access: [], technician };
+    case "manager":
+      return { role: "manager", access: [], technician };
+    case "office":
+      return { role: "user", access: [...OFFICE_PAGES], technician };
+    case "technician":
+      return { role: "user", access: [...TECHNICIAN_PAGES], technician: true };
+  }
+}
 
 /**
  * The pages a tick brings with it: a Technician needs Service to see the tickets they are
