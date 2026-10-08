@@ -8,7 +8,7 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Building2,
@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Star,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
@@ -75,7 +76,9 @@ import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel
 import { stormDay, stormRadius } from "@/components/prospect/storm-format";
 import { mergeEdits } from "@/components/prospect/form-merge";
 import { TaskDialog } from "@/components/tasks/task-dialog";
-import { TasksPanel } from "@/components/tasks/tasks-panel";
+import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
+import { saveSite } from "@/lib/crm.functions";
+import { customerPrefillFromBuilding, siteFromBuilding } from "@/lib/prospect-customer";
 
 import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import { Badge } from "@/components/ui/badge";
@@ -287,6 +290,12 @@ export function ProspectPage(props: {
   const { can, profile } = useAuth();
   const canWrite = can("prospect");
   const canBid = can("estimate");
+  // "New customer from this building" (owner, Oct 8): the Customers page's New customer dialog,
+  // started with the building's owner and address; the building becomes the customer's property.
+  const canCustomers = can("customers");
+  const navigate = useNavigate();
+  const saveSiteFn = useServerFn(saveSite);
+  const [customerDialog, setCustomerDialog] = useState(false);
   const qc = useQueryClient();
 
   const listFn = useServerFn(listBuildings);
@@ -648,6 +657,17 @@ export function ProspectPage(props: {
     !!openBuilding?.address_approx &&
     (form?.address1 ?? "").trim() === openBuilding.address1.trim();
   const approxNote = approxOpen && openBuilding ? approxAddressNote(openBuilding) : null;
+  const customerPrefill = useMemo(
+    () => (form ? customerPrefillFromBuilding(form, approxOpen) : null),
+    [form, approxOpen],
+  );
+  const customerDialogPrefill = useMemo(
+    () => ({
+      ...(customerPrefill ? { address: customerPrefill.address } : {}),
+      source: "prospect" as const,
+    }),
+    [customerPrefill],
+  );
   const setF = <K extends keyof BuildingInput>(k: K, v: BuildingInput[K]) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
   const text = (k: keyof BuildingInput, label: string, width = "") => (
@@ -1225,10 +1245,9 @@ export function ProspectPage(props: {
                     </ul>
                   </div>
                 )}
-                {/* Tasks (owner, Sep 30, item 11): list or calendar, New task. */}
-                <div className="border-t pt-3 text-foreground">
-                  <TasksPanel />
-                </div>
+                {/* The Tasks list that sat here left on Oct 8 (owner: "we dont need the task
+                  header on this page"); tasks live on Work Overview, and a building's own
+                  tasks on its card below. */}
               </CardContent>
             </Card>
           ) : (
@@ -1283,6 +1302,11 @@ export function ProspectPage(props: {
                         >
                           <FilePlus2 className="mr-1 h-4 w-4" /> New bid from this building
                         </Link>
+                      </Button>
+                    )}
+                    {form.id && canCustomers && (
+                      <Button size="sm" variant="outline" onClick={() => setCustomerDialog(true)}>
+                        <UserPlus className="mr-1 h-4 w-4" /> New customer from this building
                       </Button>
                     )}
                     {form.id && canWrite && !detail.data?.building.prospect_stage && (
@@ -1340,6 +1364,31 @@ export function ProspectPage(props: {
                       </Button>
                     )}
                   </div>
+                  {/* New customer from this building (owner, Oct 8): the Customers page's dialog,
+                    started with the owner's name and the building's address. Once the customer
+                    is saved the building is added as its property, then the customer opens. */}
+                  {form.id && canCustomers && (
+                    <QuickAddCustomerDialog
+                      open={customerDialog}
+                      initialName={customerPrefill?.name ?? ""}
+                      prefill={customerDialogPrefill}
+                      onOpenChange={setCustomerDialog}
+                      onCreated={async (hit) => {
+                        setCustomerDialog(false);
+                        try {
+                          await saveSiteFn({
+                            data: siteFromBuilding(form, approxOpen, hit.account_id),
+                          });
+                          toast.success(`Added the building as ${hit.account_name}'s property`);
+                        } catch (e) {
+                          toast.error(
+                            `${hit.account_name} was saved, but the building could not be added as its property: ${errMsg(e)}`,
+                          );
+                        }
+                        void navigate({ to: "/customers", search: { id: hit.account_id } });
+                      }}
+                    />
+                  )}
                 </CardHeader>
                 <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {form.id && selectedStormAt && (

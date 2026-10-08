@@ -302,6 +302,11 @@ export function QuickAddCustomerDialog(props: {
   onCreated: (hit: AccountHit) => void;
   /** The physical address is required too (line 1, city, state, zip). */
   requireAddress?: boolean;
+  /**
+   * Where the dialog starts (Roofs & Storms, "New customer from this building", owner Oct 8):
+   * the physical address, and the source the account is stamped with. Give a stable object.
+   */
+  prefill?: { address?: AddressValue; source?: "prospect" };
 }) {
   const qc = useQueryClient();
   const createFn = useServerFn(quickCreateAccount);
@@ -327,12 +332,12 @@ export function QuickAddCustomerDialog(props: {
     setEmail("");
     setMobile("");
     setPhone("");
-    setPhysical(blankAddress("KY"));
+    setPhysical(props.prefill?.address ?? blankAddress("KY"));
     setMailingSame(true);
     setMailing(blankAddress(""));
     setManager("");
     setTried(false);
-  }, [props.open, props.initialName]);
+  }, [props.open, props.initialName, props.prefill]);
 
   const reachable = hasContactMethod({ email, phone, mobile });
   const addressMissing = props.requireAddress ? addressProblem(physical) : null;
@@ -352,6 +357,7 @@ export function QuickAddCustomerDialog(props: {
           mailing_same: mailingSame,
           ...(mailingSame ? {} : mailingPayload(mailing)),
           account_manager_id: manager || null,
+          ...(props.prefill?.source ? { source: props.prefill.source } : {}),
         },
       }),
     onSuccess: (hit) => {
