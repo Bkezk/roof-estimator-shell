@@ -40,22 +40,22 @@ describe("pdfLineRows — what page 1 lists", () => {
   });
   it("nothing switched on: one row with the whole amount", () => {
     const r = pdfLineRows([tech, helper, patch]);
-    expect(r.shown).toEqual([]);
+    expect(r.listed).toEqual([]);
     expect(r.rollup).toEqual({ label: ROLLUP_LABEL, total: 176.75 });
     expect(ROLLUP_LABEL).toBe("Services and materials");
   });
   it("lines switched on are listed; the rest are one row after them", () => {
     const r = pdfLineRows([tech, { ...patch, show_on_invoice: true }, helper]);
-    expect(r.shown.map((l) => l.description)).toEqual(["Patch 6x6"]);
+    expect(r.listed.map((x) => x.line.description)).toEqual(["Patch 6x6"]);
     expect(r.rollup).toEqual({ label: ROLLUP_LABEL, total: 140 });
   });
   it("every line switched on: no extra row", () => {
     const r = pdfLineRows([tech, helper].map((l) => ({ ...l, show_on_invoice: true })));
-    expect(r.shown).toHaveLength(2);
+    expect(r.listed).toHaveLength(2);
     expect(r.rollup).toBeNull();
   });
   it("no lines at all: nothing to list", () => {
-    expect(pdfLineRows([])).toEqual({ shown: [], rollup: null });
+    expect(pdfLineRows([])).toEqual({ listed: [], rollup: null });
   });
 });
 
@@ -103,10 +103,11 @@ describe("savedLineRow writes the switch", () => {
 });
 
 describe("the editor, the PDF, the save and the database", () => {
-  it("each draft line has a Show box, off for a new line", () => {
+  it("each draft line chooses how it shows, Hidden for a new line", () => {
     const ed = read("src/components/service/invoice-editor.tsx");
-    expect(ed).toContain('<span className="text-center">Show</span>');
-    expect(ed).toContain("aria-label={`Line ${i + 1} shown on the invoice`}");
+    // Oct 8: the box became Hidden / No price / With price (invoice-hide-price.test.ts).
+    expect(ed).toContain("<span>On the invoice</span>");
+    expect(ed).toContain("aria-label={`Line ${i + 1} on the invoice`}");
     expect(ed).toContain("show_on_invoice: l.show_on_invoice === true,");
     const add = ed.slice(ed.indexOf("const addLine = () => {"), ed.indexOf("const tryFinal"));
     expect(add).toContain("show_on_invoice: false,");
@@ -114,7 +115,7 @@ describe("the editor, the PDF, the save and the database", () => {
   it("page 1 draws pdfLineRows: the shown lines, then the one row", () => {
     const srv = read("src/lib/invoices.server.ts");
     expect(srv).toContain("const rows = pdfLineRows(b.lines);");
-    expect(srv).toContain("for (const l of rows.shown) {");
+    expect(srv).toContain("for (const { line: l, priced } of rows.listed) {");
     expect(srv).toContain("if (rows.rollup) {");
   });
   it("the save takes the switch; Rebuild writes it once the column exists", () => {

@@ -571,16 +571,18 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   doc.y -= 6;
   doc.line();
   doc.y -= 12;
-  // Only the lines switched on are listed; the rest are one row (owner, Oct 8: Show on
-  // invoice, off by default), so the totals below are the same either way.
+  // Only the lines shown are listed, a No price line with its quantity only; the hidden and
+  // No price amounts are one row (owner, Oct 8), so the totals below are the same either way.
   const rows = pdfLineRows(b.lines);
-  for (const l of rows.shown) {
+  for (const { line: l, priced } of rows.listed) {
     doc.ensure(14);
     const desc = doc.wrap(l.description + (l.on_date ? `  (${fmtDate(l.on_date)})` : ""), 280, 9);
     doc.text(desc[0] ?? "", cols.desc, 9);
     doc.text(`${Number(l.qty)} ${unitText(Number(l.qty), l.unit)}`, cols.qty, 9);
-    doc.text(rateText(Number(l.rate)), cols.rate, 9);
-    doc.textRight(money(Number(l.total)), cols.total, 9);
+    if (priced) {
+      doc.text(rateText(Number(l.rate)), cols.rate, 9);
+      doc.textRight(money(Number(l.total)), cols.total, 9);
+    }
     doc.y -= 12;
     for (const extra of desc.slice(1)) {
       doc.ensure(12);

@@ -67,6 +67,7 @@ import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { fieldKeys } from "@/components/service/field-utils";
 import { InvoicePhotos } from "@/components/service/invoice-photos";
 import { PdfPages } from "@/components/service/pdf-pages";
+import { showChoice, showFlags, type ShowChoice } from "@/lib/invoice-pdf-rows";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -432,6 +433,8 @@ interface LineDraft {
   rate_overridden: boolean;
   /** Listed on its own on the customer's PDF (owner, Oct 8); off = in the one summary row. */
   show_on_invoice: boolean;
+  /** Listed without its rate and amount (owner, Oct 8); with show_on_invoice, "No price". */
+  hide_price: boolean;
 }
 interface HeadDraft {
   invoice_date: string;
@@ -468,6 +471,7 @@ const lineFrom = (l: InvoiceLineRow): LineDraft => ({
   rate_overridden: l.rate_overridden,
   // Missing before 20261008151500 is applied: off, as the column's default.
   show_on_invoice: l.show_on_invoice === true,
+  hide_price: l.hide_price === true,
 });
 const headFrom = (inv: InvoiceRow): HeadDraft => ({
   invoice_date: inv.invoice_date,
@@ -533,10 +537,10 @@ function OptionalNumber(props: {
 
 /** The line table's columns on a wide screen; below lg each line is a small card. */
 const LINE_COLS =
-  "lg:grid lg:grid-cols-[112px_minmax(220px,1fr)_88px_76px_112px_56px_56px_112px_36px] lg:items-start lg:gap-2";
+  "lg:grid lg:grid-cols-[112px_minmax(220px,1fr)_88px_76px_112px_56px_120px_112px_36px] lg:items-start lg:gap-2";
 /** The same with a Cost column after Rate, for the office (managesTickets; owner, Oct 8). */
 const LINE_COLS_COST =
-  "lg:grid lg:grid-cols-[112px_minmax(200px,1fr)_88px_76px_112px_112px_56px_56px_112px_36px] lg:items-start lg:gap-2";
+  "lg:grid lg:grid-cols-[112px_minmax(200px,1fr)_88px_76px_112px_112px_56px_120px_112px_36px] lg:items-start lg:gap-2";
 
 /** A label above a line's box on a phone (the table header carries it on a wide screen). */
 function CellLabel({ children }: { children: React.ReactNode }) {
@@ -663,6 +667,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         source: l.source,
         rate_overridden: l.rate_overridden,
         show_on_invoice: l.show_on_invoice,
+        hide_price: l.hide_price,
       })),
     };
   };
@@ -791,6 +796,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
         orig: null,
         rate_overridden: false,
         show_on_invoice: false,
+        hide_price: false,
       },
     ]);
     setNewKey(key);
@@ -941,7 +947,7 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
             <span className="text-right">Rate</span>
             {internal && <span className="text-right">Cost</span>}
             <span className="text-center">Taxable</span>
-            <span className="text-center">Show</span>
+            <span>On the invoice</span>
             <span className="text-right">Total</span>
             <span className="sr-only">Remove</span>
           </div>
@@ -1046,17 +1052,28 @@ function DraftInvoice({ ctx, data }: { ctx: Ctx; data: InvoiceWithLines }) {
                   />
                   <span className="lg:hidden">Taxable</span>
                 </label>
-                <label
-                  className="flex items-center gap-2 text-sm lg:h-9 lg:justify-center"
-                  title="List this line on the customer's invoice; off, it is added into one Services and materials amount"
-                >
-                  <Checkbox
-                    checked={l.show_on_invoice}
-                    aria-label={`Line ${i + 1} shown on the invoice`}
-                    onCheckedChange={(c) => setLine(l.key, { show_on_invoice: c === true })}
-                  />
-                  <span className="lg:hidden">Show on invoice</span>
-                </label>
+                {/* On the customer's PDF (owner, Oct 8): Hidden (in the one Services and
+                    materials amount), No price (listed with its quantity), With price. */}
+                <div>
+                  <CellLabel>On the invoice</CellLabel>
+                  <Select
+                    value={showChoice(l)}
+                    onValueChange={(v) => setLine(l.key, showFlags(v as ShowChoice))}
+                  >
+                    <SelectTrigger
+                      className="h-9 w-full"
+                      aria-label={`Line ${i + 1} on the invoice`}
+                      title="Hidden: in the one Services and materials amount. No price: listed with its quantity. With price: listed with rate and amount."
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hidden">Hidden</SelectItem>
+                      <SelectItem value="no_price">No price</SelectItem>
+                      <SelectItem value="priced">With price</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="flex items-center justify-between gap-2 lg:block lg:h-9 lg:pt-2 lg:text-right">
                   <span className="text-xs text-muted-foreground lg:hidden">Total</span>
                   <span className="tabular-nums">{money(r2((l.qty ?? 0) * (l.rate ?? 0)))}</span>

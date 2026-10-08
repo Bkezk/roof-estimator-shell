@@ -179,7 +179,9 @@ describe("wired in", () => {
       "if (lineFlagsChanged(prev, next)) return true;",
     );
     const helper = readFileSync("src/lib/invoice-rebuild.ts", "utf8");
-    expect(helper).toContain('(["rate_overridden", "show_on_invoice"] as const).some(');
+    expect(helper).toContain(
+      '(["rate_overridden", "show_on_invoice", "hide_price"] as const).some(',
+    );
     expect(helper).toContain("(k) => k in next && !!prev[k] !== !!next[k],");
   });
   it("the editor flags a rate edit on a ticket line and sends the flag", () => {
