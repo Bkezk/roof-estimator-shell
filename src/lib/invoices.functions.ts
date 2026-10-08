@@ -26,6 +26,7 @@ import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
 import { mergeRebuild, savedLineRow, type RebuildLine } from "@/lib/invoice-rebuild";
+import { stampSent } from "@/lib/invoice-sent";
 import type { InvoiceBundle } from "@/lib/invoices.server";
 
 export type InvoiceRow = Database["public"]["Tables"]["invoices"]["Row"];
@@ -777,18 +778,18 @@ export const sendInvoice = createServerFn({ method: "POST" })
       fileName: `Invoice-${invoiceFileStem(b.invoice)}.pdf`,
     });
     if (!r.ok) throw new Error(`The invoice was not sent: ${r.error}`);
-    const { data: updated, error } = await sb
-      .from("invoices")
-      .update({
+    // Who sent it, for the list's Sent column (stampSent copes with a database not yet migrated).
+    const { data: updated, error } = await stampSent(
+      (patch) => sb.from("invoices").update(patch).eq("id", b.invoice.id).select("*").single(),
+      {
         status: b.invoice.status === "paid" ? "paid" : "sent",
         sent_at: new Date().toISOString(),
         sent_to: data.to as unknown as Json,
         updated_by_name: nameOf(p),
-      })
-      .eq("id", b.invoice.id)
-      .select("*")
-      .single();
-    if (error) throw new Error(error.message);
+      },
+      nameOf(p),
+    );
+    if (error || !updated) throw new Error(error?.message ?? "The invoice was not updated");
     return withLines(sb, updated);
   });
 

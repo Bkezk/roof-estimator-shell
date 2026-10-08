@@ -1447,6 +1447,7 @@ export type Database = {
           property: Json;
           sage_exported_at: string | null;
           sent_at: string | null;
+          sent_by_name: string | null;
           sent_to: Json | null;
           service_job_id: string;
           status: string;
@@ -1482,6 +1483,7 @@ export type Database = {
           property?: Json;
           sage_exported_at?: string | null;
           sent_at?: string | null;
+          sent_by_name?: string | null;
           sent_to?: Json | null;
           service_job_id: string;
           status?: string;
@@ -1517,6 +1519,7 @@ export type Database = {
           property?: Json;
           sage_exported_at?: string | null;
           sent_at?: string | null;
+          sent_by_name?: string | null;
           sent_to?: Json | null;
           service_job_id?: string;
           status?: string;
