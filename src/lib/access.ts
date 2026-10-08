@@ -24,6 +24,7 @@ export const PAGES = [
   "takeoff",
   "service",
   "customers",
+  "invoices",
 ] as const;
 export type Page = (typeof PAGES)[number];
 
@@ -35,6 +36,7 @@ export const PAGE_LABELS: Record<Page, string> = {
   takeoff: "Takeoff",
   service: "Service",
   customers: "Customers",
+  invoices: "Invoices",
 };
 
 export const PAGE_HELP: Record<Page, string> = {
@@ -46,7 +48,50 @@ export const PAGE_HELP: Record<Page, string> = {
   service:
     "Service tickets (repairs): create, assign and close them; log material used off a vehicle",
   customers: "The customer hub: accounts, properties and contacts that bids and tickets link to",
+  invoices:
+    "Sees and edits invoices (every change is logged). Lives under Service, so it brings Service with it",
 };
+
+/**
+ * One-click setups for a new user (owner, Oct 8: "we dont really have PM or sales roles" — the
+ * company has office people, technicians and the owner). Office: the day-to-day pages and
+ * invoices; Technician: tickets, on the board. Both plain users; Estimate Pricing is never in a
+ * preset (tick it by hand).
+ */
+export const ACCESS_PRESETS: ReadonlyArray<{
+  key: "office" | "technician";
+  label: string;
+  help: string;
+  access: readonly Page[];
+  technician: boolean;
+}> = [
+  {
+    key: "office",
+    label: "Office",
+    help: "Estimate, Customers, Service, Invoices, Prospecting, Takeoff",
+    access: ["estimate", "customers", "service", "invoices", "prospect", "takeoff"],
+    technician: false,
+  },
+  {
+    key: "technician",
+    label: "Technician",
+    help: "Service and the Technician tick: on the board, sees their own tickets",
+    access: ["service"],
+    technician: true,
+  },
+];
+
+/**
+ * The pages a tick brings with it: a Technician needs Service to see the tickets they are
+ * assigned (dispatch-access.ts), and Invoices sits under Service. Applied on every change on
+ * Admin › Users, so neither "technician without Service" nor "invoices without Service" can be
+ * saved from the screen (the Oct 6 amber warning stays for rows saved before this).
+ */
+export function impliedAccess(access: readonly Page[], technician: boolean): Page[] {
+  const out = [...access];
+  if ((technician || out.includes("invoices")) && !out.includes("service")) out.push("service");
+  return out;
+}
 
 export const ROLES = ["admin", "manager", "user"] as const;
 export type Role = (typeof ROLES)[number];
@@ -119,12 +164,16 @@ export const isOffice = (p: AccessLike | null | undefined): boolean =>
 export const managesTickets = (p: AccessLike | null | undefined): boolean => seesEveryone(p);
 
 /**
- * A sales / project manager (owner, Oct 1): a plain user, not ticked Technician, with Estimate
- * access — they build bids, know costs and oversee jobs. A technician with Estimate is not one;
- * a manager or an admin is not one either (they are more). The twin of `public.is_sales_pm()`.
+ * A plain user with the Invoices tick (owner, Oct 8: "we dont really have PM or sales roles").
+ * Until then this was a hidden rule — a plain user, not ticked Technician, with Estimate access
+ * counted as "sales / PM" and got invoices without anyone ticking anything (owner, Oct 1). Now it
+ * is the Invoices page on Admin › Users, visible and changeable; the one user that rule covered
+ * (Brian) was given the tick by 20261008180000_invoices_access.sql. A manager or an admin is not
+ * this (they are more). The twin of `public.is_sales_pm()`, which keeps its name for the RLS
+ * policies that call it.
  */
 export const isSalesPm = (p: AccessLike | null | undefined): boolean =>
-  !!p && p.role === "user" && !p.technician && canAccess(p, "estimate");
+  !!p && p.role === "user" && (p.access ?? []).includes("invoices");
 
 /**
  * Who sees and edits invoices (owner, Oct 1: "Sales and PMs should be able to see customers and
@@ -167,6 +216,8 @@ export function pageForPath(pathname: string): Page | "admin" | "manager" | null
   if (pathname.startsWith("/inventory")) return "inventory";
   if (pathname.startsWith("/prospect")) return "prospect";
   if (pathname.startsWith("/takeoff")) return "takeoff";
+  // The Invoices tab under Service is the Invoices page's (seesInvoices gates the screen too).
+  if (pathname.startsWith("/service/invoices")) return "invoices";
   if (pathname.startsWith("/service")) return "service";
   if (pathname.startsWith("/customers")) return "customers";
   // Opportunities: every signed-in user (audit, Oct 2: a rep without Customers access was

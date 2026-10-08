@@ -15,7 +15,9 @@ import {
 } from "@/lib/auth.functions";
 import { RateBox } from "@/components/service/rate-box";
 import {
+  ACCESS_PRESETS,
   EVERYONE_PAGES,
+  impliedAccess,
   PAGES,
   PAGE_HELP,
   PAGE_LABELS,
@@ -68,6 +70,9 @@ function AccessPicker(props: {
 }) {
   // Admins and managers get their pages from the role; the boxes only mirror it.
   const byRole = props.role !== "user";
+  // A Technician or Invoices tick brings Service with it (access.ts impliedAccess).
+  const change = (role: Role, access: Page[], technician: boolean) =>
+    props.onChange(role, impliedAccess(access, technician), technician);
   return (
     <div className={props.compact ? "flex flex-wrap gap-x-4 gap-y-1" : "flex flex-col gap-1.5"}>
       <label className="flex items-center gap-1.5 text-sm" title={ROLE_HELP[props.role]}>
@@ -77,7 +82,7 @@ function AccessPicker(props: {
           aria-label="Role"
           value={props.role}
           disabled={props.disabled}
-          onChange={(e) => props.onChange(e.target.value as Role, props.access, props.technician)}
+          onChange={(e) => change(e.target.value as Role, props.access, props.technician)}
         >
           {ROLES.map((r) => (
             <option key={r} value={r}>
@@ -103,7 +108,7 @@ function AccessPicker(props: {
             }
             disabled={props.disabled || byRole || EVERYONE_PAGES.includes(p)}
             onChange={(e) =>
-              props.onChange(
+              change(
                 "user",
                 e.target.checked
                   ? [...props.access.filter((x) => x !== p), p]
@@ -121,7 +126,7 @@ function AccessPicker(props: {
           className="h-4 w-4"
           checked={props.technician}
           disabled={props.disabled}
-          onChange={(e) => props.onChange(props.role, props.access, e.target.checked)}
+          onChange={(e) => change(props.role, props.access, e.target.checked)}
         />
         <span className="font-medium">Technician</span>
       </label>
@@ -285,6 +290,26 @@ function UsersPage() {
             </div>
             <div className="space-y-2 lg:col-span-1">
               <Label>Access</Label>
+              {/* One click for the two kinds of people the company has (owner, Oct 8). */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Preset:</span>
+                {ACCESS_PRESETS.map((ps) => (
+                  <Button
+                    key={ps.key}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    title={ps.help}
+                    onClick={() => {
+                      setRole("user");
+                      setAccess(impliedAccess(ps.access, ps.technician));
+                      setTechnician(ps.technician);
+                    }}
+                  >
+                    {ps.label}
+                  </Button>
+                ))}
+              </div>
               <AccessPicker
                 role={role}
                 access={access}

@@ -29,19 +29,25 @@ function serverFn(src: string, name: string): string {
 const admin = { role: "admin", access: [] };
 const manager = { role: "manager", access: [] };
 const managerTech = { role: "manager", access: [], technician: true };
-const sales = { role: "user", access: ["estimate", "customers"], technician: false };
-const salesOnlyEstimate = { role: "user", access: ["estimate"] };
+// Owner, Oct 8: the Invoices TICK is what makes a plain user "sales / PM"; Estimate alone no longer does.
+const sales = { role: "user", access: ["estimate", "customers", "invoices"], technician: false };
+const salesOnlyInvoices = { role: "user", access: ["invoices"] };
+const estimateOnly = { role: "user", access: ["estimate", "customers"], technician: false };
 const techWithEstimate = { role: "user", access: ["estimate", "service"], technician: true };
+const techWithInvoices = { role: "user", access: ["service", "invoices"], technician: true };
 const office = { role: "user", access: ["service", "customers", "pricing"], technician: false };
 
 describe("isSalesPm / seesInvoices", () => {
-  it("a plain user with Estimate who is not a technician is sales / PM", () => {
+  it("a plain user with the Invoices tick is sales / PM; Estimate alone is not (owner, Oct 8)", () => {
     expect(isSalesPm(sales)).toBe(true);
-    expect(isSalesPm(salesOnlyEstimate)).toBe(true);
+    expect(isSalesPm(salesOnlyInvoices)).toBe(true);
+    expect(isSalesPm(estimateOnly)).toBe(false);
+    expect(seesInvoices(estimateOnly)).toBe(false);
   });
-  it("a technician with Estimate is NOT sales", () => {
+  it("a technician with Estimate is NOT sales; a technician given the Invoices tick is", () => {
     expect(isSalesPm(techWithEstimate)).toBe(false);
     expect(seesInvoices(techWithEstimate)).toBe(false);
+    expect(isSalesPm(techWithInvoices)).toBe(true);
   });
   it("a manager sees invoices but is not sales; an admin likewise", () => {
     for (const p of [manager, managerTech, admin]) {

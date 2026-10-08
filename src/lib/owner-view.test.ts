@@ -61,8 +61,10 @@ describe("roleLabel", () => {
   it("Admin / Manager / Sales-PM / Technician / User", () => {
     expect(roleLabel({ role: "admin", technician: true })).toBe("Admin");
     expect(roleLabel({ role: "manager", technician: true })).toBe("Manager");
-    // Sales-PM = a plain user, not a technician, with Estimate access (access.ts isSalesPm).
-    expect(roleLabel({ role: "user", technician: false, access: ["estimate"] })).toBe("Sales-PM");
+    // Sales-PM = a plain user with the Invoices tick (access.ts isSalesPm; owner, Oct 8 — Estimate
+    // alone no longer makes one).
+    expect(roleLabel({ role: "user", technician: false, access: ["invoices"] })).toBe("Sales-PM");
+    expect(roleLabel({ role: "user", technician: false, access: ["estimate"] })).toBe("User");
     expect(roleLabel({ role: "user", technician: true, access: ["estimate"] })).toBe("Technician");
     expect(roleLabel({ role: "user", technician: true })).toBe("Technician");
     expect(roleLabel({ role: "user", technician: false })).toBe("User");

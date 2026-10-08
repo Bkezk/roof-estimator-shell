@@ -171,7 +171,7 @@ const INV = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const salesPm = {
   id: ME,
   role: "user",
-  access: ["estimate", "customers"],
+  access: ["estimate", "customers", "invoices"], // the Invoices tick (owner, Oct 8)
   technician: false,
   full_name: "Pat Sales",
   email: "pat@example.com",
