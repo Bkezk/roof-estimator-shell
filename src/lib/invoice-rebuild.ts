@@ -34,6 +34,9 @@ export interface RebuildLine {
   rate_overridden?: boolean;
   /** Listed on its own on the customer's PDF (owner, Oct 8); off by default. */
   show_on_invoice?: boolean;
+  /** Listed without its rate and amount (owner, Oct 8: "show the material/labor but hide the
+   * price"); means nothing while show_on_invoice is off. */
+  hide_price?: boolean;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -58,9 +61,16 @@ export function mergeRebuild(
     if (l.source && l.rate_overridden)
       overridden.set(l.source, { rate: Number(l.rate), cost_rate: Number(l.cost_rate) });
   // A ticket line switched on for the PDF stays on when it is built again (owner, Oct 8).
-  const shown = new Set(old.filter((l) => l.source && l.show_on_invoice).map((l) => l.source));
+  const shown = new Map(
+    old
+      .filter((l) => l.source && l.show_on_invoice)
+      .map(
+        (l) => [l.source, { show_on_invoice: true, hide_price: l.hide_price === true }] as const,
+      ),
+  );
   const out: RebuildLine[] = fresh.map((built) => {
-    const l = shown.has(built.source) ? { ...built, show_on_invoice: true } : built;
+    const flags = shown.get(built.source);
+    const l = flags ? { ...built, ...flags } : built;
     const kept = l.source ? overridden.get(l.source) : undefined;
     if (!kept) return { ...l };
     const qty = Number(l.qty);
@@ -94,6 +104,8 @@ export interface SavedLineInput {
   rate_overridden?: boolean | undefined;
   /** Listed on its own on the customer's PDF (owner, Oct 8). */
   show_on_invoice?: boolean | undefined;
+  /** Listed without its rate and amount (owner, Oct 8). */
+  hide_price?: boolean | undefined;
 }
 export type SavedLineRow = Database["public"]["Tables"]["invoice_lines"]["Insert"] & {
   invoice_id: string;
@@ -132,5 +144,25 @@ export function savedLineRow(
   // on (left off, the column's default is off; before 20261008151500 there is no column).
   if ((prev && "show_on_invoice" in prev) || l.show_on_invoice === true)
     row.show_on_invoice = l.show_on_invoice === true;
+  // No price: the same, once 20261008171500 is applied.
+  if ((prev && "hide_price" in prev) || l.hide_price === true)
+    row.hide_price = l.hide_price === true;
   return row;
+}
+
+/**
+ * Did a line's flags change (the typed-price flag, Show on invoice)? saveInvoice rewrites only
+ * the lines that changed, and a line whose only change is its Show box must still be saved
+ * (owner, Oct 8: "when i save after clicking show on invoice it doesnt stay checked"). A flag
+ * the new row does not carry (its column not there yet) is not a change.
+ */
+type LineFlags = {
+  rate_overridden?: boolean | null;
+  show_on_invoice?: boolean | null;
+  hide_price?: boolean | null;
+};
+export function lineFlagsChanged(prev: LineFlags, next: LineFlags): boolean {
+  return (["rate_overridden", "show_on_invoice", "hide_price"] as const).some(
+    (k) => k in next && !!prev[k] !== !!next[k],
+  );
 }

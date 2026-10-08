@@ -25,7 +25,12 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { accountBillTo, billToFor, vendorBillProblem } from "@/lib/vendors";
 import { toBase64 } from "@/lib/webpush";
 import { INVOICE_NEEDS_AUTH, INVOICE_STAGES } from "@/lib/ticket-stage";
-import { mergeRebuild, savedLineRow, type RebuildLine } from "@/lib/invoice-rebuild";
+import {
+  lineFlagsChanged,
+  mergeRebuild,
+  savedLineRow,
+  type RebuildLine,
+} from "@/lib/invoice-rebuild";
 import { stampSent } from "@/lib/invoice-sent";
 import { mergeSendTo } from "@/lib/invoice-send-to";
 import type { InvoiceBundle } from "@/lib/invoices.server";
@@ -264,7 +269,8 @@ const LINE_COLS = [
  * the typed-by-hand flag alone counts (owner, Oct 6): it is what Rebuild from ticket reads.
  */
 function lineChanged(prev: InvoiceLineRow, next: LineWrite): boolean {
-  if ("rate_overridden" in next && !!prev.rate_overridden !== !!next.rate_overridden) return true;
+  // The typed-price flag and Show on invoice count too (owner, Oct 8: Show did not stay).
+  if (lineFlagsChanged(prev, next)) return true;
   return LINE_COLS.some((k) => {
     const a = prev[k] ?? null;
     const b = next[k] ?? null;
@@ -517,9 +523,10 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     const hasFlag = (oldLines ?? []).some((l) => "rate_overridden" in l);
     // Show on invoice is kept too, once 20261008151500 is applied (owner, Oct 8).
     const hasShow = (oldLines ?? []).some((l) => "show_on_invoice" in l);
+    const hasHide = (oldLines ?? []).some((l) => "hide_price" in l);
     const lines = mergeRebuild((oldLines ?? []) as RebuildLine[], built as RebuildLine[]).map(
       (l) => {
-        const { rate_overridden, show_on_invoice, ...rest } = l;
+        const { rate_overridden, show_on_invoice, hide_price, ...rest } = l;
         const row = {
           sort: rest.sort,
           kind: rest.kind,
@@ -539,6 +546,7 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
           ...row,
           ...(hasFlag ? { rate_overridden: !!rate_overridden } : {}),
           ...(hasShow ? { show_on_invoice: !!show_on_invoice } : {}),
+          ...(hasHide ? { hide_price: !!hide_price } : {}),
         };
       },
     );
@@ -583,6 +591,8 @@ const lineSchema = z.object({
   rate_overridden: z.boolean().default(false),
   /** Listed on its own on the customer's PDF (owner, Oct 8); off = in the one summary row. */
   show_on_invoice: z.boolean().default(false),
+  /** Listed without its rate and amount (owner, Oct 8: "hide the price"). */
+  hide_price: z.boolean().default(false),
 });
 const saveSchema = z.object({
   id: z.string().uuid(),

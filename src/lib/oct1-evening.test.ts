@@ -10,13 +10,14 @@ const read = (p: string) => readFileSync(p, "utf8");
 
 describe("Invoice: Preview PDF shows the PDF in the page", () => {
   const src = read("src/components/service/invoice-editor.tsx");
-  it("renders into a dialog with an iframe on a blob URL, Download and a plain new-tab link", () => {
+  // Oct 8: the pages are drawn with pdf.js (Chrome blocked its own viewer in the iframe).
+  it("renders into a dialog, pages drawn with pdf.js, Download and a plain new-tab link", () => {
     expect(src).toContain("function PdfPreviewDialog(");
     expect(src).toContain("setPdfView({ blob: pdfBlob(pdf.base64), fileName: pdf.file_name });");
     expect(src).toContain("<PdfPreviewDialog view={pdfView} onClose={() => setPdfView(null)} />");
     expect(src).toContain("const u = URL.createObjectURL(view.blob);");
     expect(src).toContain("return () => URL.revokeObjectURL(u);");
-    expect(src).toMatch(/<iframe[\s\S]*?src=\{url\}/);
+    expect(src).toContain("<PdfPages blob={view.blob} title={view.fileName} />");
     expect(src).toContain("onClick={() => view && downloadBlob(view.blob, view.fileName)}");
     expect(src).toContain("Open in a new tab");
   });

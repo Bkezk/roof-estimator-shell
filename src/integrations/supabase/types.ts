@@ -1373,6 +1373,7 @@ export type Database = {
           rate: number;
           rate_overridden: boolean;
           show_on_invoice: boolean;
+          hide_price: boolean;
           sort: number;
           source: string | null;
           taxable: boolean;
@@ -1391,6 +1392,7 @@ export type Database = {
           rate?: number;
           rate_overridden?: boolean;
           show_on_invoice?: boolean;
+          hide_price?: boolean;
           sort?: number;
           source?: string | null;
           taxable?: boolean;
@@ -1409,6 +1411,7 @@ export type Database = {
           rate?: number;
           rate_overridden?: boolean;
           show_on_invoice?: boolean;
+          hide_price?: boolean;
           sort?: number;
           source?: string | null;
           taxable?: boolean;
