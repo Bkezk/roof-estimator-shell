@@ -1674,20 +1674,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const showRate = !!crew && !!draft.technician_id;
   const techRow = (
     <div className="flex items-center gap-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
-        {job && !job.technician_id && !manager && canClaim(profile) && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={claimMut.isPending}
-            onClick={() => claimMut.mutate(job.id)}
-          >
-            Claim
-          </Button>
-        )}
-      </div>
+      <div className="min-w-0 flex-1">{techSelect("h-9")}</div>
       {crew && showRate && (
         <>
           <div className="w-28 shrink-0">
@@ -1968,12 +1955,26 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">Technician</p>
-            <p className="flex min-h-9 items-center text-sm">
+            <p className="flex min-h-9 flex-wrap items-center gap-2 text-sm">
               {draft.technician_id
                 ? (techOptions.find((t) => t.id === draft.technician_id)?.name ??
                   job?.technician_name ??
                   "Former assignee")
                 : "Unassigned"}
+              {/* Owner, Oct 8: "nothing to show its mine now" — say so, and offer Claim here
+                (the non-manager's view) when nobody has it yet. */}
+              {job && job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}
+              {job && !job.technician_id && !manager && canClaim(profile) && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={claimMut.isPending}
+                  onClick={() => claimMut.mutate(job.id)}
+                >
+                  Claim
+                </Button>
+              )}
             </p>
           </div>
           <div className="space-y-1">
@@ -2164,7 +2165,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {showCloseOut && (
                 <Button asChild>
                   <Link to="/service" search={{ id: job.id, closeout: 1 }}>
-                    <ClipboardCheck className="mr-1 h-4 w-4" /> Close out
+                    <ClipboardCheck className="mr-1 h-4 w-4" /> Open ticket
                   </Link>
                 </Button>
               )}

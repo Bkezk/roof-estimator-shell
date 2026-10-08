@@ -13,7 +13,7 @@
  * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly and
  * the tech takes it again.
  *
- * Reached from Today's Done button and the ticket page's Close out (/service?id=<id>&closeout=1).
+ * Reached from Today's and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
  * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
  * takes the Before photos, leaves, comes back for the After photos and Complete. Time is typed
  * in the Time section (Complete points out a ticket with none).

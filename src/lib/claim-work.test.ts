@@ -129,10 +129,17 @@ describe("the claim server functions", () => {
 });
 
 describe("where it is used", () => {
-  it("the ticket page: Claim beside the technician box for a non-manager who can claim, on an unassigned ticket", () => {
+  it("the ticket page: on the non-manager's Technician line, a You badge when it is theirs and Claim when nobody has it", () => {
     const page = src("src/components/service-page.tsx");
+    expect(page).toContain(
+      '{job && job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}',
+    );
     expect(page).toContain("{job && !job.technician_id && !manager && canClaim(profile) && (");
     expect(page).toContain("onClick={() => claimMut.mutate(job.id)}");
+    // Not in the manager's dispatch box: a manager assigns instead.
+    expect(page).not.toContain(
+      '<div className="flex min-w-0 flex-1 items-center gap-2"> <div className="min-w-0 flex-1">{techSelect(',
+    );
   });
   it("Work Overview: the unassigned pane left of the calendar, rows draggable, a day accepts the drop with its date", () => {
     const page = src("src/components/my-work-page.tsx");

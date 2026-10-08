@@ -260,11 +260,11 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
 
       {(askCrew || crewOpen) && <CrewBox job={j} />}
 
-      {/* Owner, Oct 8: one button. Done opens the close-out; it saves itself, and the tech can
-        leave it and come back (photos before, then after) until Complete. */}
+      {/* Owner, Oct 8: one button, "Open ticket", which opens the close-out; it saves itself,
+        and the tech can leave it and come back (photos before, then after) until Complete. */}
       <Button size="lg" className="h-16 w-full text-xl font-semibold" onClick={press}>
         <CheckCircle2 className="mr-2 h-6 w-6" />
-        {j.completed_at ? "Close-out" : "Done"}
+        Open ticket
       </Button>
 
       {stamps.length > 0 && (

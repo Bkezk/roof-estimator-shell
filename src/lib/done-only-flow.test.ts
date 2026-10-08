@@ -14,11 +14,12 @@ const src = (p: string) => readFileSync(p, "utf8").replace(/\s+/g, " ");
 
 describe("Today: one button", () => {
   const today = src("src/components/service/today-page.tsx");
-  it("Done opens the close-out; no En route, On site or Undo", () => {
+  it("the one button, Open ticket, opens the close-out; no En route, On site or Undo", () => {
     expect(today).toContain(
       'void navigate({ to: "/service", search: { id: j.id, closeout: 1 } });',
     );
-    expect(today).toContain('{j.completed_at ? "Close-out" : "Done"}');
+    expect(today).toContain("Open ticket");
+    expect(today).not.toMatch(/>\s*Done\s*</);
     expect(today).not.toMatch(/label: "En route"|label: "On site"/);
     expect(today).not.toContain('step.mutate("undo")');
     expect(today).not.toContain("setFieldStatus");
@@ -33,7 +34,10 @@ describe("Today: one button", () => {
 describe("the close-out is the workflow", () => {
   const closeout = src("src/components/service/closeout.tsx");
   it("is reached from Today and from the ticket page, and saves as it goes", () => {
-    expect(closeout).toContain("Reached from Today's Done button and the ticket page's Close out");
+    expect(closeout).toContain("Reached from Today's and the ticket page's Open ticket button");
+    expect(src("src/components/service-page.tsx")).toContain(
+      '<ClipboardCheck className="mr-1 h-4 w-4" /> Open ticket',
+    );
     expect(closeout).toContain("useAutosave<TextDraft>(");
     expect(src("src/components/service-page.tsx")).toContain(
       '<Link to="/service" search={{ id: job.id, closeout: 1 }}>',

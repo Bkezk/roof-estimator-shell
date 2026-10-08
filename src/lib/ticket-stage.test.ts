@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import { SERVICE_STAGES } from "@/lib/service.functions";
 import {
+  DONE_VIA_CLOSEOUT_MESSAGE,
   MANAGER_STAGE_MESSAGE,
   OFFICE_STAGES,
   TECH_STAGES,
@@ -48,13 +49,17 @@ describe("stageProblem (pure)", () => {
       for (const s of SERVICE_STAGES) expect(stageProblem(p, s), `${p.role} ${s}`).toBeNull();
   });
   it("a technician sets only Open / Scheduled / Done", () => {
-    for (const s of TECH_STAGES) expect(stageProblem(tech, s)).toBeNull();
+    for (const s of ["open", "scheduled"] as const) expect(stageProblem(tech, s)).toBeNull();
+    // Owner, Oct 8: Done comes from the close-out's Complete, not the picker.
+    expect(stageProblem(tech, "done")).toBe(DONE_VIA_CLOSEOUT_MESSAGE);
+    expect(stageProblem(tech, "done", "done")).toBeNull();
     expect(stageProblem(tech, "invoiced")).toBe(TECH_STAGE_MESSAGE);
     expect(stageProblem(tech, "closed")).toBe(TECH_STAGE_MESSAGE);
   });
   it("an office user or a sales / PM who is not a manager: not Authorized, Invoiced or Closed", () => {
     for (const p of [office, sales]) {
-      for (const s of TECH_STAGES) expect(stageProblem(p, s)).toBeNull();
+      for (const s of ["open", "scheduled"] as const) expect(stageProblem(p, s)).toBeNull();
+      expect(stageProblem(p, "done")).toBe(DONE_VIA_CLOSEOUT_MESSAGE);
       expect(stageProblem(p, "authorized")).toBe(MANAGER_STAGE_MESSAGE);
       expect(stageProblem(p, "invoiced")).toBe(
         "Only a manager authorizes, invoices or closes a ticket",
@@ -69,7 +74,8 @@ describe("stageProblem (pure)", () => {
     expect(stageProblem(office, "invoiced", null)).toBe(MANAGER_STAGE_MESSAGE);
   });
   it("nobody signed in is held to the technician rule", () => {
-    expect(stageProblem(null, "done")).toBeNull();
+    expect(stageProblem(null, "scheduled")).toBeNull();
+    expect(stageProblem(null, "done")).toBe(DONE_VIA_CLOSEOUT_MESSAGE);
     expect(stageProblem(null, "invoiced")).toBe(TECH_STAGE_MESSAGE);
   });
 });
@@ -84,8 +90,10 @@ describe("stageChoices / stageLocked (the picker)", () => {
   });
   it("anyone else: Invoiced / Closed only when it is the ticket's stage, and then read-only", () => {
     for (const p of [office, sales, tech]) {
+      // Done only when it already is (the close-out's Complete sets it; owner, Oct 8).
       expect(stageChoices(p, "done")).toEqual(["open", "scheduled", "done"]);
-      expect(stageChoices(p, null)).toEqual(["open", "scheduled", "done"]);
+      expect(stageChoices(p, null)).toEqual(["open", "scheduled"]);
+      expect(stageChoices(p, "scheduled")).toEqual(["open", "scheduled"]);
       // Owner, Oct 6: out of Authorized / Invoiced / Closed is a manager's move, so the ticket's
       // own stage is the only choice (stage-backwards-lock.test.ts).
       expect(stageChoices(p, "invoiced")).toEqual(["invoiced"]);

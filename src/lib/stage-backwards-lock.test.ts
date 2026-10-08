@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import { SERVICE_STAGES } from "@/lib/service.functions";
 import {
+  DONE_VIA_CLOSEOUT_MESSAGE,
   MANAGER_STAGE_MESSAGE,
   OFFICE_STAGES,
   TECH_LOCKED_MESSAGE,
@@ -72,7 +73,9 @@ describe("stageProblem from an office stage (pure)", () => {
   it("keeping the stage is never refused; the forward rule is as before", () => {
     for (const p of [tech, office, salesPm])
       for (const s of OFFICE_STAGES) expect(stageProblem(p, s, s)).toBeNull();
-    expect(stageProblem(tech, "done", "scheduled")).toBeNull();
+    // Owner, Oct 8: Done is the close-out's Complete, not a pick (ticket-stage.ts).
+    expect(stageProblem(tech, "done", "scheduled")).toBe(DONE_VIA_CLOSEOUT_MESSAGE);
+    expect(stageProblem(tech, "scheduled", "open")).toBeNull();
     expect(stageProblem(office, "open", "done")).toBeNull();
     expect(stageProblem(office, "authorized", "done")).toBe(MANAGER_STAGE_MESSAGE);
   });

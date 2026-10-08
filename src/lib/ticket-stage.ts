@@ -52,6 +52,13 @@ export const TECH_LOCKED_MESSAGE =
  * now (undefined / null for a new ticket); keeping it is never refused. Out of Authorized,
  * Invoiced or Closed (owner, Oct 6): a manager's or an admin's, whatever the target.
  */
+/**
+ * Owner, Oct 8: "the step should mark done once all the details are in there" — Done is set by
+ * the close-out's Complete (setFieldStatus), never picked by hand by the person on the ticket.
+ */
+export const DONE_VIA_CLOSEOUT_MESSAGE =
+  "Done is marked when the close-out is completed — open the ticket and finish it there";
+
 export function stageProblem(
   p: AccessLike | null | undefined,
   stage: ServiceStage,
@@ -61,6 +68,7 @@ export function stageProblem(
   if (managesTickets(p)) return null;
   if (current != null && OFFICE_STAGES.includes(current as ServiceStage))
     return MANAGER_STAGE_MESSAGE;
+  if (stage === "done") return DONE_VIA_CLOSEOUT_MESSAGE;
   if (!isOffice(p)) return TECH_STAGES.includes(stage) ? null : TECH_STAGE_MESSAGE;
   return OFFICE_STAGES.includes(stage) ? MANAGER_STAGE_MESSAGE : null;
 }
@@ -91,7 +99,7 @@ export function stageChoices(
 export const stageLocked = (
   p: AccessLike | null | undefined,
   current: ServiceStage | null,
-): boolean => !!current && !!stageProblem(p, current);
+): boolean => !!current && current !== "done" && !!stageProblem(p, current);
 
 /**
  * Who is offered Close out on a ticket (audit, Oct 2): the ticket's lead technician — not once
