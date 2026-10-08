@@ -32,6 +32,8 @@ export interface RebuildLine {
   source: string | null;
   taxable: boolean;
   rate_overridden?: boolean;
+  /** Listed on its own on the customer's PDF (owner, Oct 8); off by default. */
+  show_on_invoice?: boolean;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -55,7 +57,10 @@ export function mergeRebuild(
   for (const l of old)
     if (l.source && l.rate_overridden)
       overridden.set(l.source, { rate: Number(l.rate), cost_rate: Number(l.cost_rate) });
-  const out: RebuildLine[] = fresh.map((l) => {
+  // A ticket line switched on for the PDF stays on when it is built again (owner, Oct 8).
+  const shown = new Set(old.filter((l) => l.source && l.show_on_invoice).map((l) => l.source));
+  const out: RebuildLine[] = fresh.map((built) => {
+    const l = shown.has(built.source) ? { ...built, show_on_invoice: true } : built;
     const kept = l.source ? overridden.get(l.source) : undefined;
     if (!kept) return { ...l };
     const qty = Number(l.qty);
@@ -87,6 +92,8 @@ export interface SavedLineInput {
   taxable: boolean;
   /** Typed by hand (the editor's flag); false or missing = follows the markup / today's rate. */
   rate_overridden?: boolean | undefined;
+  /** Listed on its own on the customer's PDF (owner, Oct 8). */
+  show_on_invoice?: boolean | undefined;
 }
 export type SavedLineRow = Database["public"]["Tables"]["invoice_lines"]["Insert"] & {
   invoice_id: string;
@@ -121,5 +128,9 @@ export function savedLineRow(
     taxable: l.taxable,
   };
   if (prev && "rate_overridden" in prev) row.rate_overridden = l.rate_overridden === true;
+  // Show on invoice: as sent once the stored row has the column; a new line only when switched
+  // on (left off, the column's default is off; before 20261008151500 there is no column).
+  if ((prev && "show_on_invoice" in prev) || l.show_on_invoice === true)
+    row.show_on_invoice = l.show_on_invoice === true;
   return row;
 }

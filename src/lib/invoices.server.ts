@@ -23,6 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
 import { invoiceLabel } from "@/lib/invoice-numbering";
+import { pdfLineRows } from "@/lib/invoice-pdf-rows";
 import {
   materialLineFor,
   pieceFromCatalog,
@@ -570,7 +571,10 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   doc.y -= 6;
   doc.line();
   doc.y -= 12;
-  for (const l of b.lines) {
+  // Only the lines switched on are listed; the rest are one row (owner, Oct 8: Show on
+  // invoice, off by default), so the totals below are the same either way.
+  const rows = pdfLineRows(b.lines);
+  for (const l of rows.shown) {
     doc.ensure(14);
     const desc = doc.wrap(l.description + (l.on_date ? `  (${fmtDate(l.on_date)})` : ""), 280, 9);
     doc.text(desc[0] ?? "", cols.desc, 9);
@@ -583,6 +587,12 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
       doc.text(extra, cols.desc, 9);
       doc.y -= 12;
     }
+  }
+  if (rows.rollup) {
+    doc.ensure(14);
+    doc.text(rows.rollup.label, cols.desc, 9);
+    doc.textRight(money(rows.rollup.total), cols.total, 9);
+    doc.y -= 12;
   }
   doc.line();
   doc.y -= 14;

@@ -515,9 +515,11 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
     if (oErr) throw new Error(oErr.message);
     // Owner, Oct 5: the hand-added lines and the prices changed by hand stay.
     const hasFlag = (oldLines ?? []).some((l) => "rate_overridden" in l);
+    // Show on invoice is kept too, once 20261008151500 is applied (owner, Oct 8).
+    const hasShow = (oldLines ?? []).some((l) => "show_on_invoice" in l);
     const lines = mergeRebuild((oldLines ?? []) as RebuildLine[], built as RebuildLine[]).map(
       (l) => {
-        const { rate_overridden, ...rest } = l;
+        const { rate_overridden, show_on_invoice, ...rest } = l;
         const row = {
           sort: rest.sort,
           kind: rest.kind,
@@ -533,7 +535,11 @@ export const rebuildInvoiceLines = createServerFn({ method: "POST" })
           taxable: rest.taxable,
           invoice_id: inv.id,
         };
-        return hasFlag ? { ...row, rate_overridden: !!rate_overridden } : row;
+        return {
+          ...row,
+          ...(hasFlag ? { rate_overridden: !!rate_overridden } : {}),
+          ...(hasShow ? { show_on_invoice: !!show_on_invoice } : {}),
+        };
       },
     );
     // The lines are thrown away and made again (new ids): the log shows each removed and added.
@@ -575,6 +581,8 @@ const lineSchema = z.object({
    * change and Rebuild from ticket leave the typed price alone.
    */
   rate_overridden: z.boolean().default(false),
+  /** Listed on its own on the customer's PDF (owner, Oct 8); off = in the one summary row. */
+  show_on_invoice: z.boolean().default(false),
 });
 const saveSchema = z.object({
   id: z.string().uuid(),
