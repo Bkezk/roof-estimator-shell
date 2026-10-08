@@ -14,6 +14,9 @@
  * the tech takes it again.
  *
  * Reached from Today's Done button and the ticket page's Close out (/service?id=<id>&closeout=1).
+ * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
+ * takes the Before photos, leaves, comes back for the After photos and Complete. Time is typed
+ * in the Time section (Complete points out a ticket with none).
  */
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -70,6 +73,7 @@ import {
   type JobPhotoRow,
   type JobRepairRow,
   type RepairTemplateRow,
+  listTimeEntries,
 } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -275,6 +279,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const { profile, session } = useAuth();
   const saveFn = useServerFn(saveCloseout);
   const statusFn = useServerFn(setFieldStatus);
+  const timeFn = useServerFn(listTimeEntries);
 
   const [stored] = useState<TextDraft | null>(() => readDraft(job.id));
   const [draft, setDraft] = useState<TextDraft>(() => stored ?? fromJob(job));
@@ -376,6 +381,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     queryFn: () => photosFn({ data: { id: job.id } }),
     enabled: !!session,
   });
+  const timeQ = useQuery({
+    queryKey: fieldKeys.time(job.id),
+    queryFn: () => timeFn({ data: { id: job.id } }),
+    enabled: !!session,
+  });
   const [missing, setMissing] = useState<string[]>([]);
   const pressComplete = () => {
     // Still loading, or already finished (Finish): no list, as before.
@@ -388,6 +398,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             photos: photosQ.data,
             signature_path: job.signature_path,
             closing_notes: latest.current.closing_notes,
+            // Labor from an On site stamp (older tickets) is added by Complete itself.
+            ...(timeQ.data && !job.on_site_at
+              ? { time_hours: timeQ.data.reduce((sum, r) => sum + Number(r.hours), 0) }
+              : {}),
           });
     if (gaps.length > 0) setMissing(gaps);
     else complete.mutate();

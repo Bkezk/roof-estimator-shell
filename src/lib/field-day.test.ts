@@ -311,9 +311,10 @@ describe("days the server derives itself are the office's (Eastern), not UTC's",
 });
 
 describe("the phone sends its own day with every field action that stamps one", () => {
-  it("En route / On site / Undo (Today), Complete (close-out) and Add repair (close-out)", () => {
+  it("Complete (close-out) and Add repair (close-out); Today's only button opens the close-out (owner, Oct 8)", () => {
     const today = readFileSync("src/components/service/today-page.tsx", "utf8");
-    expect(today).toContain("statusFn({ data: { id: j.id, to, day: localYmd() } })");
+    expect(today).not.toContain("statusFn(");
+    expect(today).toContain("search: { id: j.id, closeout: 1 }");
     const closeout = readFileSync("src/components/service/closeout.tsx", "utf8");
     expect(closeout).toContain('statusFn({ data: { id: job.id, to: "done", day: localYmd() } })');
     expect(closeout).toContain("day: localYmd(),");

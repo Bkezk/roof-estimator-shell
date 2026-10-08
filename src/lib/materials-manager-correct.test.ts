@@ -36,9 +36,11 @@ describe("a manager corrects any line on the ticket", () => {
   it("lines nobody may correct (returns) stay a read-only list", () => {
     expect(src).toContain(".filter(({ m }) => !officeKeys.has(cellKey(m)))");
   });
-  it("a manager adds forgotten material from the ticket", () => {
+  it("a manager adds forgotten material from the ticket — on the ticket, never a jump to Inventory (owner, Oct 8)", () => {
     expect(src).toContain("Add material (shop or a truck)");
-    expect(src).toContain('<Link to="/inventory" search={{ job: jobId }}>');
+    expect(src).not.toContain('to="/inventory"');
+    expect(src).toContain('aria-label="Material from elsewhere"');
+    expect(src).toContain("queryFn: () => truckFn({ data: { location_id: fromLoc! } }),");
   });
 });
 

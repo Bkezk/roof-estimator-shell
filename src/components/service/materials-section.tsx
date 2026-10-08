@@ -18,7 +18,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   Check,
@@ -196,6 +195,15 @@ export function MaterialsSection({
     for (const r of truck.data ?? []) ids.add(r.location_id);
     return [...ids];
   }, [defaults.data, truck.data]);
+  // Owner, Oct 8: material from the shop or another truck is picked HERE (the Inventory page
+  // jump "kicks you out of the workflow"); `fromLoc` is the open panel's location.
+  const [fromLoc, setFromLoc] = useState<string | null>(null);
+  const other = useQuery({
+    queryKey: ["inventory-location-stock", fromLoc],
+    queryFn: () => truckFn({ data: { location_id: fromLoc! } }),
+    enabled: !!session && !!fromLoc && canLog,
+  });
+  const [otherSearch, setOtherSearch] = useState("");
   const [picked, setPicked] = useState<string | null>(() => readVehicle());
   const vehicleId = picked && vehicles.includes(picked) ? picked : (vehicles[0] ?? null);
   const pickVehicle = (id: string) => {
@@ -258,6 +266,27 @@ export function MaterialsSection({
     return out;
   }, [truck.data, ledger, vehicleId]);
 
+  const otherRows: ListRow[] = useMemo(
+    () =>
+      (other.data ?? [])
+        .filter((r) => r.location_id === fromLoc)
+        .map((r: TruckStockRow) => ({
+          key: cellKey(r),
+          location_id: r.location_id,
+          screen_id: r.screen_id,
+          row_label: r.row_label,
+          label: r.label,
+          price_col: r.price_col,
+          category: r.category,
+          unit: r.unit,
+          on_hand: r.on_hand,
+          piece: r.piece,
+          item_no: r.item_no,
+          location_name: r.location_name,
+        })),
+    [other.data, fromLoc],
+  );
+
   /** Units this ticket used of the row (server + not yet answered). */
   const usedUnits = (r: ListRow) =>
     round6(packsToUnits(usedPacks(ledger, r), r.piece) + (pending[r.key] ?? 0));
@@ -297,6 +326,7 @@ export function MaterialsSection({
       fieldKeys.materials(jobId),
       truckKey(userId),
       ["inventory-stock"],
+      ["inventory-location-stock"],
       ["inventory-movements"],
     ])
       void qc.invalidateQueries({ queryKey: k });
@@ -347,10 +377,12 @@ export function MaterialsSection({
     );
     moveTruck(r, res.qty);
   };
-  const moveTruck = (r: ListRow, packs: number) =>
-    qc.setQueryData<TruckStockRow[]>(truckKey(userId), (old) =>
-      old?.map((t) => (cellKey(t) === r.key ? { ...t, on_hand: round6(t.on_hand + packs) } : t)),
-    );
+  const moveTruck = (r: ListRow, packs: number) => {
+    const shift = (old: TruckStockRow[] | undefined) =>
+      old?.map((t) => (cellKey(t) === r.key ? { ...t, on_hand: round6(t.on_hand + packs) } : t));
+    qc.setQueryData<TruckStockRow[]>(truckKey(userId), shift);
+    qc.setQueryData<TruckStockRow[]>(["inventory-location-stock", r.location_id], shift);
+  };
 
   const record = async (r: ListRow, units: number, reason: "consumed" | "released") => {
     const res = await addFn({
@@ -731,21 +763,103 @@ export function MaterialsSection({
         </div>
       )}
 
-      {(can("inventory") || manager) &&
-        (manager ? (
-          // A manager adds material the tech forgot from any place (owner, Oct 5).
-          <Button asChild variant="outline" className="h-10">
-            <Link to="/inventory" search={{ job: jobId }}>
-              <Plus className="mr-1 h-4 w-4" /> Add material (shop or a truck)
-            </Link>
+      {canLog &&
+        (fromLoc === null ? (
+          <Button
+            type="button"
+            variant={manager ? "outline" : "link"}
+            className={manager ? "h-10" : "h-10 px-0 text-sm"}
+            onClick={() => {
+              const shop = (locations.data ?? []).find((l) => l.kind === "shop");
+              const first = (locations.data ?? []).find((l) => l.id !== vehicleId);
+              setFromLoc(shop?.id ?? first?.id ?? "shop");
+            }}
+          >
+            {manager ? (
+              <>
+                <Plus className="mr-1 h-4 w-4" /> Add material (shop or a truck)
+              </>
+            ) : (
+              "From the shop / another truck"
+            )}
           </Button>
         ) : (
-          <Button asChild variant="link" className="h-10 px-0 text-sm">
-            {/* Inventory reads ?job=<id> and opens "Take from inventory" for this ticket. */}
-            <Link to="/inventory" search={{ job: jobId }}>
-              From the shop / another truck
-            </Link>
-          </Button>
+          // Owner, Oct 8: the shop's or another truck's stock, right here — the same −/+ rows as
+          // the truck list, against this ticket at that place; no trip to the Inventory page.
+          <div className="space-y-2 rounded-lg border p-3" aria-label="Material from elsewhere">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <span className="font-medium">From</span>
+                <select
+                  className="h-10 rounded-md border bg-background px-2 text-sm"
+                  aria-label="Take material from"
+                  value={fromLoc}
+                  onChange={(e) => {
+                    setFromLoc(e.target.value);
+                    setOtherSearch("");
+                  }}
+                >
+                  {(locations.data ?? []).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                      {l.id === vehicleId ? " (my truck)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                className="ml-auto h-10"
+                onClick={() => setFromLoc(null)}
+              >
+                <Check className="mr-1 h-4 w-4" /> Done
+              </Button>
+            </div>
+            {other.error ? (
+              <p className="text-sm text-destructive">
+                Could not load {locName(fromLoc)}: {errText(other.error)}
+              </p>
+            ) : other.isLoading ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading {locName(fromLoc)}…
+              </p>
+            ) : otherRows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing is on {locName(fromLoc)} in the app yet.
+              </p>
+            ) : (
+              <>
+                {otherRows.length > 5 && (
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      type="search"
+                      className="h-11 pl-9 text-base"
+                      placeholder={`Find on ${locName(fromLoc)} (name, colour, item #)…`}
+                      value={otherSearch}
+                      onChange={(e) => setOtherSearch(e.target.value)}
+                    />
+                  </div>
+                )}
+                <ul className="divide-y rounded-lg border">
+                  {otherRows
+                    .filter((r) => matchesSearch(r, otherSearch.trim()))
+                    .map((r) => (
+                      <TruckRow
+                        key={r.key}
+                        row={r}
+                        used={usedUnits(r)}
+                        onHand={onHandUnits(r)}
+                        onAdd={(n) => add(r, n)}
+                        onReduce={(n) => reduce(r, n)}
+                        onSet={(n) => setTotal(r, n)}
+                      />
+                    ))}
+                </ul>
+              </>
+            )}
+          </div>
         ))}
     </>
   );
