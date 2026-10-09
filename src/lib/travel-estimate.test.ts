@@ -14,6 +14,13 @@
  * .ts: Google with its key, else OSRM) and says "(routed)"; the straight-line arithmetic stays as
  * the fallback, "(estimated)". The destination is the ticket's property address when it has a
  * street line, else the customer's physical address (crm_accounts), else null.
+ *
+ * Later still: "i just made a ticket with the site 2 property and the drive time wasnt auto
+ * added to the close out." The live main address is "PO Box 466, Corbin, KY 40702" — no house
+ * number, so the office never geocoded and the estimate was null for every ticket. The origin
+ * is now travelOrigin: the shop_* street (20261009160000_shop_address.sql) when set, else the
+ * main address when it is a street, else null; the main address stays the PO box the invoice
+ * prints.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -36,6 +43,7 @@ import {
   travelFromRoute,
   travelHours,
   travelNote,
+  travelOrigin,
 } from "@/lib/travel-estimate";
 import { GOOGLE_ROUTES_URL, OSRM_ROUTE_BASE, osrmRouteUrl } from "@/lib/drive-route";
 import { estimateTravel } from "@/lib/service-field.functions";
@@ -115,6 +123,67 @@ describe("travel-estimate: the arithmetic", () => {
       "",
     );
     expect(officeAddressLine({ address: null, city: "London", state: "KY", zip: null })).toBe("");
+  });
+});
+
+// ── Where the truck leaves from (owner, Oct 9: the main address is a PO box) ───────────────────
+
+describe("travelOrigin: the shop's street, else the main address when it is a street, else null", () => {
+  /** The live row (company_settings id 1): the invoice header's PO box. */
+  const PO_BOX = { address: "PO Box 466", city: "Corbin", state: "KY", zip: "40702" };
+  const STREET = { address: "200 Main St", city: "London", state: "KY", zip: "40744" };
+  const NO_SHOP = { shop_address: null, shop_city: null, shop_state: null, shop_zip: null };
+  const SHOP = {
+    shop_address: "100 Depot St",
+    shop_city: "Corbin",
+    shop_state: "KY",
+    shop_zip: "40701",
+  };
+  it("a PO-box main address and no shop → null (the bug: nothing to geocode)", () => {
+    expect(travelOrigin({ ...PO_BOX, ...NO_SHOP })).toBeNull();
+    // Blank shop boxes count as none; so does a row read before the migration (no shop keys).
+    expect(
+      travelOrigin({ ...PO_BOX, shop_address: "  ", shop_city: "", shop_state: "", shop_zip: "" }),
+    ).toBeNull();
+    expect(travelOrigin(PO_BOX)).toBeNull();
+  });
+  it("a PO-box main address and a shop street → the shop, with its state as the geocoder's hint", () => {
+    expect(travelOrigin({ ...PO_BOX, ...SHOP })).toEqual({
+      line: "100 Depot St, Corbin, KY 40701",
+      state: "KY",
+    });
+    expect(travelOrigin({ ...PO_BOX, ...SHOP, shop_state: "TN", shop_zip: null })).toEqual({
+      line: "100 Depot St, Corbin, TN",
+      state: "TN",
+    });
+    // A shop with only a street and city borrows the main address's state for the hint.
+    expect(
+      travelOrigin({
+        ...PO_BOX,
+        shop_address: "100 Depot St",
+        shop_city: "Corbin",
+        shop_state: "",
+      }),
+    ).toEqual({ line: "100 Depot St, Corbin", state: "KY" });
+  });
+  it("a street main address and no shop → the main address (as before the shop existed)", () => {
+    expect(travelOrigin({ ...STREET, ...NO_SHOP })).toEqual({
+      line: "200 Main St, London, KY 40744",
+      state: "KY",
+    });
+    expect(travelOrigin(STREET)).toEqual({ line: "200 Main St, London, KY 40744", state: "KY" });
+  });
+  it("a shop that is itself a PO box falls to the main address when that is a street; two PO boxes → null", () => {
+    expect(
+      travelOrigin({ ...STREET, ...SHOP, shop_address: "PO Box 9", shop_city: "Lexington" }),
+    ).toEqual({ line: "200 Main St, London, KY 40744", state: "KY" });
+    expect(travelOrigin({ ...PO_BOX, ...SHOP, shop_address: "PO Box 9" })).toBeNull();
+  });
+  it("the shop wins over a street main address when both are streets (the trucks park at the shop)", () => {
+    expect(travelOrigin({ ...STREET, ...SHOP })).toEqual({
+      line: "100 Depot St, Corbin, KY 40701",
+      state: "KY",
+    });
   });
 });
 
@@ -472,6 +541,50 @@ describe("estimateTravel (the server)", () => {
     expect(await run()).toBeNull();
     expect(env.rpcCalls).toEqual([]);
   });
+
+  // ── Where the truck leaves from (owner, Oct 9: "the drive time wasnt auto added to the close
+  // out" — the live main address is the invoice's PO box).
+  const PO_BOX_OFFICE = { id: 1, address: "PO Box 466", city: "Corbin", state: "KY", zip: "40702" };
+  const SHOP = {
+    shop_address: "200 Main St",
+    shop_city: "London",
+    shop_state: "KY",
+    shop_zip: "40744",
+  };
+  it("the live row — a PO-box main address, no shop street — → null before any lookup (the bug, now by design until the shop is set)", async () => {
+    world({
+      office: {
+        ...PO_BOX_OFFICE,
+        shop_address: null,
+        shop_city: null,
+        shop_state: null,
+        shop_zip: null,
+      },
+    });
+    expect(await run()).toBeNull();
+    expect(env.rpcCalls).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("a PO-box main address with the shop's street set → the shop is geocoded as the office and the estimate comes back", async () => {
+    world({ office: { ...PO_BOX_OFFICE, ...SHOP } });
+    expect(await run()).toEqual({
+      miles: 15.6,
+      minutes: 25,
+      hours: 0.83,
+      note: "Office → site ≈ 16 mi, 25 min each way (estimated)",
+      source: "estimated",
+    });
+    // The shop ("200 Main St") and the site went through the stored-data rpc; the PO box never.
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["100", "200"]);
+    expect(osrmCalls()).toEqual([osrmRouteUrl(LONDON, CORBIN)]);
+  });
+  it("a shop that is itself a PO box falls back to the main address when that is a street", async () => {
+    world({
+      office: { ...OFFICE, ...SHOP, shop_address: "PO Box 9", shop_city: "Lexington" },
+    });
+    expect(await run()).toMatchObject({ miles: 15.6, minutes: 25, source: "estimated" });
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["100", "200"]);
+  });
   it("a geocode miss (nothing stored, nothing on the state layers) → null, no throw", async () => {
     world({
       rpcs: {
@@ -568,15 +681,16 @@ describe("the Time section prefills a Travel line from the estimate (close-out o
     );
     expect(office).not.toContain("suggestTravel");
   });
-  it("the server function takes the office from company_settings (the invoice header's address), the destination in order, then the router before the arithmetic", () => {
+  it("the server function takes the office from company_settings (the shop's street, else the invoice header's address: travelOrigin), the destination in order, then the router before the arithmetic", () => {
     const fns = readFileSync("src/lib/service-field.functions.ts", "utf8");
     expect(fns).toMatch(
-      /\.from\("company_settings"\)\s*\.select\("address, city, state, zip"\)\s*\.eq\("id", 1\)\s*\.maybeSingle\(\);\s*const officeLine = office \? officeAddressLine\(office\) : "";\s*if \(!officeLine\) return null;/,
+      /\.from\("company_settings"\)\s*\.select\("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip"\)\s*\.eq\("id", 1\)\s*\.maybeSingle\(\);\s*const origin = office \? travelOrigin\(office\) : null;\s*if \(!origin\) return null;/,
     );
+    expect(fns).not.toContain("officeAddressLine(");
     expect(fns).toContain('.select("id, site_id, site_address, account_id")');
     expect(fns).toContain("const dest = await travelDestination(sb, job);");
     expect(fns).toMatch(
-      /geocodeAddressCached\(sb, officeLine, office!\.state\),\s*geocodeAddress\(sb, dest\.line, dest\.state\),/,
+      /geocodeAddressCached\(sb, origin\.line, origin\.state\),\s*geocodeAddress\(sb, dest\.line, dest\.state\),/,
     );
     expect(fns).toMatch(
       /const routed = await routedDrive\(from, to\);\s*return \(routed && travelFromRoute\(routed\)\) \?\? estimateTravelBetween\(from, to\);/,

@@ -40,8 +40,8 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { geocodeAddress, geocodeAddressCached } from "@/lib/service-aerial.functions";
 import {
   estimateTravelBetween,
-  officeAddressLine,
   travelFromRoute,
+  travelOrigin,
   type TravelEstimate,
 } from "@/lib/travel-estimate";
 import { routedDrive } from "@/lib/drive-route";
@@ -473,7 +473,10 @@ export const deleteTimeEntry = createServerFn({ method: "POST" })
  * same day: "can we have it do the routed drive to have more accurate time and it should use
  * the address in the customer profile").
  *
- * The office is company_settings' address (the one the invoice header prints). The destination,
+ * The office is where the trucks leave from (travel-estimate.ts travelOrigin; owner, Oct 9: "the
+ * drive time wasnt auto added to the close out" — the main address is the invoice header's PO
+ * box, which no geocoder can place): company_settings' shop_* street when one is set, else the
+ * main address when it is a street, else null. The destination,
  * in order: the ticket's property address when it has a street line (site_address as typed,
  * else its crm_sites row), else the customer's physical address from crm_accounts (address1,
  * city, state, zip — the same columns the invoice's Bill To reads), else null. The state hint
@@ -494,11 +497,11 @@ export const estimateTravel = createServerFn({ method: "GET" })
     try {
       const { data: office } = await sb
         .from("company_settings")
-        .select("address, city, state, zip")
+        .select("address, city, state, zip, shop_address, shop_city, shop_state, shop_zip")
         .eq("id", 1)
         .maybeSingle();
-      const officeLine = office ? officeAddressLine(office) : "";
-      if (!officeLine) return null;
+      const origin = office ? travelOrigin(office) : null;
+      if (!origin) return null;
       const { data: job } = await sb
         .from("service_jobs")
         .select("id, site_id, site_address, account_id")
@@ -508,7 +511,7 @@ export const estimateTravel = createServerFn({ method: "GET" })
       const dest = await travelDestination(sb, job);
       if (!dest) return null;
       const [from, to] = await Promise.all([
-        geocodeAddressCached(sb, officeLine, office!.state),
+        geocodeAddressCached(sb, origin.line, origin.state),
         geocodeAddress(sb, dest.line, dest.state),
       ]);
       if (!from || !to) return null;

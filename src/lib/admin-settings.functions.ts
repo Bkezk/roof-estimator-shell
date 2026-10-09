@@ -63,14 +63,36 @@ const companySchema = z.object({
   hours_per_man_day: z.number(),
   shipping_method: z.enum(["stepped", "percent"]),
   shipping_percent: z.number(),
+  // Where the trucks leave from (owner, Oct 9; 20261009160000_shop_address.sql): the street the
+  // close-out's drive time starts at when the main address is a PO box. Optional so an older
+  // bundle's save (no shop fields) still goes through and leaves the stored ones alone.
+  shop_address: z.string().nullable().optional(),
+  shop_city: z.string().nullable().optional(),
+  shop_state: z.string().nullable().optional(),
+  shop_zip: z.string().nullable().optional(),
 });
 
+/**
+ * The whole settings row, upserted as id 1 under the caller's own client: RLS policy
+ * company_settings_write (20260831225744_admin_general.sql, is_admin()) decides who may, for
+ * every column of the row.
+ */
 export const saveCompanySettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) => companySchema.parse(d))
   .handler(async ({ data, context }) => {
     await assertAdmin(context.supabase, context.userId);
-    const { error } = await context.supabase.from("company_settings").upsert({ id: 1, ...data });
+    // A shop column the sender left out (undefined) is not written, so the stored value stays.
+    const { shop_address, shop_city, shop_state, shop_zip, ...rest } = data;
+    const row = {
+      id: 1,
+      ...rest,
+      ...(shop_address !== undefined ? { shop_address } : {}),
+      ...(shop_city !== undefined ? { shop_city } : {}),
+      ...(shop_state !== undefined ? { shop_state } : {}),
+      ...(shop_zip !== undefined ? { shop_zip } : {}),
+    };
+    const { error } = await context.supabase.from("company_settings").upsert(row);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

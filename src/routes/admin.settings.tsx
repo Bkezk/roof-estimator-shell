@@ -18,6 +18,8 @@ import {
   type Warranty,
   type HighWindUpcharge,
 } from "@/lib/admin-settings.functions";
+import { parseStreetAddress } from "@/lib/aerial-address";
+import { officeAddressLine } from "@/lib/travel-estimate";
 import { CountyCodesSettings } from "@/components/crm/county-codes-settings";
 import { LeadSourcesSettings } from "@/components/crm/lead-sources-settings";
 import { Button } from "@/components/ui/button";
@@ -173,8 +175,23 @@ function blankCompany(): CompanySettings {
     hours_per_man_day: 9,
     shipping_method: "stepped",
     shipping_percent: 0,
+    shop_address: "",
+    shop_city: "",
+    shop_state: "",
+    shop_zip: "",
     updated_at: new Date().toISOString(),
   };
+}
+
+/**
+ * The close-out's drive time has nowhere to start (owner, Oct 9: "the drive time wasnt auto
+ * added to the close out"): the SAVED main address has no house number the geocoder can place
+ * (a PO box) and no shop street is saved either — travel-estimate.ts travelOrigin is null.
+ */
+function driveTimeOff(saved: CompanySettings | null): boolean {
+  if (!saved) return false;
+  const main = officeAddressLine(saved);
+  return !!main && parseStreetAddress(main) === null && !(saved.shop_address ?? "").trim();
 }
 
 // Shared draft + save for the company settings row. Each of the three tabs below
@@ -211,6 +228,10 @@ function useCompanyDraft(initial: CompanySettings | null, onSaved: () => void, s
           hours_per_man_day: c.hours_per_man_day,
           shipping_method: c.shipping_method as "stepped" | "percent",
           shipping_percent: c.shipping_percent,
+          shop_address: c.shop_address,
+          shop_city: c.shop_city,
+          shop_state: c.shop_state,
+          shop_zip: c.shop_zip,
         },
       });
       toast.success(savedMsg);
@@ -269,6 +290,51 @@ function ContractorTab({ initial, onSaved }: CompanyTabProps) {
             <Field label="ZIP">
               <Input value={c.zip ?? ""} onChange={(e) => set("zip", e.target.value)} />
             </Field>
+          </div>
+          {/* Where the trucks leave from (owner, Oct 9: the main address is the invoice's PO
+              box, which the close-out's drive time cannot start from). */}
+          <div className="space-y-3 rounded-md border p-4 sm:col-span-2">
+            <div className="space-y-1">
+              <Label className="text-sm font-medium">Drive time starts from</Label>
+              <p className="text-xs text-muted-foreground">
+                The close-out's travel estimate starts here. A PO box cannot be used — give the
+                street the trucks leave from. Leave blank when the main address above is already a
+                street.
+              </p>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Street">
+                <Input
+                  value={c.shop_address ?? ""}
+                  onChange={(e) => set("shop_address", e.target.value)}
+                />
+              </Field>
+              <Field label="City">
+                <Input
+                  value={c.shop_city ?? ""}
+                  onChange={(e) => set("shop_city", e.target.value)}
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="State">
+                  <Input
+                    value={c.shop_state ?? ""}
+                    onChange={(e) => set("shop_state", e.target.value)}
+                  />
+                </Field>
+                <Field label="Zip">
+                  <Input
+                    value={c.shop_zip ?? ""}
+                    onChange={(e) => set("shop_zip", e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
+            {driveTimeOff(initial) && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Drive time is off: the main address is a PO box and no street is set here.
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3 sm:col-span-2">
             <Switch
@@ -409,6 +475,10 @@ function ShippingTab({
           hours_per_man_day: company.hours_per_man_day,
           shipping_method: method as "stepped" | "percent",
           shipping_percent: percent,
+          shop_address: company.shop_address,
+          shop_city: company.shop_city,
+          shop_state: company.shop_state,
+          shop_zip: company.shop_zip,
         },
       });
       await saveStepsFn({ data: { steps } });

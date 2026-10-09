@@ -1265,6 +1265,10 @@ export type Database = {
           sales_tax_rate: number;
           shipping_method: string;
           shipping_percent: number;
+          shop_address: string | null;
+          shop_city: string | null;
+          shop_state: string | null;
+          shop_zip: string | null;
           state: string | null;
           updated_at: string;
           zip: string | null;
@@ -1283,6 +1287,10 @@ export type Database = {
           sales_tax_rate?: number;
           shipping_method?: string;
           shipping_percent?: number;
+          shop_address?: string | null;
+          shop_city?: string | null;
+          shop_state?: string | null;
+          shop_zip?: string | null;
           state?: string | null;
           updated_at?: string;
           zip?: string | null;
@@ -1301,6 +1309,10 @@ export type Database = {
           sales_tax_rate?: number;
           shipping_method?: string;
           shipping_percent?: number;
+          shop_address?: string | null;
+          shop_city?: string | null;
+          shop_state?: string | null;
+          shop_zip?: string | null;
           state?: string | null;
           updated_at?: string;
           zip?: string | null;

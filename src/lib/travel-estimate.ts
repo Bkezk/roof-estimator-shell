@@ -11,7 +11,13 @@
  * "(routed)"; when no router answers, the straight-line distance is stretched by a road factor
  * and driven at an average speed, as before, and the line says "(estimated)". Either way the
  * tech can change the hours before saving.
+ *
+ * Owner, Oct 9, later still ("the drive time wasnt auto added to the close out"): the main
+ * address is the invoice header's PO box, which no geocoder can place, so company_settings now
+ * also carries the shop's street (shop_address / shop_city / shop_state / shop_zip,
+ * 20261009160000_shop_address.sql) and `travelOrigin` picks where the trucks leave from.
  */
+import { parseStreetAddress } from "@/lib/aerial-address";
 
 export interface LatLng {
   lat: number;
@@ -122,4 +128,42 @@ export function officeAddressLine(c: {
     .filter((x) => x && x.trim())
     .join(", ");
   return [street, cityLine].filter(Boolean).join(", ");
+}
+
+/** company_settings' two addresses: the main one (the invoice header's) and the shop's. */
+export interface TravelOriginSettings {
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  /** Optional: a row read before 20261009160000_shop_address.sql is applied carries none. */
+  shop_address?: string | null | undefined;
+  shop_city?: string | null | undefined;
+  shop_state?: string | null | undefined;
+  shop_zip?: string | null | undefined;
+}
+
+/**
+ * Where the truck drives from (owner, Oct 9: "the drive time wasnt auto added to the close
+ * out" — the main address is "PO Box 466", which has no house number to geocode): the shop
+ * address when it has a street line (the aerial's parser finds a house number and street in
+ * it), else the main address when IT has a street line, else null — no estimate, the Time
+ * section stays as it is. `state` is the geocoder's hint, from the address the line came from
+ * (the shop's state, or the main one's when the shop's is blank: the trucks park in the same
+ * state as the office unless the settings say otherwise).
+ */
+export function travelOrigin(
+  c: TravelOriginSettings,
+): { line: string; state: string | null } | null {
+  const shop = officeAddressLine({
+    address: c.shop_address ?? null,
+    city: c.shop_city ?? null,
+    state: c.shop_state ?? null,
+    zip: c.shop_zip ?? null,
+  });
+  if (shop && parseStreetAddress(shop))
+    return { line: shop, state: (c.shop_state ?? "").trim() ? c.shop_state! : c.state };
+  const main = officeAddressLine(c);
+  if (main && parseStreetAddress(main)) return { line: main, state: c.state };
+  return null;
 }
