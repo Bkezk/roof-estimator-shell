@@ -67,7 +67,7 @@ import { listPurchaseOrders } from "@/lib/service-pos.functions";
 import { fieldKeys } from "@/components/service/field-utils";
 import { InvoicePhotos } from "@/components/service/invoice-photos";
 import { PdfPages } from "@/components/service/pdf-pages";
-import { showChoice, showFlags, type ShowChoice } from "@/lib/invoice-pdf-rows";
+import { propertyLines, showChoice, showFlags, type ShowChoice } from "@/lib/invoice-pdf-rows";
 import {
   createAnotherInvoice,
   finalizeInvoice,
@@ -1299,8 +1299,14 @@ function BillTo({
       </div>
       <div>
         <p className="text-xs text-muted-foreground">Property</p>
-        <p className="font-medium">{p["name"] || "—"}</p>
-        {p["address"] && <p className="text-muted-foreground">{p["address"]}</p>}
+        {propertyLines(p).length === 0 ? (
+          <p className="text-muted-foreground">No property on file — the PDF leaves it off</p>
+        ) : (
+          <>
+            <p className="font-medium">{p["name"]}</p>
+            {p["address"] && <p className="text-muted-foreground">{p["address"]}</p>}
+          </>
+        )}
       </div>
     </div>
   );

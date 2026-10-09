@@ -23,7 +23,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { labelColOf, rowKeys } from "@/lib/catalog-row-key";
 import { invoiceLabel } from "@/lib/invoice-numbering";
-import { pdfLineRows } from "@/lib/invoice-pdf-rows";
+import { pdfLineRows, propertyLines } from "@/lib/invoice-pdf-rows";
 import {
   materialLineFor,
   pieceFromCatalog,
@@ -555,9 +555,13 @@ export async function renderInvoicePdf(sb: Client, b: InvoiceBundle): Promise<Ui
   );
   const leftEnd = doc.y;
   doc.y = colY;
-  doc.text("Property", M + 270, 9, true);
-  doc.y -= 12;
-  doc.paragraph([property.name, property.address].filter(Boolean).join("\n"), M + 270, 240, 10);
+  // No Property heading over nothing when the ticket had no property (owner, Oct 9).
+  const propLines = propertyLines(property);
+  if (propLines.length > 0) {
+    doc.text("Property", M + 270, 9, true);
+    doc.y -= 12;
+    doc.paragraph(propLines.join("\n"), M + 270, 240, 10);
+  }
   doc.y = Math.min(leftEnd, doc.y) - 8;
 
   // Lines table

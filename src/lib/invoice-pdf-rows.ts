@@ -53,3 +53,17 @@ export function pdfLineRows<T extends PdfLine>(
     rollup: inRollup ? { label: ROLLUP_LABEL, total: r2(unpriced) } : null,
   };
 }
+
+export interface PropertyLike {
+  name?: string | null;
+  address?: string | null;
+}
+
+/**
+ * The Property block's lines on the PDF (name, then address), none when the ticket had no
+ * property (owner, Oct 9: "why does the invoice say property on it if theres no property
+ * listed?"). The heading prints only when there is a line under it.
+ */
+export function propertyLines(p: PropertyLike | null | undefined): string[] {
+  return [p?.name, p?.address].map((s) => (s ?? "").trim()).filter(Boolean);
+}
