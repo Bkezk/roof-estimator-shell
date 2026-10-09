@@ -56,7 +56,10 @@ describe("the close-out screen", () => {
   it("Complete checks first; Finish (already done) does not", () => {
     expect(src).toContain("onClick={pressComplete}");
     expect(src).not.toContain("onClick={() => complete.mutate()}");
-    expect(src).toContain("finished || !repairsQ.data || !photosQ.data");
+    // Owner, Oct 9: a read with no rows is a line, not a pass (completeGaps, closeout-check.ts);
+    // Finish is the `finished` flag the helper short-circuits on.
+    expect(src).not.toContain("finished || !repairsQ.data || !photosQ.data");
+    expect(src).toMatch(/completeGaps\(\{\s*finished,/);
   });
   it("lists what is missing with Go back and Complete anyway", () => {
     expect(src).toContain("<AlertDialogTitle>Before you finish</AlertDialogTitle>");

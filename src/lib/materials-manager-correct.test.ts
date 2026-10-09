@@ -25,7 +25,8 @@ describe("any line on the ticket can be corrected", () => {
   it("+ takes more from the same place; a stock the screen knows is checked here (the short-stock question), else the server checks", () => {
     expect(src).toContain("onAdd={(n) => add(r, n, r.known)}");
     expect(src).toContain("onSet={(n) => setTotal(r, n, r.known)}");
-    expect(src).toContain("if (checkStock && !shortOk && units > onHand + EPS) {");
+    // `ok`: the tap's short_ok, or a cell the tech already said "it came from here" for (Oct 9).
+    expect(src).toContain("if (checkStock && !ok && units > onHand + EPS) {");
     const inv = readFileSync("src/lib/inventory.functions.ts", "utf8");
     expect(inv).toContain("const onHand = await onHandAt(sb, locationId, data);");
   });

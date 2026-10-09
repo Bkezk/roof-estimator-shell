@@ -12,7 +12,7 @@
  * section; a card whose crew is already answered names it and "Change" reopens it.
  */
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -28,6 +28,8 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { myDay, type TodayJob } from "@/lib/service-field.functions";
+import type { ServiceJobWithTech } from "@/lib/service.functions";
+import { seedJobFromToday } from "@/lib/job-cache";
 import { Button } from "@/components/ui/button";
 import { CrewBox } from "@/components/service/crew-box";
 import { arrivalLabel, dayWithWindow } from "@/lib/arrival-window";
@@ -140,6 +142,8 @@ function Group({
 
 function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { profile } = useAuth();
   const address = j.site_address || "";
   const mapQuery = address || [j.site_name, j.customer_name].filter(Boolean).join(", ");
   const phone = j.contact_phone || j.account_phone;
@@ -149,9 +153,14 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
   // The crew question is the close-out's first section (owner, Oct 8); here, an answered card
   // names the crew and "Change" reopens the box.
   const [crewOpen, setCrewOpen] = useState(false);
-  const askCrew = false;
 
   const press = () => {
+    // Owner, Oct 9 (S13): this row IS the ticket row — plant it as the close-out's job so the
+    // screen renders at once (job-cache.ts); the loader still re-reads it in the background.
+    qc.setQueryData<ServiceJobWithTech>(
+      fieldKeys.job(j.id),
+      (old) => old ?? seedJobFromToday(j, profile),
+    );
     void navigate({ to: "/service", search: { id: j.id, closeout: 1 } });
   };
 
@@ -257,7 +266,7 @@ function JobCard({ job: j, today }: { job: TodayJob; today: string }) {
         )}
       </div>
 
-      {(askCrew || crewOpen) && <CrewBox job={j} />}
+      {crewOpen && <CrewBox job={j} />}
 
       {/* Owner, Oct 8: one button, "Open ticket", which opens the close-out; it saves itself,
         and the tech can leave it and come back (photos before, then after) until Complete. */}

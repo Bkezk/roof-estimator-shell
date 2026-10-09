@@ -32,8 +32,9 @@ describe("the screen: ask, then log it anyway", () => {
     expect(src).toContain(
       "const add = (r: ListRow, units: number, checkStock = true, shortOk = false) => {",
     );
+    // `ok` is the tap's short_ok or a remembered yes for the cell (closeout-batch-oct9.test.ts).
     expect(src).toMatch(
-      /if \(checkStock && !shortOk && units > onHand \+ EPS\) \{\s*setShort\(\{ r, units \}\);\s*return;\s*\}/,
+      /if \(checkStock && !ok && units > onHand \+ EPS\) \{\s*setShort\(\{ r, units \}\);\s*return;\s*\}/,
     );
     expect(src).not.toContain("take the rest from the shop or another truck");
   });
@@ -46,7 +47,7 @@ describe("the screen: ask, then log it anyway", () => {
     expect(src).toContain("If it came from somewhere else, cancel and pick that place.");
     expect(src).not.toContain("until the office fixes it");
     expect(src).toMatch(/add\(s\.r, s\.units, false, true\);/);
-    expect(src).toMatch(/record\(r, units, "consumed", shortOk\)/);
+    expect(src).toMatch(/record\(r, units, "consumed", ok\)/);
     expect(src).toContain("...(shortOk ? { short_ok: true } : {}),");
   });
   it("a source with nothing in the app still has a tappable chip that says so", () => {

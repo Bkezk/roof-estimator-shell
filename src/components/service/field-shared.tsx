@@ -310,7 +310,7 @@ export function PhotoThumb({
       {onDelete && (
         <button
           type="button"
-          className="absolute right-0.5 top-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+          className="absolute right-0.5 top-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
           aria-label="Delete this photo"
           title="Delete this photo"
           disabled={deleting}
@@ -326,7 +326,8 @@ export function PhotoThumb({
 }
 
 // ---------------------------------------------------------------------------------------------
-// Time entries: travel and labor to the quarter hour. The buttons write them; this fixes them.
+// Time entries: travel and labor to the quarter hour, typed here (owner, Oct 8: no En route /
+// On site buttons any more; older entries those made still show their clock times).
 
 const KIND_LABEL: Record<string, string> = { travel: "Travel", labor: "Labor" };
 const quarter = (h: number) => Math.round(h * 4) / 4;
@@ -367,32 +368,47 @@ export function TimeEntries({
 }) {
   const { session } = useAuth();
   const listFn = useServerFn(listTimeEntries);
+  // Owner, Oct 9 (S13): fresh for 30 s; a save puts its row in the cache itself.
   const q = useQuery({
     queryKey: fieldKeys.time(jobId),
     queryFn: () => listFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const crewFn = useServerFn(listJobCrew);
   const crewQ = useQuery({
     queryKey: fieldKeys.crew(jobId),
     queryFn: () => crewFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const [adding, setAdding] = useState(false);
   const rows = q.data ?? [];
   const total = (k: string) => rows.filter((r) => r.kind === k).reduce((s, r) => s + r.hours, 0);
   const billedFor = crewQ.data ? billedCrewLine(crewQ.data, rows) : null;
 
-  if (q.error)
+  // Owner, Oct 9 (B2): a failed background re-read keeps the cached lines and Add time on
+  // screen, with a small line saying the refresh failed; only a first read with nothing fails loud.
+  if (q.error && !q.data)
     return <p className="text-sm text-destructive">Could not load time: {errText(q.error)}</p>;
   if (q.isLoading) return <p className="text-sm text-muted-foreground">Loading time…</p>;
   return (
     <div className="space-y-3">
+      {q.error && <p className="text-xs text-destructive">Could not refresh: {errText(q.error)}</p>}
+      {/* Owner, Oct 9 (B7): who the time is billed for comes BEFORE the first line, so a tech
+          does not add a second line for the helper — one line covers everyone on the job. */}
+      {billedFor && (
+        <p className="text-sm text-muted-foreground">
+          {billedFor}
+          {editable && crewQ.data && crewQ.data.length > 1
+            ? " — one time line covers everyone on the job"
+            : ""}
+        </p>
+      )}
       {rows.length > 0 && (
         <p className="text-sm">
           <span className="font-medium">Travel</span> {fmtHours(total("travel"))} ·{" "}
           <span className="font-medium">Labor</span> {fmtHours(total("labor"))}
-          {billedFor && <span className="block text-muted-foreground">{billedFor}</span>}
         </p>
       )}
       {rows.length === 0 && !adding && (
@@ -430,11 +446,9 @@ export function TimeEntries({
                 </span>
                 <span className="text-muted-foreground">
                   {shortDay(r.on_date)}
-                  {r.source === "buttons" && r.started_at && r.ended_at
+                  {r.started_at && r.ended_at
                     ? ` · ${clock(r.started_at)} to ${clock(r.ended_at)}`
-                    : r.source === "manual"
-                      ? " · by hand"
-                      : ""}
+                    : ""}
                 </span>
               </li>
             ))}
@@ -578,13 +592,11 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
-      <p className="text-[11px] text-muted-foreground">
-        {save.isPending
-          ? "Saving…"
-          : entry.source === "buttons" && entry.started_at && entry.ended_at
-            ? `From the buttons, ${clock(entry.started_at)} to ${clock(entry.ended_at)}`
-            : "Entered by hand"}
-      </p>
+      {(save.isPending || (entry.started_at && entry.ended_at)) && (
+        <p className="text-[11px] text-muted-foreground">
+          {save.isPending ? "Saving…" : `${clock(entry.started_at)} to ${clock(entry.ended_at)}`}
+        </p>
+      )}
     </div>
   );
 }

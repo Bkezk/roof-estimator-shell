@@ -202,3 +202,15 @@ export function searchMaterials(
     };
   });
 }
+
+/**
+ * addMovement's stock refusal ("Only 0.5 box on the shelf", "Only 2 EA on Truck 2"): the server
+ * checked a shelf this screen could not (a cell the shop never stocked reads −0.001 until the
+ * stock read catches up). Owner, Oct 9: the screen answers it with the short-stock question —
+ * "it came from here, log it anyway" resends with short_ok — not a red error. Every other
+ * refusal (RLS, a closed ticket, "Only an estimator can…") stays loud: those start with "Only "
+ * too, so the units and the place are required.
+ */
+export function isStockRefusal(message: string): boolean {
+  return /^Only -?\d+(\.\d+)? \S.* on (the shelf|\S)/.test(message.trim());
+}

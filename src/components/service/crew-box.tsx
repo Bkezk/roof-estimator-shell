@@ -16,6 +16,7 @@ import { listTechnicians } from "@/lib/auth.functions";
 import { listJobCrew, type ServiceJobRow } from "@/lib/service.functions";
 import { setJobCrew, type TodayJob } from "@/lib/service-field.functions";
 import { crewQuestionPending, othersOf } from "@/lib/service-crew";
+import { CREW_FIELDS, mergeSaved } from "@/lib/job-cache";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SavedIndicator } from "@/components/service/field-shared";
@@ -37,10 +38,12 @@ export function CrewBox({
   const crewFn = useServerFn(listJobCrew);
   const techFn = useServerFn(listTechnicians);
   const setFn = useServerFn(setJobCrew);
+  // Owner, Oct 9 (S13): fresh for 30 s; a save invalidates it itself.
   const crew = useQuery({
     queryKey: fieldKeys.crew(job.id),
     queryFn: () => crewFn({ data: { id: job.id } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const techs = useQuery({
     queryKey: ["technicians"],
@@ -81,15 +84,16 @@ export function CrewBox({
   const autosave = useAutosave<string[]>(
     async (others) => {
       const row = await setFn({ data: { id: job.id, others } });
+      // Owner, Oct 9: only the crew fields this save wrote go into the caches (job-cache.ts) —
+      // the whole row landing after a signature save used to blank the signature.
       qc.setQueryData<ServiceJobRow>(fieldKeys.job(job.id), (old) =>
-        old ? { ...old, ...row } : old,
+        mergeSaved(old, row, CREW_FIELDS),
       );
       qc.setQueryData<TodayJob[]>(fieldKeys.today, (old) =>
         old?.map((x) =>
           x.id === row.id
             ? {
-                ...x,
-                ...row,
+                ...(mergeSaved(x, row, CREW_FIELDS) ?? x),
                 crew_names: others.map((id) => options.find((o) => o.id === id)?.name ?? "?"),
               }
             : x,

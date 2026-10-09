@@ -27,12 +27,13 @@ describe("the repair picker folds", () => {
     );
     expect(picker).toContain('placeholder="Search all repairs…"');
   });
-  it("eight chips, then Show all N / Show fewer (not while searching)", () => {
+  it("eight chips, then Show all N / Show fewer (the chip block is hidden while searching)", () => {
     expect(src).toContain("const PICKER_CHIPS = 8;");
-    expect(src).toContain(
-      "const chipRows = allChips || q.length >= 2 ? favRows : favRows.slice(0, PICKER_CHIPS);",
-    );
-    expect(src).toMatch(/\{favRows\.length > PICKER_CHIPS && q\.length < 2 && \(/);
+    // Owner, Oct 9 (S5): typing no longer expands the chips — the whole block hides and the
+    // matches sit under the search box (closeout-batch-oct9.test.ts).
+    expect(src).toContain("const chipRows = allChips ? favRows : favRows.slice(0, PICKER_CHIPS);");
+    expect(src).not.toContain("allChips || q.length >= 2");
+    expect(src).toMatch(/\{favRows\.length > PICKER_CHIPS && \(/);
     expect(src).toContain('{allChips ? "Show fewer" : `Show all ${favRows.length}`}');
     expect(src).not.toMatch(/\{favRows\.map\(\(t\) => \(\s*<Chip/);
   });

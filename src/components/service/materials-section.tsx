@@ -23,7 +23,7 @@
  * loudly. When the queue is empty the ticket's materials, the truck and Inventory's lists are
  * re-read.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -60,6 +60,7 @@ import {
 } from "@/lib/service-field.functions";
 import {
   SEARCH_MIN_CHARS,
+  isStockRefusal,
   searchMaterials,
   type MaterialResult,
   type MaterialSource,
@@ -168,15 +169,19 @@ export function MaterialsSection({
   const addFn = useServerFn(addMovement);
   const undoFn = useServerFn(undoMovement);
 
+  // Owner, Oct 9 (S13): fresh for 30 s, so a return from the camera does not re-read it all;
+  // a tap still invalidates these when the queue empties (refreshAll).
   const materials = useQuery({
     queryKey: fieldKeys.materials(jobId),
     queryFn: () => materialsFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const truck = useQuery({
     queryKey: truckKey(userId),
     queryFn: () => truckFn({ data: {} }),
     enabled: !!session && !!userId && canLog,
+    staleTime: 30_000,
   });
   // Shared with Inventory's "Take from" defaults and location list (same functions, same keys).
   const defaults = useQuery({
@@ -195,6 +200,7 @@ export function MaterialsSection({
     queryKey: fieldKeys.repairs(jobId),
     queryFn: () => repairsFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
 
   // The repair templates on this ticket, once each, in the order they were added.
@@ -219,6 +225,7 @@ export function MaterialsSection({
     (locations.data ?? []).find((l) => l.id === id)?.name ??
     (truck.data ?? []).find((r) => r.location_id === id)?.location_name ??
     (id === "shop" ? "Shop" : id);
+  const shopId = (locations.data ?? []).find((l) => l.kind === "shop")?.id ?? "shop";
 
   // Which truck: the ones I drive today, plus any that hold stock for me.
   const vehicles = useMemo(() => {
@@ -488,16 +495,41 @@ export function MaterialsSection({
   // should do it right themselves). `short` is the open question; the weekly reconciliation
   // report (inventory-reconcile.ts) lists every short entry so the counts get corrected.
   const [short, setShort] = useState<{ r: ListRow; units: number } | null>(null);
+  // Owner, Oct 9: once the tech has said "it came from here" for a cell, every later add on that
+  // cell on this ticket sends short_ok without asking again (each pack used to re-ask).
+  const shortOkCells = useRef<Set<string>>(new Set());
+  // Owner, Oct 9: a tap on a search chip scrolls the new "On this ticket" line into view and
+  // focuses its count box (`focusAfter` is the cell waiting for its first entry to land).
+  const focusAfter = useRef<string | null>(null);
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  const clearFocus = useCallback(() => setFocusKey(null), []);
   const add = (r: ListRow, units: number, checkStock = true, shortOk = false) => {
     if (!(units > EPS)) return;
+    const ok = shortOk || shortOkCells.current.has(r.key);
+    if (ok) shortOkCells.current.add(r.key);
     const onHand = onHandUnits(r);
-    if (checkStock && !shortOk && units > onHand + EPS) {
+    if (checkStock && !ok && units > onHand + EPS) {
       setShort({ r, units });
       return;
     }
-    enqueue(r.key, units, `Could not log ${cellName(r)}`, () =>
-      record(r, units, "consumed", shortOk),
-    );
+    enqueue(r.key, units, `Could not log ${cellName(r)}`, async () => {
+      try {
+        await record(r, units, "consumed", ok);
+      } catch (e) {
+        // The server's own stock check ("Only N … on the shelf": a shelf this screen could not
+        // read, e.g. a cell the shop never stocked) is the same question, not a red error; yes
+        // resends with short_ok (material-search.ts isStockRefusal).
+        if (!ok && isStockRefusal(errText(e))) {
+          setShort({ r, units });
+          return;
+        }
+        throw e;
+      }
+      if (focusAfter.current === r.key) {
+        focusAfter.current = null;
+        setFocusKey(r.key);
+      }
+    });
   };
 
   /** Take `units` back off this ticket (they stay on the truck). */
@@ -578,6 +610,7 @@ export function MaterialsSection({
       item_no: res.item_no,
       location_name: src.location_name,
     };
+    focusAfter.current = r.key;
     add(r, 1, src.on_hand !== null);
   };
   /** What a source chip says is left there, net of taps not yet answered. */
@@ -618,9 +651,11 @@ export function MaterialsSection({
 
   const body = (
     <>
+      {/* Owner, Oct 9 (B2): a failed background re-read keeps the cached list on screen. */}
       {materials.error && (
         <p className="text-sm text-destructive">
-          Could not load this ticket's materials: {errText(materials.error)}
+          {materials.data ? "Could not refresh" : "Could not load"} this ticket's materials:{" "}
+          {errText(materials.error)}
         </p>
       )}
       {materials.isSuccess && !anyUsed && (
@@ -633,69 +668,80 @@ export function MaterialsSection({
         </p>
       ) : (
         <>
-          {vehicleId &&
-            templates.map((t, i) => {
-              const list = usual[i]?.data ?? [];
-              if (!list.length) return null;
-              return (
-                <div key={t.id} className="space-y-1.5">
-                  <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <Sparkles className="h-3.5 w-3.5" /> Usual for {t.name}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {list.map((u) => {
-                      const key = cellKey({ ...u, location_id: vehicleId });
-                      const r = rows.find((x) => x.key === key);
-                      const piece =
-                        r?.piece ??
-                        (truck.data ?? []).find((x) => catalogKey(x) === catalogKey(u))?.piece ??
-                        null;
-                      const want = suggestedUnits(u.avg_qty, piece);
-                      const have = r ? usedUnits(r) : 0;
-                      const done = have >= want - EPS;
-                      const label = `${cellName(u)} · ${amountText(want, piece, r?.unit ?? u.unit)}`;
-                      return (
-                        <Button
-                          key={key}
-                          type="button"
-                          variant={done ? "secondary" : "outline"}
-                          aria-pressed={done}
-                          className={`h-11 max-w-full justify-start rounded-full px-4 text-sm ${
-                            done
-                              ? "border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100"
-                              : !r || onHandUnits(r) <= EPS
-                                ? "border-dashed text-muted-foreground"
-                                : ""
-                          }`}
-                          title={`Used on ${u.tickets} earlier ${u.tickets === 1 ? "ticket" : "tickets"} with this repair`}
-                          onClick={() => {
-                            if (done) {
-                              toast.info(`${cellName(u)}: already on this ticket`);
-                              return;
-                            }
-                            if (!r || onHandUnits(r) <= EPS) {
-                              toast.warning(
-                                `${cellName(u)} is not on ${locName(vehicleId)} — take it from the shop or another truck`,
-                                { duration: 8000 },
-                              );
-                              return;
-                            }
-                            add(r, round6(want - have));
-                          }}
-                        >
-                          {done ? (
-                            <Check className="mr-1 h-4 w-4 shrink-0" />
-                          ) : (
-                            <Plus className="mr-1 h-4 w-4 shrink-0" />
-                          )}
-                          <span className="truncate">{label}</span>
-                        </Button>
-                      );
-                    })}
-                  </div>
+          {templates.map((t, i) => {
+            const list = usual[i]?.data ?? [];
+            if (!list.length) return null;
+            // Owner, Oct 9: with no truck the chips source the shop (they used to need one).
+            const usualLoc = vehicleId ?? shopId;
+            return (
+              <div key={t.id} className="space-y-1.5">
+                <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5" /> Usual for {t.name}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {list.map((u) => {
+                    const key = cellKey({ ...u, location_id: usualLoc });
+                    const r = rows.find((x) => x.key === key);
+                    const piece =
+                      r?.piece ??
+                      (truck.data ?? []).find((x) => catalogKey(x) === catalogKey(u))?.piece ??
+                      null;
+                    const want = suggestedUnits(u.avg_qty, piece);
+                    const have = r ? usedUnits(r) : 0;
+                    const done = have >= want - EPS;
+                    const label = `${cellName(u)} · ${amountText(want, piece, r?.unit ?? u.unit)}`;
+                    return (
+                      <Button
+                        key={key}
+                        type="button"
+                        variant={done ? "secondary" : "outline"}
+                        aria-pressed={done}
+                        className={`h-11 max-w-full justify-start rounded-full px-4 text-sm ${
+                          done
+                            ? "border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100"
+                            : !r || onHandUnits(r) <= EPS
+                              ? "border-dashed text-muted-foreground"
+                              : ""
+                        }`}
+                        title={`Used on ${u.tickets} earlier ${u.tickets === 1 ? "ticket" : "tickets"} with this repair`}
+                        onClick={() => {
+                          if (done) {
+                            toast.info(`${cellName(u)}: already on this ticket`);
+                            return;
+                          }
+                          // Owner, Oct 9: an item the place does not show runs the same add
+                          // path, so the short-stock question takes over (it sends them to
+                          // pick the right place, or logs it here) — the chip used to only warn.
+                          const target: ListRow = r ?? {
+                            key,
+                            location_id: usualLoc,
+                            screen_id: u.screen_id,
+                            row_label: u.row_label,
+                            price_col: u.price_col,
+                            label: u.label,
+                            category: "",
+                            unit: u.unit,
+                            on_hand: 0,
+                            piece,
+                            item_no: null,
+                            location_name: locName(usualLoc),
+                          };
+                          add(target, round6(want - have));
+                        }}
+                      >
+                        {done ? (
+                          <Check className="mr-1 h-4 w-4 shrink-0" />
+                        ) : (
+                          <Plus className="mr-1 h-4 w-4 shrink-0" />
+                        )}
+                        <span className="truncate">{label}</span>
+                      </Button>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
 
           {onTicket.length > 0 && (
             <div className="space-y-1.5" aria-label="On this ticket">
@@ -714,6 +760,8 @@ export function MaterialsSection({
                       onAdd={(n) => add(r, n, r.known)}
                       onReduce={(n) => reduce(r, n)}
                       onSet={(n) => setTotal(r, n, r.known)}
+                      focus={focusKey === r.key}
+                      onFocused={clearFocus}
                     />
                   ) : (
                     // A return with nothing used: shown, not corrected (nothing to take back).
@@ -872,7 +920,7 @@ export function MaterialsSection({
                   <label className="flex items-center gap-2 text-sm">
                     <span className="font-medium">From</span>
                     <select
-                      className="h-10 rounded-md border bg-background px-2 text-sm"
+                      className="h-10 rounded-md border bg-background px-2 text-base"
                       aria-label="Take material from"
                       value={fromLoc}
                       onChange={(e) => {
@@ -897,7 +945,12 @@ export function MaterialsSection({
                     <Check className="mr-1 h-4 w-4" /> Done
                   </Button>
                 </div>
-                {other.error ? (
+                {other.error && other.data && (
+                  <p className="text-sm text-destructive">
+                    Could not refresh {locName(fromLoc)}: {errText(other.error)}
+                  </p>
+                )}
+                {other.error && !other.data ? (
                   <p className="text-sm text-destructive">
                     Could not load {locName(fromLoc)}: {errText(other.error)}
                   </p>
@@ -1013,7 +1066,12 @@ export function MaterialsSection({
                     </div>
                   )}
 
-                  {truck.error ? (
+                  {truck.error && truck.data && (
+                    <p className="text-sm text-destructive">
+                      Could not refresh your truck: {errText(truck.error)}
+                    </p>
+                  )}
+                  {truck.error && !truck.data ? (
                     <div className="flex flex-wrap items-center gap-2 text-sm text-destructive">
                       <span>Could not load your truck: {errText(truck.error)}</span>
                       <Button
@@ -1154,6 +1212,8 @@ function TruckRow({
   onAdd,
   onReduce,
   onSet,
+  focus,
+  onFocused,
 }: {
   row: ListRow;
   used: number;
@@ -1163,7 +1223,18 @@ function TruckRow({
   onAdd: (units: number) => void;
   onReduce: (units: number) => void;
   onSet: (total: number) => void;
+  /** Scroll the row into view and focus its count box (a search chip just made this line). */
+  focus?: boolean | undefined;
+  onFocused?: (() => void) | undefined;
 }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    const el = inputRef.current;
+    el?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    el?.focus();
+    onFocused?.();
+  }, [focus, onFocused]);
   // Owner, Oct 9: "the forms dont need to be arrow single increments, they need to be able to
   // type in them" — the count between − and + is a typeable box (blank when nothing is used, never
   // a 0). While it has focus it keeps its own text; blur or Enter commits the typed total through
@@ -1226,6 +1297,7 @@ function TruckRow({
           </Button>
           <label className="flex w-16 flex-col items-center">
             <Input
+              ref={inputRef}
               type="number"
               inputMode="decimal"
               min={0}

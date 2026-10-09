@@ -56,9 +56,11 @@ describe("the close-out's Repairs section", () => {
     expect(src).toContain("function RepairRow({");
     expect(src).toContain("const s = repairSummary(repair, photos);");
     expect(src).toContain("{s.qtyText}");
-    expect(src).toContain("<span>Before ({s.before})</span>");
-    expect(src).toContain("<span>After ({s.after})</span>");
-    expect(src).toMatch(/text-amber-700 dark:text-amber-400">needs: \{s\.needs\.join\(", "\)\}/);
+    // Owner, Oct 9 (S6): the counts are on the row's own camera buttons, "Before (n)" /
+    // "After (n)" (PhotoButtons, shared with the card), not plain text.
+    expect(src).toContain("<PhotoButtons photos={photos} camera={camera} compact />");
+    expect(src).toContain('{count(role) ? ` (${count(role)})` : ""}');
+    expect(src).toMatch(/text-amber-700 dark:text-amber-400">\s*needs: \{s\.needs\.join\(", "\)\}/);
     expect(src).toContain('<ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />');
   });
   it("one card open at a time; the only repair is always open; nothing remembered across reloads", () => {
@@ -76,14 +78,14 @@ describe("the close-out's Repairs section", () => {
     );
     expect(onSuccess).toContain("setExpanded(row.id);");
   });
-  it("Remove is a small ghost button in the card's header, with its confirm step; the photo buttons are h-11", () => {
+  it("Remove is a ghost button in the card's header (h-11, owner Oct 9), with its confirm step; the photo buttons are h-11", () => {
     const card = src.slice(src.indexOf("function RepairCard({"), src.indexOf("// (f) Signature"));
     const header = card.slice(
       card.indexOf("<article"),
       card.indexOf('<Label className="text-sm text-muted-foreground">Quantity</Label>'),
     );
     expect(header).toContain(
-      'className="h-9 px-2 text-xs text-destructive hover:text-destructive"',
+      'className="h-11 px-2 text-xs text-destructive hover:text-destructive"',
     );
     expect(header).toContain("onClick={() => setConfirmRemove(true)}");
     expect(header).toContain("Remove this repair and its photos?");
@@ -91,8 +93,10 @@ describe("the close-out's Repairs section", () => {
     expect(header).toContain('<ChevronUp className="h-5 w-5" />');
     expect(card).not.toContain("Remove repair");
     expect(card).not.toContain('<div className="flex justify-end">');
-    expect(card).toContain(
-      'className="h-11 text-base"\n            disabled={uploadingRole === role}',
+    // The card's camera buttons come from PhotoButtons (the section's one upload mutation).
+    expect(card).toContain("<PhotoButtons photos={photos} camera={camera} />");
+    expect(src).toMatch(
+      /className=\{compact \? "h-10 px-3 text-sm" : "h-11 text-base"\}\s*disabled=\{uploading === role\}/,
     );
   });
 });

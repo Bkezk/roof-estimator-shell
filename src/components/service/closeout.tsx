@@ -4,15 +4,15 @@
  * editable later), repairs from the template chips with before / after photos (one line each,
  * one open at a time — owner, Oct 9), materials off the truck (one tap per piece, or any
  * material found by search, from the truck or the shop; materials-section.tsx), purchase orders for material bought for
- * the job (purchase-orders-section.tsx; no Approved toggle here), closing notes, time (fix a forgotten
- * button press), the customer's signature, then Complete.
+ * the job (purchase-orders-section.tsx; no Approved toggle here), closing notes, time (typed to the
+ * quarter hour), the customer's signature, then Complete.
  *
  * Everything saves as it is filled out (owner, Sep 30: no Save button): repairs, photos, time
  * and the signature as they are made, the text fields a moment after typing stops (a subtle
  * "Saved", a loud toast when it fails). The text is also kept in localStorage per ticket
  * (bid-o-matic:closeout:<id>) until the server has it, so a lost signal on the roof does not
- * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly and
- * the tech takes it again.
+ * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly, and
+ * the file is kept on the repair for "Retry upload" (owner, Oct 9) until it lands or is discarded.
  *
  * Reached from My tickets' and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
  * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
@@ -38,6 +38,7 @@ import {
   Minus,
   PenLine,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Wrench,
@@ -76,6 +77,7 @@ import {
   type JobPhotoRow,
   type JobRepairRow,
   type RepairTemplateRow,
+  type TimeEntryRow,
   listTimeEntries,
 } from "@/lib/service-field.functions";
 import { Button } from "@/components/ui/button";
@@ -101,7 +103,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { missingForComplete } from "@/lib/closeout-check";
+import { completeGaps, type CheckRead, type CompleteGaps } from "@/lib/closeout-check";
+import { CLOSEOUT_TEXT_FIELDS, mergeSaved } from "@/lib/job-cache";
 import { repairSummary } from "@/lib/closeout-repairs";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import {
@@ -297,9 +300,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     recommend_new_roof: d.recommend_new_roof,
     signed_by: orNull(d.signed_by),
   });
+  // Owner, Oct 9: only the fields this save sent go into the cache (job-cache.ts) — the whole
+  // row landing after a signature save used to blank the signature.
   const keepRow = (row: ServiceJobRow) =>
     qc.setQueryData<ServiceJobWithTech>(fieldKeys.job(job.id), (old) =>
-      old ? { ...old, ...row } : old,
+      mergeSaved(old, row, CLOSEOUT_TEXT_FIELDS),
     );
 
   // The text saves itself a moment after typing stops; the phone's copy goes once the server
@@ -340,7 +345,10 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       return statusFn({ data: { id: job.id, to: "done", day: localYmd() } });
     },
     onSuccess: (row) => {
-      keepRow(row);
+      // The stage and the stamps changed too: the whole row, then a re-read (invalidated below).
+      qc.setQueryData<ServiceJobWithTech>(fieldKeys.job(job.id), (old) =>
+        old ? { ...old, ...row } : old,
+      );
       clearDraft(job.id);
       for (const k of [
         fieldKeys.today,
@@ -375,41 +383,67 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // same queries (and cache) the Repairs section reads.
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
+  // Owner, Oct 9 (S13): fresh for 30 s, so coming back from the camera does not re-read
+  // everything; a save still invalidates what it changed.
   const repairsQ = useQuery({
     queryKey: fieldKeys.repairs(job.id),
     queryFn: () => repairsFn({ data: { id: job.id } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const photosQ = useQuery({
     queryKey: fieldKeys.photos(job.id),
     queryFn: () => photosFn({ data: { id: job.id } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const timeQ = useQuery({
     queryKey: fieldKeys.time(job.id),
     queryFn: () => timeFn({ data: { id: job.id } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const [missing, setMissing] = useState<string[]>([]);
-  const pressComplete = () => {
-    // Still loading, or already finished (Finish): no list, as before.
-    const gaps =
-      finished || !repairsQ.data || !photosQ.data
-        ? []
-        : missingForComplete({
-            service_type: job.service_type,
-            repairs: repairsQ.data,
-            photos: photosQ.data,
-            signature_path: job.signature_path,
-            closing_notes: latest.current.closing_notes,
-            // Labor from an On site stamp (older tickets) is added by Complete itself.
-            ...(timeQ.data && !job.on_site_at
-              ? { time_hours: timeQ.data.reduce((sum, r) => sum + Number(r.hours), 0) }
-              : {}),
-          });
-    if (gaps.length > 0) setMissing(gaps);
-    else complete.mutate();
+  const [unread, setUnread] = useState(false);
+  // Owner, Oct 9: a read that failed or is still loading is a line of its own (closeout-check.ts
+  // completeGaps) — Complete used to pass silently with no checks when one had no rows yet.
+  const gapsOf = (reads: {
+    repairs: CheckRead<JobRepairRow[]>;
+    photos: CheckRead<JobPhotoRow[]>;
+    time: CheckRead<TimeEntryRow[]>;
+  }) =>
+    completeGaps({
+      finished,
+      service_type: job.service_type,
+      signature_path: job.signature_path,
+      closing_notes: latest.current.closing_notes,
+      // Labor from an On site stamp (older tickets) is added by Complete itself.
+      on_site_at: job.on_site_at,
+      ...reads,
+    });
+  const judge = (g: CompleteGaps) => {
+    if (g.gaps.length > 0) {
+      setMissing(g.gaps);
+      setUnread(g.unread);
+    } else {
+      setMissing([]); // Retry found nothing missing: the dialog closes and Complete runs.
+      complete.mutate();
+    }
   };
+  const pressComplete = () => judge(gapsOf({ repairs: repairsQ, photos: photosQ, time: timeQ }));
+  // Retry re-reads the three and judges their answers (not the closure's, which may be stale).
+  const retry = useMutation({
+    mutationFn: async () => {
+      const [repairs, photos, time] = await Promise.all([
+        repairsQ.refetch(),
+        photosQ.refetch(),
+        timeQ.refetch(),
+      ]);
+      return gapsOf({ repairs, photos, time });
+    },
+    onSuccess: judge,
+    onError: (e) => loudError("Could not re-check the ticket", e),
+  });
   // Owner, Sep 30: "Who is on this job with you?" comes first; the rest opens once answered.
   const waiting = crewQuestionPending(job);
 
@@ -542,6 +576,22 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel className="h-12">Go back</AlertDialogCancel>
+                {unread && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-12"
+                    disabled={retry.isPending}
+                    onClick={() => retry.mutate()}
+                  >
+                    {retry.isPending ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Retry
+                  </Button>
+                )}
                 <AlertDialogAction
                   className="h-12"
                   onClick={() => {
@@ -604,12 +654,20 @@ function TagChip({
       size="sm"
       variant={active ? "default" : "outline"}
       aria-pressed={active}
-      className="h-8 rounded-full px-3 text-xs"
+      className="h-10 rounded-full px-3 text-sm"
       onClick={onClick}
     >
       {children}
     </Button>
   );
+}
+
+/** A before or after photo (the camera buttons; the signature is registered elsewhere). */
+type PhotoRole = "before" | "after";
+/** A photo that did not upload, kept on its repair for Retry upload (owner, Oct 9). */
+interface Shot {
+  file: File;
+  role: PhotoRole;
 }
 
 function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: number }) {
@@ -620,16 +678,20 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const recentFn = useServerFn(recentRepairsForJob);
   const templatesFn = useServerFn(listRepairTemplates);
   const saveFn = useServerFn(saveJobRepair);
+  const registerFn = useServerFn(registerJobPhoto);
 
+  // Owner, Oct 9 (S13): fresh for 30 s — a return from the camera is not a re-read of all.
   const repairs = useQuery({
     queryKey: fieldKeys.repairs(jobId),
     queryFn: () => repairsFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const photos = useQuery({
     queryKey: fieldKeys.photos(jobId),
     queryFn: () => photosFn({ data: { id: jobId } }),
     enabled: !!session,
+    staleTime: 30_000,
   });
   const recent = useQuery({
     queryKey: ["repair-templates-recent", jobId],
@@ -707,6 +769,87 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     onError: (e) => loudError("Could not add the repair", e),
   });
 
+  // Owner, Oct 9: the camera is ONE mutation for the section, with two hidden file inputs, so
+  // a folded row's Before / After buttons (RepairRow) and the open card share it — a tech taps
+  // a row's camera without opening the card. `aim` is the repair the next picked file goes to.
+  // A failed upload keeps its file here (`failed`, one per repair) for "Retry upload": the file
+  // used to be thrown away with the error. A success or Discard lets it go.
+  const beforeRef = useRef<HTMLInputElement | null>(null);
+  const afterRef = useRef<HTMLInputElement | null>(null);
+  const aim = useRef<string | null>(null);
+  const [failed, setFailed] = useState<Record<string, Shot>>({});
+  const upload = useMutation({
+    mutationFn: async ({ file, role, repairId }: Shot & { repairId: string }) => {
+      // GPS runs beside the upload and gives up after 3 s; a photo never waits on it.
+      const where = getPosition(3000);
+      const shrunk = await shrinkPhoto(file);
+      const path = photoObjectPath(jobId, shrunk.name || "photo.jpg");
+      await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
+      const pos = await where;
+      try {
+        return await registerFn({
+          data: {
+            service_job_id: jobId,
+            repair_id: repairId,
+            role,
+            storage_path: path,
+            file_name: shrunk.name || null,
+            file_size: shrunk.blob.size,
+            taken_at: new Date(file.lastModified || Date.now()).toISOString(),
+            lat: pos?.lat ?? null,
+            lng: pos?.lng ?? null,
+          },
+        });
+      } catch (e) {
+        await removeFromServiceBucket(path);
+        throw e;
+      }
+    },
+    onSuccess: (row, v) => {
+      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) => [...(old ?? []), row]);
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
+      setFailed((f) => {
+        if (!(v.repairId in f)) return f;
+        const { [v.repairId]: _landed, ...rest } = f;
+        return rest;
+      });
+      toast.success(`${row.role === "before" ? "Before" : "After"} photo saved`);
+    },
+    onError: (e, v) => {
+      setFailed((f) => ({ ...f, [v.repairId]: { file: v.file, role: v.role } }));
+      loudError(
+        `The ${v.role} photo did not upload (it is kept on the repair — Retry upload with signal)`,
+        e,
+      );
+    },
+  });
+  const takePhoto = (repairId: string, role: PhotoRole) => {
+    aim.current = repairId;
+    (role === "before" ? beforeRef : afterRef).current?.click();
+  };
+  const pick = (role: PhotoRole) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    const repairId = aim.current;
+    if (!repairId) return;
+    for (const file of files) upload.mutate({ file, role, repairId });
+  };
+  const photoControls = (r: JobRepairRow): PhotoControls => ({
+    uploading:
+      upload.isPending && upload.variables?.repairId === r.id ? upload.variables.role : null,
+    failed: failed[r.id],
+    onPhoto: (role) => takePhoto(r.id, role),
+    onRetry: () => {
+      const shot = failed[r.id];
+      if (shot) upload.mutate({ ...shot, repairId: r.id });
+    },
+    onDiscard: () =>
+      setFailed((f) => {
+        const { [r.id]: _dropped, ...rest } = f;
+        return rest;
+      }),
+  });
+
   // The ticket's usual repairs are not re-fetched per chip: hide the ones outside it here.
   const recentRows = (recent.data ?? []).filter((t) => repairMatchesTag(t.tags, tag));
   const recentIds = new Set(recentRows.map((t) => t.id));
@@ -715,7 +858,10 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const allPhotos = photos.data ?? [];
   const openId = rows.length === 1 ? (rows[0]?.id ?? null) : expanded;
   const showPicker = rows.length === 0 || pickerOpen;
-  const chipRows = allChips || q.length >= 2 ? favRows : favRows.slice(0, PICKER_CHIPS);
+  // Owner, Oct 9 (S5): two characters typed → the matches sit right under the box and the
+  // chips are out of the way (they used to grow to the full list while typing).
+  const searching = q.length >= 2;
+  const chipRows = allChips ? favRows : favRows.slice(0, PICKER_CHIPS);
 
   return (
     <Section
@@ -727,16 +873,35 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
         ) : undefined
       }
     >
+      {/* Owner, Oct 9 (B2): a failed background re-read keeps the cached rows on screen. */}
       {repairs.error && (
         <p className="text-sm text-destructive">
-          Could not load the repairs: {errText(repairs.error)}
+          {repairs.data ? "Could not refresh the repairs" : "Could not load the repairs"}:{" "}
+          {errText(repairs.error)}
         </p>
       )}
       {photos.error && (
         <p className="text-sm text-destructive">
-          Could not load the photos: {errText(photos.error)}
+          {photos.data ? "Could not refresh the photos" : "Could not load the photos"}:{" "}
+          {errText(photos.error)}
         </p>
       )}
+      <input
+        ref={beforeRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={pick("before")}
+      />
+      <input
+        ref={afterRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={pick("after")}
+      />
       {rows.length > 0 && (
         <div className="space-y-2">
           {rows.map((r) =>
@@ -748,6 +913,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
                 repair={r}
                 photos={allPhotos.filter((p) => p.repair_id === r.id)}
                 onCollapse={rows.length > 1 ? () => setExpanded(null) : null}
+                camera={photoControls(r)}
               />
             ) : (
               <RepairRow
@@ -755,6 +921,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
                 repair={r}
                 photos={allPhotos.filter((p) => p.repair_id === r.id)}
                 onOpen={() => setExpanded(r.id)}
+                camera={photoControls(r)}
               />
             ),
           )}
@@ -783,6 +950,30 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {searching && (
+            <div className="flex flex-wrap gap-2">
+              {found.isLoading ? (
+                <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+                </span>
+              ) : found.error ? (
+                <p className="text-sm text-destructive">Search failed: {errText(found.error)}</p>
+              ) : (found.data ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No repair named like “{q}”. Use Other to type it.
+                </p>
+              ) : (
+                (found.data ?? []).map((t) => (
+                  <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
+                    {t.name}
+                  </Chip>
+                ))
+              )}
+              <Chip tone="secondary" onClick={() => setOtherOpen((v) => !v)}>
+                Other
+              </Chip>
+            </div>
+          )}
           <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roof type">
             <TagChip active={tag === null} onClick={() => pickTag(null)}>
               All
@@ -793,7 +984,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
               </TagChip>
             ))}
           </div>
-          {recentRows.length > 0 && (
+          {!searching && recentRows.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Usual here
@@ -812,31 +1003,33 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
               </div>
             </div>
           )}
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {rows.length ? "Add another" : "Tap a repair to add it"}
-            </p>
-            {favs.error && (
-              <p className="text-sm text-destructive">
-                Could not load the repair list: {errText(favs.error)}
+          {!searching && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {rows.length ? "Add another" : "Tap a repair to add it"}
               </p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {chipRows.map((t) => (
-                <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
-                  {t.name}
-                </Chip>
-              ))}
-              {favRows.length > PICKER_CHIPS && q.length < 2 && (
-                <Chip tone="secondary" onClick={() => setAllChips((v) => !v)}>
-                  {allChips ? "Show fewer" : `Show all ${favRows.length}`}
-                </Chip>
+              {favs.error && (
+                <p className="text-sm text-destructive">
+                  Could not load the repair list: {errText(favs.error)}
+                </p>
               )}
-              <Chip tone="secondary" onClick={() => setOtherOpen((v) => !v)}>
-                Other
-              </Chip>
+              <div className="flex flex-wrap gap-2">
+                {chipRows.map((t) => (
+                  <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
+                    {t.name}
+                  </Chip>
+                ))}
+                {favRows.length > PICKER_CHIPS && (
+                  <Chip tone="secondary" onClick={() => setAllChips((v) => !v)}>
+                    {allChips ? "Show fewer" : `Show all ${favRows.length}`}
+                  </Chip>
+                )}
+                <Chip tone="secondary" onClick={() => setOtherOpen((v) => !v)}>
+                  Other
+                </Chip>
+              </div>
             </div>
-          </div>
+          )}
           {otherOpen && (
             <form
               className="flex gap-2"
@@ -862,27 +1055,6 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
                 Add
               </Button>
             </form>
-          )}
-          {q.length >= 2 && (
-            <div className="flex flex-wrap gap-2">
-              {found.isLoading ? (
-                <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Searching…
-                </span>
-              ) : found.error ? (
-                <p className="text-sm text-destructive">Search failed: {errText(found.error)}</p>
-              ) : (found.data ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No repair named like “{q}”. Use Other to type it.
-                </p>
-              ) : (
-                (found.data ?? []).map((t) => (
-                  <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
-                    {t.name}
-                  </Chip>
-                ))
-              )}
-            </div>
           )}
           {rows.length > 0 && (
             <Button
@@ -916,43 +1088,120 @@ const repairVals = (r: JobRepairRow): RepairVals => ({
   resolution_text: r.resolution_text ?? "",
 });
 
+/** The section's camera, handed to a repair's row and card (see RepairsSection). */
+interface PhotoControls {
+  /** The role uploading for this repair now, else null. */
+  uploading: PhotoRole | null;
+  /** The last photo of this repair that did not upload, until it lands or is discarded. */
+  failed: Shot | undefined;
+  onPhoto: (role: PhotoRole) => void;
+  onRetry: () => void;
+  onDiscard: () => void;
+}
+
 /**
- * A repair folded to one line (owner, Oct 9): name, "× qty unit", the Before / After counts and,
- * in amber, what it still needs (closeout-repairs.ts). Tap anywhere to open the card.
+ * The Before (n) / After (n) camera buttons and, under them, the failed photo's "Retry upload"
+ * / "Discard" line. `compact`: the folded row's size; else the card's two wide buttons.
+ */
+function PhotoButtons({
+  photos,
+  camera,
+  compact,
+}: {
+  photos: JobPhotoRow[];
+  camera: PhotoControls;
+  compact?: boolean | undefined;
+}) {
+  const { uploading, failed, onPhoto, onRetry, onDiscard } = camera;
+  const count = (role: PhotoRole) => photos.filter((p) => p.role === role).length;
+  return (
+    <>
+      <div className={compact ? "flex gap-2" : "grid grid-cols-2 gap-2"}>
+        {(["before", "after"] as const).map((role) => (
+          <Button
+            key={role}
+            type="button"
+            variant="outline"
+            className={compact ? "h-10 px-3 text-sm" : "h-11 text-base"}
+            disabled={uploading === role}
+            onClick={() => onPhoto(role)}
+          >
+            {uploading === role ? (
+              <Loader2
+                className={compact ? "mr-1 h-4 w-4 animate-spin" : "mr-2 h-5 w-5 animate-spin"}
+              />
+            ) : (
+              <Camera className={compact ? "mr-1 h-4 w-4" : "mr-2 h-5 w-5"} />
+            )}
+            {role === "before" ? "Before" : "After"}
+            {count(role) ? ` (${count(role)})` : ""}
+          </Button>
+        ))}
+      </div>
+      {failed && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-destructive">
+            The {failed.role === "before" ? "Before" : "After"} photo did not upload
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10"
+            disabled={uploading !== null}
+            onClick={onRetry}
+          >
+            <RefreshCw className="mr-1 h-4 w-4" /> Retry upload
+          </Button>
+          <Button type="button" variant="ghost" className="h-10" onClick={onDiscard}>
+            Discard
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * A repair folded to one line (owner, Oct 9): name, "× qty unit" and a chevron open the card;
+ * under them its own Before (n) / After (n) camera buttons (so a photo never needs the card
+ * open) beside, in amber, what it still needs (closeout-repairs.ts).
  */
 function RepairRow({
   repair,
   photos,
   onOpen,
+  camera,
 }: {
   repair: JobRepairRow;
   photos: JobPhotoRow[];
   onOpen: () => void;
+  camera: PhotoControls;
 }) {
   const s = repairSummary(repair, photos);
   return (
-    <button
-      type="button"
-      aria-expanded={false}
-      aria-label={`Open ${repair.name || "repair"}`}
-      className="flex min-h-14 w-full items-center gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-left hover:bg-muted/40"
-      onClick={onOpen}
-    >
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold leading-snug">
+    <div className="space-y-2 rounded-lg border bg-muted/20 px-3 py-2">
+      <button
+        type="button"
+        aria-expanded={false}
+        aria-label={`Open ${repair.name || "repair"}`}
+        className="flex min-h-11 w-full items-center gap-3 rounded-md text-left hover:bg-muted/40"
+        onClick={onOpen}
+      >
+        <p className="min-w-0 flex-1 truncate font-semibold leading-snug">
           {repair.name || "Repair"}{" "}
           <span className="font-normal text-muted-foreground">{s.qtyText}</span>
         </p>
-        <p className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-          <span>Before ({s.before})</span>
-          <span>After ({s.after})</span>
-          {s.needs.length > 0 && (
-            <span className="text-amber-700 dark:text-amber-400">needs: {s.needs.join(", ")}</span>
-          )}
-        </p>
+        <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
+      </button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <PhotoButtons photos={photos} camera={camera} compact />
+        {s.needs.length > 0 && (
+          <span className="text-xs text-amber-700 dark:text-amber-400">
+            needs: {s.needs.join(", ")}
+          </span>
+        )}
       </div>
-      <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
-    </button>
+    </div>
   );
 }
 
@@ -962,6 +1211,7 @@ function RepairCard({
   repair,
   photos,
   onCollapse,
+  camera,
 }: {
   jobId: string;
   ticketNumber: number;
@@ -969,16 +1219,14 @@ function RepairCard({
   photos: JobPhotoRow[];
   /** Fold the card back to its row; null when it is the only repair (always open). */
   onCollapse: (() => void) | null;
+  camera: PhotoControls;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveJobRepair);
   const deleteFn = useServerFn(deleteJobRepair);
-  const registerFn = useServerFn(registerJobPhoto);
   const deletePhotoFn = useServerFn(deleteJobPhoto);
   const [vals, setVals] = useState<RepairVals>(() => repairVals(repair));
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const beforeRef = useRef<HTMLInputElement | null>(null);
-  const afterRef = useRef<HTMLInputElement | null>(null);
 
   const save = useMutation({
     mutationFn: (v: RepairVals) =>
@@ -1020,44 +1268,6 @@ function RepairCard({
     onError: (e) => loudError("Could not remove the repair", e),
   });
 
-  const upload = useMutation({
-    mutationFn: async ({ file, role }: { file: File; role: "before" | "after" }) => {
-      // GPS runs beside the upload and gives up after 3 s; a photo never waits on it.
-      const where = getPosition(3000);
-      const shrunk = await shrinkPhoto(file);
-      const path = photoObjectPath(jobId, shrunk.name || "photo.jpg");
-      await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
-      const pos = await where;
-      try {
-        return await registerFn({
-          data: {
-            service_job_id: jobId,
-            repair_id: repair.id,
-            role,
-            storage_path: path,
-            file_name: shrunk.name || null,
-            file_size: shrunk.blob.size,
-            taken_at: new Date(file.lastModified || Date.now()).toISOString(),
-            lat: pos?.lat ?? null,
-            lng: pos?.lng ?? null,
-          },
-        });
-      } catch (e) {
-        await removeFromServiceBucket(path);
-        throw e;
-      }
-    },
-    onSuccess: (row) => {
-      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) => [...(old ?? []), row]);
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-      toast.success(`${row.role === "before" ? "Before" : "After"} photo saved`);
-    },
-    onError: (e, v) =>
-      loudError(
-        `The ${v.role} photo did not upload (photos are not kept offline; take it again with signal)`,
-        e,
-      ),
-  });
   const delPhoto = useMutation({
     mutationFn: (id: string) => deletePhotoFn({ data: { id, service_job_id: jobId } }),
     onSuccess: (_r, id) =>
@@ -1067,12 +1277,6 @@ function RepairCard({
     onError: (e) => loudError("Could not delete the photo", e),
   });
 
-  const pick = (role: "before" | "after") => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    for (const file of files) upload.mutate({ file, role });
-  };
-  const uploadingRole = upload.isPending ? upload.variables?.role : null;
   const free = !repair.repair_template_id;
 
   return (
@@ -1099,7 +1303,7 @@ function RepairCard({
             type="button"
             variant="ghost"
             size="sm"
-            className="h-9 px-2 text-xs text-destructive hover:text-destructive"
+            className="h-11 px-2 text-xs text-destructive hover:text-destructive"
             aria-label={`Remove ${repair.name || "repair"}`}
             onClick={() => setConfirmRemove(true)}
           >
@@ -1111,7 +1315,7 @@ function RepairCard({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-9 w-9"
+            className="h-11 w-11"
             aria-label={`Fold ${repair.name || "repair"}`}
             aria-expanded
             onClick={onCollapse}
@@ -1198,45 +1402,7 @@ function RepairCard({
         </div>
       )}
 
-      <input
-        ref={beforeRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={pick("before")}
-      />
-      <input
-        ref={afterRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={pick("after")}
-      />
-      <div className="grid grid-cols-2 gap-2">
-        {(["before", "after"] as const).map((role) => (
-          <Button
-            key={role}
-            type="button"
-            variant="outline"
-            className="h-11 text-base"
-            disabled={uploadingRole === role}
-            onClick={() => (role === "before" ? beforeRef : afterRef).current?.click()}
-          >
-            {uploadingRole === role ? (
-              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            ) : (
-              <Camera className="mr-2 h-5 w-5" />
-            )}
-            {role === "before" ? "Before" : "After"}
-            {(() => {
-              const n = photos.filter((p) => p.role === role).length;
-              return n ? ` (${n})` : "";
-            })()}
-          </Button>
-        ))}
-      </div>
+      <PhotoButtons photos={photos} camera={camera} />
     </article>
   );
 }

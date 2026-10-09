@@ -26,7 +26,9 @@ describe("Today: one button", () => {
     expect(today).not.toContain("nextStep(");
   });
   it("the crew question moved to the close-out; an answered card still shows Change", () => {
-    expect(today).toContain("const askCrew = false;");
+    // Owner, Oct 9: the dead `askCrew = false` is gone; Change alone opens the box.
+    expect(today).not.toContain("askCrew");
+    expect(today).toContain("{crewOpen && <CrewBox job={j} />}");
     expect(today).toContain('{crewOpen ? "Done" : "Change"}');
   });
 });
@@ -45,9 +47,10 @@ describe("the close-out is the workflow", () => {
   });
   it("Complete checks the time logged on tickets without an On site stamp", () => {
     expect(closeout).toContain("queryFn: () => timeFn({ data: { id: job.id } }),");
-    expect(closeout).toContain(
-      "...(timeQ.data && !job.on_site_at ? { time_hours: timeQ.data.reduce((sum, r) => sum + Number(r.hours), 0) } : {}),",
-    );
+    // Owner, Oct 9: the time read goes to completeGaps with the On site stamp (closeout-check.ts
+    // skips the time check when the stamp's labor is added by Complete itself).
+    expect(closeout).toContain("on_site_at: job.on_site_at,");
+    expect(closeout).toContain("time: timeQ }");
   });
   it("missingForComplete: 'No time logged' when hours are given and zero; untouched for older callers", () => {
     const base = {
