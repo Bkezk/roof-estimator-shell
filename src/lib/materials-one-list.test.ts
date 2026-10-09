@@ -145,17 +145,17 @@ describe("the Materials section: one list, one way in", () => {
     return i;
   };
 
-  it("reads heading → Usual chips → On this ticket → Find any material → What's on my truck", () => {
+  it("reads heading → On this ticket → Find any material → What's on my truck", () => {
     const heading = at("Anything used?");
-    const usual = at("Usual for {t.name}");
     const list = at('aria-label="On this ticket"');
     const find = at('aria-label="Find any material"');
     const browse = at("Browse the shop");
     const panel = at('aria-label="Material from elsewhere"');
     const fold = at('aria-label="What\'s on my truck"');
     const radio = at('aria-label="Which truck"');
-    expect(heading).toBeLessThan(usual);
-    expect(usual).toBeLessThan(list);
+    expect(heading).toBeLessThan(list);
+    // Owner, Oct 9 (later): no "Usual for <repair>" chips between the heading and the list.
+    expect(body).not.toContain("Usual for {t.name}");
     expect(list).toBeLessThan(find);
     expect(find).toBeLessThan(browse);
     expect(browse).toBeLessThan(panel);

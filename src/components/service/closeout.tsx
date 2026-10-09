@@ -23,7 +23,16 @@
  * Reached from My tickets' and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
  * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
  * takes the Before photos, leaves, comes back for the After photos and Complete. Time is typed
- * in the Time section (Complete points out a ticket with none).
+ * in the Time section (Complete points out a ticket with none); with no Travel line yet the
+ * section opens prefilled with the office → site estimate (field-shared.tsx TimeEntries,
+ * suggestTravel; owner, Oct 9). Step 6 can be skipped ("Skip — nothing to add", a phone mark
+ * like "Nothing used"; owner, Oct 9: the notes are "kind of redundant") and is not a Complete gap.
+ *
+ * Owner, Oct 9: "i typed 1 letter into notes and it took me to the next step before i could
+ * finish typing." A step's rule can hold on the first letter; the step the tech is inside
+ * (`engaged`: focus or a tap within its card) stays the shown open step (closeout-steps.ts
+ * shownOpenStep) — expanded, no toast, no scroll, the next card still locked — and the advance
+ * runs when they leave it (focus moves out of the card, or a tap anywhere outside it).
  */
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -130,6 +139,9 @@ import {
   firstOpenStep,
   lockedLine,
   nothingUsedKey,
+  notesSkippedKey,
+  shownOpenStep,
+  stepDone,
   stepHeadline,
   stepOf,
   stepStatus,
@@ -137,6 +149,7 @@ import {
   stepSummary,
   unlockToast,
   type CloseoutStep,
+  type EngagedStep,
   type StepId,
   type StepState,
   type StepStatus,
@@ -209,27 +222,31 @@ function clearDraft(id: string) {
   }
 }
 
-// "Nothing used on this ticket" (step 4, owner Oct 9): no column holds it, so the mark lives in
-// localStorage per ticket like the text draft (closeout-steps.ts nothingUsedKey). It records
-// nothing on the server; it only lets step 5 open on a ticket that took no material.
-function readNothingUsed(id: string): boolean {
+// The phone's marks: "Nothing used on this ticket" (step 4) and "Skip — nothing to add" (step 6;
+// owner, Oct 9). No column holds either, so each lives in localStorage per ticket like the text
+// draft (closeout-steps.ts nothingUsedKey / notesSkippedKey). They record nothing on the server;
+// they only let the next step open, and Complete clears them.
+function readMark(key: string): boolean {
   try {
-    return typeof window !== "undefined" && window.localStorage.getItem(nothingUsedKey(id)) === "1";
+    return typeof window !== "undefined" && window.localStorage.getItem(key) === "1";
   } catch {
     return false;
   }
 }
-function writeNothingUsed(id: string, on: boolean) {
+function writeMark(key: string, on: boolean) {
   try {
-    if (on) window.localStorage.setItem(nothingUsedKey(id), "1");
-    else window.localStorage.removeItem(nothingUsedKey(id));
+    if (on) window.localStorage.setItem(key, "1");
+    else window.localStorage.removeItem(key);
   } catch {
     // Storage blocked (private mode): the mark lives only in this screen.
   }
 }
-function clearNothingUsed(id: string) {
-  writeNothingUsed(id, false);
-}
+const readNothingUsed = (id: string) => readMark(nothingUsedKey(id));
+const writeNothingUsed = (id: string, on: boolean) => writeMark(nothingUsedKey(id), on);
+const clearNothingUsed = (id: string) => writeNothingUsed(id, false);
+const readNotesSkipped = (id: string) => readMark(notesSkippedKey(id));
+const writeNotesSkipped = (id: string, on: boolean) => writeMark(notesSkippedKey(id), on);
+const clearNotesSkipped = (id: string) => writeNotesSkipped(id, false);
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
 const FINISHED = ["done", "authorized", "invoiced", "closed"];
@@ -331,11 +348,8 @@ const stepAnchor = (id: StepId) => `closeout-step-${id}`;
 function jumpTo(id: StepId) {
   document.getElementById(stepAnchor(id))?.scrollIntoView?.({ block: "start", behavior: "smooth" });
 }
-/** The tech is typing (a step completes on the first letter of the notes): no scrolling away. */
-function isTyping(): boolean {
-  const el = typeof document === "undefined" ? null : document.activeElement;
-  return el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
-}
+/** The step card's marker, so a tap anywhere else reads as leaving the step (CloseoutForm). */
+const STEP_ATTR = "data-step";
 
 /**
  * The step strip under the header, one line (owner, Oct 9: "having all the steps listed above
@@ -450,7 +464,10 @@ function StepStrip({
  * step to finish first. A done step that is not current folds to its header and a one-line
  * summary (closeout-steps.ts stepSummary) with Edit ("can we have each step minimize after
  * completion"); `expanded` / `onToggle` are the form's per-step state, and a step that becomes
- * current again is never folded.
+ * current again is never folded. `onEngage` fires on focus or a tap inside the card, `onLeave`
+ * when focus moves out of it (a tap elsewhere is the form's document listener): the step the
+ * tech is inside never folds or advances under them (owner, Oct 9: one letter typed into the
+ * notes jumped to the next step).
  */
 function StepCard({
   id,
@@ -461,6 +478,8 @@ function StepCard({
   summary,
   expanded,
   onToggle,
+  onEngage,
+  onLeave,
   children,
 }: {
   id: StepId;
@@ -471,6 +490,8 @@ function StepCard({
   summary: string;
   expanded: boolean;
   onToggle: () => void;
+  onEngage: () => void;
+  onLeave: () => void;
   children: React.ReactNode;
 }) {
   const step = stepOf(id);
@@ -493,10 +514,19 @@ function StepCard({
   return (
     <section
       id={stepAnchor(id)}
+      {...{ [STEP_ATTR]: id }}
       aria-label={`Step ${step.n} · ${step.title}`}
       className={`scroll-mt-3 rounded-xl border bg-card ${
         status === "current" ? "border-l-4 border-primary" : ""
       }`}
+      onPointerDown={onEngage}
+      onFocus={onEngage}
+      onBlur={(e) => {
+        // Focus went somewhere else on the page (a tap on nothing has no relatedTarget: the
+        // form's document listener decides that case).
+        const to = e.relatedTarget;
+        if (to instanceof Node && !e.currentTarget.contains(to)) onLeave();
+      }}
     >
       <div className="flex items-center justify-between gap-2 px-4 py-3">
         <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold">
@@ -622,6 +652,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       );
       clearDraft(job.id);
       clearNothingUsed(job.id);
+      clearNotesSkipped(job.id);
       for (const k of [
         fieldKeys.today,
         fieldKeys.job(job.id),
@@ -651,8 +682,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const finished = FINISHED.includes(job.stage);
 
   // M2 (owner, Oct 5): Complete first lists what is missing — a repair without its Before /
-  // After photo, no closing notes, no signature — with "Go back" and "Complete anyway". The
-  // same queries (and cache) the Repairs section reads.
+  // After photo, no time, no signature (not the notes: skippable, owner Oct 9) — with "Go back"
+  // and "Complete anyway". The same queries (and cache) the Repairs section reads.
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
   // Owner, Oct 9 (S13): fresh for 30 s, so coming back from the camera does not re-read
@@ -688,7 +719,6 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       finished,
       service_type: job.service_type,
       signature_path: job.signature_path,
-      closing_notes: latest.current.closing_notes,
       // Labor from an On site stamp (older tickets) is added by Complete itself.
       on_site_at: job.on_site_at,
       ...reads,
@@ -729,10 +759,21 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     enabled: !!session,
     staleTime: 30_000,
   });
+  // The step the tech is inside (see shownOpen below); a deliberate answer leaves it.
+  const [engaged, setEngaged] = useState<EngagedStep | null>(null);
+  const leave = () => setEngaged(null);
   const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));
   const markNothingUsed = (on: boolean) => {
     setNothingUsed(on);
     writeNothingUsed(job.id, on);
+    leave(); // A deliberate answer: the step advances now, not on the next tap elsewhere.
+  };
+  // Step 6's "Skip — nothing to add" (owner, Oct 9): the same kind of mark.
+  const [notesSkipped, setNotesSkipped] = useState(() => readNotesSkipped(job.id));
+  const markNotesSkipped = (on: boolean) => {
+    setNotesSkipped(on);
+    writeNotesSkipped(job.id, on);
+    leave();
   };
   const stepState: StepState = {
     finished,
@@ -745,6 +786,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     onSiteAt: job.on_site_at,
     // The draft, not the saved row: a save that failed on the roof must not lock the signature.
     closingNotes: draft.closing_notes,
+    notesSkipped,
     signaturePath: job.signature_path,
     // The folded steps' summaries (stepSummary): helper_count follows the named crew
     // (service-crew.ts helperCountFor), the items are the ledger's distinct cells, net.
@@ -753,20 +795,37 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     signedBy: draft.signed_by,
   };
   const open = firstOpenStep(stepState);
-  const statuses = stepStatuses(stepState);
-  const status = (id: StepId) => stepStatus(id, stepState);
+  // Owner, Oct 9 ("i typed 1 letter into notes and it took me to the next step"): the step the
+  // tech is inside — focus or a tap within its card — is the shown open step until they leave
+  // it (closeout-steps.ts shownOpenStep); `wasDone` is taken as they go in, so Edit on a folded
+  // step holds nothing back. A tap anywhere outside a step card leaves.
+  const engage = (id: StepId) =>
+    setEngaged((cur) => (cur?.id === id ? cur : { id, wasDone: stepDone(id, stepState) }));
+  useEffect(() => {
+    const outside = (e: PointerEvent) => {
+      if (!(e.target instanceof Element) || !e.target.closest(`[${STEP_ATTR}]`)) setEngaged(null);
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, []);
+  const shownOpen = shownOpenStep(open, engaged);
+  const statuses = stepStatuses(stepState, shownOpen);
+  const status = (id: StepId) => stepStatus(id, stepState, shownOpen);
   // Owner, Oct 9: a done step folds to its summary unless Edit was pressed on it. Component
-  // state, nothing remembered; cleared whenever the open step moves, so a step just finished
-  // folds, and a step that reopened (its Before photo deleted) is current — never folded.
+  // state, nothing remembered; cleared whenever the shown open step moves, so a step just
+  // finished folds once the tech leaves it, and a step that reopened (its Before photo deleted)
+  // is current — never folded.
   const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});
-  useEffect(() => setEditing({}), [open]);
+  useEffect(() => setEditing({}), [shownOpen]);
   const card = (id: StepId) => ({
     id,
     status: status(id),
-    open,
+    open: shownOpen,
     summary: stepSummary(id, stepState),
     expanded: editing[id] === true,
     onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),
+    onEngage: () => engage(id),
+    onLeave: () => setEngaged((cur) => (cur?.id === id ? null : cur)),
   });
   // The header asides: what each step holds, from the same reads the rules use.
   const repairRows = repairsQ.data ?? [];
@@ -785,28 +844,33 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // locked and then jump: the steps wait for the first answers (a failed read counts — its
   // section says so, loudly).
   const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);
-  // When the open step moves forward the next one has just unlocked: a short toast and the
-  // page scrolls its heading into view (not while the tech is typing — the notes complete on
-  // their first letter). Nothing on the first settled render, nothing when a step reopens.
+  // When the shown open step moves forward the next one has just unlocked: a short toast and
+  // the page scrolls its heading into view — unless the tech is inside some step (they pressed
+  // Edit on an earlier one while the next unlocked: no scrolling away under them). The shown
+  // step moves only when the tech leaves the step they finished, so a step never advances under
+  // their fingers. Nothing on the first settled render, nothing when a step reopens.
   const prevOpen = useRef<StepId | null | undefined>(undefined);
+  const engagedNow = useRef(engaged);
+  engagedNow.current = engaged;
   useEffect(() => {
     if (!ready) return;
     const prev = prevOpen.current;
-    prevOpen.current = open;
+    prevOpen.current = shownOpen;
     if (prev === undefined) return;
-    const msg = unlockToast(prev, open);
+    const msg = unlockToast(prev, shownOpen);
     if (!msg) return;
     toast.success(msg);
-    if (open && !isTyping()) jumpTo(open);
-  }, [ready, open]);
+    if (shownOpen && !engagedNow.current) jumpTo(shownOpen);
+  }, [ready, shownOpen]);
   // The sticky bar completes only from step 7; before that it names the step to finish and
-  // scrolls there.
+  // scrolls there. The real open step, not the shown one: once the data is complete the bar
+  // says Complete even while the tech is still inside the last step.
   const stepToFinish = open === null || open === "signature" ? null : open;
   const camera = useRepairCamera(job.id);
 
   return (
     <div className="space-y-5">
-      <StepStrip statuses={statuses} open={open} />
+      <StepStrip statuses={statuses} open={shownOpen} />
 
       {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
           answered. The card's own line says so; no second paragraph under it. */}
@@ -915,11 +979,19 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   Complete.
                 </p>
               )}
-              <TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />
+              <TimeEntries
+                jobId={job.id}
+                editable
+                defaultHelpers={job.helper_count}
+                suggestTravel
+              />
             </Section>
           </StepCard>
 
-          {/* Step 6 · Notes */}
+          {/* Step 6 · Notes — skippable (owner, Oct 9: "kind of redundant" after each repair's
+              What was wrong / What you did). The button shows only while the notes are blank;
+              pressed, a ticked line with Undo. Checked in / out with and the roof switch stay
+              optional. */}
           <StepCard {...card("notes")} icon={ClipboardList}>
             <Section title="Notes">
               <div className="space-y-1">
@@ -933,6 +1005,32 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   onChange={(e) => update({ closing_notes: e.target.value })}
                 />
               </div>
+              {!draft.closing_notes.trim() &&
+                (notesSkipped ? (
+                  <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
+                    <span className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      Skipped — nothing to add
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-10"
+                      onClick={() => markNotesSkipped(false)}
+                    >
+                      Undo
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full text-base"
+                    onClick={() => markNotesSkipped(true)}
+                  >
+                    Skip — nothing to add
+                  </Button>
+                ))}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label htmlFor="co-in">Checked in with</Label>

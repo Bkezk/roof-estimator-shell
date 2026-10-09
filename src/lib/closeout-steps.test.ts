@@ -39,6 +39,7 @@ const full: StepState = {
   timeHours: 1.5,
   onSiteAt: null,
   closingNotes: "Two holes over the gym, patched.",
+  notesSkipped: false,
   signaturePath: "job/signature.png",
   crewOthers: 0,
   materialItems: 1,
@@ -120,9 +121,11 @@ describe("each step's rule (the same things Complete's list checks)", () => {
       true,
     );
   });
-  it("6 closing notes written (blank does not count)", () => {
+  it("6 closing notes written (blank does not count), or skipped (owner, Oct 9)", () => {
     expect(stepDone("notes", { ...full, closingNotes: "  " })).toBe(false);
     expect(stepDone("notes", full)).toBe(true);
+    expect(stepDone("notes", { ...full, closingNotes: "  ", notesSkipped: true })).toBe(true);
+    expect(stepOf("signature").unlocks).toBe("Closing notes written, or skipped");
   });
   it("7 a signature saved", () => {
     expect(stepDone("signature", { ...full, signaturePath: null })).toBe(false);

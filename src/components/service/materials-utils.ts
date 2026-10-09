@@ -116,12 +116,6 @@ export function pieceFromLedger(rows: readonly LedgerRow[], cell: LocatedCell): 
   return pieceFromCountedNotes(rows.filter((r) => sameCell(r, cell)));
 }
 
-/** Usual-for-this-repair suggestion in units: the average rounded UP, at least one. */
-export function suggestedUnits(avgPacks: number, piece: PieceDef | null | undefined): number {
-  const units = packsToUnits(Math.max(0, avgPacks), piece);
-  return Math.max(1, Math.ceil(units - EPS));
-}
-
 /** A consumed ledger entry the tech could take back with undo (their own, under 24 h old). */
 export interface OwnEntry {
   id: number;

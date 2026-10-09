@@ -4,15 +4,15 @@
  *
  * Owner, Oct 9 (the screenshot: three ways to add, a dead truck block for someone with no truck,
  * a heading still saying "off the truck"): one list and one way in. Top to bottom — "Anything
- * used?" while nothing is logged; the "Usual for <repair>" chips; ONE "On this ticket" list of
- * everything logged from any place (materials-on-ticket.ts), each line a TruckRow with −, the
- * typeable count and + and "from Shop" / "from Truck 2" under the name; "Find any material",
- * the one entry point, which searches every cell anyone has stocked plus the service material
- * list and takes one from my truck, the shop or another truck in a tap (material-search.ts), with
- * a "Browse the shop" link that opens the "Material from elsewhere" panel (a whole location's
- * shelf) for anyone who does not know the name; and "What's on my truck", a fold holding the
- * on-hand rows of the vehicle the tech drives (myTruckStock), collapsed until a truck row has a
- * count, and not there at all when no truck is set up for the login.
+ * used?" while nothing is logged; ONE "On this ticket" list of everything logged from any place
+ * (materials-on-ticket.ts), each line a TruckRow with −, the typeable count and + and "from
+ * Shop" / "from Truck 2" under the name; "Find any material", the one entry point, which
+ * searches every cell anyone has stocked plus the service material list and takes one from my
+ * truck, the shop or another truck in a tap (material-search.ts), with a "Browse the shop" link
+ * that opens the "Material from elsewhere" panel (a whole location's shelf) for anyone who does
+ * not know the name; and "What's on my truck", a fold holding the on-hand rows of the vehicle
+ * the tech drives (myTruckStock), collapsed until a truck row has a count, and not there at all
+ * when no truck is set up for the login.
  *
  * + records one piece (or one pack when the product has no pieces) as a `consumed` movement
  * against the ticket at that place; − takes one back (see planReduce: the tech's own recent entry
@@ -22,11 +22,14 @@
  * "−" always sees the entry the "+" before it made; a refusal rolls the count back and is shown
  * loudly. When the queue is empty the ticket's materials, the truck and Inventory's lists are
  * re-read.
+ *
+ * Owner, Oct 9, later ("i dont like the 'usual for' on the materials side"): the "Usual for
+ * <repair>" chips — what earlier tickets with the same repair used — are gone from here; the
+ * repair picker's "Usual here" chips (closeout.tsx) are a different thing and stay.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { toast } from "sonner";
 import {
   Check,
   ChevronDown,
@@ -37,7 +40,6 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Sparkles,
   Truck,
 } from "lucide-react";
 
@@ -53,11 +55,7 @@ import {
   type TruckStockRow,
 } from "@/lib/inventory.functions";
 import { listServiceJobMaterials, type JobMaterialRow } from "@/lib/service.functions";
-import {
-  listJobRepairs,
-  listServiceMaterialOptions,
-  usualMaterialsForTemplate,
-} from "@/lib/service-field.functions";
+import { listServiceMaterialOptions } from "@/lib/service-field.functions";
 import {
   SEARCH_MIN_CHARS,
   isStockRefusal,
@@ -95,7 +93,6 @@ import {
   pieceFromLedger,
   planReduce,
   round6,
-  suggestedUnits,
   unitLabel,
   usedPacks,
   type LocatedCell,
@@ -105,7 +102,6 @@ import {
 const FIRST_ROWS = 12;
 const VEHICLE_KEY = "bid-o-matic:closeout:vehicle";
 const truckKey = (userId: string) => ["service-my-truck-stock", userId] as const;
-const usualKey = (templateId: string) => ["service-usual-materials", templateId] as const;
 
 function readVehicle(): string | null {
   try {
@@ -162,8 +158,6 @@ export function MaterialsSection({
   const truckFn = useServerFn(myTruckStock);
   const defaultsFn = useServerFn(myServiceDefaults);
   const locationsFn = useServerFn(listLocations);
-  const repairsFn = useServerFn(listJobRepairs);
-  const usualFn = useServerFn(usualMaterialsForTemplate);
   const stockFn = useServerFn(listStock);
   const optionsFn = useServerFn(listServiceMaterialOptions);
   const addFn = useServerFn(addMovement);
@@ -196,36 +190,11 @@ export function MaterialsSection({
     enabled: !!session,
     staleTime: 5 * 60_000,
   });
-  const repairs = useQuery({
-    queryKey: fieldKeys.repairs(jobId),
-    queryFn: () => repairsFn({ data: { id: jobId } }),
-    enabled: !!session,
-    staleTime: 30_000,
-  });
-
-  // The repair templates on this ticket, once each, in the order they were added.
-  const templates = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const r of repairs.data ?? [])
-      if (r.repair_template_id && !seen.has(r.repair_template_id))
-        seen.set(r.repair_template_id, r.name);
-    return [...seen].map(([id, name]) => ({ id, name }));
-  }, [repairs.data]);
-  const usual = useQueries({
-    queries: templates.map((t) => ({
-      queryKey: usualKey(t.id),
-      queryFn: () => usualFn({ data: { template_id: t.id } }),
-      enabled: !!session,
-      staleTime: 10 * 60_000,
-    })),
-  });
-
   const ledger: JobMaterialRow[] = useMemo(() => materials.data ?? [], [materials.data]);
   const locName = (id: string) =>
     (locations.data ?? []).find((l) => l.id === id)?.name ??
     (truck.data ?? []).find((r) => r.location_id === id)?.location_name ??
     (id === "shop" ? "Shop" : id);
-  const shopId = (locations.data ?? []).find((l) => l.kind === "shop")?.id ?? "shop";
 
   // Which truck: the ones I drive today, plus any that hold stock for me.
   const vehicles = useMemo(() => {
@@ -667,81 +636,6 @@ export function MaterialsSection({
         </p>
       ) : (
         <>
-          {templates.map((t, i) => {
-            const list = usual[i]?.data ?? [];
-            if (!list.length) return null;
-            // Owner, Oct 9: with no truck the chips source the shop (they used to need one).
-            const usualLoc = vehicleId ?? shopId;
-            return (
-              <div key={t.id} className="space-y-1.5">
-                <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  <Sparkles className="h-3.5 w-3.5" /> Usual for {t.name}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {list.map((u) => {
-                    const key = cellKey({ ...u, location_id: usualLoc });
-                    const r = rows.find((x) => x.key === key);
-                    const piece =
-                      r?.piece ??
-                      (truck.data ?? []).find((x) => catalogKey(x) === catalogKey(u))?.piece ??
-                      null;
-                    const want = suggestedUnits(u.avg_qty, piece);
-                    const have = r ? usedUnits(r) : 0;
-                    const done = have >= want - EPS;
-                    const label = `${cellName(u)} · ${amountText(want, piece, r?.unit ?? u.unit)}`;
-                    return (
-                      <Button
-                        key={key}
-                        type="button"
-                        variant={done ? "secondary" : "outline"}
-                        aria-pressed={done}
-                        className={`h-11 max-w-full justify-start rounded-full px-4 text-sm ${
-                          done
-                            ? "border border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100"
-                            : !r || onHandUnits(r) <= EPS
-                              ? "border-dashed text-muted-foreground"
-                              : ""
-                        }`}
-                        title={`Used on ${u.tickets} earlier ${u.tickets === 1 ? "ticket" : "tickets"} with this repair`}
-                        onClick={() => {
-                          if (done) {
-                            toast.info(`${cellName(u)}: already on this ticket`);
-                            return;
-                          }
-                          // Owner, Oct 9: an item the place does not show runs the same add
-                          // path, so the short-stock question takes over (it sends them to
-                          // pick the right place, or logs it here) — the chip used to only warn.
-                          const target: ListRow = r ?? {
-                            key,
-                            location_id: usualLoc,
-                            screen_id: u.screen_id,
-                            row_label: u.row_label,
-                            price_col: u.price_col,
-                            label: u.label,
-                            category: "",
-                            unit: u.unit,
-                            on_hand: 0,
-                            piece,
-                            item_no: null,
-                            location_name: locName(usualLoc),
-                          };
-                          add(target, round6(want - have));
-                        }}
-                      >
-                        {done ? (
-                          <Check className="mr-1 h-4 w-4 shrink-0" />
-                        ) : (
-                          <Plus className="mr-1 h-4 w-4 shrink-0" />
-                        )}
-                        <span className="truncate">{label}</span>
-                      </Button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-
           {onTicket.length > 0 && (
             <div className="space-y-1.5" aria-label="On this ticket">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

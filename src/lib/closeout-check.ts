@@ -20,7 +20,6 @@ export interface CloseoutCheckInput {
   repairs: CheckRepair[];
   photos: CheckPhoto[];
   signature_path: string | null;
-  closing_notes: string;
   /**
    * Hours logged on the ticket (travel + labor). Owner, Oct 8: without the En route / On site
    * buttons the time is typed in the close-out's Time section, so Complete points out a ticket
@@ -28,6 +27,8 @@ export interface CloseoutCheckInput {
    */
   time_hours?: number;
 }
+// No closing-notes line (owner, Oct 9: step 6 is skippable, "kind of redundant" after each
+// repair's What was wrong / What you did); the notes stay a box, not a gap.
 
 /** The repair lines: none recorded (repair tickets), then each repair's missing photos. */
 function repairGaps(service_type: string, repairs: CheckRepair[], photos: CheckPhoto[]) {
@@ -47,7 +48,6 @@ function repairGaps(service_type: string, repairs: CheckRepair[], photos: CheckP
 export function missingForComplete(c: CloseoutCheckInput): string[] {
   const out = repairGaps(c.service_type, c.repairs, c.photos);
   if (c.time_hours !== undefined && !(c.time_hours > 0)) out.push("No time logged");
-  if (!c.closing_notes.trim()) out.push("No closing notes");
   if (!c.signature_path) out.push("No customer signature");
   return out;
 }
@@ -63,7 +63,6 @@ export interface CompleteGapsInput {
   finished: boolean;
   service_type: string;
   signature_path: string | null;
-  closing_notes: string;
   /** An older ticket's On site stamp: Complete adds its labor itself, so no time check. */
   on_site_at: string | null;
   repairs: CheckRead<CheckRepair[]>;
@@ -113,7 +112,6 @@ export function completeGaps(c: CompleteGapsInput): CompleteGaps {
       gaps.push(readGap("time", c.time));
     }
   }
-  if (!c.closing_notes.trim()) gaps.push("No closing notes");
   if (!c.signature_path) gaps.push("No customer signature");
   return { gaps, unread };
 }

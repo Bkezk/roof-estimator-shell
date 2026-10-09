@@ -21,8 +21,9 @@ describe("the step strip", () => {
   it("sits first in the form: the headline, then the seven titles ticked / highlighted / locked", () => {
     expect(src).toContain('from "@/lib/closeout-steps"');
     expect(src).toContain("function StepStrip({");
+    // The SHOWN open step (owner, Oct 9, later: the step the tech is inside stays open).
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{open\} \/>/,
+      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} \/>/,
     );
     const strip = src.slice(
       src.indexOf("function StepStrip({"),
@@ -75,7 +76,8 @@ describe("the sections in step order", () => {
       "Nothing used on this ticket",
       '{...card("time")}',
       '<Section title="Time">',
-      "<TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />",
+      "<TimeEntries",
+      "suggestTravel",
       '{...card("notes")}',
       '<Section title="Notes">',
       '{...card("signature")}',
@@ -157,27 +159,31 @@ describe("the Nothing used mark (step 4)", () => {
     expect(src).toContain(
       "const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));",
     );
-    expect(src).toContain('window.localStorage.getItem(nothingUsedKey(id)) === "1"');
-    expect(src).toContain('window.localStorage.setItem(nothingUsedKey(id), "1")');
-    expect(src).toContain("window.localStorage.removeItem(nothingUsedKey(id))");
+    // Owner, Oct 9 (later): one pair of mark helpers serves this and step 6's Skip mark.
+    expect(src).toContain('window.localStorage.getItem(key) === "1"');
+    expect(src).toContain('window.localStorage.setItem(key, "1")');
+    expect(src).toContain("window.localStorage.removeItem(key)");
+    expect(src).toContain("const readNothingUsed = (id: string) => readMark(nothingUsedKey(id));");
     expect(form).toMatch(/clearDraft\(job\.id\);\s*clearNothingUsed\(job\.id\);/);
-    expect(src).toMatch(/no column holds it, so the mark lives in\s*\/\/ localStorage per ticket/);
+    expect(src).toMatch(/No column holds either, so each lives in localStorage per ticket/);
   });
 });
 
 describe("the toast when a step unlocks", () => {
-  it("fires once the reads settled, forward only, and scrolls the next heading into view unless the tech is typing", () => {
+  it("fires once the reads settled, forward only, on the SHOWN open step, and scrolls the next heading into view unless the tech is inside a step", () => {
     expect(form).toContain(
       "const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);",
     );
     expect(form).toContain("const prevOpen = useRef<StepId | null | undefined>(undefined);");
+    // Owner, Oct 9 (later): the advance follows shownOpen (closeout-engaged-step.test.ts), so a
+    // step the tech is still inside never toasts or scrolls under them.
     expect(form).toMatch(
-      /if \(!ready\) return;\s*const prev = prevOpen\.current;\s*prevOpen\.current = open;\s*if \(prev === undefined\) return;\s*const msg = unlockToast\(prev, open\);\s*if \(!msg\) return;\s*toast\.success\(msg\);\s*if \(open && !isTyping\(\)\) jumpTo\(open\);/,
+      /if \(!ready\) return;\s*const prev = prevOpen\.current;\s*prevOpen\.current = shownOpen;\s*if \(prev === undefined\) return;\s*const msg = unlockToast\(prev, shownOpen\);\s*if \(!msg\) return;\s*toast\.success\(msg\);\s*if \(shownOpen && !engagedNow\.current\) jumpTo\(shownOpen\);/,
     );
     expect(src).toMatch(
       /function jumpTo\(id: StepId\) \{\s*document\s*\.getElementById\(stepAnchor\(id\)\)\s*\?\.scrollIntoView\?\.\(\{ block: "start", behavior: "smooth" \}\);/,
     );
-    expect(src).toContain("el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement");
+    expect(src).not.toContain("function isTyping(");
   });
 });
 

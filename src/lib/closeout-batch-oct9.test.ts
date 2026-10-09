@@ -30,7 +30,6 @@ const answered: CompleteGapsInput = {
   finished: false,
   service_type: "leak",
   signature_path: "job/sig.png",
-  closing_notes: "Patched the seam",
   on_site_at: null,
   repairs: { data: [{ id: "r1", name: "Seam" }], error: null },
   photos: {
@@ -68,14 +67,13 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
       repairs: { data: undefined, error: null },
       photos: { data: undefined, error: new Error("offline") },
       time: { data: undefined, error: new Error("offline") },
-      closing_notes: "",
       signature_path: null,
     });
+    // No "No closing notes" line: step 6 is skippable (owner, Oct 9).
     expect(out.gaps).toEqual([
       "Still loading the repairs",
       "Could not check the photos — no signal (offline)",
       "Could not check the time — no signal (offline)",
-      "No closing notes",
       "No customer signature",
     ]);
     expect(out.unread).toBe(true);
@@ -85,7 +83,6 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
       ...answered,
       photos: { data: [{ repair_id: "r1", role: "before" }], error: null },
       time: { data: [], error: null },
-      closing_notes: " ",
     };
     expect(completeGaps(c).gaps).toEqual(
       missingForComplete({
@@ -93,15 +90,10 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
         repairs: c.repairs.data!,
         photos: c.photos.data,
         signature_path: c.signature_path,
-        closing_notes: c.closing_notes,
         time_hours: 0,
       }),
     );
-    expect(completeGaps(c).gaps).toEqual([
-      "Seam has no After photo",
-      "No time logged",
-      "No closing notes",
-    ]);
+    expect(completeGaps(c).gaps).toEqual(["Seam has no After photo", "No time logged"]);
   });
   it("an older ticket's On site stamp: no time line even with the time read unanswered", () => {
     expect(
@@ -118,7 +110,7 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
         ...answered,
         finished: true,
         repairs: { data: undefined, error: new Error("x") },
-        closing_notes: "",
+        signature_path: null,
       }),
     ).toEqual({ gaps: [], unread: false });
   });
@@ -126,7 +118,8 @@ describe("B1 completeGaps: a read without rows is a line, never a silent pass", 
     expect(closeout).toMatch(
       /const pressComplete = \(\) =>\s*judge\(gapsOf\(\{ repairs: repairsQ, photos: photosQ, time: timeQ \}\)\);/,
     );
-    expect(closeout).toContain("closing_notes: latest.current.closing_notes");
+    // The notes are not judged (owner, Oct 9: step 6 is skippable; closeout-check.ts).
+    expect(closeout).not.toContain("closing_notes: latest.current.closing_notes");
     expect(closeout).toMatch(
       /await Promise\.all\(\[\s*repairsQ\.refetch\(\),\s*photosQ\.refetch\(\),\s*timeQ\.refetch\(\),\s*\]\)/,
     );
@@ -409,8 +402,9 @@ describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets
     // closeout: repairsQ, photosQ, timeQ, materialsQ (the steps' state, closeout-steps.ts) in
     // the form + repairs, photos in the section.
     expect(stale(closeout)).toBe(6);
-    // materials: the ticket's materials, the truck, the repairs.
-    expect(stale(materials)).toBe(3);
+    // materials: the ticket's materials, the truck (the repairs read went with the Usual-for
+    // chips, owner Oct 9).
+    expect(stale(materials)).toBe(2);
     // field-shared: the time list and the crew it is billed for.
     expect(stale(shared)).toBe(2);
     // crew-box: the crew.

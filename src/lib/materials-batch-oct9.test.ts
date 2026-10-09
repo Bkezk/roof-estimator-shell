@@ -79,24 +79,15 @@ describe("B5 the short-stock yes is remembered per cell; the server's refusal as
   });
 });
 
-describe("B6 the Usual-for chips", () => {
-  const chips = src.slice(
-    src.indexOf("{templates.map((t, i) => {"),
-    src.indexOf('aria-label="On this ticket"'),
-  );
-  it("show without a vehicle, sourcing the shop", () => {
-    expect(src).not.toContain("{vehicleId &&\n            templates.map(");
-    expect(src).toContain(
-      'const shopId = (locations.data ?? []).find((l) => l.kind === "shop")?.id ?? "shop";',
-    );
-    expect(chips).toContain("const usualLoc = vehicleId ?? shopId;");
-    expect(chips).toContain("const key = cellKey({ ...u, location_id: usualLoc });");
-  });
-  it("an item the place does not show runs the same add path (the short question takes over) instead of a warning", () => {
-    expect(chips).not.toContain("toast.warning(");
-    expect(chips).not.toContain("take it from the shop or another truck");
-    expect(chips).toMatch(
-      /const target: ListRow = r \?\? \{\s*key,\s*location_id: usualLoc,[\s\S]*?on_hand: 0,[\s\S]*?location_name: locName\(usualLoc\),\s*\};\s*add\(target, round6\(want - have\)\);/,
-    );
+describe("B6 the Usual-for chips — gone (owner, Oct 9, later: \"i dont like the 'usual for' on the materials side\")", () => {
+  it("the chips, their reads and the shop fallback they needed are no longer in the section", () => {
+    expect(src).not.toContain("{templates.map((t, i) => {");
+    expect(src).not.toContain("Usual for {t.name}");
+    expect(src).not.toContain("usualMaterialsForTemplate");
+    expect(src).not.toContain("const usualLoc = vehicleId ?? shopId;");
+    expect(src).not.toContain("const shopId =");
+    expect(src).not.toContain("useQueries");
+    // The one list and the search still source the shop and other trucks (the pins above).
+    expect(src).toContain('aria-label="On this ticket"');
   });
 });

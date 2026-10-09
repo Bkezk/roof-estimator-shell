@@ -136,6 +136,84 @@ async function buildingsNear(ctx: Ctx, lat: number, lng: number, radiusM: number
   return (data ?? []) as NearBuilding[];
 }
 
+/**
+ * Where an address is, by the chain the header describes: our stored buildings and 911 points
+ * (the read-only rpc; pickAddressMatch decides), then the live state layers when nothing stored
+ * matches. One place for the aerial AND the travel estimate (owner, Oct 9; service-field
+ * .functions.ts estimateTravel), so both find the same spot for the same address.
+ */
+type AddressLocation =
+  | { kind: "stored"; candidate: AddressCandidate; at: { lat: number; lng: number } }
+  | { kind: "ambiguous"; count: number }
+  | { kind: "live"; live: LiveFound }
+  | { kind: "none" };
+
+async function locateAddress(
+  sb: SupabaseClient<Database>,
+  parsed: ParsedAddress,
+  word: string,
+  addressState: "KY" | "TN" | null,
+): Promise<AddressLocation> {
+  const { data: cands, error } = await sb.rpc("service_aerial_address_candidates", {
+    p_house: parsed.house,
+    p_street_word: word,
+    p_limit: 80,
+  });
+  if (error) throw new Error(error.message);
+  const m = pickAddressMatch(parsed, (cands ?? []) as AddressCandidate[]);
+  if (m.outcome === "match")
+    return {
+      kind: "stored",
+      candidate: m.candidate,
+      at: { lat: m.candidate.lat!, lng: m.candidate.lng! },
+    };
+  if (m.outcome === "ambiguous") return { kind: "ambiguous", count: m.count };
+  // Nothing stored for it: the live state layers, which carry every building.
+  const live = await liveAddressLookup(parsed, word, addressState);
+  return live ? { kind: "live", live } : { kind: "none" };
+}
+
+/**
+ * An address line → its point, or null when it cannot be read, matches nothing (or several
+ * places) in our data and on the state layers, or the state server is down. Never throws for a
+ * miss; only a failing database read does. `stateHint`: the site's state column when known.
+ */
+export async function geocodeAddress(
+  sb: SupabaseClient<Database>,
+  address: string,
+  stateHint: string | null,
+): Promise<{ lat: number; lng: number } | null> {
+  const parsed = parseStreetAddress(address);
+  const word = parsed ? streetFilterWord(parsed) : null;
+  if (!parsed || !word) return null;
+  const st = stateCode(stateHint) ?? parsed.state ?? null;
+  const where = await locateAddress(sb, parsed, word, st === "KY" || st === "TN" ? st : null);
+  if (where.kind === "stored") return where.at;
+  if (where.kind === "live") return { lat: where.live.found.lat, lng: where.live.found.lng };
+  return null;
+}
+
+/**
+ * geocodeAddress with the hits kept for the life of the server process, keyed by the address
+ * line: the office's address is the same on every ticket (owner, Oct 9). A miss is not kept, so
+ * a state server that was down is asked again next time.
+ */
+const geocodeHits = new Map<string, { lat: number; lng: number }>();
+export async function geocodeAddressCached(
+  sb: SupabaseClient<Database>,
+  address: string,
+  stateHint: string | null,
+): Promise<{ lat: number; lng: number } | null> {
+  const key = `${address.trim().toUpperCase()}|${stateCode(stateHint) ?? ""}`;
+  const hit = geocodeHits.get(key);
+  if (hit) return hit;
+  const found = await geocodeAddress(sb, address, stateHint);
+  if (found) geocodeHits.set(key, found);
+  return found;
+}
+/** Test-only: forget the cached hits. */
+export const clearGeocodeCache = () => geocodeHits.clear();
+
 /** The ticket's saved aerial, or where its address is on our map. */
 export const getTicketAerial = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -180,17 +258,11 @@ export const getTicketAerial = createServerFn({ method: "GET" })
     if (!address.trim()) note = "The ticket has no address.";
     else if (!parsed || !word) note = "The address has no house number and street to match.";
     else {
-      const { data: cands, error } = await sb.rpc("service_aerial_address_candidates", {
-        p_house: parsed.house,
-        p_street_word: word,
-        p_limit: 80,
-      });
-      if (error) throw new Error(error.message);
-      const m = pickAddressMatch(parsed, (cands ?? []) as AddressCandidate[]);
-      if (m.outcome === "match") {
-        const at = { lat: m.candidate.lat!, lng: m.candidate.lng! };
+      const where = await locateAddress(sb, parsed, word, addressState);
+      if (where.kind === "stored") {
+        const { at, candidate } = where;
         const near = await buildingsNear(context, at.lat, at.lng, 350);
-        const hit = buildingForPoint(at, near, m.candidate.building_id);
+        const hit = buildingForPoint(at, near, candidate.building_id);
         if (hit)
           return {
             address,
@@ -206,7 +278,7 @@ export const getTicketAerial = createServerFn({ method: "GET" })
           found: {
             id: null,
             footprint: null,
-            address: m.candidate.address,
+            address: candidate.address,
             state: addressState,
             how: "address",
             lat: at.lat,
@@ -216,14 +288,12 @@ export const getTicketAerial = createServerFn({ method: "GET" })
           note: "The address is on the map but no building outline is stored there; pick the building.",
         };
       }
-      if (m.outcome === "ambiguous")
-        note = `The address matches ${m.count} places in our map data; pick the building on the map.`;
-      else {
-        // Nothing stored for it: the live state layers, which carry every building.
-        const live = await liveAddressLookup(parsed, word, addressState);
-        if (live) return { address, addressState, saved: null, found: live.found, note: live.note };
-        note = "No building or 911 address point in our map data matches this address.";
-      }
+      if (where.kind === "ambiguous")
+        note = `The address matches ${where.count} places in our map data; pick the building on the map.`;
+      else if (where.kind === "live") {
+        const { live } = where;
+        return { address, addressState, saved: null, found: live.found, note: live.note };
+      } else note = "No building or 911 address point in our map data matches this address.";
     }
 
     // 2. Where the ticket's photos were taken (the tech on the roof).

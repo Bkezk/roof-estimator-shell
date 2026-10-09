@@ -61,14 +61,15 @@ describe("the close-out is the workflow", () => {
         { repair_id: "r1", role: "after" },
       ],
       signature_path: "sig.png",
-      closing_notes: "Fixed it",
     };
     expect(missingForComplete({ ...base, time_hours: 0 })).toEqual(["No time logged"]);
     expect(missingForComplete({ ...base, time_hours: 1.5 })).toEqual([]);
     expect(missingForComplete(base)).toEqual([]);
-    // In the screen's order: repairs and photos, time, notes, signature.
-    expect(
-      missingForComplete({ ...base, time_hours: 0, closing_notes: "", signature_path: null }),
-    ).toEqual(["No time logged", "No closing notes", "No customer signature"]);
+    // In the screen's order: repairs and photos, time, signature (the notes are skippable, owner
+    // Oct 9: never a gap).
+    expect(missingForComplete({ ...base, time_hours: 0, signature_path: null })).toEqual([
+      "No time logged",
+      "No customer signature",
+    ]);
   });
 });

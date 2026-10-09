@@ -8,7 +8,6 @@ import {
   packUnitLabel,
   pieceFromLedger,
   planReduce,
-  suggestedUnits,
   usedPacks,
   type LedgerRow,
 } from "./materials-utils";
@@ -57,13 +56,6 @@ describe("materials utils", () => {
     expect(pieceFromLedger([row(1, -0.25, { counted_note: "3 cartridges" })], cell)).toEqual(cart);
     expect(pieceFromLedger([row(1, -0.083, { counted_note: "1 cartridge" })], cell)).toEqual(cart);
     expect(pieceFromLedger([row(1, -1)], cell)).toBeNull();
-  });
-
-  it("suggests the usual amount rounded up, at least one", () => {
-    expect(suggestedUnits(0.17, cart)).toBe(3);
-    expect(suggestedUnits(0.25, cart)).toBe(3);
-    expect(suggestedUnits(0.01, null)).toBe(1);
-    expect(suggestedUnits(2, null)).toBe(2);
   });
 
   it("finds only my own entries under 24 h, newest first", () => {

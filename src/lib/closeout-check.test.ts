@@ -14,7 +14,6 @@ const full: CloseoutCheckInput = {
     { repair_id: "r1", role: "after" },
   ],
   signature_path: "job/signature.png",
-  closing_notes: "Patched two holes over the gym.",
 };
 
 describe("missingForComplete", () => {
@@ -35,11 +34,11 @@ describe("missingForComplete", () => {
       }),
     ).toEqual(["Drain flashing has no Before photo", "Drain flashing has no After photo"]);
   });
-  it("no closing notes (blank counts), no signature", () => {
-    expect(missingForComplete({ ...full, closing_notes: "  ", signature_path: null })).toEqual([
-      "No closing notes",
+  it("no signature; the closing notes are never a gap (owner, Oct 9: step 6 is skippable)", () => {
+    expect(missingForComplete({ ...full, signature_path: null })).toEqual([
       "No customer signature",
     ]);
+    expect("closing_notes" in full).toBe(false);
   });
   it("no repairs on a repair ticket; an inspection does not need one", () => {
     expect(missingForComplete({ ...full, repairs: [], photos: [] })).toEqual([
@@ -67,6 +66,7 @@ describe("the close-out screen", () => {
     expect(src).toContain("<AlertDialogTitle>Before you finish</AlertDialogTitle>");
     expect(src).toContain("Go back</AlertDialogCancel>");
     expect(src).toContain("Complete anyway");
-    expect(src).toContain("closing_notes: latest.current.closing_notes");
+    // Owner, Oct 9: the notes are not judged (completeGaps has no closing_notes input).
+    expect(src).not.toContain("closing_notes: latest.current.closing_notes");
   });
 });

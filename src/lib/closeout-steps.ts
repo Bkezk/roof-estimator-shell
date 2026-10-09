@@ -45,7 +45,7 @@ export const CLOSEOUT_STEPS: readonly CloseoutStep[] = [
   },
   { id: "time", n: 5, title: "Time", unlocks: "Materials logged, or Nothing used" },
   { id: "notes", n: 6, title: "Notes", unlocks: "Time on the ticket" },
-  { id: "signature", n: 7, title: "Signature", unlocks: "Closing notes written" },
+  { id: "signature", n: 7, title: "Signature", unlocks: "Closing notes written, or skipped" },
 ];
 
 export const STEP_COUNT = CLOSEOUT_STEPS.length;
@@ -75,6 +75,11 @@ export interface StepState {
   /** An older ticket's On site stamp: Complete adds its labor itself, so time is not required. */
   onSiteAt: string | null;
   closingNotes: string;
+  /**
+   * The tech pressed "Skip — nothing to add" on step 6 (owner, Oct 9: "notes on step 6 should
+   * be skippable as it is kind of redundant"); a phone mark like "Nothing used" (notesSkippedKey).
+   */
+  notesSkipped: boolean;
   signaturePath: string | null;
   /** The other technicians on the job (service_jobs.helper_count follows the named crew). */
   crewOthers: number;
@@ -140,7 +145,7 @@ export function stepDone(id: StepId, s: StepState): boolean {
     case "time":
       return !!s.onSiteAt || s.timeHours > 0;
     case "notes":
-      return s.closingNotes.trim().length > 0;
+      return s.closingNotes.trim().length > 0 || s.notesSkipped;
     case "signature":
       return !!s.signaturePath;
   }
@@ -154,16 +159,48 @@ export function firstOpenStep(s: StepState): StepId | null {
 
 /**
  * done: the rule holds. current: the first step that does not. locked: not done, after the
- * current one. A done step is never locked, whatever sits before it (see the header).
+ * current one. A done step is never locked, whatever sits before it (see the header). `open` is
+ * the step shown as current — firstOpenStep by default, or the step the tech is still inside
+ * (shownOpenStep), which reads current even once its rule holds.
  */
-export function stepStatus(id: StepId, s: StepState): StepStatus {
+export function stepStatus(
+  id: StepId,
+  s: StepState,
+  open: StepId | null = firstOpenStep(s),
+): StepStatus {
+  if (id === open) return "current";
   if (stepDone(id, s)) return "done";
-  return firstOpenStep(s) === id ? "current" : "locked";
+  return "locked";
 }
 
 /** Every step's status, in order (the strip). */
-export function stepStatuses(s: StepState): { step: CloseoutStep; status: StepStatus }[] {
-  return CLOSEOUT_STEPS.map((step) => ({ step, status: stepStatus(step.id, s) }));
+export function stepStatuses(
+  s: StepState,
+  open: StepId | null = firstOpenStep(s),
+): { step: CloseoutStep; status: StepStatus }[] {
+  return CLOSEOUT_STEPS.map((step) => ({ step, status: stepStatus(step.id, s, open) }));
+}
+
+/** The step the tech is inside (focus or a tap within its card) and whether it was done then. */
+export interface EngagedStep {
+  id: StepId;
+  /** Done when they went in (Edit on a folded step): leaving it changes nothing. */
+  wasDone: boolean;
+}
+
+/**
+ * The step the screen shows as open (owner, Oct 9: "i typed 1 letter into notes and it took me
+ * to the next step before i could finish typing"). A step's rule can hold on the first letter,
+ * which moves `open` (firstOpenStep) forward at once; while the tech is still inside that step
+ * it stays the shown one — expanded, no toast, no scroll, the next step still reading locked —
+ * and the advance runs when they leave. A step that was already done when they went in (Edit
+ * on a folded step) never holds the screen back; nor does one the data moved back behind (a
+ * Before photo deleted while typing notes: the real open step shows).
+ */
+export function shownOpenStep(open: StepId | null, engaged: EngagedStep | null): StepId | null {
+  if (!engaged || engaged.wasDone) return open;
+  if (open === null || stepIndex(engaged.id) < stepIndex(open)) return engaged.id;
+  return open;
 }
 
 /** The strip's header: "Step 3 of 7 · The work", or that all are done. */
@@ -236,7 +273,7 @@ export function stepSummary(id: StepId, s: StepState): string {
       return s.onSiteAt ? "Labor from the On site stamp" : "No time";
     case "notes": {
       const t = s.closingNotes.trim().replace(/\s+/g, " ");
-      if (!t) return "No notes";
+      if (!t) return s.notesSkipped ? "Skipped" : "No notes";
       return t.length > SUMMARY_NOTES_CHARS ? `${t.slice(0, SUMMARY_NOTES_CHARS).trimEnd()}…` : t;
     }
     case "signature": {
@@ -259,3 +296,9 @@ export function finishStepLabel(open: StepId): string {
  * nothing on the server and only marks step 4 done on this phone (owner, Oct 9).
  */
 export const nothingUsedKey = (jobId: string) => `bid-o-matic:closeout-nothing-used:${jobId}`;
+/**
+ * Where step 6's "Skip — nothing to add" mark lives (owner, Oct 9: the notes are "kind of
+ * redundant" after What was wrong / What you did): the same per-ticket localStorage, cleared
+ * on Complete like the rest; it records nothing on the server.
+ */
+export const notesSkippedKey = (jobId: string) => `bid-o-matic:closeout-notes-skipped:${jobId}`;

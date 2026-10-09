@@ -29,7 +29,6 @@ import { mentionRoster } from "@/lib/auth.functions";
 import {
   SERVICE_CATEGORY,
   materialsByCell,
-  serviceLabel,
   servicePiece,
   stockCellOf,
   unitWord,
@@ -37,6 +36,13 @@ import {
 import { cellUnit } from "@/lib/inventory.functions";
 import { stockUnitFor, type PieceDef } from "@/lib/stock-units";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
+import { siteAddressLine } from "@/lib/crm.functions";
+import { geocodeAddress, geocodeAddressCached } from "@/lib/service-aerial.functions";
+import {
+  estimateTravelBetween,
+  officeAddressLine,
+  type TravelEstimate,
+} from "@/lib/travel-estimate";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -455,6 +461,64 @@ export const deleteTimeEntry = createServerFn({ method: "POST" })
       .eq("id", data.id)
       .eq("service_job_id", data.service_job_id);
     if (error) throw new Error(error.message);
+  });
+
+/**
+ * The automatic travel line (owner, Oct 9: "an automated travel to the time section that tracks
+ * the distance between the jbk office and the location on the ticket and calculates the drive
+ * time and prefills from there? if its missing any info its just empty as it is now"). The
+ * office is company_settings' address (the one the invoice header prints), the site the ticket's
+ * address (site_address, else its site's line, as the aerial reads it); both go through the
+ * aerial's address chain (service-aerial.functions.ts geocodeAddress: our stored map data, then
+ * the live state layers) and travel-estimate.ts turns the two points into road miles, drive
+ * minutes and round-trip hours. Null whenever a piece is missing or fails — no office address,
+ * no site address, no match, the state server down, the ticket not readable — so the Time
+ * section stays as it is; only a login without Service access is refused.
+ */
+export const estimateTravel = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }): Promise<TravelEstimate | null> => {
+    await me(context);
+    const sb = context.supabase;
+    try {
+      const { data: office } = await sb
+        .from("company_settings")
+        .select("address, city, state, zip")
+        .eq("id", 1)
+        .maybeSingle();
+      const officeLine = office ? officeAddressLine(office) : "";
+      if (!officeLine) return null;
+      const { data: job } = await sb
+        .from("service_jobs")
+        .select("id, site_id, site_address")
+        .eq("id", data.id)
+        .maybeSingle();
+      if (!job) return null;
+      let siteLine = (job.site_address ?? "").trim();
+      let siteState: string | null = null;
+      if (job.site_id) {
+        const { data: s } = await sb
+          .from("crm_sites")
+          .select("address1, address2, city, state, zip")
+          .eq("id", job.site_id)
+          .maybeSingle();
+        if (s) {
+          siteState = s.state;
+          if (!siteLine) siteLine = siteAddressLine(s);
+        }
+      }
+      if (!siteLine) return null;
+      const [from, to] = await Promise.all([
+        geocodeAddressCached(sb, officeLine, office!.state),
+        geocodeAddress(sb, siteLine, siteState),
+      ]);
+      if (!from || !to) return null;
+      return estimateTravelBetween(from, to);
+    } catch {
+      // A read or the state server failing is "no estimate", never an error on the close-out.
+      return null;
+    }
   });
 
 /**
@@ -995,78 +1059,6 @@ export const recentRepairsForJob = createServerFn({ method: "GET" })
     const order = new Map(seen.map((id, i) => [id, i]));
     const sorted = templates.sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
     return templatesForViewer(sorted, manager);
-  });
-
-/**
- * What a tech usually uses on a repair template (owner, Sep 27): the materials logged on
- * earlier tickets that carried this template, averaged per ticket, so the close-out can
- * prefill them. Cells with the tech's own history first.
- */
-export interface UsualMaterial {
-  screen_id: string;
-  row_label: string;
-  price_col: string;
-  /** The service material name for the cell, or null (the catalog label stands). */
-  label: string | null;
-  unit: string;
-  /** Average quantity per ticket, in the stock unit (packs). */
-  avg_qty: number;
-  tickets: number;
-}
-export const usualMaterialsForTemplate = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ template_id: z.string().uuid() }).parse(d))
-  .handler(async ({ data, context }): Promise<UsualMaterial[]> => {
-    await me(context);
-    const sb = context.supabase;
-    const { data: reps } = await sb
-      .from("service_job_repairs")
-      .select("service_job_id")
-      .eq("repair_template_id", data.template_id)
-      .order("created_at", { ascending: false })
-      .limit(200);
-    const jobIds = [...new Set((reps ?? []).map((r) => r.service_job_id))];
-    if (!jobIds.length) return [];
-    const { data: moves } = await sb
-      .from("inventory_movements")
-      .select("service_job_id, screen_id, row_label, price_col, qty, unit")
-      .in("service_job_id", jobIds)
-      .in("reason", ["consumed", "released"]);
-    const perJob = new Map<string, Map<string, { qty: number; unit: string }>>();
-    for (const m of moves ?? []) {
-      if (!m.service_job_id) continue;
-      const cell = `${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
-      const j = perJob.get(m.service_job_id) ?? new Map();
-      const cur = j.get(cell) ?? { qty: 0, unit: m.unit };
-      cur.qty += -Number(m.qty);
-      j.set(cell, cur);
-      perJob.set(m.service_job_id, j);
-    }
-    const agg = new Map<string, { sum: number; n: number; unit: string }>();
-    for (const j of perJob.values())
-      for (const [cell, v] of j) {
-        if (!(v.qty > 0)) continue;
-        const a = agg.get(cell) ?? { sum: 0, n: 0, unit: v.unit };
-        a.sum += v.qty;
-        a.n += 1;
-        agg.set(cell, a);
-      }
-    const byMaterial = materialsByCell(await loadServiceMaterialLinks(sb));
-    return [...agg.entries()]
-      .map(([cell, a]) => {
-        const [screen_id, row_label, price_col] = cell.split("\u0000") as [string, string, string];
-        return {
-          screen_id,
-          row_label,
-          price_col,
-          label: serviceLabel(byMaterial, { screen_id, row_label, price_col }),
-          unit: a.unit,
-          avg_qty: Math.round((a.sum / a.n) * 100) / 100,
-          tickets: a.n,
-        };
-      })
-      .sort((x, y) => y.tickets - x.tickets)
-      .slice(0, 12);
   });
 
 /**

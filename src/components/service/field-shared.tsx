@@ -31,11 +31,13 @@ import { listJobCrew } from "@/lib/service.functions";
 import { billedCrewLine } from "@/lib/service-crew";
 import {
   deleteTimeEntry,
+  estimateTravel,
   listTimeEntries,
   saveTimeEntry,
   type JobPhotoRow,
   type TimeEntryRow,
 } from "@/lib/service-field.functions";
+import type { TravelEstimate } from "@/lib/travel-estimate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberField } from "@/components/ui/number-field";
@@ -375,20 +377,29 @@ const sameVals = (a: TimeVals, b: TimeVals) =>
 /**
  * The ticket's time entries as an editable list (kind, hours, helpers, date) with add and
  * delete. Read-only when `editable` is false: then only the totals and the lines show.
+ *
+ * `suggestTravel` (the close-out only; owner, Oct 9): while the ticket has no Travel line, the
+ * server's office → site estimate (estimateTravel) opens the Add form prefilled — kind Travel,
+ * the round-trip hours, today — with the estimate under it and one "Add travel" tap; the tech
+ * changes the hours first if they like. No estimate (an address missing, nothing found): the
+ * section is exactly as before, the empty "Add time" button.
  */
 export function TimeEntries({
   jobId,
   editable,
   defaultHelpers,
   compact,
+  suggestTravel,
 }: {
   jobId: string;
   editable: boolean;
   defaultHelpers: number;
   compact?: boolean | undefined;
+  suggestTravel?: boolean | undefined;
 }) {
   const { session } = useAuth();
   const listFn = useServerFn(listTimeEntries);
+  const travelFn = useServerFn(estimateTravel);
   // Owner, Oct 9 (S13): fresh for 30 s; a save puts its row in the cache itself.
   const q = useQuery({
     queryKey: fieldKeys.time(jobId),
@@ -396,6 +407,19 @@ export function TimeEntries({
     enabled: !!session,
     staleTime: 30_000,
   });
+  const hasTravel = (q.data ?? []).some((r) => r.kind === "travel");
+  // Read only where it is offered and only while no Travel line exists; the office and the
+  // site do not move, so an hour's freshness is plenty.
+  const travel = useQuery({
+    queryKey: fieldKeys.travelEstimate(jobId),
+    queryFn: () => travelFn({ data: { id: jobId } }),
+    enabled: !!session && !!suggestTravel && editable && q.isSuccess && !hasTravel,
+    staleTime: 60 * 60_000,
+  });
+  // Cancel on the prefilled form puts the plain "Add time" button back for this visit.
+  const [travelDismissed, setTravelDismissed] = useState(false);
+  const suggested: TravelEstimate | null =
+    suggestTravel && editable && !hasTravel && !travelDismissed ? (travel.data ?? null) : null;
   const crewFn = useServerFn(listJobCrew);
   const crewQ = useQuery({
     queryKey: fieldKeys.crew(jobId),
@@ -432,7 +456,7 @@ export function TimeEntries({
           <span className="font-medium">Labor</span> {fmtHours(total("labor"))}
         </p>
       )}
-      {rows.length === 0 && !adding && (
+      {rows.length === 0 && !adding && !suggested && (
         <p className="text-sm text-muted-foreground">No time recorded yet.</p>
       )}
       {editable ? (
@@ -440,7 +464,18 @@ export function TimeEntries({
           {rows.map((r) => (
             <TimeRow key={r.id} entry={r} jobId={jobId} />
           ))}
-          {adding ? (
+          {suggested && !adding ? (
+            <NewTimeRow
+              key="travel-estimate"
+              jobId={jobId}
+              defaultHelpers={defaultHelpers}
+              initial={{ kind: "travel", hours: suggested.hours }}
+              note={suggested.note}
+              hint={`${suggested.note} — round trip`}
+              submitLabel="Add travel"
+              onClose={() => setTravelDismissed(true)}
+            />
+          ) : adding ? (
             <NewTimeRow
               jobId={jobId}
               defaultHelpers={defaultHelpers}
@@ -625,26 +660,44 @@ function TimeRow({ entry, jobId }: { entry: TimeEntryRow; jobId: string }) {
 function NewTimeRow({
   jobId,
   defaultHelpers,
+  initial,
+  note,
+  hint,
+  submitLabel = "Add",
   onClose,
 }: {
   jobId: string;
   defaultHelpers: number;
+  /** Prefilled values (the travel estimate: kind Travel and its hours); else blank labor today. */
+  initial?: Partial<Pick<TimeVals, "kind" | "hours">> | undefined;
+  /** Saved in the entry's note column (service_time_entries.note) — the estimate's line. */
+  note?: string | undefined;
+  /** A muted line under the boxes saying where the prefill came from. */
+  hint?: string | undefined;
+  submitLabel?: string | undefined;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveTimeEntry);
   const [vals, setVals] = useState<TimeVals>(() => ({
-    kind: "labor",
-    hours: 0,
+    kind: initial?.kind ?? "labor",
+    hours: initial?.hours ?? 0,
     helper_count: defaultHelpers,
     on_date: localYmd(),
   }));
   const save = useMutation({
     mutationFn: () =>
-      saveFn({ data: { service_job_id: jobId, ...vals, hours: quarter(vals.hours) } }),
+      saveFn({
+        data: {
+          service_job_id: jobId,
+          ...vals,
+          hours: quarter(vals.hours),
+          ...(note ? { note } : {}),
+        },
+      }),
     onSuccess: (row) => {
       qc.setQueryData<TimeEntryRow[]>(fieldKeys.time(jobId), (old) => [...(old ?? []), row]);
-      toast.success("Time added");
+      toast.success(row.kind === "travel" ? "Travel added" : "Time added");
       onClose();
     },
     onError: (e) => loudError("Could not add the time", e),
@@ -652,6 +705,7 @@ function NewTimeRow({
   return (
     <div className="space-y-2 rounded-md border border-primary/40 bg-muted/30 p-2">
       <TimeFields vals={vals} onChange={setVals} disabled={save.isPending} />
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       <div className="flex gap-2">
         <Button
           type="button"
@@ -666,7 +720,7 @@ function NewTimeRow({
           }}
         >
           {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Add
+          {submitLabel}
         </Button>
         <Button
           type="button"

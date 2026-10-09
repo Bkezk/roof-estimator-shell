@@ -42,6 +42,7 @@ const full: StepState = {
   timeHours: 3.5,
   onSiteAt: null,
   closingNotes: "Drain was clogged; cleared it and resealed the strainer.",
+  notesSkipped: false,
   signaturePath: "job/signature.png",
   crewOthers: 0,
   materialItems: 3,
@@ -113,6 +114,11 @@ describe("stepSummary — the one line a folded step shows", () => {
       "line one line two",
     );
     expect(stepSummary("notes", { ...full, closingNotes: "   " })).toBe("No notes");
+    // Owner, Oct 9: "Skip — nothing to add" pressed with the notes blank.
+    expect(stepSummary("notes", { ...full, closingNotes: "   ", notesSkipped: true })).toBe(
+      "Skipped",
+    );
+    expect(stepSummary("notes", { ...full, notesSkipped: true })).toBe(full.closingNotes);
   });
   it("7 Signed by <name> / Signed / Not signed", () => {
     expect(stepSummary("signature", full)).toBe("Signed by Pat Ortiz");
@@ -238,7 +244,7 @@ describe("the compact strip", () => {
     // Not sticky; still first in the form.
     expect(strip).not.toContain("sticky");
     expect(form).toMatch(
-      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{open\} \/>/,
+      /<div className="space-y-5">\s*<StepStrip statuses=\{statuses\} open=\{shownOpen\} \/>/,
     );
   });
 });
@@ -259,7 +265,9 @@ describe("done steps minimize", () => {
     expect(form).toContain(
       "const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});",
     );
-    expect(form).toContain("useEffect(() => setEditing({}), [open]);");
+    // Owner, Oct 9 (later): the SHOWN open step — the one the tech is inside does not fold.
+    expect(form).toContain("useEffect(() => setEditing({}), [shownOpen]);");
+    expect(form).not.toContain("useEffect(() => setEditing({}), [open]);");
     expect(form).toContain("summary: stepSummary(id, stepState),");
     expect(form).toContain("expanded: editing[id] === true,");
     expect(form).toContain("onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),");
