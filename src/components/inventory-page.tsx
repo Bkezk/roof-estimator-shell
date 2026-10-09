@@ -19,8 +19,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
+  ChevronLeft,
+  ChevronRight,
   History,
   Package,
+  Scale,
   PackageMinus,
   PackagePlus,
   Trash2,
@@ -28,7 +31,21 @@ import {
   Warehouse,
 } from "lucide-react";
 
+import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-store";
+import { canAccess, seesEveryone } from "@/lib/access";
+import { getReconciliation } from "@/lib/inventory-reconcile.functions";
+import {
+  CLEAN_LINE,
+  fmtQty as fmtSigned,
+  fmtWhen as fmtOfficeWhen,
+  reconcileAdjustment,
+  reconciliationSummary,
+  shiftWeek,
+  weekStartOf,
+  type NegativeCell,
+} from "@/lib/inventory-reconcile";
+import { NumberField } from "@/components/ui/number-field";
 import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import type { ItemNumberRow, PriceTarget } from "@/lib/admin-item-numbers.functions";
 import { listServiceMaterialNames } from "@/lib/service-materials.functions";
@@ -534,6 +551,8 @@ export function InventoryPage(props: {
           </CardContent>
         )}
       </Card>
+
+      {seesEveryone(profile) && <ReconcileCard canSetCount={canAccess(profile, "estimate")} />}
 
       {role === "admin" && <SettingsCard rule={rule} />}
 
@@ -1388,6 +1407,244 @@ function LedgerTable(props: {
           </Table>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Reconcile (owner, Oct 9; admins and managers): where negative stock came from, and the place to
+ * fix it. The report (inventory-reconcile.ts): each cell below zero with the entry that took it
+ * there and every taking entry since (who / ticket / when) — current state whatever week is
+ * picked — then the picked Monday–Sunday week's "Short:" entries and what was fixed. Set count
+ * records ONE `adjustment` through addMovement so on hand becomes what was counted; there is no
+ * dismiss — the only way off the list is a corrected count. Who may set a count is addMovement's
+ * own rule (Estimate access or admin — a manager has it through canAccess); others see the list
+ * and a line to ask an admin.
+ */
+function ReconcileCard(props: { canSetCount: boolean }) {
+  const fn = useServerFn(getReconciliation);
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [weekStart, setWeekStart] = useState(() => weekStartOf(new Date()));
+  const thisWeek = weekStartOf(new Date());
+  const q = useQuery({
+    queryKey: ["inventory-reconcile", weekStart],
+    queryFn: () => fn({ data: { weekStart } }),
+    enabled: open,
+  });
+  const r = q.data;
+  const refreshAll = () => {
+    void qc.invalidateQueries({ queryKey: ["inventory-reconcile"] });
+    void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
+    void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
+  };
+  return (
+    <Card data-card="reconcile">
+      <CardHeader className="pb-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between text-left"
+          onClick={() => setOpen((o) => !o)}
+        >
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Scale className="h-4 w-4" /> Reconcile
+            <span className="text-xs font-normal text-muted-foreground">admins and managers</span>
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">{open ? "Hide" : "Show"}</span>
+        </button>
+        {open && (
+          <CardDescription>
+            Where a count below zero came from — the entry that took it below zero and every taking
+            entry since, with who, which ticket and when — and the week&apos;s short entries. Type
+            what is really there and Set count to fix it.
+          </CardDescription>
+        )}
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2" data-week-picker>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Previous week"
+              onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[9rem] text-center font-medium">
+              {r ? r.weekLabel : "…"}
+              {weekStart === thisWeek && (
+                <span className="ml-1 text-xs font-normal text-muted-foreground">(this week)</span>
+              )}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Next week"
+              disabled={weekStart >= thisWeek}
+              onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          {q.isLoading && <p className="text-muted-foreground">Loading…</p>}
+          {q.error && (
+            <p className="text-destructive">
+              {q.error instanceof Error ? q.error.message : "Could not load the report"}
+            </p>
+          )}
+          {r && !r.negatives.length && !r.shortEntries.length && (
+            <p className="text-muted-foreground">{CLEAN_LINE}</p>
+          )}
+          {r && (r.negatives.length > 0 || r.shortEntries.length > 0) && (
+            <p className="text-muted-foreground">{reconciliationSummary(r)}</p>
+          )}
+          {r && r.negatives.length > 0 && !props.canSetCount && (
+            <p className="text-muted-foreground">Ask an admin to set the count.</p>
+          )}
+          {r?.negatives.map((n) => (
+            <NegativeRow
+              key={`${n.location_id}|${n.screen_id}|${n.row_label}|${n.price_col}`}
+              cell={n}
+              canSetCount={props.canSetCount}
+              onSet={refreshAll}
+            />
+          ))}
+          {r && r.shortEntries.length > 0 && (
+            <div>
+              <div className="font-medium">Short entries this week</div>
+              <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
+                {r.shortEntries.map((s, i) => (
+                  <li key={i}>
+                    {fmtOfficeWhen(s.at)} · {s.location_name} · {s.name} · {fmtSigned(s.qty)}{" "}
+                    {s.unit} · {s.by_name ?? "(unknown)"}
+                    {s.service_job_id ? (
+                      <>
+                        {" · "}
+                        <Link
+                          to="/service"
+                          search={{ id: s.service_job_id }}
+                          className="underline underline-offset-2"
+                        >
+                          ticket {s.service_job_name ?? s.service_job_id}
+                        </Link>
+                      </>
+                    ) : null}
+                    {s.note && <div className="pl-4 text-xs">{s.note}</div>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {r && r.fixed.length > 0 && (
+            <div>
+              <div className="font-medium">Fixed this week</div>
+              <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
+                {r.fixed.map((f, i) => (
+                  <li key={i}>
+                    {f.location_name} · {f.name}: below zero {fmtOfficeWhen(f.wentBelowAt)}, back to{" "}
+                    {fmtQty(f.on_hand)} {f.unit} {fmtOfficeWhen(f.fixedAt)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+/** One cell below zero: its story, and the Counted box + Set count that ends it. */
+function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: () => void }) {
+  const n = props.cell;
+  const addFn = useServerFn(addMovement);
+  // Blank until typed (NumberField shows 0 as empty); NaN = nothing typed yet.
+  const [counted, setCounted] = useState<number>(0);
+  const [touched, setTouched] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const payload = touched ? reconcileAdjustment(n, counted) : null;
+  const setCount = async () => {
+    if (!payload) return;
+    setBusy(true);
+    try {
+      await addFn({ data: payload });
+      toast.success(`${n.location_name} · ${n.name} set to ${fmtQty(counted)} ${n.unit}`);
+      setTouched(false);
+      setCounted(0);
+      props.onSet();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not set the count", {
+        duration: 10000,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div data-negative-cell>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="font-medium">
+          {n.location_name} · {n.name}:{" "}
+          <span className="text-destructive">
+            {fmtSigned(n.on_hand)} {n.unit}
+          </span>{" "}
+          <span className="text-xs font-normal text-muted-foreground">
+            below zero since {fmtOfficeWhen(n.firstBelowZeroAt)}
+          </span>
+        </div>
+        {props.canSetCount && (
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Counted ({n.unit})</Label>
+            <NumberField
+              value={counted}
+              onChange={(v) => {
+                setCounted(v);
+                setTouched(true);
+              }}
+              inputMode="decimal"
+              step="any"
+              className="h-9 w-28"
+              placeholder="count"
+              disabled={busy}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={!payload || busy}
+              onClick={() => void setCount()}
+            >
+              Set count
+            </Button>
+          </div>
+        )}
+      </div>
+      <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
+        {n.contributors.map((c, i) => (
+          <li key={i}>
+            {fmtOfficeWhen(c.at)} · {fmtSigned(c.qty)} {n.unit} ·{" "}
+            {REASON_LABELS[c.reason as MovementReason] ?? c.reason}
+            {" · "}
+            {c.by_name ?? "(unknown)"}
+            {c.service_job_id ? (
+              <>
+                {" · "}
+                <Link
+                  to="/service"
+                  search={{ id: c.service_job_id }}
+                  className="underline underline-offset-2"
+                >
+                  ticket {c.service_job_name ?? c.service_job_id}
+                </Link>
+              </>
+            ) : null}
+            {c.short && <span className="ml-1 font-medium text-destructive">SHORT</span>}
+          </li>
+        ))}
+        {n.more > 0 && <li>+{n.more} more</li>}
+      </ul>
     </div>
   );
 }
