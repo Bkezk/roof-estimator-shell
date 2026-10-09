@@ -3,6 +3,26 @@
  * (crm_settings) and the delivery health of the reminder mail / push, with a "Run reminders
  * now" button (the same lazy dispatcher the app calls on load; it skips a pass when the last one
  * ran under ten minutes ago). Admin only — the server refuses everyone else.
+ *
+ * The sentences state the rules as followups.server.ts runs them (owner, Oct 9: "its unclear
+ * what the remind the assignee after x days means … for tickets who is it reminding if
+ * unassigned? if assigned is it 1 day after due date then every 3 days?"). Quoted from that
+ * module's header and syncFollowup:
+ *   "One open row per assigned item; assigning starts it, a closing status ends it, and the
+ *    dispatcher (notify.server.ts) reminds the assignee until then."
+ *   "ticket = due on its scheduled day (or first_days from now when unscheduled), reminders
+ *    every ticket_every_days, closed at Done / Invoiced / Closed or when unassigned.
+ *    Opportunity = due at its expected close (default close_days from creation), first reminder
+ *    after opportunity_first_days, then every opportunity_every_days, closed at Won / Lost /
+ *    No response."
+ *   "Ticket: remind on the due day (the scheduled day) unless it is already past, then now.
+ *    Opportunity: first reminder after first_days, never later than the due date."
+ * An item with no assignee has no follow-up row (syncFollowup closes it "unassigned"), so
+ * nobody is reminded; Work Overview lists it under Unassigned and flags it overdue after
+ * crm_settings.unassigned_overdue_days (my-work.ts unassignedOverdue). Untouched work
+ * (notify.server.ts escalateUntouched): assigned, no contact logged, not started; past
+ * ticket_untouched_days / opportunity_untouched_days the escalation people hear, "then again
+ * every ticket_every_days / opportunity_every_days", while the assignee's own reminders go on.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -61,14 +81,14 @@ const FIELDS: Field[] = [
   },
   {
     key: "opportunity_first_days",
-    label: "First opportunity reminder after N days",
+    label: "First opportunity reminder N days after assignment",
     min: 0,
     group: "opportunity",
   },
   { key: "opportunity_every_days", label: "Then every N days", min: 1, group: "opportunity" },
   {
     key: "ticket_first_days",
-    label: "First ticket reminder after N days (unscheduled tickets)",
+    label: "Unscheduled ticket due N days after the technician is assigned",
     min: 0,
     group: "ticket",
   },
@@ -222,8 +242,10 @@ export function RemindersSettings() {
           <div className="space-y-1.5">
             <CardTitle>Follow-up reminders</CardTitle>
             <CardDescription>
-              Assigning a ticket or an opportunity starts a timer; the assignee is reminded at these
-              lengths until it is closed. Changes apply to timers started from now on.
+              A timer starts when a ticket gets a technician or an opportunity gets an assignee;
+              that person is reminded at these lengths until it is closed. Nothing is timed, and
+              nobody is reminded, while an item has no person on it. Changes apply to timers started
+              from now on.
             </CardDescription>
           </div>
           {saveButton}
@@ -246,37 +268,50 @@ export function RemindersSettings() {
                 submit();
               }}
             >
-              <Section title="Opportunities">
-                <Row>Should close within {field("opportunity_close_days")} days.</Row>
+              <Section
+                title="Opportunities"
+                help="Won, Lost or No response ends the timer; taking the assignee off stops the reminders."
+              >
                 <Row>
-                  Remind the assignee after {field("opportunity_first_days")} days, then every{" "}
-                  {field("opportunity_every_days")} days until it is closed.
+                  Timer starts when someone is assigned. Due at the expected close,{" "}
+                  {field("opportunity_close_days")} days after it is entered unless a date is set.
+                </Row>
+                <Row>
+                  Remind the assignee {field("opportunity_first_days")} days after assignment (never
+                  later than the due date), then every {field("opportunity_every_days")} days until
+                  it is won, lost or closed.
                 </Row>
               </Section>
 
               <Section
                 title="Tickets"
-                help="A scheduled ticket is due on its scheduled day and reminds from then."
+                help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders."
               >
                 <Row>
-                  Unscheduled: remind the technician after {field("ticket_first_days")} days, then
-                  every {field("ticket_every_days")} days.
+                  Timer starts when a technician is assigned. A scheduled ticket is due on its day:
+                  remind the technician that day, then every {field("ticket_every_days")} days until
+                  it is Done.
+                </Row>
+                <Row>
+                  An unscheduled ticket is due {field("ticket_first_days")} days after assignment:
+                  remind the technician then, and again every {draft.ticket_every_days} days until
+                  it is Done.
                 </Row>
               </Section>
 
               <Section
                 title="Needs assignment"
-                help="A ticket or opportunity with nobody on it sits under Unassigned on Work Overview until someone takes it."
+                help="Nobody is reminded while a ticket or opportunity has no person on it — there is no timer until someone is assigned."
               >
                 <Row>
-                  Flag it overdue after {daysFields("unassigned")} days without a person (0 = the
-                  day it is entered).
+                  It sits under Unassigned on Work Overview and is flagged overdue there after{" "}
+                  {daysFields("unassigned")} days (0 = the day it is entered).
                 </Row>
               </Section>
 
               <Section
                 title="Untouched work"
-                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists and the people below hear right away, then again at the ticket's or opportunity's “every N days” above."
+                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “every N days” above — until a contact is logged or it is started."
               >
                 <Row>
                   A ticket counts as untouched after {field("ticket_untouched_days")} days with no

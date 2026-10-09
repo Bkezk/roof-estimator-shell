@@ -4,10 +4,16 @@
  * prefills from there? if its missing any info its just empty as it is now."
  *
  * The arithmetic (travel-estimate.ts), the server function through the fake Supabase with the
- * state servers stubbed (estimateTravel: a hit returns numbers; a missing site address, no
- * office address or no geocode hit is null; no Service access throws), and the Time section's
- * prefilled form on the close-out (field-shared.tsx TimeEntries, closeout.tsx) — not on the
- * office ticket page.
+ * state servers and the routers stubbed (estimateTravel: a hit returns numbers; a missing site
+ * address, no office address or no geocode hit is null; no Service access throws), and the Time
+ * section's prefilled form on the close-out (field-shared.tsx TimeEntries, closeout.tsx) — not
+ * on the office ticket page.
+ *
+ * Later the same day: "can we have it do the routed drive to have more accurate time and it
+ * should use the address in the customer profile." The server asks a router first (drive-route
+ * .ts: Google with its key, else OSRM) and says "(routed)"; the straight-line arithmetic stays as
+ * the fallback, "(estimated)". The destination is the ticket's property address when it has a
+ * street line, else the customer's physical address (crm_accounts), else null.
  */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,9 +33,11 @@ import {
   haversineMiles,
   officeAddressLine,
   roadMiles,
+  travelFromRoute,
   travelHours,
   travelNote,
 } from "@/lib/travel-estimate";
+import { GOOGLE_ROUTES_URL, OSRM_ROUTE_BASE, osrmRouteUrl } from "@/lib/drive-route";
 import { estimateTravel } from "@/lib/service-field.functions";
 import { clearGeocodeCache } from "@/lib/service-aerial.functions";
 import { fakeSupabase } from "@/test/fake-supabase";
@@ -67,19 +75,34 @@ describe("travel-estimate: the arithmetic", () => {
     expect(travelHours(60)).toBe(2);
     expect(travelHours(35)).toBe(1.17);
   });
-  it("travelNote reads 'Office → site ≈ 23 mi, 35 min each way (estimated)'", () => {
+  it("travelNote reads 'Office → site ≈ 23 mi, 35 min each way (estimated)', or '(routed)' from a router", () => {
     expect(travelNote(23, 35)).toBe("Office → site ≈ 23 mi, 35 min each way (estimated)");
     expect(travelNote(15.5, 25)).toBe("Office → site ≈ 16 mi, 25 min each way (estimated)");
+    expect(travelNote(23, 35, "routed")).toBe("Office → site ≈ 23 mi, 35 min each way (routed)");
+    expect(travelNote(23, 35, "estimated")).toBe(
+      "Office → site ≈ 23 mi, 35 min each way (estimated)",
+    );
   });
-  it("estimateTravelBetween composes the four; the same spot is no trip (null)", () => {
+  it("estimateTravelBetween composes the four, marked estimated; the same spot is no trip (null)", () => {
     const e = estimateTravelBetween(LONDON, CORBIN)!;
     expect(e).toEqual({
       miles: 15.6,
       minutes: 25,
       hours: 0.83,
       note: "Office → site ≈ 16 mi, 25 min each way (estimated)",
+      source: "estimated",
     });
     expect(estimateTravelBetween(LONDON, LONDON)).toBeNull();
+  });
+  it("travelFromRoute: a router's miles and minutes, the same round-trip hours, marked routed; 0 minutes is null", () => {
+    expect(travelFromRoute({ miles: 23, minutes: 35 })).toEqual({
+      miles: 23,
+      minutes: 35,
+      hours: 1.17,
+      note: "Office → site ≈ 23 mi, 35 min each way (routed)",
+      source: "routed",
+    });
+    expect(travelFromRoute({ miles: 0, minutes: 0 })).toBeNull();
   });
   it("officeAddressLine joins company_settings' address, city, state and zip; no street → ''", () => {
     expect(
@@ -122,13 +145,28 @@ const storedRpc = {
         : [],
 };
 
+/** A routed answer: 23.0 road miles in 33 min 20 s, as OSRM and Google each report it. */
+const OSRM_OK = { code: "Ok", routes: [{ distance: 37015, duration: 2000 }] };
+const GOOGLE_OK = { routes: [{ distanceMeters: 37015, duration: "2000s" }] };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+
 let env: ReturnType<typeof fakeSupabase>;
 let fetchMock: ReturnType<typeof vi.fn>;
+/** What fetch was asked, by host: the routers and the state layers are told apart by URL. */
+const fetched = () => fetchMock.mock.calls.map((c) => String(c[0]));
+const osrmCalls = () => fetched().filter((u) => u.startsWith(OSRM_ROUTE_BASE));
+const googleCalls = () => fetched().filter((u) => u.startsWith(GOOGLE_ROUTES_URL));
+const layerCalls = () =>
+  fetched().filter((u) => !u.startsWith(OSRM_ROUTE_BASE) && !u.startsWith(GOOGLE_ROUTES_URL));
 function world(over: {
   office?: Row | null;
   job?: Row;
   sites?: Row[];
+  accounts?: Row[];
   rpcs?: Record<string, (args: Row) => unknown>;
+  /** The routers' answers; by default OSRM finds no route and Google is not configured. */
+  osrm?: () => Promise<Response>;
+  google?: () => Promise<Response>;
 }) {
   env = fakeSupabase(
     {
@@ -160,11 +198,21 @@ function world(over: {
         },
       ],
       crm_sites: over.sites ?? [],
+      crm_accounts: over.accounts ?? [],
     },
     { rpcs: over.rpcs ?? storedRpc },
   );
-  // The state servers (the live fallback): nothing found anywhere.
-  fetchMock = vi.fn(async () => new Response(JSON.stringify({ features: [] }), { status: 200 }));
+  // The routers (OSRM: no route unless the test says; Google: never expected without a key) and
+  // the state servers (the live geocode fallback): nothing found anywhere.
+  fetchMock = vi.fn(async (url: string) => {
+    if (url.startsWith(OSRM_ROUTE_BASE))
+      return over.osrm ? over.osrm() : json({ code: "NoRoute", routes: [] });
+    if (url.startsWith(GOOGLE_ROUTES_URL)) {
+      if (!over.google) throw new Error("test: Google was asked without a key");
+      return over.google();
+    }
+    return json({ features: [] });
+  });
   vi.stubGlobal("fetch", fetchMock);
 }
 const run = (who = ME) =>
@@ -172,21 +220,79 @@ const run = (who = ME) =>
     data: { id: JOB },
     context: { supabase: env.db, userId: who },
   });
-beforeEach(() => clearGeocodeCache());
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  clearGeocodeCache();
+  // No Google key in the test process unless a test sets one.
+  vi.stubEnv("GOOGLE_MAPS_API_KEY", "");
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe("estimateTravel (the server)", () => {
-  it("office and site both in our map data: road miles, minutes, round-trip hours and the note", async () => {
+  it("office and site both in our map data, no router: road miles, minutes, round-trip hours and the '(estimated)' note", async () => {
     world({});
     expect(await run()).toEqual({
       miles: 15.6,
       minutes: 25,
       hours: 0.83,
       note: "Office → site ≈ 16 mi, 25 min each way (estimated)",
+      source: "estimated",
     });
-    // Both addresses went through the stored-data rpc; the state servers were not needed.
+    // Both addresses went through the stored-data rpc; the state servers were not needed. The
+    // only fetch was OSRM, asked once for the two points (lng,lat;lng,lat).
     expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["100", "200"]);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(layerCalls()).toEqual([]);
+    expect(googleCalls()).toEqual([]);
+    expect(osrmCalls()).toEqual([osrmRouteUrl(LONDON, CORBIN)]);
+  });
+  it("OSRM answers: its road miles and minutes, the same round-trip hours, '(routed)'", async () => {
+    world({ osrm: async () => json(OSRM_OK) });
+    expect(await run()).toEqual({
+      miles: 23,
+      minutes: 35,
+      hours: 1.17,
+      note: "Office → site ≈ 23 mi, 35 min each way (routed)",
+      source: "routed",
+    });
+  });
+  it("OSRM down (network error, 5xx, junk) → the straight-line estimate, never an error", async () => {
+    for (const osrm of [
+      async () => {
+        throw new TypeError("fetch failed");
+      },
+      async () => new Response("<html>502</html>", { status: 502 }),
+      async () => json({ message: "Too Many Requests" }, 429),
+    ]) {
+      world({ osrm });
+      expect(await run()).toMatchObject({ miles: 15.6, minutes: 25, source: "estimated" });
+    }
+  });
+  it("with GOOGLE_MAPS_API_KEY set (Lovable Cloud › Secrets): Google Routes first, in the header; OSRM only if Google fails", async () => {
+    vi.stubEnv("GOOGLE_MAPS_API_KEY", "test-key");
+    world({ google: async () => json(GOOGLE_OK) });
+    expect(await run()).toMatchObject({ miles: 23, minutes: 35, hours: 1.17, source: "routed" });
+    expect(googleCalls()).toEqual([GOOGLE_ROUTES_URL]);
+    expect(osrmCalls()).toEqual([]);
+    const init = fetchMock.mock.calls.find((c) => String(c[0]) === GOOGLE_ROUTES_URL)![1] as {
+      method: string;
+      headers: Record<string, string>;
+    };
+    expect(init.method).toBe("POST");
+    expect(init.headers["X-Goog-Api-Key"]).toBe("test-key");
+    expect(init.headers["X-Goog-FieldMask"]).toBe("routes.distanceMeters,routes.duration");
+    // Google refusing → OSRM.
+    world({
+      google: async () => json({ error: { code: 403, message: "PERMISSION_DENIED" } }, 403),
+      osrm: async () => json(OSRM_OK),
+    });
+    expect(await run()).toMatchObject({ miles: 23, minutes: 35, source: "routed" });
+    expect(googleCalls()).toHaveLength(1);
+    expect(osrmCalls()).toHaveLength(1);
+    // Both failing → estimated.
+    world({ google: async () => json({ routes: [] }) });
+    expect(await run()).toMatchObject({ miles: 15.6, minutes: 25, source: "estimated" });
   });
   it("the site's address comes from its crm_sites row when the ticket has none typed", async () => {
     world({
@@ -204,10 +310,159 @@ describe("estimateTravel (the server)", () => {
     });
     expect(await run()).toMatchObject({ miles: 15.6, minutes: 25, hours: 0.83 });
   });
-  it("no site address → null, and nothing is geocoded for it", async () => {
+  it("no site address and no customer → null, and nothing is geocoded or routed for it", async () => {
     world({ job: { id: JOB, site_id: null, site_address: "   ", technician_id: ME } });
     expect(await run()).toBeNull();
     expect(env.rpcCalls.map((c) => c.args["p_house"])).not.toContain("100");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // ── Where the truck goes (owner, Oct 9: "it should use the address in the customer profile")
+  const ACCOUNT = "e3333333-3333-4333-8333-333333333333";
+  const corbinAccount = (over: Row = {}): Row => ({
+    id: ACCOUNT,
+    name: "Depot Hardware",
+    address1: "100 Depot St",
+    address2: null,
+    city: "Corbin",
+    state: "KY",
+    zip: "40701",
+    // The mailing address is somewhere else on purpose: it must not be used.
+    mailing_same: false,
+    mailing_address1: "PO Box 9",
+    mailing_city: "Lexington",
+    mailing_state: "KY",
+    mailing_zip: "40502",
+    ...over,
+  });
+  it("a ticket with no property address falls back to the customer's physical address (crm_accounts address1 / city / state / zip)", async () => {
+    world({
+      job: { id: JOB, site_id: null, site_address: null, technician_id: ME, account_id: ACCOUNT },
+      accounts: [corbinAccount()],
+    });
+    expect(await run()).toMatchObject({ miles: 15.6, minutes: 25, source: "estimated" });
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["100", "200"]);
+  });
+  it("the property address wins when it has a street line — typed on the ticket, else its crm_sites row — even with a customer address", async () => {
+    // Typed on the ticket: a different house than the customer's.
+    const rpcs = {
+      service_aerial_address_candidates: (args: Row) =>
+        args["p_house"] === "200"
+          ? [cand("200", "MAIN ST", LONDON)]
+          : args["p_house"] === "100"
+            ? [cand("100", "DEPOT ST", CORBIN)]
+            : args["p_house"] === "7"
+              ? [cand("7", "MILL RD", { lat: 36.8, lng: -84.2 })]
+              : [],
+    };
+    world({
+      job: {
+        id: JOB,
+        site_id: null,
+        site_address: "7 Mill Rd, Williamsburg, KY 40769",
+        technician_id: ME,
+        account_id: ACCOUNT,
+      },
+      accounts: [corbinAccount()],
+      rpcs,
+    });
+    expect(await run()).not.toBeNull();
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["200", "7"]);
+    // Its crm_sites row, when nothing is typed (the office's point is forgotten so both ends are
+    // looked up again).
+    clearGeocodeCache();
+    world({
+      job: {
+        id: JOB,
+        site_id: "site-1",
+        site_address: null,
+        technician_id: ME,
+        account_id: ACCOUNT,
+      },
+      sites: [
+        {
+          id: "site-1",
+          address1: "7 Mill Rd",
+          address2: null,
+          city: "Williamsburg",
+          state: "KY",
+          zip: "40769",
+        },
+      ],
+      accounts: [corbinAccount()],
+      rpcs,
+    });
+    expect(await run()).not.toBeNull();
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["200", "7"]);
+  });
+  it("a property address with no street line ('Corbin, KY'; a site row with no address1) is skipped for the customer's", async () => {
+    world({
+      job: {
+        id: JOB,
+        site_id: null,
+        site_address: "Corbin, KY",
+        technician_id: ME,
+        account_id: ACCOUNT,
+      },
+      accounts: [corbinAccount()],
+    });
+    expect(await run()).toMatchObject({ miles: 15.6, minutes: 25 });
+    expect(env.rpcCalls.map((c) => c.args["p_house"]).sort()).toEqual(["100", "200"]);
+    world({
+      job: {
+        id: JOB,
+        site_id: "site-1",
+        site_address: "  ",
+        technician_id: ME,
+        account_id: ACCOUNT,
+      },
+      sites: [
+        { id: "site-1", address1: null, address2: null, city: "Corbin", state: "KY", zip: "40701" },
+      ],
+      accounts: [corbinAccount()],
+    });
+    expect(await run()).toMatchObject({ miles: 15.6, minutes: 25 });
+  });
+  it("a customer with no street address either (or no such customer) → null, nothing geocoded for the site", async () => {
+    world({
+      job: { id: JOB, site_id: null, site_address: null, technician_id: ME, account_id: ACCOUNT },
+      accounts: [corbinAccount({ address1: "  ", address2: null })],
+    });
+    expect(await run()).toBeNull();
+    expect(env.rpcCalls.map((c) => c.args["p_house"])).not.toContain("100");
+    world({
+      job: { id: JOB, site_id: null, site_address: null, technician_id: ME, account_id: ACCOUNT },
+      accounts: [],
+    });
+    expect(await run()).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("the geocoder's state hint comes from the row the address came from: the customer's state column when its line carries none", async () => {
+    // Nothing stored for the customer's house: the live layers are asked — Tennessee's only,
+    // from crm_accounts.state, although the line itself ("500 Church St") names no state.
+    world({
+      job: { id: JOB, site_id: null, site_address: null, technician_id: ME, account_id: ACCOUNT },
+      accounts: [corbinAccount({ address1: "500 Church St", city: null, state: "TN", zip: null })],
+      rpcs: {
+        service_aerial_address_candidates: (args: Row) =>
+          args["p_house"] === "200" ? [cand("200", "MAIN ST", LONDON)] : [],
+      },
+    });
+    expect(await run()).toBeNull();
+    expect(layerCalls().length).toBeGreaterThan(0);
+    expect(layerCalls().some((u) => u.includes("kygisserver.ky.gov"))).toBe(false);
+    expect(layerCalls().some((u) => u.includes("USA_Structures"))).toBe(true);
+    // The same line from a Kentucky customer asks Kentucky's 911 points.
+    world({
+      job: { id: JOB, site_id: null, site_address: null, technician_id: ME, account_id: ACCOUNT },
+      accounts: [corbinAccount({ address1: "500 Church St", city: null, state: "KY", zip: null })],
+      rpcs: {
+        service_aerial_address_candidates: (args: Row) =>
+          args["p_house"] === "200" ? [cand("200", "MAIN ST", LONDON)] : [],
+      },
+    });
+    expect(await run()).toBeNull();
+    expect(layerCalls().some((u) => u.includes("kygisserver.ky.gov"))).toBe(true);
   });
   it("no office address (blank street, or no company_settings row) → null before any lookup", async () => {
     world({ office: { ...OFFICE, address: null } });
@@ -313,16 +568,32 @@ describe("the Time section prefills a Travel line from the estimate (close-out o
     );
     expect(office).not.toContain("suggestTravel");
   });
-  it("the server function takes the office from company_settings (the invoice header's address) and the site as the aerial reads it", () => {
+  it("the server function takes the office from company_settings (the invoice header's address), the destination in order, then the router before the arithmetic", () => {
     const fns = readFileSync("src/lib/service-field.functions.ts", "utf8");
     expect(fns).toMatch(
       /\.from\("company_settings"\)\s*\.select\("address, city, state, zip"\)\s*\.eq\("id", 1\)\s*\.maybeSingle\(\);\s*const officeLine = office \? officeAddressLine\(office\) : "";\s*if \(!officeLine\) return null;/,
     );
-    expect(fns).toContain("if (!siteLine) siteLine = siteAddressLine(s);");
+    expect(fns).toContain('.select("id, site_id, site_address, account_id")');
+    expect(fns).toContain("const dest = await travelDestination(sb, job);");
     expect(fns).toMatch(
-      /geocodeAddressCached\(sb, officeLine, office!\.state\),\s*geocodeAddress\(sb, siteLine, siteState\),/,
+      /geocodeAddressCached\(sb, officeLine, office!\.state\),\s*geocodeAddress\(sb, dest\.line, dest\.state\),/,
     );
-    expect(fns).toContain("return estimateTravelBetween(from, to);");
+    expect(fns).toMatch(
+      /const routed = await routedDrive\(from, to\);\s*return \(routed && travelFromRoute\(routed\)\) \?\? estimateTravelBetween\(from, to\);/,
+    );
+    // The destination: property with a street line (typed, else its site row), else the customer.
+    expect(fns).toMatch(
+      /if \(hasStreetLine\(typed\)\) return \{ line: typed, state: siteState \};\s*if \(!job\.account_id\) return null;\s*const \{ data: a \} = await sb\s*\.from\("crm_accounts"\)\s*\.select\("address1, address2, city, state, zip"\)/,
+    );
+    expect(fns).not.toContain("mailing_address1");
+    // The module header says what the free router is and how the key switches to Google.
+    const route = readFileSync("src/lib/drive-route.ts", "utf8");
+    expect(route).toMatch(
+      /OSRM's public demo server \(router\.project-osrm\.org\): free, no key, but a demo with no\s+\*\s+guarantee/,
+    );
+    expect(route).toContain("GOOGLE_MAPS_API_KEY");
+    expect(route).toContain("Lovable Cloud › Secrets");
+    expect(route).not.toMatch(/console\.(log|warn|error)/);
     // The same address chain the aerial uses, shared, not copied.
     const aerial = readFileSync("src/lib/service-aerial.functions.ts", "utf8");
     expect(aerial).toContain("export async function geocodeAddress(");

@@ -5,9 +5,12 @@
  *
  * Pure arithmetic; the server function (service-field.functions.ts estimateTravel) geocodes the
  * office (company_settings' address) and the ticket's site through the aerial's address chain
- * and hands the two points here. No routing service is called (no key, no new dependency): the
- * straight-line distance is stretched by a road factor and driven at an average speed, which
- * is why every line says "(estimated)" and the tech can change the hours before saving.
+ * and hands the two points here. Owner, Oct 9, later: "can we have it do the routed drive to
+ * have more accurate time" — the server first asks a router for the real road miles and minutes
+ * (drive-route.ts: Google when its key is set, else OSRM's public demo) and the line then says
+ * "(routed)"; when no router answers, the straight-line distance is stretched by a road factor
+ * and driven at an average speed, as before, and the line says "(estimated)". Either way the
+ * tech can change the hours before saving.
  */
 
 export interface LatLng {
@@ -50,9 +53,16 @@ export function travelHours(oneWayMinutes: number, roundTrip = true): number {
   return Math.round((minutes / 60) * 100) / 100;
 }
 
-/** The muted line under the prefilled form and the entry's note. */
-export function travelNote(miles: number, minutes: number): string {
-  return `Office → site ≈ ${Math.round(miles)} mi, ${minutes} min each way (estimated)`;
+/** Where the numbers came from: a router's road route, or the straight-line arithmetic here. */
+export type TravelSource = "routed" | "estimated";
+
+/** The muted line under the prefilled form and the entry's note; its tail says which source. */
+export function travelNote(
+  miles: number,
+  minutes: number,
+  source: TravelSource = "estimated",
+): string {
+  return `Office → site ≈ ${Math.round(miles)} mi, ${minutes} min each way (${source})`;
 }
 
 export interface TravelEstimate {
@@ -63,6 +73,7 @@ export interface TravelEstimate {
   /** Round-trip hours, to 2 dp: what the Travel line is prefilled with. */
   hours: number;
   note: string;
+  source: TravelSource;
 }
 
 /** The whole estimate from the two points; null when the two are the same spot (nothing to drive). */
@@ -70,7 +81,29 @@ export function estimateTravelBetween(office: LatLng, site: LatLng): TravelEstim
   const miles = roadMiles(haversineMiles(office, site));
   const minutes = driveMinutes(miles);
   if (minutes <= 0) return null;
-  return { miles, minutes, hours: travelHours(minutes), note: travelNote(miles, minutes) };
+  return {
+    miles,
+    minutes,
+    hours: travelHours(minutes),
+    note: travelNote(miles, minutes, "estimated"),
+    source: "estimated",
+  };
+}
+
+/**
+ * The estimate from a router's answer (drive-route.ts routedDrive: road miles to a tenth, minutes
+ * to the next 5): the same round-trip hours and note, marked "(routed)". Null when the route is
+ * no drive at all (0 minutes), so the caller falls back the same way as for no answer.
+ */
+export function travelFromRoute(route: { miles: number; minutes: number }): TravelEstimate | null {
+  if (!(route.minutes > 0)) return null;
+  return {
+    miles: route.miles,
+    minutes: route.minutes,
+    hours: travelHours(route.minutes),
+    note: travelNote(route.miles, route.minutes, "routed"),
+    source: "routed",
+  };
 }
 
 /**

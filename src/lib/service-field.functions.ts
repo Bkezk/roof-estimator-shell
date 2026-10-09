@@ -41,8 +41,11 @@ import { geocodeAddress, geocodeAddressCached } from "@/lib/service-aerial.funct
 import {
   estimateTravelBetween,
   officeAddressLine,
+  travelFromRoute,
   type TravelEstimate,
 } from "@/lib/travel-estimate";
+import { routedDrive } from "@/lib/drive-route";
+import { parseStreetAddress } from "@/lib/aerial-address";
 
 export const SERVICE_BUCKET = "service";
 export type TimeEntryRow = Database["public"]["Tables"]["service_time_entries"]["Row"];
@@ -466,14 +469,21 @@ export const deleteTimeEntry = createServerFn({ method: "POST" })
 /**
  * The automatic travel line (owner, Oct 9: "an automated travel to the time section that tracks
  * the distance between the jbk office and the location on the ticket and calculates the drive
- * time and prefills from there? if its missing any info its just empty as it is now"). The
- * office is company_settings' address (the one the invoice header prints), the site the ticket's
- * address (site_address, else its site's line, as the aerial reads it); both go through the
- * aerial's address chain (service-aerial.functions.ts geocodeAddress: our stored map data, then
- * the live state layers) and travel-estimate.ts turns the two points into road miles, drive
- * minutes and round-trip hours. Null whenever a piece is missing or fails — no office address,
- * no site address, no match, the state server down, the ticket not readable — so the Time
- * section stays as it is; only a login without Service access is refused.
+ * time and prefills from there? if its missing any info its just empty as it is now"; later the
+ * same day: "can we have it do the routed drive to have more accurate time and it should use
+ * the address in the customer profile").
+ *
+ * The office is company_settings' address (the one the invoice header prints). The destination,
+ * in order: the ticket's property address when it has a street line (site_address as typed,
+ * else its crm_sites row), else the customer's physical address from crm_accounts (address1,
+ * city, state, zip — the same columns the invoice's Bill To reads), else null. The state hint
+ * for the geocoder comes from whichever row was used. Both ends go through the aerial's address
+ * chain (service-aerial.functions.ts geocodeAddress: our stored map data, then the live state
+ * layers); then drive-route.ts asks a router for the road miles and minutes ("(routed)"), and
+ * when no router answers travel-estimate.ts stretches the straight line as before
+ * ("(estimated)"). Null whenever a piece is missing or fails — no office address, no address
+ * on the ticket or its customer, no match, the state server down, the ticket not readable — so
+ * the Time section stays as it is; only a login without Service access is refused.
  */
 export const estimateTravel = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -491,35 +501,67 @@ export const estimateTravel = createServerFn({ method: "GET" })
       if (!officeLine) return null;
       const { data: job } = await sb
         .from("service_jobs")
-        .select("id, site_id, site_address")
+        .select("id, site_id, site_address, account_id")
         .eq("id", data.id)
         .maybeSingle();
       if (!job) return null;
-      let siteLine = (job.site_address ?? "").trim();
-      let siteState: string | null = null;
-      if (job.site_id) {
-        const { data: s } = await sb
-          .from("crm_sites")
-          .select("address1, address2, city, state, zip")
-          .eq("id", job.site_id)
-          .maybeSingle();
-        if (s) {
-          siteState = s.state;
-          if (!siteLine) siteLine = siteAddressLine(s);
-        }
-      }
-      if (!siteLine) return null;
+      const dest = await travelDestination(sb, job);
+      if (!dest) return null;
       const [from, to] = await Promise.all([
         geocodeAddressCached(sb, officeLine, office!.state),
-        geocodeAddress(sb, siteLine, siteState),
+        geocodeAddress(sb, dest.line, dest.state),
       ]);
       if (!from || !to) return null;
-      return estimateTravelBetween(from, to);
+      const routed = await routedDrive(from, to);
+      return (routed && travelFromRoute(routed)) ?? estimateTravelBetween(from, to);
     } catch {
-      // A read or the state server failing is "no estimate", never an error on the close-out.
+      // A read, a router or the state server failing is "no estimate", never an error on the
+      // close-out.
       return null;
     }
   });
+
+/** A line has a street when the aerial's parser finds a house number and street in it. */
+const hasStreetLine = (line: string) => !!parseStreetAddress(line);
+
+/**
+ * Where the truck drives to (owner, Oct 9: "it should use the address in the customer
+ * profile"): the ticket's property address when it has a street line — site_address as typed,
+ * else its crm_sites row — else the customer's physical address (crm_accounts address1 /
+ * address2 / city / state / zip; not the mailing_* columns, a PO box is nowhere to drive), else
+ * null. `state` is the hint for the geocoder, from the row the line came from.
+ */
+async function travelDestination(
+  sb: SupabaseClient<Database>,
+  job: { site_id: string | null; site_address: string | null; account_id: string | null },
+): Promise<{ line: string; state: string | null } | null> {
+  const typed = (job.site_address ?? "").trim();
+  let siteState: string | null = null;
+  if (job.site_id) {
+    const { data: s } = await sb
+      .from("crm_sites")
+      .select("address1, address2, city, state, zip")
+      .eq("id", job.site_id)
+      .maybeSingle();
+    if (s) {
+      siteState = s.state;
+      if (!hasStreetLine(typed)) {
+        const line = siteAddressLine(s);
+        if (hasStreetLine(line)) return { line, state: s.state };
+      }
+    }
+  }
+  if (hasStreetLine(typed)) return { line: typed, state: siteState };
+  if (!job.account_id) return null;
+  const { data: a } = await sb
+    .from("crm_accounts")
+    .select("address1, address2, city, state, zip")
+    .eq("id", job.account_id)
+    .maybeSingle();
+  if (!a) return null;
+  const line = siteAddressLine(a);
+  return hasStreetLine(line) ? { line, state: a.state } : null;
+}
 
 /**
  * Repair templates: favourites and the most used first, then a name search. `tag` (owner,
