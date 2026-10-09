@@ -94,7 +94,10 @@ describe("Reminders page layout", () => {
     expect(src).toContain('id="reminder-settings"');
     expect(src.match(/\{saveButton\}/g)?.length).toBe(2);
   });
-  it("the page is capped in width", () => {
-    expect(src).toContain('<div className="max-w-4xl space-y-6">');
+  it("the page uses the full width, with a wider label column on large screens", () => {
+    // Owner (Oct 9): "we're only using half the page here, make the panels wider".
+    expect(src).not.toContain("max-w-4xl");
+    expect(src).toContain('<div className="space-y-6">\n      <Card>');
+    expect(src).toContain("lg:grid-cols-[15rem_1fr]");
   });
 });

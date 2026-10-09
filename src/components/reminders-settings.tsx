@@ -236,7 +236,7 @@ export function RemindersSettings() {
   );
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="space-y-6">
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
           <div className="space-y-1.5">
@@ -514,7 +514,7 @@ export function RemindersSettings() {
 /** One setting group: its name and help on the left, its sentences on the right. */
 function Section(props: { title: string; help?: string; children: ReactNode }) {
   return (
-    <div className="grid gap-x-6 gap-y-2 py-4 first:pt-0 sm:grid-cols-[11rem_1fr]">
+    <div className="grid gap-x-6 gap-y-2 py-4 first:pt-0 sm:grid-cols-[11rem_1fr] lg:grid-cols-[15rem_1fr]">
       <div className="space-y-1">
         <p className="text-sm font-semibold">{props.title}</p>
         {props.help && <p className="text-xs text-muted-foreground">{props.help}</p>}
