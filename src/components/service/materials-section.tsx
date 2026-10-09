@@ -465,8 +465,10 @@ export function MaterialsSection({
    * checks it (addMovement: "Only N … on the shelf").
    */
   // Owner, Oct 9: material the app says is not there can still be logged ("even if there is
-  // not stock of that item in the shop or vehicle") — after a plain question, since the count
-  // at that place then goes below zero for the office to fix. `short` is the open question.
+  // not stock of that item in the shop or vehicle") — after a question that first sends them
+  // to the right place if it came from elsewhere (owner: never "the office fixes it", they
+  // should do it right themselves). `short` is the open question; the weekly reconciliation
+  // report (inventory-reconcile.ts) lists every short entry so the counts get corrected.
   const [short, setShort] = useState<{ r: ListRow; units: number } | null>(null);
   const add = (r: ListRow, units: number, checkStock = true, shortOk = false) => {
     if (!(units > EPS)) return;
@@ -737,8 +739,9 @@ export function MaterialsSection({
                 {cellName(short.r)} on {locName(short.r.location_id)}.
               </p>
               <p className="text-muted-foreground">
-                Log {amountText(short.units, short.r.piece, short.r.unit)} anyway? The count there
-                goes below zero until the office fixes it.
+                If it came from somewhere else, cancel and pick that place. If it really came from{" "}
+                {locName(short.r.location_id)}, log it here and the count there gets corrected with
+                your entry.
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button
@@ -750,7 +753,7 @@ export function MaterialsSection({
                     add(s.r, s.units, false, true);
                   }}
                 >
-                  Log it anyway
+                  It came from {locName(short.r.location_id)} — log it
                 </Button>
                 <Button
                   type="button"

@@ -2,8 +2,10 @@
  * Owner, Oct 9: "they need to be able to add materials via typing and selection from our
  * catalog even if there is not stock of that item in the shop or vehicle". A ticket's material
  * the app says is not there is logged anyway after a plain question — the count at that place
- * goes below zero and the entry's note says so, for the office to fix — instead of the old
- * "Not enough …" refusal on the screen and "Only N on the shelf" from the server.
+ * goes below zero and the entry's note says so — instead of the old "Not enough …" refusal on
+ * the screen and "Only N on the shelf" from the server. The question first sends them to the
+ * right place when it came from elsewhere; it never says the office will fix it (owner: "they
+ * may see that and think they can just skip it").
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -37,6 +39,8 @@ describe("the screen: ask, then log it anyway", () => {
   });
   it("the question names the item and the place and sends short_ok on yes", () => {
     expect(src).toMatch(/role="alertdialog"\s*aria-label="Log it anyway\?"/);
+    expect(src).toContain("If it came from somewhere else, cancel and pick that place.");
+    expect(src).not.toContain("until the office fixes it");
     expect(src).toMatch(/add\(s\.r, s\.units, false, true\);/);
     expect(src).toMatch(/record\(r, units, "consumed", shortOk\)/);
     expect(src).toContain("...(shortOk ? { short_ok: true } : {}),");
