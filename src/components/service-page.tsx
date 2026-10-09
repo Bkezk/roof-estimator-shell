@@ -402,13 +402,11 @@ function ServiceList({
   // ?overdue=1 from the Customers page counts strip; cleared from its chip.
   const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
   const today = localYmd(new Date());
-  // "Mine" defaults on for a technician admin; null = not touched yet (follow the profile). A
-  // plain technician has no Mine filter: the list is already only theirs. A counts-strip link
-  // starts with Mine off, so the list shows what the tile counted.
-  const [mineOverride, setMineOverride] = useState<boolean | null>(
-    presetStage || presetOverdue ? false : null,
-  );
-  const mine = !isTech && (mineOverride ?? !!profile?.technician);
+  // "Mine" starts off for everyone (owner, Oct 9: "make sure when the owner/manager clicks
+  // service it isnt filtered to just mine"; it used to start on for anyone ticked Technician).
+  // A plain technician has no Mine filter: the list is already only theirs.
+  const [mineOn, setMineOn] = useState(false);
+  const mine = !isTech && mineOn;
   const [showDeleted, setShowDeleted] = useState(false);
   const [toDelete, setToDelete] = useState<ServiceJobWithTech | null>(null);
   const [collapsed, setCollapsed] = useState<ServiceStage[]>(readCollapsed);
@@ -482,7 +480,7 @@ function ServiceList({
     setOverdueOnly(false);
     setTypeFilter("all");
     setTechFilter(TECH_ALL);
-    setMineOverride(false);
+    setMineOn(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
 
@@ -618,7 +616,7 @@ function ServiceList({
                 {!isTech && (
                   <>
                     <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-                    <Chip active={mine} onClick={() => setMineOverride(!mine)}>
+                    <Chip active={mine} onClick={() => setMineOn(!mine)}>
                       Mine
                     </Chip>
                   </>

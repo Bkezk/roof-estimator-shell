@@ -21,9 +21,9 @@ describe("the Service tabs", () => {
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
-  it("show the board to managers / admins only, invoices by seesInvoices, tickets to all", () => {
+  it("show the board to everyone (owner, Oct 9), invoices by seesInvoices, tickets to all", () => {
     expect(tabs).toMatch(
-      /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: managesTickets \}/,
+      /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: everyone \}/,
     );
     expect(tabs).toMatch(
       /\{ title: "Invoices", to: "\/service\/invoices", icon: Receipt, show: seesInvoices \}/,

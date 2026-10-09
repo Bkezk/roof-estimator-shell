@@ -44,10 +44,10 @@ describe("the name is My tickets everywhere it is shown", () => {
   it("tab title", () => {
     expect(read("src/routes/service.today.tsx")).toContain('title: "My tickets — JBK Portal"');
   });
-  it("links back from the close-out, the ticket page, the board and Invoices", () => {
+  it("links back from the close-out, the ticket page and Invoices", () => {
     expect(read("src/components/service/closeout.tsx")).toMatch(/ArrowLeft[^\n]*\/> My tickets/);
     expect(read("src/components/service-page.tsx")).toMatch(/CalendarDays[^\n]*\/> My tickets/);
-    expect(read("src/components/service/board-page.tsx")).toContain("Go to My tickets");
+    // (The board's "Go to …" button went with its manager-only gate, Oct 9.)
     const inv = read("src/components/service/invoices-page.tsx");
     expect(inv).toContain("Go to My tickets");
     expect(inv).not.toContain("Go to Today");

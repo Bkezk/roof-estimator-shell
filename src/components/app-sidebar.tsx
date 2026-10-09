@@ -85,6 +85,8 @@ type ServiceItem = {
   techOnly?: boolean;
   /** Shown only when this says so (beyond `page`). */
   visible?: (p: AccessLike | null | undefined) => boolean;
+  /** Lit on this path prefix instead of `url` (Service: every /service page). */
+  lit?: string;
   /** Paths under `url` that belong to another item (My tickets has its own entry). */
   except?: string[];
 };
@@ -97,7 +99,16 @@ const customerItems: ServiceItem[] = [
     techOnly: true,
   },
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
-  { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
+  // Owner, Oct 9: the menu opens on the Tech Board; the Tickets tab is a click away. The item
+  // stays lit on every /service page but My tickets.
+  {
+    title: "Service",
+    url: "/service/board",
+    icon: Wrench,
+    page: "service",
+    lit: "/service",
+    except: ["/service/today"],
+  },
   // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from Work Overview.
   {
     title: "Opportunities",
@@ -352,7 +363,8 @@ export function AppSidebar() {
             isActive={
               item.exact
                 ? pathname === item.url
-                : isActive(item.url) && !(item.except ?? []).some((p) => pathname.startsWith(p))
+                : isActive(item.lit ?? item.url) &&
+                  !(item.except ?? []).some((p) => pathname.startsWith(p))
             }
             tooltip={item.title}
           >

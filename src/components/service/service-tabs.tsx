@@ -2,7 +2,7 @@
  * The Service page's views as tabs (owner, Sep 28: one menu entry, not four): Tech Board,
  * Tickets and Invoices are views of the same work, so they sit on one row under the page title.
  * The Tech Board tab (owner, Oct 5: it used to sit folded above the ticket list; first, same day) shows to
- * managers and admins, who dispatch (`managesTickets`); the Invoices tab to admins, managers and
+ * everyone (owner, Oct 9; dispatch on it stays `managesTickets`); the Invoices tab to admins, managers and
  * sales / project managers (`seesInvoices`; owner, Oct 1); anyone else sees Tickets only.
  */
 import { Link, useRouterState } from "@tanstack/react-router";
@@ -23,8 +23,9 @@ const TABS: readonly {
   icon: typeof Wrench;
   show: (p: AccessLike | null | undefined) => boolean;
 }[] = [
-  // Owner, Oct 5: the Tech Board first (dispatch is the first thing a manager does here).
-  { title: "Tech Board", to: "/service/board", icon: CalendarDays, show: managesTickets },
+  // Owner, Oct 5: the Tech Board first (dispatch is the first thing a manager does here);
+  // Oct 9: everyone opens on it (a technician-only user sees their own tickets there).
+  { title: "Tech Board", to: "/service/board", icon: CalendarDays, show: everyone },
   { title: "Tickets", to: "/service", icon: Wrench, show: everyone },
   { title: "Invoices", to: "/service/invoices", icon: Receipt, show: seesInvoices },
 ];

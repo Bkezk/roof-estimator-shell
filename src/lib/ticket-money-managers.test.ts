@@ -220,15 +220,16 @@ describe("dispatch is a manager's", () => {
     expect(fn).toContain(
       'if (!managesTickets(p)) throw new Error("Only a manager dispatches tickets");',
     );
+    // Owner, Oct 9: everyone opens on the board (service-board-everyone.test.ts); dispatch on
+    // it — drag, drop, the "+" and New ticket — is still under managesTickets.
     const board = read("src/components/service/board-page.tsx");
-    expect(board).toMatch(
-      /export function BoardPage[\s\S]*?if \(!managesTickets\(profile\)\)\s*return \(/,
-    );
-    // Owner, Oct 5: the board is the Tech Board tab (service-board-tab.test.ts), shown to
-    // managers only; the list page no longer embeds it.
+    expect(board).toContain("const dispatch = managesTickets(profile);");
+    expect(board).not.toMatch(/if \(!managesTickets\(profile\)\)\s*return \(/);
+    // Owner, Oct 5: the board is the Tech Board tab (service-board-tab.test.ts); the list page
+    // no longer embeds it.
     const tabs = read("src/components/service/service-tabs.tsx");
     expect(tabs).toMatch(
-      /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: managesTickets \}/,
+      /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: everyone \}/,
     );
     expect(read("src/components/service-page.tsx")).not.toContain("EmbeddedBoard");
   });

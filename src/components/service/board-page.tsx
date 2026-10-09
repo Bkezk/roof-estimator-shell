@@ -8,9 +8,11 @@
  * its chips names its stage — owner, Oct 5: "color coded by status"). The rail lists Open /
  * Scheduled tickets missing a technician or a day, oldest first.
  *
- * Managers and admins only (owner, Oct 1: the manager dispatches; `managesTickets`):
- * assignServiceJob refuses anyone else, who is sent to /service/today instead. Drag and drop is native HTML5 (desktop); on a phone the grid
- * scrolls sideways and a tap opens the ticket.
+ * Everyone with Service opens on it (owner, Oct 9: "make sure everyone who opens the service
+ * page it opens on the tech board"); a technician-only user sees their own tickets on it (RLS).
+ * Dispatch stays a manager's (owner, Oct 1; `managesTickets`): the drag and drop, the "+" on a
+ * cell and New ticket show only to them, and assignServiceJob refuses anyone else. Drag and drop
+ * is native HTML5 (desktop); on a phone the grid scrolls sideways and a tap opens the ticket.
  */
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -83,7 +85,6 @@ const stageAfter = (j: ServiceJobWithTech, tech: string | null, date: string | n
   movable(j) ? (tech && date ? "scheduled" : "open") : j.stage;
 
 /** The technician's phone page (its route is built separately). */
-const TODAY_URL: string = "/service/today";
 const DRAG_TYPE = "application/x-service-ticket";
 
 interface Row {
@@ -98,22 +99,13 @@ interface Assign {
 }
 
 export function BoardPage({ week }: { week?: string | undefined }) {
-  const { profile } = useAuth();
-  if (!managesTickets(profile))
-    return (
-      <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
-        <p className="font-medium">The board is for managers.</p>
-        <p className="text-sm text-muted-foreground">Your tickets for the day are on Today.</p>
-        <Button asChild>
-          <Link to={TODAY_URL}>Go to My tickets</Link>
-        </Button>
-      </div>
-    );
   return <Board week={week} />;
 }
 
 function Board({ week }: { week?: string | undefined }) {
-  const { session } = useAuth();
+  const { session, profile } = useAuth();
+  // Dispatch is a manager's (owner, Oct 1); everyone else reads the board.
+  const dispatch = managesTickets(profile);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const listFn = useServerFn(listServiceJobs);
@@ -253,6 +245,10 @@ function Board({ week }: { week?: string | undefined }) {
   // ---- Drag and drop ---------------------------------------------------------------------------
   const dragged = dragId ? jobs.find((j) => j.id === dragId) : undefined;
   const startDrag = (e: DragEvent, j: ServiceJobWithTech) => {
+    if (!dispatch) {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData(DRAG_TYPE, j.id);
     e.dataTransfer.setData("text/plain", `#${j.number}`);
     e.dataTransfer.effectAllowed = "move";
@@ -275,6 +271,7 @@ function Board({ week }: { week?: string | undefined }) {
   };
   const dropOn = (e: DragEvent, techId: string | null, ymd: string | null) => {
     e.preventDefault();
+    if (!dispatch) return;
     const id = e.dataTransfer.getData(DRAG_TYPE) || dragId;
     endDrag();
     const job = jobs.find((j) => j.id === id);
@@ -301,20 +298,23 @@ function Board({ week }: { week?: string | undefined }) {
             <CalendarDays className="h-6 w-6" /> Tech Board
           </h1>
           <p className="text-sm text-muted-foreground">
-            Drag a ticket onto a technician&apos;s day to schedule it; drag it back to the left to
-            unassign. Click a ticket to open it.
+            {dispatch
+              ? "Drag a ticket onto a technician's day to schedule it; drag it back to the left to unassign. Click a ticket to open it."
+              : "Who is where this week. Click a ticket to open it."}
           </p>
           <div className="mt-2">
             <ServiceTabs />
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button asChild>
-            <Link to="/service" search={{ new: 1 }}>
-              <Plus className="mr-1 h-4 w-4" /> New ticket
-            </Link>
-          </Button>
-        </div>
+        {dispatch && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild>
+              <Link to="/service" search={{ new: 1 }}>
+                <Plus className="mr-1 h-4 w-4" /> New ticket
+              </Link>
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -397,6 +397,7 @@ function Board({ week }: { week?: string | undefined }) {
                     key={j.id}
                     job={j}
                     detail
+                    drag={dispatch}
                     dragging={dragId === j.id}
                     onDragStart={startDrag}
                     onDragEnd={endDrag}
@@ -444,6 +445,7 @@ function Board({ week }: { week?: string | undefined }) {
                   today={today}
                   over={over}
                   dragId={dragId}
+                  dispatch={dispatch}
                   cellJobs={cellJobs}
                   allowDrop={allowDrop}
                   leave={leave}
@@ -480,6 +482,7 @@ function Board({ week }: { week?: string | undefined }) {
                         today={today}
                         over={over}
                         dragId={dragId}
+                        dispatch={dispatch}
                         cellJobs={cellJobs}
                         allowDrop={allowDrop}
                         leave={leave}
@@ -504,6 +507,8 @@ function BoardRow(props: {
   today: string;
   over: string | null;
   dragId: string | null;
+  /** A manager: chips drag, cells take drops and carry the "+" (owner, Oct 1 / Oct 9). */
+  dispatch: boolean;
   cellJobs: (techId: string, ymd: string) => ServiceJobWithTech[];
   allowDrop: (e: DragEvent, key: string) => void;
   leave: (e: DragEvent, key: string) => void;
@@ -544,21 +549,24 @@ function BoardRow(props: {
               <TicketChip
                 key={j.id}
                 job={j}
+                drag={props.dispatch}
                 dragging={props.dragId === j.id}
                 onDragStart={props.startDrag}
                 onDragEnd={props.endDrag}
               />
             ))}
-            <Link
-              to="/service"
-              search={{ new: 1, tech: r.id, date: d }}
-              className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-background text-muted-foreground opacity-100 shadow-sm hover:text-foreground focus:opacity-100 md:opacity-0 md:group-hover:opacity-100"
-              title={`New ticket for ${r.name} on ${shortDay(d)}`}
-              aria-label={`New ticket for ${r.name} on ${shortDay(d)}`}
-              draggable={false}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Link>
+            {props.dispatch && (
+              <Link
+                to="/service"
+                search={{ new: 1, tech: r.id, date: d }}
+                className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-background text-muted-foreground opacity-100 shadow-sm hover:text-foreground focus:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                title={`New ticket for ${r.name} on ${shortDay(d)}`}
+                aria-label={`New ticket for ${r.name} on ${shortDay(d)}`}
+                draggable={false}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Link>
+            )}
           </div>
         );
       })}
@@ -591,13 +599,15 @@ function TicketChip(props: {
   job: ServiceJobWithTech;
   /** The rail's chips also say what is already set (a technician without a day, or the reverse). */
   detail?: boolean;
+  /** May this viewer drag it (a manager)? */
+  drag: boolean;
   dragging: boolean;
   onDragStart: (e: DragEvent, j: ServiceJobWithTech) => void;
   onDragEnd: () => void;
 }) {
   const j = props.job;
   const stage = asStage(j.stage);
-  const canDrag = stage === "open" || stage === "scheduled";
+  const canDrag = props.drag && (stage === "open" || stage === "scheduled");
   const toneKey = ticketToneKey({ stage, field_status: j.field_status });
   const mark = stageMark(stage);
   const partial = props.detail
