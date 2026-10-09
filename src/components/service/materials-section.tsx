@@ -7,8 +7,10 @@
  * product has no pieces) as a `consumed` movement against the ticket at that truck; − takes one
  * back (see planReduce: the tech's own recent entry is undone, an estimator's login records
  * `released`). Above the list, "Usual for <repair>" chips add what earlier tickets with the same
- * repair template used, in one tap. Material from the shop or another truck still goes through
- * Inventory (a secondary link).
+ * repair template used, in one tap. "Find any material" (owner, Oct 9) searches every cell anyone
+ * has stocked plus the service material list and takes one from my truck, the shop or another
+ * truck in a tap (material-search.ts); the "Material from elsewhere" panel lists a whole
+ * location's shelf the same way.
  *
  * Taps are optimistic (the count and the on-hand move at once) and run one after another so a
  * "−" always sees the entry the "+" before it made; a refusal (e.g. only 2 on the truck) rolls the
@@ -38,13 +40,25 @@ import { managesTickets } from "@/lib/access";
 import {
   addMovement,
   listLocations,
+  listStock,
   myServiceDefaults,
   myTruckStock,
   undoMovement,
+  type StockRow,
   type TruckStockRow,
 } from "@/lib/inventory.functions";
 import { listServiceJobMaterials, type JobMaterialRow } from "@/lib/service.functions";
-import { listJobRepairs, usualMaterialsForTemplate } from "@/lib/service-field.functions";
+import {
+  listJobRepairs,
+  listServiceMaterialOptions,
+  usualMaterialsForTemplate,
+} from "@/lib/service-field.functions";
+import {
+  SEARCH_MIN_CHARS,
+  searchMaterials,
+  type MaterialResult,
+  type MaterialSource,
+} from "@/lib/material-search";
 import { plural, type PieceDef } from "@/lib/stock-units";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -134,6 +148,8 @@ export function MaterialsSection({
   const locationsFn = useServerFn(listLocations);
   const repairsFn = useServerFn(listJobRepairs);
   const usualFn = useServerFn(usualMaterialsForTemplate);
+  const stockFn = useServerFn(listStock);
+  const optionsFn = useServerFn(listServiceMaterialOptions);
   const addFn = useServerFn(addMovement);
   const undoFn = useServerFn(undoMovement);
 
@@ -204,6 +220,24 @@ export function MaterialsSection({
     enabled: !!session && !!fromLoc && canLog,
   });
   const [otherSearch, setOtherSearch] = useState("");
+  // Owner, Oct 9: "Find any material" — every stocked cell at every location (the same read as
+  // the Inventory page, so one cache) plus the service material list, read once the box has two
+  // characters; the results say where each can be taken from (material-search.ts).
+  const [find, setFind] = useState("");
+  const findQ = find.trim();
+  const finding = findQ.length >= SEARCH_MIN_CHARS;
+  const stock = useQuery({
+    queryKey: ["inventory-stock"],
+    queryFn: () => stockFn(),
+    enabled: !!session && canLog && finding,
+    staleTime: 60_000,
+  });
+  const options = useQuery({
+    queryKey: ["service-material-options"],
+    queryFn: () => optionsFn(),
+    enabled: !!session && canLog && finding,
+    staleTime: 5 * 60_000,
+  });
   const [picked, setPicked] = useState<string | null>(() => readVehicle());
   const vehicleId = picked && vehicles.includes(picked) ? picked : (vehicles[0] ?? null);
   const pickVehicle = (id: string) => {
@@ -382,6 +416,14 @@ export function MaterialsSection({
       old?.map((t) => (cellKey(t) === r.key ? { ...t, on_hand: round6(t.on_hand + packs) } : t));
     qc.setQueryData<TruckStockRow[]>(truckKey(userId), shift);
     qc.setQueryData<TruckStockRow[]>(["inventory-location-stock", r.location_id], shift);
+    // The search results read the all-locations stock: move it too, until the re-read.
+    qc.setQueryData<StockRow[]>(["inventory-stock"], (old) =>
+      old?.map((t) =>
+        t.location_id === r.location_id && catalogKey(t) === catalogKey(r)
+          ? { ...t, on_hand: round6(t.on_hand + packs) }
+          : t,
+      ),
+    );
   };
 
   const record = async (r: ListRow, units: number, reason: "consumed" | "released") => {
@@ -471,6 +513,55 @@ export function MaterialsSection({
     if (delta > EPS) add(r, delta, checkStock);
     else if (delta < -EPS) reduce(r, -delta);
   };
+
+  // The rows this screen already knows the piece / service name of lend them to the results.
+  const known = useMemo(
+    () => [...(truck.data ?? []), ...(other.data ?? [])],
+    [truck.data, other.data],
+  );
+  const found: MaterialResult[] = useMemo(
+    () =>
+      searchMaterials(
+        findQ,
+        stock.data ?? null,
+        options.data ?? [],
+        locations.data ?? [],
+        vehicleId,
+        known,
+      ),
+    [findQ, stock.data, options.data, locations.data, vehicleId, known],
+  );
+  /**
+   * A source chip: one unit (one pack when the cell has no pieces) of the result against this
+   * ticket at THAT location, through the same path as a truck row's +. The stock check runs here
+   * when the all-locations read answered (so a refusal is instant); else the server checks.
+   */
+  const addFromSearch = (res: MaterialResult, src: MaterialSource) => {
+    const r: ListRow = {
+      key: cellKey({ ...res, location_id: src.location_id }),
+      location_id: src.location_id,
+      screen_id: res.screen_id,
+      row_label: res.row_label,
+      price_col: res.price_col,
+      label: res.label,
+      category: res.category,
+      unit: res.unit,
+      on_hand: src.on_hand ?? 0,
+      piece: res.piece,
+      item_no: res.item_no,
+      location_name: src.location_name,
+    };
+    add(r, 1, src.on_hand !== null);
+  };
+  /** What a source chip says is left there, net of taps not yet answered. */
+  const sourceLeft = (res: MaterialResult, src: MaterialSource): string => {
+    if (src.on_hand === null) return "?";
+    const key = cellKey({ ...res, location_id: src.location_id });
+    const units = round6(packsToUnits(src.on_hand, res.piece) - (pending[key] ?? 0));
+    return units <= EPS ? "none" : `${amountText(units, res.piece, res.unit)} left`;
+  };
+  const sourceName = (src: MaterialSource) =>
+    src.kind === "mine" ? "My truck" : src.kind === "shop" ? "Shop" : src.location_name;
 
   // Everything this ticket used anywhere (for the reminder), and what came from elsewhere.
   const anyUsed = usedTotalPositive(ledger) || Object.values(pending).some((v) => v > EPS);
@@ -626,6 +717,92 @@ export function MaterialsSection({
                 </div>
               );
             })}
+
+          <div className="space-y-2" aria-label="Find any material">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                className="h-11 pl-9 text-base"
+                placeholder="Find any material (name, colour, item #)…"
+                aria-label="Find any material"
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+              />
+            </div>
+            {finding &&
+              (stock.isLoading || options.isLoading ? (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+                </p>
+              ) : (
+                <>
+                  {(stock.error || options.error) && (
+                    <p className="text-sm text-destructive">
+                      Search could not read{" "}
+                      {stock.error ? `the stock (${errText(stock.error)})` : ""}
+                      {stock.error && options.error ? " and " : ""}
+                      {options.error ? `the material list (${errText(options.error)})` : ""}
+                      {stock.error ? "; what is left where is unknown — the server checks" : ""}
+                    </p>
+                  )}
+                  {found.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No material named like “{findQ}”.
+                    </p>
+                  ) : (
+                    <ul className="divide-y rounded-lg border">
+                      {found.map((res) => {
+                        const small = [
+                          res.category,
+                          !res.label && res.price_col !== "price" ? res.price_col : null,
+                          res.item_no ? `#${res.item_no}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ");
+                        return (
+                          <li key={res.key} className="space-y-1.5 px-3 py-2.5">
+                            <div className="min-w-0">
+                              <p className="font-medium leading-snug">{cellName(res)}</p>
+                              {small && (
+                                <p className="truncate text-xs text-muted-foreground">{small}</p>
+                              )}
+                            </div>
+                            <div
+                              className="flex flex-wrap gap-1.5"
+                              role="group"
+                              aria-label="Take from"
+                            >
+                              {res.sources.map((src) => {
+                                const left = sourceLeft(res, src);
+                                const none = left === "none";
+                                return (
+                                  <Button
+                                    key={src.location_id}
+                                    type="button"
+                                    variant="outline"
+                                    className={`h-10 max-w-full justify-start rounded-full px-3 text-sm ${
+                                      none ? "border-dashed text-muted-foreground" : ""
+                                    }`}
+                                    aria-label={`One ${unitLabel(1, res.piece, res.unit)} of ${cellName(res)} from ${src.location_name}`}
+                                    onClick={() => addFromSearch(res, src)}
+                                  >
+                                    <Plus className="mr-1 h-4 w-4 shrink-0" />
+                                    <span className="truncate">
+                                      {sourceName(src)} · {left}
+                                    </span>
+                                  </Button>
+                                );
+                              })}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </>
+              ))}
+          </div>
 
           <div className="space-y-2">
             <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -932,9 +1109,13 @@ function TruckRow({
   onReduce: (units: number) => void;
   onSet: (total: number) => void;
 }) {
-  const [typing, setTyping] = useState(false);
-  const [text, setText] = useState("");
+  // Owner, Oct 9: "the forms dont need to be arrow single increments, they need to be able to
+  // type in them" — the count between − and + is a typeable box (blank when nothing is used, never
+  // a 0). While it has focus it keeps its own text; blur or Enter commits the typed total through
+  // onSet; a blank or unchanged box changes nothing.
+  const [text, setText] = useState<string | null>(null);
   const unitWord = unitLabel(used, row.piece, row.unit);
+  const shown = used > EPS ? fmtNum(used) : "";
   const small = [
     row.category,
     !row.label && row.price_col !== "price" ? row.price_col : null,
@@ -945,20 +1126,21 @@ function TruckRow({
   const onHandPacks = row.piece ? onHand / row.piece.perPack : onHand;
   const empty = onHand <= EPS;
 
-  const submit = () => {
+  const commit = () => {
+    if (text === null) return;
     const t = text.trim();
+    setText(null);
+    if (!t || t === shown) return;
     const n = Number(t);
-    if (!t || !Number.isFinite(n) || n < 0) {
+    if (!Number.isFinite(n) || n < 0) {
       loudError("Type how many", new Error(`a number of ${unitLabel(2, row.piece, row.unit)}`));
       return;
     }
     onSet(Math.round(n * 1000) / 1000);
-    setTyping(false);
-    setText("");
   };
 
   return (
-    <li className={`space-y-2 px-3 py-3 ${used > EPS ? "bg-primary/5" : ""}`}>
+    <li className={`px-3 py-3 ${used > EPS ? "bg-primary/5" : ""}`}>
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
           <p className="font-medium leading-snug">{cellName(row)}</p>
@@ -975,7 +1157,7 @@ function TruckRow({
             </p>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-start gap-1">
           <Button
             type="button"
             variant="outline"
@@ -987,24 +1169,32 @@ function TruckRow({
           >
             <Minus className="h-5 w-5" />
           </Button>
-          <button
-            type="button"
-            className="flex h-12 w-14 flex-col items-center justify-center rounded-md leading-none hover:bg-muted"
-            aria-label={`Used on this ticket: ${fmtNum(used)} ${unitWord}. Tap to type a number`}
-            onClick={() => {
-              setTyping((v) => !v);
-              setText("");
-            }}
-          >
-            <span
-              className={`text-xl font-semibold tabular-nums ${used > EPS ? "" : "text-muted-foreground"}`}
-            >
-              {fmtNum(used)}
-            </span>
+          <label className="flex w-16 flex-col items-center">
+            <Input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="any"
+              className="h-12 w-16 px-1 text-center text-lg font-semibold tabular-nums"
+              aria-label={`Used on this ticket, ${unitLabel(2, row.piece, row.unit)} of ${cellName(row)}`}
+              value={text ?? shown}
+              onFocus={(e) => {
+                setText(shown);
+                e.currentTarget.select();
+              }}
+              onChange={(e) => setText(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+              }}
+            />
             <span className="mt-0.5 max-w-full truncate text-[10px] text-muted-foreground">
               {unitWord}
             </span>
-          </button>
+          </label>
           <Button
             type="button"
             variant={used > EPS ? "default" : "outline"}
@@ -1017,34 +1207,6 @@ function TruckRow({
           </Button>
         </div>
       </div>
-      {typing && (
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            submit();
-          }}
-        >
-          <span className="text-sm text-muted-foreground">Used in all</span>
-          <Input
-            autoFocus
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step="any"
-            className="h-11 w-24 text-center text-base"
-            placeholder={fmtNum(used)}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-          <span className="min-w-0 truncate text-sm text-muted-foreground">
-            {unitLabel(2, row.piece, row.unit)}
-          </span>
-          <Button type="submit" className="ml-auto h-11" disabled={!text.trim()}>
-            Set
-          </Button>
-        </form>
-      )}
     </li>
   );
 }

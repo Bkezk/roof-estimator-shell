@@ -1,8 +1,9 @@
 /**
  * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3):
  * who is on the job (crew-box.tsx; owner, Sep 30: answered first — the rest opens after — and
- * editable later), repairs from the template chips with before / after photos, materials off
- * the truck (one tap per piece, materials-section.tsx), purchase orders for material bought for
+ * editable later), repairs from the template chips with before / after photos (one line each,
+ * one open at a time — owner, Oct 9), materials off the truck (one tap per piece, or any
+ * material found by search, from the truck or the shop; materials-section.tsx), purchase orders for material bought for
  * the job (purchase-orders-section.tsx; no Approved toggle here), closing notes, time (fix a forgotten
  * button press), the customer's signature, then Complete.
  *
@@ -27,6 +28,8 @@ import {
   ArrowLeft,
   Camera,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   ClipboardList,
   Loader2,
@@ -99,6 +102,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { missingForComplete } from "@/lib/closeout-check";
+import { repairSummary } from "@/lib/closeout-repairs";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import {
   clock,
@@ -663,6 +667,10 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   });
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherName, setOtherName] = useState("");
+  // Owner, Oct 9: with several repairs the full cards made a very long page. Each repair is one
+  // folded row (RepairRow); one is open at a time — the one just added, or the only one — and
+  // nothing is remembered across reloads.
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const add = useMutation({
     mutationFn: (t: RepairTemplateRow | { name: string }) =>
@@ -687,6 +695,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
       toast.success(`Added ${row.name}`);
       setOtherName("");
       setOtherOpen(false);
+      setExpanded(row.id);
     },
     onError: (e) => loudError("Could not add the repair", e),
   });
@@ -697,6 +706,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const favRows = (favs.data ?? []).filter((t) => !recentIds.has(t.id));
   const rows = repairs.data ?? [];
   const allPhotos = photos.data ?? [];
+  const openId = rows.length === 1 ? (rows[0]?.id ?? null) : expanded;
 
   return (
     <Section
@@ -719,16 +729,26 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
         </p>
       )}
       {rows.length > 0 && (
-        <div className="space-y-3">
-          {rows.map((r) => (
-            <RepairCard
-              key={r.id}
-              jobId={jobId}
-              ticketNumber={ticketNumber}
-              repair={r}
-              photos={allPhotos.filter((p) => p.repair_id === r.id)}
-            />
-          ))}
+        <div className="space-y-2">
+          {rows.map((r) =>
+            openId === r.id ? (
+              <RepairCard
+                key={r.id}
+                jobId={jobId}
+                ticketNumber={ticketNumber}
+                repair={r}
+                photos={allPhotos.filter((p) => p.repair_id === r.id)}
+                onCollapse={rows.length > 1 ? () => setExpanded(null) : null}
+              />
+            ) : (
+              <RepairRow
+                key={r.id}
+                repair={r}
+                photos={allPhotos.filter((p) => p.repair_id === r.id)}
+                onOpen={() => setExpanded(r.id)}
+              />
+            ),
+          )}
         </div>
       )}
 
@@ -857,16 +877,59 @@ const repairVals = (r: JobRepairRow): RepairVals => ({
   resolution_text: r.resolution_text ?? "",
 });
 
+/**
+ * A repair folded to one line (owner, Oct 9): name, "× qty unit", the Before / After counts and,
+ * in amber, what it still needs (closeout-repairs.ts). Tap anywhere to open the card.
+ */
+function RepairRow({
+  repair,
+  photos,
+  onOpen,
+}: {
+  repair: JobRepairRow;
+  photos: JobPhotoRow[];
+  onOpen: () => void;
+}) {
+  const s = repairSummary(repair, photos);
+  return (
+    <button
+      type="button"
+      aria-expanded={false}
+      aria-label={`Open ${repair.name || "repair"}`}
+      className="flex min-h-14 w-full items-center gap-3 rounded-lg border bg-muted/20 px-3 py-2 text-left hover:bg-muted/40"
+      onClick={onOpen}
+    >
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-semibold leading-snug">
+          {repair.name || "Repair"}{" "}
+          <span className="font-normal text-muted-foreground">{s.qtyText}</span>
+        </p>
+        <p className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+          <span>Before ({s.before})</span>
+          <span>After ({s.after})</span>
+          {s.needs.length > 0 && (
+            <span className="text-amber-700 dark:text-amber-400">needs: {s.needs.join(", ")}</span>
+          )}
+        </p>
+      </div>
+      <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function RepairCard({
   jobId,
   ticketNumber,
   repair,
   photos,
+  onCollapse,
 }: {
   jobId: string;
   ticketNumber: number;
   repair: JobRepairRow;
   photos: JobPhotoRow[];
+  /** Fold the card back to its row; null when it is the only repair (always open). */
+  onCollapse: (() => void) | null;
 }) {
   const qc = useQueryClient();
   const saveFn = useServerFn(saveJobRepair);
@@ -975,7 +1038,7 @@ function RepairCard({
 
   return (
     <article className="space-y-3 rounded-lg border bg-muted/20 p-3">
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-1">
         <div className="min-w-0 flex-1">
           {free ? (
             <Input
@@ -991,7 +1054,58 @@ function RepairCard({
           )}
         </div>
         {save.isPending && <Loader2 className="mt-3 h-4 w-4 animate-spin text-muted-foreground" />}
+        {/* Owner, Oct 9: Remove sits in the header (a small ghost button), not on a row of its own. */}
+        {!confirmRemove && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-9 px-2 text-xs text-destructive hover:text-destructive"
+            aria-label={`Remove ${repair.name || "repair"}`}
+            onClick={() => setConfirmRemove(true)}
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> Remove
+          </Button>
+        )}
+        {onCollapse && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9"
+            aria-label={`Fold ${repair.name || "repair"}`}
+            aria-expanded
+            onClick={onCollapse}
+          >
+            <ChevronUp className="h-5 w-5" />
+          </Button>
+        )}
       </div>
+      {confirmRemove && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="text-sm">Remove this repair and its photos?</span>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="h-10"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            Remove
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-10"
+            onClick={() => setConfirmRemove(false)}
+          >
+            Keep
+          </Button>
+        </div>
+      )}
 
       <div className="flex items-center gap-2">
         <Label className="text-sm text-muted-foreground">Quantity</Label>
@@ -1067,7 +1181,7 @@ function RepairCard({
             key={role}
             type="button"
             variant="outline"
-            className="h-12 text-base"
+            className="h-11 text-base"
             disabled={uploadingRole === role}
             onClick={() => (role === "before" ? beforeRef : afterRef).current?.click()}
           >
@@ -1083,44 +1197,6 @@ function RepairCard({
             })()}
           </Button>
         ))}
-      </div>
-
-      <div className="flex justify-end">
-        {confirmRemove ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm">Remove this repair and its photos?</span>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              className="h-10"
-              disabled={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              {remove.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              Remove
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-10"
-              onClick={() => setConfirmRemove(false)}
-            >
-              Keep
-            </Button>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-10 text-destructive hover:text-destructive"
-            onClick={() => setConfirmRemove(true)}
-          >
-            <Trash2 className="mr-1 h-4 w-4" /> Remove repair
-          </Button>
-        )}
       </div>
     </article>
   );

@@ -26,7 +26,15 @@ import { warrantyBadges, type Warranty } from "@/lib/warranty";
 import { SITE_HISTORY_LIMIT, type SiteHistoryRow } from "@/lib/site-history";
 import { mentionedIds } from "@/lib/mentions";
 import { mentionRoster } from "@/lib/auth.functions";
-import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import {
+  SERVICE_CATEGORY,
+  materialsByCell,
+  serviceLabel,
+  servicePiece,
+  stockCellOf,
+  unitWord,
+} from "@/lib/service-materials";
+import { stockUnitFor, type PieceDef } from "@/lib/stock-units";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 export const SERVICE_BUCKET = "service";
@@ -1058,6 +1066,57 @@ export const usualMaterialsForTemplate = createServerFn({ method: "GET" })
       })
       .sort((x, y) => y.tickets - x.tickets)
       .slice(0, 12);
+  });
+
+/**
+ * The service material list for the close-out's "Find any material" search (owner, Oct 9: a tech
+ * searches any material and takes it from the shop or a truck), one row per stock cell, so a
+ * material nobody has stocked yet is still found. From the price-free view (service-materials.server.ts
+ * loadServiceMaterialLinks — a technician may not read service_materials' costs): NO prices here.
+ * The unit is the cell's stock unit (a twin's screen unit, else the material's own word); a stock
+ * row's unit wins on the screen when there is one.
+ */
+export interface ServiceMaterialOption {
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+  /** The service material's name (CenterPoint's). */
+  label: string;
+  category: string;
+  unit: string;
+  piece: PieceDef | null;
+  /** Catalog item number when there is exactly one for the cell. */
+  item_no: string | null;
+}
+export const listServiceMaterialOptions = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<ServiceMaterialOption[]> => {
+    await me(context);
+    const sb = context.supabase;
+    const [materials, { data: nums }] = await Promise.all([
+      loadServiceMaterialLinks(sb),
+      sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
+    ]);
+    const numsByCell = new Map<string, string[]>();
+    for (const n of nums ?? []) {
+      const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
+      const list = numsByCell.get(k) ?? [];
+      if (!list.includes(n.item_no)) list.push(n.item_no);
+      numsByCell.set(k, list);
+    }
+    // One row per cell, named by the material that names it everywhere else (materialsByCell).
+    return [...materialsByCell(materials.filter((m) => m.active)).values()].map((m) => {
+      const cell = stockCellOf(m);
+      const nos = numsByCell.get(`${cell.screen_id}\u0000${cell.row_label}\u0000${cell.price_col}`);
+      return {
+        ...cell,
+        label: m.name,
+        category: m.category?.trim() || SERVICE_CATEGORY,
+        unit: m.stock_screen_id ? stockUnitFor(cell.screen_id) : unitWord(m.unit),
+        piece: servicePiece(m),
+        item_no: nos?.length === 1 ? (nos[0] ?? null) : null,
+      };
+    });
   });
 
 /**
