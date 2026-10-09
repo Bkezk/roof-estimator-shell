@@ -31,6 +31,8 @@ export interface SearchStock extends CatalogCell {
   /** Packs. */
   on_hand: number;
   item_nos?: string[] | undefined;
+  /** The catalog's pieces per pack when the stock read carries it (listStock does, Oct 9). */
+  piece?: PieceDef | null | undefined;
 }
 /** A row this screen already knows the piece / name of (myTruckStock, the elsewhere panel). */
 export interface SearchKnown extends CatalogCell {
@@ -124,6 +126,7 @@ export function searchMaterials(
     e.perLoc.set(s.location_id, (e.perLoc.get(s.location_id) ?? 0) + s.on_hand);
     e.category ||= s.category;
     e.unit ||= s.unit;
+    e.piece ??= s.piece ?? null;
     if (!e.item_no && s.item_nos?.length === 1) e.item_no = s.item_nos[0] ?? null;
   }
   for (const c of catalog) {

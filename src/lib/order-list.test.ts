@@ -192,6 +192,7 @@ describe("order list — matching engine lines to stock cells", () => {
           on_hand: 1.25,
           last_at: null,
           item_nos: [],
+          piece: null,
         },
       ],
       pulls: [
@@ -290,6 +291,7 @@ describe("order list — matching engine lines to stock cells", () => {
           on_hand: 4,
           last_at: null,
           item_nos: [],
+          piece: null,
         },
       ],
     });
@@ -315,6 +317,7 @@ describe("order list — matching engine lines to stock cells", () => {
         on_hand: 1500,
         last_at: null,
         item_nos: [],
+        piece: null,
       },
       {
         location_id: "shop",
@@ -326,6 +329,7 @@ describe("order list — matching engine lines to stock cells", () => {
         on_hand: 0.6,
         last_at: null,
         item_nos: [],
+        piece: null,
       },
       {
         location_id: "shop",
@@ -337,6 +341,7 @@ describe("order list — matching engine lines to stock cells", () => {
         on_hand: 0.75,
         last_at: null,
         item_nos: [],
+        piece: null,
       },
     ];
     const lines = buildOrderList({

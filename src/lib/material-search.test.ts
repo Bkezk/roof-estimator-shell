@@ -402,3 +402,39 @@ describe("the Materials section's Find box", () => {
     expect(src).toContain('qc.setQueryData<StockRow[]>(["inventory-stock"], (old) =>');
   });
 });
+
+describe("pieces per box reach the search (owner, Oct 9: a tap logged a whole box of screws)", () => {
+  it("a stock row's piece is taken when nothing else knows the cell", () => {
+    const screws = {
+      screen_id: "duro_last:fasteners_and_bits",
+      row_label: '1 1/2" [Collated Screws]',
+      price_col: "Price/Box",
+      category: "Fasteners & Bits",
+      unit: "box",
+      item_nos: ["1278-001"],
+      piece: { name: "fastener", perPack: 1000 },
+    };
+    const res = searchMaterials(
+      "collated",
+      [{ ...screws, location_id: "shop", on_hand: 0.418 }],
+      [],
+      [{ id: "shop", name: "Shop", kind: "shop" }],
+      null,
+    );
+    expect(res[0]?.piece).toEqual({ name: "fastener", perPack: 1000 });
+  });
+  it("listStock computes the piece per cell and the catalog options fall back to it", () => {
+    const inv = readFileSync("src/lib/inventory.functions.ts", "utf8");
+    expect(inv).toMatch(/export interface StockRow \{[\s\S]*?piece: PieceDef \| null;/);
+    expect(inv).toMatch(
+      /export const listStock[\s\S]*?row\.piece = pieceCache\.get\(k\) \?\? null;/,
+    );
+    const fld = readFileSync("src/lib/service-field.functions.ts", "utf8");
+    expect(fld).toContain(
+      "piece: servicePiece(m) ?? (m.stock_screen_id ? await catalogPiece(cell) : null),",
+    );
+    expect(readFileSync("src/lib/material-search.ts", "utf8")).toContain(
+      "e.piece ??= s.piece ?? null;",
+    );
+  });
+});

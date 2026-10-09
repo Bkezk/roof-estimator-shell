@@ -124,6 +124,12 @@ export interface StockRow {
   on_hand: number;
   last_at: string | null;
   item_nos: string[];
+  /**
+   * How the cell is counted in pieces (a box of 1,000 fasteners, a 4-cartridge case), from the
+   * catalog; null when it is counted whole. Owner, Oct 9: the close-out's search logged a whole
+   * box of collated screws per tap because the stock row carried no piece.
+   */
+  piece: PieceDef | null;
 }
 
 export interface MovementRow {
@@ -199,6 +205,7 @@ export const listStock = createServerFn({ method: "GET" })
           on_hand: 0,
           last_at: null,
           item_nos: [],
+          piece: null,
         };
         byCell.set(key, row);
       }
@@ -216,6 +223,19 @@ export const listStock = createServerFn({ method: "GET" })
     for (const row of byCell.values())
       row.item_nos =
         numsByCell.get(`${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`) ?? [];
+    // Piece definitions per distinct cell (a handful of catalog reads, like myTruckStock).
+    const pieceCache = new Map<string, PieceDef | null>();
+    for (const row of byCell.values()) {
+      const k = `${row.screen_id}\u0000${row.row_label}\u0000${row.price_col}`;
+      if (!pieceCache.has(k)) {
+        try {
+          pieceCache.set(k, (await cellUnit(sb, row)).piece);
+        } catch {
+          pieceCache.set(k, null);
+        }
+      }
+      row.piece = pieceCache.get(k) ?? null;
+    }
     return [...byCell.values()]
       .map((r) => ({ ...r, on_hand: Math.round(r.on_hand * 1000) / 1000 }))
       .sort(
@@ -518,7 +538,7 @@ async function onHandAt(
 }
 
 /** The stock unit and pieces-per-pack of a catalog cell (the same rules addMovement applies). */
-async function cellUnit(
+export async function cellUnit(
   sb: SupabaseClient<Database>,
   cell: { screen_id: string; row_label: string; price_col: string },
 ): Promise<{ unit: string; piece: PieceDef | null }> {

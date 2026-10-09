@@ -34,6 +34,7 @@ import {
   stockCellOf,
   unitWord,
 } from "@/lib/service-materials";
+import { cellUnit } from "@/lib/inventory.functions";
 import { stockUnitFor, type PieceDef } from "@/lib/stock-units";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
@@ -1097,6 +1098,24 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
       loadServiceMaterialLinks(sb),
       sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
     ]);
+    // A twin cell counts in the catalog's pieces (a box of 1,000 fasteners) unless the material
+    // says otherwise (servicePiece); owner, Oct 9: a tap must log one screw, not one box.
+    const pieceCache = new Map<string, PieceDef | null>();
+    const catalogPiece = async (cell: {
+      screen_id: string;
+      row_label: string;
+      price_col: string;
+    }) => {
+      const k = `${cell.screen_id}\u0000${cell.row_label}\u0000${cell.price_col}`;
+      if (!pieceCache.has(k)) {
+        try {
+          pieceCache.set(k, (await cellUnit(sb, cell)).piece);
+        } catch {
+          pieceCache.set(k, null);
+        }
+      }
+      return pieceCache.get(k) ?? null;
+    };
     const numsByCell = new Map<string, string[]>();
     for (const n of nums ?? []) {
       const k = `${n.screen_id}\u0000${n.row_label}\u0000${n.price_col}`;
@@ -1105,18 +1124,20 @@ export const listServiceMaterialOptions = createServerFn({ method: "GET" })
       numsByCell.set(k, list);
     }
     // One row per cell, named by the material that names it everywhere else (materialsByCell).
-    return [...materialsByCell(materials.filter((m) => m.active)).values()].map((m) => {
+    const out: ServiceMaterialOption[] = [];
+    for (const m of materialsByCell(materials.filter((m) => m.active)).values()) {
       const cell = stockCellOf(m);
       const nos = numsByCell.get(`${cell.screen_id}\u0000${cell.row_label}\u0000${cell.price_col}`);
-      return {
+      out.push({
         ...cell,
         label: m.name,
         category: m.category?.trim() || SERVICE_CATEGORY,
         unit: m.stock_screen_id ? stockUnitFor(cell.screen_id) : unitWord(m.unit),
-        piece: servicePiece(m),
+        piece: servicePiece(m) ?? (m.stock_screen_id ? await catalogPiece(cell) : null),
         item_no: nos?.length === 1 ? (nos[0] ?? null) : null,
-      };
-    });
+      });
+    }
+    return out;
   });
 
 /**
