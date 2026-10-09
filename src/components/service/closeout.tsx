@@ -28,19 +28,25 @@
  * suggestTravel; owner, Oct 9). Step 6 can be skipped ("Skip — nothing to add", a phone mark
  * like "Nothing used"; owner, Oct 9: the notes are "kind of redundant") and is not a Complete gap.
  *
- * Owner, Oct 9: "i typed 1 letter into notes and it took me to the next step before i could
- * finish typing." A step's rule can hold on the first letter; the step the tech is inside
- * (`engaged`: focus or a tap within its card) stays the shown open step (closeout-steps.ts
- * shownOpenStep) — expanded, no toast, no scroll, the next card still locked — and the advance
- * runs when they leave it (focus moves out of the card, or a tap anywhere outside it).
+ * Owner, Oct 9 (from the phone): "ill have everything i need in there and it wont go to the next
+ * step … instead of auto swapping to the next step it should have a go to next step button at
+ * the bottom." A step never advances on its own: the form keeps the step the tech is ON
+ * (`onStep`, set once the reads settle, never remembered) and the current card ends in a
+ * "Next step: <title>" button — enabled once the step's rule holds, until then disabled over one
+ * line saying what is still needed (closeout-steps.ts stepMissing). Pressing it moves `onStep`
+ * on and scrolls the next card into view; the step left folds to its summary. "Nothing used" and
+ * "Skip — nothing to add" only mark their step done; Next is the one way forward. The sticky
+ * bar's "Finish step N" names the REAL first open step and takes the tech there the same way.
  */
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
+  ArrowRight,
   Camera,
   Check,
   CheckCircle2,
@@ -138,18 +144,18 @@ import {
   finishStepLabel,
   firstOpenStep,
   lockedLine,
+  nextStep,
+  nextStepLabel,
   nothingUsedKey,
   notesSkippedKey,
   shownOpenStep,
-  stepDone,
   stepHeadline,
+  stepMissing,
   stepOf,
   stepStatus,
   stepStatuses,
   stepSummary,
-  unlockToast,
   type CloseoutStep,
-  type EngagedStep,
   type StepId,
   type StepState,
   type StepStatus,
@@ -225,7 +231,7 @@ function clearDraft(id: string) {
 // The phone's marks: "Nothing used on this ticket" (step 4) and "Skip — nothing to add" (step 6;
 // owner, Oct 9). No column holds either, so each lives in localStorage per ticket like the text
 // draft (closeout-steps.ts nothingUsedKey / notesSkippedKey). They record nothing on the server;
-// they only let the next step open, and Complete clears them.
+// they only mark the step done (Next step then enables), and Complete clears them.
 function readMark(key: string): boolean {
   try {
     return typeof window !== "undefined" && window.localStorage.getItem(key) === "1";
@@ -343,13 +349,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-/** The element a step's heading scrolls to (the strip, the sticky bar and the unlock toast). */
+/** The element a step's heading scrolls to (the strip, the sticky bar and the Next step button). */
 const stepAnchor = (id: StepId) => `closeout-step-${id}`;
 function jumpTo(id: StepId) {
   document.getElementById(stepAnchor(id))?.scrollIntoView?.({ block: "start", behavior: "smooth" });
 }
-/** The step card's marker, so a tap anywhere else reads as leaving the step (CloseoutForm). */
-const STEP_ATTR = "data-step";
 
 /**
  * The step strip under the header, one line (owner, Oct 9: "having all the steps listed above
@@ -464,10 +468,11 @@ function StepStrip({
  * step to finish first. A done step that is not current folds to its header and a one-line
  * summary (closeout-steps.ts stepSummary) with Edit ("can we have each step minimize after
  * completion"); `expanded` / `onToggle` are the form's per-step state, and a step that becomes
- * current again is never folded. `onEngage` fires on focus or a tap inside the card, `onLeave`
- * when focus moves out of it (a tap elsewhere is the form's document listener): the step the
- * tech is inside never folds or advances under them (owner, Oct 9: one letter typed into the
- * notes jumped to the next step).
+ * current again is never folded. The current card ends in the "Next step: <title>" button
+ * (owner, Oct 9: "a go to next step button at the bottom" instead of auto-advancing): enabled
+ * when `missing` is null (the step's rule holds), else disabled over the `missing` line that says
+ * what to do; `onNext` is the form's move. Signature has no next step (the Complete bar follows
+ * it), so it gets no button.
  */
 function StepCard({
   id,
@@ -478,8 +483,8 @@ function StepCard({
   summary,
   expanded,
   onToggle,
-  onEngage,
-  onLeave,
+  missing,
+  onNext,
   children,
 }: {
   id: StepId;
@@ -490,11 +495,13 @@ function StepCard({
   summary: string;
   expanded: boolean;
   onToggle: () => void;
-  onEngage: () => void;
-  onLeave: () => void;
+  /** What this step still needs (closeout-steps.ts stepMissing); null once its rule holds. */
+  missing: string | null;
+  onNext: () => void;
   children: React.ReactNode;
 }) {
   const step = stepOf(id);
+  const nextLabel = nextStepLabel(id);
   if (status === "locked")
     return (
       <p
@@ -514,19 +521,10 @@ function StepCard({
   return (
     <section
       id={stepAnchor(id)}
-      {...{ [STEP_ATTR]: id }}
       aria-label={`Step ${step.n} · ${step.title}`}
       className={`scroll-mt-3 rounded-xl border bg-card ${
         status === "current" ? "border-l-4 border-primary" : ""
       }`}
-      onPointerDown={onEngage}
-      onFocus={onEngage}
-      onBlur={(e) => {
-        // Focus went somewhere else on the page (a tap on nothing has no relatedTarget: the
-        // form's document listener decides that case).
-        const to = e.relatedTarget;
-        if (to instanceof Node && !e.currentTarget.contains(to)) onLeave();
-      }}
     >
       <div className="flex items-center justify-between gap-2 px-4 py-3">
         <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold">
@@ -576,6 +574,24 @@ function StepCard({
         <p className="px-4 pb-3 text-sm text-muted-foreground">{summary}</p>
       ) : (
         <div className="space-y-3 px-4 pb-4">{children}</div>
+      )}
+      {status === "current" && nextLabel !== null && (
+        <div className="space-y-1.5 border-t px-4 py-3">
+          <Button
+            type="button"
+            className="h-12 w-full text-base font-semibold"
+            disabled={missing !== null}
+            aria-describedby={missing !== null ? `${stepAnchor(id)}-missing` : undefined}
+            onClick={onNext}
+          >
+            {nextLabel} <ArrowRight className="ml-2 h-5 w-5" aria-hidden />
+          </Button>
+          {missing !== null && (
+            <p id={`${stepAnchor(id)}-missing`} className="text-sm text-muted-foreground">
+              {missing}
+            </p>
+          )}
+        </div>
       )}
     </section>
   );
@@ -759,21 +775,17 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     enabled: !!session,
     staleTime: 30_000,
   });
-  // The step the tech is inside (see shownOpen below); a deliberate answer leaves it.
-  const [engaged, setEngaged] = useState<EngagedStep | null>(null);
-  const leave = () => setEngaged(null);
+  // The marks only make their step done; the tech still presses Next step (owner, Oct 9).
   const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));
   const markNothingUsed = (on: boolean) => {
     setNothingUsed(on);
     writeNothingUsed(job.id, on);
-    leave(); // A deliberate answer: the step advances now, not on the next tap elsewhere.
   };
   // Step 6's "Skip — nothing to add" (owner, Oct 9): the same kind of mark.
   const [notesSkipped, setNotesSkipped] = useState(() => readNotesSkipped(job.id));
   const markNotesSkipped = (on: boolean) => {
     setNotesSkipped(on);
     writeNotesSkipped(job.id, on);
-    leave();
   };
   const stepState: StepState = {
     finished,
@@ -795,26 +807,40 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     signedBy: draft.signed_by,
   };
   const open = firstOpenStep(stepState);
-  // Owner, Oct 9 ("i typed 1 letter into notes and it took me to the next step"): the step the
-  // tech is inside — focus or a tap within its card — is the shown open step until they leave
-  // it (closeout-steps.ts shownOpenStep); `wasDone` is taken as they go in, so Edit on a folded
-  // step holds nothing back. A tap anywhere outside a step card leaves.
-  const engage = (id: StepId) =>
-    setEngaged((cur) => (cur?.id === id ? cur : { id, wasDone: stepDone(id, stepState) }));
+  // Until the reads answer every list is empty, so the strip would say Before with the rest
+  // locked and then jump: the steps wait for the first answers (a failed read counts — its
+  // section says so, loudly).
+  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);
+  // Owner, Oct 9 ("instead of auto swapping to the next step it should have a go to next step
+  // button at the bottom"): the step the tech is ON. Set once from the first open step when the
+  // reads settle, then moved only by the Next step button and the bar's Finish step N — never by
+  // the data, so a step whose rule holds stays current until they press Next (closeout-steps.ts
+  // shownOpenStep). Component state, nothing remembered.
+  const [onStep, setOnStep] = useState<StepId | null>(null);
+  const started = useRef(false);
   useEffect(() => {
-    const outside = (e: PointerEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest(`[${STEP_ATTR}]`)) setEngaged(null);
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, []);
-  const shownOpen = shownOpenStep(open, engaged);
+    if (!ready || started.current) return;
+    started.current = true;
+    setOnStep(open);
+  }, [ready, open]);
+  // Go to a step: the card is current (expanded) before the scroll measures it, so the heading
+  // lands at the top with the step just left already folded.
+  const goTo = (id: StepId) => {
+    flushSync(() => setOnStep(id));
+    jumpTo(id);
+  };
+  const goNext = (id: StepId) => {
+    const next = nextStep(id);
+    if (next) goTo(next);
+  };
+  const shownOpen = shownOpenStep(open, onStep);
   const statuses = stepStatuses(stepState, shownOpen);
   const status = (id: StepId) => stepStatus(id, stepState, shownOpen);
   // Owner, Oct 9: a done step folds to its summary unless Edit was pressed on it. Component
   // state, nothing remembered; cleared whenever the shown open step moves, so a step just
-  // finished folds once the tech leaves it, and a step that reopened (its Before photo deleted)
-  // is current — never folded.
+  // finished folds once the tech presses Next step, and a step that reopened (its Before photo
+  // deleted) is current — never folded. Edit on a folded step expands it in place; it does not
+  // move onStep.
   const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});
   useEffect(() => setEditing({}), [shownOpen]);
   const card = (id: StepId) => ({
@@ -824,8 +850,8 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     summary: stepSummary(id, stepState),
     expanded: editing[id] === true,
     onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),
-    onEngage: () => engage(id),
-    onLeave: () => setEngaged((cur) => (cur?.id === id ? null : cur)),
+    missing: stepMissing(id, stepState),
+    onNext: () => goNext(id),
   });
   // The header asides: what each step holds, from the same reads the rules use.
   const repairRows = repairsQ.data ?? [];
@@ -840,31 +866,12 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
       ).length === 0,
   ).length;
   const materialItems = stepState.materialItems;
-  // Until the reads answer every list is empty, so the strip would say Before with the rest
-  // locked and then jump: the steps wait for the first answers (a failed read counts — its
-  // section says so, loudly).
-  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);
-  // When the shown open step moves forward the next one has just unlocked: a short toast and
-  // the page scrolls its heading into view — unless the tech is inside some step (they pressed
-  // Edit on an earlier one while the next unlocked: no scrolling away under them). The shown
-  // step moves only when the tech leaves the step they finished, so a step never advances under
-  // their fingers. Nothing on the first settled render, nothing when a step reopens.
-  const prevOpen = useRef<StepId | null | undefined>(undefined);
-  const engagedNow = useRef(engaged);
-  engagedNow.current = engaged;
-  useEffect(() => {
-    if (!ready) return;
-    const prev = prevOpen.current;
-    prevOpen.current = shownOpen;
-    if (prev === undefined) return;
-    const msg = unlockToast(prev, shownOpen);
-    if (!msg) return;
-    toast.success(msg);
-    if (shownOpen && !engagedNow.current) jumpTo(shownOpen);
-  }, [ready, shownOpen]);
+  // No toast and no scroll when a step's rule starts to hold: pressing Next step is the tech's
+  // own move and its own feedback (owner, Oct 9).
   // The sticky bar completes only from step 7; before that it names the step to finish and
-  // scrolls there. The real open step, not the shown one: once the data is complete the bar
-  // says Complete even while the tech is still inside the last step.
+  // takes the tech there (goTo: the card is current and expanded when the scroll lands). The
+  // real open step, not the shown one: once the data is complete the bar says Complete even
+  // while the tech is still on an earlier step.
   const stepToFinish = open === null || open === "signature" ? null : open;
   const camera = useRepairCamera(job.id);
 
@@ -1097,7 +1104,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               variant={stepToFinish ? "secondary" : "default"}
               className="h-14 w-full text-lg font-semibold"
               disabled={busy}
-              onClick={stepToFinish ? () => jumpTo(stepToFinish) : pressComplete}
+              onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}
             >
               {complete.isPending ? (
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -1829,32 +1836,49 @@ function RepairCard({
   const [vals, setVals] = useState<RepairVals>(() => repairVals(repair));
   const [confirmRemove, setConfirmRemove] = useState(false);
 
+  const payload = (v: RepairVals) => ({
+    id: repair.id,
+    service_job_id: jobId,
+    repair_template_id: repair.repair_template_id,
+    name: v.name.trim() || repair.name,
+    quantity: v.quantity,
+    unit: repair.unit || "EA",
+    problem_text: orNull(v.problem_text),
+    resolution_text: orNull(v.resolution_text),
+    completed_on: repair.completed_on,
+    print_on_invoice: repair.print_on_invoice,
+  });
+  const landed = (row: JobRepairRow) =>
+    qc.setQueryData<JobRepairRow[]>(fieldKeys.repairs(jobId), (old) =>
+      old?.map((r) => (r.id === row.id ? row : r)),
+    );
+  const unchanged = (v: RepairVals) => JSON.stringify(v) === JSON.stringify(repairVals(repair));
   const save = useMutation({
-    mutationFn: (v: RepairVals) =>
-      saveFn({
-        data: {
-          id: repair.id,
-          service_job_id: jobId,
-          repair_template_id: repair.repair_template_id,
-          name: v.name.trim() || repair.name,
-          quantity: v.quantity,
-          unit: repair.unit || "EA",
-          problem_text: orNull(v.problem_text),
-          resolution_text: orNull(v.resolution_text),
-          completed_on: repair.completed_on,
-          print_on_invoice: repair.print_on_invoice,
-        },
-      }),
-    onSuccess: (row) =>
-      qc.setQueryData<JobRepairRow[]>(fieldKeys.repairs(jobId), (old) =>
-        old?.map((r) => (r.id === row.id ? row : r)),
-      ),
+    mutationFn: (v: RepairVals) => saveFn({ data: payload(v) }),
+    onSuccess: landed,
     onError: (e) => loudError(`Could not save ${repair.name}`, e),
   });
   const commit = (next?: Partial<RepairVals>) => {
     const v = { ...vals, ...next };
-    if (JSON.stringify(v) === JSON.stringify(repairVals(repair))) return;
+    if (unchanged(v)) return;
     save.mutate(v);
+  };
+  // Owner, Oct 9: step 3's Next step button reads the SAVED row (closeout-steps.ts stepDone:
+  // resolution_text), and on a phone a text box is not left until a tap lands elsewhere — so
+  // What was wrong / What you did save a moment after typing stops (useAutosave, as the closing
+  // notes do) and on blur (flush), not only when the box is left. The name and quantity (step 2)
+  // still commit on blur.
+  const typed = useAutosave<RepairVals>(
+    async (v) => {
+      if (unchanged(v)) return;
+      landed(await saveFn({ data: payload(v) }));
+    },
+    { what: `${repair.name}'s text` },
+  );
+  const type = (patch: Partial<RepairVals>) => {
+    const next = { ...vals, ...patch };
+    setVals(next);
+    typed.push(next);
   };
 
   const remove = useMutation({
@@ -1984,8 +2008,8 @@ function RepairCard({
               className="text-base"
               placeholder="e.g. Drain clogged with debris, water pooling"
               value={vals.problem_text}
-              onChange={(e) => setVals((v) => ({ ...v, problem_text: e.target.value }))}
-              onBlur={() => commit()}
+              onChange={(e) => type({ problem_text: e.target.value })}
+              onBlur={() => void typed.flush()}
             />
           </div>
           <div className="space-y-1">
@@ -1998,8 +2022,8 @@ function RepairCard({
               className="text-base"
               placeholder="e.g. Cleared the drain and resealed the strainer"
               value={vals.resolution_text}
-              onChange={(e) => setVals((v) => ({ ...v, resolution_text: e.target.value }))}
-              onBlur={() => commit()}
+              onChange={(e) => type({ resolution_text: e.target.value })}
+              onBlur={() => void typed.flush()}
             />
           </div>
         </>

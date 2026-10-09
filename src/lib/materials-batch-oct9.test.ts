@@ -66,7 +66,8 @@ describe("B5 the short-stock yes is remembered per cell; the server's refusal as
   it("a search chip's add scrolls the new On this ticket line into view and focuses its count box", () => {
     expect(src).toMatch(/focusAfter\.current = r\.key;\s*add\(r, 1, src\.on_hand !== null\);/);
     expect(add).toMatch(
-      /if \(focusAfter\.current === r\.key\) \{\s*focusAfter\.current = null;\s*setFocusKey\(r\.key\);\s*\}/,
+      // …and clears the Find any material box (owner, Oct 9; materials-search-clears.test.ts).
+      /if \(focusAfter\.current === r\.key\) \{\s*focusAfter\.current = null;\s*setFocusKey\(r\.key\);\s*setFind\(""\);\s*\}/,
     );
     expect(src).toMatch(
       /aria-label="On this ticket"[\s\S]*?<TruckRow[\s\S]*?focus=\{focusKey === r\.key\}\s*onFocused=\{clearFocus\}/,

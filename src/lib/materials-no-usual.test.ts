@@ -27,8 +27,11 @@ describe("the Usual-for chips are gone from the Materials section", () => {
     expect(section).not.toContain("suggestedUnits");
     expect(section).not.toContain("Sparkles");
     expect(section).not.toContain("const shopId =");
-    // toast was only used by a chip ("already on this ticket"); loudError does the rest.
-    expect(section).not.toContain('from "sonner"');
+    // toast was only used by a chip ("already on this ticket"); loudError does the rest — the one
+    // toast since is Remove's "Removed … — Undo" (owner, Oct 9; materials-remove.test.ts).
+    expect(section.match(/toast\./g)).toHaveLength(1);
+    expect(section).toContain("toast.success(removedToast(");
+    expect(section).not.toContain("already on this ticket");
     // The header says why.
     expect(section).toContain("i dont like the 'usual for' on the materials side");
   });

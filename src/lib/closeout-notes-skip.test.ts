@@ -137,7 +137,9 @@ describe("the Skip button on the screen", () => {
     expect(form).toMatch(
       /clearDraft\(job\.id\);\s*clearNothingUsed\(job\.id\);\s*clearNotesSkipped\(job\.id\);/,
     );
-    // Pressing it is a deliberate answer: the step advances now (closeout-engaged-step.test.ts).
-    expect(form).toMatch(/writeNotesSkipped\(job\.id, on\);\s*leave\(\);/);
+    // Owner, Oct 9 (later): the mark only makes the step done; nothing advances on its own — the
+    // Next step button does (closeout-next-step.test.ts).
+    expect(form).toMatch(/writeNotesSkipped\(job\.id, on\);\s*\};/);
+    expect(form).not.toContain("leave()");
   });
 });

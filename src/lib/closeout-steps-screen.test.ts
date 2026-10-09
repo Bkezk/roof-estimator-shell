@@ -137,7 +137,9 @@ describe("the Complete bar", () => {
     expect(form).toContain(
       'const stepToFinish = open === null || open === "signature" ? null : open;',
     );
-    expect(form).toContain("onClick={stepToFinish ? () => jumpTo(stepToFinish) : pressComplete}");
+    // Owner, Oct 9 (later): Finish step N also makes that step the one the tech is on (goTo), so
+    // its card is current and expanded when the scroll lands (closeout-next-step.test.ts).
+    expect(form).toContain("onClick={stepToFinish ? () => goTo(stepToFinish) : pressComplete}");
     expect(form).toContain('variant={stepToFinish ? "secondary" : "default"}');
     expect(form).toMatch(
       /\{stepToFinish\s*\?\s*finishStepLabel\(stepToFinish\)\s*:\s*finished\s*\?\s*"Finish"\s*:\s*"Complete"\}/,
@@ -169,17 +171,14 @@ describe("the Nothing used mark (step 4)", () => {
   });
 });
 
-describe("the toast when a step unlocks", () => {
-  it("fires once the reads settled, forward only, on the SHOWN open step, and scrolls the next heading into view unless the tech is inside a step", () => {
+describe("no toast when a step unlocks (owner, Oct 9, later: the tech presses Next step)", () => {
+  it("the reads still settle first; the unlock toast and its scroll are gone — closeout-next-step.test.ts has the button", () => {
     expect(form).toContain(
       "const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);",
     );
-    expect(form).toContain("const prevOpen = useRef<StepId | null | undefined>(undefined);");
-    // Owner, Oct 9 (later): the advance follows shownOpen (closeout-engaged-step.test.ts), so a
-    // step the tech is still inside never toasts or scrolls under them.
-    expect(form).toMatch(
-      /if \(!ready\) return;\s*const prev = prevOpen\.current;\s*prevOpen\.current = shownOpen;\s*if \(prev === undefined\) return;\s*const msg = unlockToast\(prev, shownOpen\);\s*if \(!msg\) return;\s*toast\.success\(msg\);\s*if \(shownOpen && !engagedNow\.current\) jumpTo\(shownOpen\);/,
-    );
+    expect(form).not.toContain("prevOpen");
+    expect(form).not.toContain("unlockToast(");
+    expect(form).not.toContain("engagedNow");
     expect(src).toMatch(
       /function jumpTo\(id: StepId\) \{\s*document\s*\.getElementById\(stepAnchor\(id\)\)\s*\?\.scrollIntoView\?\.\(\{ block: "start", behavior: "smooth" \}\);/,
     );

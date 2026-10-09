@@ -16,7 +16,11 @@
  *
  * + records one piece (or one pack when the product has no pieces) as a `consumed` movement
  * against the ticket at that place; − takes one back (see planReduce: the tech's own recent entry
- * is undone, else a `released` movement the server caps at what the ticket took).
+ * is undone, else a `released` movement the server caps at what the ticket took). Owner, Oct 9
+ * ("you cant easily get rid of materials if you accidentally add them"): every "On this ticket"
+ * line also has Remove — one tap takes the whole line back off the ticket the same way, the stock
+ * going back where it came from, with an "Undo" on the toast that logs it again; no confirm.
+ * A tap on a search result clears the "Find any material" box once the add lands (owner, Oct 9).
  *
  * Taps are optimistic (the count and the on-hand move at once) and run one after another so a
  * "−" always sees the entry the "+" before it made; a refusal rolls the count back and is shown
@@ -30,6 +34,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import {
   Check,
   ChevronDown,
@@ -40,6 +45,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Truck,
 } from "lucide-react";
 
@@ -64,6 +70,7 @@ import {
   type MaterialSource,
 } from "@/lib/material-search";
 import { onTicketRows } from "@/lib/materials-on-ticket";
+import { removeLabel, removedToast } from "@/lib/materials-remove";
 import { plural, type PieceDef } from "@/lib/stock-units";
 import {
   AlertDialog,
@@ -468,7 +475,9 @@ export function MaterialsSection({
   // cell on this ticket sends short_ok without asking again (each pack used to re-ask).
   const shortOkCells = useRef<Set<string>>(new Set());
   // Owner, Oct 9: a tap on a search chip scrolls the new "On this ticket" line into view and
-  // focuses its count box (`focusAfter` is the cell waiting for its first entry to land).
+  // focuses its count box (`focusAfter` is the cell waiting for its first entry to land); the
+  // "Find any material" box clears then too (owner: "once you've added a material … the find any
+  // material search bar should clear") — on the landing, so a refused add keeps what they typed.
   const focusAfter = useRef<string | null>(null);
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const clearFocus = useCallback(() => setFocusKey(null), []);
@@ -497,12 +506,13 @@ export function MaterialsSection({
       if (focusAfter.current === r.key) {
         focusAfter.current = null;
         setFocusKey(r.key);
+        setFind("");
       }
     });
   };
 
-  /** Take `units` back off this ticket (they stay on the truck). */
-  const reduce = (r: ListRow, units: number) => {
+  /** Take `units` back off this ticket (they stay on the truck); `onDone` once it all landed. */
+  const reduce = (r: ListRow, units: number, onDone?: () => void) => {
     if (!(units > EPS)) return;
     if (units > usedUnits(r) + EPS) {
       loudError(
@@ -532,7 +542,24 @@ export function MaterialsSection({
           }
         }
       }
+      onDone?.();
     });
+  };
+  /**
+   * Owner, Oct 9 ("you cant easily get rid of materials if you accidentally add them on the close
+   * out workflow"): one tap takes the whole line back off the ticket — the same take-back as −
+   * for everything used (own fresh entries undone, else a release the server caps), so the stock
+   * goes back where it came from — with no confirm; the toast's Undo logs the same amount again
+   * from the same place (a cell they said "it came from here" for stays said).
+   */
+  const removeRow = (r: ListRow, known: boolean) => {
+    const units = usedUnits(r);
+    if (!(units > EPS)) return;
+    reduce(r, units, () =>
+      toast.success(removedToast(cellName(r), units, r.piece, r.unit), {
+        action: { label: "Undo", onClick: () => add(r, units, known) },
+      }),
+    );
   };
 
   /** Set the ticket's total for the row (the typed box). */
@@ -653,6 +680,7 @@ export function MaterialsSection({
                       onAdd={(n) => add(r, n, r.known)}
                       onReduce={(n) => reduce(r, n)}
                       onSet={(n) => setTotal(r, n, r.known)}
+                      onRemove={() => removeRow(r, r.known)}
                       focus={focusKey === r.key}
                       onFocused={clearFocus}
                     />
@@ -1104,6 +1132,7 @@ function TruckRow({
   onAdd,
   onReduce,
   onSet,
+  onRemove,
   focus,
   onFocused,
 }: {
@@ -1115,6 +1144,8 @@ function TruckRow({
   onAdd: (units: number) => void;
   onReduce: (units: number) => void;
   onSet: (total: number) => void;
+  /** Take the whole line off the ticket in one tap (the "On this ticket" list; owner, Oct 9). */
+  onRemove?: (() => void) | undefined;
   /** Scroll the row into view and focus its count box (a search chip just made this line). */
   focus?: boolean | undefined;
   onFocused?: (() => void) | undefined;
@@ -1226,6 +1257,20 @@ function TruckRow({
           </Button>
         </div>
       </div>
+      {onRemove && used > EPS && (
+        <div className="mt-1 flex justify-end">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-10 px-2 text-xs text-destructive hover:text-destructive"
+            aria-label={removeLabel(cellName(row))}
+            onClick={onRemove}
+          >
+            <Trash2 className="mr-1 h-4 w-4" /> Remove
+          </Button>
+        </div>
+      )}
     </li>
   );
 }

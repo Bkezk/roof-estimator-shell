@@ -19,6 +19,14 @@
  * its header and a one-line summary (stepSummary) with Edit; the strip is one line of numbered
  * dots. The summaries need the crew count, the material count and the signer's name, so the
  * state carries them.
+ *
+ * Owner, Oct 9 (later, from the phone: "ill have everything i need in there and it wont go to
+ * the next step … instead of auto swapping to the next step it should have a go to next step
+ * button at the bottom"): a step never advances on its own. The screen keeps the step the tech
+ * is ON (`onStep`); its card ends in a "Next step: <title>" button (nextStepLabel) that is
+ * enabled once the step's rule holds and, until then, disabled beside one line saying exactly
+ * what is still needed (stepMissing). Pressing it moves `onStep` forward. shownOpenStep picks
+ * the card shown as current from `onStep` and the real first open step.
  */
 
 export type StepId = "crew" | "before" | "work" | "materials" | "time" | "notes" | "signature";
@@ -160,8 +168,8 @@ export function firstOpenStep(s: StepState): StepId | null {
 /**
  * done: the rule holds. current: the first step that does not. locked: not done, after the
  * current one. A done step is never locked, whatever sits before it (see the header). `open` is
- * the step shown as current — firstOpenStep by default, or the step the tech is still inside
- * (shownOpenStep), which reads current even once its rule holds.
+ * the step shown as current — firstOpenStep by default, or the step the tech is on
+ * (shownOpenStep), which reads current even once its rule holds, until they press Next step.
  */
 export function stepStatus(
   id: StepId,
@@ -181,26 +189,71 @@ export function stepStatuses(
   return CLOSEOUT_STEPS.map((step) => ({ step, status: stepStatus(step.id, s, open) }));
 }
 
-/** The step the tech is inside (focus or a tap within its card) and whether it was done then. */
-export interface EngagedStep {
-  id: StepId;
-  /** Done when they went in (Edit on a folded step): leaving it changes nothing. */
-  wasDone: boolean;
+/** The step after `id` in CLOSEOUT_STEPS order; null after Signature (Complete follows). */
+export function nextStep(id: StepId): StepId | null {
+  return CLOSEOUT_STEPS[stepIndex(id) + 1]?.id ?? null;
+}
+
+/** The button at the foot of the current step's card: "Next step: The work". null on Signature. */
+export function nextStepLabel(id: StepId): string | null {
+  const next = nextStep(id);
+  return next === null ? null : `Next step: ${stepOf(next).title}`;
 }
 
 /**
- * The step the screen shows as open (owner, Oct 9: "i typed 1 letter into notes and it took me
- * to the next step before i could finish typing"). A step's rule can hold on the first letter,
- * which moves `open` (firstOpenStep) forward at once; while the tech is still inside that step
- * it stays the shown one — expanded, no toast, no scroll, the next step still reading locked —
- * and the advance runs when they leave. A step that was already done when they went in (Edit
- * on a folded step) never holds the screen back; nor does one the data moved back behind (a
- * Before photo deleted while typing notes: the real open step shows).
+ * The step the screen shows as open (owner, Oct 9: "instead of auto swapping to the next step
+ * it should have a go to next step button at the bottom"). `onStep` is the step the tech is on —
+ * set when the reads settle and moved only by the Next step button (or the bar's Finish step N);
+ * it is never moved by the data, so a step whose rule holds stays current, expanded, the next
+ * card still locked, until they press Next. Two exceptions: with no `onStep` yet the real open
+ * step shows; and when the data moved back BEHIND `onStep` (a Before photo deleted while on the
+ * notes) the real open step shows, so what must be fixed is the current card. Every step done
+ * (`open` null) with an `onStep`: that step stays shown, the bar says Complete.
  */
-export function shownOpenStep(open: StepId | null, engaged: EngagedStep | null): StepId | null {
-  if (!engaged || engaged.wasDone) return open;
-  if (open === null || stepIndex(engaged.id) < stepIndex(open)) return engaged.id;
-  return open;
+export function shownOpenStep(open: StepId | null, onStep: StepId | null): StepId | null {
+  if (onStep === null) return open;
+  if (open !== null && stepIndex(open) < stepIndex(onStep)) return open;
+  return onStep;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What a step still needs before Next step enables, in the words of the step — null once its
+ * rule (stepDone) holds. Says the thing the tech must do on THIS step, not the rule: "Take the
+ * Before photo on 2 repairs", "Log a material or mark Nothing used". The Time line names the two
+ * buttons because the prefilled Travel estimate counts only once "Add travel" is pressed.
+ */
+export function stepMissing(id: StepId, s: StepState): string | null {
+  if (stepDone(id, s)) return null;
+  switch (id) {
+    case "crew":
+      return "Answer who is on the job";
+    case "before": {
+      if (!repairsSuffice(s)) return "Add at least one repair";
+      const n = s.repairs.filter((r) => !hasPhoto(s.photos, r.id, "before")).length;
+      return `Take the Before photo on ${plural(n, "repair")}`;
+    }
+    case "work": {
+      if (!repairsSuffice(s)) return "Add at least one repair (step 2)";
+      const noText = s.repairs.filter((r) => !(r.resolution_text ?? "").trim());
+      const noPhoto = s.repairs.filter((r) => !hasPhoto(s.photos, r.id, "after"));
+      const both = noText.length === noPhoto.length && noText.every((r) => noPhoto.includes(r));
+      if (both)
+        return `Say what you did and take the After photo on ${plural(noText.length, "repair")}`;
+      if (noText.length === 0) return `Take the After photo on ${plural(noPhoto.length, "repair")}`;
+      if (noPhoto.length === 0) return `Say what you did on ${plural(noText.length, "repair")}`;
+      return `Say what you did on ${plural(noText.length, "repair")} and take the After photo on ${plural(noPhoto.length, "repair")}`;
+    }
+    case "materials":
+      return "Log a material or mark Nothing used";
+    case "time":
+      return "Add the time (Add travel, or Add time)";
+    case "notes":
+      return "Type a note or press Skip";
+    case "signature":
+      return "Get the customer's signature";
+  }
 }
 
 /** The strip's header: "Step 3 of 7 · The work", or that all are done. */
@@ -215,20 +268,6 @@ export function lockedLine(open: StepId | null): string {
   if (open === null) return "Locked";
   const s = stepOf(open);
   return `Locked — finish step ${s.n}: ${s.title} first`;
-}
-
-/**
- * The toast when the open step moves forward: "Step 2 done — next: The work". null when the
- * step moved back (a Before photo deleted reopens step 2) or did not move; the last step done
- * says Complete is ready.
- */
-export function unlockToast(prev: StepId | null, next: StepId | null): string | null {
-  if (prev === null || prev === next) return null;
-  if (next !== null && stepIndex(next) <= stepIndex(prev)) return null;
-  const done = stepOf(prev);
-  return next === null
-    ? `Step ${done.n} done — Complete is ready`
-    : `Step ${done.n} done — next: ${stepOf(next).title}`;
 }
 
 /** Hours as the Time section prints them: "3.5 h", "0.25 h", "8 h". */

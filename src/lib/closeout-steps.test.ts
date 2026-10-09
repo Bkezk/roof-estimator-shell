@@ -4,6 +4,7 @@
  * Each rule, the order, an inspection ticket, a legacy On site stamp, a finished ticket, and the
  * strip's lines. Pure, no screen.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -19,7 +20,6 @@ import {
   stepOf,
   stepStatus,
   stepStatuses,
-  unlockToast,
   type StepId,
   type StepState,
 } from "@/lib/closeout-steps";
@@ -223,15 +223,8 @@ describe("the strip's lines", () => {
     expect(lockedLine(null)).toBe("Locked");
     expect(finishStepLabel("materials")).toBe("Finish step 4: Materials");
   });
-  it("the unlock toast: forward only, naming the step done and the next; the last says Complete", () => {
-    expect(unlockToast("crew", "before")).toBe("Step 1 done — next: Before");
-    expect(unlockToast("before", "materials")).toBe("Step 2 done — next: Materials");
-    expect(unlockToast("signature", null)).toBe("Step 7 done — Complete is ready");
-    // The same step, a step reopened, or nothing open before: no toast.
-    expect(unlockToast("work", "work")).toBeNull();
-    expect(unlockToast("work", "before")).toBeNull();
-    expect(unlockToast(null, "before")).toBeNull();
-    expect(unlockToast(null, null)).toBeNull();
+  it("no toast when a step's rule starts to hold (owner, Oct 9): the tech presses Next step — closeout-next-step.test.ts", () => {
+    expect(readFileSync("src/lib/closeout-steps.ts", "utf8")).not.toContain("unlockToast");
   });
   it("the Nothing used mark's key is per ticket", () => {
     expect(nothingUsedKey("abc")).toBe("bid-o-matic:closeout-nothing-used:abc");
