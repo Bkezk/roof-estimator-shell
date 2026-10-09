@@ -1,0 +1,48 @@
+/**
+ * Owner, Oct 9: "they need to be able to add materials via typing and selection from our
+ * catalog even if there is not stock of that item in the shop or vehicle". A ticket's material
+ * the app says is not there is logged anyway after a plain question — the count at that place
+ * goes below zero and the entry's note says so, for the office to fix — instead of the old
+ * "Not enough …" refusal on the screen and "Only N on the shelf" from the server.
+ */
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+const read = (p: string) => readFileSync(p, "utf8");
+
+describe("the server: short_ok on a ticket's consumed entry", () => {
+  const src = read("src/lib/inventory.functions.ts");
+  it("addMovement accepts short_ok and only then lets the count go below zero", () => {
+    expect(src).toMatch(/short_ok: z\.boolean\(\)\.optional\(\),/);
+    expect(src).toMatch(
+      /if \(!\(data\.short_ok && data\.service_job_id\)\)\s*throw new Error\(\s*`Only \$\{/,
+    );
+  });
+  it("the entry's note says the count was short", () => {
+    expect(src).toMatch(/shortNote = `Short: the app had \$\{had\}/);
+    expect(src).toContain('note: [data.note, shortNote].filter(Boolean).join(" — ") || null,');
+  });
+});
+
+describe("the screen: ask, then log it anyway", () => {
+  const src = read("src/components/service/materials-section.tsx");
+  it("add() asks instead of refusing when the place shows too little", () => {
+    expect(src).toContain(
+      "const add = (r: ListRow, units: number, checkStock = true, shortOk = false) => {",
+    );
+    expect(src).toMatch(
+      /if \(checkStock && !shortOk && units > onHand \+ EPS\) \{\s*setShort\(\{ r, units \}\);\s*return;\s*\}/,
+    );
+    expect(src).not.toContain("take the rest from the shop or another truck");
+  });
+  it("the question names the item and the place and sends short_ok on yes", () => {
+    expect(src).toMatch(/role="alertdialog"\s*aria-label="Log it anyway\?"/);
+    expect(src).toMatch(/add\(s\.r, s\.units, false, true\);/);
+    expect(src).toMatch(/record\(r, units, "consumed", shortOk\)/);
+    expect(src).toContain("...(shortOk ? { short_ok: true } : {}),");
+  });
+  it("a source with nothing in the app still has a tappable chip that says so", () => {
+    expect(src).toContain('"none in the app"');
+    expect(src).not.toContain('left === "none";');
+  });
+});

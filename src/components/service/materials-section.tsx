@@ -426,7 +426,12 @@ export function MaterialsSection({
     );
   };
 
-  const record = async (r: ListRow, units: number, reason: "consumed" | "released") => {
+  const record = async (
+    r: ListRow,
+    units: number,
+    reason: "consumed" | "released",
+    shortOk = false,
+  ) => {
     const res = await addFn({
       data: {
         screen_id: r.screen_id,
@@ -438,6 +443,7 @@ export function MaterialsSection({
         reason,
         location_id: r.location_id,
         service_job_id: jobId,
+        ...(shortOk ? { short_ok: true } : {}),
       },
     });
     recorded(r, res, r.piece ? `${fmtNum(units)} ${plural(units, r.piece.name)}` : null);
@@ -458,19 +464,20 @@ export function MaterialsSection({
    * taken from the shop or another truck, whose on-hand this screen does not hold — the server
    * checks it (addMovement: "Only N … on the shelf").
    */
-  const add = (r: ListRow, units: number, checkStock = true) => {
+  // Owner, Oct 9: material the app says is not there can still be logged ("even if there is
+  // not stock of that item in the shop or vehicle") — after a plain question, since the count
+  // at that place then goes below zero for the office to fix. `short` is the open question.
+  const [short, setShort] = useState<{ r: ListRow; units: number } | null>(null);
+  const add = (r: ListRow, units: number, checkStock = true, shortOk = false) => {
     if (!(units > EPS)) return;
     const onHand = onHandUnits(r);
-    if (checkStock && units > onHand + EPS) {
-      loudError(
-        `Not enough ${cellName(r)}`,
-        new Error(
-          `only ${amountText(Math.max(0, onHand), r.piece, r.unit)} on ${locName(r.location_id)} — take the rest from the shop or another truck`,
-        ),
-      );
+    if (checkStock && !shortOk && units > onHand + EPS) {
+      setShort({ r, units });
       return;
     }
-    enqueue(r.key, units, `Could not log ${cellName(r)}`, () => record(r, units, "consumed"));
+    enqueue(r.key, units, `Could not log ${cellName(r)}`, () =>
+      record(r, units, "consumed", shortOk),
+    );
   };
 
   /** Take `units` back off this ticket (they stay on the truck). */
@@ -558,7 +565,7 @@ export function MaterialsSection({
     if (src.on_hand === null) return "?";
     const key = cellKey({ ...res, location_id: src.location_id });
     const units = round6(packsToUnits(src.on_hand, res.piece) - (pending[key] ?? 0));
-    return units <= EPS ? "none" : `${amountText(units, res.piece, res.unit)} left`;
+    return units <= EPS ? "none in the app" : `${amountText(units, res.piece, res.unit)} left`;
   };
   const sourceName = (src: MaterialSource) =>
     src.kind === "mine" ? "My truck" : src.kind === "shop" ? "Shop" : src.location_name;
@@ -718,6 +725,44 @@ export function MaterialsSection({
               );
             })}
 
+          {short && (
+            <div
+              role="alertdialog"
+              aria-label="Log it anyway?"
+              className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
+            >
+              <p className="font-medium">
+                The app shows{" "}
+                {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)} of{" "}
+                {cellName(short.r)} on {locName(short.r.location_id)}.
+              </p>
+              <p className="text-muted-foreground">
+                Log {amountText(short.units, short.r.piece, short.r.unit)} anyway? The count there
+                goes below zero until the office fixes it.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  className="h-10"
+                  onClick={() => {
+                    const s = short;
+                    setShort(null);
+                    add(s.r, s.units, false, true);
+                  }}
+                >
+                  Log it anyway
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-10"
+                  onClick={() => setShort(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
           <div className="space-y-2" aria-label="Find any material">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -775,7 +820,7 @@ export function MaterialsSection({
                             >
                               {res.sources.map((src) => {
                                 const left = sourceLeft(res, src);
-                                const none = left === "none";
+                                const none = left === "none in the app";
                                 return (
                                   <Button
                                     key={src.location_id}

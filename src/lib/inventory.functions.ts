@@ -302,6 +302,13 @@ const addSchema = cellSchema.extend({
   service_job_id: z.string().uuid().nullable().optional(),
   counted_note: z.string().max(300).nullable().optional(),
   note: z.string().max(1000).nullable().optional(),
+  /**
+   * A ticket's material logged although the place shows too little of it in the app (owner,
+   * Oct 9: "add materials … from our catalog even if there is not stock of that item in the
+   * shop or vehicle"). The count there goes below zero and the entry's note says so, for the
+   * office to fix the count; only with a service_job_id.
+   */
+  short_ok: z.boolean().optional(),
 });
 
 /**
@@ -397,13 +404,20 @@ export const addMovement = createServerFn({ method: "POST" })
           `This ticket only took ${Math.round(net * 1000) / 1000} ${unit} from ${location.name}`,
         );
     }
+    let shortNote: string | null = null;
     if (data.reason === "consumed") {
-      // Never take more than the location holds (on hand = the sum of the cell's entries there).
+      // Never take more than the location holds (on hand = the sum of the cell's entries there)
+      // — unless a ticket says it did anyway (short_ok): the count goes below zero and the
+      // entry says so, so the office sees what to fix.
       const onHand = await onHandAt(sb, locationId, data);
-      if (-qty > onHand + 1e-9)
-        throw new Error(
-          `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}`,
-        );
+      if (-qty > onHand + 1e-9) {
+        const had = `${Math.round(Math.max(0, onHand) * 1000) / 1000} ${unit}`;
+        if (!(data.short_ok && data.service_job_id))
+          throw new Error(
+            `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}`,
+          );
+        shortNote = `Short: the app had ${had} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}; count needs fixing`;
+      }
     }
     let bidName: string | null = null;
     let jobName: string | null = null;
@@ -446,7 +460,7 @@ export const addMovement = createServerFn({ method: "POST" })
         counted_note:
           data.counted_note ??
           (data.in_pieces && piece ? `${data.qty} ${plural(data.qty, piece.name)}` : null),
-        note: data.note ?? null,
+        note: [data.note, shortNote].filter(Boolean).join(" — ") || null,
         created_by: context.userId,
         created_by_name: me?.full_name?.trim() || me?.email || null,
       })

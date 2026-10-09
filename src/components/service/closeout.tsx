@@ -667,6 +667,11 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   });
   const [otherOpen, setOtherOpen] = useState(false);
   const [otherName, setOtherName] = useState("");
+  // Owner, Oct 9 ("the repairs look the same?"): the picker — roof-type chips and thirty
+  // tap-to-add chips — took most of the screen. It folds behind "Add another repair" once a
+  // repair is on the ticket, the search sits first, and the chips show eight until "Show all".
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [allChips, setAllChips] = useState(false);
   // Owner, Oct 9: with several repairs the full cards made a very long page. Each repair is one
   // folded row (RepairRow); one is open at a time — the one just added, or the only one — and
   // nothing is remembered across reloads.
@@ -696,6 +701,8 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
       setOtherName("");
       setOtherOpen(false);
       setExpanded(row.id);
+      setPickerOpen(false);
+      setAllChips(false);
     },
     onError: (e) => loudError("Could not add the repair", e),
   });
@@ -707,6 +714,8 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const rows = repairs.data ?? [];
   const allPhotos = photos.data ?? [];
   const openId = rows.length === 1 ? (rows[0]?.id ?? null) : expanded;
+  const showPicker = rows.length === 0 || pickerOpen;
+  const chipRows = allChips || q.length >= 2 ? favRows : favRows.slice(0, PICKER_CHIPS);
 
   return (
     <Section
@@ -752,117 +761,147 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
         </div>
       )}
 
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roof type">
-          <TagChip active={tag === null} onClick={() => pickTag(null)}>
-            All
-          </TagChip>
-          {REPAIR_TAGS.map((t) => (
-            <TagChip key={t.value} active={tag === t.value} onClick={() => pickTag(t.value)}>
-              {t.label}
+      {!showPicker && (
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 w-full text-base"
+          onClick={() => setPickerOpen(true)}
+        >
+          <Plus className="mr-2 h-5 w-5" /> Add another repair
+        </Button>
+      )}
+      {showPicker && (
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              className="h-11 pl-9 text-base"
+              placeholder="Search all repairs…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Roof type">
+            <TagChip active={tag === null} onClick={() => pickTag(null)}>
+              All
             </TagChip>
-          ))}
-        </div>
-        {recentRows.length > 0 && (
+            {REPAIR_TAGS.map((t) => (
+              <TagChip key={t.value} active={tag === t.value} onClick={() => pickTag(t.value)}>
+                {t.label}
+              </TagChip>
+            ))}
+          </div>
+          {recentRows.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Usual here
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {recentRows.map((t) => (
+                  <Chip
+                    key={t.id}
+                    tone="secondary"
+                    disabled={add.isPending}
+                    onClick={() => add.mutate(t)}
+                  >
+                    {t.name}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="space-y-1.5">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Usual here
+              {rows.length ? "Add another" : "Tap a repair to add it"}
             </p>
-            <div className="flex flex-wrap gap-2">
-              {recentRows.map((t) => (
-                <Chip
-                  key={t.id}
-                  tone="secondary"
-                  disabled={add.isPending}
-                  onClick={() => add.mutate(t)}
-                >
-                  {t.name}
-                </Chip>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {rows.length ? "Add another" : "Tap a repair to add it"}
-          </p>
-          {favs.error && (
-            <p className="text-sm text-destructive">
-              Could not load the repair list: {errText(favs.error)}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {favRows.map((t) => (
-              <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
-                {t.name}
-              </Chip>
-            ))}
-            <Chip tone="secondary" onClick={() => setOtherOpen((v) => !v)}>
-              Other
-            </Chip>
-          </div>
-        </div>
-        {otherOpen && (
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const name = otherName.trim();
-              if (!name) {
-                loudError("Name the repair", new Error("type what you did, e.g. Patched seam"));
-                return;
-              }
-              add.mutate({ name });
-            }}
-          >
-            <Input
-              autoFocus
-              className="h-11 text-base"
-              maxLength={200}
-              placeholder="What repair? e.g. Patched seam"
-              value={otherName}
-              onChange={(e) => setOtherName(e.target.value)}
-            />
-            <Button type="submit" className="h-11" disabled={add.isPending}>
-              Add
-            </Button>
-          </form>
-        )}
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            className="h-11 pl-9 text-base"
-            placeholder="Search all repairs…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        {q.length >= 2 && (
-          <div className="flex flex-wrap gap-2">
-            {found.isLoading ? (
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Searching…
-              </span>
-            ) : found.error ? (
-              <p className="text-sm text-destructive">Search failed: {errText(found.error)}</p>
-            ) : (found.data ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No repair named like “{q}”. Use Other to type it.
+            {favs.error && (
+              <p className="text-sm text-destructive">
+                Could not load the repair list: {errText(favs.error)}
               </p>
-            ) : (
-              (found.data ?? []).map((t) => (
+            )}
+            <div className="flex flex-wrap gap-2">
+              {chipRows.map((t) => (
                 <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
                   {t.name}
                 </Chip>
-              ))
-            )}
+              ))}
+              {favRows.length > PICKER_CHIPS && q.length < 2 && (
+                <Chip tone="secondary" onClick={() => setAllChips((v) => !v)}>
+                  {allChips ? "Show fewer" : `Show all ${favRows.length}`}
+                </Chip>
+              )}
+              <Chip tone="secondary" onClick={() => setOtherOpen((v) => !v)}>
+                Other
+              </Chip>
+            </div>
           </div>
-        )}
-      </div>
+          {otherOpen && (
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const name = otherName.trim();
+                if (!name) {
+                  loudError("Name the repair", new Error("type what you did, e.g. Patched seam"));
+                  return;
+                }
+                add.mutate({ name });
+              }}
+            >
+              <Input
+                autoFocus
+                className="h-11 text-base"
+                maxLength={200}
+                placeholder="What repair? e.g. Patched seam"
+                value={otherName}
+                onChange={(e) => setOtherName(e.target.value)}
+              />
+              <Button type="submit" className="h-11" disabled={add.isPending}>
+                Add
+              </Button>
+            </form>
+          )}
+          {q.length >= 2 && (
+            <div className="flex flex-wrap gap-2">
+              {found.isLoading ? (
+                <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Searching…
+                </span>
+              ) : found.error ? (
+                <p className="text-sm text-destructive">Search failed: {errText(found.error)}</p>
+              ) : (found.data ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No repair named like “{q}”. Use Other to type it.
+                </p>
+              ) : (
+                (found.data ?? []).map((t) => (
+                  <Chip key={t.id} disabled={add.isPending} onClick={() => add.mutate(t)}>
+                    {t.name}
+                  </Chip>
+                ))
+              )}
+            </div>
+          )}
+          {rows.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-10 w-full"
+              onClick={() => setPickerOpen(false)}
+            >
+              Done adding
+            </Button>
+          )}
+        </div>
+      )}
     </Section>
   );
 }
+
+/** Tap-to-add chips shown before "Show all" (owner, Oct 9: the picker took the screen). */
+const PICKER_CHIPS = 8;
 
 interface RepairVals {
   name: string;

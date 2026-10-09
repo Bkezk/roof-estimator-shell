@@ -21,7 +21,7 @@ describe("a manager corrects any line on the ticket", () => {
   it("+ takes more from the same place, the server checking the stock there", () => {
     expect(src).toContain("onAdd={(n) => add(r, n, false)}");
     expect(src).toContain("onSet={(n) => setTotal(r, n, false)}");
-    expect(src).toContain("if (checkStock && units > onHand + EPS) {");
+    expect(src).toContain("if (checkStock && !shortOk && units > onHand + EPS) {");
     const inv = readFileSync("src/lib/inventory.functions.ts", "utf8");
     expect(inv).toContain("const onHand = await onHandAt(sb, locationId, data);");
   });
