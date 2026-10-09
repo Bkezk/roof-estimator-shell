@@ -48,7 +48,12 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets, seesEveryone, seesOpportunitiesList } from "@/lib/access";
+import {
+  dispatchesTickets,
+  managesTickets,
+  seesEveryone,
+  seesOpportunitiesList,
+} from "@/lib/access";
 import { hasContactMethod, NO_CONTACT_ON_FILE } from "@/lib/crm-account";
 import { canManageFollowup, isFollowupOverdue } from "@/lib/followup-rules";
 import { OPPORTUNITY_DATE_REQUIRED } from "@/lib/ticket-date";
@@ -1140,8 +1145,9 @@ function OppEditor({ opp }: { opp: OpportunityWithNames | null }) {
                   </Link>
                 </Button>
               ))}
-            {/* Owner, Oct 2: beside Start a bid, at every status, for those who create tickets. */}
-            {opp && !deleted && managesTickets(profile) && (
+            {/* Owner, Oct 2: beside Start a bid, at every status, for those who create tickets
+                (the office too since Oct 9: dispatchesTickets). */}
+            {opp && !deleted && dispatchesTickets(profile) && (
               <Button asChild variant="outline">
                 <Link
                   to="/service"

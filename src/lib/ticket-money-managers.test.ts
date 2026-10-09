@@ -184,8 +184,9 @@ describe("creating tickets is the office's and a manager's (dispatchesTickets si
     const cust = read("src/components/customers-page.tsx");
     // A deleted customer (read-only, audit Oct 2) offers no New ticket either.
     expect(linesWith(cust, "const canNewTicket = ")).toEqual([
-      'const canNewTicket = can("service") && managesTickets(profile) && !props.readOnly;',
-      'const canNewTicket = can("service") && managesTickets(profile) && !readOnly;',
+      // Owner, Oct 9: the office creates tickets too (office-dispatch.test.ts).
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !props.readOnly;',
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !readOnly;',
     ]);
     expect(cust).toMatch(
       /\{canNewTicket && \(\s*<Button asChild size="sm">\s*<Link to="\/service" search=\{\{ new: 1, account: a\.id \}\}>/,

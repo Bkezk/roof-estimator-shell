@@ -52,7 +52,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets, seesEveryone } from "@/lib/access";
+import { dispatchesTickets, seesEveryone } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
 import { doneStamp, orderAccountTasks, type TaskRow } from "@/lib/tasks";
 import { TaskDialog } from "@/components/tasks/task-dialog";
@@ -603,7 +603,8 @@ function AccountSummary(props: {
 }) {
   const { can, profile } = useAuth();
   // Only a manager creates tickets (owner, Oct 1).
-  const canNewTicket = can("service") && managesTickets(profile) && !props.readOnly;
+  // Owner, Oct 9: the office creates tickets too (dispatchesTickets), here as on the Service page.
+  const canNewTicket = can("service") && dispatchesTickets(profile) && !props.readOnly;
   const users = useCrmUsers();
   const a = props.account;
   const physical = addressLines(a);
@@ -1361,7 +1362,7 @@ function SitesSection({
 }) {
   const { can, profile } = useAuth();
   // Only a manager creates tickets (owner, Oct 1).
-  const canNewTicket = can("service") && managesTickets(profile) && !readOnly;
+  const canNewTicket = can("service") && dispatchesTickets(profile) && !readOnly;
   const qc = useQueryClient();
   const deleteFn = useServerFn(deleteSite);
   // "new" = the add form is open; an id = that site is being edited.

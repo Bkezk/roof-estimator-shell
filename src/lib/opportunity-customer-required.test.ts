@@ -359,7 +359,7 @@ describe("4. Start a ticket", () => {
     );
     expect(header).toContain("Start a ticket");
     expect(header).toContain("search={ticketPrefillFromOpportunity(opp)}");
-    expect(header).toContain("managesTickets(profile)");
+    expect(header).toContain("dispatchesTickets(profile)");
     expect(header.indexOf("Start a bid")).toBeLessThan(header.indexOf("Start a ticket"));
     expect(header).not.toMatch(/status === "won"[\s\S]{0,80}Start a ticket/);
     // "Ticket #6004" once one exists.

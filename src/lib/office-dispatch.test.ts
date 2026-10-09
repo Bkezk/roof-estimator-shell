@@ -458,3 +458,18 @@ describe("the logging the owner asked for already exists (verified by reading th
     expect(svc).toMatch(/dateMoveNote\("Date", oldYmd, newYmd\)/);
   });
 });
+
+describe("the office's New ticket / Start a ticket on the Customers and Opportunities pages (Oct 9 follow-up)", () => {
+  it("both pages gate on dispatchesTickets, not managesTickets", () => {
+    const cust = readFileSync("src/components/customers-page.tsx", "utf8");
+    expect(cust).toContain(
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !props.readOnly;',
+    );
+    expect(cust).toContain(
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !readOnly;',
+    );
+    expect(cust).not.toContain("managesTickets(profile)");
+    const opp = readFileSync("src/components/opportunities-page.tsx", "utf8");
+    expect(opp).toMatch(/\{opp && !deleted && dispatchesTickets\(profile\) && \(/);
+  });
+});

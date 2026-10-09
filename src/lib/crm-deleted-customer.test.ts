@@ -311,7 +311,7 @@ describe("the Customers page on a deleted customer (source)", () => {
   it("hides Edit / Delete / New ticket and never opens the form when read-only", () => {
     expect(page).toMatch(/\{!props\.readOnly && \(\s*<>\s*<Button[^]*?<Pencil[^]*?Delete customer/);
     expect(page).toContain(
-      'const canNewTicket = can("service") && managesTickets(profile) && !props.readOnly;',
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !props.readOnly;',
     );
     expect(page).toContain("if (editing && !readOnly)");
   });
@@ -322,7 +322,7 @@ describe("the Customers page on a deleted customer (source)", () => {
     expect(page).toContain("!readOnly && editing === c.id ? (");
     expect(page).toContain("!readOnly && editing === s.id ? (");
     expect(page).toContain(
-      'const canNewTicket = can("service") && managesTickets(profile) && !readOnly;',
+      'const canNewTicket = can("service") && dispatchesTickets(profile) && !readOnly;',
     );
     expect(page).toContain("{!readOnly && !linking && (");
     expect(page).toContain("{!readOnly && !!suggested.data?.length && (");
