@@ -4,7 +4,7 @@
  * now" button (the same lazy dispatcher the app calls on load; it skips a pass when the last one
  * ran under ten minutes ago). Admin only — the server refuses everyone else.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -21,7 +21,6 @@ import { listAssigneeOptions } from "@/lib/opportunities.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { NumberField } from "@/components/ui/number-field";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -177,16 +176,23 @@ export function RemindersSettings() {
     onError: (e) => toast.error(`Could not run the reminders: ${errText(e)}`),
   });
 
-  const daysFields = (group: Field["group"]) =>
-    FIELDS.filter((f) => f.group === group).map((f) => (
-      <DaysField
-        key={f.key}
+  // Owner, Oct 9 ("optimize and clarify this page a bit, its layout is unusual and spaced out"):
+  // the numbers sit inside short sentences, one compact card, four sections side by side with
+  // their help instead of a two-column grid of boxed sub-cards.
+  const field = (key: NumericKey) => {
+    const f = FIELDS.find((x) => x.key === key)!;
+    return (
+      <Days
+        key={key}
         field={f}
-        value={draft[f.key]}
+        value={draft[key]}
         invalid={invalid.includes(f)}
-        onChange={(v) => setDraft((d) => ({ ...d, [f.key]: v }))}
+        onChange={(v) => setDraft((d) => ({ ...d, [key]: v }))}
       />
-    ));
+    );
+  };
+  const daysFields = (group: Field["group"]) =>
+    FIELDS.filter((f) => f.group === group).map((f) => field(f.key));
 
   const submit = () => {
     if (invalid.length) {
@@ -198,15 +204,29 @@ export function RemindersSettings() {
     save.mutate();
   };
 
+  const saveButton = (
+    <Button type="submit" form="reminder-settings" disabled={save.isPending || !settings.data}>
+      {save.isPending ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <Save className="mr-2 h-4 w-4" />
+      )}
+      Save
+    </Button>
+  );
+
   return (
-    <div className="space-y-6">
+    <div className="max-w-4xl space-y-6">
       <Card>
-        <CardHeader>
-          <CardTitle>Follow-up reminders</CardTitle>
-          <CardDescription>
-            Assigning a ticket or an opportunity starts a timer; the assignee is reminded at these
-            lengths until it is closed. Changes apply to timers started from now on.
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div className="space-y-1.5">
+            <CardTitle>Follow-up reminders</CardTitle>
+            <CardDescription>
+              Assigning a ticket or an opportunity starts a timer; the assignee is reminded at these
+              lengths until it is closed. Changes apply to timers started from now on.
+            </CardDescription>
+          </div>
+          {saveButton}
         </CardHeader>
         <CardContent>
           {settings.error ? (
@@ -219,95 +239,90 @@ export function RemindersSettings() {
             </p>
           ) : (
             <form
-              className="space-y-5"
+              id="reminder-settings"
+              className="divide-y"
               onSubmit={(e) => {
                 e.preventDefault();
                 submit();
               }}
             >
-              <div className="grid gap-4 sm:grid-cols-2">
-                <p className="text-sm font-semibold sm:col-span-2">Opportunities</p>
-                {daysFields("opportunity")}
-                <p className="pt-2 text-sm font-semibold sm:col-span-2">Tickets</p>
-                {daysFields("ticket")}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                A scheduled ticket is due on its scheduled day and reminds from then.
-              </p>
+              <Section title="Opportunities">
+                <Row>Should close within {field("opportunity_close_days")} days.</Row>
+                <Row>
+                  Remind the assignee after {field("opportunity_first_days")} days, then every{" "}
+                  {field("opportunity_every_days")} days until it is closed.
+                </Row>
+              </Section>
 
-              <div className="space-y-4 rounded-lg border p-4">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold">Needs assignment</p>
-                  <p className="text-sm text-muted-foreground">
-                    The front desk can enter a ticket or an opportunity without a person on it. It
-                    sits under &ldquo;Unassigned&rdquo; on Work Overview for managers and office
-                    staff until someone is assigned, and after this many days waiting it is flagged
-                    overdue there. 0 flags it the day it is entered.
-                  </p>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">{daysFields("unassigned")}</div>
-              </div>
+              <Section
+                title="Tickets"
+                help="A scheduled ticket is due on its scheduled day and reminds from then."
+              >
+                <Row>
+                  Unscheduled: remind the technician after {field("ticket_first_days")} days, then
+                  every {field("ticket_every_days")} days.
+                </Row>
+              </Section>
 
-              <div className="space-y-4 rounded-lg border p-4">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold">Untouched work</p>
-                  <p className="text-sm text-muted-foreground">
-                    Untouched = assigned but no contact logged and not started. Past the limit the
-                    item turns red in the lists and the people below hear about it right away, then
-                    again at the &ldquo;Then every N days&rdquo; above (ticket or opportunity) until
-                    someone logs a contact or starts it.
-                  </p>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">{daysFields("untouched")}</div>
-                <label className="flex items-center gap-2 text-sm">
+              <Section
+                title="Needs assignment"
+                help="A ticket or opportunity with nobody on it sits under Unassigned on Work Overview until someone takes it."
+              >
+                <Row>
+                  Flag it overdue after {daysFields("unassigned")} days without a person (0 = the
+                  day it is entered).
+                </Row>
+              </Section>
+
+              <Section
+                title="Untouched work"
+                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists and the people below hear right away, then again at the ticket's or opportunity's “every N days” above."
+              >
+                <Row>
+                  A ticket counts as untouched after {field("ticket_untouched_days")} days with no
+                  contact; an opportunity after {field("opportunity_untouched_days")} days.
+                </Row>
+                <Row>
                   <Switch
                     checked={draft.escalate_to_admins}
                     onCheckedChange={(v) => setDraft((d) => ({ ...d, escalate_to_admins: v }))}
+                    aria-label="Escalate untouched items to every admin and manager"
                   />
-                  Escalate untouched items to every admin and manager
-                </label>
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">Also escalate to</p>
+                  <span>Escalate untouched items to every admin and manager</span>
+                </Row>
+                <Row>
+                  <span className="text-muted-foreground">Also escalate to</span>
                   {users.error ? (
-                    <p className="text-xs text-destructive">
+                    <span className="text-xs text-destructive">
                       Could not load the users: {errText(users.error)}
-                    </p>
+                    </span>
                   ) : !users.data ? (
-                    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the users…
-                    </p>
+                    </span>
                   ) : userOptions.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No users to pick.</p>
+                    <span className="text-xs text-muted-foreground">No users to pick.</span>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {userOptions.map((u) => {
-                        const on = draft.escalate_user_ids.includes(u.id);
-                        return (
-                          <Button
-                            key={u.id}
-                            type="button"
-                            size="sm"
-                            variant={on ? "default" : "outline"}
-                            className="h-7 rounded-full px-3 text-xs"
-                            aria-pressed={on}
-                            onClick={() => toggleEscalate(u.id)}
-                          >
-                            {u.name}
-                          </Button>
-                        );
-                      })}
-                    </div>
+                    userOptions.map((u) => {
+                      const on = draft.escalate_user_ids.includes(u.id);
+                      return (
+                        <Button
+                          key={u.id}
+                          type="button"
+                          size="sm"
+                          variant={on ? "default" : "outline"}
+                          className="h-7 rounded-full px-3 text-xs"
+                          aria-pressed={on}
+                          onClick={() => toggleEscalate(u.id)}
+                        >
+                          {u.name}
+                        </Button>
+                      );
+                    })
                   )}
-                </div>
-              </div>
-              <Button type="submit" disabled={save.isPending}>
-                {save.isPending ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-2 h-4 w-4" />
-                )}
-                Save
-              </Button>
+                </Row>
+              </Section>
+              <div className="flex justify-end pt-4">{saveButton}</div>
             </form>
           )}
         </CardContent>
@@ -461,26 +476,46 @@ export function RemindersSettings() {
   );
 }
 
-function DaysField(props: {
+/** One setting group: its name and help on the left, its sentences on the right. */
+function Section(props: { title: string; help?: string; children: ReactNode }) {
+  return (
+    <div className="grid gap-x-6 gap-y-2 py-4 first:pt-0 sm:grid-cols-[11rem_1fr]">
+      <div className="space-y-1">
+        <p className="text-sm font-semibold">{props.title}</p>
+        {props.help && <p className="text-xs text-muted-foreground">{props.help}</p>}
+      </div>
+      <div className="space-y-2">{props.children}</div>
+    </div>
+  );
+}
+
+/** A sentence with number boxes in it. */
+function Row(props: { children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm">{props.children}</div>
+  );
+}
+
+/** A number of days, inline in its sentence; the full label is its accessible name. */
+function Days(props: {
   field: Field;
   value: number;
   invalid: boolean;
   onChange: (v: number) => void;
 }) {
-  const id = `crm-${props.field.key}`;
   return (
-    <div className="space-y-1">
-      <Label htmlFor={id}>{props.field.label}</Label>
-      <div id={id} className="w-28">
-        <NumberField
-          value={props.value}
-          min={0}
-          max={365}
-          inputMode="numeric"
-          invalid={props.invalid}
-          onChange={(v) => props.onChange(Math.round(v))}
-        />
-      </div>
-    </div>
+    <span className="inline-block w-16">
+      <NumberField
+        title={props.field.label}
+        value={props.value}
+        min={0}
+        max={365}
+        inputMode="numeric"
+        invalid={props.invalid}
+        className="h-8 text-center"
+        blankZero={false}
+        onChange={(v) => props.onChange(Math.round(v))}
+      />
+    </span>
   );
 }
