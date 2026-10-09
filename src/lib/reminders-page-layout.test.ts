@@ -16,7 +16,9 @@ import { describe, expect, it } from "vitest";
 const src = readFileSync("src/components/reminders-settings.tsx", "utf8");
 
 describe("Reminders page layout", () => {
-  it("four sections as sentences with inline day boxes", () => {
+  it("four sections as labelled lines: who, due, first reminder, after that", () => {
+    // Owner, Oct 9, on the sentence version: "i still think this wording is a bit unclear" —
+    // each rule is now one line with a label naming the question it answers.
     for (const t of [
       'title="Opportunities"',
       'title="Tickets"',
@@ -24,29 +26,52 @@ describe("Reminders page layout", () => {
       'title="Untouched work"',
     ])
       expect(src).toContain(t);
+    expect(src.match(/<Line label="Who is reminded">/g)?.length).toBe(2);
+    expect(src.match(/<Line label="Due date">/g)?.length).toBe(2);
+    expect(src.match(/<Line label="First reminder">/g)?.length).toBe(2);
+    expect(src.match(/<Line label="After that">/g)?.length).toBe(2);
+    // Opportunities
     expect(src).toMatch(
-      /Timer starts when someone is assigned\. Due at the expected close,\{" "\}\s*\{field\("opportunity_close_days"\)\} days after it is entered unless a date is set\./,
+      /The person assigned to the opportunity\. Nobody, until someone is assigned\./,
     );
     expect(src).toMatch(
-      /Remind the assignee \{field\("opportunity_first_days"\)\} days after assignment \(never\s+later than the due date\), then every \{field\("opportunity_every_days"\)\} days until\s+it is won, lost or closed\./,
+      /The expected close date\. When none is set, \{field\("opportunity_close_days"\)\} days\s+after the opportunity is entered\./,
     );
     expect(src).toMatch(
-      /Timer starts when a technician is assigned\. A scheduled ticket is due on its day:\s+remind the technician that day, then every \{field\("ticket_every_days"\)\} days until\s+it is Done\./,
+      /\{field\("opportunity_first_days"\)\} days after the person is assigned, or on the due\s+date if that comes first\./,
     );
     expect(src).toMatch(
-      /An unscheduled ticket is due \{field\("ticket_first_days"\)\} days after assignment:\s+remind the technician then, and again every \{draft\.ticket_every_days\} days until\s+it is Done\./,
+      /Every \{field\("opportunity_every_days"\)\} days until it is won, lost or marked No\s+response\./,
     );
+    // Tickets
+    expect(src).toMatch(/The technician on the ticket\. Nobody, until one is assigned\./);
     expect(src).toMatch(
-      /It sits under Unassigned on Work Overview and is flagged overdue there after\{" "\}\s*\{daysFields\("unassigned"\)\} days \(0 = the day it is entered\)\./,
+      /The scheduled day\. With no scheduled day, \{field\("ticket_first_days"\)\} days after\s+the technician is assigned\./,
     );
+    expect(src).toContain('<Line label="First reminder">On the due date.</Line>');
+    expect(src).toMatch(/Every \{field\("ticket_every_days"\)\} days until the ticket is Done\./);
+    // Needs assignment
+    expect(src).toContain('<Line label="Where it shows">Under Unassigned on Work Overview.</Line>');
     expect(src).toMatch(
-      /A ticket counts as untouched after \{field\("ticket_untouched_days"\)\} days with no\s+contact; an opportunity after \{field\("opportunity_untouched_days"\)\} days\./,
+      /<Line label="Flagged overdue">\s+\{daysFields\("unassigned"\)\} days after it is entered with nobody assigned \(0 = the\s+same day\)\./,
     );
-    // The old wording the owner found unclear is gone.
+    // Untouched work
+    expect(src).toMatch(
+      /<Line label="Counts as untouched">\s+A ticket after \{field\("ticket_untouched_days"\)\} days with no contact logged; an\s+opportunity after \{field\("opportunity_untouched_days"\)\} days\./,
+    );
+    expect(src).toContain('<Line label="What happens">');
+    expect(src).toContain('<Line label="Also tell">');
+    expect(src).toContain('<Line label="And these people">');
+    expect(src).toContain("<span>Every admin and manager</span>");
+    // The label column inside each section.
+    expect(src).toContain("sm:grid-cols-[10rem_1fr]");
+    expect(src).not.toContain("function Row(");
+    // The old wordings the owner found unclear are gone.
     expect(src).not.toContain("Should close within");
-    expect(src).not.toContain("Remind the assignee after");
+    expect(src).not.toContain("Remind the assignee");
     expect(src).not.toContain("Unscheduled: remind the technician after");
     expect(src).not.toContain("Flag it overdue after");
+    expect(src).not.toContain("Timer starts when someone is assigned. Due at the expected close");
   });
   it("each section's help says who is reminded, from when, and what ends the timer", () => {
     expect(src).toContain(
@@ -59,17 +84,20 @@ describe("Reminders page layout", () => {
       'help="Nobody is reminded while a ticket or opportunity has no person on it — there is no timer until someone is assigned."',
     );
     expect(src).toMatch(
-      /help="Assigned, but no contact logged and not started\. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “every N days” above — until a contact is logged or it is started\."/,
+      /help="Assigned, but no contact logged and not started\. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until a contact is logged or it is started\."/,
     );
-    // The card's description states the one rule behind all four.
+    // The card's description states the one rule behind all four, and what each line answers.
     expect(src).toMatch(
       /A timer starts when a ticket gets a technician or an opportunity gets an assignee;\s+that person is reminded at these lengths until it is closed\. Nothing is timed, and\s+nobody is reminded, while an item has no person on it\./,
+    );
+    expect(src).toMatch(
+      /Each line below says who is\s+reminded, when the item is due, when the first reminder goes and how often after that\./,
     );
     // The strings other tests and the settings keys pin are still there.
     expect(src).toContain("Escalate untouched items to every admin and manager");
     expect(src).toContain('key: "unassigned_overdue_days"');
     expect(src).toContain('daysFields("unassigned")');
-    // The accessible names (the boxes' title) say the same as the sentences.
+    // The accessible names (the boxes' title) say the same as the lines.
     expect(src).toContain('label: "First opportunity reminder N days after assignment"');
     expect(src).toContain(
       'label: "Unscheduled ticket due N days after the technician is assigned"',

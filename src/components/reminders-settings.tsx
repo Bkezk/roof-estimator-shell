@@ -244,8 +244,9 @@ export function RemindersSettings() {
             <CardDescription>
               A timer starts when a ticket gets a technician or an opportunity gets an assignee;
               that person is reminded at these lengths until it is closed. Nothing is timed, and
-              nobody is reminded, while an item has no person on it. Changes apply to timers started
-              from now on.
+              nobody is reminded, while an item has no person on it. Each line below says who is
+              reminded, when the item is due, when the first reminder goes and how often after that.
+              Changes apply to timers started from now on.
             </CardDescription>
           </div>
           {saveButton}
@@ -272,61 +273,71 @@ export function RemindersSettings() {
                 title="Opportunities"
                 help="Won, Lost or No response ends the timer; taking the assignee off stops the reminders."
               >
-                <Row>
-                  Timer starts when someone is assigned. Due at the expected close,{" "}
-                  {field("opportunity_close_days")} days after it is entered unless a date is set.
-                </Row>
-                <Row>
-                  Remind the assignee {field("opportunity_first_days")} days after assignment (never
-                  later than the due date), then every {field("opportunity_every_days")} days until
-                  it is won, lost or closed.
-                </Row>
+                <Line label="Who is reminded">
+                  The person assigned to the opportunity. Nobody, until someone is assigned.
+                </Line>
+                <Line label="Due date">
+                  The expected close date. When none is set, {field("opportunity_close_days")} days
+                  after the opportunity is entered.
+                </Line>
+                <Line label="First reminder">
+                  {field("opportunity_first_days")} days after the person is assigned, or on the due
+                  date if that comes first.
+                </Line>
+                <Line label="After that">
+                  Every {field("opportunity_every_days")} days until it is won, lost or marked No
+                  response.
+                </Line>
               </Section>
 
               <Section
                 title="Tickets"
                 help="Done, Invoiced or Closed ends the timer; taking the technician off stops the reminders."
               >
-                <Row>
-                  Timer starts when a technician is assigned. A scheduled ticket is due on its day:
-                  remind the technician that day, then every {field("ticket_every_days")} days until
-                  it is Done.
-                </Row>
-                <Row>
-                  An unscheduled ticket is due {field("ticket_first_days")} days after assignment:
-                  remind the technician then, and again every {draft.ticket_every_days} days until
-                  it is Done.
-                </Row>
+                <Line label="Who is reminded">
+                  The technician on the ticket. Nobody, until one is assigned.
+                </Line>
+                <Line label="Due date">
+                  The scheduled day. With no scheduled day, {field("ticket_first_days")} days after
+                  the technician is assigned.
+                </Line>
+                <Line label="First reminder">On the due date.</Line>
+                <Line label="After that">
+                  Every {field("ticket_every_days")} days until the ticket is Done.
+                </Line>
               </Section>
 
               <Section
                 title="Needs assignment"
                 help="Nobody is reminded while a ticket or opportunity has no person on it — there is no timer until someone is assigned."
               >
-                <Row>
-                  It sits under Unassigned on Work Overview and is flagged overdue there after{" "}
-                  {daysFields("unassigned")} days (0 = the day it is entered).
-                </Row>
+                <Line label="Where it shows">Under Unassigned on Work Overview.</Line>
+                <Line label="Flagged overdue">
+                  {daysFields("unassigned")} days after it is entered with nobody assigned (0 = the
+                  same day).
+                </Line>
               </Section>
 
               <Section
                 title="Untouched work"
-                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “every N days” above — until a contact is logged or it is started."
+                help="Assigned, but no contact logged and not started. Past the limit it turns red in the lists; the assignee is reminded as above, and the people below are told as well — right away, then again at the ticket's or opportunity's “After that” interval above — until a contact is logged or it is started."
               >
-                <Row>
-                  A ticket counts as untouched after {field("ticket_untouched_days")} days with no
-                  contact; an opportunity after {field("opportunity_untouched_days")} days.
-                </Row>
-                <Row>
+                <Line label="Counts as untouched">
+                  A ticket after {field("ticket_untouched_days")} days with no contact logged; an
+                  opportunity after {field("opportunity_untouched_days")} days.
+                </Line>
+                <Line label="What happens">
+                  It turns red in the lists. The assignee keeps getting the reminders above.
+                </Line>
+                <Line label="Also tell">
                   <Switch
                     checked={draft.escalate_to_admins}
                     onCheckedChange={(v) => setDraft((d) => ({ ...d, escalate_to_admins: v }))}
                     aria-label="Escalate untouched items to every admin and manager"
                   />
-                  <span>Escalate untouched items to every admin and manager</span>
-                </Row>
-                <Row>
-                  <span className="text-muted-foreground">Also escalate to</span>
+                  <span>Every admin and manager</span>
+                </Line>
+                <Line label="And these people">
                   {users.error ? (
                     <span className="text-xs text-destructive">
                       Could not load the users: {errText(users.error)}
@@ -355,7 +366,7 @@ export function RemindersSettings() {
                       );
                     })
                   )}
-                </Row>
+                </Line>
               </Section>
               <div className="flex justify-end pt-4">{saveButton}</div>
             </form>
@@ -524,10 +535,17 @@ function Section(props: { title: string; help?: string; children: ReactNode }) {
   );
 }
 
-/** A sentence with number boxes in it. */
-function Row(props: { children: ReactNode }) {
+/**
+ * One rule as "label: what happens", the number boxes inline in the text (owner, Oct 9, after the
+ * sentence version: "i still think this wording is a bit unclear" — each line now answers one
+ * question: who is reminded, when it is due, when the first reminder goes, then how often).
+ */
+function Line(props: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm">{props.children}</div>
+    <div className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[10rem_1fr]">
+      <span className="font-medium text-muted-foreground">{props.label}</span>
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">{props.children}</span>
+    </div>
   );
 }
 
