@@ -127,6 +127,7 @@ export function Box({
   summary,
   storageKey,
   tone: toneKey,
+  plain,
 }: {
   title: string;
   icon: LucideIcon;
@@ -141,6 +142,12 @@ export function Box({
   storageKey?: string | undefined;
   /** Its colour (SECTION_TONES key); else the storage key's. */
   tone?: string | undefined;
+  /**
+   * Inside a card already (the close-out's step card, owner Oct 9: "a box in a box … awkward and
+   * cramped"): no border or background of its own, a rule above instead, and the header flush
+   * with the card's padding.
+   */
+  plain?: boolean | undefined;
 }) {
   const [open, setOpen] = useState(() => initialOpen(storageKey, defaultOpen));
   const t = sectionTone(toneKey ?? storageKey);
@@ -148,7 +155,12 @@ export function Box({
 
   if (!collapsible)
     return (
-      <section className={`space-y-3 rounded-lg border p-4 ${t?.edge ?? ""}`} aria-label={title}>
+      <section
+        className={
+          plain ? "space-y-3 border-t pt-3" : `space-y-3 rounded-lg border p-4 ${t?.edge ?? ""}`
+        }
+        aria-label={title}
+      >
         {hasSummary ? (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="flex items-center gap-2 font-semibold">
@@ -172,11 +184,16 @@ export function Box({
     if (storageKey) writeSection(storageKey, next);
   };
   return (
-    <section className={`overflow-hidden rounded-lg border ${t?.edge ?? ""}`} aria-label={title}>
+    <section
+      className={plain ? "border-t" : `overflow-hidden rounded-lg border ${t?.edge ?? ""}`}
+      aria-label={title}
+    >
       <h2>
         <button
           type="button"
-          className={`flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${t?.head ?? ""}`}
+          className={`flex w-full items-center justify-between gap-3 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+            plain ? "min-h-11 py-2" : `p-4 ${t?.head ?? ""}`
+          }`}
           aria-expanded={open}
           onClick={toggle}
         >
@@ -189,7 +206,11 @@ export function Box({
           </span>
         </button>
       </h2>
-      {open && <div className={`space-y-3 px-4 pb-4 ${t ? "pt-3" : ""}`}>{children}</div>}
+      {open && (
+        <div className={plain ? "space-y-3 pb-2" : `space-y-3 px-4 pb-4 ${t ? "pt-3" : ""}`}>
+          {children}
+        </div>
+      )}
     </section>
   );
 }

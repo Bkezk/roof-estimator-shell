@@ -40,6 +40,9 @@ const full: StepState = {
   onSiteAt: null,
   closingNotes: "Two holes over the gym, patched.",
   signaturePath: "job/signature.png",
+  crewOthers: 0,
+  materialItems: 1,
+  signedBy: "",
 };
 const ids = CLOSEOUT_STEPS.map((s) => s.id);
 const statusList = (s: StepState) => stepStatuses(s).map((x) => x.status);
@@ -91,7 +94,7 @@ describe("each step's rule (the same things Complete's list checks)", () => {
     ).toBe(false);
     expect(stepDone("before", full)).toBe(true);
   });
-  it("3 every repair has Work completed text (blank does not count) and an After photo", () => {
+  it("3 every repair has its What you did text (blank does not count) and an After photo", () => {
     expect(stepDone("work", { ...full, repairs: [{ id: "r1", resolution_text: "   " }] })).toBe(
       false,
     );
@@ -235,9 +238,9 @@ describe("the strip's lines", () => {
 
 describe("a repair's needs by step (closeout-repairs.ts)", () => {
   it("step 2 asks for the Before photo only; step 3 for the After photo and the work text", () => {
-    const needs = ["before photo", "after photo", "work completed"];
+    const needs = ["before photo", "after photo", "what you did"];
     expect(needsFor("before", needs)).toEqual(["before photo"]);
-    expect(needsFor("work", needs)).toEqual(["after photo", "work completed"]);
+    expect(needsFor("work", needs)).toEqual(["after photo", "what you did"]);
     expect(needsFor("before", ["after photo"])).toEqual([]);
     expect(needsFor("work", ["before photo"])).toEqual([]);
     expect(PHASE_PHOTO_ROLES).toEqual({ before: ["before"], work: ["after"] });

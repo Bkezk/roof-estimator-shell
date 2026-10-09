@@ -28,10 +28,16 @@ export function CrewBox({
   job,
   disabled,
   className,
+  embedded,
 }: {
   job: Pick<ServiceJobRow, "id" | "technician_id" | "crew_confirmed_at" | "stage">;
   disabled?: boolean | undefined;
   className?: string | undefined;
+  /**
+   * Inside the close-out's step card "1 · Who is here" (owner, Oct 9: no box in a box): no
+   * border of its own, the question as a plain line with Saved beside it.
+   */
+  embedded?: boolean | undefined;
 }) {
   const { session, profile } = useAuth();
   const qc = useQueryClient();
@@ -133,13 +139,21 @@ export function CrewBox({
 
   return (
     <section
-      className={`space-y-3 rounded-xl border p-4 ${pending ? "border-primary bg-primary/5" : "bg-card"} ${className ?? ""}`}
+      className={
+        embedded
+          ? `space-y-3 ${className ?? ""}`
+          : `space-y-3 rounded-xl border p-4 ${pending ? "border-primary bg-primary/5" : "bg-card"} ${className ?? ""}`
+      }
       aria-label="Who is on this job"
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Users className="h-5 w-5 text-muted-foreground" /> Who is on this job with you?
-        </h2>
+        {embedded ? (
+          <p className="font-medium">Who is on this job with you?</p>
+        ) : (
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Users className="h-5 w-5 text-muted-foreground" /> Who is on this job with you?
+          </h2>
+        )}
         <SavedIndicator state={autosave.state} />
       </div>
       {pending && (

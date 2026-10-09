@@ -180,9 +180,12 @@ describe("the Materials section: one list, one way in", () => {
     expect(src).not.toContain("On this ticket — correct a quantity");
     expect(src).not.toContain("Also on this ticket");
     expect(src).not.toContain("officeRows");
-    // Empty: no list, just the heading line.
+    // Empty: no list. The "N items" count sits on the close-out's step card header now
+    // (closeout.tsx, countMaterialItems; owner, Oct 9: no box in a box), so the section has no
+    // heading of its own and no item count.
     expect(body).toContain("{onTicket.length > 0 && (");
-    expect(src).toContain("const itemsOnTicket = onTicket.length;");
+    expect(src).not.toContain("const itemsOnTicket = onTicket.length;");
+    expect(src).toContain('<section className="space-y-3" aria-label="Materials">');
   });
   it("(2) the search is the one way in; no add button, a Browse the shop link opens the shelf view at the shop", () => {
     expect(src).not.toContain("Add material (shop or a truck)");

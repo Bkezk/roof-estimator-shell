@@ -89,6 +89,8 @@ export function PurchaseOrdersSection({
       storageKey="purchase-orders"
       defaultOpen={false}
       summary={q.data ? poSummary(pos) : undefined}
+      // On the close-out the fold sits inside the step card (owner, Oct 9: no box in a box).
+      plain={field}
     >
       {q.error ? (
         <p className="text-sm text-destructive">

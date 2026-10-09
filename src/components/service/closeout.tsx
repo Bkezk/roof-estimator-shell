@@ -8,8 +8,10 @@
  * was done and the After photos, 4 materials off the truck (one tap per piece, or any material
  * found by search, from the truck or the shop; materials-section.tsx) and purchase orders for
  * material bought for the job (purchase-orders-section.tsx; no Approved toggle here), 5 time
- * (typed to the quarter hour), 6 closing notes, 7 the customer's signature, then Complete. A
- * done step stays open and editable; a locked one is a single muted line.
+ * (typed to the quarter hour), 6 closing notes, 7 the customer's signature, then Complete. Each
+ * step is one card (StepCard; owner, Oct 9: "a box in a box … awkward and cramped"): a done step
+ * that is not the current one folds to its header and a one-line summary with Edit; a locked
+ * one is a single muted line; the strip above is one line of numbered dots.
  *
  * Everything saves as it is filled out (owner, Sep 30: no Save button): repairs, photos, time
  * and the signature as they are made, the text fields a moment after typing stops (a subtle
@@ -31,6 +33,7 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   Camera,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -41,11 +44,14 @@ import {
   Lock,
   MapPin,
   Minus,
+  Package,
   PenLine,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
   Trash2,
+  Users,
   Wrench,
 } from "lucide-react";
 
@@ -119,6 +125,7 @@ import {
 } from "@/lib/closeout-repairs";
 import {
   STEP_COUNT,
+  countMaterialItems,
   finishStepLabel,
   firstOpenStep,
   lockedLine,
@@ -127,6 +134,7 @@ import {
   stepOf,
   stepStatus,
   stepStatuses,
+  stepSummary,
   unlockToast,
   type CloseoutStep,
   type StepId,
@@ -305,25 +313,14 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
   );
 }
 
-function Section({
-  title,
-  icon: Icon,
-  children,
-  aside,
-}: {
-  title: string;
-  icon: typeof Wrench;
-  children: React.ReactNode;
-  aside?: React.ReactNode;
-}) {
+/**
+ * A step's body. Plain (owner, Oct 9: "we have a box in a box here and it looks a bit awkward and
+ * cramped"): the step card (StepCard) draws the border, the icon, the title and the aside; this
+ * only names the region.
+ */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4" aria-label={title}>
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Icon className="h-5 w-5 text-muted-foreground" /> {title}
-        </h2>
-        {aside}
-      </div>
+    <section className="space-y-3" aria-label={title}>
       {children}
     </section>
   );
@@ -341,10 +338,12 @@ function isTyping(): boolean {
 }
 
 /**
- * The step strip under the header (owner, Oct 9): "Step 3 of 7 · The work", then the seven
- * titles — done ones ticked, the current one highlighted, locked ones greyed with a lock and
- * the line saying what unlocks them. A tap on an open step scrolls to it. Tight enough for a
- * 390 px phone: one line per step, the current title never truncated.
+ * The step strip under the header, one line (owner, Oct 9: "having all the steps listed above
+ * the forms takes up a lot of space"): "Step 3 of 7 · The work" on the left, seven numbered dots
+ * on the right — done ones filled with a tick, the current one primary, locked ones muted with a
+ * lock — each a tap that scrolls to its step (a locked one does nothing; its title says what
+ * unlocks it). The chevron opens the full list (one line per step, the locked ones with their
+ * unlock line) for anyone who wants it; closed by default, nothing remembered. Not sticky.
  */
 function StepStrip({
   statuses,
@@ -353,64 +352,125 @@ function StepStrip({
   statuses: { step: CloseoutStep; status: StepStatus }[];
   open: StepId | null;
 }) {
+  const [listOpen, setListOpen] = useState(false);
   return (
     <nav aria-label="Close-out steps" className="rounded-xl border bg-card px-3 py-2">
-      <p className="mb-1 text-sm font-semibold">{stepHeadline(open)}</p>
-      <ol className="space-y-0.5">
-        {statuses.map(({ step, status }) => (
-          <li key={step.id}>
-            <button
-              type="button"
-              disabled={status === "locked"}
-              aria-current={status === "current" ? "step" : undefined}
-              className={`flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-left text-sm leading-tight ${
-                status === "current"
-                  ? "bg-primary/10 font-semibold text-primary"
-                  : status === "done"
-                    ? "hover:bg-muted/40"
-                    : "text-muted-foreground/70"
-              }`}
-              onClick={() => jumpTo(step.id)}
-            >
-              {status === "done" ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-              ) : status === "locked" ? (
-                <Lock className="h-4 w-4 shrink-0" />
-              ) : (
-                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                  {step.n}
-                </span>
-              )}
-              <span className="min-w-0 flex-1">
-                <span className={status === "current" ? "block" : "block truncate"}>
-                  {status === "current" ? step.title : `${step.n}. ${step.title}`}
-                </span>
-                {status === "locked" && (
-                  <span className="block truncate text-xs font-normal">{step.unlocks}</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{stepHeadline(open)}</p>
+        <ol className="flex items-center gap-1" aria-label="Jump to a step">
+          {statuses.map(({ step, status }) => (
+            <li key={step.id}>
+              <button
+                type="button"
+                aria-current={status === "current" ? "step" : undefined}
+                aria-disabled={status === "locked" || undefined}
+                aria-label={`Step ${step.n} of ${STEP_COUNT}: ${step.title}${
+                  status === "locked" ? ` — locked: ${step.unlocks}` : ""
+                }`}
+                title={status === "locked" ? `Locked — ${step.unlocks}` : step.title}
+                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                  status === "current"
+                    ? "bg-primary text-primary-foreground"
+                    : status === "done"
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-emerald-950"
+                      : "cursor-default bg-muted text-muted-foreground/70"
+                }`}
+                onClick={() => status !== "locked" && jumpTo(step.id)}
+              >
+                {status === "done" ? (
+                  <Check className="h-4 w-4" aria-hidden />
+                ) : status === "locked" ? (
+                  <Lock className="h-3.5 w-3.5" aria-hidden />
+                ) : (
+                  step.n
                 )}
-              </span>
-            </button>
-          </li>
-        ))}
-      </ol>
+              </button>
+            </li>
+          ))}
+        </ol>
+        <button
+          type="button"
+          aria-expanded={listOpen}
+          aria-label={listOpen ? "Hide the step list" : "Show all steps"}
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40"
+          onClick={() => setListOpen((v) => !v)}
+        >
+          {listOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+      </div>
+      {listOpen && (
+        <ol className="mt-2 space-y-0.5 border-t pt-2">
+          {statuses.map(({ step, status }) => (
+            <li key={step.id}>
+              <button
+                type="button"
+                disabled={status === "locked"}
+                aria-current={status === "current" ? "step" : undefined}
+                className={`flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-left text-sm leading-tight ${
+                  status === "current"
+                    ? "bg-primary/10 font-semibold text-primary"
+                    : status === "done"
+                      ? "hover:bg-muted/40"
+                      : "text-muted-foreground/70"
+                }`}
+                onClick={() => jumpTo(step.id)}
+              >
+                {status === "done" ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                ) : status === "locked" ? (
+                  <Lock className="h-4 w-4 shrink-0" />
+                ) : (
+                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                    {step.n}
+                  </span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className={status === "current" ? "block" : "block truncate"}>
+                    {status === "current" ? step.title : `${step.n}. ${step.title}`}
+                  </span>
+                  {status === "locked" && (
+                    <span className="block truncate text-xs font-normal">{step.unlocks}</span>
+                  )}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      )}
     </nav>
   );
 }
 
 /**
- * A step's place on the page: its sections under a small "Step n of 7 · title" line (ringed
- * while current, ticked once done — a done step stays rendered and editable), or, while locked,
- * one muted line saying which step to finish first.
+ * The step IS the card (owner, Oct 9: "we have a box in a box here and it looks a bit awkward and
+ * cramped even on subsequent steps"): one bordered card per step. Its header row is the step
+ * number (a tick once done), the section's icon and the title — "2 · Before" — with the aside on
+ * the right ("0 of 1 done", "3 items"); the body renders plain inside. The current step has a
+ * primary border and a left accent bar, not a ring. A locked step is one muted line saying which
+ * step to finish first. A done step that is not current folds to its header and a one-line
+ * summary (closeout-steps.ts stepSummary) with Edit ("can we have each step minimize after
+ * completion"); `expanded` / `onToggle` are the form's per-step state, and a step that becomes
+ * current again is never folded.
  */
-function StepSlot({
+function StepCard({
   id,
   status,
   open,
+  icon: Icon,
+  aside,
+  summary,
+  expanded,
+  onToggle,
   children,
 }: {
   id: StepId;
   status: StepStatus;
   open: StepId | null;
+  icon: typeof Wrench;
+  aside?: React.ReactNode;
+  summary: string;
+  expanded: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
 }) {
   const step = stepOf(id);
@@ -423,33 +483,71 @@ function StepSlot({
         <Lock className="h-4 w-4 shrink-0" />
         <span>
           <span className="font-medium">
-            {step.n}. {step.title}
+            {step.n} · {step.title}
           </span>{" "}
           · {lockedLine(open)}
         </span>
       </p>
     );
+  const folded = status === "done" && !expanded;
   return (
-    <div
+    <section
       id={stepAnchor(id)}
-      className={`scroll-mt-3 space-y-3 ${
-        status === "current"
-          ? "rounded-2xl ring-2 ring-primary ring-offset-4 ring-offset-background"
-          : ""
+      aria-label={`Step ${step.n} · ${step.title}`}
+      className={`scroll-mt-3 rounded-xl border bg-card ${
+        status === "current" ? "border-l-4 border-primary" : ""
       }`}
     >
-      <p
-        className={`flex items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-wide ${
-          status === "current" ? "text-primary" : "text-muted-foreground"
-        }`}
-      >
-        {status === "done" && (
-          <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-        )}
-        Step {step.n} of {STEP_COUNT} · {step.title}
-      </p>
-      {children}
-    </div>
+      <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <h2 className="flex min-w-0 items-center gap-2 text-lg font-semibold">
+          {status === "done" ? (
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white dark:bg-emerald-500 dark:text-emerald-950"
+              aria-label={`Step ${step.n}, done`}
+            >
+              <Check className="h-4 w-4" aria-hidden />
+            </span>
+          ) : (
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground"
+              aria-label={`Step ${step.n}`}
+            >
+              {step.n}
+            </span>
+          )}
+          <Icon className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="truncate">{step.title}</span>
+        </h2>
+        <div className="flex shrink-0 items-center gap-2 text-sm text-muted-foreground">
+          {aside}
+          {status === "done" && (
+            <Button
+              type="button"
+              variant={folded ? "outline" : "ghost"}
+              size="sm"
+              className="h-9"
+              aria-expanded={!folded}
+              onClick={onToggle}
+            >
+              {folded ? (
+                <>
+                  <Pencil className="mr-1 h-4 w-4" /> Edit
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="mr-1 h-4 w-4" /> Done
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+      {folded ? (
+        <p className="px-4 pb-3 text-sm text-muted-foreground">{summary}</p>
+      ) : (
+        <div className="space-y-3 px-4 pb-4">{children}</div>
+      )}
+    </section>
   );
 }
 
@@ -648,10 +746,41 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     // The draft, not the saved row: a save that failed on the roof must not lock the signature.
     closingNotes: draft.closing_notes,
     signaturePath: job.signature_path,
+    // The folded steps' summaries (stepSummary): helper_count follows the named crew
+    // (service-crew.ts helperCountFor), the items are the ledger's distinct cells, net.
+    crewOthers: job.helper_count,
+    materialItems: countMaterialItems(materialsQ.data ?? []),
+    signedBy: draft.signed_by,
   };
   const open = firstOpenStep(stepState);
   const statuses = stepStatuses(stepState);
   const status = (id: StepId) => stepStatus(id, stepState);
+  // Owner, Oct 9: a done step folds to its summary unless Edit was pressed on it. Component
+  // state, nothing remembered; cleared whenever the open step moves, so a step just finished
+  // folds, and a step that reopened (its Before photo deleted) is current — never folded.
+  const [editing, setEditing] = useState<Partial<Record<StepId, boolean>>>({});
+  useEffect(() => setEditing({}), [open]);
+  const card = (id: StepId) => ({
+    id,
+    status: status(id),
+    open,
+    summary: stepSummary(id, stepState),
+    expanded: editing[id] === true,
+    onToggle: () => setEditing((e) => ({ ...e, [id]: !e[id] })),
+  });
+  // The header asides: what each step holds, from the same reads the rules use.
+  const repairRows = repairsQ.data ?? [];
+  const workDone = repairRows.filter(
+    (r) =>
+      needsFor(
+        "work",
+        repairSummary(
+          r,
+          (photosQ.data ?? []).filter((p) => p.repair_id === r.id),
+        ).needs,
+      ).length === 0,
+  ).length;
+  const materialItems = stepState.materialItems;
   // Until the reads answer every list is empty, so the strip would say Before with the rest
   // locked and then jump: the steps wait for the first answers (a failed read counts — its
   // section says so, loudly).
@@ -679,18 +808,13 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
     <div className="space-y-5">
       <StepStrip statuses={statuses} open={open} />
 
-      {/* Step 1 · Who is here: the crew gate (owner, Sep 30), unchanged — nothing else renders
-          until it is answered. */}
-      <StepSlot id="crew" status={status("crew")} open={open}>
-        <CrewBox job={job} />
-      </StepSlot>
+      {/* Step 1 · Who is here: the crew gate (owner, Sep 30) — nothing else renders until it is
+          answered. The card's own line says so; no second paragraph under it. */}
+      <StepCard {...card("crew")} icon={Users}>
+        <CrewBox job={job} embedded />
+      </StepCard>
 
-      {waiting ? (
-        <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
-          Check-in details, photos, repairs and the rest open once you have answered who is on the
-          job.
-        </p>
-      ) : !ready ? (
+      {waiting ? null : !ready ? (
         <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
         </p>
@@ -700,7 +824,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
           {/* Step 2 · Before: the Inspection checklist (Inspection tickets) and the Aerial markup,
               then the repairs — pick them, take each one's Before photo. */}
-          <StepSlot id="before" status={status("before")} open={open}>
+          <StepCard
+            {...card("before")}
+            icon={Wrench}
+            aside={repairRows.length > 0 ? <span>{repairRows.length} added</span> : undefined}
+          >
             <TicketExtras job={job} canEdit />
             <RepairsSection
               jobId={job.id}
@@ -708,16 +836,37 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               phase="before"
               camera={camera}
             />
-          </StepSlot>
+          </StepCard>
 
-          {/* Step 3 · The work: Problem and Work completed for each repair, then its After photo. */}
-          <StepSlot id="work" status={status("work")} open={open}>
+          {/* Step 3 · The work: what was wrong and what was done for each repair, then its After
+              photo. */}
+          <StepCard
+            {...card("work")}
+            icon={Hammer}
+            aside={
+              repairRows.length > 0 ? (
+                <span>
+                  {workDone} of {repairRows.length} done
+                </span>
+              ) : undefined
+            }
+          >
             <RepairsSection jobId={job.id} ticketNumber={job.number} phase="work" camera={camera} />
-          </StepSlot>
+          </StepCard>
 
           {/* Step 4 · Materials, the purchase orders (material bought for the job; never the
               Approved toggle here) and, with nothing logged, the "Nothing used" mark. */}
-          <StepSlot id="materials" status={status("materials")} open={open}>
+          <StepCard
+            {...card("materials")}
+            icon={Package}
+            aside={
+              materialItems > 0 ? (
+                <span>
+                  {materialItems} {materialItems === 1 ? "item" : "items"}
+                </span>
+              ) : undefined
+            }
+          >
             <MaterialsSection jobId={job.id} />
             {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
             <PurchaseOrdersSection jobId={job.id} field />
@@ -747,11 +896,19 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   Nothing used on this ticket
                 </Button>
               ))}
-          </StepSlot>
+          </StepCard>
 
           {/* Step 5 · Time */}
-          <StepSlot id="time" status={status("time")} open={open}>
-            <Section title="Time" icon={Clock}>
+          <StepCard
+            {...card("time")}
+            icon={Clock}
+            aside={
+              stepState.timeHours > 0 ? (
+                <span>{Number(stepState.timeHours.toFixed(2))} h</span>
+              ) : undefined
+            }
+          >
+            <Section title="Time">
               {job.on_site_at && !finished && (
                 <p className="text-sm text-muted-foreground">
                   Labor from On site ({clock(job.on_site_at)}) until now is added when you press
@@ -760,11 +917,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               )}
               <TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />
             </Section>
-          </StepSlot>
+          </StepCard>
 
           {/* Step 6 · Notes */}
-          <StepSlot id="notes" status={status("notes")} open={open}>
-            <Section title="Notes" icon={ClipboardList}>
+          <StepCard {...card("notes")} icon={ClipboardList}>
+            <Section title="Notes">
               <div className="space-y-1">
                 <Label htmlFor="co-notes">Closing notes</Label>
                 <Textarea
@@ -806,11 +963,15 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                 />
               </label>
             </Section>
-          </StepSlot>
+          </StepCard>
 
           {/* Step 7 · Signature */}
-          <StepSlot id="signature" status={status("signature")} open={open}>
-            <Section title="Signature" icon={PenLine}>
+          <StepCard
+            {...card("signature")}
+            icon={PenLine}
+            aside={job.signature_path ? <span>Signed</span> : undefined}
+          >
+            <Section title="Signature">
               <div className="space-y-1">
                 <Label htmlFor="co-signed-by">Signed by</Label>
                 <Input
@@ -824,7 +985,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
               </div>
               <SignatureSection job={job} />
             </Section>
-          </StepSlot>
+          </StepCard>
 
           {/* Complete (the rest saves itself): from step 7 only; before that the bar names the
               step to finish and a tap scrolls there. */}
@@ -961,7 +1122,8 @@ interface Shot {
 /**
  * The repairs, in one of the two steps they span (owner, Oct 9, closeout-steps.ts): "before" is
  * step 2 — the picker, each repair's row with its Before camera, Remove; "work" is step 3 — the
- * same repairs with Problem, Work completed and the After camera. Both read the same cached
+ * same repairs with What was wrong, What you did to fix it and the After camera. Both read the
+ * same cached
  * rows and share the one camera (useRepairCamera, held by the form).
  */
 function RepairsSection({
@@ -1082,33 +1244,15 @@ function RepairsSection({
   const allPhotos = photos.data ?? [];
   const openId = rows.length === 1 ? (rows[0]?.id ?? null) : expanded;
   const showPicker = before && (rows.length === 0 || pickerOpen);
-  const workDone = rows.filter(
-    (r) =>
-      needsFor(
-        "work",
-        repairSummary(
-          r,
-          allPhotos.filter((p) => p.repair_id === r.id),
-        ).needs,
-      ).length === 0,
-  ).length;
   // Owner, Oct 9 (S5): two characters typed → the matches sit right under the box and the
   // chips are out of the way (they used to grow to the full list while typing).
   const searching = q.length >= 2;
   const chipRows = allChips ? favRows : favRows.slice(0, PICKER_CHIPS);
 
+  // The step card (closeout.tsx CloseoutForm) carries the heading and the "N added" / "N of N
+  // done" aside; this is the body.
   return (
-    <Section
-      title={before ? "Repairs" : "The work"}
-      icon={before ? Wrench : Hammer}
-      aside={
-        rows.length > 0 ? (
-          <span className="text-sm text-muted-foreground">
-            {before ? `${rows.length} added` : `${workDone} of ${rows.length} done`}
-          </span>
-        ) : undefined
-      }
-    >
+    <Section title={before ? "Repairs" : "The work"}>
       {/* Owner, Oct 9 (B2): a failed background re-read keeps the cached rows on screen. */}
       {repairs.error && (
         <p className="text-sm text-destructive">
@@ -1558,8 +1702,9 @@ function RepairRow({
 
 /**
  * The open repair. In step 2 (`phase` "before"): its name (editable when typed in), quantity,
- * Remove, its Before photos and camera. In step 3 ("work"): Problem, Work completed, its After
- * photos and camera. Text saves when a box is left.
+ * Remove, its Before photos and camera. In step 3 ("work"): What was wrong, What you did to fix
+ * it (the columns stay problem_text / resolution_text; owner, Oct 9: "Problem" and "Work
+ * completed" read like questions), its After photos and camera. Text saves when a box is left.
  */
 function RepairCard({
   jobId,
@@ -1732,20 +1877,28 @@ function RepairCard({
       {!before && (
         <>
           <div className="space-y-1">
-            <Label className="text-sm">Problem</Label>
+            <Label className="text-sm" htmlFor={`${repair.id}-problem`}>
+              What was wrong
+            </Label>
             <Textarea
+              id={`${repair.id}-problem`}
               rows={2}
               className="text-base"
+              placeholder="e.g. Drain clogged with debris, water pooling"
               value={vals.problem_text}
               onChange={(e) => setVals((v) => ({ ...v, problem_text: e.target.value }))}
               onBlur={() => commit()}
             />
           </div>
           <div className="space-y-1">
-            <Label className="text-sm">Work completed</Label>
+            <Label className="text-sm" htmlFor={`${repair.id}-resolution`}>
+              What you did to fix it
+            </Label>
             <Textarea
+              id={`${repair.id}-resolution`}
               rows={2}
               className="text-base"
+              placeholder="e.g. Cleared the drain and resealed the strainer"
               value={vals.resolution_text}
               onChange={(e) => setVals((v) => ({ ...v, resolution_text: e.target.value }))}
               onBlur={() => commit()}

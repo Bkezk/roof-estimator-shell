@@ -14,6 +14,11 @@
  * notes on the ticket, the signature is from an earlier visit — is done wherever it sits:
  * hiding filled boxes would hide what the tech must be able to fix. Pure, so the rules and the
  * order are tested without the screen.
+ *
+ * Owner, Oct 9 (from the desktop screenshots): a done step that is not the current one folds to
+ * its header and a one-line summary (stepSummary) with Edit; the strip is one line of numbered
+ * dots. The summaries need the crew count, the material count and the signer's name, so the
+ * state carries them.
  */
 
 export type StepId = "crew" | "before" | "work" | "materials" | "time" | "notes" | "signature";
@@ -36,7 +41,7 @@ export const CLOSEOUT_STEPS: readonly CloseoutStep[] = [
     id: "materials",
     n: 4,
     title: "Materials",
-    unlocks: "Work completed and an After photo on every repair",
+    unlocks: "What you did and an After photo on every repair",
   },
   { id: "time", n: 5, title: "Time", unlocks: "Materials logged, or Nothing used" },
   { id: "notes", n: 6, title: "Notes", unlocks: "Time on the ticket" },
@@ -71,6 +76,35 @@ export interface StepState {
   onSiteAt: string | null;
   closingNotes: string;
   signaturePath: string | null;
+  /** The other technicians on the job (service_jobs.helper_count follows the named crew). */
+  crewOthers: number;
+  /** Distinct materials with a net count on the ticket (countMaterialItems). */
+  materialItems: number;
+  /** The "Signed by" box (the draft, like the notes). */
+  signedBy: string;
+}
+
+/** A ledger row as listServiceJobMaterials returns it: one cell, qty negative = used. */
+export interface MaterialLedgerRow {
+  screen_id: string;
+  row_label: string;
+  price_col: string;
+  qty: number | string;
+}
+
+/**
+ * How many distinct materials the ticket used, net of take-backs (a "+" then a "−" is nothing):
+ * the "N items logged" summary of step 4 and its header line.
+ */
+export function countMaterialItems(rows: readonly MaterialLedgerRow[]): number {
+  const byCell = new Map<string, number>();
+  for (const r of rows) {
+    const key = `${r.screen_id}\u0000${r.row_label}\u0000${r.price_col}`;
+    byCell.set(key, (byCell.get(key) ?? 0) - Number(r.qty));
+  }
+  let n = 0;
+  for (const v of byCell.values()) if (v > 1e-6) n += 1;
+  return n;
 }
 
 export function stepOf(id: StepId): CloseoutStep {
@@ -158,6 +192,59 @@ export function unlockToast(prev: StepId | null, next: StepId | null): string | 
   return next === null
     ? `Step ${done.n} done — Complete is ready`
     : `Step ${done.n} done — next: ${stepOf(next).title}`;
+}
+
+/** Hours as the Time section prints them: "3.5 h", "0.25 h", "8 h". */
+const hoursText = (h: number) => `${Number(h.toFixed(2))} h`;
+
+/** The closing notes cut to one line for the folded step. */
+export const SUMMARY_NOTES_CHARS = 80;
+
+/**
+ * The one line a done step folds to (owner, Oct 9: "can we have each step minimize after
+ * completion"): what the tech answered, in the words of the step, so they can tell at a glance
+ * whether to press Edit. Says what is true of the data even on a finished ticket (where every
+ * step reads done): "No repairs", "Nothing used", "No time", "No notes", "Not signed".
+ */
+export function stepSummary(id: StepId, s: StepState): string {
+  switch (id) {
+    case "crew":
+      return s.crewOthers > 0
+        ? `With ${s.crewOthers} ${s.crewOthers === 1 ? "other" : "others"}`
+        : "Alone";
+    case "before": {
+      const n = s.repairs.length;
+      if (n === 0) return s.serviceType === "inspection" ? "Inspection — no repairs" : "No repairs";
+      return `${n} ${n === 1 ? "repair" : "repairs"}, Before ${n === 1 ? "photo" : "photos"} taken`;
+    }
+    case "work": {
+      const n = s.repairs.length;
+      if (n === 0) return s.serviceType === "inspection" ? "Inspection — no repairs" : "No repairs";
+      const done = s.repairs.filter(
+        (r) => !!(r.resolution_text ?? "").trim() && hasPhoto(s.photos, r.id, "after"),
+      ).length;
+      return `${done} of ${n} with what you did and an After photo`;
+    }
+    case "materials":
+      return s.materialItems > 0
+        ? `${s.materialItems} ${s.materialItems === 1 ? "item" : "items"} logged`
+        : s.materialsTouched
+          ? "Nothing used"
+          : "No materials";
+    case "time":
+      if (s.timeHours > 0) return hoursText(s.timeHours);
+      return s.onSiteAt ? "Labor from the On site stamp" : "No time";
+    case "notes": {
+      const t = s.closingNotes.trim().replace(/\s+/g, " ");
+      if (!t) return "No notes";
+      return t.length > SUMMARY_NOTES_CHARS ? `${t.slice(0, SUMMARY_NOTES_CHARS).trimEnd()}…` : t;
+    }
+    case "signature": {
+      if (!s.signaturePath) return "Not signed";
+      const by = s.signedBy.trim();
+      return by ? `Signed by ${by}` : "Signed";
+    }
+  }
 }
 
 /** The sticky bar's label while a step before Signature is still open. */

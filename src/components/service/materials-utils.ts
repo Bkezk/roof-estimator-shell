@@ -8,6 +8,7 @@
  * PIECES when the catalog says how many one pack holds (cartridges, fasteners), else in the
  * pack unit. "Units" below means whichever of the two the tech counts in.
  */
+import { looseMatch } from "@/lib/material-aliases";
 import { pieceFromCountedNotes, plural, type PieceDef } from "@/lib/stock-units";
 
 export interface CatalogCell {
@@ -196,7 +197,6 @@ export function planReduce(
   return steps;
 }
 
-/** Does every search word appear in the row's name, category, colour / size or item #? */
 /**
  * What a row is called on a repair ticket: the service material name (owner, Oct 6: CenterPoint's
  * names; src/lib/service-materials.ts) when there is one, else the catalog label with its colour /
@@ -207,6 +207,12 @@ export function cellName(r: { label?: string | null; row_label: string; price_co
   return r.price_col && r.price_col !== "price" ? `${r.row_label} (${r.price_col})` : r.row_label;
 }
 
+/**
+ * Does every search word appear in the row's name, category, colour / size or item #? Loosely
+ * (owner, Oct 9: "durolast, dl, and duro last should all pull up durolast products, screws should
+ * pull up fasteners"): both sides lose case, hyphens, spaces, slashes, dots and quotes, and a
+ * word also matches through its alias group (material-aliases.ts) and without its plural "s".
+ */
 export function matchesSearch(
   row: {
     label?: string | null;
@@ -217,9 +223,5 @@ export function matchesSearch(
   },
   q: string,
 ): boolean {
-  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!words.length) return true;
-  const hay =
-    `${row.label ?? ""} ${row.row_label} ${row.category} ${row.price_col} ${row.item_no ?? ""}`.toLowerCase();
-  return words.every((w) => hay.includes(w));
+  return looseMatch([row.label, row.row_label, row.category, row.price_col, row.item_no], q);
 }

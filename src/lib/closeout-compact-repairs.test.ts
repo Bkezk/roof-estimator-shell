@@ -30,15 +30,16 @@ describe("repairSummary", () => {
       ]),
     ).toEqual({ qtyText: "× 2 EA", before: 2, after: 1, needs: [] });
   });
-  it("lists the before photo, the after photo and the work completed it still needs, in that order", () => {
+  it("lists the before photo, the after photo and the what-you-did text it still needs, in that order", () => {
+    // Owner, Oct 9: the box is "What you did to fix it", so the hint says "what you did".
     expect(repairSummary(repair({ resolution_text: "  " }), []).needs).toEqual([
       "before photo",
       "after photo",
-      "work completed",
+      "what you did",
     ]);
     expect(repairSummary(repair({ resolution_text: null }), [{ role: "before" }]).needs).toEqual([
       "after photo",
-      "work completed",
+      "what you did",
     ]);
     expect(repairSummary(repair(), [{ role: "after" }]).needs).toEqual(["before photo"]);
   });

@@ -3,6 +3,8 @@
  * the strip under the header, the sections in step order (Time above Notes now), locked steps
  * as one muted line, the Complete bar gated to step 7, the "Nothing used" mark, the toast when
  * a step unlocks, and the crew box still the gate. Each pin fails on the one-scroll screen.
+ * Later that day the step became the card (StepCard, the strip one line of dots, done steps
+ * folded — closeout-layout-oct9.test.ts); the pins here describe that shape.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -24,13 +26,14 @@ describe("the step strip", () => {
     );
     const strip = src.slice(
       src.indexOf("function StepStrip({"),
-      src.indexOf("function StepSlot({"),
+      src.indexOf("function StepCard({"),
     );
     expect(strip).toContain("{stepHeadline(open)}");
     expect(strip).toContain('aria-label="Close-out steps"');
     expect(strip).toContain('aria-current={status === "current" ? "step" : undefined}');
     expect(strip).toContain('disabled={status === "locked"}');
-    // Done: a tick. Locked: a lock and the "what unlocks it" line. Current: the number.
+    // Done: a tick. Locked: a lock and the "what unlocks it" line. Current: the number (the full
+    // list behind the chevron; the one-line dots are pinned in closeout-layout-oct9.test.ts).
     expect(strip).toMatch(/status === "done" \? \(\s*<CheckCircle2/);
     expect(strip).toMatch(/status === "locked" \? \(\s*<Lock/);
     expect(strip).toContain('{status === "locked" && (');
@@ -59,24 +62,24 @@ describe("the step strip", () => {
 describe("the sections in step order", () => {
   it("1 crew, 2 extras + repairs (before), 3 repairs (work), 4 materials + POs + Nothing used, 5 time, 6 notes, 7 signature, then Complete", () => {
     const order = [
-      '<StepSlot id="crew"',
-      "<CrewBox job={job} />",
-      '<StepSlot id="before"',
+      '{...card("crew")}',
+      "<CrewBox job={job} embedded />",
+      '{...card("before")}',
       "<TicketExtras job={job} canEdit />",
       'phase="before"',
-      '<StepSlot id="work"',
+      '{...card("work")}',
       'phase="work"',
-      '<StepSlot id="materials"',
+      '{...card("materials")}',
       "<MaterialsSection jobId={job.id} />",
       "<PurchaseOrdersSection jobId={job.id} field />",
       "Nothing used on this ticket",
-      '<StepSlot id="time"',
-      '<Section title="Time" icon={Clock}>',
+      '{...card("time")}',
+      '<Section title="Time">',
       "<TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />",
-      '<StepSlot id="notes"',
-      '<Section title="Notes" icon={ClipboardList}>',
-      '<StepSlot id="signature"',
-      '<Section title="Signature" icon={PenLine}>',
+      '{...card("notes")}',
+      '<Section title="Notes">',
+      '{...card("signature")}',
+      '<Section title="Signature">',
       "<SignatureSection job={job} />",
       'className="sticky bottom-0 z-10',
       "<AlertDialogTitle>Before you finish</AlertDialogTitle>",
@@ -85,45 +88,41 @@ describe("the sections in step order", () => {
     for (let i = 1; i < positions.length; i++)
       expect(positions[i], `${order[i - 1]} before ${order[i]}`).toBeGreaterThan(positions[i - 1]!);
     // Time is above Notes now (it used to follow it).
-    expect(at('<Section title="Time" icon={Clock}>')).toBeLessThan(
-      at('<Section title="Notes" icon={ClipboardList}>'),
-    );
-    // Every step is wrapped once.
+    expect(at('<Section title="Time">')).toBeLessThan(at('<Section title="Notes">'));
+    // Every step is one card (StepCard; the per-step props come from card(id)).
     for (const id of ["crew", "before", "work", "materials", "time", "notes", "signature"])
-      expect(
-        form.match(
-          new RegExp(`<StepSlot id="${id}" status=\\{status\\("${id}"\\)\\} open=\\{open\\}>`, "g"),
-        ),
-      ).toHaveLength(1);
+      expect(form.match(new RegExp(`\\{\\.\\.\\.card\\("${id}"\\)\\}`, "g"))).toHaveLength(1);
+    expect(form.match(/<StepCard/g)).toHaveLength(7);
   });
-  it("a locked step is one muted line naming the step to finish; open ones keep their sections, the current one ringed", () => {
+  it("a locked step is one muted line naming the step to finish; open ones are the card, the current one with the accent bar", () => {
     const slot = src.slice(
-      src.indexOf("function StepSlot({"),
+      src.indexOf("function StepCard({"),
       src.indexOf("function CloseoutForm("),
     );
     expect(slot).toMatch(/if \(status === "locked"\)\s*return \(\s*<p/);
     expect(slot).toContain("{lockedLine(open)}");
     expect(slot).toContain('<Lock className="h-4 w-4 shrink-0" />');
     expect(slot).toContain("{children}");
-    expect(slot).toMatch(
-      /status === "current"\s*\?\s*"rounded-2xl ring-2 ring-primary ring-offset-4 ring-offset-background"\s*:\s*""/,
-    );
-    expect(slot).toContain("Step {step.n} of {STEP_COUNT} · {step.title}");
+    // Owner, Oct 9 (later): the ring-offset frame around a Section card read as a box in a box;
+    // the step is the card now, with a left accent bar while current.
+    expect(slot).not.toContain("ring-offset-4");
+    expect(slot).toMatch(/status === "current" \? "border-l-4 border-primary" : ""/);
+    expect(slot).toMatch(/\{step\.n\} · \{step\.title\}/);
     expect(slot).toContain("id={stepAnchor(id)}");
   });
-  it("the repairs section knows its step: the picker, Remove and quantity in Before; Problem, Work completed in The work", () => {
+  it("the repairs section knows its step: the picker, Remove and quantity in Before; What was wrong, What you did in The work", () => {
     expect(src).toContain('const before = phase === "before";');
     expect(src).toContain('title={before ? "Repairs" : "The work"}');
-    expect(src).toContain(
-      "{before ? `${rows.length} added` : `${workDone} of ${rows.length} done`}",
-    );
+    // The "N added" / "N of N done" aside sits on the step card's header (the form).
+    expect(form).toContain("<span>{repairRows.length} added</span>");
+    expect(form).toMatch(/\{workDone\} of \{repairRows\.length\} done/);
     expect(src).toContain("No repairs on the ticket — add them in step 2.");
     expect(src).toContain("{before && !confirmRemove && (");
     expect(src).toMatch(
       /\{before && \(\s*<div className="flex items-center gap-2">\s*<Label className="text-sm text-muted-foreground">Quantity<\/Label>/,
     );
     expect(src).toMatch(
-      /\{!before && \(\s*<>\s*<div className="space-y-1">\s*<Label className="text-sm">Problem<\/Label>/,
+      /\{!before && \(\s*<>\s*<div className="space-y-1">\s*<Label className="text-sm" htmlFor=\{`\$\{repair\.id\}-problem`\}>\s*What was wrong\s*<\/Label>/,
     );
     // The picker's reads are step 2's only.
     expect(src.match(/enabled: !!session && before,/g)).toHaveLength(2);
@@ -186,13 +185,13 @@ describe("the crew box is still the gate (step 1)", () => {
   it("nothing after it renders until the question is answered; the reads then settle before the steps show", () => {
     expect(form).toContain("const waiting = crewQuestionPending(job);");
     expect(form).toMatch(
-      /<StepSlot id="crew" status=\{status\("crew"\)\} open=\{open\}>\s*<CrewBox job=\{job\} \/>\s*<\/StepSlot>\s*\{waiting \? \(/,
+      /<StepCard \{\.\.\.card\("crew"\)\} icon=\{Users\}>\s*<CrewBox job=\{job\} embedded \/>\s*<\/StepCard>\s*\{waiting \? null : !ready \? \(/,
     );
-    expect(form).toContain(
-      "Check-in details, photos, repairs and the rest open once you have answered who is on the",
-    );
+    // Owner, Oct 9 (later): the paragraph under step 1 repeated the strip and the crew card's
+    // own line; while waiting, nothing renders below the card.
+    expect(form).not.toContain("Check-in details, photos, repairs and the rest open");
     expect(form).toMatch(
-      /\) : !ready \? \(\s*<p[^>]*>\s*<Loader2 className="h-4 w-4 animate-spin" \/> Loading the ticket…/,
+      /\{waiting \? null : !ready \? \(\s*<p[^>]*>\s*<Loader2 className="h-4 w-4 animate-spin" \/> Loading the ticket…/,
     );
     // The crew answer is step 1's rule, nothing more.
     expect(form).toContain("crewAnswered: !waiting,");

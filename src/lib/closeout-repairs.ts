@@ -3,7 +3,7 @@
  * especially if you have more than one"). Each repair is one line — name, "× qty unit", the
  * Before / After photo counts and what it still needs — that opens to the full card on a tap.
  * The "needs" list uses the same per-repair rules Complete checks (closeout-check.ts: a Before
- * and an After photo) plus the work-completed text the invoice prints. Pure, so it is tested
+ * and an After photo) plus the "what you did" text the invoice prints. Pure, so it is tested
  * without the screen.
  */
 
@@ -21,7 +21,11 @@ export interface RepairSummary {
   qtyText: string;
   before: number;
   after: number;
-  /** "before photo", "after photo", "work completed" — in the order the card asks for them. */
+  /**
+   * "before photo", "after photo", "what you did" — in the order the card asks for them. Owner,
+   * Oct 9: the card's box is "What you did to fix it" (not "Work completed", which read like a
+   * question), so the hint uses the same words.
+   */
   needs: string[];
 }
 
@@ -42,7 +46,7 @@ export function repairSummary(
   const needs: string[] = [];
   if (before === 0) needs.push("before photo");
   if (after === 0) needs.push("after photo");
-  if (!(repair.resolution_text ?? "").trim()) needs.push("work completed");
+  if (!(repair.resolution_text ?? "").trim()) needs.push("what you did");
   return {
     qtyText: `× ${qtyNum(repair.quantity)} ${(repair.unit ?? "").trim() || "EA"}`,
     before,
@@ -53,7 +57,7 @@ export function repairSummary(
 
 /**
  * The close-out shows each repair twice (closeout-steps.ts, owner Oct 9): in step 2 (Before)
- * the row asks only for its Before photo; in step 3 (The work) for the work-completed text and
+ * the row asks only for its Before photo; in step 3 (The work) for the "what you did" text and
  * the After photo. The same `needs` list, split by step.
  */
 export type RepairPhase = "before" | "work";

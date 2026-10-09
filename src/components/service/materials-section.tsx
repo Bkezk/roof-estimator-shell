@@ -638,7 +638,6 @@ export function MaterialsSection({
     );
     return hit ? hit.on_hand : null;
   });
-  const itemsOnTicket = onTicket.length;
   const truckHasCount = rows.some((r) => usedUnits(r) > EPS);
   const truckShown = truckOpen ?? truckHasCount;
 
@@ -1179,17 +1178,16 @@ export function MaterialsSection({
       </Box>
     );
 
+  // The close-out: the step card is the box and its header says "4 · Materials" with the item
+  // count (closeout.tsx; owner, Oct 9: no box in a box), so this is the body alone — only the
+  // saving spinner is its own line here.
   return (
-    <section className="space-y-3 rounded-xl border bg-card p-4" aria-label="Materials">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Package className="h-5 w-5 text-muted-foreground" /> Materials
-        </h2>
-        <span className="flex items-center gap-2 text-sm text-muted-foreground">
-          {busy > 0 && <Loader2 className="h-4 w-4 animate-spin" aria-label="Saving" />}
-          {itemsOnTicket > 0 && `${itemsOnTicket} ${itemsOnTicket === 1 ? "item" : "items"}`}
-        </span>
-      </div>
+    <section className="space-y-3" aria-label="Materials">
+      {busy > 0 && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+        </p>
+      )}
       {body}
     </section>
   );
