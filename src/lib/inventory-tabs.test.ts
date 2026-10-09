@@ -154,7 +154,7 @@ describe("2 · the tab row and its gate", () => {
 describe("3 · the Reconcile tab's words", () => {
   it("one plain sentence under the title", () => {
     expect(reconcile.replace(/\s+/g, " ")).toContain(
-      "Counts the app shows below zero, and where each one went wrong. Type what is really on the shelf or truck and save it — that is the only way a line leaves this list.",
+      "Counts inventory shows below zero, and where each one went wrong. Type what is really on the shelf or truck and save it — that is the only way a line leaves this list.",
     );
     expect(reconcile).not.toContain("admins and managers</span>");
   });
@@ -163,11 +163,11 @@ describe("3 · the Reconcile tab's words", () => {
     expect(reconcile).toContain('"Below zero now",');
     expect(reconcile).toContain("Nothing is below zero right now.");
     expect(reconcile).toContain('data-block="short"');
-    expect(reconcile).toContain("<>Logged with none in the app — {weekWord}</>,");
+    expect(reconcile).toContain("<>Logged with none in inventory — {weekWord}</>,");
     expect(reconcile).toContain(
-      '"A tech logged material the app said was not there. The count at that place went below zero; fix it above or on the Stock tab.",',
+      '"A tech logged material inventory said was not there. The count at that place went below zero; fix it above or on the Stock tab.",',
     );
-    expect(reconcile).toContain("Nothing was logged with none in the app {weekWord}.");
+    expect(reconcile).toContain("Nothing was logged with none in inventory {weekWord}.");
     expect(reconcile).toContain('data-block="fixed"');
     expect(reconcile).toContain(
       '<>Fixed {weekWord}</>, "Counts that were below zero and were corrected."',
@@ -188,9 +188,9 @@ describe("3 · the Reconcile tab's words", () => {
       "<TableHead>When</TableHead> <TableHead>Who</TableHead> <TableHead>Ticket</TableHead> <TableHead>Where</TableHead> <TableHead>Item</TableHead>",
     );
   });
-  it("a cell below zero: bold 'app shows −2 boxes', when, 'What took it there' with the short badge, and the fix row", () => {
+  it("a cell below zero: bold 'inventory shows −2 boxes', when, 'What took it there' with the short badge, and the fix row", () => {
     expect(negativeRow).toContain(
-      "app shows {fmtSigned(n.on_hand)} {packUnitLabel(n.on_hand, n.unit)}",
+      "inventory shows {fmtSigned(n.on_hand)} {packUnitLabel(n.on_hand, n.unit)}",
     );
     expect(negativeRow).toContain("Went below zero {fmtOfficeWhen(n.firstBelowZeroAt)}");
     expect(negativeRow).toContain("What took it there");
@@ -199,7 +199,7 @@ describe("3 · the Reconcile tab's words", () => {
     );
     expect(negativeRow).toContain("{fmtSigned(c.qty)} {packUnitLabel(c.qty, n.unit)}");
     expect(negativeRow).toContain("data-short-badge");
-    expect(negativeRow).toContain("logged with none in the app");
+    expect(negativeRow).toContain("logged with none in inventory");
     expect(negativeRow).not.toContain(">SHORT<");
     // The fix row.
     expect(negativeRow).toContain("data-fix-row");
@@ -208,7 +208,7 @@ describe("3 · the Reconcile tab's words", () => {
     expect(negativeRow).toContain("{packUnitLabel(2, n.unit)}</span>");
     expect(negativeRow).toMatch(/>\s*Save count\s*<\/Button>/);
     expect(negativeRow).not.toMatch(/>\s*Set count\s*</);
-    expect(negativeRow).toContain("Records one adjustment so the app matches your count.");
+    expect(negativeRow).toContain("Records one adjustment so inventory matches your count.");
     // The same adjustment as before: reconcileAdjustment → addMovement.
     expect(negativeRow).toContain(
       "const payload = counted === null ? null : reconcileAdjustment(n, counted);",
@@ -235,6 +235,6 @@ describe("3 · the Reconcile tab's words", () => {
     expect(setCountButton).toContain("{packUnitLabel(2, r.unit)}</span>");
     expect(setCountButton).toMatch(/onClick=\{\(\) => void setCount\(\)\}\s*>\s*Save count/);
     expect(setCountButton).not.toContain("Counted (");
-    expect(setCountButton).toContain("Records one adjustment so the app matches your count.");
+    expect(setCountButton).toContain("Records one adjustment so inventory matches your count.");
   });
 });

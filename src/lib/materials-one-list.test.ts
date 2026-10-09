@@ -210,7 +210,7 @@ describe("the Materials section: one list, one way in", () => {
     expect(src).not.toContain("From my truck");
     // A truck with nothing stocked says so inside the fold, with the office line.
     expect(body).toMatch(
-      /rows\.length === 0 \? \(\s*<p className="text-sm text-muted-foreground">\s*Nothing is on \{locName\(vehicleId\)\} in the app yet \(the office stocks trucks\s+in\s+Inventory\)\./,
+      /rows\.length === 0 \? \(\s*<p className="text-sm text-muted-foreground">\s*Nothing is on \{locName\(vehicleId\)\} in inventory yet \(the office stocks trucks\s+in\s+Inventory\)\./,
     );
     // Show all stays in the fold.
     expect(body.indexOf("Show all {filtered.length}")).toBeGreaterThan(

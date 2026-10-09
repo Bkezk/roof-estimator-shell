@@ -618,7 +618,7 @@ export function MaterialsSection({
     if (src.on_hand === null) return "?";
     const key = cellKey({ ...res, location_id: src.location_id });
     const units = round6(packsToUnits(src.on_hand, res.piece) - (pending[key] ?? 0));
-    return units <= EPS ? "none in the app" : `${amountText(units, res.piece, res.unit)} left`;
+    return units <= EPS ? "none in inventory" : `${amountText(units, res.piece, res.unit)} left`;
   };
   const sourceName = (src: MaterialSource) =>
     src.kind === "mine" ? "My truck" : src.kind === "shop" ? "Shop" : src.location_name;
@@ -837,7 +837,7 @@ export function MaterialsSection({
                             >
                               {res.sources.map((src) => {
                                 const left = sourceLeft(res, src);
-                                const none = left === "none in the app";
+                                const none = left === "none in inventory";
                                 return (
                                   <Button
                                     key={src.location_id}
@@ -871,7 +871,7 @@ export function MaterialsSection({
                 <AlertDialogContent>
                   <AlertDialogHeader>
                     <AlertDialogTitle>
-                      The app shows{" "}
+                      Inventory shows{" "}
                       {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)}{" "}
                       of {cellName(short.r)} on {locName(short.r.location_id)}
                     </AlertDialogTitle>
@@ -960,7 +960,7 @@ export function MaterialsSection({
                   </p>
                 ) : otherRows.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    Nothing is on {locName(fromLoc)} in the app yet.
+                    Nothing is on {locName(fromLoc)} in inventory yet.
                   </p>
                 ) : (
                   <>
@@ -1089,8 +1089,8 @@ export function MaterialsSection({
                     </p>
                   ) : rows.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      Nothing is on {locName(vehicleId)} in the app yet (the office stocks trucks in
-                      Inventory).
+                      Nothing is on {locName(vehicleId)} in inventory yet (the office stocks trucks
+                      in Inventory).
                     </p>
                   ) : (
                     <>

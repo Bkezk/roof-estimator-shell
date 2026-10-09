@@ -1712,8 +1712,8 @@ function ReconcileTab(props: { canSetCount: boolean }) {
           <Scale className="h-4 w-4" /> Reconcile
         </CardTitle>
         <CardDescription>
-          Counts the app shows below zero, and where each one went wrong. Type what is really on the
-          shelf or truck and save it — that is the only way a line leaves this list.
+          Counts inventory shows below zero, and where each one went wrong. Type what is really on
+          the shelf or truck and save it — that is the only way a line leaves this list.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 text-sm">
@@ -1725,7 +1725,7 @@ function ReconcileTab(props: { canSetCount: boolean }) {
         <section className="space-y-3" data-block="below-zero">
           {blockTitle(
             "Below zero now",
-            "Every place and item the app counts below zero today, whatever week is picked, and the entries that took it there.",
+            "Every place and item inventory counts below zero today, whatever week is picked, and the entries that took it there.",
           )}
           {body((rep) =>
             rep.negatives.length === 0 ? (
@@ -1752,8 +1752,8 @@ function ReconcileTab(props: { canSetCount: boolean }) {
         <section className="space-y-3" data-block="short">
           <div className="flex flex-wrap items-start justify-between gap-2">
             {blockTitle(
-              <>Logged with none in the app — {weekWord}</>,
-              "A tech logged material the app said was not there. The count at that place went below zero; fix it above or on the Stock tab.",
+              <>Logged with none in inventory — {weekWord}</>,
+              "A tech logged material inventory said was not there. The count at that place went below zero; fix it above or on the Stock tab.",
             )}
             <div className="flex flex-wrap items-center gap-2" data-week-picker>
               <Button
@@ -1788,7 +1788,7 @@ function ReconcileTab(props: { canSetCount: boolean }) {
           {body((rep) =>
             rep.shortEntries.length === 0 ? (
               <p className="text-muted-foreground">
-                Nothing was logged with none in the app {weekWord}.
+                Nothing was logged with none in inventory {weekWord}.
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -1900,7 +1900,7 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
         <p className="font-semibold">
           {n.location_name} · {n.name}:{" "}
           <span className="text-destructive">
-            app shows {fmtSigned(n.on_hand)} {packUnitLabel(n.on_hand, n.unit)}
+            inventory shows {fmtSigned(n.on_hand)} {packUnitLabel(n.on_hand, n.unit)}
           </span>
         </p>
         <p className="text-xs text-muted-foreground">
@@ -1950,7 +1950,7 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
                       className="mr-1 rounded bg-destructive/10 px-1 py-0.5 text-[10px] font-medium text-destructive"
                       data-short-badge
                     >
-                      logged with none in the app
+                      logged with none in inventory
                     </span>
                   )}
                   {REASON_LABELS[c.reason as MovementReason] ?? c.reason}
@@ -1994,7 +1994,7 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Records one adjustment so the app matches your count.
+            Records one adjustment so inventory matches your count.
           </p>
         </div>
       )}
@@ -2087,7 +2087,7 @@ function SetCountButton(props: { row: StockRow; locationName: string; onSet: () 
           <p className="text-xs text-muted-foreground">That is the count already.</p>
         )}
         <p className="text-xs text-muted-foreground">
-          Records one adjustment so the app matches your count.
+          Records one adjustment so inventory matches your count.
         </p>
       </PopoverContent>
     </Popover>

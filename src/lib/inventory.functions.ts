@@ -461,7 +461,7 @@ export const addMovement = createServerFn({ method: "POST" })
           throw new Error(
             `Only ${Math.round(onHand * 1000) / 1000} ${unit} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}`,
           );
-        shortNote = `Short: the app had ${had} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}; count needs fixing`;
+        shortNote = `Short: inventory had ${had} ${location.kind === "shop" ? "on the shelf" : `on ${location.name}`}; count needs fixing`;
       }
     }
     let bidName: string | null = null;

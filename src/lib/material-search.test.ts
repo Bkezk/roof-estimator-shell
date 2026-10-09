@@ -390,7 +390,7 @@ describe("the Materials section's Find box", () => {
     );
     // A source with nothing left reads "none", dashed and muted.
     expect(src).toContain(
-      'return units <= EPS ? "none in the app" : `${amountText(units, res.piece, res.unit)} left`;',
+      'return units <= EPS ? "none in inventory" : `${amountText(units, res.piece, res.unit)} left`;',
     );
     expect(src).toContain('none ? "border-dashed text-muted-foreground" : ""');
   });

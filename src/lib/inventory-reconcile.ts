@@ -53,7 +53,7 @@ export interface Contributor {
   service_job_name: string | null;
   service_job_id: string | null;
   note: string | null;
-  /** The entry was logged short (its note says the app had too little). */
+  /** The entry was logged short (its note says inventory had too little). */
   short: boolean;
 }
 

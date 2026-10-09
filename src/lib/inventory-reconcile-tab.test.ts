@@ -60,7 +60,7 @@ function world(movements?: Record<string, unknown>[], maxRows?: number) {
           qty: -2,
           service_job_id: JOB,
           service_job_name: "#6001 Smith",
-          note: "Short: the app had 0 tube on the shelf; count needs fixing",
+          note: "Short: inventory had 0 tube on the shelf; count needs fixing",
         }),
         move(2, { location_id: "truck-1", qty: 3, reason: "transfer_in" }),
         move(3, { location_id: "truck-1", qty: -4, created_at: "2026-09-30T14:00:00Z" }),
@@ -217,7 +217,7 @@ describe("the Inventory page's Reconcile tab", () => {
   });
 
   it("lists the week's short entries (when, who, ticket link, place, item, change, note), the fixes, and each block's own empty line", () => {
-    expect(c).toContain("Logged with none in the app — {weekWord}");
+    expect(c).toContain("Logged with none in inventory — {weekWord}");
     expect(c).toContain("search={{ id: e.service_job_id }}");
     expect(c).toContain("search={{ id: c.service_job_id }}");
     expect(c).toContain(
@@ -228,7 +228,7 @@ describe("the Inventory page's Reconcile tab", () => {
     expect(c).not.toContain("CLEAN_LINE");
     expect(c).not.toContain("reconciliationSummary");
     expect(c).toContain("Nothing is below zero right now.");
-    expect(c).toContain("Nothing was logged with none in the app {weekWord}.");
+    expect(c).toContain("Nothing was logged with none in inventory {weekWord}.");
     expect(c).toContain("Nothing was fixed {weekWord}.");
     expect(c).toContain(
       '{n.more > 0 && <p className="mt-1 text-xs text-muted-foreground">+{n.more} more</p>}',

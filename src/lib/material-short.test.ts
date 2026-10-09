@@ -21,7 +21,7 @@ describe("the server: short_ok on a ticket's consumed entry", () => {
     );
   });
   it("the entry's note says the count was short", () => {
-    expect(src).toMatch(/shortNote = `Short: the app had \$\{had\}/);
+    expect(src).toMatch(/shortNote = `Short: inventory had \$\{had\}/);
     expect(src).toContain('note: [data.note, shortNote].filter(Boolean).join(" — ") || null,');
   });
 });
@@ -50,8 +50,8 @@ describe("the screen: ask, then log it anyway", () => {
     expect(src).toMatch(/record\(r, units, "consumed", ok\)/);
     expect(src).toContain("...(shortOk ? { short_ok: true } : {}),");
   });
-  it("a source with nothing in the app still has a tappable chip that says so", () => {
-    expect(src).toContain('"none in the app"');
+  it("a source with nothing in inventory still has a tappable chip that says so", () => {
+    expect(src).toContain('"none in inventory"');
     expect(src).not.toContain('left === "none";');
   });
 });

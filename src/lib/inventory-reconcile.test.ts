@@ -93,9 +93,9 @@ describe("weeks (office time, Monday–Sunday)", () => {
 
 describe("helpers", () => {
   it("isShortNote: the server's note alone, or after the user's own note", () => {
-    expect(isShortNote("Short: the app had 0 tube on the shelf; count needs fixing")).toBe(true);
+    expect(isShortNote("Short: inventory had 0 tube on the shelf; count needs fixing")).toBe(true);
     expect(
-      isShortNote("Used the last one — Short: the app had 0 tube on Truck 1; count needs fixing"),
+      isShortNote("Used the last one — Short: inventory had 0 tube on Truck 1; count needs fixing"),
     ).toBe(true);
     expect(isShortNote("Shortage noted by Ann")).toBe(false);
     expect(isShortNote(null)).toBe(false);
@@ -150,7 +150,7 @@ describe("buildReconciliation — negatives and where they came from", () => {
         service_job_id: JOB2,
         service_job_name: "#6002 Jones",
         created_by_name: "Joe",
-        note: "Short: the app had 1 tube on the shelf; count needs fixing",
+        note: "Short: inventory had 1 tube on the shelf; count needs fixing",
       }),
       mv({ qty: 1, created_at: "2026-10-06T10:00:00Z", reason: "released", service_job_id: JOB2 }),
       mv({ qty: -2, created_at: "2026-10-07T10:00:00Z", reason: "damaged" }),
@@ -248,7 +248,7 @@ describe("buildReconciliation — negatives and where they came from", () => {
 });
 
 describe("buildReconciliation — short entries and fixes follow the picked week", () => {
-  const short = "Short: the app had 0 tube on the shelf; count needs fixing";
+  const short = "Short: inventory had 0 tube on the shelf; count needs fixing";
   const rows = () => [
     mv({ qty: -1, created_at: "2026-09-30T10:00:00Z", note: short }),
     mv({
