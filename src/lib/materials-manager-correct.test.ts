@@ -1,9 +1,12 @@
 /**
  * Owner, Oct 5 (service follow-up 1): "is the admin able to easily edit material … in the
  * tickets?" — not before: lines taken from the shop or another truck were a read-only list, and
- * an office login with no truck saw "No truck is set up for you today". Now a manager corrects
- * every line on the ticket with the same −, typed total and + as a truck row, and adds what the
- * tech forgot with "Add material (shop or a truck)".
+ * an office login with no truck saw "No truck is set up for you today". Since then (owner, Oct 9:
+ * one list, one way in — materials-one-list.test.ts) EVERY login that may log material corrects
+ * every line on the ticket from the one "On this ticket" list with the same −, typed total and +
+ * as a truck row, and adds what was forgotten through "Find any material" or "Browse the shop".
+ * The manager-only stepper list and its "Add material (shop or a truck)" button are gone; what
+ * this file protects is the behaviour behind them.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -11,16 +14,17 @@ import { planReduce } from "@/components/service/materials-utils";
 
 const src = readFileSync("src/components/service/materials-section.tsx", "utf8");
 
-describe("a manager corrects any line on the ticket", () => {
-  it("lines from the shop or another truck get the stepper, for managers only", () => {
-    expect(src).toContain("const manager = managesTickets(profile);");
-    expect(src).toContain("const officeRows: ListRow[] = manager");
-    expect(src).toContain("On this ticket — correct a quantity");
-    expect(src).toContain("fromText={`from ${r.location_name}`}");
+describe("any line on the ticket can be corrected", () => {
+  it("lines from the shop or another truck get the stepper — for everyone, not managers only", () => {
+    expect(src).not.toContain("managesTickets(profile)");
+    expect(src).not.toContain("officeRows");
+    expect(src).not.toContain("On this ticket — correct a quantity");
+    expect(src).toContain('aria-label="On this ticket"');
+    expect(src).toContain("fromText={r.from}");
   });
-  it("+ takes more from the same place, the server checking the stock there", () => {
-    expect(src).toContain("onAdd={(n) => add(r, n, false)}");
-    expect(src).toContain("onSet={(n) => setTotal(r, n, false)}");
+  it("+ takes more from the same place; a stock the screen knows is checked here (the short-stock question), else the server checks", () => {
+    expect(src).toContain("onAdd={(n) => add(r, n, r.known)}");
+    expect(src).toContain("onSet={(n) => setTotal(r, n, r.known)}");
     expect(src).toContain("if (checkStock && !shortOk && units > onHand + EPS) {");
     const inv = readFileSync("src/lib/inventory.functions.ts", "utf8");
     expect(inv).toContain("const onHand = await onHandAt(sb, locationId, data);");
@@ -33,12 +37,24 @@ describe("a manager corrects any line on the ticket", () => {
       'const jobRelease = data.reason === "released" && !!data.service_job_id;',
     );
   });
-  it("lines nobody may correct (returns) stay a read-only list", () => {
-    expect(src).toContain(".filter(({ m }) => !officeKeys.has(cellKey(m)))");
+  it("a tech may only undo their own entries from the last 24 hours; the refusal says so", () => {
+    expect(src).toContain(
+      "const plan = planReduce(ownFreshEntries(now, r, r.piece, myName), units, canRelease);",
+    );
+    expect(src).toContain(
+      "only your own entries from the last 24 hours can be taken back here; ask the office to correct the ticket",
+    );
   });
-  it("a manager adds forgotten material from the ticket — on the ticket, never a jump to Inventory (owner, Oct 8)", () => {
-    expect(src).toContain("Add material (shop or a truck)");
+  it("lines nobody may correct (returns with nothing used) stay read-only rows of the same list", () => {
+    expect(src).toMatch(/r\.packs > EPS \? \(\s*<TruckRow/);
+    expect(src).toContain(
+      "returned {amountText(packsToUnits(-r.packs, r.piece), r.piece, r.unit)}",
+    );
+  });
+  it("forgotten material is added on the ticket, never a jump to Inventory (owner, Oct 8); the shelf view stays as Browse the shop", () => {
+    expect(src).not.toContain("Add material (shop or a truck)");
     expect(src).not.toContain('to="/inventory"');
+    expect(src).toContain("Browse the shop");
     expect(src).toContain('aria-label="Material from elsewhere"');
     expect(src).toContain("queryFn: () => truckFn({ data: { location_id: fromLoc! } }),");
   });

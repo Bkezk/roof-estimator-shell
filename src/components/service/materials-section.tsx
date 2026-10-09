@@ -2,20 +2,26 @@
  * The close-out's Materials section (docs/service-module-design.md §5.3, §12.5; owner, Sep 27:
  * log material with one tap and never leave the screen).
  *
- * "From my truck": the on-hand rows of the vehicle the tech drives (myTruckStock), each with a
- * big −/+ stepper showing what THIS ticket used of it. + records one piece (or one pack when the
- * product has no pieces) as a `consumed` movement against the ticket at that truck; − takes one
- * back (see planReduce: the tech's own recent entry is undone, an estimator's login records
- * `released`). Above the list, "Usual for <repair>" chips add what earlier tickets with the same
- * repair template used, in one tap. "Find any material" (owner, Oct 9) searches every cell anyone
- * has stocked plus the service material list and takes one from my truck, the shop or another
- * truck in a tap (material-search.ts); the "Material from elsewhere" panel lists a whole
- * location's shelf the same way.
+ * Owner, Oct 9 (the screenshot: three ways to add, a dead truck block for someone with no truck,
+ * a heading still saying "off the truck"): one list and one way in. Top to bottom — "Anything
+ * used?" while nothing is logged; the "Usual for <repair>" chips; ONE "On this ticket" list of
+ * everything logged from any place (materials-on-ticket.ts), each line a TruckRow with −, the
+ * typeable count and + and "from Shop" / "from Truck 2" under the name; "Find any material",
+ * the one entry point, which searches every cell anyone has stocked plus the service material
+ * list and takes one from my truck, the shop or another truck in a tap (material-search.ts), with
+ * a "Browse the shop" link that opens the "Material from elsewhere" panel (a whole location's
+ * shelf) for anyone who does not know the name; and "What's on my truck", a fold holding the
+ * on-hand rows of the vehicle the tech drives (myTruckStock), collapsed until a truck row has a
+ * count, and not there at all when no truck is set up for the login.
+ *
+ * + records one piece (or one pack when the product has no pieces) as a `consumed` movement
+ * against the ticket at that place; − takes one back (see planReduce: the tech's own recent entry
+ * is undone, else a `released` movement the server caps at what the ticket took).
  *
  * Taps are optimistic (the count and the on-hand move at once) and run one after another so a
- * "−" always sees the entry the "+" before it made; a refusal (e.g. only 2 on the truck) rolls the
- * count back and is shown loudly. When the queue is empty the ticket's materials, the truck and
- * Inventory's lists are re-read.
+ * "−" always sees the entry the "+" before it made; a refusal rolls the count back and is shown
+ * loudly. When the queue is empty the ticket's materials, the truck and Inventory's lists are
+ * re-read.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,7 +42,6 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
 import {
   addMovement,
   listLocations,
@@ -59,6 +64,7 @@ import {
   type MaterialResult,
   type MaterialSource,
 } from "@/lib/material-search";
+import { onTicketRows } from "@/lib/materials-on-ticket";
 import { plural, type PieceDef } from "@/lib/stock-units";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,7 +146,6 @@ export function MaterialsSection({
   // Putting a piece back against this ticket is allowed for any login that may log material
   // (the server caps it at what the ticket took).
   const canRelease = canLog;
-  const manager = managesTickets(profile);
 
   const materialsFn = useServerFn(listServiceJobMaterials);
   const truckFn = useServerFn(myTruckStock);
@@ -334,6 +339,9 @@ export function MaterialsSection({
   countsRef.current = new Map(rows.map((r) => [r.key, usedPacks(ledger, r)]));
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
+  // Owner, Oct 9: the truck list is a fold under the search, closed until a truck row has a count
+  // on this ticket (null: not toggled yet, the count decides).
+  const [truckOpen, setTruckOpen] = useState<boolean | null>(null);
   const [pinned, setPinned] = useState<Set<string>>(new Set());
   const loaded = materials.isSuccess && truck.isSuccess;
   useEffect(() => {
@@ -460,9 +468,9 @@ export function MaterialsSection({
   };
 
   /**
-   * Use `units` more of the row on this ticket. `checkStock` false: a manager correcting a line
-   * taken from the shop or another truck, whose on-hand this screen does not hold — the server
-   * checks it (addMovement: "Only N … on the shelf").
+   * Use `units` more of the row on this ticket. `checkStock` false: a line whose on-hand this
+   * screen does not hold (an "On this ticket" line from a place the app has not read, a search
+   * result before the stock read) — the server checks it (addMovement: "Only N … on the shelf").
    */
   // Owner, Oct 9: material the app says is not there can still be logged ("even if there is
   // not stock of that item in the shop or vehicle") — after a question that first sends them
@@ -572,43 +580,24 @@ export function MaterialsSection({
   const sourceName = (src: MaterialSource) =>
     src.kind === "mine" ? "My truck" : src.kind === "shop" ? "Shop" : src.location_name;
 
-  // Everything this ticket used anywhere (for the reminder), and what came from elsewhere.
+  // Everything this ticket used anywhere (for the reminder).
   const anyUsed = usedTotalPositive(ledger) || Object.values(pending).some((v) => v > EPS);
-  const elsewhere = useMemo(() => {
-    const byCell = new Map<string, { m: JobMaterialRow; packs: number }>();
-    for (const m of ledger) {
-      if (m.location_id === vehicleId) continue;
-      const k = cellKey(m);
-      const cur = byCell.get(k) ?? { m, packs: 0 };
-      cur.packs = round6(cur.packs - Number(m.qty));
-      byCell.set(k, cur);
-    }
-    return [...byCell.values()].filter((v) => Math.abs(v.packs) > EPS);
-  }, [ledger, vehicleId]);
-  const itemsOnTicket = rows.filter((r) => usedUnits(r) > EPS).length + elsewhere.length;
-  // Owner, Oct 5 (service follow-up 1): a manager corrects any line on the ticket here — the
-  // lines from the shop or another truck get the same −, typed total and + as the truck's.
-  // − puts it back where it was taken from (a "released" movement, capped by the server at what
-  // the ticket took); + takes more from the same place (the server checks the stock there).
-  const officeRows: ListRow[] = manager
-    ? elsewhere
-        .filter(({ packs }) => packs > EPS)
-        .map(({ m }) => ({
-          key: cellKey(m),
-          location_id: m.location_id,
-          screen_id: m.screen_id,
-          row_label: m.row_label,
-          label: m.label,
-          price_col: m.price_col,
-          category: "",
-          unit: m.unit,
-          on_hand: 0,
-          piece: pieceFromLedger(ledger, m),
-          item_no: null,
-          location_name: locName(m.location_id),
-        }))
-    : [];
-  const officeKeys = new Set(officeRows.map((r) => r.key));
+  // Owner, Oct 9: ONE list of what is on the ticket from any place, first logged first
+  // (materials-on-ticket.ts), every line with the same −, typed total and + as a truck row — a
+  // tech corrects a shop line too, not only a manager. + takes more from the same place: a stock
+  // this screen knows (the truck, the browse panel, the all-locations read) is checked here and a
+  // shortfall asks the short-stock question; else the server checks ("Only N … on the shelf").
+  // − is the truck's take-back: own entries from the last 24 h are undone, else a "released"
+  // movement the server caps at what the ticket took (planReduce; the loud message says so).
+  const onTicket = onTicketRows(ledger, [...rows, ...otherRows], locName, (c) => {
+    const hit = (stock.data ?? []).find(
+      (t) => t.location_id === c.location_id && catalogKey(t) === catalogKey(c),
+    );
+    return hit ? hit.on_hand : null;
+  });
+  const itemsOnTicket = onTicket.length;
+  const truckHasCount = rows.some((r) => usedUnits(r) > EPS);
+  const truckShown = truckOpen ?? truckHasCount;
 
   // Lines on the ticket: the cells with something used (or returned) net of take-backs.
   const lineCount = useMemo(() => {
@@ -625,7 +614,7 @@ export function MaterialsSection({
         </p>
       )}
       {materials.isSuccess && !anyUsed && (
-        <p className="font-medium text-amber-700 dark:text-amber-400">Anything off the truck?</p>
+        <p className="font-medium text-amber-700 dark:text-amber-400">Anything used?</p>
       )}
 
       {!canLog ? (
@@ -634,35 +623,6 @@ export function MaterialsSection({
         </p>
       ) : (
         <>
-          {vehicles.length > 1 && vehicleId && (
-            <div
-              role="radiogroup"
-              aria-label="Which truck"
-              className="grid gap-1 rounded-lg bg-muted p-1"
-              style={{
-                gridTemplateColumns: `repeat(${Math.min(vehicles.length, 3)}, minmax(0, 1fr))`,
-              }}
-            >
-              {vehicles.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="radio"
-                  aria-checked={id === vehicleId}
-                  onClick={() => pickVehicle(id)}
-                  className={`flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors ${
-                    id === vehicleId
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Truck className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{locName(id)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
           {vehicleId &&
             templates.map((t, i) => {
               const list = usual[i]?.data ?? [];
@@ -727,45 +687,41 @@ export function MaterialsSection({
               );
             })}
 
-          {short && (
-            <div
-              role="alertdialog"
-              aria-label="Log it anyway?"
-              className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
-            >
-              <p className="font-medium">
-                The app shows{" "}
-                {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)} of{" "}
-                {cellName(short.r)} on {locName(short.r.location_id)}.
+          {onTicket.length > 0 && (
+            <div className="space-y-1.5" aria-label="On this ticket">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                On this ticket
               </p>
-              <p className="text-muted-foreground">
-                If it came from somewhere else, cancel and pick that place. If it really came from{" "}
-                {locName(short.r.location_id)}, log it here and the count there gets corrected with
-                your entry.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  className="h-10"
-                  onClick={() => {
-                    const s = short;
-                    setShort(null);
-                    add(s.r, s.units, false, true);
-                  }}
-                >
-                  It came from {locName(short.r.location_id)} — log it
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-10"
-                  onClick={() => setShort(null)}
-                >
-                  Cancel
-                </Button>
-              </div>
+              <ul className="divide-y rounded-lg border">
+                {onTicket.map((r) =>
+                  r.packs > EPS ? (
+                    <TruckRow
+                      key={r.key}
+                      row={r}
+                      used={usedUnits(r)}
+                      onHand={onHandUnits(r)}
+                      fromText={r.from}
+                      onAdd={(n) => add(r, n, r.known)}
+                      onReduce={(n) => reduce(r, n)}
+                      onSet={(n) => setTotal(r, n, r.known)}
+                    />
+                  ) : (
+                    // A return with nothing used: shown, not corrected (nothing to take back).
+                    <li key={r.key} className="flex justify-between gap-3 px-3 py-2 text-sm">
+                      <span className="min-w-0">
+                        {cellName(r)}
+                        <span className="block text-xs text-muted-foreground">{r.from}</span>
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        returned {amountText(packsToUnits(-r.packs, r.piece), r.piece, r.unit)}
+                      </span>
+                    </li>
+                  ),
+                )}
+              </ul>
             </div>
           )}
+
           <div className="space-y-2" aria-label="Find any material">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -850,242 +806,288 @@ export function MaterialsSection({
                   )}
                 </>
               ))}
-          </div>
-
-          <div className="space-y-2">
-            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Truck className="h-3.5 w-3.5" /> From my truck
-              {vehicleId && vehicles.length === 1 ? ` · ${locName(vehicleId)}` : ""}
-            </p>
-            {truck.error ? (
-              <div className="flex flex-wrap items-center gap-2 text-sm text-destructive">
-                <span>Could not load your truck: {errText(truck.error)}</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10"
-                  onClick={() => void truck.refetch()}
-                >
-                  <RefreshCw className="mr-1 h-4 w-4" /> Try again
-                </Button>
-              </div>
-            ) : truck.isLoading || defaults.isLoading ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading your truck…
-              </p>
-            ) : !vehicleId ? (
-              <p className="text-sm text-muted-foreground">
-                No truck is set up for you today (the office assigns drivers in Inventory).
-              </p>
-            ) : rows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing is on {locName(vehicleId)} in the app yet.
-              </p>
-            ) : (
-              <>
-                {rows.length > 5 && (
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="search"
-                      className="h-11 pl-9 text-base"
-                      placeholder="Find on the truck (name, colour, item #)…"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                  </div>
-                )}
-                {filtered.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Nothing on the truck like “{q}”.</p>
-                ) : (
-                  <ul className="divide-y rounded-lg border">
-                    {visible.map((r) => (
-                      <TruckRow
-                        key={r.key}
-                        row={r}
-                        used={usedUnits(r)}
-                        onHand={onHandUnits(r)}
-                        onAdd={(n) => add(r, n)}
-                        onReduce={(n) => reduce(r, n)}
-                        onSet={(n) => setTotal(r, n)}
-                      />
-                    ))}
-                  </ul>
-                )}
-                {!q && filtered.length > FIRST_ROWS && (
+            {short && (
+              <div
+                role="alertdialog"
+                aria-label="Log it anyway?"
+                className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
+              >
+                <p className="font-medium">
+                  The app shows{" "}
+                  {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)} of{" "}
+                  {cellName(short.r)} on {locName(short.r.location_id)}.
+                </p>
+                <p className="text-muted-foreground">
+                  If it came from somewhere else, cancel and pick that place. If it really came from{" "}
+                  {locName(short.r.location_id)}, log it here and the count there gets corrected
+                  with your entry.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    className="h-10"
+                    onClick={() => {
+                      const s = short;
+                      setShort(null);
+                      add(s.r, s.units, false, true);
+                    }}
+                  >
+                    It came from {locName(short.r.location_id)} — log it
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
-                    className="h-11 w-full"
-                    onClick={() => setShowAll((v) => !v)}
+                    className="h-10"
+                    onClick={() => setShort(null)}
                   >
-                    {showAll ? (
-                      <>
-                        <ChevronUp className="mr-1 h-4 w-4" /> Show fewer
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown className="mr-1 h-4 w-4" /> Show all {filtered.length}
-                      </>
-                    )}
+                    Cancel
                   </Button>
-                )}
-              </>
+                </div>
+              </div>
             )}
-          </div>
-        </>
-      )}
-
-      {officeRows.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            On this ticket — correct a quantity
-          </p>
-          <ul className="divide-y rounded-lg border">
-            {officeRows.map((r) => (
-              <TruckRow
-                key={r.key}
-                row={r}
-                used={usedUnits(r)}
-                onHand={0}
-                fromText={`from ${r.location_name}`}
-                onAdd={(n) => add(r, n, false)}
-                onReduce={(n) => reduce(r, n)}
-                onSet={(n) => setTotal(r, n, false)}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-      {elsewhere.some(({ m }) => !officeKeys.has(cellKey(m))) && (
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Also on this ticket
-          </p>
-          <ul className="divide-y rounded-md border text-sm">
-            {elsewhere
-              .filter(({ m }) => !officeKeys.has(cellKey(m)))
-              .map(({ m, packs }) => {
-                const piece = pieceFromLedger(ledger, m);
-                const units = packsToUnits(packs, piece);
-                return (
-                  <li key={cellKey(m)} className="flex justify-between gap-3 px-3 py-2">
-                    <span className="min-w-0">
-                      {cellName(m)}
-                      <span className="block text-xs text-muted-foreground">
-                        from {locName(m.location_id)}
-                      </span>
-                    </span>
-                    <span className="shrink-0 tabular-nums">
-                      {units < 0
-                        ? `returned ${amountText(-units, piece, m.unit)}`
-                        : amountText(units, piece, m.unit)}
-                    </span>
-                  </li>
-                );
-              })}
-          </ul>
-        </div>
-      )}
-
-      {canLog &&
-        (fromLoc === null ? (
-          <Button
-            type="button"
-            variant={manager ? "outline" : "link"}
-            className={manager ? "h-10" : "h-10 px-0 text-sm"}
-            onClick={() => {
-              const shop = (locations.data ?? []).find((l) => l.kind === "shop");
-              const first = (locations.data ?? []).find((l) => l.id !== vehicleId);
-              setFromLoc(shop?.id ?? first?.id ?? "shop");
-            }}
-          >
-            {manager ? (
-              <>
-                <Plus className="mr-1 h-4 w-4" /> Add material (shop or a truck)
-              </>
-            ) : (
-              "From the shop / another truck"
-            )}
-          </Button>
-        ) : (
-          // Owner, Oct 8: the shop's or another truck's stock, right here — the same −/+ rows as
-          // the truck list, against this ticket at that place; no trip to the Inventory page.
-          <div className="space-y-2 rounded-lg border p-3" aria-label="Material from elsewhere">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <span className="font-medium">From</span>
-                <select
-                  className="h-10 rounded-md border bg-background px-2 text-sm"
-                  aria-label="Take material from"
-                  value={fromLoc}
-                  onChange={(e) => {
-                    setFromLoc(e.target.value);
-                    setOtherSearch("");
-                  }}
-                >
-                  {(locations.data ?? []).map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                      {l.id === vehicleId ? " (my truck)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            {fromLoc === null ? (
+              // Owner, Oct 9: the search is the one way in; the shelf view stays for anyone who
+              // does not know the name.
               <Button
                 type="button"
-                variant="ghost"
-                className="ml-auto h-10"
-                onClick={() => setFromLoc(null)}
+                variant="link"
+                className="h-10 px-0 text-sm"
+                onClick={() => {
+                  const shop = (locations.data ?? []).find((l) => l.kind === "shop");
+                  setFromLoc(shop?.id ?? "shop");
+                }}
               >
-                <Check className="mr-1 h-4 w-4" /> Done
+                Browse the shop
               </Button>
-            </div>
-            {other.error ? (
-              <p className="text-sm text-destructive">
-                Could not load {locName(fromLoc)}: {errText(other.error)}
-              </p>
-            ) : other.isLoading ? (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading {locName(fromLoc)}…
-              </p>
-            ) : otherRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Nothing is on {locName(fromLoc)} in the app yet.
-              </p>
             ) : (
-              <>
-                {otherRows.length > 5 && (
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      type="search"
-                      className="h-11 pl-9 text-base"
-                      placeholder={`Find on ${locName(fromLoc)} (name, colour, item #)…`}
-                      value={otherSearch}
-                      onChange={(e) => setOtherSearch(e.target.value)}
-                    />
-                  </div>
+              // Owner, Oct 8: the shop's or another truck's stock, right here — the same −/+ rows as
+              // the truck list, against this ticket at that place; no trip to the Inventory page.
+              <div className="space-y-2 rounded-lg border p-3" aria-label="Material from elsewhere">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">From</span>
+                    <select
+                      className="h-10 rounded-md border bg-background px-2 text-sm"
+                      aria-label="Take material from"
+                      value={fromLoc}
+                      onChange={(e) => {
+                        setFromLoc(e.target.value);
+                        setOtherSearch("");
+                      }}
+                    >
+                      {(locations.data ?? []).map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name}
+                          {l.id === vehicleId ? " (my truck)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="ml-auto h-10"
+                    onClick={() => setFromLoc(null)}
+                  >
+                    <Check className="mr-1 h-4 w-4" /> Done
+                  </Button>
+                </div>
+                {other.error ? (
+                  <p className="text-sm text-destructive">
+                    Could not load {locName(fromLoc)}: {errText(other.error)}
+                  </p>
+                ) : other.isLoading ? (
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading {locName(fromLoc)}…
+                  </p>
+                ) : otherRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Nothing is on {locName(fromLoc)} in the app yet.
+                  </p>
+                ) : (
+                  <>
+                    {otherRows.length > 5 && (
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="search"
+                          className="h-11 pl-9 text-base"
+                          placeholder={`Find on ${locName(fromLoc)} (name, colour, item #)…`}
+                          value={otherSearch}
+                          onChange={(e) => setOtherSearch(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <ul className="divide-y rounded-lg border">
+                      {otherRows
+                        .filter((r) => matchesSearch(r, otherSearch.trim()))
+                        .map((r) => (
+                          <TruckRow
+                            key={r.key}
+                            row={r}
+                            used={usedUnits(r)}
+                            onHand={onHandUnits(r)}
+                            onAdd={(n) => add(r, n)}
+                            onReduce={(n) => reduce(r, n)}
+                            onSet={(n) => setTotal(r, n)}
+                          />
+                        ))}
+                    </ul>
+                  </>
                 )}
-                <ul className="divide-y rounded-lg border">
-                  {otherRows
-                    .filter((r) => matchesSearch(r, otherSearch.trim()))
-                    .map((r) => (
-                      <TruckRow
-                        key={r.key}
-                        row={r}
-                        used={usedUnits(r)}
-                        onHand={onHandUnits(r)}
-                        onAdd={(n) => add(r, n)}
-                        onReduce={(n) => reduce(r, n)}
-                        onSet={(n) => setTotal(r, n)}
-                      />
-                    ))}
-                </ul>
-              </>
+              </div>
             )}
           </div>
-        ))}
+
+          {truck.error && !vehicleId ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+              <span>Could not load your truck: {errText(truck.error)}</span>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10"
+                onClick={() => void truck.refetch()}
+              >
+                <RefreshCw className="mr-1 h-4 w-4" /> Try again
+              </Button>
+            </div>
+          ) : (truck.isLoading || defaults.isLoading) && !vehicleId ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading your truck…
+            </p>
+          ) : vehicleId ? (
+            // Owner, Oct 9: a fold, not a block — and no fold at all for a login with no truck
+            // (the old "no truck is set up for you" line was a dead block for the office).
+            <div className="space-y-2" aria-label="What's on my truck">
+              <button
+                type="button"
+                className="flex h-10 w-full items-center justify-between gap-2 rounded-md px-1 text-left text-sm font-medium hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-expanded={truckShown}
+                onClick={() => setTruckOpen(!truckShown)}
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Truck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate">
+                    What's on my truck{vehicles.length === 1 ? ` · ${locName(vehicleId)}` : ""}
+                  </span>
+                </span>
+                {truckShown ? (
+                  <ChevronUp className="h-4 w-4 shrink-0" aria-hidden />
+                ) : (
+                  <ChevronDown className="h-4 w-4 shrink-0" aria-hidden />
+                )}
+              </button>
+              {truckShown && (
+                <>
+                  {vehicles.length > 1 && vehicleId && (
+                    <div
+                      role="radiogroup"
+                      aria-label="Which truck"
+                      className="grid gap-1 rounded-lg bg-muted p-1"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.min(vehicles.length, 3)}, minmax(0, 1fr))`,
+                      }}
+                    >
+                      {vehicles.map((id) => (
+                        <button
+                          key={id}
+                          type="button"
+                          role="radio"
+                          aria-checked={id === vehicleId}
+                          onClick={() => pickVehicle(id)}
+                          className={`flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors ${
+                            id === vehicleId
+                              ? "bg-background text-foreground shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          <Truck className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{locName(id)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {truck.error ? (
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+                      <span>Could not load your truck: {errText(truck.error)}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10"
+                        onClick={() => void truck.refetch()}
+                      >
+                        <RefreshCw className="mr-1 h-4 w-4" /> Try again
+                      </Button>
+                    </div>
+                  ) : truck.isLoading ? (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading your truck…
+                    </p>
+                  ) : rows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Nothing is on {locName(vehicleId)} in the app yet (the office stocks trucks in
+                      Inventory).
+                    </p>
+                  ) : (
+                    <>
+                      {rows.length > 5 && (
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            type="search"
+                            className="h-11 pl-9 text-base"
+                            placeholder="Find on the truck (name, colour, item #)…"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                          />
+                        </div>
+                      )}
+                      {filtered.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Nothing on the truck like “{q}”.
+                        </p>
+                      ) : (
+                        <ul className="divide-y rounded-lg border">
+                          {visible.map((r) => (
+                            <TruckRow
+                              key={r.key}
+                              row={r}
+                              used={usedUnits(r)}
+                              onHand={onHandUnits(r)}
+                              onAdd={(n) => add(r, n)}
+                              onReduce={(n) => reduce(r, n)}
+                              onSet={(n) => setTotal(r, n)}
+                            />
+                          ))}
+                        </ul>
+                      )}
+                      {!q && filtered.length > FIRST_ROWS && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-11 w-full"
+                          onClick={() => setShowAll((v) => !v)}
+                        >
+                          {showAll ? (
+                            <>
+                              <ChevronUp className="mr-1 h-4 w-4" /> Show fewer
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="mr-1 h-4 w-4" /> Show all {filtered.length}
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          ) : null}
+        </>
+      )}
     </>
   );
 
@@ -1151,7 +1153,7 @@ function TruckRow({
   row: ListRow;
   used: number;
   onHand: number;
-  /** In place of the truck's on-hand line: where a manager-corrected line was taken from. */
+  /** In place of the on-hand line: where an "On this ticket" line was taken from. */
   fromText?: string | undefined;
   onAdd: (units: number) => void;
   onReduce: (units: number) => void;

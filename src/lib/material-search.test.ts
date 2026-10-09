@@ -394,8 +394,9 @@ describe("the Materials section's Find box", () => {
     );
     expect(src).toContain('none ? "border-dashed text-muted-foreground" : ""');
   });
-  it("the truck list, the Usual chips and the elsewhere panel are still there; a logged tap moves the stock cache too", () => {
-    expect(src).toContain("From my truck");
+  it("the truck fold, the Usual chips and the elsewhere panel are still there; a logged tap moves the stock cache too", () => {
+    // Owner, Oct 9: the truck list is the "What's on my truck" fold under the search.
+    expect(src).toContain("What's on my truck");
     expect(src).toContain("Usual for {t.name}");
     expect(src).toContain('aria-label="Material from elsewhere"');
     expect(src).toContain('qc.setQueryData<StockRow[]>(["inventory-stock"], (old) =>');
