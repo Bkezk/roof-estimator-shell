@@ -20,6 +20,8 @@ import {
   type ReconcileMovement,
   type Reconciliation,
 } from "@/lib/inventory-reconcile";
+import { materialsByCell, serviceLabel } from "@/lib/service-materials";
+import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
 /**
  * The whole ledger, oldest first: a cell's first-below-zero may be older than any week, and
@@ -66,14 +68,17 @@ export const getReconciliation = createServerFn({ method: "GET" })
       .eq("id", context.userId)
       .maybeSingle();
     if (!seesEveryone(me)) throw new Error("Forbidden: admins and managers only");
-    const [movements, { data: locs, error: lErr }] = await Promise.all([
+    const [movements, { data: locs, error: lErr }, materials] = await Promise.all([
       readAllMovements(sb),
       // Every location, active or not: an entry on a retired vehicle still needs its name.
       sb.from("inventory_locations").select("id, name"),
+      loadServiceMaterialLinks(sb),
     ]);
     if (lErr) throw new Error(lErr.message);
+    // Cells read by their service name, as the stock table and the close-out do (owner, Oct 9).
+    const byMaterial = materialsByCell(materials);
     return buildReconciliation({
-      movements,
+      movements: movements.map((m) => ({ ...m, label: serviceLabel(byMaterial, m) })),
       locations: (locs ?? []).map((l) => ({ id: l.id, name: l.name })),
       ...reconcileWindow(data.weekStart ?? null),
     });

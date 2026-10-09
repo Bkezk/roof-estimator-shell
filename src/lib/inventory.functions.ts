@@ -10,7 +10,7 @@
  * only reduces what the ordering summary says to buy.
  */
 import { createServerFn } from "@tanstack/react-start";
-import { canAccess, managesTickets } from "@/lib/access";
+import { canAccess, managesTickets, seesEveryone } from "@/lib/access";
 import { fieldEditProblem } from "@/lib/field-edit-lock";
 import {
   PACK_QTY_COLS,
@@ -19,6 +19,7 @@ import {
   pieceDefFromPack,
   pieceDefFromUnitType,
   plural,
+  variantOf,
   type PieceDef,
 } from "@/lib/stock-units";
 import { z } from "zod";
@@ -102,10 +103,11 @@ export const listLocations = createServerFn({ method: "GET" })
 export { STOCK_UNIT_BY_SCREEN, stockUnitFor } from "@/lib/stock-units";
 /**
  * Screens with several price columns key stock by colour / size (White, Tan, 2", …); a
- * single-price screen (Adhesives) stores the generic "price" column — shown as "—".
+ * single-price screen (Adhesives) stores the generic "price" column — shown as "—", and so is a
+ * pack-priced screen's "Price/Box" (owner, Oct 9: not a colour; stock-units.ts variantOf).
  */
 export const SINGLE_PRICE_COL = "price";
-export const priceColLabel = (col: string): string => (col === SINGLE_PRICE_COL ? "—" : col);
+export const priceColLabel = (col: string): string => variantOf(col) ?? "—";
 
 const cellSchema = z.object({
   screen_id: z.string().min(1),
@@ -130,6 +132,12 @@ export interface StockRow {
    * box of collated screws per tap because the stock row carried no piece.
    */
   piece: PieceDef | null;
+  /**
+   * The service material name for the cell (owner, Oct 6: CenterPoint's names on repair
+   * tickets; Oct 9: the Inventory page reads the same way as the close-out), or null: the row
+   * keeps the catalog's label.
+   */
+  label: string | null;
 }
 
 export interface MovementRow {
@@ -157,6 +165,8 @@ export interface MovementRow {
   created_at: string;
   /** May the caller undo this entry now (own entry within 24 h, or admin)? */
   can_undo?: boolean;
+  /** The service material name for the cell, as on StockRow; null = the catalog's label. */
+  label: string | null;
 }
 
 /** A stock row's category: its catalog screen's, or a service material's own group. */
@@ -181,15 +191,17 @@ export const listStock = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<StockRow[]> => {
     const sb = context.supabase;
-    const [{ data, error }, cats, { data: nums }] = await Promise.all([
+    const [{ data, error }, cats, { data: nums }, materials] = await Promise.all([
       sb
         .from("inventory_movements")
         .select("location_id, screen_id, row_label, price_col, qty, unit, created_at, item_no")
         .order("created_at"),
       categories(sb),
       sb.from("catalog_item_numbers").select("screen_id, row_label, price_col, item_no"),
+      loadServiceMaterialLinks(sb),
     ]);
     if (error) throw new Error(error.message);
+    const byMaterial = materialsByCell(materials);
     const byCell = new Map<string, StockRow>();
     for (const m of data ?? []) {
       const key = `${m.location_id}\u0000${m.screen_id}\u0000${m.row_label}\u0000${m.price_col}`;
@@ -206,6 +218,7 @@ export const listStock = createServerFn({ method: "GET" })
           last_at: null,
           item_nos: [],
           piece: null,
+          label: serviceLabel(byMaterial, m),
         };
         byCell.set(key, row);
       }
@@ -246,7 +259,14 @@ export const listStock = createServerFn({ method: "GET" })
       );
   });
 
-/** The ledger, newest first. */
+/** One page of the ledger (PostgREST answers at most 1,000 rows per request). */
+export const MOVEMENTS_PAGE = 1000;
+
+/**
+ * The ledger, newest first, one page at a time (owner, Oct 9: History showed the latest 300 and
+ * called that every entry). `before` is the created_at of the oldest entry already shown: the
+ * next page is what came before it. A page shorter than `limit` is the end.
+ */
 export const listMovements = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .validator((d) =>
@@ -254,7 +274,8 @@ export const listMovements = createServerFn({ method: "GET" })
       .object({
         screen_id: z.string().optional(),
         bid_id: z.string().uuid().optional(),
-        limit: z.number().int().min(1).max(1000).optional(),
+        limit: z.number().int().min(1).max(MOVEMENTS_PAGE).optional(),
+        before: z.string().datetime({ offset: true }).optional(),
       })
       .parse(d ?? {}),
   )
@@ -264,18 +285,22 @@ export const listMovements = createServerFn({ method: "GET" })
       .from("inventory_movements")
       .select("*")
       .order("created_at", { ascending: false })
-      .limit(data.limit ?? 300);
+      .limit(data.limit ?? MOVEMENTS_PAGE);
     if (data.screen_id) q = q.eq("screen_id", data.screen_id);
     if (data.bid_id) q = q.eq("bid_id", data.bid_id);
-    const [{ data: rows, error }, cats, { data: me }] = await Promise.all([
+    if (data.before) q = q.lt("created_at", data.before);
+    const [{ data: rows, error }, cats, { data: me }, materials] = await Promise.all([
       q,
       categories(sb),
       sb.from("profiles").select("role").eq("id", context.userId).maybeSingle(),
+      loadServiceMaterialLinks(sb),
     ]);
     if (error) throw new Error(error.message);
+    const byMaterial = materialsByCell(materials);
     const now = Date.now();
     return (rows ?? []).map((r) => ({
       id: r.id,
+      label: serviceLabel(byMaterial, r),
       location_id: r.location_id,
       pair_id: r.pair_id,
       can_undo:
@@ -757,7 +782,8 @@ export const listJobOptions = createServerFn({ method: "GET" })
 
 /**
  * Vehicle drivers (owner, Sep 26): up to two users per vehicle, a user may be on two vehicles,
- * admins change it, history is kept (a closed row has to_date). Current = to_date is null.
+ * admins and managers change it (owner, Oct 9), history is kept (a closed row has to_date).
+ * Current = to_date is null.
  */
 export interface VehicleDriverRow {
   id: number;
@@ -790,7 +816,11 @@ export const listVehicleDrivers = createServerFn({ method: "GET" })
     }));
   });
 
-/** Admin: set who drives a vehicle from today. Closes anyone no longer listed, keeps history. */
+/**
+ * Admins and managers (owner, Oct 9: "allow managers to set truck drivers"; RLS
+ * vehicle_drivers_write, 20261009130000): set who drives a vehicle from today. Closes anyone no
+ * longer listed, keeps history.
+ */
 export const setVehicleDrivers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d) =>
@@ -808,7 +838,7 @@ export const setVehicleDrivers = createServerFn({ method: "POST" })
       .select("role")
       .eq("id", context.userId)
       .maybeSingle();
-    if (me?.role !== "admin") throw new Error("Forbidden: admin access required");
+    if (!seesEveryone(me)) throw new Error("Forbidden: admins and managers only");
     const location = await locationOf(sb, data.location_id);
     if (location.kind !== "vehicle") throw new Error("Drivers are set on service vehicles only");
     // The office's day (America/New_York), not UTC's: after 8 pm Eastern UTC is tomorrow.

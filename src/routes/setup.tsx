@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { ClipboardList, Package, Receipt, Settings2, Truck } from "lucide-react";
 
+import { seesEveryone } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { listLocations } from "@/lib/inventory.functions";
 import { ServiceRatesSettings } from "@/components/service-rates-settings";
@@ -15,9 +16,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
  * Setup (owner, Oct 5): the Service Rates page renamed and moved from the Admin group to the
  * Customers group, under Opportunities, with Vehicles & drivers brought over from Inventory. One
  * page, three tabs so each part gets the whole screen: Service rates, Inspection checklist and
- * (admins only — setVehicleDrivers is an admin write) Vehicles & drivers. ?tab= deep-links a tab;
- * /admin/service-rates redirects here. Access is the central gate's (pageForPath: /setup →
- * manager: admins and managers, as Service Rates was).
+ * Vehicles & drivers — admins and managers (owner, Oct 9: "allow managers to set truck drivers";
+ * setVehicleDrivers and RLS vehicle_drivers_write, 20261009130000, apply the same rule). ?tab=
+ * deep-links a tab; /admin/service-rates redirects here. Access is the central gate's
+ * (pageForPath: /setup → manager: admins and managers, as Service Rates was).
  *
  * Material pricing (owner, Oct 6): the service material price list repair tickets bill from,
  * separate from Estimate Pricing (the bids').
@@ -33,18 +35,20 @@ export const Route = createFileRoute("/setup")({
 });
 
 function SetupPage() {
-  const { role } = useAuth();
+  const { profile } = useAuth();
   const navigate = useNavigate({ from: "/setup" });
   const { tab } = Route.useSearch();
-  const isAdmin = role === "admin";
-  // A manager who lands on ?tab=vehicles (an old link) sees the rates instead.
-  const active: SetupTab = tab === "vehicles" && !isAdmin ? "rates" : (tab ?? "rates");
+  // Admins and managers set the drivers (owner, Oct 9); the gate already keeps everyone else off
+  // the page, so this only guards a stale profile.
+  const canSetDrivers = seesEveryone(profile);
+  // Someone who may not set drivers but lands on ?tab=vehicles (an old link) sees the rates.
+  const active: SetupTab = tab === "vehicles" && !canSetDrivers ? "rates" : (tab ?? "rates");
   const locationsFn = useServerFn(listLocations);
   // The same query (and cache) as the Inventory page.
   const locationsQ = useQuery({
     queryKey: ["inventory-locations"],
     queryFn: () => locationsFn(),
-    enabled: isAdmin,
+    enabled: canSetDrivers,
   });
 
   return (
@@ -55,7 +59,7 @@ function SetupPage() {
         </h1>
         <p className="text-sm text-muted-foreground">
           How service work is priced and run: the rates and material prices invoices are built from,
-          what an inspection asks about{isAdmin ? ", and who drives each vehicle" : ""}.
+          what an inspection asks about{canSetDrivers ? ", and who drives each vehicle" : ""}.
         </p>
       </div>
       <Tabs
@@ -74,7 +78,7 @@ function SetupPage() {
           <TabsTrigger value="inspection" className="gap-1.5">
             <ClipboardList className="h-4 w-4" aria-hidden /> Inspection checklist
           </TabsTrigger>
-          {isAdmin && (
+          {canSetDrivers && (
             <TabsTrigger value="vehicles" className="gap-1.5">
               <Truck className="h-4 w-4" aria-hidden /> Vehicles &amp; drivers
             </TabsTrigger>
@@ -89,7 +93,7 @@ function SetupPage() {
         <TabsContent value="inspection" className="mt-4">
           <InspectionChecklistSettings />
         </TabsContent>
-        {isAdmin && (
+        {canSetDrivers && (
           <TabsContent value="vehicles" className="mt-4">
             {locationsQ.error ? (
               <p className="text-sm text-destructive">

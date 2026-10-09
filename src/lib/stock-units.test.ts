@@ -28,7 +28,11 @@ describe("stock units — pieces of a priced pack", () => {
     expect(describeStock(0.75, "4-Cartridge Case", def)).toBe("3 cartridges");
     expect(describeStock(0.25, "4-Cartridge Case", def)).toBe("1 cartridge");
     expect(describeStock(0.6, "box", { name: "fastener", perPack: 1000 })).toBe("600 fasteners");
-    expect(describeStock(2, "pail", null)).toBe("2 pail");
+    // A pack unit pluralises like the close-out (owner, Oct 9): "2 pails", "1 pail", "3 sq ft".
+    expect(describeStock(2, "pail", null)).toBe("2 pails");
+    expect(describeStock(1, "pail", null)).toBe("1 pail");
+    expect(describeStock(3, "sq ft", null)).toBe("3 sq ft");
+    expect(displayStock(2, "box", null)).toEqual({ amount: 2, unit: "boxes" });
     expect(displayStock(2.5, "4-Cartridge Case", def)).toEqual({ amount: 10, unit: "cartridges" });
   });
 });

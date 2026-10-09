@@ -193,6 +193,7 @@ describe("order list — matching engine lines to stock cells", () => {
           last_at: null,
           item_nos: [],
           piece: null,
+          label: null,
         },
       ],
       pulls: [
@@ -207,6 +208,7 @@ describe("order list — matching engine lines to stock cells", () => {
           row_label: "Duro-Fleece Adhesive(cartridge)",
           price_col: "price",
           item_no: null,
+          label: null,
           qty: -1,
           unit: "4-Cartridge Case",
           reason: "consumed",
@@ -228,6 +230,7 @@ describe("order list — matching engine lines to stock cells", () => {
           row_label: "Duro-Fleece Adhesive(cartridge)",
           price_col: "price",
           item_no: null,
+          label: null,
           qty: 0.25,
           unit: "4-Cartridge Case",
           reason: "released",
@@ -292,6 +295,7 @@ describe("order list — matching engine lines to stock cells", () => {
           last_at: null,
           item_nos: [],
           piece: null,
+          label: null,
         },
       ],
     });
@@ -318,6 +322,7 @@ describe("order list — matching engine lines to stock cells", () => {
         last_at: null,
         item_nos: [],
         piece: null,
+        label: null,
       },
       {
         location_id: "shop",
@@ -330,6 +335,7 @@ describe("order list — matching engine lines to stock cells", () => {
         last_at: null,
         item_nos: [],
         piece: null,
+        label: null,
       },
       {
         location_id: "shop",
@@ -342,6 +348,7 @@ describe("order list — matching engine lines to stock cells", () => {
         last_at: null,
         item_nos: [],
         piece: null,
+        label: null,
       },
     ];
     const lines = buildOrderList({

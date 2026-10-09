@@ -174,11 +174,15 @@ describe("the Inventory page's Reconcile card", () => {
   });
 
   it("each negative cell has a blank Counted box (decimal, in the cell's unit) and Set count → addMovement with reconcileAdjustment's payload", () => {
-    const row = c.slice(c.indexOf("function NegativeRow("), c.indexOf("function SettingsCard("));
+    const row = c.slice(c.indexOf("function NegativeRow("), c.indexOf("function SetCountButton("));
     expect(row).toContain("const addFn = useServerFn(addMovement);");
-    expect(row).toContain("const payload = touched ? reconcileAdjustment(n, counted) : null;");
+    // The box tracks its text (owner, Oct 9): blank = no payload, so Set count stays off.
+    expect(row).toContain("const counted = parseCounted(text);");
+    expect(row).toContain(
+      "const payload = counted === null ? null : reconcileAdjustment(n, counted);",
+    );
     expect(row).toContain("await addFn({ data: payload });");
-    expect(row).toContain("<NumberField");
+    expect(row).toContain('type="number"');
     expect(row).toContain('inputMode="decimal"');
     expect(row).toContain('step="any"');
     expect(row).toContain("Counted ({n.unit})");

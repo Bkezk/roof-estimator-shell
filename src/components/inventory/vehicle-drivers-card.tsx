@@ -1,6 +1,6 @@
 /**
- * Setup › Vehicles & drivers (admins; owner, Sep 26 — service design §11; moved from Inventory
- * Oct 5): who drives each service vehicle. Up to two drivers
+ * Setup › Vehicles & drivers (admins and managers — owner, Oct 9; Sep 26 — service design §11;
+ * moved from Inventory Oct 5): who drives each service vehicle. Up to two drivers
  * per vehicle and a person may be on two vehicles. Saving a row closes whoever is no longer
  * listed from today and adds the new names from today (setVehicleDrivers), so the history below
  * shows every change. A driver's "Take from inventory" starts on their vehicle.
@@ -194,7 +194,7 @@ function VehicleRow(props: {
             : `${props.vehicle.name} has no driver now`,
         );
         void qc.invalidateQueries({ queryKey: ["vehicle-drivers"] });
-        // The admin may have put themselves on (or off) a vehicle.
+        // The admin or manager may have put themselves on (or off) a vehicle.
         void qc.invalidateQueries({ queryKey: ["inventory-my-defaults"] });
       })
       .catch((e: unknown) => toast.error(errText(e, "Could not save the drivers")))

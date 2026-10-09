@@ -13,6 +13,16 @@
  * write-offs are not offered here — the server still accepts them from estimators. Admins set
  * the opened-box rule at the bottom of the page; who drives each vehicle is on Setup ›
  * Vehicles & drivers (owner, Oct 5).
+ *
+ * Owner, Oct 9 (after a review): History pages through the whole ledger and says how much is
+ * shown; a Put-in's remembered job is an unmistakable "Left over from …" line (leftovers off one
+ * bid, several in a row, are the normal case — owner: "very rarely if ever just ordering to have
+ * things stocked") with "Bought or delivered (no job)" as the other choice; the amount is two
+ * boxes side by side, whole packs and pieces, either or both filled; every row has Set count for
+ * estimators and managers (a shelf counted down is one adjustment); the dialog stays open after
+ * Save so ten leftovers are ten saves, not ten dialogs; the shop is the default place for anyone
+ * without a vehicle; a truck can load another truck; names and units read as on the close-out
+ * (the service material's name first, "2 boxes", a price column is not a colour).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,16 +46,18 @@ import { useAuth } from "@/lib/auth-store";
 import { canAccess, seesEveryone } from "@/lib/access";
 import { getReconciliation } from "@/lib/inventory-reconcile.functions";
 import {
+  cellName,
   CLEAN_LINE,
+  COUNT_NOTE,
   fmtQty as fmtSigned,
   fmtWhen as fmtOfficeWhen,
+  parseCounted,
   reconcileAdjustment,
   reconciliationSummary,
   shiftWeek,
   weekStartOf,
   type NegativeCell,
 } from "@/lib/inventory-reconcile";
-import { NumberField } from "@/components/ui/number-field";
 import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import type { ItemNumberRow, PriceTarget } from "@/lib/admin-item-numbers.functions";
 import { listServiceMaterialNames } from "@/lib/service-materials.functions";
@@ -59,6 +71,7 @@ import {
   listLocations,
   listMovements,
   listStock,
+  MOVEMENTS_PAGE,
   myServiceDefaults,
   OPENED_BOX_LABELS,
   REASON_LABELS,
@@ -71,15 +84,17 @@ import {
   type InventoryLocation,
   type JobOption,
   type MovementReason,
+  type MovementRow,
   type OpenedBoxRule,
   type StockRow,
 } from "@/lib/inventory.functions";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
 import type { TargetRef } from "@/lib/item-number-targets";
 import {
+  combinedCount,
   describeStock,
   displayStock,
-  packsFromPieces,
+  packUnitLabel,
   plural,
   type PieceDef,
 } from "@/lib/stock-units";
@@ -94,6 +109,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -153,6 +169,9 @@ interface ProductOption {
   variant: string; // colour / size, "" for single-price products
   category: string;
   itemNos: string[];
+  /** The stock unit and pieces per pack, so "on hand" reads "2 boxes" / "10 cartridges". */
+  unit: string;
+  piece: PieceDef | null;
 }
 
 function productOptions(targets: PriceTarget[], itemNumbers: ItemNumberRow[]): ProductOption[] {
@@ -173,6 +192,8 @@ function productOptions(targets: PriceTarget[], itemNumbers: ItemNumberRow[]): P
           variant: priceColLabel(col) === "—" ? "" : col,
           category: t.category,
           itemNos: nos.get(key) ?? [],
+          unit: t.row_units?.[row] ?? stockUnitFor(t.screen_id),
+          piece: t.pieces?.[row] ?? null,
         });
       }
     }
@@ -204,10 +225,18 @@ export function InventoryPage(props: {
     queryKey: ["inventory-locations"],
     queryFn: () => locationsFn(),
   });
+  // History: the newest page from the cache (the close-out and the estimator invalidate this
+  // key too), older pages appended on "Show older" and dropped whenever the first page re-reads,
+  // so the pages never overlap (owner, Oct 9: it showed 300 and called that every entry).
   const movesQ = useQuery({
     queryKey: ["inventory-movements"],
     queryFn: () => movesFn({ data: {} }),
   });
+  const [older, setOlder] = useState<MovementRow[]>([]);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  useEffect(() => {
+    setOlder([]);
+  }, [movesQ.dataUpdatedAt]);
   const targetsQ = useQuery({ queryKey: ["price-targets"], queryFn: () => targetsFn() });
   // Service materials with no bid-catalog twin (owner, Oct 6): stocked here too.
   const serviceNamesQ = useQuery({
@@ -225,6 +254,8 @@ export function InventoryPage(props: {
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
+    // The Reconcile card sums the same ledger (owner, Oct 9: it kept a fixed cell listed).
+    void qc.invalidateQueries({ queryKey: ["inventory-reconcile"] });
   };
   const targets: PriceTarget[] = useMemo(
     () => [...(targetsQ.data ?? []), ...serviceStockTargets(serviceNamesQ.data ?? [])],
@@ -232,10 +263,37 @@ export function InventoryPage(props: {
   );
   const itemNumbers = useMemo(() => itemNosQ.data ?? [], [itemNosQ.data]);
   const products = useMemo(() => productOptions(targets, itemNumbers), [targets, itemNumbers]);
-  const pieceOf = (screenId: string, rowLabel: string): PieceDef | null =>
-    targets.find((t) => t.screen_id === screenId)?.pieces?.[rowLabel] ?? null;
-  const stock = stockQ.data ?? [];
-  const moves = movesQ.data ?? [];
+  const stock = useMemo(() => stockQ.data ?? [], [stockQ.data]);
+  // A ledger entry's piece: the stock row's (listStock's, which knows a service material's own
+  // unit — an ISO board), else the catalog's.
+  const stockPiece = useMemo(() => {
+    const m = new Map<string, PieceDef | null>();
+    for (const r of stock) m.set(`${r.screen_id}|${r.row_label}|${r.price_col}`, r.piece);
+    return m;
+  }, [stock]);
+  const pieceFor = (cell: { screen_id: string; row_label: string; price_col: string }) =>
+    stockPiece.get(`${cell.screen_id}|${cell.row_label}|${cell.price_col}`) ??
+    targets.find((t) => t.screen_id === cell.screen_id)?.pieces?.[cell.row_label] ??
+    null;
+  const firstPage = useMemo(() => movesQ.data ?? [], [movesQ.data]);
+  const moves = useMemo(() => [...firstPage, ...older], [firstPage, older]);
+  // A page shorter than the page size is the end of the ledger.
+  const lastPage = older.length ? older : firstPage;
+  const hasOlder = movesQ.isFetched && lastPage.length >= MOVEMENTS_PAGE;
+  const loadOlder = async () => {
+    const oldest = moves[moves.length - 1];
+    if (!oldest || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await movesFn({ data: { before: oldest.created_at } });
+      setOlder((o) => [...o, ...page]);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not load older entries");
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+  const canSetCount = canAccess(profile, "estimate");
   const rule = settingsQ.data?.opened_box_rule ?? "half";
   const locations = useMemo(() => locationsQ.data ?? [], [locationsQ.data]);
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
@@ -271,7 +329,7 @@ export function InventoryPage(props: {
       setDialog({
         mode: "leftover",
         ref: null,
-        location: null,
+        location: SHOP_LOCATION_ID,
         purpose: { kind: "job" },
         job: `bid:${props.initialBidId}`,
       });
@@ -285,7 +343,7 @@ export function InventoryPage(props: {
     setDialog({
       mode: "consumed",
       ref: null,
-      location: myVehicle ?? null,
+      location: myVehicle ?? SHOP_LOCATION_ID,
       purpose: { kind: "job" },
       job: `service:${props.initialServiceJobId}`,
     });
@@ -297,6 +355,7 @@ export function InventoryPage(props: {
     if (!zeros && Math.abs(r.on_hand) < 0.0005) return false;
     return (
       !filter ||
+      (r.label ?? "").toLowerCase().includes(filter) ||
       r.row_label.toLowerCase().includes(filter) ||
       r.category.toLowerCase().includes(filter) ||
       r.price_col.toLowerCase().includes(filter) ||
@@ -314,8 +373,9 @@ export function InventoryPage(props: {
     setDialog({
       mode,
       ref: r ? { screen_id: r.screen_id, row_label: r.row_label, price_col: r.price_col } : null,
-      // A row already says where it is; the header buttons ask first (or start on my vehicle).
-      location: r ? r.location_id : take && myVehicle ? myVehicle : null,
+      // A row already says where it is; the header buttons start on my vehicle, else the shop
+      // (owner, Oct 9) — the chip stays, with Change.
+      location: r ? r.location_id : (myVehicle ?? SHOP_LOCATION_ID),
       purpose: take && myJobs.length > 0 ? { kind: "job" } : null,
       job: onlyTicket ?? (take && myJobs.length > 1 ? "__pick__" : null),
     });
@@ -394,7 +454,7 @@ export function InventoryPage(props: {
               {/* Phone: one card per product with big buttons. */}
               <ul className="space-y-2 md:hidden">
                 {rows.map((r) => {
-                  const d = displayStock(r.on_hand, r.unit, pieceOf(r.screen_id, r.row_label));
+                  const d = displayStock(r.on_hand, r.unit, r.piece);
                   return (
                     <li
                       key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
@@ -402,10 +462,15 @@ export function InventoryPage(props: {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="truncate font-medium">{r.row_label}</p>
+                          <p className="truncate font-medium">{cellName(r)}</p>
                           <p className="text-xs text-muted-foreground">
                             {[
-                              priceColLabel(r.price_col) !== "—" ? r.price_col : null,
+                              r.label ? r.row_label : null,
+                              r.label
+                                ? null
+                                : priceColLabel(r.price_col) !== "—"
+                                  ? r.price_col
+                                  : null,
                               r.category,
                               locationName(r.location_id),
                             ]
@@ -422,7 +487,9 @@ export function InventoryPage(props: {
                           {fmtQty(d.amount)} <span className="text-xs font-normal">{d.unit}</span>
                         </p>
                       </div>
-                      <div className="mt-2 grid grid-cols-2 gap-2">
+                      <div
+                        className={`mt-2 grid gap-2 ${canSetCount ? "grid-cols-3" : "grid-cols-2"}`}
+                      >
                         <Button
                           size="sm"
                           variant="outline"
@@ -434,6 +501,13 @@ export function InventoryPage(props: {
                         <Button size="sm" variant="outline" onClick={() => open("leftover", r)}>
                           <PackagePlus className="mr-1 h-4 w-4" /> Put in
                         </Button>
+                        {canSetCount && (
+                          <SetCountButton
+                            row={r}
+                            locationName={locationName(r.location_id)}
+                            onSet={refresh}
+                          />
+                        )}
                       </div>
                     </li>
                   );
@@ -451,18 +525,25 @@ export function InventoryPage(props: {
                       <TableHead className="text-right">On hand</TableHead>
                       <TableHead>Location</TableHead>
                       <TableHead>Last entry</TableHead>
-                      <TableHead className="w-[250px]" />
+                      <TableHead className={canSetCount ? "w-[340px]" : "w-[250px]"} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {rows.map((r) => {
-                      const piece = pieceOf(r.screen_id, r.row_label);
+                      const piece = r.piece;
                       const d = displayStock(r.on_hand, r.unit, piece);
                       return (
                         <TableRow
                           key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
                         >
-                          <TableCell className="text-sm font-medium">{r.row_label}</TableCell>
+                          <TableCell className="text-sm font-medium">
+                            {cellName(r)}
+                            {r.label && (
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {r.row_label}
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
                           <TableCell className="text-xs text-muted-foreground">
                             {r.category}
@@ -476,7 +557,7 @@ export function InventoryPage(props: {
                             {fmtQty(d.amount)} <span className="text-xs font-normal">{d.unit}</span>
                             {piece && (
                               <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                                ({fmtQty(r.on_hand)} {r.unit})
+                                ({describeStock(r.on_hand, r.unit, null)})
                               </span>
                             )}
                           </TableCell>
@@ -503,6 +584,13 @@ export function InventoryPage(props: {
                               >
                                 Put in inventory
                               </Button>
+                              {canSetCount && (
+                                <SetCountButton
+                                  row={r}
+                                  locationName={locationName(r.location_id)}
+                                  onSet={refresh}
+                                />
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -526,28 +614,45 @@ export function InventoryPage(props: {
             <CardTitle className="flex items-center gap-2 text-base">
               <History className="h-4 w-4" /> History
               <span className="text-xs font-normal text-muted-foreground">
-                {moves.length} entr{moves.length === 1 ? "y" : "ies"}
+                {hasOlder
+                  ? `latest ${moves.length} shown`
+                  : `${moves.length} entr${moves.length === 1 ? "y" : "ies"}`}
               </span>
             </CardTitle>
             <span className="text-xs text-muted-foreground">{historyOpen ? "Hide" : "Show"}</span>
           </button>
           {historyOpen && (
             <CardDescription>
-              Every entry, newest first. On hand is the sum of these. Your own entries from the last
-              24 hours can be undone here.
+              Every entry, newest first{hasOlder ? " — the latest first; Show older adds more" : ""}
+              . On hand is the sum of these. Your own entries from the last 24 hours can be undone
+              here.
             </CardDescription>
           )}
         </CardHeader>
         {historyOpen && (
-          <CardContent>
+          <CardContent className="space-y-3">
             <LedgerTable
               rows={moves}
               loading={movesQ.isLoading}
               role={role}
               locations={locations}
+              where={where}
+              onWhere={setWhere}
+              myVehicle={myVehicle}
               onChanged={refresh}
-              pieceOf={pieceOf}
+              pieceFor={pieceFor}
             />
+            {hasOlder && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={loadingOlder}
+                onClick={() => void loadOlder()}
+              >
+                {loadingOlder ? "Loading…" : "Show older"}
+              </Button>
+            )}
           </CardContent>
         )}
       </Card>
@@ -575,8 +680,10 @@ export function InventoryPage(props: {
           onSaved={(saved) => {
             refresh();
             // The confirmation carries Undo for a wrong number or job: one tap removes the
-            // entry (own entries, 24 h — undoMovement) and the shelf and the bid follow.
-            toast.success(saved.message, {
+            // entry (own entries, 24 h — undoMovement) and the shelf and the bid follow. The
+            // dialog stays open for the next item (owner, Oct 9).
+            toast.success("Saved — add another", {
+              description: saved.message,
               duration: 10000,
               action: {
                 label: "Undo",
@@ -659,7 +766,7 @@ function ProductPicker(props: {
               <span className="ml-1 font-mono">#{chosen.itemNos.join(", #")}</span>
             )}
             {" · "}
-            {fmtQty(onHand(chosen))} on hand
+            {describeStock(onHand(chosen), chosen.unit, chosen.piece)} on hand
           </p>
         </div>
         <Button size="sm" variant="ghost" onClick={() => props.onChange(null)}>
@@ -700,7 +807,7 @@ function ProductPicker(props: {
                 </span>
               </span>
               <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                {onHand(p) > 0 ? `${fmtQty(onHand(p))} on hand` : ""}
+                {onHand(p) > 0 ? `${describeStock(onHand(p), p.unit, p.piece)} on hand` : ""}
               </span>
             </button>
           </li>
@@ -731,6 +838,11 @@ function JobPicker(props: {
   mine: string[];
   value: string;
   required: boolean;
+  /**
+   * "Left over from" / "For": the chosen job reads as one highlighted sentence (owner, Oct 9: a
+   * remembered job must be unmistakable, not a quiet pre-selected picker).
+   */
+  prefix: string;
   onChange: (key: string) => void;
 }) {
   const [text, setText] = useState("");
@@ -768,9 +880,12 @@ function JobPicker(props: {
   );
   if (chosen) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 px-3 py-2">
+      <div
+        data-chosen-job
+        className="flex flex-wrap items-center justify-between gap-2 rounded-md border-2 border-primary/60 bg-primary/10 px-3 py-2"
+      >
         <p className="font-medium">
-          <JobKindTag kind={chosen.kind} />
+          {props.prefix} <JobKindTag kind={chosen.kind} />
           {label(chosen)}
         </p>
         <div className="flex gap-1">
@@ -779,7 +894,7 @@ function JobPicker(props: {
               No job
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => props.onChange("__pick__")}>
+          <Button size="sm" variant="outline" onClick={() => props.onChange("__pick__")}>
             Change
           </Button>
         </div>
@@ -873,8 +988,12 @@ function LocationPicker(props: {
   );
 }
 
-/** What the material is for (taking) or where it came from (putting in). */
-type Purpose = { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "shop" };
+/**
+ * What the material is for (taking) or where it came from (putting in). "purchase" (owner, Oct 9):
+ * bought or delivered, no job — an ordinary `leftover` entry with neither a bid nor a ticket.
+ */
+type Purpose =
+  { kind: "job" } | { kind: "vehicle"; id: string } | { kind: "shop" } | { kind: "purchase" };
 
 function RecordDialog(props: {
   mode: Mode;
@@ -901,11 +1020,18 @@ function RecordDialog(props: {
   // The form unfolds one step at a time: where → product → how much → what for → note.
   const [locationId, setLocationId] = useState<string>(props.initialLocation ?? "");
   const [ref, setRef] = useState<TargetRef | null>(props.initialRef);
-  const [qty, setQty] = useState("");
-  const [countMode, setCountMode] = useState<"pieces" | "packs">("pieces");
+  // Two boxes (owner, Oct 9): whole packs and pieces, either or both; blank to start.
+  const [packsText, setPacksText] = useState("");
+  const [piecesText, setPiecesText] = useState("");
   const [purpose, setPurpose] = useState<Purpose | null>(props.initialPurpose);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  // How many entries this dialog has saved: it stays open for the next item (owner, Oct 9).
+  const [savedCount, setSavedCount] = useState(0);
+  const clearAmount = () => {
+    setPacksText("");
+    setPiecesText("");
+  };
   // The job ("service:<id>" / "bid:<id>"): the link (?job= / ?bid=) or my only open ticket,
   // else the last job used on this phone.
   const [jobId, setJobId] = useState<string>(() => props.initialJob ?? readLastJob());
@@ -938,7 +1064,6 @@ function RecordDialog(props: {
     : undefined;
   const unit = ref ? (target?.row_units?.[ref.row_label] ?? stockUnitFor(ref.screen_id)) : "";
   const piece = ref ? (target?.pieces?.[ref.row_label] ?? null) : null;
-  const inPieces = !!piece && countMode === "pieces";
   const onHand = ref
     ? (stockHere.find(
         (s) =>
@@ -947,31 +1072,37 @@ function RecordDialog(props: {
           s.price_col === ref.price_col,
       )?.on_hand ?? 0)
     : 0;
-  const onHandCounted = inPieces && piece ? onHand * piece.perPack : onHand;
-  const n = qty.trim() === "" ? NaN : Number(qty);
+  const count = combinedCount(packsText, piecesText, piece);
+  const packs = count?.packs ?? NaN;
   // A vehicle → shop move, from either side of the dialog: moves only what came back (what a
   // truck used is taken for its job instead — there is no vehicle write-off).
   const isReturn =
     (!consumed && purpose?.kind === "vehicle") ||
     (consumed && purpose?.kind === "shop" && location?.kind === "vehicle");
-  const amountOk = Number.isFinite(n) && n > 0;
-  const packs = inPieces && piece && Number.isFinite(n) ? packsFromPieces(n, piece) : n;
+  const amountOk = !!count;
   // Taking, returning off a vehicle, or loading from the shop never exceeds what that place holds.
   const limited = consumed || isReturn || fromShop;
   const tooMany = limited && Number.isFinite(packs) && packs > onHand + 1e-9;
-  // Taking for a job needs the job; a leftover's job is optional ("Not from a job" = a purchase).
-  const jobOk =
-    purpose?.kind === "job" ? (consumed ? !!job : !pickingJob && (!jobId || !!job)) : true;
+  // A job purpose needs its job, taking or leftover alike ("Bought or delivered" is the no-job
+  // choice, owner Oct 9).
+  const jobOk = purpose?.kind === "job" ? !!job : true;
   const canSave = !!location && !!ref && amountOk && !!purpose && jobOk && !tooMany && !saving;
-  const fmtCounted = (v: number) =>
-    inPieces && piece ? `${fmtQty(v)} ${plural(v, piece.name)}` : `${fmtQty(v)} ${unit}`;
+  // What a place holds, as the boxes count it: "2 boxes (2,000 fasteners)" / "3 pails".
+  const fmtOnHand = (v: number) =>
+    piece
+      ? `${describeStock(v, unit, null)} (${describeStock(v, unit, piece)})`
+      : describeStock(v, unit, null);
+  const placeText =
+    isReturn && vehicle ? `on ${vehicle.name}` : fromShop ? "at the shop" : `at ${locName}`;
 
   const save = async () => {
     if (!ref || !location || !purpose || !canSave) return;
     setSaving(true);
     try {
       const product = ref.row_label;
-      const pieces = inPieces ? { in_pieces: true as const } : {};
+      if (!count) return;
+      const n = count.qty;
+      const pieces = count.inPieces ? { in_pieces: true as const } : {};
       const noteOrNull = note.trim() || null;
       let saved: { id: number; message: string };
       if (purpose.kind === "shop") {
@@ -1018,7 +1149,8 @@ function RecordDialog(props: {
         };
       } else {
         const reason = consumed ? "consumed" : "leftover";
-        // A ticket goes as service_job_id, a bid as bid_id — never both.
+        // A ticket goes as service_job_id, a bid as bid_id — never both; "Bought or delivered"
+        // names neither.
         const forJob = purpose.kind === "job" ? job : undefined;
         const r = await addFn({
           data: {
@@ -1041,11 +1173,16 @@ function RecordDialog(props: {
           id: r.id,
           message: consumed
             ? `${amount} of ${product} taken from ${locName} for ${forJob ? jobTitle(forJob) : "the job"}`
-            : `${amount} of ${product} put in ${locName}${forJob ? ` (left over from ${jobTitle(forJob)})` : ""}`,
+            : `${amount} of ${product} put in ${locName}${forJob ? ` (left over from ${jobTitle(forJob)})` : " (bought or delivered)"}`,
         };
       }
       props.onSaved(saved);
-      props.onClose();
+      // Stay open for the next item (owner, Oct 9): the place, the purpose and the job are kept;
+      // only the product, the amount and the note start over.
+      setSavedCount((c) => c + 1);
+      setRef(null);
+      clearAmount();
+      setNote("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not record that");
     } finally {
@@ -1065,7 +1202,9 @@ function RecordDialog(props: {
           : `Move from the shop to ${locName}`
         : purpose.kind === "vehicle"
           ? consumed
-            ? `Load onto ${vehicle?.name ?? "the vehicle"}`
+            ? location?.kind === "vehicle"
+              ? `Move to ${vehicle?.name ?? "the vehicle"}`
+              : `Load onto ${vehicle?.name ?? "the vehicle"}`
             : `Put back in ${locName}`
           : consumed
             ? `Take from ${locName}`
@@ -1090,9 +1229,15 @@ function RecordDialog(props: {
           <DialogDescription>
             {consumed
               ? "Takes material from the shop or a service vehicle — for a job, to load a vehicle, or to bring it back to the shop."
-              : `Puts material in the shop or on a service vehicle — leftovers from a job (or a purchase), stock moved from the shop, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
+              : `Puts material in the shop or on a service vehicle — leftovers from a job, something bought or delivered, stock moved from the shop, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
           </DialogDescription>
         </DialogHeader>
+        {savedCount > 0 && (
+          <p className="rounded-md bg-primary/10 px-3 py-2 text-sm" data-saved-line>
+            Saved {savedCount === 1 ? "one entry" : `${savedCount} entries`} — pick the next
+            product, or Close.
+          </p>
+        )}
         <div className="space-y-4">
           <div className="space-y-1">
             <Label>{consumed ? "Take it from where" : "Put it where"}</Label>
@@ -1103,7 +1248,7 @@ function RecordDialog(props: {
                 setLocationId(id);
                 // Stock differs per location: pick the product and purpose again.
                 setRef(null);
-                setQty("");
+                clearAmount();
                 setPurpose(props.initialPurpose);
               }}
             />
@@ -1118,79 +1263,83 @@ function RecordDialog(props: {
                 onlyInStock={limited}
                 onChange={(v) => {
                   setRef(v);
-                  setCountMode("pieces");
-                  setQty("");
+                  clearAmount();
                 }}
               />
             </div>
           )}
           {location && ref && (
-            <div className="flex flex-wrap items-end gap-3">
-              <div className="space-y-1">
-                <Label>
-                  {isReturn
-                    ? consumed
-                      ? "How much goes back to the shop"
-                      : "How much came back"
-                    : "How much"}
-                  {inPieces && piece ? ` (${plural(2, piece.name)})` : unit ? ` (${unit})` : ""}
-                </Label>
-                <Input
-                  autoFocus
-                  type="number"
-                  inputMode="decimal"
-                  step="any"
-                  min={0}
-                  className="h-11 w-36 text-lg"
-                  value={qty}
-                  onChange={(e) => setQty(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              {piece && (
+            <div className="space-y-1" data-amount>
+              <Label>
+                {isReturn
+                  ? consumed
+                    ? "How much goes back to the shop"
+                    : "How much came back"
+                  : "How much"}
+              </Label>
+              <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
-                  <Label>Count in</Label>
-                  <Select
-                    value={countMode}
-                    onValueChange={(v) => setCountMode(v as typeof countMode)}
-                  >
-                    <SelectTrigger className="h-11 w-[220px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pieces">
-                        {plural(2, piece.name)} ({piece.perPack} per {unit})
-                      </SelectItem>
-                      <SelectItem value="packs">whole {unit}</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label className="text-xs text-muted-foreground">
+                    {piece ? `Whole ${packUnitLabel(2, unit)}` : unit}
+                  </Label>
+                  <Input
+                    autoFocus
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    min={0}
+                    className="h-11 w-32 text-lg"
+                    value={packsText}
+                    onChange={(e) => setPacksText(e.target.value)}
+                    placeholder="0"
+                    aria-label={piece ? `Whole ${packUnitLabel(2, unit)}` : unit}
+                  />
                 </div>
+                {piece && (
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">{plural(2, piece.name)}</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step="any"
+                      min={0}
+                      className="h-11 w-32 text-lg"
+                      value={piecesText}
+                      onChange={(e) => setPiecesText(e.target.value)}
+                      placeholder="0"
+                      aria-label={plural(2, piece.name)}
+                    />
+                  </div>
+                )}
+              </div>
+              {/* The total, in both units when the product has pieces (owner, Oct 9). */}
+              {count && piece && (
+                <p className="text-sm font-medium" data-conversion>
+                  = {describeStock(count.packs, unit, null)} ·{" "}
+                  {describeStock(count.packs, unit, piece)}
+                </p>
               )}
-              <p className="pb-2 text-sm text-muted-foreground">
-                {limited
-                  ? `${fmtCounted(onHandCounted)} ${isReturn && vehicle ? `on ${vehicle.name}` : fromShop ? "at the shop" : `at ${locName}`}`
-                  : ""}
-                {inPieces && piece && Number.isFinite(n) && n > 0
-                  ? `${limited ? " · " : ""}= ${fmtQty(packs)} ${unit}`
-                  : ""}
-              </p>
+              {piece && (
+                <p className="text-xs text-muted-foreground">
+                  {piece.perPack} {plural(piece.perPack, piece.name)} per {unit}
+                </p>
+              )}
+              {limited && (
+                <p className="text-sm text-muted-foreground">
+                  {fmtOnHand(onHand)} {placeText}
+                </p>
+              )}
             </div>
           )}
           {tooMany && (
             <p className="text-sm text-destructive">
-              Only {fmtCounted(onHandCounted)}{" "}
-              {isReturn && vehicle
-                ? `on ${vehicle.name}`
-                : fromShop
-                  ? "at the shop"
-                  : `at ${locName}`}
-              .
+              Only {fmtOnHand(onHand)} {placeText}.
             </p>
           )}
           {location && ref && (
             <div className="space-y-1">
               <Label>{consumed ? "What is it for" : "Where is it from"}</Label>
-              <ul className="divide-y rounded-md border">
+              <ul className="divide-y rounded-md border" data-purposes>
                 <li>
                   {choice(
                     consumed ? "A job" : "Left over from a job",
@@ -1198,6 +1347,16 @@ function RecordDialog(props: {
                     () => setPurpose({ kind: "job" }),
                   )}
                 </li>
+                {!consumed && (
+                  <li>
+                    {choice(
+                      "Bought or delivered (no job)",
+                      purpose?.kind === "purchase",
+                      () => setPurpose({ kind: "purchase" }),
+                      <Package className="h-4 w-4 text-muted-foreground" />,
+                    )}
+                  </li>
+                )}
                 {!consumed && location.kind === "vehicle" && (
                   <li>
                     {choice(
@@ -1205,7 +1364,7 @@ function RecordDialog(props: {
                       purpose?.kind === "shop",
                       () => {
                         setPurpose({ kind: "shop" });
-                        setQty("");
+                        clearAmount();
                       },
                       <Warehouse className="h-4 w-4 text-muted-foreground" />,
                     )}
@@ -1221,15 +1380,21 @@ function RecordDialog(props: {
                     )}
                   </li>
                 )}
-                {location.kind === "shop" &&
+                {/* From the shop: load a vehicle / what came back off one. Taking off a vehicle
+                    (owner, Oct 9): the other vehicles too — truck to truck is one transfer. */}
+                {(location.kind === "shop" || consumed) &&
                   vehicles.map((v) => (
                     <li key={v.id}>
                       {choice(
-                        consumed ? `Load onto ${v.name}` : `Coming back off ${v.name}`,
+                        consumed
+                          ? location.kind === "vehicle"
+                            ? `Move to ${v.name}`
+                            : `Load onto ${v.name}`
+                          : `Coming back off ${v.name}`,
                         purpose?.kind === "vehicle" && purpose.id === v.id,
                         () => {
                           setPurpose({ kind: "vehicle", id: v.id });
-                          setQty("");
+                          clearAmount();
                         },
                         <Truck className="h-4 w-4 text-muted-foreground" />,
                       )}
@@ -1240,14 +1405,13 @@ function RecordDialog(props: {
           )}
           {location && ref && purpose?.kind === "job" && (
             <div className="space-y-1">
-              <Label>
-                {consumed ? "Which job" : "Which job (optional — leave blank for a purchase)"}
-              </Label>
+              <Label>Which job</Label>
               <JobPicker
                 jobs={props.jobs}
                 mine={props.myJobIds}
                 value={pickingJob ? "" : jobId}
-                required={consumed}
+                required
+                prefix={consumed ? "For" : "Left over from"}
                 onChange={setJobId}
               />
             </div>
@@ -1269,7 +1433,7 @@ function RecordDialog(props: {
           )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={props.onClose}>
-              Cancel
+              {savedCount > 0 ? "Close" : "Cancel"}
             </Button>
             <Button onClick={save} disabled={!canSave} className="min-w-40">
               {saveLabel}
@@ -1282,12 +1446,16 @@ function RecordDialog(props: {
 }
 
 function LedgerTable(props: {
-  rows: Awaited<ReturnType<ReturnType<typeof useServerFn<typeof listMovements>>>>;
+  rows: MovementRow[];
   loading: boolean;
   role: string | null;
   locations: InventoryLocation[];
+  /** The page's Where (the stock list's), so a truck's entries can be seen alone (owner, Oct 9). */
+  where: string;
+  onWhere: (id: string) => void;
+  myVehicle: string | undefined;
   onChanged: () => void;
-  pieceOf: (screenId: string, rowLabel: string) => PieceDef | null;
+  pieceFor: (cell: { screen_id: string; row_label: string; price_col: string }) => PieceDef | null;
 }) {
   const delFn = useServerFn(deleteMovement);
   const undoFn = useServerFn(undoMovement);
@@ -1303,9 +1471,12 @@ function LedgerTable(props: {
       .catch((e: unknown) => toast.error(e instanceof Error ? e.message : "Could not undo"));
   };
   const locName = (id: string) => props.locations.find((l) => l.id === id)?.name ?? id;
-  const rows = props.rows.filter(
+  const here =
+    props.where === "all" ? props.rows : props.rows.filter((r) => r.location_id === props.where);
+  const rows = here.filter(
     (r) =>
       !f ||
+      (r.label ?? "").toLowerCase().includes(f) ||
       r.row_label.toLowerCase().includes(f) ||
       r.category.toLowerCase().includes(f) ||
       locName(r.location_id).toLowerCase().includes(f) ||
@@ -1316,16 +1487,41 @@ function LedgerTable(props: {
   );
   return (
     <div className="space-y-3">
-      <Input
-        className="h-9 max-w-xs"
-        placeholder="Search by product, place, job, person or reason…"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Input
+          className="h-9 max-w-xs"
+          placeholder="Search by product, place, job, person or reason…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        {props.locations.length > 1 && (
+          <Select value={props.where} onValueChange={props.onWhere}>
+            <SelectTrigger className="h-9 w-[220px]" aria-label="Where">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {props.locations.map((l) => (
+                <SelectItem key={l.id} value={l.id}>
+                  {l.name}
+                  {l.id === props.myVehicle ? " (my vehicle)" : ""}
+                </SelectItem>
+              ))}
+              <SelectItem value="all">Everywhere</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        {props.where !== "all" && (
+          <span className="text-xs text-muted-foreground">
+            {here.length} at {locName(props.where)}
+          </span>
+        )}
+      </div>
       {props.loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : props.rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No entries yet.</p>
+      ) : here.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {props.where === "all" ? "No entries yet." : `No entries at ${locName(props.where)} yet.`}
+        </p>
       ) : rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing matches “{q.trim()}”.</p>
       ) : (
@@ -1352,16 +1548,17 @@ function LedgerTable(props: {
                   </TableCell>
                   <TableCell className="text-xs">{r.created_by_name ?? ""}</TableCell>
                   <TableCell className="text-xs">
-                    {r.row_label}
-                    {priceColLabel(r.price_col) !== "—" ? ` · ${r.price_col}` : ""}
-                    <span className="text-muted-foreground"> · {r.category}</span>
+                    {cellName(r)}
+                    <span className="text-muted-foreground">
+                      {r.label ? ` · ${r.row_label}` : ""} · {r.category}
+                    </span>
                   </TableCell>
                   <TableCell className="text-xs">{locName(r.location_id)}</TableCell>
                   <TableCell
                     className={`whitespace-nowrap text-right text-xs font-semibold tabular-nums ${r.qty < 0 ? "text-destructive" : "text-green-700 dark:text-green-400"}`}
                   >
                     {r.qty > 0 ? "+" : ""}
-                    {describeStock(r.qty, r.unit, props.pieceOf(r.screen_id, r.row_label))}
+                    {describeStock(r.qty, r.unit, props.pieceFor(r))}
                   </TableCell>
                   <TableCell className="text-xs">{REASON_LABELS[r.reason]}</TableCell>
                   <TableCell className="text-xs">
@@ -1561,19 +1758,18 @@ function ReconcileCard(props: { canSetCount: boolean }) {
 function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: () => void }) {
   const n = props.cell;
   const addFn = useServerFn(addMovement);
-  // Blank until typed (NumberField shows 0 as empty); NaN = nothing typed yet.
-  const [counted, setCounted] = useState<number>(0);
-  const [touched, setTouched] = useState(false);
+  // The box's TEXT (owner, Oct 9: a blank box must not enable Set count; a typed "0" must).
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
-  const payload = touched ? reconcileAdjustment(n, counted) : null;
+  const counted = parseCounted(text);
+  const payload = counted === null ? null : reconcileAdjustment(n, counted);
   const setCount = async () => {
-    if (!payload) return;
+    if (!payload || counted === null) return;
     setBusy(true);
     try {
       await addFn({ data: payload });
       toast.success(`${n.location_name} · ${n.name} set to ${fmtQty(counted)} ${n.unit}`);
-      setTouched(false);
-      setCounted(0);
+      setText("");
       props.onSet();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not set the count", {
@@ -1598,16 +1794,15 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
         {props.canSetCount && (
           <div className="flex items-center gap-2">
             <Label className="text-xs text-muted-foreground">Counted ({n.unit})</Label>
-            <NumberField
-              value={counted}
-              onChange={(v) => {
-                setCounted(v);
-                setTouched(true);
-              }}
+            <Input
+              type="number"
               inputMode="decimal"
               step="any"
+              min={0}
               className="h-9 w-28"
               placeholder="count"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
               disabled={busy}
             />
             <Button
@@ -1646,6 +1841,95 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
         {n.more > 0 && <li>+{n.more} more</li>}
       </ul>
     </div>
+  );
+}
+
+/**
+ * Set count on a stock row (owner, Oct 9: counting a shelf DOWN was impossible — nothing sent an
+ * adjustment for a cell at or above zero). A popover with one box in the stock unit (packs, as
+ * every adjustment is) and a button; on-hand becomes what was typed through the same
+ * reconcileAdjustment → addMovement path the Reconcile card uses, with its own note. Shown to
+ * canAccess(profile, "estimate") (admins and managers pass); the server keeps its own rule.
+ */
+function SetCountButton(props: { row: StockRow; locationName: string; onSet: () => void }) {
+  const r = props.row;
+  const addFn = useServerFn(addMovement);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const counted = parseCounted(text);
+  const payload = counted === null ? null : reconcileAdjustment(r, counted, COUNT_NOTE);
+  const setCount = async () => {
+    if (!payload || counted === null) return;
+    setBusy(true);
+    try {
+      await addFn({ data: payload });
+      toast.success(
+        `${props.locationName} · ${cellName(r)} set to ${describeStock(counted, r.unit, null)}`,
+      );
+      setText("");
+      setOpen(false);
+      props.onSet();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not set the count", {
+        duration: 10000,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (!o) setText("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline" data-set-count>
+          Set count
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 space-y-2">
+        <p className="text-sm font-medium">{cellName(r)}</p>
+        <p className="text-xs text-muted-foreground">
+          {props.locationName} · now {describeStock(r.on_hand, r.unit, null)}
+          {r.piece ? ` (${describeStock(r.on_hand, r.unit, r.piece)})` : ""}
+        </p>
+        <Label className="text-xs text-muted-foreground">
+          Counted ({packUnitLabel(2, r.unit)})
+        </Label>
+        <div className="flex items-center gap-2">
+          <Input
+            autoFocus
+            type="number"
+            inputMode="decimal"
+            step="any"
+            min={0}
+            className="h-9 w-28"
+            placeholder="count"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={busy}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && payload && !busy) void setCount();
+            }}
+          />
+          <Button
+            type="button"
+            size="sm"
+            disabled={!payload || busy}
+            onClick={() => void setCount()}
+          >
+            Set count
+          </Button>
+        </div>
+        {counted !== null && !payload && (
+          <p className="text-xs text-muted-foreground">That is the count already.</p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 

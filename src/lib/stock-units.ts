@@ -91,24 +91,91 @@ export const packsFromPieces = (pieces: number, def: PieceDef): number => pieces
 
 export const plural = (n: number, name: string): string => `${name}${Math.abs(n) === 1 ? "" : "s"}`;
 
+// Pack units that read the same for one or many.
+const NO_PLURAL = new Set(["each", "ea", "ft", "lf", "sq ft", "sf", "gal", "lb", "lbs", "oz"]);
+
+/**
+ * "case" → "cases", "box" → "boxes", "4-Cartridge Case" → "4-Cartridge Cases"; "sq ft" stays. The
+ * close-out's rule (materials-utils.ts packUnitLabel), here so the Inventory page, History and
+ * Reconcile read the same way (owner, Oct 9: "2 boxes", not "2 box").
+ */
+export function packUnitLabel(n: number, unit: string): string {
+  const u = unit.trim();
+  if (!u || Math.abs(Math.abs(n) - 1) < 1e-6 || NO_PLURAL.has(u.toLowerCase())) return u;
+  const m = /^(.*?)([A-Za-z]+)$/.exec(u);
+  if (!m) return u;
+  const [, head = "", word = ""] = m;
+  if (NO_PLURAL.has(word.toLowerCase()) || /s$/i.test(word)) return u;
+  const tail = /(x|ch|sh)$/i.test(word) ? "es" : "s";
+  return `${head}${word}${tail}`;
+}
+
+/**
+ * A catalog price column that is a PRICE, not a colour or size: the single-price screens'
+ * "price", and a pack-priced screen's "Price/Box" / "Price/Part" / "Cost/Sq. Ft." (owner, Oct 9:
+ * "Price/Box" is not a colour — the same rule invoice-materials.ts applies to a line's name).
+ */
+export const isPriceCol = (col: string): boolean =>
+  col === "price" || /^(price|cost)\b/i.test(col.trim());
+
+/** The colour / size a price column names ("White", '2"'), or null when it is only a price. */
+export const variantOf = (col: string): string | null => (isPriceCol(col) ? null : col);
+
+/**
+ * The Record dialog's two count boxes (owner, Oct 9: leftovers are partial packs — 3 cartridges,
+ * 600 screws — and sometimes whole boxes too): "Whole boxes" and "fasteners" side by side, either
+ * or both filled. The total goes to the server in PIECES when any pieces were typed (packs ×
+ * per pack + pieces; addMovement's in_pieces), else in whole packs. Null while nothing usable is
+ * typed, when a box holds junk or a negative, or when the total is zero. A product without pieces
+ * has one box, in its unit (piecesText is then ignored).
+ */
+export function combinedCount(
+  packsText: string,
+  piecesText: string,
+  piece: PieceDef | null | undefined,
+): { qty: number; inPieces: boolean; packs: number; pieces: number | null } | null {
+  const num = (t: string): number | null => {
+    const v = t.trim();
+    if (v === "") return 0;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const packs = num(packsText);
+  if (packs === null) return null;
+  if (!piece) {
+    if (packsText.trim() === "" || packs <= 0) return null;
+    return { qty: packs, inPieces: false, packs, pieces: null };
+  }
+  const pieces = num(piecesText);
+  if (pieces === null) return null;
+  if (packsText.trim() === "" && piecesText.trim() === "") return null;
+  if (piecesText.trim() === "") {
+    if (packs <= 0) return null;
+    return { qty: packs, inPieces: false, packs, pieces: packs * piece.perPack };
+  }
+  const total = packs * piece.perPack + pieces;
+  if (total <= 0) return null;
+  return { qty: total, inPieces: true, packs: total / piece.perPack, pieces: total };
+}
+
 const fmt = (n: number): string =>
   Math.abs(n - Math.round(n)) < 1e-6 ? String(Math.round(n)) : n.toFixed(3).replace(/\.?0+$/, "");
 
 /**
  * What a stock quantity (kept in priced packs) reads as: in PIECES when the product has a pack
- * size ("10 cartridges", "600 fasteners"), else in the pack unit ("2 pail").
+ * size ("10 cartridges", "600 fasteners"), else in the pack unit, pluralised ("2 pails").
  */
 export function displayStock(
   qty: number,
   unit: string,
   def: PieceDef | null | undefined,
 ): { amount: number; unit: string } {
-  if (!def) return { amount: qty, unit };
+  if (!def) return { amount: qty, unit: packUnitLabel(qty, unit) };
   const pieces = qty * def.perPack;
   return { amount: pieces, unit: plural(pieces, def.name) };
 }
 
-/** "10 cartridges" / "2 pail" — displayStock as one string. */
+/** "10 cartridges" / "2 pails" — displayStock as one string. */
 export function describeStock(qty: number, unit: string, def: PieceDef | null | undefined): string {
   const d = displayStock(qty, unit, def);
   return `${fmt(d.amount)} ${d.unit}`;

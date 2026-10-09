@@ -16,6 +16,7 @@
  * existing addMovement); there is no dismiss.
  */
 import { FIELD_DAY_TZ } from "@/lib/field-day";
+import { variantOf } from "@/lib/stock-units";
 
 /** The columns of inventory_movements the report reads (a MovementRow qualifies). */
 export interface ReconcileMovement {
@@ -34,6 +35,8 @@ export interface ReconcileMovement {
   note: string | null;
   created_by_name: string | null;
   created_at: string;
+  /** The service material name for the cell when there is one (listStock's `label`). */
+  label?: string | null;
 }
 
 export interface ReconcileLocation {
@@ -179,9 +182,21 @@ export const isShortNote = (note: string | null | undefined): boolean =>
   !!note && (/^Short: /.test(note) || / — Short: /.test(note));
 
 export const SINGLE_PRICE = "price";
-/** The Inventory page's product label: "Membrane · White", or the row alone for a single price. */
-export const cellName = (m: { row_label: string; price_col: string }): string =>
-  m.price_col === SINGLE_PRICE ? m.row_label : `${m.row_label} · ${m.price_col}`;
+/**
+ * What a cell is called on the Inventory page, in History and here (owner, Oct 9: the same name
+ * as the close-out): the service material's name when there is one, else the catalog row with
+ * its colour / size — "Membrane · White" — and the row alone when the column is only a price
+ * ("price", "Price/Box"; stock-units.ts variantOf).
+ */
+export const cellName = (m: {
+  label?: string | null;
+  row_label: string;
+  price_col: string;
+}): string => {
+  if (m.label) return m.label;
+  const variant = variantOf(m.price_col);
+  return variant ? `${m.row_label} · ${variant}` : m.row_label;
+};
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
 const byTime = (a: ReconcileMovement, b: ReconcileMovement) =>
@@ -346,14 +361,29 @@ export function reconciliationSummary(r: Reconciliation): string {
   return `${parts.join(", ")}.`;
 }
 
-/** The note the Set count button writes on its adjustment entry. */
+/** The note the Reconcile card's Set count writes on its adjustment entry. */
 export const RECONCILE_NOTE = "Reconciled on Inventory › Reconcile";
+/** The note the stock table's per-row Set count writes (owner, Oct 9: counting a shelf down). */
+export const COUNT_NOTE = "Counted on Inventory";
+
+/**
+ * The Counted box's text as a count: null while nothing usable is typed. The box tracks its TEXT
+ * (owner, Oct 9: a NumberField reports 0 for "", so Set count was enabled on a blank box); "0" is
+ * a real count — a shelf can be empty.
+ */
+export function parseCounted(text: string): number | null {
+  const t = text.trim();
+  if (t === "") return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
 
 /**
  * Set count: ONE `adjustment` entry through the existing addMovement so the cell's on-hand at that
  * location becomes what was counted (adjustments carry their sign and are in the stock unit —
  * packs, not pieces — like every adjustment the server accepts). Null when the typed count is not
- * a change (the server refuses a zero quantity) or not a number.
+ * a change (the server refuses a zero quantity) or not a number. The Reconcile card and the stock
+ * table's per-row Set count (owner, Oct 9) share it; only the note differs.
  */
 export function reconcileAdjustment(
   cell: {
@@ -364,6 +394,7 @@ export function reconcileAdjustment(
     on_hand: number;
   },
   counted: number,
+  note: string = RECONCILE_NOTE,
 ): {
   screen_id: string;
   row_label: string;
@@ -383,6 +414,6 @@ export function reconcileAdjustment(
     location_id: cell.location_id,
     qty,
     reason: "adjustment",
-    note: RECONCILE_NOTE,
+    note,
   };
 }

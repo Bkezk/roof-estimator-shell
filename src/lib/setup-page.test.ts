@@ -1,7 +1,8 @@
 /**
  * Setup (owner, Oct 5): "change service rates to Setup and move it under the opportunities tab,
  * and also add the vehicles and drivers there and remove it from inventory". One page at /setup
- * with three tabs — Service rates, Inspection checklist, Vehicles & drivers (admins) — the old
+ * with three tabs — Service rates, Inspection checklist, Vehicles & drivers (admins; managers too
+ * since Oct 9) — the old
  * /admin/service-rates redirecting to it, the sidebar entry right under Opportunities, the Admin
  * group left to admins, and the Vehicles & drivers card gone from the Inventory page.
  */
@@ -43,13 +44,15 @@ describe("the /setup page", () => {
     // The same cache key as Inventory, so the vehicle list is shared.
     expect(setup).toContain('queryKey: ["inventory-locations"]');
   });
-  it("shows Vehicles & drivers to admins only (setVehicleDrivers is an admin write)", () => {
-    expect(setup).toMatch(/\{isAdmin && \(\s*<TabsTrigger value="vehicles"/);
-    expect(setup).toMatch(/\{isAdmin && \(\s*<TabsContent value="vehicles"/);
-    // A manager following an old ?tab=vehicles link lands on the rates, not a blank tab.
-    expect(setup).toContain('tab === "vehicles" && !isAdmin ? "rates"');
+  it("shows Vehicles & drivers to admins and managers (owner, Oct 9; setVehicleDrivers takes both)", () => {
+    expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsTrigger value="vehicles"/);
+    expect(setup).toMatch(/\{canSetDrivers && \(\s*<TabsContent value="vehicles"/);
+    expect(setup).toContain("const canSetDrivers = seesEveryone(profile);");
+    expect(setup).not.toContain("isAdmin");
+    // Someone else following an old ?tab=vehicles link lands on the rates, not a blank tab.
+    expect(setup).toContain('tab === "vehicles" && !canSetDrivers ? "rates"');
     expect(read("src/lib/inventory.functions.ts")).toMatch(
-      /export const setVehicleDrivers[\s\S]*?if \(me\?\.role !== "admin"\) throw new Error\("Forbidden: admin access required"\);/,
+      /export const setVehicleDrivers[\s\S]*?if \(!seesEveryone\(me\)\) throw new Error\("Forbidden: admins and managers only"\);/,
     );
   });
   it("deep-links its tab with ?tab= and is titled Setup", () => {
