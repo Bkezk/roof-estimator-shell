@@ -5,7 +5,7 @@
  *
  * An invoice's history includes its lines' rows (entity 'invoice_line', entity_id = the
  * invoice). A customer's history includes the rows of its sites and contacts, deleted ones too.
- * A vendor's history is its own rows (entity 'vendor').
+ * A vendor's history is its own rows (entity 'vendor'); a task's too (entity 'task'; owner, Oct 9).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -21,7 +21,7 @@ export const listAudit = createServerFn({ method: "GET" })
   .validator((d: unknown) =>
     z
       .object({
-        entity: z.enum(["invoice", "account", "vendor", "ticket"]),
+        entity: z.enum(["invoice", "account", "vendor", "ticket", "task"]),
         entity_id: z.string().uuid(),
       })
       .parse(d),
@@ -65,6 +65,19 @@ export const listAudit = createServerFn({ method: "GET" })
         .from("audit_log")
         .select(cols)
         .eq("entity", "vendor")
+        .eq("entity_id", data.entity_id)
+        .order("at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(LIMIT);
+      if (error) throw new Error(error.message);
+      return (rows ?? []) as AuditRow[];
+    }
+    if (data.entity === "task") {
+      // A task's own rows (its History fold in the task dialog; owner, Oct 9).
+      const { data: rows, error } = await sb
+        .from("audit_log")
+        .select(cols)
+        .eq("entity", "task")
         .eq("entity_id", data.entity_id)
         .order("at", { ascending: false })
         .order("id", { ascending: false })

@@ -128,6 +128,55 @@ export function taskWhenText(t: DueFields, tz: string = TASK_TZ): string {
   return `${day} at ${time}`;
 }
 
+// ── Done stamp ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * "Done Oct 9, 2:15 PM by Braden Keck" for a done task (owner, Oct 9: "the done by and done at
+ * stamp", like a ticket's), null while it is open. An older row done before the stamp carried a
+ * name reads "Done Oct 9, 2:15 PM"; one with no time at all, "Done".
+ */
+export function doneStamp(
+  t: Pick<TaskRow, "status" | "done_at" | "done_by_name">,
+  tz: string = TASK_TZ,
+): string | null {
+  if (t.status !== "done") return null;
+  const parts = ["Done"];
+  const at = t.done_at ? new Date(t.done_at) : null;
+  if (at && !Number.isNaN(at.getTime()))
+    parts.push(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+        .format(at)
+        .replace(/\s/g, " "),
+    );
+  const who = (t.done_by_name ?? "").trim();
+  if (who) parts.push(`by ${who}`);
+  return parts.join(" ");
+}
+
+/**
+ * A customer's tasks as its Tasks section lists them (owner, Oct 9): the open ones first, soonest
+ * due first and undated last, then the done ones, most recently done first.
+ */
+export function orderAccountTasks<
+  T extends DueFields & Pick<TaskRow, "status" | "title" | "done_at">,
+>(tasks: readonly T[], tz: string = TASK_TZ): T[] {
+  const due = (t: T) => taskDueAt(t, tz)?.getTime() ?? Number.POSITIVE_INFINITY;
+  const done = (t: T) => (t.done_at ? new Date(t.done_at).getTime() : 0);
+  return [...tasks].sort((a, b) => {
+    const ad = a.status === "done" ? 1 : 0;
+    const bd = b.status === "done" ? 1 : 0;
+    if (ad !== bd) return ad - bd;
+    if (ad) return done(b) - done(a) || a.title.localeCompare(b.title);
+    return due(a) - due(b) || a.title.localeCompare(b.title);
+  });
+}
+
 // ── Notices ────────────────────────────────────────────────────────────────────────────────
 
 export type TaskNoticeKind = "created" | "morning" | "overdue";

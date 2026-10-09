@@ -446,7 +446,9 @@ describe("migration 20261001100000_ticket_purchase_orders.sql", () => {
     // (20261001110000_vendors.sql) and 'ticket' / 'ticket_time' (20261005130000_ticket_audit.sql).
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
     expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
-      AUDIT_ENTITIES.filter((e) => e !== "vendor" && e !== "ticket" && e !== "ticket_time"),
+      AUDIT_ENTITIES.filter(
+        (e) => e !== "vendor" && e !== "ticket" && e !== "ticket_time" && e !== "task",
+      ),
     );
   });
   it("audit_row is 20261001080000's, plus only the PO branch and the approval stamps skipped", () => {

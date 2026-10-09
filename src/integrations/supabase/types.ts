@@ -3780,6 +3780,8 @@ export type Database = {
           created_by_name: string | null;
           details: string | null;
           done_at: string | null;
+          done_by: string | null;
+          done_by_name: string | null;
           due_at: string | null;
           due_date: string | null;
           external_emails: string[];
@@ -3808,6 +3810,8 @@ export type Database = {
           created_by_name?: string | null;
           details?: string | null;
           done_at?: string | null;
+          done_by?: string | null;
+          done_by_name?: string | null;
           due_at?: string | null;
           due_date?: string | null;
           external_emails?: string[];
@@ -3836,6 +3840,8 @@ export type Database = {
           created_by_name?: string | null;
           details?: string | null;
           done_at?: string | null;
+          done_by?: string | null;
+          done_by_name?: string | null;
           due_at?: string | null;
           due_date?: string | null;
           external_emails?: string[];
@@ -3864,6 +3870,13 @@ export type Database = {
             columns: ["building_id"];
             isOneToOne: false;
             referencedRelation: "buildings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "tasks_done_by_fkey";
+            columns: ["done_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
           {
@@ -4369,6 +4382,11 @@ export type Database = {
           id: string;
           technician: boolean;
         }[];
+      };
+      /** 20261009100000_tasks_tracking.sql: may the caller take unassigned work (the twin of canClaim)? */
+      can_claim: {
+        Args: never;
+        Returns: boolean;
       };
       release_bid_lock: {
         Args: { p_bid: string; p_session: string };

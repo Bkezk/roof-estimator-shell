@@ -75,6 +75,7 @@ import type { StormArea } from "@/components/prospect-map";
 import { STORM_SUMMARY_KEY, StormPanel } from "@/components/prospect/storm-panel";
 import { stormDay, stormRadius } from "@/components/prospect/storm-format";
 import { mergeEdits } from "@/components/prospect/form-merge";
+import { doneStamp } from "@/lib/tasks";
 import { TaskDialog } from "@/components/tasks/task-dialog";
 import { QuickAddCustomerDialog } from "@/components/crm/account-picker";
 import { saveSite } from "@/lib/crm.functions";
@@ -1717,6 +1718,12 @@ export function ProspectPage(props: {
                               {t.due_date && (
                                 <span className="ml-2 text-xs text-muted-foreground">
                                   due {t.due_date}
+                                </span>
+                              )}
+                              {/* Who marked it done and when (owner, Oct 9). */}
+                              {doneStamp(t) && (
+                                <span className="block text-xs text-muted-foreground">
+                                  {doneStamp(t)}
                                 </span>
                               )}
                             </button>

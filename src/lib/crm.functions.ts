@@ -260,6 +260,12 @@ export interface AccountDetail {
   jobs: Database["public"]["Tables"]["service_jobs"]["Row"][];
   /** Bids linked to the account — empty when the reader has no Estimate access. */
   bids: LinkedBidRow[];
+  /**
+   * The customer's tasks (owner, Oct 9: a Tasks list on a customer, like Tickets): whole rows,
+   * so the Tasks section opens one in the task dialog. Admins and managers get them all; anyone
+   * else what tasks RLS lets through (their own, and open unassigned ones).
+   */
+  tasks: Database["public"]["Tables"]["tasks"]["Row"][];
 }
 
 export const getAccount = createServerFn({ method: "GET" })
@@ -268,22 +274,31 @@ export const getAccount = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<AccountDetail> => {
     const p = await readAccess(context);
     const sb = context.supabase;
-    const [{ data: account, error }, { data: sites }, { data: jobs }] = await Promise.all([
-      sb.from("crm_accounts").select("*").eq("id", data.id).maybeSingle(),
-      sb
-        .from("crm_sites")
-        .select("*")
-        .eq("account_id", data.id)
-        .is("deleted_at", null)
-        .order("name"),
-      sb
-        .from("service_jobs")
-        .select("*")
-        .eq("account_id", data.id)
-        .is("deleted_at", null)
-        .order("updated_at", { ascending: false })
-        .limit(200),
-    ]);
+    const [{ data: account, error }, { data: sites }, { data: jobs }, { data: tasks }] =
+      await Promise.all([
+        sb.from("crm_accounts").select("*").eq("id", data.id).maybeSingle(),
+        sb
+          .from("crm_sites")
+          .select("*")
+          .eq("account_id", data.id)
+          .is("deleted_at", null)
+          .order("name"),
+        sb
+          .from("service_jobs")
+          .select("*")
+          .eq("account_id", data.id)
+          .is("deleted_at", null)
+          .order("updated_at", { ascending: false })
+          .limit(200),
+        // Every column (done_by / done_by_name arrive with 20261009100000; a named list would fail
+        // until it is applied). The section orders them (tasks.ts orderAccountTasks).
+        sb
+          .from("tasks")
+          .select("*")
+          .eq("account_id", data.id)
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(200),
+      ]);
     if (error) throw new Error(error.message);
     if (!account) throw new Error("Customer not found");
     let deleted_by: string | null = null;
@@ -310,7 +325,7 @@ export const getAccount = createServerFn({ method: "GET" })
         .limit(200);
       bids = (b ?? []) as LinkedBidRow[];
     }
-    return { account, deleted_by, sites: sites ?? [], jobs: jobs ?? [], bids };
+    return { account, deleted_by, sites: sites ?? [], jobs: jobs ?? [], bids, tasks: tasks ?? [] };
   });
 
 /** Drop the keys a caller left out, so an update leaves those columns as they are. */

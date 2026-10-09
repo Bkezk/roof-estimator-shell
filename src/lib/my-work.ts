@@ -118,6 +118,11 @@ export interface TaskIn {
   assignee_name: string | null;
   /** The building's name / address, when the caller may read buildings. */
   building_label?: string | null;
+  /** The task's company and property (sent for unassigned tasks: their "where"). */
+  account_name?: string | null;
+  site_name?: string | null;
+  /** When it was entered (sent for unassigned tasks: the "needs assignment" timer). */
+  created_at?: string | null;
 }
 
 export interface FollowupIn {
@@ -176,6 +181,8 @@ export interface OppIn {
 export interface UnassignedRows {
   tickets: TicketIn[];
   opportunities: OppIn[];
+  /** Open tasks with no assignee (owner, Oct 9: tasks behave like services here too). */
+  tasks?: TaskIn[];
 }
 
 export interface WorkRows {
@@ -291,7 +298,7 @@ export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkIte
     key: `task:${t.id}`,
     kind: "task",
     title: t.title,
-    where: joinWhere(t.building_label),
+    where: joinWhere(t.account_name, t.site_name, t.building_label),
     date: t.due_date,
     status: t.status === "open" ? "Open" : t.status,
     done: false,
@@ -372,7 +379,11 @@ export function flagUnassigned(items: WorkItem[], today: string, days?: number):
   return items.map((i) => (i.unassigned ? { ...i, flag: unassignedOverdue(i, today, days) } : i));
 }
 
-/** The Unassigned group's rows: tickets without a technician, open opportunities without an assignee. */
+/**
+ * The Unassigned group's rows: tickets without a technician, open opportunities without an
+ * assignee, and open tasks without one (owner, Oct 9: "add them to the work overview and lists
+ * with the same behavior as services").
+ */
 export function unassignedItems(
   rows: UnassignedRows | null | undefined,
   toYmd: (iso: string) => string = localYmd,
@@ -386,7 +397,14 @@ export function unassignedItems(
       since: t.created_at ? toYmd(t.created_at) : null,
     }));
   const opps = rows.opportunities.map((o) => opportunityItem(o, toYmd));
-  return [...tickets, ...opps].sort(compareWork);
+  const tasks = (rows.tasks ?? [])
+    .filter((t) => t.status === "open" && !t.assignee)
+    .map((t) => ({
+      ...taskItem(t),
+      unassigned: true,
+      since: t.created_at ? toYmd(t.created_at) : null,
+    }));
+  return [...tickets, ...opps, ...tasks].sort(compareWork);
 }
 
 /** Date first (no date last), then tickets → inspections → tasks → follow-ups, then title. */
@@ -430,9 +448,9 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
     .filter((f) => f.status === "open")
     .filter((f) => !(f.kind === "ticket" && listed.has(`${f.item_id}|${f.assignee_id}`)))
     .map((f) => followupItem(f, names, toYmd));
-  // Unassigned work comes separately and never doubles an assigned row (a ticket is either
-  // somebody's or nobody's).
-  const assignedKeys = new Set(tickets.map((t) => t.key));
+  // Unassigned work comes separately and never doubles an assigned row (a ticket or a task is
+  // either somebody's or nobody's).
+  const assignedKeys = new Set([...tickets, ...tasks].map((t) => t.key));
   const unassigned = unassignedItems(rows.unassigned, toYmd).filter(
     (u) => !assignedKeys.has(u.key),
   );

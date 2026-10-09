@@ -5,7 +5,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
-import { taskWhenText, type TaskRow } from "@/lib/tasks";
+import { doneStamp, taskWhenText, type TaskRow } from "@/lib/tasks";
 import { listAssignableUsers } from "@/lib/tasks.functions";
 
 /** Every task query starts with this key; a save invalidates them all. */
@@ -27,13 +27,17 @@ export function useInvalidateTasks() {
   };
 }
 
-/** One line under a task's title: when, company / property, who it is assigned to. */
+/**
+ * One line under a task's title: when, company / property, who it is assigned to, and for a
+ * done task its stamp ("Done Oct 9, 2:15 PM by …"; owner, Oct 9).
+ */
 export function taskSubline(t: TaskRow, assigneeName?: string | null): string {
   return [
     t.due_at || t.due_date ? taskWhenText(t) : null,
     t.account_name,
     t.site_name,
     assigneeName ? `→ ${assigneeName}` : null,
+    doneStamp(t),
   ]
     .filter(Boolean)
     .join(" · ");

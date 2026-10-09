@@ -39,6 +39,7 @@ import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
 import { claimServiceJob } from "@/lib/service.functions";
 import { claimOpportunity } from "@/lib/opportunities.functions";
+import { claimTask } from "@/lib/tasks.functions";
 import {
   KIND_LABELS,
   addMonths,
@@ -222,10 +223,12 @@ function WorkRow({
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{item.date ? dayLabel(item.date) : "No date"}</span>
           <span>{item.status}</span>
+          {/* Whose it is, always (owner, Oct 9: "why doesnt this show who its assigned to on
+            the card?"); the Everyone view also names an item whose person is unknown. */}
           {item.unassigned ? (
             <span className="font-medium text-destructive">Unassigned</span>
           ) : (
-            showWho && <span>{item.assigneeName ?? "(unknown)"}</span>
+            (showWho || item.assigneeName) && <span>{item.assigneeName ?? "(unknown)"}</span>
           )}
           {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
             (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
@@ -772,10 +775,13 @@ export function MyWorkPage(props: {
   // Owner, Oct 8: claiming unassigned work (the row's Claim, or a drop on a calendar day).
   const claimTicketFn = useServerFn(claimServiceJob);
   const claimOppFn = useServerFn(claimOpportunity);
+  const claimTaskFn = useServerFn(claimTask);
   const claimMut = useMutation({
     mutationFn: async (v: { item: WorkItem; date: string | null }) => {
       const id = v.item.key.slice(v.item.key.indexOf(":") + 1);
       if (v.item.kind === "opportunity") await claimOppFn({ data: { id, date: v.date } });
+      // A task nobody is on (owner, Oct 9: tasks behave like services here).
+      else if (v.item.kind === "task") await claimTaskFn({ data: { id, date: v.date } });
       else await claimTicketFn({ data: { id, date: v.date } });
     },
     onSuccess: (_r, v) => {

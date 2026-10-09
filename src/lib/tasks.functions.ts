@@ -15,14 +15,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { CLAIM_NEEDS_TICK, CLAIM_TAKEN, canClaim } from "@/lib/access";
 import {
   addedAttendees,
   attendeeList,
   canSeeTask,
   cleanEmails,
   dueAtFor,
+  isAllDay,
+  localHm,
   noticeRecipients,
   seesAllTasks,
+  taskDueAt,
   taskInputSchema,
   type TaskRow,
 } from "@/lib/tasks";
@@ -40,7 +44,7 @@ export const userLabel = (u: Pick<TaskUser, "full_name" | "email"> | null | unde
 async function me(ctx: Ctx) {
   const { data, error } = await ctx.supabase
     .from("profiles")
-    .select("id, role, full_name, email")
+    .select("id, role, access, technician, full_name, email")
     .eq("id", ctx.userId)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -127,6 +131,23 @@ export const listTasks = createServerFn({ method: "GET" })
     return (rows ?? []).filter((t) => canSeeTask(profile, t));
   });
 
+/**
+ * done_at / done_by / done_by_name for a save (owner, Oct 9: tasks carry the done stamp like a
+ * ticket). Becoming done stamps the caller and now; staying done keeps the stamp it has (an
+ * edit to a done task is not a second completion); open clears all three.
+ */
+export function doneFields(
+  status: "open" | "done",
+  before: Pick<TaskRow, "status" | "done_at" | "done_by" | "done_by_name"> | null,
+  userId: string,
+  userName: string | null,
+): Pick<Database["public"]["Tables"]["tasks"]["Update"], "done_at" | "done_by" | "done_by_name"> {
+  if (status !== "done") return { done_at: null, done_by: null, done_by_name: null };
+  if (before?.status === "done")
+    return { done_at: before.done_at, done_by: before.done_by, done_by_name: before.done_by_name };
+  return { done_at: new Date().toISOString(), done_by: userId, done_by_name: userName };
+}
+
 export interface SaveTaskResult {
   task: TaskRow;
   /** Users and outside emails a "New task" notice went to on this save. */
@@ -169,12 +190,9 @@ export const saveTask = createServerFn({ method: "POST" })
       attendees: attendeeList(assignee, data.attendees),
       external_emails: cleanEmails(data.external_emails),
       status,
-      done_at:
-        status === "done"
-          ? before?.status === "done"
-            ? before.done_at
-            : new Date().toISOString()
-          : null,
+      // The done stamp (owner, Oct 9: "the done by and done at stamp"): who and when, set once
+      // when the task becomes done, kept while it stays done, cleared when it is reopened.
+      ...doneFields(status, before, context.userId, userLabel(profile) || null),
     };
     let row: TaskRow;
     if (before) {
@@ -247,17 +265,76 @@ export const setTaskStatus = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<TaskRow> => {
     const profile = await me(context);
-    await loadVisible(context, data.id, profile);
+    const before = await loadVisible(context, data.id, profile);
     const { data: row, error } = await context.supabase
       .from("tasks")
       .update({
         status: data.status,
-        done_at: data.status === "done" ? new Date().toISOString() : null,
+        ...doneFields(data.status, before, context.userId, userLabel(profile) || null),
       })
       .eq("id", data.id)
       .select()
       .single();
     if (error) throw new Error(error.message);
+    return row;
+  });
+
+/**
+ * Take a task nobody is on for yourself (owner, Oct 9: tasks on Work Overview behave like
+ * services — the Unassigned group and Claim, as claimServiceJob / claimOpportunity). Who:
+ * `canClaim` (ticked Technician, not technician-only, with Service). Under RLS the row is
+ * nobody's, so the claimer is not its creator, assignee or attendee: 20261009100000 adds
+ * tasks_read_unassigned (read an open task with no assignee) and tasks_claim (update it, only
+ * into one assigned to yourself) on can_claim(), the SQL twin of `canClaim`. `.is("assignee",
+ * null)` on the update means two people cannot both take it. A date (a drop on a calendar day)
+ * moves the task to that day, keeping its time of day; without one it keeps its date.
+ */
+export const claimTask = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((d: unknown) =>
+    z
+      .object({
+        id: z.string().uuid(),
+        date: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/)
+          .nullable()
+          .optional(),
+      })
+      .parse(d),
+  )
+  .handler(async ({ data, context }): Promise<TaskRow> => {
+    const p = await me(context);
+    if (!canClaim(p)) throw new Error(CLAIM_NEEDS_TICK);
+    const sb = context.supabase;
+    const { data: cur, error: cErr } = await sb
+      .from("tasks")
+      .select("*")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (cErr) throw new Error(cErr.message);
+    if (!cur) throw new Error("Task not found");
+    if (cur.assignee) throw new Error(CLAIM_TAKEN);
+    if (cur.status !== "open") throw new Error("Only an open task can be claimed");
+    const at = taskDueAt(cur);
+    const allDay = isAllDay(cur);
+    const moved = data.date
+      ? { date: data.date, time: at && !allDay ? localHm(at) : null, all_day: allDay }
+      : null;
+    const { data: row, error } = await sb
+      .from("tasks")
+      .update({
+        assignee: context.userId,
+        assignee_name: userLabel(p) || null,
+        attendees: attendeeList(context.userId, cur.attendees ?? []),
+        ...(moved ? { due_date: moved.date, due_at: dueAtFor(moved) } : {}),
+      })
+      .eq("id", data.id)
+      .is("assignee", null)
+      .select()
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!row) throw new Error(CLAIM_TAKEN);
     return row;
   });
 

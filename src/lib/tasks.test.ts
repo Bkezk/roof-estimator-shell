@@ -47,6 +47,8 @@ const task = (over: Partial<TaskRow> = {}): TaskRow => ({
   created_at: et("2026-09-30", "10:00").toISOString(),
   updated_at: et("2026-09-30", "10:00").toISOString(),
   done_at: null,
+  done_by: null,
+  done_by_name: null,
   notified_created_at: null,
   notified_morning_at: null,
   notified_overdue_at: null,

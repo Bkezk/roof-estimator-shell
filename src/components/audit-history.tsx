@@ -17,8 +17,8 @@ import { auditLine } from "@/lib/audit";
 import { listAudit } from "@/lib/audit.functions";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
-/** What has a History fold: an invoice, a customer (account) or a vendor. */
-export type AuditFold = "invoice" | "account" | "vendor" | "ticket";
+/** What has a History fold: an invoice, a customer (account), a vendor, a ticket or a task (owner, Oct 9). */
+export type AuditFold = "invoice" | "account" | "vendor" | "ticket" | "task";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

@@ -297,7 +297,7 @@ describe("migration 20261001110000_vendors.sql", () => {
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
     // As of this migration: 'ticket' / 'ticket_time' came later (20261005130000_ticket_audit.sql).
     expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
-      AUDIT_ENTITIES.filter((e) => e !== "ticket" && e !== "ticket_time"),
+      AUDIT_ENTITIES.filter((e) => e !== "ticket" && e !== "ticket_time" && e !== "task"),
     );
     expect(flat).toContain(
       "when 'vendors' then v_entity := 'vendor'; v_entity_id := (v_row ->> 'id')::uuid; v_label := 'Vendor ''' || coalesce(v_old ->> 'name', v_new ->> 'name', '') || '''';",

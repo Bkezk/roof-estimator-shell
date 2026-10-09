@@ -14,6 +14,7 @@ import { Loader2, Trash2, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-store";
 import {
   cleanEmails,
+  doneStamp,
   isValidEmail,
   taskInputSchema,
   taskToInput,
@@ -28,6 +29,7 @@ import {
   type TaskUser,
 } from "@/lib/tasks.functions";
 import { AccountPicker } from "@/components/crm/account-picker";
+import { AuditHistory } from "@/components/audit-history";
 import { useInvalidateTasks, useTaskUsers } from "@/components/tasks/task-shared";
 import {
   AlertDialog,
@@ -458,6 +460,10 @@ export function TaskDialog(props: {
                 onCheckedChange={(v) => set({ status: v === true ? "done" : "open" })}
               />
               Done
+              {/* Who marked it done and when (owner, Oct 9), as the row was saved. */}
+              {doneStamp(props.task) && (
+                <span className="text-xs text-muted-foreground">{doneStamp(props.task)}</span>
+              )}
             </label>
           )}
           {props.task?.notify_error && (
@@ -501,6 +507,8 @@ export function TaskDialog(props: {
             </div>
           </DialogFooter>
         </form>
+        {/* Admins and managers: who changed the task (audit_log; owner, Oct 9). */}
+        {props.task && <AuditHistory entity="task" entityId={props.task.id} />}
       </DialogContent>
       <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <AlertDialogContent>

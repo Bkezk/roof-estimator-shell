@@ -31,6 +31,7 @@ import {
   Building2,
   Contact,
   Link2,
+  ListTodo,
   Loader2,
   Mail,
   MapPin,
@@ -53,6 +54,8 @@ import {
 import { useAuth } from "@/lib/auth-store";
 import { managesTickets, seesEveryone } from "@/lib/access";
 import { AuditHistory } from "@/components/audit-history";
+import { doneStamp, orderAccountTasks, type TaskRow } from "@/lib/tasks";
+import { TaskDialog } from "@/components/tasks/task-dialog";
 import {
   deleteAccount,
   deleteContact,
@@ -471,6 +474,12 @@ function AccountDetailPane({ id }: { id: string }) {
       <SitesSection accountId={id} sites={d.sites} readOnly={deleted} />
       <TicketsSection jobs={d.jobs} />
       {can("estimate") && <BidsSection accountId={id} bids={d.bids} readOnly={deleted} />}
+      <TasksSection
+        accountId={id}
+        accountName={d.account.name}
+        tasks={d.tasks}
+        readOnly={deleted}
+      />
       {can("takeoff") && <TakeoffsSection accountId={id} />}
       {/* Admins and managers: who changed the customer, its sites and contacts (audit_log). */}
       <AuditHistory entity="account" entityId={id} className="rounded-lg border p-4" />
@@ -1550,6 +1559,86 @@ function TicketsSection({ jobs }: { jobs: AccountDetail["jobs"] }) {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * The customer's tasks (owner, Oct 9: "add them to the work overview and lists with the same
+ * behavior as services"): open ones first by due day, then done ones with their stamp ("Done
+ * Oct 9, 2:15 PM by …"). A row opens the task dialog; New task starts one on this company.
+ */
+function TasksSection({
+  accountId,
+  accountName,
+  tasks,
+  readOnly,
+}: {
+  accountId: string;
+  accountName: string;
+  tasks: TaskRow[];
+  readOnly: boolean;
+}) {
+  const qc = useQueryClient();
+  const [dialog, setDialog] = useState<{ task?: TaskRow } | null>(null);
+  const rows = orderAccountTasks(tasks);
+  return (
+    <section className="space-y-3 rounded-lg border p-4" aria-label="Tasks">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 font-semibold">
+          <ListTodo className="h-4 w-4" /> Tasks
+          <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
+        </h2>
+        {!readOnly && (
+          <Button size="sm" variant="outline" onClick={() => setDialog({})}>
+            <Plus className="mr-1 h-4 w-4" /> New task
+          </Button>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No tasks for this customer.</p>
+      ) : (
+        <div className="divide-y rounded-md border">
+          {rows.map((t) => {
+            const stamp = doneStamp(t);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className="flex w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left text-sm hover:bg-muted/60"
+                onClick={() => setDialog({ task: t })}
+              >
+                <span
+                  className={`min-w-0 flex-1 truncate font-medium ${
+                    stamp ? "text-muted-foreground line-through" : ""
+                  }`}
+                >
+                  {t.title}
+                  {t.site_name ? (
+                    <span className="font-normal text-muted-foreground"> · {t.site_name}</span>
+                  ) : null}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t.due_date ? day(t.due_date) : "No date"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {t.assignee_name ?? "Unassigned"}
+                </span>
+                <span className="text-xs text-muted-foreground">{stamp ?? "Open"}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <TaskDialog
+        open={!!dialog}
+        onOpenChange={(o) => {
+          if (!o) setDialog(null);
+        }}
+        task={dialog?.task}
+        defaults={{ account_id: accountId, account_name: accountName }}
+        onSaved={() => void qc.invalidateQueries({ queryKey: ["account", accountId] })}
+      />
     </section>
   );
 }

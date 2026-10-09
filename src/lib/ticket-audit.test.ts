@@ -27,9 +27,11 @@ const BRANCHES =
 
 describe("the migration", () => {
   it("exists", () => expect(existsSync(PATH)).toBe(true));
-  it("adds 'ticket' and 'ticket_time' to the entity check, which matches AUDIT_ENTITIES", () => {
+  it("adds 'ticket' and 'ticket_time' to the entity check, which matches AUDIT_ENTITIES less what came after ('task', Oct 9)", () => {
     const listed = /check \(entity in \(([^)]*)\)\)/.exec(flat)![1]!;
-    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual([...AUDIT_ENTITIES]);
+    expect(listed.split(",").map((x) => x.trim().replace(/'/g, ""))).toEqual(
+      AUDIT_ENTITIES.filter((e) => e !== "task"),
+    );
     expect(AUDIT_ENTITIES).toContain("ticket");
     expect(AUDIT_ENTITIES).toContain("ticket_time");
   });
@@ -69,7 +71,7 @@ describe("the migration", () => {
 describe("reading it", () => {
   it("listAudit takes a ticket: its own rows and its time entries' rows", () => {
     const fns = read("src/lib/audit.functions.ts");
-    expect(fns).toContain('entity: z.enum(["invoice", "account", "vendor", "ticket"])');
+    expect(fns).toContain('entity: z.enum(["invoice", "account", "vendor", "ticket", "task"])');
     expect(fns).toContain('.in("entity", ["ticket", "ticket_time"])');
   });
   it("the ticket page has the History fold (AuditHistory hides itself from non-managers)", () => {

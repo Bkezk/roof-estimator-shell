@@ -48,9 +48,10 @@ export interface MyWorkResult {
   /** Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? */
   authorizer: boolean;
   /**
-   * Nobody's work (owner, Oct 7): tickets without a technician and open opportunities without an
-   * assignee, for everyone but a technician-only user (`isOffice`), whatever `who` asks for —
-   * null for a technician. No date window: an unassigned ticket stays listed however old.
+   * Nobody's work (owner, Oct 7): tickets without a technician, open opportunities without an
+   * assignee and, since Oct 9, open tasks without one, for everyone but a technician-only user
+   * (`isOffice`), whatever `who` asks for — null for a technician. No date window: an unassigned
+   * ticket stays listed however old.
    */
   unassigned: UnassignedRows | null;
   /** Setup's "needs assignment" timer: unassigned work is flagged overdue after this many days. */
@@ -142,6 +143,20 @@ export const listMyWork = createServerFn({ method: "GET" })
           }[],
           error: null,
         });
+    // Open tasks nobody is on (owner, Oct 9: tasks behave like services). RLS
+    // tasks_read_unassigned (20261009100000) shows them to everyone but a technician-only user;
+    // until it is applied an office user who is not the creator reads none, a manager all.
+    const uTasks = showUnassigned
+      ? sb
+          .from("tasks")
+          .select(
+            "id, title, due_date, status, building_id, assignee, assignee_name, account_name, site_name, created_at",
+          )
+          .eq("status", "open")
+          .is("assignee", null)
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : Promise.resolve({ data: [] as TaskIn[], error: null });
     // The "needs assignment" timer (Setup › Reminders; 20261007100000_unassigned_overdue.sql).
     // Until that migration is applied the column is missing and the default stands.
     const uDays = showUnassigned
@@ -149,13 +164,14 @@ export const listMyWork = createServerFn({ method: "GET" })
       : Promise.resolve({ data: null, error: null });
 
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth, unTickets, unOpps, days] = await Promise.all([
+    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days] = await Promise.all([
       tq,
       kq,
       fq,
       sb.rpc("ticket_authorizers"),
       uTickets,
       uOpps,
+      uTasks,
       uDays,
     ]);
     const unassignedOverdueDays =
@@ -164,6 +180,7 @@ export const listMyWork = createServerFn({ method: "GET" })
         : UNASSIGNED_OVERDUE_DAYS_DEFAULT;
     if (unTickets.error) throw new Error(`Unassigned tickets: ${unTickets.error.message}`);
     if (unOpps.error) throw new Error(`Unassigned opportunities: ${unOpps.error.message}`);
+    if (unTasks.error) throw new Error(`Unassigned tasks: ${unTasks.error.message}`);
     const authorizer =
       !auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId);
     if (tickets.error) throw new Error(`Tickets: ${tickets.error.message}`);
@@ -173,7 +190,11 @@ export const listMyWork = createServerFn({ method: "GET" })
     // Labels for tasks (their building) and follow-ups (their customer): best effort — a caller
     // who may not read buildings or accounts simply gets the rows without them.
     const buildingIds = [
-      ...new Set((tasks.data ?? []).map((t) => t.building_id).filter((x): x is string => !!x)),
+      ...new Set(
+        [...(tasks.data ?? []), ...(unTasks.data ?? [])]
+          .map((t) => t.building_id)
+          .filter((x): x is string => !!x),
+      ),
     ];
     const accountIds = [
       ...new Set(
@@ -201,15 +222,20 @@ export const listMyWork = createServerFn({ method: "GET" })
       ]),
     );
     const accountName = new Map((accounts.data ?? []).map((a) => [a.id, a.name]));
+    const withBuilding = (t: TaskIn): TaskIn => ({
+      ...t,
+      building_label: t.building_id ? (buildingLabel.get(t.building_id) ?? null) : null,
+    });
     const names: Record<string, string> = {};
     for (const p of people) names[p.id] = p.name;
+    // The caller's own name, so their own cards say who (owner, Oct 9: "why doesnt this show
+    // who its assigned to on the card?"); a plain user reads no other profile and holds no
+    // other person's item.
+    names[context.userId] ??= nameOf(me);
 
     return {
       tickets: (tickets.data ?? []) as TicketIn[],
-      tasks: (tasks.data ?? []).map((t) => ({
-        ...t,
-        building_label: t.building_id ? (buildingLabel.get(t.building_id) ?? null) : null,
-      })),
+      tasks: (tasks.data ?? []).map(withBuilding),
       followups: (followups.data ?? []).map((f) => ({
         id: f.id,
         title: f.title,
@@ -239,6 +265,7 @@ export const listMyWork = createServerFn({ method: "GET" })
               account_name: o.account_id ? (accountName.get(o.account_id) ?? null) : null,
               created_at: o.created_at,
             })),
+            tasks: (unTasks.data ?? []).map(withBuilding),
           }
         : null,
       unassignedOverdueDays,
