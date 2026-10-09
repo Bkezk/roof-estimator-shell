@@ -66,6 +66,16 @@ import {
 } from "@/lib/material-search";
 import { onTicketRows } from "@/lib/materials-on-ticket";
 import { plural, type PieceDef } from "@/lib/stock-units";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Box } from "@/components/service/field-shared";
@@ -806,45 +816,40 @@ export function MaterialsSection({
                   )}
                 </>
               ))}
-            {short && (
-              <div
-                role="alertdialog"
-                aria-label="Log it anyway?"
-                className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950"
-              >
-                <p className="font-medium">
-                  The app shows{" "}
-                  {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)} of{" "}
-                  {cellName(short.r)} on {locName(short.r.location_id)}.
-                </p>
-                <p className="text-muted-foreground">
-                  If it came from somewhere else, cancel and pick that place. If it really came from{" "}
-                  {locName(short.r.location_id)}, log it here and the count there gets corrected
-                  with your entry.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    className="h-10"
-                    onClick={() => {
-                      const s = short;
-                      setShort(null);
-                      add(s.r, s.units, false, true);
-                    }}
-                  >
-                    It came from {locName(short.r.location_id)} — log it
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-10"
-                    onClick={() => setShort(null)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            )}
+            {/* A real dialog, not a panel under the results (owner, Oct 9: "this pop up appears
+                below the list which means its not visible unless someone scrolls down"). */}
+            <AlertDialog open={!!short} onOpenChange={(o) => !o && setShort(null)}>
+              {short && (
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      The app shows{" "}
+                      {amountText(Math.max(0, onHandUnits(short.r)), short.r.piece, short.r.unit)}{" "}
+                      of {cellName(short.r)} on {locName(short.r.location_id)}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      If it came from somewhere else, cancel and pick that place. If it really came
+                      from {locName(short.r.location_id)}, log it here and the count there gets
+                      corrected with your entry.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel className="h-11">Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      className="h-11"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        const s = short;
+                        setShort(null);
+                        add(s.r, s.units, false, true);
+                      }}
+                    >
+                      It came from {locName(short.r.location_id)} — log it
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              )}
+            </AlertDialog>
             {fromLoc === null ? (
               // Owner, Oct 9: the search is the one way in; the shelf view stays for anyone who
               // does not know the name.

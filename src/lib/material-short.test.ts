@@ -38,7 +38,11 @@ describe("the screen: ask, then log it anyway", () => {
     expect(src).not.toContain("take the rest from the shop or another truck");
   });
   it("the question names the item and the place and sends short_ok on yes", () => {
-    expect(src).toMatch(/role="alertdialog"\s*aria-label="Log it anyway\?"/);
+    // A real dialog (owner, Oct 9: a panel under the results was off screen).
+    expect(src).toMatch(
+      /<AlertDialog open=\{!!short\} onOpenChange=\{\(o\) => !o && setShort\(null\)\}>/,
+    );
+    expect(src).not.toContain('role="alertdialog"');
     expect(src).toContain("If it came from somewhere else, cancel and pick that place.");
     expect(src).not.toContain("until the office fixes it");
     expect(src).toMatch(/add\(s\.r, s\.units, false, true\);/);
