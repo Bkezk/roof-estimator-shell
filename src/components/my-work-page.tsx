@@ -825,7 +825,17 @@ export function MyWorkPage(props: {
       writeStoredWorkLayout(storage, userId, l);
     }
   }, [savedLayout.data, storage, userId]);
-  const saveLayout = useMutation({ mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }) });
+  // The saved-layout cache follows every save (owner, Oct 9: "i restored the layout on the work
+  // overview but it doesnt remember i restored it when i navigate away and then back" — the
+  // stale cached copy was re-applied on the next mount and written back over the reset).
+  const saveLayout = useMutation({
+    mutationFn: (l: WorkLayout) => saveLayoutFn({ data: l }),
+    onMutate: (l) => {
+      qc.setQueryData<{ layout: WorkLayout | null }>(["work-layout", userId], {
+        layout: isDefaultWorkLayout(l) ? null : l,
+      });
+    },
+  });
   const onLayout = (l: WorkLayout) => {
     setLayout(l);
     if (userId) writeStoredWorkLayout(storage, userId, l);
