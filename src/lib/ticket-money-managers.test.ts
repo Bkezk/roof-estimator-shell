@@ -103,10 +103,9 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
       "if (!isOffice(p)) return TECH_STAGES.includes(stage) ? null : TECH_STAGE_MESSAGE;",
       "return isOffice(p) || TECH_STAGES.includes(job.stage as ServiceStage);",
     ],
-    "src/lib/service-field.functions.ts": [
-      "if (!isOffice(p) && job.technician_id !== ctx.userId)",
-      'if (!isOffice(p)) q = q.eq("technician_id", context.userId);',
-    ],
+    // myDay lists the caller's own tickets for everyone since Oct 9 (my-tickets-page.test.ts),
+    // so only the own-ticket editing check remains here.
+    "src/lib/service-field.functions.ts": ["if (!isOffice(p) && job.technician_id !== ctx.userId)"],
     "src/lib/service-aerial.functions.ts": [
       "if (!isOffice(p) && job.technician_id !== context.userId)",
     ],

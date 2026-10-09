@@ -13,7 +13,7 @@
  * lose typed notes. Photos are NOT queued offline: an upload without signal fails loudly and
  * the tech takes it again.
  *
- * Reached from Today's and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
+ * Reached from My tickets' and the ticket page's Open ticket button (/service?id=<id>&closeout=1).
  * Owner, Oct 8: this IS the workflow — no En route / On site steps before it; a tech opens it,
  * takes the Before photos, leaves, comes back for the After photos and Complete. Time is typed
  * in the Time section (Complete points out a ticket with none).
@@ -209,7 +209,7 @@ export function CloseoutScreen({ job }: { job: ServiceJobWithTech }) {
         <div className="flex flex-wrap items-center gap-x-1">
           <Button asChild variant="ghost" size="sm" className="-ml-2 h-10">
             <Link to="/service/today">
-              <ArrowLeft className="mr-1 h-4 w-4" /> Today
+              <ArrowLeft className="mr-1 h-4 w-4" /> My tickets
             </Link>
           </Button>
           <Button asChild variant="ghost" size="sm" className="h-10">

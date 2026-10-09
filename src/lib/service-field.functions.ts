@@ -115,7 +115,7 @@ async function logEvent(
   });
 }
 
-/** A ticket on the Today page: the row plus what the tech needs at a glance. */
+/** A ticket on the My tickets page: the row plus what the tech needs at a glance. */
 export interface TodayJob extends ServiceJobRow {
   technician_instructions: string | null;
   contact_name: string | null;
@@ -127,22 +127,26 @@ export interface TodayJob extends ServiceJobRow {
   warranty_badges: string[];
 }
 
-/** My tickets that still need me: not Done yet, soonest first (today's on top). */
+/**
+ * My tickets that still need me: not Done yet, soonest first (today's on top). Everyone's own
+ * tickets only, the office included (owner, Oct 9: "it should probably be called my tickets");
+ * an Office technician claims unassigned work from Work Overview, and the Service page shows
+ * the whole board.
+ */
 export const myDay = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<TodayJob[]> => {
-    const p = await me(context);
+    await me(context); // Service access
     const sb = context.supabase;
-    let q = sb
+    // Mine only, whoever I am (RLS also filters a technician's reads).
+    const { data: jobs, error } = await sb
       .from("service_jobs")
       .select("*")
       .is("deleted_at", null)
       .in("stage", ["open", "scheduled"])
+      .eq("technician_id", context.userId)
       .order("scheduled_date", { ascending: true, nullsFirst: false })
       .limit(100);
-    // Office users see the whole board here; a technician their own (RLS also filters).
-    if (!isOffice(p)) q = q.eq("technician_id", context.userId);
-    const { data: jobs, error } = await q;
     if (error) throw new Error(error.message);
     const siteIds = [
       ...new Set((jobs ?? []).map((j) => j.site_id).filter((x): x is string => !!x)),

@@ -507,7 +507,7 @@ function ServiceList({
           {profile?.technician && (
             <Button asChild size="lg" variant="outline" className="text-base">
               <Link to="/service/today">
-                <CalendarDays className="mr-2 h-5 w-5" /> My day
+                <CalendarDays className="mr-2 h-5 w-5" /> My tickets
               </Link>
             </Button>
           )}

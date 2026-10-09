@@ -34,7 +34,7 @@ describe("Today: one button", () => {
 describe("the close-out is the workflow", () => {
   const closeout = src("src/components/service/closeout.tsx");
   it("is reached from Today and from the ticket page, and saves as it goes", () => {
-    expect(closeout).toContain("Reached from Today's and the ticket page's Open ticket button");
+    expect(closeout).toContain("Reached from My tickets' and the ticket page's Open ticket button");
     expect(src("src/components/service-page.tsx")).toContain(
       '<ClipboardCheck className="mr-1 h-4 w-4" /> Open ticket',
     );

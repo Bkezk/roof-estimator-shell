@@ -105,7 +105,7 @@ export function BoardPage({ week }: { week?: string | undefined }) {
         <p className="font-medium">The board is for managers.</p>
         <p className="text-sm text-muted-foreground">Your tickets for the day are on Today.</p>
         <Button asChild>
-          <Link to={TODAY_URL}>Go to Today</Link>
+          <Link to={TODAY_URL}>Go to My tickets</Link>
         </Button>
       </div>
     );

@@ -87,9 +87,9 @@ export function InvoicesPage({
     return (
       <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
         <p className="font-medium">Invoices are for managers and sales.</p>
-        <p className="text-sm text-muted-foreground">Your tickets are on Today.</p>
+        <p className="text-sm text-muted-foreground">Your tickets are on My tickets.</p>
         <Button asChild>
-          <Link to="/service/today">Go to Today</Link>
+          <Link to="/service/today">Go to My tickets</Link>
         </Button>
       </div>
     );

@@ -85,11 +85,17 @@ type ServiceItem = {
   techOnly?: boolean;
   /** Shown only when this says so (beyond `page`). */
   visible?: (p: AccessLike | null | undefined) => boolean;
-  /** Paths under `url` that belong to another item (Today has its own entry). */
+  /** Paths under `url` that belong to another item (My tickets has its own entry). */
   except?: string[];
 };
 const customerItems: ServiceItem[] = [
-  { title: "Today", url: "/service/today", icon: CalendarCheck, page: "service", techOnly: true },
+  {
+    title: "My tickets",
+    url: "/service/today",
+    icon: CalendarCheck,
+    page: "service",
+    techOnly: true,
+  },
   { title: "Customers", url: "/customers", icon: Contact, page: "customers" },
   { title: "Service", url: "/service", icon: Wrench, page: "service", except: ["/service/today"] },
   // Customers or Estimate (seesOpportunitiesList); anyone else opens their own from Work Overview.
@@ -320,7 +326,7 @@ export function AppSidebar() {
       return typeof s["cat"] === "string" ? s["cat"] : undefined;
     },
   });
-  // A technician who is neither an admin nor a manager: Today first, no Board.
+  // A technician who is neither an admin nor a manager: My tickets first, no Board.
   const isTech = !!profile && !isOffice(profile);
   const isActive = (path: string) =>
     pathname === path || (path !== "/" && pathname.startsWith(path));

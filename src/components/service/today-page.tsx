@@ -1,10 +1,12 @@
 /**
- * The technician's day on the phone (docs/service-module-design.md §5.3): their open tickets,
- * today's first, each with ONE big button, Done, which opens the close-out (owner, Oct 8: "we
- * dont need the en route then on site buttons … it should just be done then present that
- * workflow"). The close-out saves as it is filled out and can be left and come back to any time
- * (photos before, then after) — closeout.tsx; its Complete stamps the labor entries the tech
- * logged and sets the ticket Done. Office users see every open ticket here (myDay).
+ * My tickets — the technician's day on the phone (docs/service-module-design.md §5.3): the
+ * signed-in person's open tickets, today's first, each with ONE big button, Open ticket, which
+ * opens the close-out (owner, Oct 8: "we dont need the en route then on site buttons … it should
+ * just be done then present that workflow"). The close-out saves as it is filled out and can be
+ * left and come back to any time (photos before, then after) — closeout.tsx; its Complete stamps
+ * the labor entries the tech logged and sets the ticket Done. Everyone sees their own tickets
+ * only, the office included (owner, Oct 9: "it should probably be called my tickets"); the URL
+ * stays /service/today.
  *
  * The crew question ("Who is on this job with you?", crew-box.tsx) is the close-out's first
  * section; a card whose crew is already answered names it and "Change" reopens it.
@@ -61,9 +63,10 @@ export function TodayPage() {
     <div className="mx-auto w-full max-w-[640px] space-y-5 pb-10">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">Today · {title}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">My tickets</h1>
+          <p className="text-sm text-muted-foreground">{title}</p>
           <Link to="/service" className="text-sm text-primary underline-offset-2 hover:underline">
-            All my tickets
+            Every stage, on the Service page
           </Link>
         </div>
         <Button
