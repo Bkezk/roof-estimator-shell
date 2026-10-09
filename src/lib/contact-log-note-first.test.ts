@@ -28,10 +28,14 @@ describe("LogContactButtons: tap opens the note, Save logs", () => {
       expect(src).toContain(`  ${m}: "e.g. `);
   });
   it("Save logs the picked method (the note along when there is one); Ctrl/⌘+Enter too; Cancel clears", () => {
-    expect(buttons).toContain("if (picked && !log.isPending) log.mutate(picked);");
+    // Since Oct 9 Save also waits for a valid "They asked to try again on" (holdReady).
+    expect(buttons).toContain("if (picked && !log.isPending && holdReady) log.mutate(picked);");
     expect(buttons).toContain('if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {');
     expect(buttons).toContain("Save {CONTACT_METHOD_LABELS[picked]}");
-    expect(buttons).toContain('{note.trim() ? "" : " without a note"}');
+    // Since Oct 9 the label also says "and hold until <day>" when a try-again date is set.
+    expect(buttons.replace(/\s+/g, " ")).toContain(
+      '{tryAgain ? ` and hold until ${shortDay(tryAgain)}` : note.trim() ? "" : " without a note"}',
+    );
     expect(buttons).toContain("...(n ? { note: n } : {})");
     expect(buttons).toContain('<X className="mr-1 h-3.5 w-3.5" /> Cancel');
     // The old "+ note" toggle is gone.

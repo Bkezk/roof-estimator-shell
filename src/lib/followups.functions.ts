@@ -10,6 +10,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
 import { canAccess } from "@/lib/access";
+import { LOG_NOTE_METHOD } from "@/lib/contact-log.functions";
+import { easternYmd } from "@/lib/field-day";
+import {
+  HOLD_NEEDS_MIGRATION,
+  HOLD_REASON_MAX,
+  holdDateProblem,
+  holdNote,
+  holdReasonProblem,
+  holdUntilFromDays,
+  isMissingRpc,
+} from "@/lib/followup-holds";
 import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
 
 export type FollowupRow = Database["public"]["Tables"]["crm_followups"]["Row"];
@@ -125,44 +136,166 @@ export const closeFollowup = createServerFn({ method: "POST" })
     if (!count) throw new Error("That follow-up is not open, or you may not close it");
   });
 
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const snoozeSchema = z
+  .object({
+    id: z.string().uuid(),
+    /** The hold's last day of silence (YYYY-MM-DD): tomorrow through 180 days out. */
+    until: z.string().regex(YMD).optional(),
+    /** Older callers (the 1 / 3 / 7-day menu): mapped to a date. */
+    days: z.number().int().min(1).max(180).optional(),
+    reason: z.string().trim().min(1).max(HOLD_REASON_MAX).optional(),
+  })
+  .refine((d) => !!d.until || !!d.days, { message: "A snooze needs a date" });
+
+/** What a hold did (the toast: "On hold until Fri, Oct 24"). */
+export interface HoldResult {
+  /** YYYY-MM-DD, the last day the reminders stay quiet (they fire that morning). */
+  until: string;
+  hold_count: number;
+}
+
 /**
- * Push the next reminder out by N days (the item stays open; Work Overview shows "Snoozed until …").
- * Admins and managers only (owner, Oct 1), like closeFollowup.
+ * Snooze with a date and a reason (owner, Oct 9; it was "push out by N days"): the follow-up's
+ * reminders pause until 08:00 Eastern on `until`, Work Overview moves the item to Waiting and
+ * says why and who. Admins and managers only (owner, Oct 1; canManageFollowup, and the database
+ * function refuses a 'snooze' by anyone else). `days` is still accepted for older callers and
+ * becomes a date; without a reason it reads "Snoozed N days". The write is hold_followup, the
+ * one path for every hold (holdFollowup below).
  */
 export const snoozeFollowup = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) =>
-    z.object({ id: z.string().uuid(), days: z.number().int().min(1).max(60) }).parse(d),
-  )
-  .handler(async ({ data, context }): Promise<void> => {
+  .validator((d: unknown) => snoozeSchema.parse(d))
+  .handler(async ({ data, context }): Promise<HoldResult> => {
     const p = await me(context);
     if (!canManageFollowup(p)) throw new Error(FOLLOWUP_MANAGER_ONLY);
-    // A deleted opportunity's follow-up is not pushed out (deleting closes it; closing stays
-    // allowed).
     const { data: f, error: fErr } = await context.supabase
       .from("crm_followups")
-      .select("kind, item_id")
+      .select("id, kind, item_id, status")
       .eq("id", data.id)
       .maybeSingle();
     if (fErr) throw new Error(fErr.message);
-    if (f?.kind === "opportunity") {
+    if (!f || f.status !== "open")
+      throw new Error("That follow-up is not open, or you may not snooze it");
+    // A deleted opportunity's follow-up is not pushed out (deleting closes it; closing stays
+    // allowed).
+    if (f.kind === "opportunity") {
       const { assertLiveOpportunity } = await import("@/lib/opportunities.functions");
       await assertLiveOpportunity(context.supabase, f.item_id);
     }
-    const next = new Date(Date.now() + data.days * 86400000).toISOString();
-    const snooze = (patch: { next_remind_at: string; snoozed_until?: string }) =>
-      context.supabase
-        .from("crm_followups")
-        .update(patch, { count: "exact" })
-        .eq("id", data.id)
-        .eq("status", "open");
-    let { error, count } = await snooze({ next_remind_at: next, snoozed_until: next });
-    // Before 20261001030000_followups_manager_only.sql is applied there is no snoozed_until.
-    if (error && (error.code === "PGRST204" || /snoozed_until/.test(error.message)))
-      ({ error, count } = await snooze({ next_remind_at: next }));
-    if (error) throw new Error(error.message);
-    if (!count) throw new Error("That follow-up is not open, or you may not snooze it");
+    const today = easternYmd();
+    const until = data.until ?? holdUntilFromDays(data.days ?? 1, today);
+    const reason =
+      data.reason ?? `Snoozed ${data.days ?? 1} day${(data.days ?? 1) === 1 ? "" : "s"}`;
+    return holdFollowup(context.supabase, {
+      followupId: f.id,
+      kind: f.kind,
+      itemId: f.item_id,
+      until,
+      reason,
+      via: "snooze",
+      today,
+      actor: { id: context.userId, name: (p.full_name ?? "").trim() || p.email },
+    });
   });
+
+export interface HoldInput {
+  followupId: string;
+  /** The follow-up's kind and item: where the Timeline line goes. */
+  kind: string;
+  itemId: string;
+  /** YYYY-MM-DD. */
+  until: string;
+  reason: string;
+  /** 'snooze': the Snooze popover (managers); 'contact': a logged contact with a date (also the assignee). */
+  via: "snooze" | "contact";
+  /** The office's day (easternYmd), for the date check. */
+  today: string;
+  actor: { id: string; name: string | null };
+}
+
+/** hold_followup's answer (20261009150000_followup_holds.sql). */
+interface HoldOut {
+  id: string;
+  cleared: boolean;
+  until?: string;
+  next_remind_at?: string;
+  hold_count: number;
+  held_by_name?: string | null;
+}
+
+/**
+ * The one hold path (owner, Oct 9): check the date and the reason, call hold_followup with the
+ * CALLER's client (the database function checks who: an admin or a manager, or for 'contact'
+ * the follow-up's assignee — auth.uid(), so never the service role here), then put the hold on
+ * the item's record: a ticket's Timeline (service_job_events, kind "note", as a date move) or an
+ * opportunity's contact log (a plain note, method "note", as its "Expected close moved" line).
+ * The line is best effort, like logTicketDateMove: the hold itself is already saved.
+ */
+export async function holdFollowup(
+  sb: SupabaseClient<Database>,
+  input: HoldInput,
+): Promise<HoldResult> {
+  const dateProblem = holdDateProblem(input.until, input.today);
+  if (dateProblem) throw new Error(dateProblem);
+  const reasonProblem = holdReasonProblem(input.reason);
+  if (reasonProblem) throw new Error(reasonProblem);
+  const reason = input.reason.trim();
+  const r = await sb.rpc("hold_followup", {
+    p_followup: input.followupId,
+    p_until: input.until,
+    p_reason: reason,
+    p_via: input.via,
+  });
+  if (r.error) {
+    if (isMissingRpc(r.error)) throw new Error(HOLD_NEEDS_MIGRATION);
+    throw new Error(r.error.message);
+  }
+  const out = r.data as unknown as HoldOut;
+  const note = holdNote(input.until, input.actor.name, reason);
+  // The hold history (owner's #6): one line per hold, where the item keeps its record.
+  const log =
+    input.kind === "opportunity"
+      ? await sb.from("crm_contact_log").insert({
+          kind: "opportunity",
+          item_id: input.itemId,
+          method: LOG_NOTE_METHOD,
+          note,
+          by_user: input.actor.id,
+          by_name: input.actor.name,
+        })
+      : await sb.from("service_job_events").insert({
+          service_job_id: input.itemId,
+          kind: "note",
+          note,
+          by_user: input.actor.id,
+          by_name: input.actor.name,
+          meta: { hold_until: input.until, hold_via: input.via, hold_reason: reason },
+        });
+  if (log.error) console.error("Could not log the hold", log.error.message);
+  return { until: input.until, hold_count: out.hold_count };
+}
+
+/**
+ * End a hold's record (hold_reason, hold_via, held_by, held_by_name, held_at) once a contact is
+ * logged without a new date after the hold ended (owner's #5: the "Back from hold" badge shows
+ * until then). The dates are left alone. Same callers as holdFollowup; same function.
+ */
+export async function clearFollowupHold(
+  sb: SupabaseClient<Database>,
+  followupId: string,
+): Promise<void> {
+  const r = await sb.rpc("hold_followup", {
+    p_followup: followupId,
+    p_until: null,
+    p_reason: null,
+    p_via: "contact",
+  });
+  if (r.error) {
+    if (isMissingRpc(r.error)) throw new Error(HOLD_NEEDS_MIGRATION);
+    throw new Error(r.error.message);
+  }
+}
 
 /** The signed-in user's inbox, newest first. */
 export const listNotifications = createServerFn({ method: "GET" })

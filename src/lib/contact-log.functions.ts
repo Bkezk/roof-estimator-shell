@@ -4,7 +4,10 @@
  *
  * - logContact: one tap on a ticket or an opportunity — Called / Texted / Emailed / Visited
  *   plus an optional note. The database trigger stamps the item's contacted_at, moves an Open
- *   opportunity to Contacted, and writes a ticket timeline entry.
+ *   opportunity to Contacted, and writes a ticket timeline entry. With "They asked to try again
+ *   on" (owner, Oct 9) the same save puts the item's follow-up on hold until that day, the note
+ *   as the reason — the assignee may, as well as a manager (lib/followup-holds.ts); without a
+ *   date, a contact ends a finished hold's "Back from hold" state.
  * - listUntouched: everything assigned and neither started nor contacted, from the SQL
  *   definition in crm_untouched() (RLS: a technician sees their own, the office everyone's).
  *   Each row carries its admin-set limit so the UI can grade it: muted before the limit, red
@@ -16,6 +19,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
+import { easternYmd } from "@/lib/field-day";
+import {
+  CONTACT_HOLD_NEEDS_NOTE,
+  CONTACT_HOLD_NOTE_TOO_LONG,
+  HOLD_ASSIGNEE_OR_MANAGER,
+  HOLD_REASON_MAX,
+  NO_FOLLOWUP_TO_HOLD,
+  backFromHold,
+  holdDateProblem,
+} from "@/lib/followup-holds";
+import { canManageFollowup } from "@/lib/followup-rules";
 
 export type ContactLogRow = Database["public"]["Tables"]["crm_contact_log"]["Row"];
 export type UntouchedRow = Database["public"]["Functions"]["crm_untouched"]["Returns"][number];
@@ -48,13 +62,17 @@ export const CONTACT_KINDS = ["ticket", "opportunity"] as const;
 export type ContactKind = (typeof CONTACT_KINDS)[number];
 
 type Ctx = { supabase: SupabaseClient<Database>; userId: string };
-async function myName(ctx: Ctx): Promise<string | null> {
+async function myProfile(ctx: Ctx) {
   const { data } = await ctx.supabase
     .from("profiles")
-    .select("full_name, email")
+    .select("role, access, full_name, email")
     .eq("id", ctx.userId)
     .maybeSingle();
-  return (data?.full_name ?? "").trim() || data?.email || null;
+  return {
+    role: data?.role ?? null,
+    access: data?.access ?? null,
+    name: (data?.full_name ?? "").trim() || data?.email || null,
+  };
 }
 
 /** Whole days since `iso` (0 for today); null when unknown. */
@@ -83,19 +101,54 @@ const logSchema = z.object({
     .max(2000)
     .optional()
     .transform((v) => (v ? v : null)),
+  /** "They asked to try again on" (YYYY-MM-DD): hold the follow-up until then (owner, Oct 9). */
+  try_again_on: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 export type LogContactInput = z.input<typeof logSchema>;
+
+/** The logged row, and the hold the same save set (null when no date was given). */
+export type LogContactResult = ContactLogRow & {
+  hold: { until: string; hold_count: number } | null;
+};
 
 export const logContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((d: unknown) => logSchema.parse(d))
-  .handler(async ({ data, context }): Promise<ContactLogRow> => {
+  .handler(async ({ data, context }): Promise<LogContactResult> => {
     // A deleted opportunity takes no contact: the log's trigger would move it Open → Contacted.
     if (data.kind === "opportunity") {
       const { assertLiveOpportunity } = await import("@/lib/opportunities.functions");
       await assertLiveOpportunity(context.supabase, data.item_id);
     }
-    const by_name = await myName(context);
+    const p = await myProfile(context);
+    const by_name = p.name;
+    const today = easternYmd();
+    // The item's open follow-up: the one a date holds, or the one whose finished hold a plain
+    // contact ends. Every column (the hold columns arrive with 20261009150000).
+    const { data: fus, error: fuErr } = await context.supabase
+      .from("crm_followups")
+      .select("*")
+      .eq("kind", data.kind)
+      .eq("item_id", data.item_id)
+      .eq("status", "open")
+      .limit(1);
+    if (fuErr) throw new Error(fuErr.message);
+    const followup = fus?.[0] ?? null;
+    if (data.try_again_on) {
+      // Everything checked before anything is written: the save is the contact AND the hold.
+      const problem = holdDateProblem(data.try_again_on, today);
+      if (problem) throw new Error(problem);
+      if (!data.note) throw new Error(CONTACT_HOLD_NEEDS_NOTE);
+      if (data.note.length > HOLD_REASON_MAX) throw new Error(CONTACT_HOLD_NOTE_TOO_LONG);
+      if (!followup) throw new Error(NO_FOLLOWUP_TO_HOLD);
+      // Owner, Oct 9: a logged contact with a date is a recorded reason — the assignee may hold
+      // their own follow-up; the database function says the same.
+      if (!(canManageFollowup(p) || followup.assignee_id === context.userId))
+        throw new Error(HOLD_ASSIGNEE_OR_MANAGER);
+    }
     const { data: row, error } = await context.supabase
       .from("crm_contact_log")
       .insert({
@@ -114,7 +167,33 @@ export const logContact = createServerFn({ method: "POST" })
         throw new Error("You cannot log a contact on this item (no access to it)");
       throw new Error(error.message);
     }
-    return row;
+    if (data.try_again_on && followup && data.note) {
+      const { holdFollowup } = await import("@/lib/followups.functions");
+      try {
+        const hold = await holdFollowup(context.supabase, {
+          followupId: followup.id,
+          kind: followup.kind,
+          itemId: followup.item_id,
+          until: data.try_again_on,
+          reason: data.note,
+          via: "contact",
+          today,
+          actor: { id: context.userId, name: by_name },
+        });
+        return { ...row, hold };
+      } catch (e) {
+        // The contact is on record; say plainly that the hold is not.
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`The contact was logged, but the hold was not set: ${msg}`);
+      }
+    }
+    // A contact after a hold ended (owner's #5): the "Back from hold" state ends with it. A hold
+    // still running is left alone — its date stands.
+    if (followup && backFromHold(followup, today, (iso) => easternYmd(new Date(iso)))) {
+      const { clearFollowupHold } = await import("@/lib/followups.functions");
+      await clearFollowupHold(context.supabase, followup.id);
+    }
+    return { ...row, hold: null };
   });
 
 export const listContactLog = createServerFn({ method: "GET" })

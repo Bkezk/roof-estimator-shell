@@ -30,15 +30,17 @@ const task = (id: string, due: string | null) => ({
 });
 
 describe("the List without Today", () => {
-  it("has five groups: Overdue, This week, Later, No date, Done", () => {
+  it("has six groups: Overdue, This week, Later, Waiting, No date, Done", () => {
     // Unassigned (Oct 7) and Needs authorization (Oct 5) lead, each shown only to those it is for.
     // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and
-    // Done" — the default; each user may drag their own order (lib/work-layout.ts).
+    // Done" — the default; each user may drag their own order (lib/work-layout.ts). Oct 9:
+    // Waiting (a follow-up on hold) after Later, before No date.
     expect(LIST_BUCKETS).toEqual([
       "unassigned",
       "overdue",
       "week",
       "later",
+      "waiting",
       "authorize",
       "nodate",
       "done",
@@ -47,6 +49,7 @@ describe("the List without Today", () => {
       "Overdue",
       "This week",
       "Later",
+      "Waiting",
       "No date",
       "Done — waiting on the office",
     ]);
@@ -85,11 +88,13 @@ describe("the List without Today", () => {
     expect(presetGroups(groups, "today").map((g) => g.bucket)).toEqual(["week"]);
     expect(defaultBucket(listGroups([], today), null)).toBe("week");
   });
-  it("the page lays out five columns and rings the preset's column", () => {
+  it("the page lays out the columns and rings the preset's column", () => {
     const page = readFileSync("src/components/my-work-page.tsx", "utf8");
-    // As many columns as the user shows (Oct 7: up to seven, fewer when some are hidden).
+    // As many columns as the user shows (Oct 7: up to seven, fewer when some are hidden; eight
+    // since Oct 9 with Waiting).
     expect(page).toContain("listGridClass(shown.length)");
     expect(page).toContain('7: "xl:grid-cols-7"');
+    expect(page).toContain('8: "xl:grid-cols-8"');
     expect(page).toContain('5: "xl:grid-cols-5"');
     expect(page).toContain(
       'preset && presetBucket(preset) === g.bucket ? "ring-2 ring-primary" : ""',

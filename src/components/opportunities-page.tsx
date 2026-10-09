@@ -1427,7 +1427,7 @@ function FollowupStrip({ opp, status }: { opp: OpportunityWithNames; status: Opp
         <>
           <SnoozeMenu
             disabled={snooze.isPending || close.isPending}
-            onSnooze={(days) => snooze.mutate({ id: f.id, days })}
+            onSnooze={(hold) => snooze.mutate({ id: f.id, ...hold })}
           />
           <Button
             variant="outline"

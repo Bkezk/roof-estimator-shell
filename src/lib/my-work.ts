@@ -135,9 +135,13 @@ export interface FollowupIn {
   item_id: string;
   assignee_id: string;
   account_name?: string | null;
-  /** Reminder cadence and a running snooze (Work Overview's follow-up state line). */
+  /** Reminder cadence and a running hold (Work Overview's follow-up state line). */
   every_days?: number | null;
   snoozed_until?: string | null;
+  /** The hold's record (owner, Oct 9): why, who, how often. */
+  hold_reason?: string | null;
+  held_by_name?: string | null;
+  hold_count?: number | null;
 }
 
 /** The open follow-up behind a row: its state line, and Snooze / Close for managers. */
@@ -148,6 +152,9 @@ export interface WorkFollowup {
   status: string;
   every_days: number | null;
   snoozed_until: string | null;
+  hold_reason: string | null;
+  held_by_name: string | null;
+  hold_count: number;
 }
 
 const workFollowup = (f: FollowupIn): WorkFollowup => ({
@@ -157,6 +164,9 @@ const workFollowup = (f: FollowupIn): WorkFollowup => ({
   status: f.status,
   every_days: f.every_days ?? null,
   snoozed_until: f.snoozed_until ?? null,
+  hold_reason: f.hold_reason ?? null,
+  held_by_name: f.held_by_name ?? null,
+  hold_count: f.hold_count ?? 0,
 });
 
 /** An open opportunity nobody is assigned to (the Unassigned group; owner, Oct 7). */
@@ -460,7 +470,15 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
 // ---- grouping ------------------------------------------------------------------------------
 
 export type WorkBucket =
-  "unassigned" | "authorize" | "overdue" | "today" | "week" | "later" | "nodate" | "done";
+  | "unassigned"
+  | "authorize"
+  | "overdue"
+  | "today"
+  | "week"
+  | "later"
+  | "waiting"
+  | "nodate"
+  | "done";
 
 export const BUCKET_LABELS: Record<WorkBucket, string> = {
   // Owner, Oct 7: nobody's work first — it needs a person before it needs a date.
@@ -471,17 +489,21 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   today: "Today",
   week: "This week",
   later: "Later",
+  // Owner, Oct 9: a held follow-up (snoozed_until ahead) waits here, out of Overdue / This week.
+  waiting: "Waiting",
   nodate: "No date",
   done: "Done — waiting on the office",
 };
 
-// Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done".
+// Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done";
+// Oct 9: Waiting after Later, before No date.
 const BUCKET_ORDER: WorkBucket[] = [
   "unassigned",
   "overdue",
   "today",
   "week",
   "later",
+  "waiting",
   "authorize",
   "nodate",
   "done",
@@ -494,14 +516,30 @@ const BUCKET_ORDER: WorkBucket[] = [
  */
 export const LIST_BUCKETS: WorkBucket[] = BUCKET_ORDER.filter((b) => b !== "today");
 
+/** What `bucketOf` reads of an item (the follow-up only for a running hold). */
+export type BucketIn = Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned"> & {
+  followup?: Pick<WorkFollowup, "status" | "snoozed_until"> | null;
+};
+
 /** The List's bucket for an item: `bucketOf`, with today folded into This week. */
 export const listBucketOf = (
-  item: Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned">,
+  item: BucketIn,
   today: string,
+  toYmd: (iso: string) => string = localYmd,
 ): WorkBucket => {
-  const b = bucketOf(item, today);
+  const b = bucketOf(item, today, toYmd);
   return b === "today" ? "week" : b;
 };
+
+/**
+ * Is the item's follow-up on hold on `today` (its snoozed_until falls on a later day, the
+ * viewer's days)? On the hold's own day it is back: the morning reminder fires that day.
+ */
+export const isHeldOn = (
+  f: Pick<WorkFollowup, "status" | "snoozed_until"> | null | undefined,
+  today: string,
+  toYmd: (iso: string) => string = localYmd,
+): boolean => !!f && f.status === "open" && !!f.snoozed_until && toYmd(f.snoozed_until) > today;
 
 /** The Saturday that ends `today`'s week (weeks run Sunday to Saturday, like the calendar). */
 export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
@@ -509,16 +547,19 @@ export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
 /**
  * Where an item sits relative to `today` (YYYY-MM-DD): before today = Overdue; today; later this
  * week (through Saturday); Later; No date. A Done ticket is finished work, never overdue: it has
- * its own last group.
+ * its own last group. A follow-up on hold (owner, Oct 9: snoozed_until ahead of today) waits
+ * under Waiting whatever its date, so a held item is never counted overdue while it waits.
  */
 export function bucketOf(
-  item: Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned">,
+  item: BucketIn,
   today: string,
+  toYmd: (iso: string) => string = localYmd,
 ): WorkBucket {
   // Nobody's work sits under Unassigned whatever its date (overdue or not): the fix is a person.
   if (item.unassigned) return "unassigned";
   if (item.needsAuth) return "authorize";
   if (item.done) return "done";
+  if (isHeldOn(item.followup, today, toYmd)) return "waiting";
   if (!item.date) return "nodate";
   if (item.date < today) return "overdue";
   if (item.date === today) return "today";
@@ -533,10 +574,14 @@ export interface WorkGroup {
 }
 
 /** The List view: non-empty groups in order, each sorted by `compareWork` (due first). */
-export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
+export function groupWork(
+  items: WorkItem[],
+  today: string,
+  toYmd: (iso: string) => string = localYmd,
+): WorkGroup[] {
   const by = new Map<WorkBucket, WorkItem[]>();
   for (const it of items) {
-    const b = listBucketOf(it, today);
+    const b = listBucketOf(it, today, toYmd);
     const list = by.get(b) ?? [];
     list.push(it);
     by.set(b, list);
@@ -551,7 +596,7 @@ export function groupWork(items: WorkItem[], today: string): WorkGroup[] {
 /**
  * The List's headings (owner, Oct 1: "how many sub headings are there? I see Later and No date
  * only"): every List group, always, in the same order — an empty one shows "(0)" and this line.
- * (Five since Oct 6: Today is folded into This week.)
+ * (Five since Oct 6: Today is folded into This week; six since Oct 9: Waiting.)
  */
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   unassigned: "Everything has someone on it.",
@@ -560,6 +605,7 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   today: "Nothing due today.",
   week: "Nothing due this week.",
   later: "Nothing scheduled later.",
+  waiting: "Nothing on hold.",
   nodate: "Everything has a date.",
   done: "Nothing waiting on the office.",
 };
@@ -573,9 +619,9 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
 export function listGroups(
   items: WorkItem[],
   today: string,
-  opts: { authorize?: boolean; unassigned?: boolean } = {},
+  opts: { authorize?: boolean; unassigned?: boolean; toYmd?: (iso: string) => string } = {},
 ): WorkGroup[] {
-  const filled = new Map(groupWork(items, today).map((g) => [g.bucket, g]));
+  const filled = new Map(groupWork(items, today, opts.toYmd).map((g) => [g.bucket, g]));
   return LIST_BUCKETS.filter((b) =>
     b === "authorize"
       ? opts.authorize || filled.has("authorize")

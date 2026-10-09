@@ -140,11 +140,13 @@ describe("Work Overview: the Needs authorization tab", () => {
     expect(bucketOf(followupItem({ ...timer, kind: "ticket" }), "2026-10-05")).toBe("today");
   });
   it("first for the authorizer, even empty; hidden for everyone else unless it has items", () => {
-    // Its place since Oct 7: after Later, before No date (the owner's default order).
+    // Its place since Oct 7: after Later, before No date (the owner's default order); Waiting
+    // (Oct 9) sits between Later and it.
     expect(listGroups([], "2026-10-05", { authorize: true }).map((g) => g.bucket)).toEqual([
       "overdue",
       "week",
       "later",
+      "waiting",
       "authorize",
       "nodate",
       "done",

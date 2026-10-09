@@ -112,7 +112,7 @@ describe("followupStateText (My Work rows)", () => {
       "Overdue 1 day",
     );
   });
-  it("Snoozed until <day> while the snooze runs; not once it has passed", () => {
+  it("On hold until <day> while the hold runs (owner, Oct 9: it read 'Snoozed until'); not once it has passed", () => {
     expect(
       followupStateLine(
         followupStateText(
@@ -121,7 +121,7 @@ describe("followupStateText (My Work rows)", () => {
           utcDay,
         ),
       ),
-    ).toBe("Overdue 3 days · Snoozed until Sun, Oct 4 · Reminders every 3 days");
+    ).toBe("Overdue 3 days · On hold until Sun, Oct 4 · Reminders every 3 days");
     expect(
       followupStateLine(
         followupStateText(f({ snoozed_until: "2026-09-30T15:00:00Z" }), TODAY, utcDay),

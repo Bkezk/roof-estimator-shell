@@ -10,6 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/integrations/supabase/types";
+import { backFromHoldNotice, firstReminderAfterHold, isHeldAt } from "@/lib/followup-holds";
 import { generateVapidKeys, sendWebPush } from "@/lib/webpush";
 
 /**
@@ -398,7 +399,9 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
       continue;
     }
 
-    // 2. The assignee's reminder.
+    // 2. The assignee's reminder. The first one after a hold ends reads "Back from hold" with
+    // the reason (owner, Oct 9: a hold ends loudly); `f` is the row as read, before the claim
+    // stamped last_reminded_at.
     const dueDate = new Date(f.due_at);
     const overdueDays = Math.floor((now.getTime() - dueDate.getTime()) / 86400000);
     const when =
@@ -407,13 +410,23 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
         : overdueDays === 0
           ? "due today"
           : `due ${dueDate.toLocaleDateString("en-US")}`;
+    const back =
+      f.snoozed_until && f.hold_reason && firstReminderAfterHold(f, now)
+        ? backFromHoldNotice({
+            title: f.title,
+            snoozed_until: f.snoozed_until,
+            hold_reason: f.hold_reason,
+          })
+        : null;
     try {
       await notify(
         [f.assignee_id],
         {
           kind: "followup",
-          title: `Follow up: ${f.title}`,
-          body: `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
+          title: back ? back.title : `Follow up: ${f.title}`,
+          body: back
+            ? back.body
+            : `${when}. Reminder ${f.reminders_sent + 1}; it repeats every ${f.every_days} day${f.every_days === 1 ? "" : "s"} until the item is finished or closed.`,
           url: f.url,
           followup_id: f.id,
         },
@@ -464,6 +477,9 @@ const daysSince = (u: UntouchedItem, now: Date) =>
  * escalate once. As with the reminders the claim is never rolled back: a failed send is
  * recorded (on the item's open follow-up, if any, and in the log) and the item waits for its
  * next turn. A re-assignment clears escalated_at (the stamp_assigned triggers).
+ *
+ * An item whose follow-up is on hold (snoozed_until ahead; owner, Oct 9) is skipped: someone
+ * decided it waits, with a reason on the record, so it is not "untouched".
  *
  * Each item is handled on its own: an error on one is recorded and the pass goes on.
  */
@@ -539,6 +555,8 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
     const recipients = escalateTo.filter((id) => id !== u.assignee_id);
     if (!recipients.length) continue;
     const f = followupOf.get(key);
+    // On hold: it waits on purpose (lib/followup-holds.ts isHeldAt); not escalated.
+    if (isHeldAt(f, now)) continue;
     const record = async (step: string, e: unknown) => {
       if (f) await recordFailure(admin, f, step, e);
       else console.error(`Reminder pass: ${key} (${u.title}) failed at ${step}: ${errText(e)}`);

@@ -138,6 +138,7 @@ describe("Unassigned work on Work Overview", () => {
       "overdue",
       "week",
       "later",
+      "waiting",
       "nodate",
       "done",
     ]);

@@ -78,21 +78,22 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
   });
 });
 
-describe("List: every heading, always, in the same order (five since Oct 6: no Today)", () => {
+describe("List: every heading, always, in the same order (five since Oct 6: no Today; six since Oct 9: Waiting)", () => {
   const today = "2026-10-01";
-  it("an empty list still has the five groups, each with (0) and its empty line", () => {
+  it("an empty list still has the six groups, each with (0) and its empty line", () => {
     const groups = listGroups([], today);
     expect(groups.map((g) => g.label)).toEqual([
       "Overdue",
       "This week",
       "Later",
+      "Waiting",
       "No date",
       "Done — waiting on the office",
     ]);
     expect(groups.every((g) => g.items.length === 0)).toBe(true);
     for (const g of groups) expect(BUCKET_EMPTY[g.bucket]).toMatch(/\.$/);
   });
-  it("only Later and No date filled: the other three are still there, empty", () => {
+  it("only Later and No date filled: the other four are still there, empty", () => {
     const items = mergeWork({
       tickets: [],
       tasks: [
@@ -122,6 +123,7 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
       ["overdue", 0],
       ["week", 0],
       ["later", 1],
+      ["waiting", 0],
       ["nodate", 1],
       ["done", 0],
     ]);

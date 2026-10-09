@@ -1,7 +1,7 @@
 /**
  * Test-only: a small in-memory stand-in for the caller's Supabase client, enough PostgREST for
  * the server functions under test (select / insert / update / delete with eq, neq, in, is, not
- * is, ilike, or(ilike… / not.is.null), gte, lt, order, limit, range, count; maybeSingle /
+ * is, ilike, or(ilike… / not.is.null), gte, gt, lt, lte, order, limit, range, count; maybeSingle /
  * single; rpc technician_options, crm_user_options, the follow-up functions as missing, any
  * rpc a test passes in `opts.rpcs` (by name) or answers in `opts.rpc`). Every write that
  * changed something is recorded, so a test can say "nothing was written"; every rpc call is in
@@ -123,7 +123,9 @@ export function fakeSupabase(
         return filter(`or ${expr}`, (r) => parts.some((p) => p(r)));
       },
       gte: (c: string, v: string) => filter(`gte ${c}`, (r) => String(r[c] ?? "") >= v),
+      gt: (c: string, v: string) => filter(`gt ${c}`, (r) => String(r[c] ?? "") > v),
       lt: (c: string, v: string) => filter(`lt ${c}`, (r) => String(r[c] ?? "") < v),
+      lte: (c: string, v: string) => filter(`lte ${c}`, (r) => String(r[c] ?? "") <= v),
       update: (p: Row, opts?: { count?: string }) => {
         op = "update";
         payload = p;

@@ -9,6 +9,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
+import { shortDay } from "@/lib/followup-rules";
 import { closeFollowup, snoozeFollowup } from "@/lib/followups.functions";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -45,10 +46,11 @@ export function useFollowupActions() {
     void qc.invalidateQueries({ queryKey: ["followups"] });
     void qc.invalidateQueries({ queryKey: ["my-work"] });
   };
+  // A snooze is a hold with a date and a reason (owner, Oct 9; followup-controls.tsx SnoozeMenu).
   const snooze = useMutation({
-    mutationFn: (v: { id: string; days: number }) => snoozeFn({ data: v }),
-    onSuccess: (_r, v) => {
-      toast.success(`Snoozed: next reminder in ${v.days} day${v.days === 1 ? "" : "s"}`);
+    mutationFn: (v: { id: string; until: string; reason: string }) => snoozeFn({ data: v }),
+    onSuccess: (r) => {
+      toast.success(`On hold until ${shortDay(r.until)}`);
       refresh();
     },
     onError: (e) => toast.error(`Could not snooze the follow-up: ${errText(e)}`),

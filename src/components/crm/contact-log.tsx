@@ -7,7 +7,9 @@
  * - LogContactButtons: tap Called / Texted / Emailed / Visited, the note opens (owner, Oct 1: to
  *   encourage one), Save logs the contact with the note. The database stamps the item, moves an
  *   Open opportunity to Contacted and writes the ticket timeline entry, so every list that shows
- *   the item is refreshed after it.
+ *   the item is refreshed after it. "They asked to try again on" (owner, Oct 9): with a date,
+ *   the same save puts the item's follow-up on hold until that day, the note as the reason —
+ *   the assignee may, as well as a manager (lib/followup-holds.ts).
  * - ContactLogList: the item's past contacts, newest first.
  * - LatestContact: only the most recent contact on one line, with "Show all (N)" for the list.
  * - UntouchedBadge: muted before the admin limit, red at or past it.
@@ -33,6 +35,9 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
+import { HOLD_REASON_MAX, holdDateBounds, holdDateProblem } from "@/lib/followup-holds";
+import { shortDay } from "@/lib/followup-rules";
+import { localYmd } from "@/lib/my-work";
 import {
   CONTACT_METHOD_LABELS,
   contactMethodLabel,
@@ -47,6 +52,8 @@ import {
 } from "@/lib/contact-log.functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -115,15 +122,41 @@ export function LogContactButtons({
   // encourage one; "Save" (or Ctrl/⌘+Enter) logs the contact, with the note when there is one.
   const [picked, setPicked] = useState<ContactMethod | null>(null);
   const [note, setNote] = useState("");
+  // Owner, Oct 9: "They asked to try again on" — optional; with it, the note is the hold's reason.
+  const [tryAgain, setTryAgain] = useState("");
+  const today = localYmd(new Date());
+  const bounds = holdDateBounds(today);
+  const dateProblem = tryAgain ? holdDateProblem(tryAgain, today) : null;
+  const noteProblem = !tryAgain
+    ? null
+    : !note.trim()
+      ? "Add a note: it becomes the reason for the hold."
+      : note.trim().length > HOLD_REASON_MAX
+        ? `With a date the note is the hold's reason: at most ${HOLD_REASON_MAX} characters.`
+        : null;
+  const holdReady = !tryAgain || (!dateProblem && !noteProblem);
 
   const log = useMutation({
     mutationFn: (method: ContactMethod) => {
       const n = note.trim();
-      return logFn({ data: { kind, item_id: itemId, method, ...(n ? { note: n } : {}) } });
+      return logFn({
+        data: {
+          kind,
+          item_id: itemId,
+          method,
+          ...(n ? { note: n } : {}),
+          ...(tryAgain ? { try_again_on: tryAgain } : {}),
+        },
+      });
     },
-    onSuccess: (_row, method) => {
-      toast.success(`Logged: ${CONTACT_METHOD_LABELS[method]}`);
+    onSuccess: (row, method) => {
+      toast.success(
+        row.hold
+          ? `Logged: ${CONTACT_METHOD_LABELS[method]} · on hold until ${shortDay(row.hold.until)}`
+          : `Logged: ${CONTACT_METHOD_LABELS[method]}`,
+      );
       setNote("");
+      setTryAgain("");
       setPicked(null);
       for (const queryKey of REFRESH_KEYS) void qc.invalidateQueries({ queryKey });
       onLogged?.(method);
@@ -131,7 +164,7 @@ export function LogContactButtons({
     onError: (e) => toast.error(`Could not log the contact: ${errText(e)}`, { duration: 12_000 }),
   });
   const save = () => {
-    if (picked && !log.isPending) log.mutate(picked);
+    if (picked && !log.isPending && holdReady) log.mutate(picked);
   };
 
   return (
@@ -181,15 +214,48 @@ export function LogContactButtons({
               }
             }}
           />
+          <div className="space-y-1" data-field="try-again-on">
+            <Label htmlFor={`contact-try-again-${kind}`} className="text-xs">
+              They asked to try again on
+            </Label>
+            <Input
+              id={`contact-try-again-${kind}`}
+              type="date"
+              className="h-8 w-48"
+              value={tryAgain}
+              min={bounds.min}
+              max={bounds.max}
+              onChange={(e) => setTryAgain(e.target.value)}
+            />
+            <p
+              className={`text-xs ${dateProblem || noteProblem ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {dateProblem ??
+                noteProblem ??
+                (tryAgain
+                  ? `The follow-up waits until ${shortDay(tryAgain)}; this note is the reason.`
+                  : "Optional. With a date, the follow-up is on hold until then and this note is the reason.")}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" className="h-8" disabled={log.isPending} onClick={save}>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              disabled={log.isPending || !holdReady}
+              onClick={save}
+            >
               {log.isPending ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
               ) : (
                 <Check className="mr-1 h-4 w-4" />
               )}
               Save {CONTACT_METHOD_LABELS[picked]}
-              {note.trim() ? "" : " without a note"}
+              {tryAgain
+                ? ` and hold until ${shortDay(tryAgain)}`
+                : note.trim()
+                  ? ""
+                  : " without a note"}
             </Button>
             <Button
               type="button"
@@ -200,6 +266,7 @@ export function LogContactButtons({
               onClick={() => {
                 setPicked(null);
                 setNote("");
+                setTryAgain("");
               }}
             >
               <X className="mr-1 h-3.5 w-3.5" /> Cancel

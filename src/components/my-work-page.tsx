@@ -1,14 +1,17 @@
 /**
  * Work Overview (owner, Sep 30): the signed-in person's own tickets (as lead technician), open tasks
- * and open follow-ups in one list, grouped Overdue / This week / Later / No date (a Done
- * ticket last, never overdue), or on a month calendar where a click on a day lists that day.
+ * and open follow-ups in one list, grouped Overdue / This week / Later / Waiting / No date (a Done
+ * ticket last, never overdue; Waiting since Oct 9: a follow-up on hold), or on a month calendar
+ * where a click on a day lists that day.
  * Every signed-in user lands here. Admins and managers also get a "Show" picker (Mine /
  * Everyone / one person); the server returns only the caller's own items to anyone else.
  *
  * Each row links to the ticket, the task's building or the follow-up's item. The Follow-ups page
  * is folded in here (owner, Oct 1): a ticket, opportunity or follow-up row shows its follow-up
- * state (Due / Overdue N days / Snoozed until / Reminders every N days). Snooze and Close are
- * for admins and managers only (seesEveryone; the server and the database refuse anyone else);
+ * state (Due / Overdue N days / On hold until … · reason · held by … / Reminders every N days)
+ * and, once a hold has ended and nothing was logged since, a "Back from hold" badge with the
+ * reason (owner, Oct 9). Snooze (a hold with a date and a reason) and Close are for admins and
+ * managers only (seesEveryone; the server and the database refuse anyone else);
  * everyone else sees the state with one line saying their manager manages follow-ups. The rules
  * (merge, sort, buckets, calendar grid, scoping) are pure in src/lib/my-work.ts, the follow-up
  * state in src/lib/followup-rules.ts.
@@ -35,6 +38,7 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import { canClaim, isAdmin, seesEveryone } from "@/lib/access";
+import { backFromHold } from "@/lib/followup-holds";
 import { followupStateText } from "@/lib/followup-rules";
 import { listMyWork } from "@/lib/my-work.functions";
 import { claimServiceJob } from "@/lib/service.functions";
@@ -123,7 +127,7 @@ const KIND_BAR: Record<WorkKind, string> = {
   opportunity: "border-l-rose-500",
 };
 
-/** How many columns the desktop List grid needs for the columns shown (one to seven). */
+/** How many columns the desktop List grid needs for the columns shown (one to eight). */
 const GRID_COLS: Record<number, string> = {
   1: "xl:grid-cols-1",
   2: "xl:grid-cols-2",
@@ -132,9 +136,11 @@ const GRID_COLS: Record<number, string> = {
   5: "xl:grid-cols-5",
   6: "xl:grid-cols-6",
   7: "xl:grid-cols-7",
+  // Eight since Oct 9 (Waiting): every column an admin can show at once.
+  8: "xl:grid-cols-8",
 };
 const listGridClass = (count: number): string =>
-  GRID_COLS[Math.min(7, Math.max(1, count))] ?? "xl:grid-cols-7";
+  GRID_COLS[Math.min(8, Math.max(1, count))] ?? "xl:grid-cols-8";
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (read as a calendar day, no time zone shift). */
 const dayLabel = (ymd: string) => {
@@ -153,11 +159,27 @@ const monthLabel = (month: string) => {
 /** Snooze / Close for one row's follow-up: admins and managers only (null for everyone else). */
 type ManageFollowup = (f: WorkFollowup) => React.ReactNode;
 
-/** A row's follow-up state: "Overdue 3 days · Snoozed until Fri, Oct 3 · Reminders every 3 days". */
+/**
+ * A row's follow-up state: "Overdue 3 days · On hold until Fri, Oct 24 · <reason> · held by <name>
+ * · Reminders every 3 days"; after a hold has ended, a "Back from hold" badge with the reason until
+ * a contact is logged (owner, Oct 9; lib/followup-holds.ts backFromHold).
+ */
 function FollowupState({ f, today }: { f: WorkFollowup; today: string }) {
   const parts = followupStateText(f, today);
+  const back = backFromHold(f, today);
   return (
     <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs">
+      {back && (
+        <span className="flex w-full flex-wrap items-center gap-1.5" data-badge="back-from-hold">
+          <Badge
+            variant="outline"
+            className="border-amber-400 bg-amber-50 px-1.5 py-0 text-[11px] text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+          >
+            Back from hold
+          </Badge>
+          <span className="text-muted-foreground">{f.hold_reason}</span>
+        </span>
+      )}
       {parts.map((p, i) => (
         <span
           key={p.text}
@@ -855,7 +877,11 @@ export function MyWorkPage(props: {
         return (
           <>
             {busy && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-            <SnoozeMenu disabled={busy} onSnooze={(days) => snooze.mutate({ id: f.id, days })} />
+            <SnoozeMenu
+              disabled={busy}
+              today={today}
+              onSnooze={(hold) => snooze.mutate({ id: f.id, ...hold })}
+            />
             <Button variant="outline" size="sm" disabled={busy} onClick={() => setClosing(f)}>
               <CheckCircle2 className="mr-1 h-4 w-4" /> Close
             </Button>

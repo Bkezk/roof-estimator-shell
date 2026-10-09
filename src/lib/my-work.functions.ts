@@ -247,6 +247,10 @@ export const listMyWork = createServerFn({ method: "GET" })
         assignee_id: f.assignee_id,
         every_days: f.every_days,
         snoozed_until: f.snoozed_until ?? null,
+        // The hold's record (owner, Oct 9; missing until 20261009150000_followup_holds.sql).
+        hold_reason: f.hold_reason ?? null,
+        held_by_name: f.held_by_name ?? null,
+        hold_count: f.hold_count ?? 0,
         account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
       })),
       names,

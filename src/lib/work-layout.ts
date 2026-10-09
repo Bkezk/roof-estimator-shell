@@ -31,15 +31,33 @@ const isBucket = (v: unknown): v is WorkBucket =>
 
 /**
  * Whatever was stored, made whole: unknown names dropped, duplicates removed, every column
- * present (missing ones appended in default order), hidden only among the known. Anything that
- * is not a layout at all gives the default.
+ * present, hidden only among the known. Anything that is not a layout at all gives the default.
+ *
+ * A column the stored order lacks takes its default place among the columns that are there:
+ * after the nearest default predecessor present, else before the nearest default successor,
+ * else at the end (owner, Oct 9: a layout saved before "Waiting" existed gets it after Later,
+ * before No date, as the default has it — appending put it last, after Done).
  */
 export function normalizeWorkLayout(raw: unknown): WorkLayout {
   const r = (raw ?? {}) as { order?: unknown; hidden?: unknown };
   const order: WorkBucket[] = [];
   for (const v of Array.isArray(r.order) ? r.order : [])
     if (isBucket(v) && !order.includes(v)) order.push(v);
-  for (const b of DEFAULT_WORK_LAYOUT_ORDER) if (!order.includes(b)) order.push(b);
+  const defaults = DEFAULT_WORK_LAYOUT_ORDER;
+  for (const [i, b] of defaults.entries()) {
+    if (order.includes(b)) continue;
+    const before = defaults
+      .slice(0, i)
+      .reverse()
+      .find((x) => order.includes(x));
+    if (before) {
+      order.splice(order.indexOf(before) + 1, 0, b);
+      continue;
+    }
+    const after = defaults.slice(i + 1).find((x) => order.includes(x));
+    if (after) order.splice(order.indexOf(after), 0, b);
+    else order.push(b);
+  }
   const hidden: WorkBucket[] = [];
   for (const v of Array.isArray(r.hidden) ? r.hidden : [])
     if (isBucket(v) && !hidden.includes(v)) hidden.push(v);

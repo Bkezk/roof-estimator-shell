@@ -597,6 +597,12 @@ export type Database = {
           created_by: string | null;
           dispatch_errors: number;
           due_at: string;
+          held_at: string | null;
+          held_by: string | null;
+          held_by_name: string | null;
+          hold_count: number;
+          hold_reason: string | null;
+          hold_via: string | null;
           every_days: number;
           id: string;
           item_id: string;
@@ -622,6 +628,12 @@ export type Database = {
           created_by?: string | null;
           dispatch_errors?: number;
           due_at: string;
+          held_at?: string | null;
+          held_by?: string | null;
+          held_by_name?: string | null;
+          hold_count?: number;
+          hold_reason?: string | null;
+          hold_via?: string | null;
           every_days?: number;
           id?: string;
           item_id: string;
@@ -647,6 +659,12 @@ export type Database = {
           created_by?: string | null;
           dispatch_errors?: number;
           due_at?: string;
+          held_at?: string | null;
+          held_by?: string | null;
+          held_by_name?: string | null;
+          hold_count?: number;
+          hold_reason?: string | null;
+          hold_via?: string | null;
           every_days?: number;
           id?: string;
           item_id?: string;
@@ -663,6 +681,13 @@ export type Database = {
           url?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "crm_followups_held_by_fkey";
+            columns: ["held_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "crm_followups_account_id_fkey";
             columns: ["account_id"];
@@ -4280,6 +4305,15 @@ export type Database = {
         Returns: Json;
       };
       followup_sync_close: { Args: { p_id: string; p_reason: string }; Returns: boolean };
+      hold_followup: {
+        Args: {
+          p_followup: string;
+          p_until: string | null;
+          p_reason: string | null;
+          p_via: string;
+        };
+        Returns: Json;
+      };
       followup_claim_reminder: {
         Args: { p_id: string; p_expected: string };
         Returns: boolean;

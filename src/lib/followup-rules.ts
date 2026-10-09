@@ -12,8 +12,9 @@
  *   admin or a manager may change it ("manager and admins can move dates … reps cannot") — a
  *   ticket's date also the office (owner, Oct 9; `kind: "ticket"`, logged).
  * - dateMoveNote: the line logged on the item when its date moves, so every push is on record.
- * - followupStateText: "Due Fri, Oct 3" / "Overdue 3 days" / "Snoozed until …" / "Reminders
- *   every N days" for a row on Work Overview.
+ * - followupStateText: "Due Fri, Oct 3" / "Overdue 3 days" / "On hold until … · <reason> · held
+ *   by <name>" / "held N times" / "Reminders every N days" for a row on Work Overview (the hold
+ *   parts since Oct 9: lib/followup-holds.ts).
  */
 import { dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
 import { localYmd, ymdParts } from "@/lib/my-work";
@@ -100,6 +101,10 @@ export interface FollowupStateIn {
   every_days?: number | null;
   snoozed_until?: string | null;
   status?: string | null;
+  /** The hold's record (owner, Oct 9; 20261009150000_followup_holds.sql). */
+  hold_reason?: string | null;
+  held_by_name?: string | null;
+  hold_count?: number | null;
 }
 
 export interface FollowupStatePart {
@@ -110,8 +115,9 @@ export interface FollowupStatePart {
 
 /**
  * A follow-up's state against `today` (YYYY-MM-DD, the viewer's day): Due today / Due <day> or
- * Overdue N days, then Snoozed until <day> while a snooze is running, then Reminders every N
- * days. A closed follow-up says so and nothing else.
+ * Overdue N days; then, while a hold is running, "On hold until <day>", its reason and "held by
+ * <name>" (owner, Oct 9 — it was "Snoozed until <day>"); "held N times" once it has been held
+ * more than once; then Reminders every N days. A closed follow-up says so and nothing else.
  */
 export function followupStateText(
   f: FollowupStateIn,
@@ -128,8 +134,16 @@ export function followupStateText(
   else parts.push({ text: `Due ${shortDay(due)}`, tone: "normal" });
   if (f.snoozed_until) {
     const until = toYmd(f.snoozed_until);
-    if (until > today) parts.push({ text: `Snoozed until ${shortDay(until)}`, tone: "normal" });
+    if (until > today) {
+      parts.push({ text: `On hold until ${shortDay(until)}`, tone: "normal" });
+      const reason = (f.hold_reason ?? "").trim();
+      if (reason) parts.push({ text: reason, tone: "normal" });
+      const holder = (f.held_by_name ?? "").trim();
+      if (holder) parts.push({ text: `held by ${holder}`, tone: "normal" });
+    }
   }
+  const held = f.hold_count ?? 0;
+  if (held > 1) parts.push({ text: `held ${held} times`, tone: "normal" });
   const every = f.every_days ?? 0;
   if (every > 0)
     parts.push({ text: `Reminders every ${every} day${every === 1 ? "" : "s"}`, tone: "normal" });
