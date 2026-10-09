@@ -54,7 +54,9 @@ describe("missingForComplete", () => {
 describe("the close-out screen", () => {
   const src = readFileSync("src/components/service/closeout.tsx", "utf8");
   it("Complete checks first; Finish (already done) does not", () => {
-    expect(src).toContain("onClick={pressComplete}");
+    // Owner, Oct 9 (steps): from step 7 the bar runs pressComplete; before that a tap scrolls
+    // to the step still open (closeout-steps.ts) — never straight to complete.mutate().
+    expect(src).toContain("onClick={stepToFinish ? () => jumpTo(stepToFinish) : pressComplete}");
     expect(src).not.toContain("onClick={() => complete.mutate()}");
     // Owner, Oct 9: a read with no rows is a line, not a pass (completeGaps, closeout-check.ts);
     // Finish is the `finished` flag the helper short-circuits on.

@@ -1,11 +1,15 @@
 /**
- * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3):
- * who is on the job (crew-box.tsx; owner, Sep 30: answered first — the rest opens after — and
- * editable later), repairs from the template chips with before / after photos (one line each,
- * one open at a time — owner, Oct 9), materials off the truck (one tap per piece, or any
- * material found by search, from the truck or the shop; materials-section.tsx), purchase orders for material bought for
- * the job (purchase-orders-section.tsx; no Approved toggle here), closing notes, time (typed to the
- * quarter hour), the customer's signature, then Complete.
+ * The technician's close-out on one scrolling screen (docs/service-module-design.md §5.3), as
+ * seven steps that unlock in order (closeout-steps.ts; owner, Oct 9: "questions have to be
+ * answered to proceed … unlocking each step after the last is complete"): 1 who is on the job
+ * (crew-box.tsx; owner, Sep 30: answered first — the rest opens after — and editable later),
+ * 2 the repairs from the template chips with their Before photos (one line each, one open at a
+ * time — owner, Oct 9; the Inspection checklist and Aerial markup sit here), 3 the work — what
+ * was done and the After photos, 4 materials off the truck (one tap per piece, or any material
+ * found by search, from the truck or the shop; materials-section.tsx) and purchase orders for
+ * material bought for the job (purchase-orders-section.tsx; no Approved toggle here), 5 time
+ * (typed to the quarter hour), 6 closing notes, 7 the customer's signature, then Complete. A
+ * done step stays open and editable; a locked one is a single muted line.
  *
  * Everything saves as it is filled out (owner, Sep 30: no Save button): repairs, photos, time
  * and the signature as they are made, the text fields a moment after typing stops (a subtle
@@ -32,6 +36,7 @@ import {
   ChevronUp,
   Clock,
   ClipboardList,
+  Hammer,
   Loader2,
   Lock,
   MapPin,
@@ -58,6 +63,7 @@ import {
   SERVICE_STAGES,
   STAGE_LABELS,
   TECH_STAGES,
+  listServiceJobMaterials,
   type ServiceJobRow,
   type ServiceJobWithTech,
   type ServiceStage,
@@ -105,7 +111,28 @@ import {
 } from "@/components/ui/alert-dialog";
 import { completeGaps, type CheckRead, type CompleteGaps } from "@/lib/closeout-check";
 import { CLOSEOUT_TEXT_FIELDS, mergeSaved } from "@/lib/job-cache";
-import { repairSummary } from "@/lib/closeout-repairs";
+import {
+  PHASE_PHOTO_ROLES,
+  needsFor,
+  repairSummary,
+  type RepairPhase,
+} from "@/lib/closeout-repairs";
+import {
+  STEP_COUNT,
+  finishStepLabel,
+  firstOpenStep,
+  lockedLine,
+  nothingUsedKey,
+  stepHeadline,
+  stepOf,
+  stepStatus,
+  stepStatuses,
+  unlockToast,
+  type CloseoutStep,
+  type StepId,
+  type StepState,
+  type StepStatus,
+} from "@/lib/closeout-steps";
 import { officeStageMessage } from "@/lib/office-stage-message";
 import {
   clock,
@@ -172,6 +199,28 @@ function clearDraft(id: string) {
   } catch {
     // Nothing to clear.
   }
+}
+
+// "Nothing used on this ticket" (step 4, owner Oct 9): no column holds it, so the mark lives in
+// localStorage per ticket like the text draft (closeout-steps.ts nothingUsedKey). It records
+// nothing on the server; it only lets step 5 open on a ticket that took no material.
+function readNothingUsed(id: string): boolean {
+  try {
+    return typeof window !== "undefined" && window.localStorage.getItem(nothingUsedKey(id)) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeNothingUsed(id: string, on: boolean) {
+  try {
+    if (on) window.localStorage.setItem(nothingUsedKey(id), "1");
+    else window.localStorage.removeItem(nothingUsedKey(id));
+  } catch {
+    // Storage blocked (private mode): the mark lives only in this screen.
+  }
+}
+function clearNothingUsed(id: string) {
+  writeNothingUsed(id, false);
 }
 
 const orNull = (s: string) => (s.trim() ? s.trim() : null);
@@ -280,6 +329,130 @@ function Section({
   );
 }
 
+/** The element a step's heading scrolls to (the strip, the sticky bar and the unlock toast). */
+const stepAnchor = (id: StepId) => `closeout-step-${id}`;
+function jumpTo(id: StepId) {
+  document.getElementById(stepAnchor(id))?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+}
+/** The tech is typing (a step completes on the first letter of the notes): no scrolling away. */
+function isTyping(): boolean {
+  const el = typeof document === "undefined" ? null : document.activeElement;
+  return el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement;
+}
+
+/**
+ * The step strip under the header (owner, Oct 9): "Step 3 of 7 · The work", then the seven
+ * titles — done ones ticked, the current one highlighted, locked ones greyed with a lock and
+ * the line saying what unlocks them. A tap on an open step scrolls to it. Tight enough for a
+ * 390 px phone: one line per step, the current title never truncated.
+ */
+function StepStrip({
+  statuses,
+  open,
+}: {
+  statuses: { step: CloseoutStep; status: StepStatus }[];
+  open: StepId | null;
+}) {
+  return (
+    <nav aria-label="Close-out steps" className="rounded-xl border bg-card px-3 py-2">
+      <p className="mb-1 text-sm font-semibold">{stepHeadline(open)}</p>
+      <ol className="space-y-0.5">
+        {statuses.map(({ step, status }) => (
+          <li key={step.id}>
+            <button
+              type="button"
+              disabled={status === "locked"}
+              aria-current={status === "current" ? "step" : undefined}
+              className={`flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-0.5 text-left text-sm leading-tight ${
+                status === "current"
+                  ? "bg-primary/10 font-semibold text-primary"
+                  : status === "done"
+                    ? "hover:bg-muted/40"
+                    : "text-muted-foreground/70"
+              }`}
+              onClick={() => jumpTo(step.id)}
+            >
+              {status === "done" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              ) : status === "locked" ? (
+                <Lock className="h-4 w-4 shrink-0" />
+              ) : (
+                <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {step.n}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className={status === "current" ? "block" : "block truncate"}>
+                  {status === "current" ? step.title : `${step.n}. ${step.title}`}
+                </span>
+                {status === "locked" && (
+                  <span className="block truncate text-xs font-normal">{step.unlocks}</span>
+                )}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/**
+ * A step's place on the page: its sections under a small "Step n of 7 · title" line (ringed
+ * while current, ticked once done — a done step stays rendered and editable), or, while locked,
+ * one muted line saying which step to finish first.
+ */
+function StepSlot({
+  id,
+  status,
+  open,
+  children,
+}: {
+  id: StepId;
+  status: StepStatus;
+  open: StepId | null;
+  children: React.ReactNode;
+}) {
+  const step = stepOf(id);
+  if (status === "locked")
+    return (
+      <p
+        id={stepAnchor(id)}
+        className="flex items-center gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"
+      >
+        <Lock className="h-4 w-4 shrink-0" />
+        <span>
+          <span className="font-medium">
+            {step.n}. {step.title}
+          </span>{" "}
+          · {lockedLine(open)}
+        </span>
+      </p>
+    );
+  return (
+    <div
+      id={stepAnchor(id)}
+      className={`scroll-mt-3 space-y-3 ${
+        status === "current"
+          ? "rounded-2xl ring-2 ring-primary ring-offset-4 ring-offset-background"
+          : ""
+      }`}
+    >
+      <p
+        className={`flex items-center gap-1.5 px-1 text-xs font-semibold uppercase tracking-wide ${
+          status === "current" ? "text-primary" : "text-muted-foreground"
+        }`}
+      >
+        {status === "done" && (
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+        )}
+        Step {step.n} of {STEP_COUNT} · {step.title}
+      </p>
+      {children}
+    </div>
+  );
+}
+
 function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -350,6 +523,7 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
         old ? { ...old, ...row } : old,
       );
       clearDraft(job.id);
+      clearNothingUsed(job.id);
       for (const k of [
         fieldKeys.today,
         fieldKeys.job(job.id),
@@ -447,102 +621,213 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
   // Owner, Sep 30: "Who is on this job with you?" comes first; the rest opens once answered.
   const waiting = crewQuestionPending(job);
 
+  // Owner, Oct 9: the close-out is seven steps that unlock in order (closeout-steps.ts). Their
+  // state comes from the ticket row, the reads above, the ticket's materials and this phone's
+  // "Nothing used" mark (no column for it: localStorage per ticket, like the text draft).
+  const materialsFn = useServerFn(listServiceJobMaterials);
+  const materialsQ = useQuery({
+    queryKey: fieldKeys.materials(job.id),
+    queryFn: () => materialsFn({ data: { id: job.id } }),
+    enabled: !!session,
+    staleTime: 30_000,
+  });
+  const [nothingUsed, setNothingUsed] = useState(() => readNothingUsed(job.id));
+  const markNothingUsed = (on: boolean) => {
+    setNothingUsed(on);
+    writeNothingUsed(job.id, on);
+  };
+  const stepState: StepState = {
+    finished,
+    crewAnswered: !waiting,
+    serviceType: job.service_type,
+    repairs: repairsQ.data ?? [],
+    photos: photosQ.data ?? [],
+    materialsTouched: (materialsQ.data ?? []).length > 0 || nothingUsed,
+    timeHours: (timeQ.data ?? []).reduce((sum, r) => sum + Number(r.hours), 0),
+    onSiteAt: job.on_site_at,
+    // The draft, not the saved row: a save that failed on the roof must not lock the signature.
+    closingNotes: draft.closing_notes,
+    signaturePath: job.signature_path,
+  };
+  const open = firstOpenStep(stepState);
+  const statuses = stepStatuses(stepState);
+  const status = (id: StepId) => stepStatus(id, stepState);
+  // Until the reads answer every list is empty, so the strip would say Before with the rest
+  // locked and then jump: the steps wait for the first answers (a failed read counts — its
+  // section says so, loudly).
+  const ready = ![repairsQ, photosQ, timeQ, materialsQ].some((q) => q.isLoading);
+  // When the open step moves forward the next one has just unlocked: a short toast and the
+  // page scrolls its heading into view (not while the tech is typing — the notes complete on
+  // their first letter). Nothing on the first settled render, nothing when a step reopens.
+  const prevOpen = useRef<StepId | null | undefined>(undefined);
+  useEffect(() => {
+    if (!ready) return;
+    const prev = prevOpen.current;
+    prevOpen.current = open;
+    if (prev === undefined) return;
+    const msg = unlockToast(prev, open);
+    if (!msg) return;
+    toast.success(msg);
+    if (open && !isTyping()) jumpTo(open);
+  }, [ready, open]);
+  // The sticky bar completes only from step 7; before that it names the step to finish and
+  // scrolls there.
+  const stepToFinish = open === null || open === "signature" ? null : open;
+  const camera = useRepairCamera(job.id);
+
   return (
     <div className="space-y-5">
-      {/* (a) Who is on the job */}
-      <CrewBox job={job} />
+      <StepStrip statuses={statuses} open={open} />
+
+      {/* Step 1 · Who is here: the crew gate (owner, Sep 30), unchanged — nothing else renders
+          until it is answered. */}
+      <StepSlot id="crew" status={status("crew")} open={open}>
+        <CrewBox job={job} />
+      </StepSlot>
 
       {waiting ? (
         <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">
           Check-in details, photos, repairs and the rest open once you have answered who is on the
           job.
         </p>
+      ) : !ready ? (
+        <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
+        </p>
       ) : (
         <>
-          {/* Inspection checklist (Inspection tickets) and the Aerial markup */}
-          <TicketExtras job={job} canEdit />
+          {camera.inputs}
 
-          {/* (b) Repairs */}
-          <RepairsSection jobId={job.id} ticketNumber={job.number} />
+          {/* Step 2 · Before: the Inspection checklist (Inspection tickets) and the Aerial markup,
+              then the repairs — pick them, take each one's Before photo. */}
+          <StepSlot id="before" status={status("before")} open={open}>
+            <TicketExtras job={job} canEdit />
+            <RepairsSection
+              jobId={job.id}
+              ticketNumber={job.number}
+              phase="before"
+              camera={camera}
+            />
+          </StepSlot>
 
-          {/* (c) Materials */}
-          <MaterialsSection jobId={job.id} />
+          {/* Step 3 · The work: Problem and Work completed for each repair, then its After photo. */}
+          <StepSlot id="work" status={status("work")} open={open}>
+            <RepairsSection jobId={job.id} ticketNumber={job.number} phase="work" camera={camera} />
+          </StepSlot>
 
-          {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
-          <PurchaseOrdersSection jobId={job.id} field />
+          {/* Step 4 · Materials, the purchase orders (material bought for the job; never the
+              Approved toggle here) and, with nothing logged, the "Nothing used" mark. */}
+          <StepSlot id="materials" status={status("materials")} open={open}>
+            <MaterialsSection jobId={job.id} />
+            {/* (c2) Purchase orders: material bought for the job (never the Approved toggle here) */}
+            <PurchaseOrdersSection jobId={job.id} field />
+            {(materialsQ.data ?? []).length === 0 &&
+              (nothingUsed ? (
+                <div className="flex min-h-11 items-center justify-between gap-2 rounded-xl border px-4 py-1 text-sm">
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    Nothing used on this ticket
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-10"
+                    onClick={() => markNothingUsed(false)}
+                  >
+                    Undo
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 w-full text-base"
+                  onClick={() => markNothingUsed(true)}
+                >
+                  Nothing used on this ticket
+                </Button>
+              ))}
+          </StepSlot>
 
-          {/* (d) Notes */}
-          <Section title="Notes" icon={ClipboardList}>
-            <div className="space-y-1">
-              <Label htmlFor="co-notes">Closing notes</Label>
-              <Textarea
-                id="co-notes"
-                rows={5}
-                className="text-base"
-                placeholder="What you found and did (the keyboard's microphone works here)"
-                value={draft.closing_notes}
-                onChange={(e) => update({ closing_notes: e.target.value })}
-              />
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
+          {/* Step 5 · Time */}
+          <StepSlot id="time" status={status("time")} open={open}>
+            <Section title="Time" icon={Clock}>
+              {job.on_site_at && !finished && (
+                <p className="text-sm text-muted-foreground">
+                  Labor from On site ({clock(job.on_site_at)}) until now is added when you press
+                  Complete.
+                </p>
+              )}
+              <TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />
+            </Section>
+          </StepSlot>
+
+          {/* Step 6 · Notes */}
+          <StepSlot id="notes" status={status("notes")} open={open}>
+            <Section title="Notes" icon={ClipboardList}>
               <div className="space-y-1">
-                <Label htmlFor="co-in">Checked in with</Label>
-                <Input
-                  id="co-in"
-                  className="h-11 text-base"
-                  maxLength={200}
-                  value={draft.checked_in_with}
-                  onChange={(e) => update({ checked_in_with: e.target.value })}
+                <Label htmlFor="co-notes">Closing notes</Label>
+                <Textarea
+                  id="co-notes"
+                  rows={5}
+                  className="text-base"
+                  placeholder="What you found and did (the keyboard's microphone works here)"
+                  value={draft.closing_notes}
+                  onChange={(e) => update({ closing_notes: e.target.value })}
                 />
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor="co-in">Checked in with</Label>
+                  <Input
+                    id="co-in"
+                    className="h-11 text-base"
+                    maxLength={200}
+                    value={draft.checked_in_with}
+                    onChange={(e) => update({ checked_in_with: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="co-out">Checked out with</Label>
+                  <Input
+                    id="co-out"
+                    className="h-11 text-base"
+                    maxLength={200}
+                    value={draft.checked_out_with}
+                    onChange={(e) => update({ checked_out_with: e.target.value })}
+                  />
+                </div>
+              </div>
+              <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
+                <span className="font-medium">Recommend a new roof</span>
+                <Switch
+                  checked={draft.recommend_new_roof}
+                  onCheckedChange={(v) => update({ recommend_new_roof: v })}
+                />
+              </label>
+            </Section>
+          </StepSlot>
+
+          {/* Step 7 · Signature */}
+          <StepSlot id="signature" status={status("signature")} open={open}>
+            <Section title="Signature" icon={PenLine}>
               <div className="space-y-1">
-                <Label htmlFor="co-out">Checked out with</Label>
+                <Label htmlFor="co-signed-by">Signed by</Label>
                 <Input
-                  id="co-out"
+                  id="co-signed-by"
                   className="h-11 text-base"
                   maxLength={200}
-                  value={draft.checked_out_with}
-                  onChange={(e) => update({ checked_out_with: e.target.value })}
+                  placeholder="Customer's name"
+                  value={draft.signed_by}
+                  onChange={(e) => update({ signed_by: e.target.value })}
                 />
               </div>
-            </div>
-            <label className="flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2">
-              <span className="font-medium">Recommend a new roof</span>
-              <Switch
-                checked={draft.recommend_new_roof}
-                onCheckedChange={(v) => update({ recommend_new_roof: v })}
-              />
-            </label>
-          </Section>
+              <SignatureSection job={job} />
+            </Section>
+          </StepSlot>
 
-          {/* (e) Time */}
-          <Section title="Time" icon={Clock}>
-            {job.on_site_at && !finished && (
-              <p className="text-sm text-muted-foreground">
-                Labor from On site ({clock(job.on_site_at)}) until now is added when you press
-                Complete.
-              </p>
-            )}
-            <TimeEntries jobId={job.id} editable defaultHelpers={job.helper_count} />
-          </Section>
-
-          {/* (f) Signature */}
-          <Section title="Signature" icon={PenLine}>
-            <div className="space-y-1">
-              <Label htmlFor="co-signed-by">Signed by</Label>
-              <Input
-                id="co-signed-by"
-                className="h-11 text-base"
-                maxLength={200}
-                placeholder="Customer's name"
-                value={draft.signed_by}
-                onChange={(e) => update({ signed_by: e.target.value })}
-              />
-            </div>
-            <SignatureSection job={job} />
-          </Section>
-
-          {/* (g) Complete (the rest saves itself) */}
+          {/* Complete (the rest saves itself): from step 7 only; before that the bar names the
+              step to finish and a tap scrolls there. */}
           <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <div className="mb-2 flex min-h-4 items-center justify-between gap-2 text-xs text-muted-foreground">
               <span>Everything saves as you go.</span>
@@ -550,16 +835,19 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
             </div>
             <Button
               type="button"
+              variant={stepToFinish ? "secondary" : "default"}
               className="h-14 w-full text-lg font-semibold"
               disabled={busy}
-              onClick={pressComplete}
+              onClick={stepToFinish ? () => jumpTo(stepToFinish) : pressComplete}
             >
               {complete.isPending ? (
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : stepToFinish ? (
+                <Lock className="mr-2 h-5 w-5" />
               ) : (
                 <CheckCircle2 className="mr-2 h-5 w-5" />
               )}
-              {finished ? "Finish" : "Complete"}
+              {stepToFinish ? finishStepLabel(stepToFinish) : finished ? "Finish" : "Complete"}
             </Button>
           </div>
           <AlertDialog open={missing.length > 0} onOpenChange={(o) => !o && setMissing([])}>
@@ -670,15 +958,31 @@ interface Shot {
   role: PhotoRole;
 }
 
-function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: number }) {
+/**
+ * The repairs, in one of the two steps they span (owner, Oct 9, closeout-steps.ts): "before" is
+ * step 2 — the picker, each repair's row with its Before camera, Remove; "work" is step 3 — the
+ * same repairs with Problem, Work completed and the After camera. Both read the same cached
+ * rows and share the one camera (useRepairCamera, held by the form).
+ */
+function RepairsSection({
+  jobId,
+  ticketNumber,
+  phase,
+  camera,
+}: {
+  jobId: string;
+  ticketNumber: number;
+  phase: RepairPhase;
+  camera: RepairCamera;
+}) {
   const { session } = useAuth();
   const qc = useQueryClient();
+  const before = phase === "before";
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
   const recentFn = useServerFn(recentRepairsForJob);
   const templatesFn = useServerFn(listRepairTemplates);
   const saveFn = useServerFn(saveJobRepair);
-  const registerFn = useServerFn(registerJobPhoto);
 
   // Owner, Oct 9 (S13): fresh for 30 s — a return from the camera is not a re-read of all.
   const repairs = useQuery({
@@ -693,10 +997,11 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     enabled: !!session,
     staleTime: 30_000,
   });
+  // The picker's reads belong to step 2 only.
   const recent = useQuery({
     queryKey: ["repair-templates-recent", jobId],
     queryFn: () => recentFn({ data: { id: jobId } }),
-    enabled: !!session,
+    enabled: !!session && before,
     staleTime: 5 * 60_000,
   });
   // Roof-type chips (owner, Oct 6: "the repair tags … please fix"): the chosen chip filters
@@ -712,7 +1017,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const favs = useQuery({
     queryKey: ["repair-templates", "top", tag],
     queryFn: () => templatesFn({ data: { limit: 24, tag: tag ?? undefined } }),
-    enabled: !!session,
+    enabled: !!session && before,
     staleTime: 5 * 60_000,
   });
   const [search, setSearch] = useState("");
@@ -724,7 +1029,7 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const found = useQuery({
     queryKey: ["repair-templates", "q", q, tag],
     queryFn: () => templatesFn({ data: { q, limit: 30, tag: tag ?? undefined } }),
-    enabled: !!session && q.length >= 2,
+    enabled: !!session && before && q.length >= 2,
     staleTime: 60_000,
   });
   const [otherOpen, setOtherOpen] = useState(false);
@@ -769,87 +1074,6 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
     onError: (e) => loudError("Could not add the repair", e),
   });
 
-  // Owner, Oct 9: the camera is ONE mutation for the section, with two hidden file inputs, so
-  // a folded row's Before / After buttons (RepairRow) and the open card share it — a tech taps
-  // a row's camera without opening the card. `aim` is the repair the next picked file goes to.
-  // A failed upload keeps its file here (`failed`, one per repair) for "Retry upload": the file
-  // used to be thrown away with the error. A success or Discard lets it go.
-  const beforeRef = useRef<HTMLInputElement | null>(null);
-  const afterRef = useRef<HTMLInputElement | null>(null);
-  const aim = useRef<string | null>(null);
-  const [failed, setFailed] = useState<Record<string, Shot>>({});
-  const upload = useMutation({
-    mutationFn: async ({ file, role, repairId }: Shot & { repairId: string }) => {
-      // GPS runs beside the upload and gives up after 3 s; a photo never waits on it.
-      const where = getPosition(3000);
-      const shrunk = await shrinkPhoto(file);
-      const path = photoObjectPath(jobId, shrunk.name || "photo.jpg");
-      await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
-      const pos = await where;
-      try {
-        return await registerFn({
-          data: {
-            service_job_id: jobId,
-            repair_id: repairId,
-            role,
-            storage_path: path,
-            file_name: shrunk.name || null,
-            file_size: shrunk.blob.size,
-            taken_at: new Date(file.lastModified || Date.now()).toISOString(),
-            lat: pos?.lat ?? null,
-            lng: pos?.lng ?? null,
-          },
-        });
-      } catch (e) {
-        await removeFromServiceBucket(path);
-        throw e;
-      }
-    },
-    onSuccess: (row, v) => {
-      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) => [...(old ?? []), row]);
-      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
-      setFailed((f) => {
-        if (!(v.repairId in f)) return f;
-        const { [v.repairId]: _landed, ...rest } = f;
-        return rest;
-      });
-      toast.success(`${row.role === "before" ? "Before" : "After"} photo saved`);
-    },
-    onError: (e, v) => {
-      setFailed((f) => ({ ...f, [v.repairId]: { file: v.file, role: v.role } }));
-      loudError(
-        `The ${v.role} photo did not upload (it is kept on the repair — Retry upload with signal)`,
-        e,
-      );
-    },
-  });
-  const takePhoto = (repairId: string, role: PhotoRole) => {
-    aim.current = repairId;
-    (role === "before" ? beforeRef : afterRef).current?.click();
-  };
-  const pick = (role: PhotoRole) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
-    const repairId = aim.current;
-    if (!repairId) return;
-    for (const file of files) upload.mutate({ file, role, repairId });
-  };
-  const photoControls = (r: JobRepairRow): PhotoControls => ({
-    uploading:
-      upload.isPending && upload.variables?.repairId === r.id ? upload.variables.role : null,
-    failed: failed[r.id],
-    onPhoto: (role) => takePhoto(r.id, role),
-    onRetry: () => {
-      const shot = failed[r.id];
-      if (shot) upload.mutate({ ...shot, repairId: r.id });
-    },
-    onDiscard: () =>
-      setFailed((f) => {
-        const { [r.id]: _dropped, ...rest } = f;
-        return rest;
-      }),
-  });
-
   // The ticket's usual repairs are not re-fetched per chip: hide the ones outside it here.
   const recentRows = (recent.data ?? []).filter((t) => repairMatchesTag(t.tags, tag));
   const recentIds = new Set(recentRows.map((t) => t.id));
@@ -857,7 +1081,17 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
   const rows = repairs.data ?? [];
   const allPhotos = photos.data ?? [];
   const openId = rows.length === 1 ? (rows[0]?.id ?? null) : expanded;
-  const showPicker = rows.length === 0 || pickerOpen;
+  const showPicker = before && (rows.length === 0 || pickerOpen);
+  const workDone = rows.filter(
+    (r) =>
+      needsFor(
+        "work",
+        repairSummary(
+          r,
+          allPhotos.filter((p) => p.repair_id === r.id),
+        ).needs,
+      ).length === 0,
+  ).length;
   // Owner, Oct 9 (S5): two characters typed → the matches sit right under the box and the
   // chips are out of the way (they used to grow to the full list while typing).
   const searching = q.length >= 2;
@@ -865,11 +1099,13 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
 
   return (
     <Section
-      title="Repairs"
-      icon={Wrench}
+      title={before ? "Repairs" : "The work"}
+      icon={before ? Wrench : Hammer}
       aside={
         rows.length > 0 ? (
-          <span className="text-sm text-muted-foreground">{rows.length} added</span>
+          <span className="text-sm text-muted-foreground">
+            {before ? `${rows.length} added` : `${workDone} of ${rows.length} done`}
+          </span>
         ) : undefined
       }
     >
@@ -886,22 +1122,11 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
           {errText(photos.error)}
         </p>
       )}
-      <input
-        ref={beforeRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={pick("before")}
-      />
-      <input
-        ref={afterRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={pick("after")}
-      />
+      {!before && rows.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No repairs on the ticket — add them in step 2.
+        </p>
+      )}
       {rows.length > 0 && (
         <div className="space-y-2">
           {rows.map((r) =>
@@ -911,24 +1136,26 @@ function RepairsSection({ jobId, ticketNumber }: { jobId: string; ticketNumber: 
                 jobId={jobId}
                 ticketNumber={ticketNumber}
                 repair={r}
+                phase={phase}
                 photos={allPhotos.filter((p) => p.repair_id === r.id)}
                 onCollapse={rows.length > 1 ? () => setExpanded(null) : null}
-                camera={photoControls(r)}
+                camera={camera.controls(r)}
               />
             ) : (
               <RepairRow
                 key={r.id}
                 repair={r}
+                phase={phase}
                 photos={allPhotos.filter((p) => p.repair_id === r.id)}
                 onOpen={() => setExpanded(r.id)}
-                camera={photoControls(r)}
+                camera={camera.controls(r)}
               />
             ),
           )}
         </div>
       )}
 
-      {!showPicker && (
+      {before && !showPicker && (
         <Button
           type="button"
           variant="outline"
@@ -1099,25 +1326,145 @@ interface PhotoControls {
   onDiscard: () => void;
 }
 
+/** The one camera both repair steps share (useRepairCamera): its hidden inputs and controls. */
+interface RepairCamera {
+  inputs: React.ReactNode;
+  controls: (r: JobRepairRow) => PhotoControls;
+}
+
 /**
- * The Before (n) / After (n) camera buttons and, under them, the failed photo's "Retry upload"
- * / "Discard" line. `compact`: the folded row's size; else the card's two wide buttons.
+ * Owner, Oct 9: the camera is ONE mutation with two hidden file inputs, so a folded row's
+ * Before / After buttons (RepairRow) and the open card share it — a tech taps a row's camera
+ * without opening the card. Held by the form, since the repairs show in step 2 (Before) and
+ * step 3 (The work). `aim` is the repair the next picked file goes to. A failed upload keeps
+ * its file here (`failed`, one per repair) for "Retry upload": the file used to be thrown away
+ * with the error. A success or Discard lets it go.
+ */
+function useRepairCamera(jobId: string): RepairCamera {
+  const qc = useQueryClient();
+  const registerFn = useServerFn(registerJobPhoto);
+  const beforeRef = useRef<HTMLInputElement | null>(null);
+  const afterRef = useRef<HTMLInputElement | null>(null);
+  const aim = useRef<string | null>(null);
+  const [failed, setFailed] = useState<Record<string, Shot>>({});
+  const upload = useMutation({
+    mutationFn: async ({ file, role, repairId }: Shot & { repairId: string }) => {
+      // GPS runs beside the upload and gives up after 3 s; a photo never waits on it.
+      const where = getPosition(3000);
+      const shrunk = await shrinkPhoto(file);
+      const path = photoObjectPath(jobId, shrunk.name || "photo.jpg");
+      await uploadToServiceBucket(path, shrunk.blob, shrunk.type);
+      const pos = await where;
+      try {
+        return await registerFn({
+          data: {
+            service_job_id: jobId,
+            repair_id: repairId,
+            role,
+            storage_path: path,
+            file_name: shrunk.name || null,
+            file_size: shrunk.blob.size,
+            taken_at: new Date(file.lastModified || Date.now()).toISOString(),
+            lat: pos?.lat ?? null,
+            lng: pos?.lng ?? null,
+          },
+        });
+      } catch (e) {
+        await removeFromServiceBucket(path);
+        throw e;
+      }
+    },
+    onSuccess: (row, v) => {
+      qc.setQueryData<JobPhotoRow[]>(fieldKeys.photos(jobId), (old) => [...(old ?? []), row]);
+      void qc.invalidateQueries({ queryKey: fieldKeys.events(jobId) });
+      setFailed((f) => {
+        if (!(v.repairId in f)) return f;
+        const { [v.repairId]: _landed, ...rest } = f;
+        return rest;
+      });
+      toast.success(`${row.role === "before" ? "Before" : "After"} photo saved`);
+    },
+    onError: (e, v) => {
+      setFailed((f) => ({ ...f, [v.repairId]: { file: v.file, role: v.role } }));
+      loudError(
+        `The ${v.role} photo did not upload (it is kept on the repair — Retry upload with signal)`,
+        e,
+      );
+    },
+  });
+  const takePhoto = (repairId: string, role: PhotoRole) => {
+    aim.current = repairId;
+    (role === "before" ? beforeRef : afterRef).current?.click();
+  };
+  const pick = (role: PhotoRole) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    const repairId = aim.current;
+    if (!repairId) return;
+    for (const file of files) upload.mutate({ file, role, repairId });
+  };
+  const photoControls = (r: JobRepairRow): PhotoControls => ({
+    uploading:
+      upload.isPending && upload.variables?.repairId === r.id ? upload.variables.role : null,
+    failed: failed[r.id],
+    onPhoto: (role) => takePhoto(r.id, role),
+    onRetry: () => {
+      const shot = failed[r.id];
+      if (shot) upload.mutate({ ...shot, repairId: r.id });
+    },
+    onDiscard: () =>
+      setFailed((f) => {
+        const { [r.id]: _dropped, ...rest } = f;
+        return rest;
+      }),
+  });
+
+  const inputs = (
+    <>
+      <input
+        ref={beforeRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={pick("before")}
+      />
+      <input
+        ref={afterRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={pick("after")}
+      />
+    </>
+  );
+  return { inputs, controls: photoControls };
+}
+
+/**
+ * The Before (n) / After (n) camera buttons — `roles`: the step's (step 2 Before, step 3 After;
+ * closeout-repairs.ts PHASE_PHOTO_ROLES) — and, under them, that role's failed photo with
+ * "Retry upload" / "Discard". `compact`: the folded row's size; else the card's wide buttons.
  */
 function PhotoButtons({
   photos,
   camera,
+  roles,
   compact,
 }: {
   photos: JobPhotoRow[];
   camera: PhotoControls;
+  roles: readonly PhotoRole[];
   compact?: boolean | undefined;
 }) {
   const { uploading, failed, onPhoto, onRetry, onDiscard } = camera;
   const count = (role: PhotoRole) => photos.filter((p) => p.role === role).length;
+  const shown = failed && roles.includes(failed.role) ? failed : undefined;
   return (
     <>
       <div className={compact ? "flex gap-2" : "grid grid-cols-2 gap-2"}>
-        {(["before", "after"] as const).map((role) => (
+        {roles.map((role) => (
           <Button
             key={role}
             type="button"
@@ -1138,10 +1485,10 @@ function PhotoButtons({
           </Button>
         ))}
       </div>
-      {failed && (
+      {shown && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-destructive">
-            The {failed.role === "before" ? "Before" : "After"} photo did not upload
+            The {shown.role === "before" ? "Before" : "After"} photo did not upload
           </span>
           <Button
             type="button"
@@ -1163,21 +1510,25 @@ function PhotoButtons({
 
 /**
  * A repair folded to one line (owner, Oct 9): name, "× qty unit" and a chevron open the card;
- * under them its own Before (n) / After (n) camera buttons (so a photo never needs the card
- * open) beside, in amber, what it still needs (closeout-repairs.ts).
+ * under them its own camera button for the step (Before (n) in step 2, After (n) in step 3, so
+ * a photo never needs the card open) beside, in amber, what the step still needs of it
+ * (closeout-repairs.ts).
  */
 function RepairRow({
   repair,
+  phase,
   photos,
   onOpen,
   camera,
 }: {
   repair: JobRepairRow;
+  phase: RepairPhase;
   photos: JobPhotoRow[];
   onOpen: () => void;
   camera: PhotoControls;
 }) {
   const s = repairSummary(repair, photos);
+  const needs = needsFor(phase, s.needs);
   return (
     <div className="space-y-2 rounded-lg border bg-muted/20 px-3 py-2">
       <button
@@ -1194,10 +1545,10 @@ function RepairRow({
         <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />
       </button>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <PhotoButtons photos={photos} camera={camera} compact />
-        {s.needs.length > 0 && (
+        <PhotoButtons photos={photos} camera={camera} roles={PHASE_PHOTO_ROLES[phase]} compact />
+        {needs.length > 0 && (
           <span className="text-xs text-amber-700 dark:text-amber-400">
-            needs: {s.needs.join(", ")}
+            needs: {needs.join(", ")}
           </span>
         )}
       </div>
@@ -1205,10 +1556,16 @@ function RepairRow({
   );
 }
 
+/**
+ * The open repair. In step 2 (`phase` "before"): its name (editable when typed in), quantity,
+ * Remove, its Before photos and camera. In step 3 ("work"): Problem, Work completed, its After
+ * photos and camera. Text saves when a box is left.
+ */
 function RepairCard({
   jobId,
   ticketNumber,
   repair,
+  phase,
   photos,
   onCollapse,
   camera,
@@ -1216,6 +1573,7 @@ function RepairCard({
   jobId: string;
   ticketNumber: number;
   repair: JobRepairRow;
+  phase: RepairPhase;
   photos: JobPhotoRow[];
   /** Fold the card back to its row; null when it is the only repair (always open). */
   onCollapse: (() => void) | null;
@@ -1278,12 +1636,15 @@ function RepairCard({
   });
 
   const free = !repair.repair_template_id;
+  const before = phase === "before";
+  const roles = PHASE_PHOTO_ROLES[phase];
+  const shown = photos.filter((p) => (roles as readonly string[]).includes(p.role));
 
   return (
     <article className="space-y-3 rounded-lg border bg-muted/20 p-3">
       <div className="flex items-start gap-1">
         <div className="min-w-0 flex-1">
-          {free ? (
+          {free && before ? (
             <Input
               aria-label="Repair name"
               className="h-11 text-base font-semibold"
@@ -1297,8 +1658,9 @@ function RepairCard({
           )}
         </div>
         {save.isPending && <Loader2 className="mt-3 h-4 w-4 animate-spin text-muted-foreground" />}
-        {/* Owner, Oct 9: Remove sits in the header (a small ghost button), not on a row of its own. */}
-        {!confirmRemove && (
+        {/* Owner, Oct 9: Remove sits in the header (a small ghost button), not on a row of its own;
+            step 2's — a repair is taken off where it was added. */}
+        {before && !confirmRemove && (
           <Button
             type="button"
             variant="ghost"
@@ -1350,45 +1712,51 @@ function RepairCard({
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        <Label className="text-sm text-muted-foreground">Quantity</Label>
-        <div className="w-24">
-          <NumberField
-            value={vals.quantity}
-            step="any"
-            inputMode="decimal"
-            className="h-11 text-center text-base"
-            onChange={(n) => setVals((v) => ({ ...v, quantity: n }))}
-            onBlur={() => commit()}
-          />
+      {before && (
+        <div className="flex items-center gap-2">
+          <Label className="text-sm text-muted-foreground">Quantity</Label>
+          <div className="w-24">
+            <NumberField
+              value={vals.quantity}
+              step="any"
+              inputMode="decimal"
+              className="h-11 text-center text-base"
+              onChange={(n) => setVals((v) => ({ ...v, quantity: n }))}
+              onBlur={() => commit()}
+            />
+          </div>
+          <span className="text-sm text-muted-foreground">{repair.unit}</span>
         </div>
-        <span className="text-sm text-muted-foreground">{repair.unit}</span>
-      </div>
+      )}
 
-      <div className="space-y-1">
-        <Label className="text-sm">Problem</Label>
-        <Textarea
-          rows={2}
-          className="text-base"
-          value={vals.problem_text}
-          onChange={(e) => setVals((v) => ({ ...v, problem_text: e.target.value }))}
-          onBlur={() => commit()}
-        />
-      </div>
-      <div className="space-y-1">
-        <Label className="text-sm">Work completed</Label>
-        <Textarea
-          rows={2}
-          className="text-base"
-          value={vals.resolution_text}
-          onChange={(e) => setVals((v) => ({ ...v, resolution_text: e.target.value }))}
-          onBlur={() => commit()}
-        />
-      </div>
+      {!before && (
+        <>
+          <div className="space-y-1">
+            <Label className="text-sm">Problem</Label>
+            <Textarea
+              rows={2}
+              className="text-base"
+              value={vals.problem_text}
+              onChange={(e) => setVals((v) => ({ ...v, problem_text: e.target.value }))}
+              onBlur={() => commit()}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm">Work completed</Label>
+            <Textarea
+              rows={2}
+              className="text-base"
+              value={vals.resolution_text}
+              onChange={(e) => setVals((v) => ({ ...v, resolution_text: e.target.value }))}
+              onBlur={() => commit()}
+            />
+          </div>
+        </>
+      )}
 
-      {photos.length > 0 && (
+      {shown.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {photos.map((p) => (
+          {shown.map((p) => (
             <PhotoThumb
               key={p.id}
               photo={p}
@@ -1402,7 +1770,7 @@ function RepairCard({
         </div>
       )}
 
-      <PhotoButtons photos={photos} camera={camera} />
+      <PhotoButtons photos={photos} camera={camera} roles={roles} />
     </article>
   );
 }

@@ -507,7 +507,13 @@ describe("the editor, lightbox, thumbnail and export", () => {
   });
   it("mounted on the technician's close-out and the office ticket page", () => {
     const closeout = read("src/components/service/closeout.tsx");
-    expect(closeout).toMatch(/<RepairsSection jobId=\{job\.id\} ticketNumber=\{job\.number\} \/>/);
+    // Owner, Oct 9 (steps): mounted twice — step 2 (Before) and step 3 (The work).
+    expect(closeout).toMatch(
+      /<RepairsSection\s+jobId=\{job\.id\}\s+ticketNumber=\{job\.number\}\s+phase="before"\s+camera=\{camera\}\s*\/>/,
+    );
+    expect(closeout).toMatch(
+      /<RepairsSection\s+jobId=\{job\.id\}\s+ticketNumber=\{job\.number\}\s+phase="work"\s+camera=\{camera\}\s*\/>/,
+    );
     expect(closeout).toMatch(/canAnnotate\s+ticketNumber=\{ticketNumber\}/);
     const sections = read("src/components/service/ticket-field-sections.tsx");
     expect(sections).toMatch(/canAnnotate=\{canEdit\}/);

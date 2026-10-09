@@ -50,3 +50,17 @@ export function repairSummary(
     needs,
   };
 }
+
+/**
+ * The close-out shows each repair twice (closeout-steps.ts, owner Oct 9): in step 2 (Before)
+ * the row asks only for its Before photo; in step 3 (The work) for the work-completed text and
+ * the After photo. The same `needs` list, split by step.
+ */
+export type RepairPhase = "before" | "work";
+export const PHASE_PHOTO_ROLES: Record<RepairPhase, readonly ("before" | "after")[]> = {
+  before: ["before"],
+  work: ["after"],
+};
+export function needsFor(phase: RepairPhase, needs: readonly string[]): string[] {
+  return needs.filter((n) => (phase === "before" ? n === "before photo" : n !== "before photo"));
+}

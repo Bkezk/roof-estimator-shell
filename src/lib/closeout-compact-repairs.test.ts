@@ -52,15 +52,22 @@ describe("repairSummary", () => {
 describe("the close-out's Repairs section", () => {
   const src = readFileSync("src/components/service/closeout.tsx", "utf8");
   it("folds each repair to a row showing name, × qty, Before / After counts and an amber needs hint", () => {
-    expect(src).toContain('import { repairSummary } from "@/lib/closeout-repairs";');
+    expect(src).toMatch(
+      /import \{[\s\S]*?repairSummary,[\s\S]*?\} from "@\/lib\/closeout-repairs";/,
+    );
     expect(src).toContain("function RepairRow({");
     expect(src).toContain("const s = repairSummary(repair, photos);");
     expect(src).toContain("{s.qtyText}");
     // Owner, Oct 9 (S6): the counts are on the row's own camera buttons, "Before (n)" /
-    // "After (n)" (PhotoButtons, shared with the card), not plain text.
-    expect(src).toContain("<PhotoButtons photos={photos} camera={camera} compact />");
+    // "After (n)" (PhotoButtons, shared with the card), not plain text. Later that day the row
+    // shows in two steps (closeout-steps.ts): step 2's Before button, step 3's After button,
+    // each with that step's needs (closeout-repairs.ts needsFor).
+    expect(src).toContain(
+      "<PhotoButtons photos={photos} camera={camera} roles={PHASE_PHOTO_ROLES[phase]} compact />",
+    );
+    expect(src).toContain("const needs = needsFor(phase, s.needs);");
     expect(src).toContain('{count(role) ? ` (${count(role)})` : ""}');
-    expect(src).toMatch(/text-amber-700 dark:text-amber-400">\s*needs: \{s\.needs\.join\(", "\)\}/);
+    expect(src).toMatch(/text-amber-700 dark:text-amber-400">\s*needs: \{needs\.join\(", "\)\}/);
     expect(src).toContain('<ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground" />');
   });
   it("one card open at a time; the only repair is always open; nothing remembered across reloads", () => {
@@ -93,8 +100,9 @@ describe("the close-out's Repairs section", () => {
     expect(header).toContain('<ChevronUp className="h-5 w-5" />');
     expect(card).not.toContain("Remove repair");
     expect(card).not.toContain('<div className="flex justify-end">');
-    // The card's camera buttons come from PhotoButtons (the section's one upload mutation).
-    expect(card).toContain("<PhotoButtons photos={photos} camera={camera} />");
+    // The card's camera buttons come from PhotoButtons (the form's one upload mutation), for
+    // the step's role only.
+    expect(card).toContain("<PhotoButtons photos={photos} camera={camera} roles={roles} />");
     expect(src).toMatch(
       /className=\{compact \? "h-10 px-3 text-sm" : "h-11 text-base"\}\s*disabled=\{uploading === role\}/,
     );

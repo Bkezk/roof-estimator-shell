@@ -250,7 +250,13 @@ describe("B3 mergeSaved: a save merges only the fields it sent", () => {
 // B4 + S6
 
 describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row has the camera", () => {
+  // Owner, Oct 9 (steps): the camera is the form's useRepairCamera, shared by the Before and
+  // The work steps' RepairsSection (closeout-steps.ts); the section itself has none.
   const section = closeout.slice(
+    closeout.indexOf("function useRepairCamera("),
+    closeout.indexOf("return { inputs, controls: photoControls };"),
+  );
+  const repairsSection = closeout.slice(
     closeout.indexOf("function RepairsSection({"),
     closeout.indexOf("const PICKER_CHIPS = 8;"),
   );
@@ -262,13 +268,17 @@ describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row h
     closeout.indexOf("function RepairRow({"),
     closeout.indexOf("function RepairCard({"),
   );
-  it("one upload mutation and the two hidden inputs live in the section, not the card", () => {
+  it("one upload mutation and the two hidden inputs live in the form's camera hook, not the card or the section", () => {
     expect(section).toContain("const upload = useMutation({");
     expect(section).toContain("ref={beforeRef}");
     expect(section).toContain("ref={afterRef}");
     expect(section).toContain("repair_id: repairId,");
     expect(card).not.toContain("useMutation({\n    mutationFn: async ({ file, role }");
     expect(card).not.toContain('type="file"');
+    expect(repairsSection).not.toContain("useMutation({\n    mutationFn: async ({ file, role }");
+    expect(repairsSection).not.toContain('type="file"');
+    expect(closeout).toContain("const camera = useRepairCamera(job.id);");
+    expect(closeout).toContain("{camera.inputs}");
   });
   it("a failed upload keeps { file, role } per repair; success clears it; the toast no longer says take it again", () => {
     expect(section).toContain("const [failed, setFailed] = useState<Record<string, Shot>>({});");
@@ -288,12 +298,19 @@ describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row h
     expect(section).toMatch(
       /onDiscard: \(\) =>\s*setFailed\(\(f\) => \{\s*const \{ \[r\.id\]: _dropped, \.\.\.rest \} = f;/,
     );
-    expect(closeout).toMatch(/\{failed && \([\s\S]*?Retry upload[\s\S]*?Discard\s*<\/Button>/);
+    // `shown`: the failed shot when it is the step's role (closeout-steps: Before in step 2,
+    // After in step 3) — the Retry upload / Discard line sits under that step's button.
+    expect(closeout).toContain(
+      "const shown = failed && roles.includes(failed.role) ? failed : undefined;",
+    );
+    expect(closeout).toMatch(/\{shown && \([\s\S]*?Retry upload[\s\S]*?Discard\s*<\/Button>/);
   });
-  it("the folded row has Before (n) / After (n) beside the amber needs hint, without opening the card", () => {
-    expect(row).toContain("<PhotoButtons photos={photos} camera={camera} compact />");
+  it("the folded row has the step's camera button (Before (n) in step 2, After (n) in step 3) beside the amber needs hint, without opening the card", () => {
+    expect(row).toContain(
+      "<PhotoButtons photos={photos} camera={camera} roles={PHASE_PHOTO_ROLES[phase]} compact />",
+    );
     expect(row).toMatch(
-      /<PhotoButtons[^\n]*compact \/>\s*\{s\.needs\.length > 0 && \(\s*<span className="text-xs text-amber-700 dark:text-amber-400">/,
+      /<PhotoButtons[^\n]*compact \/>\s*\{needs\.length > 0 && \(\s*<span className="text-xs text-amber-700 dark:text-amber-400">/,
     );
     // No button inside a button: the open control is its own <button>, closed before the camera.
     expect(row.indexOf("</button>")).toBeGreaterThan(-1);
@@ -302,8 +319,8 @@ describe("B4 a failed photo upload is kept for Retry upload; S6 the folded row h
     expect(section).toMatch(
       /const takePhoto = \(repairId: string, role: PhotoRole\) => \{\s*aim\.current = repairId;/,
     );
-    expect(section).toContain("camera={photoControls(r)}");
-    expect(card).toContain("<PhotoButtons photos={photos} camera={camera} />");
+    expect(repairsSection).toContain("camera={camera.controls(r)}");
+    expect(card).toContain("<PhotoButtons photos={photos} camera={camera} roles={roles} />");
   });
 });
 
@@ -389,8 +406,9 @@ describe("S5 the repair picker: matches under the search box, chips hidden while
 describe("S13 query hygiene: 30 s staleTime on the close-out's reads; My tickets seeds the ticket", () => {
   it("every fieldKeys.* read on the close-out is fresh for 30 s", () => {
     const stale = (s: string) => (s.match(/staleTime: 30_000,/g) ?? []).length;
-    // closeout: repairsQ, photosQ, timeQ in the form + repairs, photos in the section.
-    expect(stale(closeout)).toBe(5);
+    // closeout: repairsQ, photosQ, timeQ, materialsQ (the steps' state, closeout-steps.ts) in
+    // the form + repairs, photos in the section.
+    expect(stale(closeout)).toBe(6);
     // materials: the ticket's materials, the truck, the repairs.
     expect(stale(materials)).toBe(3);
     // field-shared: the time list and the crew it is billed for.

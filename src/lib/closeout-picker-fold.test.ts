@@ -11,8 +11,9 @@ const src = readFileSync("src/components/service/closeout.tsx", "utf8");
 
 describe("the repair picker folds", () => {
   it("open on an empty ticket, folded behind Add another repair once a repair exists", () => {
-    expect(src).toContain("const showPicker = rows.length === 0 || pickerOpen;");
-    expect(src).toMatch(/\{!showPicker && \(\s*<Button[\s\S]*?Add another repair/);
+    // Owner, Oct 9 (steps): the picker is step 2's (Before) — never in step 3's The work.
+    expect(src).toContain("const showPicker = before && (rows.length === 0 || pickerOpen);");
+    expect(src).toMatch(/\{before && !showPicker && \(\s*<Button[\s\S]*?Add another repair/);
     expect(src).toMatch(/\{showPicker && \(\s*<div className="space-y-3">/);
     // Adding a repair folds it again.
     expect(src).toMatch(
