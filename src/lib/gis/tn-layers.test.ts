@@ -2,10 +2,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { ArcGisFeatureSet } from "./arcgis";
+import { FOOTPRINT_OUT_FIELDS, footprintAtPointUrl } from "./ky-layers";
 import {
   TN_COUNTIES,
   TN_PAGE_SIZE,
   USA_STRUCTURES_LAYER,
+  structuresByAddressUrl,
   tnBuildingRow,
   tnCountUrl,
   tnCountyFromFips,
@@ -110,5 +112,40 @@ describe("tnBuildingRow", () => {
     expect(tnBuildingRow({ ...unclassified!, attributes: a })!.county).toBe("Pickett");
     const b = { ...a, FIPS: null };
     expect(tnBuildingRow({ ...unclassified!, attributes: b }, "Pickett")!.county).toBe("Pickett");
+  });
+});
+
+describe("live address lookup: structures by house number and street word (owner, Oct 9)", () => {
+  it("filters PROP_ADDR the way the database does and keeps to Tennessee's counties", () => {
+    const u = new URL(structuresByAddressUrl("321", "trinity")!);
+    expect(u.href.startsWith(`${USA_STRUCTURES_LAYER}/query?`)).toBe(true);
+    expect(u.searchParams.get("where")).toBe(
+      "UPPER(PROP_ADDR) LIKE '321 %' AND UPPER(PROP_ADDR) LIKE '%TRINITY%' AND FIPS LIKE '47%'",
+    );
+    expect(u.searchParams.get("f")).toBe("pjson");
+    expect(u.searchParams.get("returnGeometry")).toBe("true");
+    expect(u.searchParams.get("resultRecordCount")).toBe("80");
+    expect(
+      new URL(structuresByAddressUrl("321", "trinity", 10)!).searchParams.get("resultRecordCount"),
+    ).toBe("10");
+  });
+  it("asks for the same fields in the same projection as the tap lookup, so one reader serves both", () => {
+    const u = new URL(structuresByAddressUrl("12A", "OAK")!);
+    const tap = new URL(footprintAtPointUrl(USA_STRUCTURES_LAYER, -86.78, 36.2));
+    expect(u.searchParams.get("outSR")).toBe("102100");
+    expect(u.searchParams.get("outSR")).toBe(tap.searchParams.get("outSR"));
+    expect(u.searchParams.get("outFields")).toBe(tap.searchParams.get("outFields"));
+    expect(u.searchParams.get("outFields")).toBe(FOOTPRINT_OUT_FIELDS);
+    expect(u.searchParams.get("where")).toBe(
+      "UPPER(PROP_ADDR) LIKE '12A %' AND UPPER(PROP_ADDR) LIKE '%OAK%' AND FIPS LIKE '47%'",
+    );
+  });
+  it("refuses anything that is not a plain house number and word", () => {
+    expect(structuresByAddressUrl("12'", "MAIN")).toBeNull();
+    expect(structuresByAddressUrl("12", "MAIN' OR 1=1")).toBeNull();
+    expect(structuresByAddressUrl("12", "M")).toBeNull();
+    expect(structuresByAddressUrl("12", "ma in")).toBeNull();
+    expect(structuresByAddressUrl("12", "a".repeat(41))).toBeNull();
+    expect(structuresByAddressUrl("x12", "MAIN")).toBeNull();
   });
 });

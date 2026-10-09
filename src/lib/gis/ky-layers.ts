@@ -452,7 +452,8 @@ export function layerShortName(layerUrl: string): string {
   return m?.[1] ?? "layer";
 }
 
-const sqlLit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+/** A single-quoted ArcGIS SQL string literal (quotes doubled). */
+export const sqlLit = (v: string): string => `'${v.replace(/'/g, "''")}'`;
 
 /**
  * How each county's 911 agency spells its own name in the statewide address-point layer —
@@ -738,6 +739,10 @@ export function pointInFootprint(
   return false;
 }
 
+/** The attributes footprintFromFeature reads (both the Kentucky copy and the national layer). */
+export const FOOTPRINT_OUT_FIELDS =
+  "BUILD_ID,SQFEET,HEIGHT,FIPS,PROP_ADDR,PROP_CITY,PROP_ZIP,OCC_CLS,PRIM_OCC,LATITUDE,LONGITUDE,UUID";
+
 /**
  * A spatial query: the footprints that contain any of `points` (WGS84 [lng, lat]), sent as an
  * ArcGIS multipoint so one request covers a whole batch of promoted buildings. POST body, since
@@ -754,10 +759,7 @@ export function footprintsAtPointsRequest(
   body.set("geometryType", "esriGeometryMultipoint");
   body.set("inSR", "4326");
   body.set("spatialRel", "esriSpatialRelIntersects");
-  body.set(
-    "outFields",
-    "BUILD_ID,SQFEET,HEIGHT,FIPS,PROP_ADDR,PROP_CITY,PROP_ZIP,OCC_CLS,PRIM_OCC,LATITUDE,LONGITUDE,UUID",
-  );
+  body.set("outFields", FOOTPRINT_OUT_FIELDS);
   body.set("returnGeometry", "true");
   body.set("outSR", "102100");
   return { url: `${layerUrl.replace(/\/+$/, "")}/query`, body };
@@ -774,13 +776,52 @@ export function footprintAtPointUrl(layerUrl: string, lng: number, lat: number):
   p.set("geometryType", "esriGeometryPoint");
   p.set("inSR", "4326");
   p.set("spatialRel", "esriSpatialRelIntersects");
-  p.set(
-    "outFields",
-    "BUILD_ID,SQFEET,HEIGHT,FIPS,PROP_ADDR,PROP_CITY,PROP_ZIP,OCC_CLS,PRIM_OCC,LATITUDE,LONGITUDE,UUID",
-  );
+  p.set("outFields", FOOTPRINT_OUT_FIELDS);
   p.set("returnGeometry", "true");
   p.set("outSR", "102100");
   return `${layerUrl.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
+
+// ── Live address lookup (the ticket's aerial) ───────────────────────────────────────────────
+
+/** A house number ("1169", "12A") and a plain street word the live lookups accept as a literal. */
+export const LOOKUP_HOUSE_RX = /^[0-9]{1,7}[A-Za-z]?$/;
+export const LOOKUP_WORD_RX = /^[A-Za-z0-9]{2,40}$/;
+
+/** The attributes addressPointFromFeature reads (the key, the NG911 address parts, place). */
+export const KY_ADDRESS_POINT_OUT_FIELDS =
+  "OBJECTID,Site_NGUID,AddNum_Pre,Add_Number,AddNum_Suf,LSt_PreDir,LSt_Name,LSt_Type,LSt_PosDir,Post_Comm,Post_Code,Inc_Muni,County,LandmkName,Place_Type,Lat,Long";
+
+/**
+ * The 911 points that share a ticket's house number and a street word, asked of the state
+ * server at request time (owner, Oct 9: our stored points stop at commercial-looking ones, so a
+ * small property's aerial must find its building on the live layer, with no size floor). The
+ * same filter as the database's service_aerial_address_candidates, on the layer's own columns:
+ * `Add_Number` is an integer, so the house's digits compare as a number (a letter suffix is
+ * checked by the matcher from the composed address); the street word is a LIKE on `LSt_Name`.
+ * Geometry comes back in Web Mercator, the way addressPointFromFeature reads a point. Null when
+ * the house or word is not a plain literal (nothing typed becomes SQL).
+ */
+export function addressPointsByAddressUrl(
+  house: string,
+  streetWord: string,
+  limit = 80,
+): string | null {
+  if (!LOOKUP_HOUSE_RX.test(house) || !LOOKUP_WORD_RX.test(streetWord)) return null;
+  const number = Number(house.replace(/[A-Za-z]$/, ""));
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  // No UPPER() on the column (it makes the state server scan every row — see countyWhere); the
+  // layer stores street names upper-case already.
+  p.set(
+    "where",
+    `Add_Number = ${number} AND LSt_Name LIKE ${sqlLit(`%${streetWord.toUpperCase()}%`)}`,
+  );
+  p.set("outFields", KY_ADDRESS_POINT_OUT_FIELDS);
+  p.set("returnGeometry", "true");
+  p.set("outSR", "102100");
+  p.set("resultRecordCount", String(limit));
+  return `${KY_ADDRESS_POINTS_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
 }
 
 /**

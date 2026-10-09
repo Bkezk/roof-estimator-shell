@@ -6,9 +6,12 @@
  * Finding the building: the ticket's address (site_address, or its site's) is matched against
  * the stored buildings and Kentucky's 911 address points (src/lib/aerial-address.ts decides;
  * two read-only SQL functions fetch the candidates for Service users, whose RLS does not reach
- * the Prospecting tables); the matched point is put on a building outline. No address match →
- * the ticket's own photo GPS, if any; else the tech picks the building on the map
- * (`aerialBuildingAt`). Customer sites carry no lat/lng of their own.
+ * the Prospecting tables); the matched point is put on a building outline. Nothing stored for
+ * the address → the same lookup on the live state layers (owner, Oct 9: our map data was loaded
+ * with a 5,000 sq ft floor, so a small property's aerial must find its building on the state
+ * server, with no size floor; `liveAddressLookup`). No address match → the ticket's own photo
+ * GPS, if any; else the tech picks the building on the map (`aerialBuildingAt`). Customer sites
+ * carry no lat/lng of their own.
  *
  * Nothing here creates repairs or bids. Access: Service; a technician saves only on their own
  * tickets (RLS + the checks here).
@@ -27,6 +30,7 @@ import {
   streetFilterWord,
   type AddressCandidate,
   type NearBuilding,
+  type ParsedAddress,
 } from "@/lib/aerial-address";
 import { footprintAreaSqFt, footprintPolygons } from "@/lib/aerial-geo";
 import {
@@ -39,11 +43,14 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { parseLooseJson } from "@/lib/loose-json";
 import {
   KY_FOOTPRINTS_LAYER,
+  addressPointFromFeature,
+  addressPointsByAddressUrl,
   footprintAtPointUrl,
   footprintFromFeature,
   pointInFootprint,
+  type FootprintCandidate,
 } from "@/lib/gis/ky-layers";
-import { USA_STRUCTURES_LAYER } from "@/lib/gis/tn-layers";
+import { USA_STRUCTURES_LAYER, structuresByAddressUrl } from "@/lib/gis/tn-layers";
 import type { ArcGisFeatureSet } from "@/lib/gis/arcgis";
 import { nearKyTnLine, stateCode, stateForPoint } from "@/lib/prospect";
 
@@ -209,10 +216,14 @@ export const getTicketAerial = createServerFn({ method: "GET" })
           note: "The address is on the map but no building outline is stored there; pick the building.",
         };
       }
-      note =
-        m.outcome === "ambiguous"
-          ? `The address matches ${m.count} places in our map data; pick the building on the map.`
-          : "No building or 911 address point in our map data matches this address.";
+      if (m.outcome === "ambiguous")
+        note = `The address matches ${m.count} places in our map data; pick the building on the map.`;
+      else {
+        // Nothing stored for it: the live state layers, which carry every building.
+        const live = await liveAddressLookup(parsed, word, addressState);
+        if (live) return { address, addressState, saved: null, found: live.found, note: live.note };
+        note = "No building or 911 address point in our map data matches this address.";
+      }
     }
 
     // 2. Where the ticket's photos were taken (the tech on the roof).
@@ -279,6 +290,125 @@ const fetchJson = async (url: string): Promise<unknown> => {
     throw new Error(json.error.message ?? "ArcGIS error");
   return json;
 };
+
+/** A live lookup's answer: the point (with its outline when the layer has one) and the note. */
+type LiveFound = { found: FoundBuilding; note: string | null };
+const LIVE_NO_OUTLINE_NOTE =
+  "The address is on the state map but no building outline covers it; pick the building.";
+
+const liveFound = (
+  hit: FootprintCandidate | null,
+  fallback: { address: string | null; state: "KY" | "TN"; lat: number; lng: number },
+): LiveFound => {
+  if (!hit?.geometry) {
+    return {
+      found: { id: null, footprint: null, how: "address", areaSqFt: null, ...fallback },
+      note: LIVE_NO_OUTLINE_NOTE,
+    };
+  }
+  const polys = footprintPolygons(hit.geometry.footprint);
+  return {
+    found: {
+      id: null,
+      footprint: hit.geometry.footprint as AerialBuilding["footprint"],
+      address: fallback.address,
+      state: fallback.state,
+      how: "address",
+      lat: hit.lat ?? fallback.lat,
+      lng: hit.lng ?? fallback.lng,
+      areaSqFt: footprintAreaSqFt(polys),
+    },
+    note: null,
+  };
+};
+
+/** Kentucky: the 911 point for the address, then the state's outline under it. */
+async function liveKentucky(parsed: ParsedAddress, word: string): Promise<LiveFound | null> {
+  const url = addressPointsByAddressUrl(parsed.house, word);
+  if (!url) return null;
+  const set = (await fetchJson(url)) as ArcGisFeatureSet;
+  const cands: AddressCandidate[] = (set.features ?? []).flatMap((f) => {
+    const p = addressPointFromFeature(f);
+    return p
+      ? [
+          {
+            source: "point" as const,
+            id: p.key,
+            address: p.address,
+            city: p.city,
+            zip: p.zip,
+            lat: p.lat,
+            lng: p.lng,
+            building_id: null,
+          },
+        ]
+      : [];
+  });
+  const m = pickAddressMatch(parsed, cands);
+  if (m.outcome !== "match") return null;
+  const at = { lat: m.candidate.lat!, lng: m.candidate.lng! };
+  const page = (await fetchJson(
+    footprintAtPointUrl(KY_FOOTPRINTS_LAYER, at.lng, at.lat),
+  )) as ArcGisFeatureSet;
+  const hit =
+    (page.features ?? [])
+      .map(footprintFromFeature)
+      .find((c) => c !== null && pointInFootprint(at.lng, at.lat, c.geometry?.footprint)) ?? null;
+  return liveFound(hit, { address: m.candidate.address, state: "KY", ...at });
+}
+
+/** Tennessee: the national layer's structures carry the address, so the match is the outline. */
+async function liveTennessee(parsed: ParsedAddress, word: string): Promise<LiveFound | null> {
+  const url = structuresByAddressUrl(parsed.house, word);
+  if (!url) return null;
+  const set = (await fetchJson(url)) as ArcGisFeatureSet;
+  const rows = (set.features ?? []).flatMap((f) => {
+    const c = footprintFromFeature(f);
+    return c && c.address ? [c] : [];
+  });
+  const cands: AddressCandidate[] = rows.map((c, i) => ({
+    source: "building",
+    id: String(i),
+    address: c.address!,
+    city: c.city,
+    zip: c.zip,
+    lat: c.lat,
+    lng: c.lng,
+    building_id: null,
+  }));
+  const m = pickAddressMatch(parsed, cands);
+  if (m.outcome !== "match") return null;
+  const hit = rows[Number(m.candidate.id)]!;
+  return liveFound(hit, {
+    address: [hit.address, hit.city].filter(Boolean).join(", ") || null,
+    state: "TN",
+    lat: m.candidate.lat!,
+    lng: m.candidate.lng!,
+  });
+}
+
+/**
+ * The address on the live state layers (owner, Oct 9), when our stored data has nothing for it:
+ * Kentucky's 911 points then its footprints, or Tennessee's structures; both when the state is
+ * not known. Anything that goes wrong (the server down, an odd answer) is null: the ticket then
+ * reads as before, with the Pick button.
+ */
+async function liveAddressLookup(
+  parsed: ParsedAddress,
+  word: string,
+  addressState: "KY" | "TN" | null,
+): Promise<LiveFound | null> {
+  const states: ("KY" | "TN")[] = addressState ? [addressState] : ["KY", "TN"];
+  for (const st of states) {
+    try {
+      const r = st === "KY" ? await liveKentucky(parsed, word) : await liveTennessee(parsed, word);
+      if (r) return r;
+    } catch {
+      // The state server is a best effort here; the stored-data note covers it.
+    }
+  }
+  return null;
+}
 
 /**
  * "Pick the building on the map": the stored outline under the tapped point, else the state

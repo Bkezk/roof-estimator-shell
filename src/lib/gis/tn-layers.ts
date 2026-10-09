@@ -16,7 +16,13 @@
  *   - TDOT imagery: tile cache to level 23; index layer 0 has Cnty_Name, TN_Ortho_Year, NAIP_Year.
  */
 import { parcelQueryUrl, str, type ArcGisFeature } from "./arcgis";
-import { footprintFromFeature } from "./ky-layers";
+import {
+  FOOTPRINT_OUT_FIELDS,
+  LOOKUP_HOUSE_RX,
+  LOOKUP_WORD_RX,
+  footprintFromFeature,
+  sqlLit,
+} from "./ky-layers";
 
 /** National FEMA / ORNL structures layer (polygons, all states). */
 export const USA_STRUCTURES_LAYER =
@@ -208,6 +214,36 @@ export const tnPageUrl = (fips: string, offset: number, minSqFt = 5000): string 
 /** How many prospects the county has (the loader checks its paging against this). */
 export const tnCountUrl = (fips: string, minSqFt = 5000): string =>
   parcelQueryUrl(USA_STRUCTURES_LAYER, { where: tnCountyWhere(fips, minSqFt), countOnly: true });
+
+/**
+ * Tennessee structures whose address starts with a ticket's house number and carries a street
+ * word, asked of the national layer at request time (owner, Oct 9: our stored Tennessee rows
+ * stop at 5,000 sq ft, so a small property's aerial must find its outline live, with no size
+ * floor). The same filter as the database's service_aerial_address_candidates, on PROP_ADDR;
+ * `FIPS LIKE '47%'` keeps it to Tennessee's counties. Geometry comes back in Web Mercator
+ * (outSR 102100, as footprintAtPointUrl) so footprintFromFeature reads it. Null when the house
+ * or word is not a plain literal (nothing typed becomes SQL).
+ */
+export function structuresByAddressUrl(
+  house: string,
+  streetWord: string,
+  limit = 80,
+): string | null {
+  if (!LOOKUP_HOUSE_RX.test(house) || !LOOKUP_WORD_RX.test(streetWord)) return null;
+  const p = new URLSearchParams();
+  p.set("f", "pjson");
+  p.set(
+    "where",
+    `UPPER(PROP_ADDR) LIKE ${sqlLit(`${house.toUpperCase()} %`)} AND UPPER(PROP_ADDR) LIKE ${sqlLit(
+      `%${streetWord.toUpperCase()}%`,
+    )} AND FIPS LIKE '${TN_STATE_FIPS}%'`,
+  );
+  p.set("outFields", FOOTPRINT_OUT_FIELDS);
+  p.set("returnGeometry", "true");
+  p.set("outSR", "102100");
+  p.set("resultRecordCount", String(limit));
+  return `${USA_STRUCTURES_LAYER.replace(/\/+$/, "")}/query?${p.toString()}`;
+}
 
 /** "usa:5702572": distinct from Kentucky's "ornl:<id>" keys (the state's own copy). */
 export const tnSourceKey = (buildId: string): string => `usa:${buildId}`;

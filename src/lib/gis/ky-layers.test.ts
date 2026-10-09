@@ -4,8 +4,11 @@ import { describe, expect, it } from "vitest";
 import type { ArcGisFeatureSet } from "./arcgis";
 import {
   KY_911_COUNTY_SPELLINGS,
+  KY_ADDRESS_POINTS_LAYER,
+  KY_ADDRESS_POINT_OUT_FIELDS,
   KY_COUNTIES,
   addressPointFromFeature,
+  addressPointsByAddressUrl,
   canonicalCounty,
   classifyPlace,
   composeAddress,
@@ -300,5 +303,49 @@ describe("classifyPlace (mirrors the database rule)", () => {
     expect(classifyPlace(null, "TRI-COUNTY FORD")).toBe("commercial");
     expect(classifyPlace(null, null)).toBeNull();
     expect(classifyPlace("CoWOOWOO", null)).toBeNull();
+  });
+});
+
+describe("live address lookup: the 911 points for a house number and street word (owner, Oct 9)", () => {
+  it("compares the integer Add_Number and a LIKE on the street name, in Web Mercator", () => {
+    const u = new URL(addressPointsByAddressUrl("1169", "136")!);
+    expect(u.href.startsWith(`${KY_ADDRESS_POINTS_LAYER}/query?`)).toBe(true);
+    expect(u.searchParams.get("where")).toBe("Add_Number = 1169 AND LSt_Name LIKE '%136%'");
+    expect(u.searchParams.get("outSR")).toBe("102100");
+    expect(u.searchParams.get("returnGeometry")).toBe("true");
+    expect(u.searchParams.get("f")).toBe("pjson");
+    expect(u.searchParams.get("resultRecordCount")).toBe("80");
+    expect(u.searchParams.get("outFields")).toBe(KY_ADDRESS_POINT_OUT_FIELDS);
+    // Everything addressPointFromFeature reads is asked for.
+    for (const f of [
+      "Site_NGUID",
+      "Add_Number",
+      "LSt_Name",
+      "LSt_Type",
+      "Post_Comm",
+      "Lat",
+      "Long",
+    ])
+      expect(KY_ADDRESS_POINT_OUT_FIELDS.split(",")).toContain(f);
+    expect(new URL(addressPointsByAddressUrl("12", "main", 20)!).searchParams.get("where")).toBe(
+      "Add_Number = 12 AND LSt_Name LIKE '%MAIN%'",
+    );
+    expect(
+      new URL(addressPointsByAddressUrl("12", "main", 20)!).searchParams.get("resultRecordCount"),
+    ).toBe("20");
+  });
+  it("a house with a letter suffix compares its digits (the matcher checks the letter)", () => {
+    expect(new URL(addressPointsByAddressUrl("12A", "OAK")!).searchParams.get("where")).toBe(
+      "Add_Number = 12 AND LSt_Name LIKE '%OAK%'",
+    );
+  });
+  it("refuses anything that is not a plain house number and word (nothing typed becomes SQL)", () => {
+    expect(addressPointsByAddressUrl("12'", "MAIN")).toBeNull();
+    expect(addressPointsByAddressUrl("12", "MAIN' OR 1=1 --")).toBeNull();
+    expect(addressPointsByAddressUrl("12", "M")).toBeNull();
+    expect(addressPointsByAddressUrl("12", "%")).toBeNull();
+    expect(addressPointsByAddressUrl("", "MAIN")).toBeNull();
+    expect(addressPointsByAddressUrl("12345678", "MAIN")).toBeNull();
+    expect(addressPointsByAddressUrl("12-4", "MAIN")).toBeNull();
   });
 });
