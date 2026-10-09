@@ -6,9 +6,11 @@
  * invoices) and stamps them exported.
  *
  * The first chip, **Awaiting invoice** (`?tab=to-invoice`; owner, Oct 1, asked what "To
- * invoice" meant), is the queue before that: the tickets at stage Done, which is exactly
- * "marked Done with no finalised invoice yet" (finalising moves a ticket to Invoiced), longest
- * waiting first; a row opens the ticket, where its invoice card is.
+ * invoice" meant), is the queue before that: the tickets at stage Authorized (M9, owner Oct 5:
+ * a Done ticket is reviewed first), which is exactly "marked Authorized with no finalised
+ * invoice yet" (finalising moves a ticket to Invoiced), longest waiting first; a row opens the
+ * ticket (`?from=invoices`, so its Back returns here), where its invoice card is. Until Oct 9
+ * the queue filtered for Done while the server returned Authorized, so it was always empty.
  *
  * The Customer column is whom the invoice is billed to; an invoice billed to a vendor shows the
  * badge "Billed to vendor: <name>" there instead (owner, Oct 1: "Sometimes invoices go to
@@ -39,7 +41,7 @@ import {
   listAwaitingInvoice,
   type ServiceJobWithTech,
 } from "@/lib/service.functions";
-import { daysSince, doneAt, toInvoice as toInvoiceRows } from "@/lib/service-schedule";
+import { daysSince, toInvoice as toInvoiceRows, waitingSince } from "@/lib/service-schedule";
 import {
   exportSageCsv,
   INVOICE_STATUSES,
@@ -161,8 +163,8 @@ function InvoiceList({
       }),
     enabled: !!session && !toInvoice,
   });
-  // The Done tickets and their count from the server (the count is the database's, not the
-  // length of the 1,000-row ticket list). Under "service-jobs", so every ticket change that
+  // The Authorized tickets and their count from the server (the count is the database's, not
+  // the length of the 1,000-row ticket list). Under "service-jobs", so every ticket change that
   // refreshes the Tickets list refreshes this too.
   const jobsQ = useQuery({
     queryKey: AWAITING_INVOICE_KEY,
@@ -181,8 +183,9 @@ function InvoiceList({
   const openSum = sum((r) => (r.status === "final" || r.status === "sent" ? Number(r.total) : 0));
   const shown = sortInvoices(rows, sort.key, sort.dir);
   const anyFilter = status !== "all" || !!from || !!to || !!q.trim();
+  // The ticket's Back link returns to this queue (owner, Oct 9).
   const open = (serviceJobId: string) =>
-    void navigate({ to: "/service", search: { id: serviceJobId } });
+    void navigate({ to: "/service", search: { id: serviceJobId, from: "invoices" } });
   const openInvoice = (invoiceId: string) =>
     void navigate({ to: "/service/invoices", search: { id: invoiceId } });
 
@@ -443,10 +446,10 @@ function SortHead(props: {
   );
 }
 
-/** The Awaiting invoice queue: Done tickets, longest waiting first; a row opens its ticket. */
+/** The Awaiting invoice queue: Authorized tickets, longest waiting first; a row opens its ticket. */
 function ToInvoiceTable(props: {
   rows: ServiceJobWithTech[];
-  /** Every Done ticket (the database's count); more than rows when the list is capped. */
+  /** Every Authorized ticket (the database's count); more than rows when the list is capped. */
   count: number;
   loading: boolean;
   error: Error | null;
@@ -480,14 +483,14 @@ function ToInvoiceTable(props: {
             <th className="px-3 py-2 font-medium">Customer</th>
             <th className="px-3 py-2 font-medium">Property</th>
             <th className="px-3 py-2 font-medium">Technician</th>
-            <th className="px-3 py-2 font-medium">Done</th>
+            <th className="px-3 py-2 font-medium">Authorized</th>
             <th className="px-3 py-2 text-right font-medium">Waiting</th>
           </tr>
         </thead>
         <tbody>
           {props.rows.map((j) => {
-            const done = doneAt(j);
-            const days = daysSince(done, now);
+            const since = waitingSince(j);
+            const days = daysSince(since, now);
             return (
               <tr
                 key={j.id}
@@ -497,7 +500,7 @@ function ToInvoiceTable(props: {
                 <td className="px-3 py-2 font-medium tabular-nums">
                   <Link
                     to="/service"
-                    search={{ id: j.id }}
+                    search={{ id: j.id, from: "invoices" }}
                     className="underline-offset-2 hover:underline"
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -512,7 +515,7 @@ function ToInvoiceTable(props: {
                   ) : null}
                 </td>
                 <td className="px-3 py-2">{j.technician_name ?? "Unassigned"}</td>
-                <td className="whitespace-nowrap px-3 py-2">{stampDay(done)}</td>
+                <td className="whitespace-nowrap px-3 py-2">{stampDay(since)}</td>
                 <td
                   className={`whitespace-nowrap px-3 py-2 text-right tabular-nums ${days >= 7 ? "font-medium text-amber-700 dark:text-amber-400" : ""}`}
                 >

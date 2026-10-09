@@ -14,6 +14,12 @@
  * a customer and a vendor, so we could make two invoices for that if needed"); an invoice billed
  * to a vendor carries the badge "Billed to vendor: <name>".
  *
+ * At Done the card is "Needs authorization" (AuthorizeCard) with **Mark authorized** alone; the
+ * invoice card with **Make the invoice** comes only once the ticket is Authorized. Two steps,
+ * two buttons, kept apart on purpose (owner, Oct 9: authorizing and invoicing are done by
+ * different people — never one combined button). On the ticket page the Done card leads the
+ * right column (service-page.tsx).
+ *
  * Admins, managers and sales / project managers (`seesInvoices`; owner, Oct 1); everyone else
  * — technicians above all — never sees it (RLS invoices_office), so the card renders nothing
  * for them. Every change is logged on the server (audit_log); the History fold is on the page.

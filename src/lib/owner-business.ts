@@ -55,7 +55,7 @@ export interface MoneyTile {
 export interface BusinessNumbers {
   today: string;
   at: string;
-  /** Done tickets with no invoice yet — the Invoices page's "Awaiting invoice" queue. */
+  /** Done tickets with no invoice yet (still to be authorized, then invoiced). */
   toInvoice: { count: number; oldestDays: number | null };
   /** Final or sent invoices not marked paid. */
   unpaid: MoneyTile;
@@ -117,7 +117,12 @@ const oldest = (dates: readonly (string | null | undefined)[], now: string): num
     return age === null ? best : best === null || age > best ? age : best;
   }, null);
 
-/** The same queue as the Invoices page's "Awaiting invoice" chip (service-schedule.ts toInvoice). */
+/**
+ * The tile's queue: Done tickets with no invoice — the ones still to be reviewed (Authorized) and
+ * invoiced. Not the Invoices page's "Awaiting invoice" chip, which lists the Authorized tickets
+ * (service-schedule.ts toInvoice; M9, owner Oct 5), so the tile links to the Done tickets
+ * themselves (BUSINESS_HREFS.toInvoice).
+ */
 export const TO_INVOICE_STAGES: readonly string[] = ["done"];
 export const UNPAID_STATUSES: readonly string[] = ["final", "sent"];
 export const BILLED_STATUSES: readonly string[] = ["final", "sent", "paid"];
@@ -183,7 +188,8 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
 
 /** Where each tile goes: the list already filtered to what the tile counts. */
 export const BUSINESS_HREFS = {
-  toInvoice: "/service/invoices?tab=to-invoice",
+  // The Done tickets the tile counts (the Awaiting invoice queue holds the Authorized ones).
+  toInvoice: "/service?stage=done",
   unpaid: "/service/invoices?status=unpaid",
   invoiced: "/service/invoices",
   pipeline: "/opportunities?status=allopen",

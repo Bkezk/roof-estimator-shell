@@ -50,11 +50,13 @@ describe("daysSince", () => {
 });
 
 describe("toInvoice", () => {
-  it("keeps Done tickets, longest waiting first", () => {
+  // Authorized since Oct 9 (M9, owner Oct 5: a Done ticket is reviewed first; the queue kept
+  // filtering Done while the server returned Authorized, so it was always empty).
+  it("keeps Authorized tickets, longest waiting first; Done and Invoiced are out", () => {
     const rows = toInvoice([
       {
         id: 1,
-        stage: "done",
+        stage: "authorized",
         completed_at: "2026-09-20T10:00:00Z",
         updated_at: "2026-09-26T00:00:00Z",
       },
@@ -64,7 +66,8 @@ describe("toInvoice", () => {
         completed_at: "2026-09-01T10:00:00Z",
         updated_at: "2026-09-02T00:00:00Z",
       },
-      { id: 3, stage: "done", completed_at: null, updated_at: "2026-09-10T00:00:00Z" },
+      { id: 3, stage: "authorized", completed_at: null, updated_at: "2026-09-10T00:00:00Z" },
+      { id: 4, stage: "done", completed_at: null, updated_at: "2026-09-01T00:00:00Z" },
     ]);
     expect(rows.map((r) => r.id)).toEqual([3, 1]);
   });

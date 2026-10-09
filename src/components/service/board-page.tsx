@@ -10,9 +10,17 @@
  *
  * Everyone with Service opens on it (owner, Oct 9: "make sure everyone who opens the service
  * page it opens on the tech board"); a technician-only user sees their own tickets on it (RLS).
- * Dispatch stays a manager's (owner, Oct 1; `managesTickets`): the drag and drop, the "+" on a
- * cell and New ticket show only to them, and assignServiceJob refuses anyone else. Drag and drop
- * is native HTML5 (desktop); on a phone the grid scrolls sideways and a tap opens the ticket.
+ * Dispatch — the drag and drop, the "+" on a cell and New ticket — is a manager's and, since
+ * Oct 9, the office's (`dispatchesTickets`; owner: "lets make office users able to create,
+ * dispatch, and move a tickets date but make that activity logged" — the database logs every
+ * ticket write to its History and a date move to its Timeline); assignServiceJob refuses anyone
+ * else. Drag and drop is native HTML5 (desktop); on a phone the grid scrolls sideways and a tap
+ * opens the ticket.
+ *
+ * Owner, Oct 9: a chip dropped on "Prev" / "Next" moves the ticket a week back or forward for
+ * the same technician in one drag (one write, the stage stays Scheduled); a chip opens the
+ * ticket with `?from=board&week=` so its Back returns to this week; the cell "+" is always
+ * visible; the Unassigned rail reads by day (overdue, today, coming days, undated last).
  */
 import { useMemo, useState, type DragEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,8 +48,9 @@ import {
 } from "@/lib/stage-colors";
 
 import { useAuth } from "@/lib/auth-store";
-import { managesTickets } from "@/lib/access";
+import { dispatchesTickets } from "@/lib/access";
 import { weekLabel } from "@/lib/board-week";
+import { assignedStage, shiftDays, sortUnassigned } from "@/lib/service-schedule";
 import {
   assignServiceJob,
   listServiceJobs,
@@ -82,7 +91,7 @@ const movable = (j: ServiceJobWithTech) => {
 };
 /** The stage the server will set on a drop (assignServiceJob's rule), for the optimistic view. */
 const stageAfter = (j: ServiceJobWithTech, tech: string | null, date: string | null) =>
-  movable(j) ? (tech && date ? "scheduled" : "open") : j.stage;
+  assignedStage(j.stage, tech, date);
 
 /** The technician's phone page (its route is built separately). */
 const DRAG_TYPE = "application/x-service-ticket";
@@ -104,8 +113,8 @@ export function BoardPage({ week }: { week?: string | undefined }) {
 
 function Board({ week }: { week?: string | undefined }) {
   const { session, profile } = useAuth();
-  // Dispatch is a manager's (owner, Oct 1); everyone else reads the board.
-  const dispatch = managesTickets(profile);
+  // Dispatch is a manager's and the office's (owner, Oct 1 / Oct 9); a technician reads the board.
+  const dispatch = dispatchesTickets(profile);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const listFn = useServerFn(listServiceJobs);
@@ -236,8 +245,10 @@ function Board({ week }: { week?: string | undefined }) {
         .join(" ")
         .toLowerCase()
         .includes(q);
-    })
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    });
+  // By day (owner, Oct 9): overdue, today, the coming days, undated last; within a day the
+  // oldest created first (it used to be oldest created first overall).
+  const rail = sortUnassigned(unassigned);
   const unassignedTotal = jobs.filter(
     (j) => movable(j) && (!j.technician_id || !j.scheduled_date),
   ).length;
@@ -286,6 +297,25 @@ function Board({ week }: { week?: string | undefined }) {
       scheduled_date: ymd ?? job.scheduled_date,
     });
   };
+  // A chip dropped on Prev / Next (owner, Oct 9): the same technician, the same weekday, a week
+  // earlier or later — one write (assignServiceJob), the stage stays Scheduled. Only a ticket
+  // that is on the grid (a technician and a day) can move a week.
+  const dropWeek = (e: DragEvent, weeks: -1 | 1) => {
+    e.preventDefault();
+    if (!dispatch) return;
+    const id = e.dataTransfer.getData(DRAG_TYPE) || dragId;
+    endDrag();
+    const job = jobs.find((j) => j.id === id);
+    if (!job || !movable(job) || !job.technician_id || !job.scheduled_date) return;
+    assign.mutate({
+      job,
+      technician_id: job.technician_id,
+      technician_name: job.technician_name,
+      scheduled_date: shiftDays(job.scheduled_date, weeks * 7),
+    });
+  };
+  const weekDropClass = (key: string) =>
+    over === key ? "border-primary bg-primary/10 ring-2 ring-primary" : "";
 
   const loading = jobsQ.isLoading || techsQ.isLoading;
   const error = jobsQ.error ?? techsQ.error;
@@ -322,7 +352,14 @@ function Board({ week }: { week?: string | undefined }) {
           variant="outline"
           size="sm"
           aria-label="Previous week"
+          className={weekDropClass("prev-week")}
+          title={
+            dispatch ? "Previous week. Drop a ticket here to move it a week earlier." : undefined
+          }
           onClick={() => goWeek(addDays(monday, -7))}
+          onDragOver={(e) => allowDrop(e, "prev-week")}
+          onDragLeave={(e) => leave(e, "prev-week")}
+          onDrop={(e) => dropWeek(e, -1)}
         >
           <ChevronLeft className="h-4 w-4" /> Prev
         </Button>
@@ -338,7 +375,12 @@ function Board({ week }: { week?: string | undefined }) {
           variant="outline"
           size="sm"
           aria-label="Next week"
+          className={weekDropClass("next-week")}
+          title={dispatch ? "Next week. Drop a ticket here to move it a week later." : undefined}
           onClick={() => goWeek(addDays(monday, 7))}
+          onDragOver={(e) => allowDrop(e, "next-week")}
+          onDragLeave={(e) => leave(e, "next-week")}
+          onDrop={(e) => dropWeek(e, 1)}
         >
           Next <ChevronRight className="h-4 w-4" />
         </Button>
@@ -392,11 +434,12 @@ function Board({ week }: { week?: string | undefined }) {
                     : "No unassigned tickets match."}
                 </p>
               ) : (
-                unassigned.map((j) => (
+                rail.map((j) => (
                   <TicketChip
                     key={j.id}
                     job={j}
                     detail
+                    week={days[0]!}
                     drag={dispatch}
                     dragging={dragId === j.id}
                     onDragStart={startDrag}
@@ -507,7 +550,7 @@ function BoardRow(props: {
   today: string;
   over: string | null;
   dragId: string | null;
-  /** A manager: chips drag, cells take drops and carry the "+" (owner, Oct 1 / Oct 9). */
+  /** A manager or the office: chips drag, cells take drops and carry the "+" (owner, Oct 1 / Oct 9). */
   dispatch: boolean;
   cellJobs: (techId: string, ymd: string) => ServiceJobWithTech[];
   allowDrop: (e: DragEvent, key: string) => void;
@@ -549,6 +592,7 @@ function BoardRow(props: {
               <TicketChip
                 key={j.id}
                 job={j}
+                week={props.days[0]!}
                 drag={props.dispatch}
                 dragging={props.dragId === j.id}
                 onDragStart={props.startDrag}
@@ -559,7 +603,8 @@ function BoardRow(props: {
               <Link
                 to="/service"
                 search={{ new: 1, tech: r.id, date: d }}
-                className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-background text-muted-foreground opacity-100 shadow-sm hover:text-foreground focus:opacity-100 md:opacity-0 md:group-hover:opacity-100"
+                // Always visible (owner, Oct 9); it used to appear on hover only on a desktop.
+                className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md border bg-background text-muted-foreground shadow-sm hover:text-foreground"
                 title={`New ticket for ${r.name} on ${shortDay(d)}`}
                 aria-label={`New ticket for ${r.name} on ${shortDay(d)}`}
                 draggable={false}
@@ -599,7 +644,9 @@ function TicketChip(props: {
   job: ServiceJobWithTech;
   /** The rail's chips also say what is already set (a technician without a day, or the reverse). */
   detail?: boolean;
-  /** May this viewer drag it (a manager)? */
+  /** The week on the board (its Monday): the ticket's Back link returns here (owner, Oct 9). */
+  week: string;
+  /** May this viewer drag it (a manager or the office)? */
   drag: boolean;
   dragging: boolean;
   onDragStart: (e: DragEvent, j: ServiceJobWithTech) => void;
@@ -631,7 +678,7 @@ function TicketChip(props: {
   return (
     <Link
       to="/service"
-      search={{ id: j.id }}
+      search={{ id: j.id, from: "board", week: props.week }}
       draggable={canDrag}
       onDragStart={canDrag ? (e) => props.onDragStart(e, j) : (e) => e.preventDefault()}
       onDragEnd={props.onDragEnd}

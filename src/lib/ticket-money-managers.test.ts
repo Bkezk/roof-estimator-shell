@@ -2,9 +2,11 @@
  * Owner, Oct 1: "only the managers / admins can see and edit the prices on invoices / repairs /
  * inspections etc."; "The manager creates the tickets; reps do not create tickets"; "the
  * per-technician charge is separate from estimate pricing and can be edited per job".
- * `managesTickets` (admin or manager) decides creating, dispatching and every ticket price;
- * `isOffice` decides only who sees what. Unit tests of the pure rules plus source checks of the
- * components, server functions and the migration.
+ * `managesTickets` (admin or manager) decides every ticket price and deleting; since Oct 9
+ * creating and dispatching (the technician, the date, the Board) are `dispatchesTickets` — the
+ * office too, logged (office-dispatch.test.ts) — while `isOffice` decides only who sees what.
+ * Unit tests of the pure rules plus source checks of the components, server functions and the
+ * migration.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -154,24 +156,25 @@ describe("isOffice is left only where it decides visibility or own-ticket editin
   });
 });
 
-describe("creating tickets is a manager's", () => {
+describe("creating tickets is the office's and a manager's (dispatchesTickets since Oct 9); Delete a manager's", () => {
   const page = read("src/components/service-page.tsx");
-  it("the list's New ticket and first-ticket buttons render under managesTickets", () => {
+  it("the list's New ticket and first-ticket buttons render under dispatchesTickets", () => {
     expect(page).toMatch(/const manager = managesTickets\(profile\);/);
+    expect(page).toMatch(/const dispatcher = dispatchesTickets\(profile\);/);
     expect(page).toMatch(
-      /\{manager && \(\s*<Button size="lg" className="text-base font-semibold" onClick=\{newTicket\}>\s*<Plus className="mr-2 h-5 w-5" \/> New ticket/,
+      /\{dispatcher && \(\s*<Button size="lg" className="text-base font-semibold" onClick=\{newTicket\}>\s*<Plus className="mr-2 h-5 w-5" \/> New ticket/,
     );
     expect(page).toMatch(
-      /\{manager && \(\s*<Button variant="outline" className="mt-4" onClick=\{newTicket\}>/,
-    );
-  });
-  it("?new=1 sends anyone else away", () => {
-    expect(page).toMatch(
-      /if \(isNew\) \{[\s\S]*?if \(!managesTickets\(profile\)\) return <ManagersCreateTickets \/>;[\s\S]*?<NewFromTicket/,
+      /\{dispatcher && \(\s*<Button variant="outline" className="mt-4" onClick=\{newTicket\}>/,
     );
   });
-  it("Repeat (New ticket for this site) and Delete are a manager's", () => {
-    expect(page).toMatch(/\{manager && repeatable && \(/);
+  it("?new=1 sends a technician-only user away", () => {
+    expect(page).toMatch(
+      /if \(isNew\) \{[\s\S]*?if \(!dispatchesTickets\(profile\)\) return <OfficeCreatesTickets \/>;[\s\S]*?<NewFromTicket/,
+    );
+  });
+  it("Repeat (New ticket for this site) is a dispatcher's; Delete a manager's", () => {
+    expect(page).toMatch(/\{dispatcher && repeatable && \(/);
     expect(page).toMatch(
       /\{manager && \(\s*<Button\s+variant="outline"\s+className="text-destructive/,
     );
@@ -191,10 +194,10 @@ describe("creating tickets is a manager's", () => {
       /\{canNewTicket && \(\s*<Button[\s\S]{0,120}title="New service ticket at this property"/,
     );
   });
-  it("the server refuses a non-manager's create and repair ticket", () => {
+  it("the server refuses a technician-only user's create (the office creates since Oct 9) and a non-manager's repair ticket", () => {
     const svc = serverFn(read("src/lib/service.functions.ts"), "saveServiceJob");
     expect(svc).toMatch(
-      /const manager = managesTickets\(p\);\s*if \(!data\.id && !manager\) throw new Error\("Only a manager creates tickets"\);/,
+      /const manager = managesTickets\(p\);\s*const dispatcher = dispatchesTickets\(p\);\s*if \(!data\.id && !dispatcher\) throw new Error\("Only the office or a manager creates tickets"\);/,
     );
     const ins = serverFn(
       read("src/lib/service-inspection.functions.ts"),
@@ -214,17 +217,17 @@ describe("creating tickets is a manager's", () => {
   });
 });
 
-describe("dispatch is a manager's", () => {
+describe("dispatch is the office's and a manager's (dispatchesTickets, Oct 9); its money a manager's", () => {
   it("assignServiceJob and the Board page", () => {
     const fn = serverFn(read("src/lib/service.functions.ts"), "assignServiceJob");
     expect(fn).toContain(
-      'if (!managesTickets(p)) throw new Error("Only a manager dispatches tickets");',
+      'if (!dispatchesTickets(p)) throw new Error("Only the office or a manager dispatches tickets");',
     );
     // Owner, Oct 9: everyone opens on the board (service-board-everyone.test.ts); dispatch on
-    // it — drag, drop, the "+" and New ticket — is still under managesTickets.
+    // it — drag, drop, the "+" and New ticket — is under dispatchesTickets.
     const board = read("src/components/service/board-page.tsx");
-    expect(board).toContain("const dispatch = managesTickets(profile);");
-    expect(board).not.toMatch(/if \(!managesTickets\(profile\)\)\s*return \(/);
+    expect(board).toContain("const dispatch = dispatchesTickets(profile);");
+    expect(board).not.toMatch(/if \(!dispatchesTickets\(profile\)\)\s*return \(/);
     // Owner, Oct 5: the board is the Tech Board tab (service-board-tab.test.ts); the list page
     // no longer embeds it.
     const tabs = read("src/components/service/service-tabs.tsx");
@@ -233,14 +236,14 @@ describe("dispatch is a manager's", () => {
     );
     expect(read("src/components/service-page.tsx")).not.toContain("EmbeddedBoard");
   });
-  it("the form's technician select, crew and $ / hour boxes are under managesTickets", () => {
+  it("the form's technician select is a dispatcher's; the crew and $ / hour boxes stay under managesTickets", () => {
     const page = read("src/components/service-page.tsx");
-    const at = page.indexOf("{manager ? (\n");
+    const at = page.indexOf("{dispatcher ? (\n");
     expect(at).toBeGreaterThan(0);
     const branch = page.slice(at, page.indexOf(") : (", at));
-    expect(branch).toContain("{techRow}");
-    expect(branch).toContain("{crewRows}");
-    // Everyone else reads the names.
+    expect(branch).toContain('{manager ? techRow : techSelect("h-9")}');
+    expect(branch).toContain("{manager && crewRows}");
+    // A technician-only user reads the names.
     const other = page.slice(
       page.indexOf(") : (", at),
       page.indexOf("Change it on the close-out.", at),
@@ -253,10 +256,10 @@ describe("dispatch is a manager's", () => {
       /\.\.\.\(manager \? \{ labor_rate_kind: draft\.labor_rate_kind \} : \{\}\)/,
     );
   });
-  it("saveServiceJob keeps the technician, crew and labor rate on anyone else's save", () => {
+  it("saveServiceJob keeps the technician on a technician's save, the crew and labor rate on anyone but a manager's", () => {
     const svc = serverFn(read("src/lib/service.functions.ts"), "saveServiceJob");
     expect(svc).toContain("const crew = manager ? fields.crew : undefined;");
-    expect(svc).toContain("if (!manager) patch.technician_id = cur.technician_id;");
+    expect(svc).toContain("if (!dispatcher) patch.technician_id = cur.technician_id;");
     expect(svc).toContain("fields.labor_rate_kind && manager ?");
     expect(svc).toContain("const saved = manager ? await saveCrew(sb, row, crew) : row;");
   });

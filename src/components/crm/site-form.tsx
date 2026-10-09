@@ -46,13 +46,17 @@ type SiteFields = {
   /** The JBK county code (county_codes.id), or none. */
   county_code_id: string | null;
 };
-const siteFields = (s: SiteRow | null): SiteFields => ({
+/** A new property's starting address (SiteSelect: the customer's own physical address). */
+export type SiteAddressPrefill = Partial<
+  Pick<SiteFields, "address1" | "address2" | "city" | "state" | "zip">
+>;
+const siteFields = (s: SiteRow | null, prefill?: SiteAddressPrefill): SiteFields => ({
   name: s?.name ?? "",
-  address1: s?.address1 ?? "",
-  address2: s?.address2 ?? "",
-  city: s?.city ?? "",
-  state: s ? (s.state ?? "") : "KY",
-  zip: s?.zip ?? "",
+  address1: s?.address1 ?? prefill?.address1 ?? "",
+  address2: s?.address2 ?? prefill?.address2 ?? "",
+  city: s?.city ?? prefill?.city ?? "",
+  state: s ? (s.state ?? "") : prefill?.state || "KY",
+  zip: s?.zip ?? prefill?.zip ?? "",
   technician_instructions: s?.technician_instructions ?? "",
   notes: s?.notes ?? "",
   county_code_id: s?.county_code_id ?? null,
@@ -99,6 +103,12 @@ export function SiteForm(props: {
   site: SiteRow | null;
   /** Closed: `changed` after a save, with the saved row. */
   onDone: (changed: boolean, row?: SiteRow) => void;
+  /**
+   * A new property's starting address (owner, Oct 9: a property added from the ticket form
+   * starts at the customer's physical address, so one just quick-added is not typed twice).
+   * Ignored for an existing property.
+   */
+  prefill?: SiteAddressPrefill | undefined;
 }) {
   const { session } = useAuth();
   const qc = useQueryClient();
@@ -108,7 +118,7 @@ export function SiteForm(props: {
   const listWFn = useServerFn(listSiteWarranties);
   const saveWFn = useServerFn(saveSiteWarranty);
   const delWFn = useServerFn(deleteSiteWarranty);
-  const [f, setF] = useState<SiteFields>(() => siteFields(props.site));
+  const [f, setF] = useState<SiteFields>(() => siteFields(props.site, props.prefill));
   const set = <K extends keyof SiteFields>(k: K, v: SiteFields[K]) =>
     setF((p) => ({ ...p, [k]: v }));
 

@@ -148,7 +148,8 @@ describe("the tighter layout (owner, Oct 1): two columns for the office, one for
     ].map((l) => right.indexOf(l));
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(right).toContain("{crewRows}");
+    // The crew rows stay a manager's inside the dispatcher's box (owner, Oct 1 / Oct 9).
+    expect(right).toContain("{manager && crewRows}");
     expect(right).not.toContain("ticket-description");
     expect(right).not.toContain("ticket-notes");
   });
@@ -213,7 +214,7 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
     expect(aside).not.toContain("{ticketForm}");
   });
 
-  it("the column's order: Aerial, Inspection, Repairs, Materials, the rest of the field sections, Invoice", () => {
+  it("the column's order: Aerial, Inspection, Repairs, Materials, the rest of the field sections, Invoice — the Done ticket's Needs authorization card first (Oct 9)", () => {
     const aside = panes.slice(panes.indexOf("<aside"), panes.indexOf("</aside>"));
     const seq = [
       "<AerialSection",
@@ -221,8 +222,9 @@ describe("the folding sections on the right (owner, Oct 1: 'the menus that open 
       "<TicketRepairs",
       "{materials}",
       "<TicketFieldSections",
-      "<InvoiceBlock",
+      '{jobStage !== "done" && <InvoiceBlock',
     ].map((p) => aside.indexOf(p));
+    expect(aside.indexOf('{jobStage === "done" && <InvoiceBlock')).toBeLessThan(seq[0]!);
     expect(seq.every((i) => i > 0)).toBe(true);
     expect([...seq].sort((a, b) => a - b)).toEqual(seq);
     // Repairs (with the photos) is not repeated by TicketFieldSections in the column.

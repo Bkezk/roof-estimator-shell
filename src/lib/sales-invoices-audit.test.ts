@@ -174,11 +174,11 @@ describe("invoice gates use seesInvoices; creation, dispatch and rates keep mana
       /queryKey: \["service-rates"\],\s*queryFn: \(\) => ratesFn\(\),(?:\s*\/\/[^\n]*)*\s*enabled: !!session && managesTickets\(profile\),/,
     );
   });
-  it("ticket creation, dispatch, crew rates and repair prices still use managesTickets", () => {
+  it("crew rates and repair prices still use managesTickets; creation and dispatch are dispatchesTickets since Oct 9", () => {
     const svc = read("src/lib/service.functions.ts");
     expect(serverFn(svc, "saveServiceJob")).toMatch(/const manager = managesTickets\(p\);/);
     expect(svc).toContain(
-      'if (!managesTickets(p)) throw new Error("Only a manager dispatches tickets");',
+      'if (!dispatchesTickets(p)) throw new Error("Only the office or a manager dispatches tickets");',
     );
     expect(serverFn(svc, "listJobCrew")).toContain("const noMoney = !managesTickets(p);");
     expect(serverFn(svc, "getCrewRateDefaults")).toContain(

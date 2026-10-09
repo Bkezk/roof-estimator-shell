@@ -290,8 +290,11 @@ export function AccountPicker(props: {
 }
 
 /**
- * New customer in one step: the account only (owner, Sep 30: its sites are added on the account
- * afterwards, under Customers). Needs an email, a cell phone or an office phone, and with
+ * New customer in one step: the account only. Its properties are added on the Customers page,
+ * or — since Oct 9 (owner: "go with the property added from ticket form add"; it reverses the
+ * Sep 30 "sites are added on the Customers page") — right on the ticket form, where SiteSelect's
+ * "Add property" prefills the property's address from the physical address typed here, so it is
+ * not typed twice. Needs an email, a cell phone or an office phone, and with
  * `requireAddress` (an opportunity's customer, owner Oct 2) the physical address: line 1, city,
  * state and zip (addressProblem). Default off: every other caller is unchanged.
  */

@@ -10,8 +10,10 @@ export const Route = createFileRoute("/service")({
   // customer side of an earlier ticket `from=<ticket uuid>` ("New ticket for this site"), or
   // with a customer `account=<uuid>` and site `site=<uuid>` (the Customers page), or from an
   // opportunity `opportunity=<uuid>` (its "Start a ticket": customer, site, description); without
-  // either the page lists tickets, with its stage chip preset by `stage=` (a stage, or
-  // `openwork`) and `overdue=1` (the Customers page counts strip). Parsing: lib/service-search.ts.
+  // either the page lists tickets with its filters from the URL — `stage=` (a stage, or
+  // `openwork`), `overdue=1` (the Customers page counts strip), `q=`, `tech=`, `type=` (owner,
+  // Oct 9: the list keeps its filters and Back restores them). A ticket's `from=board&week=` /
+  // `from=invoices` says where its Back link returns. Parsing: lib/service-search.ts.
   // Access is the central gate's (pageForPath: /service → Service).
   validateSearch: parseServiceSearch,
   component: ServiceRoute,
@@ -34,6 +36,9 @@ function ServiceRoute() {
       opportunity={search.opportunity}
       stage={search.stage}
       overdue={search.overdue === 1}
+      q={search.q}
+      tech={search.tech}
+      type={search.type}
     />
   );
 }

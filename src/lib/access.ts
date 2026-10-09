@@ -81,7 +81,7 @@ export const KIND_HELP: Record<UserKind, string> = {
   manager:
     "Everything but Users and Reminders; sees everyone's tickets, creates and dispatches them and sets their prices",
   office:
-    "Project Bids, Estimate Pricing, Customers, Service, Invoices, Prospecting, Takeoff and Inventory; sees every ticket, runs none of their money",
+    "Project Bids, Estimate Pricing, Customers, Service, Invoices, Prospecting, Takeoff and Inventory; sees every ticket, creates, dispatches and moves their dates (logged), runs none of their money",
   technician: "Inventory and the tickets assigned to them; no prices anywhere",
 };
 
@@ -197,8 +197,8 @@ export const seesEveryone = (p: AccessLike | null | undefined): boolean =>
   isAdmin(p) || isManager(p);
 
 /**
- * The office: sees every ticket (visibility only — creating, dispatching and money are
- * `managesTickets`). Everyone except a technician-only user (`isFieldOnly`: that technician
+ * The office: sees every ticket (visibility; with Service they also dispatch —
+ * `dispatchesTickets`; money is `managesTickets`). Everyone except a technician-only user (`isFieldOnly`: that technician
  * sees and edits only their own tickets). The twin of RLS
  * `not is_technician() or is_admin() or is_manager()`.
  */
@@ -241,9 +241,24 @@ export const CLAIM_TAKEN = "Someone already has it";
  * on a ticket (crew $/hour, invoices, repair template prices, the Setup page) and
  * deleting a ticket. `isOffice` stays for visibility only (who sees every ticket). Estimate
  * Pricing is not this: it stays `canAccess(p, "pricing")`. The twin of RLS
- * `public.is_admin() or public.is_manager()`.
+ * `public.is_admin() or public.is_manager()`. Since Oct 9 creating, dispatching and moving the
+ * date are wider (`dispatchesTickets`: the office too); this stays the money gate.
  */
 export const managesTickets = (p: AccessLike | null | undefined): boolean => seesEveryone(p);
+
+/**
+ * Who creates a ticket, dispatches it (the technician, the Board's drag and drop and "+") and
+ * moves its date (owner, Oct 9: "lets make office users able to create, dispatch, and move a
+ * tickets date but make that activity logged"): a manager or an admin (`managesTickets`), and
+ * the office — anyone who is not technician-only (`isOffice`) with Service access. Every such
+ * write is logged by the database (audit_log, the ticket's History fold; a date move also lands
+ * on its Timeline as "Date moved …"). Money stays `managesTickets`: crew $/hour, labor rate,
+ * repair prices, invoices, Service Rates, and deleting a ticket. The twin of RLS
+ * `public.is_admin() or public.is_manager() or not public.is_technician()` with
+ * `has_access('service')` (20261009120000_office_dispatch.sql).
+ */
+export const dispatchesTickets = (p: AccessLike | null | undefined): boolean =>
+  managesTickets(p) || (isOffice(p) && canAccess(p, "service"));
 
 /**
  * A plain user with the Invoices tick (owner, Oct 8: "we dont really have PM or sales roles").

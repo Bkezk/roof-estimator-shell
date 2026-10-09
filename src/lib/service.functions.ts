@@ -5,9 +5,13 @@
  * material off a vehicle is logged against (inventory.functions.ts).
  *
  * Access: Service. A technician (profiles.technician) may edit only jobs assigned to them —
- * RLS enforces the same rule; office users and admins edit any. Creating, dispatching, deleting
- * and every rate are a manager's or an admin's (`managesTickets`; owner, Oct 1), and so are the
- * stages Invoiced and Closed (`stageProblem`, ticket-stage.ts; owner, Oct 1).
+ * RLS enforces the same rule; office users and admins edit any. Deleting a ticket and every rate
+ * are a manager's or an admin's (`managesTickets`; owner, Oct 1), and so are the stages
+ * Authorized, Invoiced and Closed (`stageProblem`, ticket-stage.ts; owner, Oct 1). Creating,
+ * dispatching (the technician) and moving the date are also the office's (`dispatchesTickets`;
+ * owner, Oct 9: "lets make office users able to create, dispatch, and move a tickets date but
+ * make that activity logged") — the database logs every service_jobs write to audit_log (the
+ * ticket's History) and a date move lands on its Timeline (logTicketDateMove).
  */
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
@@ -20,6 +24,7 @@ import {
   CLAIM_TAKEN,
   canAccess,
   canClaim,
+  dispatchesTickets,
   isOffice,
   managesTickets,
 } from "@/lib/access";
@@ -30,6 +35,7 @@ import { siteAddressLine } from "@/lib/crm.functions";
 import { MAX_HELPERS, planCrew, type CrewRow } from "@/lib/service-crew";
 import { TECH_LOCKED_MESSAGE, stageProblem, techStageLocked } from "@/lib/ticket-stage";
 import { ARRIVAL_WINDOWS } from "@/lib/arrival-window";
+import { assignedStage } from "@/lib/service-schedule";
 import { materialsByCell, serviceLabel } from "@/lib/service-materials";
 import { loadServiceMaterialLinks } from "@/lib/service-materials.server";
 
@@ -291,9 +297,12 @@ export const saveServiceJob = createServerFn({ method: "POST" })
   .validator((d: unknown) => jobSchema.parse(d))
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
-    // Owner, Oct 1: "The manager creates the tickets; reps do not create tickets".
+    // Money (crew, rates): a manager's (owner, Oct 1). Creating and dispatching: the office too
+    // (owner, Oct 9: "lets make office users able to create, dispatch, and move a tickets date
+    // but make that activity logged"; a technician-only user still neither).
     const manager = managesTickets(p);
-    if (!data.id && !manager) throw new Error("Only a manager creates tickets");
+    const dispatcher = dispatchesTickets(p);
+    if (!data.id && !dispatcher) throw new Error("Only the office or a manager creates tickets");
     const sb = context.supabase;
     const { id, ...fields } = data;
     let customer_name = fields.customer_name ?? "";
@@ -398,15 +407,17 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Owner, Oct 6: a technician cannot change a ticket once it is Authorized, Invoiced or
       // Closed (RLS service_jobs_update says the same, 20261006190000); the office still may.
       if (techStageLocked(p, cur.stage)) throw new Error(TECH_LOCKED_MESSAGE);
-      // Owner, Oct 1: once a ticket has a date, only an admin or a manager moves it.
+      // Owner, Oct 1: once a ticket has a date, a technician does not move it; Oct 9: the office
+      // and managers do (logged on the Timeline below and in History by the database).
       const moveProblem = dateMoveProblem({
         profile: p,
         oldYmd: cur.scheduled_date,
         newYmd: fields.scheduled_date,
+        kind: "ticket",
       });
       if (moveProblem) throw new Error(moveProblem);
-      // Dispatch is a manager's: anyone else's save keeps the assigned technician.
-      if (!manager) patch.technician_id = cur.technician_id;
+      // Dispatch is the office's and a manager's: anyone else's save keeps the technician.
+      if (!dispatcher) patch.technician_id = cur.technician_id;
       // The stage is not the form's to send: the ticket keeps the one it has now. An Open ticket
       // that now has a technician and a day becomes Scheduled (nothing else moves it here).
       const scheduledNow =
@@ -576,7 +587,10 @@ export const setServiceStage = createServerFn({ method: "POST" })
 
 /**
  * The Tech Board's drop: assign (or unassign) a technician and a day in one call. Stage moves
- * Open ↔ Scheduled with it; Done and later are left alone. Managers and admins only.
+ * Open ↔ Scheduled with it (assignedStage); Done and later are left alone, and a date-only move
+ * of a Scheduled ticket stays Scheduled — one write, no bounce through Open, so the follow-up
+ * keeps its timer and only "Date moved …" is logged (owner, Oct 9: cross-week reschedule in one
+ * drag). Managers, admins and the office (`dispatchesTickets`; owner, Oct 9).
  */
 export const assignServiceJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -594,7 +608,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }): Promise<ServiceJobWithTech> => {
     const p = await serviceWrite(context);
-    if (!managesTickets(p)) throw new Error("Only a manager dispatches tickets");
+    if (!dispatchesTickets(p)) throw new Error("Only the office or a manager dispatches tickets");
     const dateProblem = assignDateProblem(data.scheduled_date);
     if (dateProblem) throw new Error(dateProblem);
     const sb = context.supabase;
@@ -605,20 +619,17 @@ export const assignServiceJob = createServerFn({ method: "POST" })
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
     if (!cur) throw new Error("Ticket not found");
-    // A drop onto another day moves the date: an admin's or a manager's (owner, Oct 1). A drop
-    // that only changes the technician on the same day needs no more than dispatching.
+    // A drop onto another day moves the date: the office's or a manager's (owner, Oct 1 / Oct 9;
+    // logged below). A drop that only changes the technician on the same day needs no more than
+    // dispatching.
     const moveProblem = dateMoveProblem({
       profile: p,
       oldYmd: cur.scheduled_date,
       newYmd: data.scheduled_date,
+      kind: "ticket",
     });
     if (moveProblem) throw new Error(moveProblem);
-    const stage =
-      cur.stage === "open" || cur.stage === "scheduled"
-        ? data.technician_id && data.scheduled_date
-          ? "scheduled"
-          : "open"
-        : cur.stage;
+    const stage = assignedStage(cur.stage, data.technician_id, data.scheduled_date);
     const { data: row, error } = await sb
       .from("service_jobs")
       .update({

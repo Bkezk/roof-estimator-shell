@@ -36,10 +36,19 @@
  * ticket keeps the opportunity (from_opportunity_id) and says "From opportunity: <title>".
  *
  * Owner, Oct 1 ("The manager creates the tickets; reps do not create tickets"; "only the
- * managers / admins can see and edit the prices"): New ticket / `?new=1`, Repeat, the Board,
- * the technician select and crew with its $ / hour boxes, the Labor rate, the invoice and
- * Delete / Restore are `managesTickets` (admin or manager). Everyone else reads the technician
- * and crew by name. `isOffice` / `officeOrAdmin` decide only what is seen and the layout.
+ * managers / admins can see and edit the prices"): the crew with its $ / hour boxes, the Labor
+ * rate, the invoice and Delete / Restore are `managesTickets` (admin or manager). Owner, Oct 9
+ * ("lets make office users able to create, dispatch, and move a tickets date but make that
+ * activity logged"): New ticket / `?new=1`, Repeat, the technician select, the date and the
+ * arrival window are `dispatchesTickets` (managers and the office; a technician-only user reads
+ * the technician by name) — the database logs every ticket write to its History and a date move
+ * to its Timeline. `isOffice` / `officeOrAdmin` decide only what is seen and the layout.
+ *
+ * Owner, Oct 9 (the Oct 9 batch): the list keeps its filters in the URL (q, tech, type, stage,
+ * overdue) so Back restores them, and a ticket's Back link honours `?from=board&week=` /
+ * `?from=invoices`; the Overdue chip is a toggle; a failed background refetch keeps the ticket
+ * on screen with a "Could not refresh" line; a new ticket no longer assigns itself to its
+ * creator; the Done ticket's "Needs authorization" card leads the right column.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -76,7 +85,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { canClaim, isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
+import { canClaim, dispatchesTickets, isOffice, managesTickets, seesInvoices } from "@/lib/access";
 import { TICKET_DATE_REQUIRED } from "@/lib/ticket-date";
 import { canCloseOut, stageChoices, stageLocked } from "@/lib/ticket-stage";
 import {
@@ -118,7 +127,7 @@ import { CountyCodeLine } from "@/components/crm/county-code-picker";
 import { WarrantyBadges } from "@/components/crm/site-warranties";
 import { AutoTextarea } from "@/components/ui/auto-textarea";
 import { autoSiteId, siteProblem, TICKET_STAGE_HINT } from "@/lib/ticket-form";
-import type { StageFilter } from "@/lib/service-search";
+import type { ServiceSearch, StageFilter, TicketFrom, TypeValue } from "@/lib/service-search";
 import { localYmd } from "@/lib/tasks";
 import { SERVICE_OPEN_WORK, ticketOverdueDays } from "@/lib/work-counts";
 import {
@@ -255,6 +264,9 @@ export function ServicePage({
   opportunity,
   stage,
   overdue,
+  q,
+  tech,
+  type,
 }: {
   id?: string | undefined;
   isNew?: boolean;
@@ -270,35 +282,44 @@ export function ServicePage({
   stage?: Exclude<StageFilter, "all"> | undefined;
   /** The list: preset the Overdue filter (`?overdue=1`, the Customers page counts strip). */
   overdue?: boolean | undefined;
+  /** The list: the search box, the Technician select and the Type select (`?q=&tech=&type=`). */
+  q?: string | undefined;
+  tech?: string | undefined;
+  type?: TypeValue | undefined;
 }) {
   const { profile } = useAuth();
   if (id) return <TicketLoader id={id} closeout={!!closeout} />;
   if (isNew) {
-    // Owner, Oct 1: "The manager creates the tickets; reps do not create tickets" (the server
-    // refuses too: saveServiceJob "Only a manager creates tickets").
+    // Owner, Oct 1: "reps do not create tickets"; Oct 9: the office does, logged (the server
+    // refuses anyone else too: saveServiceJob "Only the office or a manager creates tickets").
     if (!profile) return null;
-    if (!managesTickets(profile)) return <ManagersCreateTickets />;
+    if (!dispatchesTickets(profile)) return <OfficeCreatesTickets />;
     if (from) return <NewFromTicket key={from} from={from} />;
     if (opportunity) return <NewForOpportunity key={opportunity} id={opportunity} />;
     if (account)
       return <NewForAccount key={`${account}|${site ?? ""}`} accountId={account} siteId={site} />;
     return <TicketEditor job={null} />;
   }
-  // Keyed on the preset so following another counts-strip link re-applies it.
+  // The filters live in the URL (owner, Oct 9: Back restores them), so the list is not keyed on
+  // them: following another counts-strip link changes the params it reads.
   return (
     <ServiceList
-      key={`${stage ?? ""}|${overdue ? 1 : 0}`}
-      presetStage={stage}
-      presetOverdue={!!overdue}
+      filters={{
+        ...(stage ? { stage } : {}),
+        ...(overdue ? { overdue: 1 as const } : {}),
+        ...(q ? { q } : {}),
+        ...(tech ? { tech } : {}),
+        ...(type ? { type } : {}),
+      }}
     />
   );
 }
 
-/** `?new=1` for anyone but a manager: the same "sent away" card as the Board and Invoices. */
-function ManagersCreateTickets() {
+/** `?new=1` for a technician-only user: the same "sent away" card as the Board and Invoices. */
+function OfficeCreatesTickets() {
   return (
     <div className="mx-auto max-w-md space-y-3 rounded-lg border border-dashed p-8 text-center">
-      <p className="font-medium">A manager creates tickets.</p>
+      <p className="font-medium">The office creates tickets.</p>
       <p className="text-sm text-muted-foreground">
         Your tickets are the ones assigned to you, on the Service list and on Today.
       </p>
@@ -345,14 +366,13 @@ const writeCollapsed = (stages: ServiceStage[]) => {
 };
 
 type TypeFilter = "all" | ServiceType;
+/** The list's filters as the URL carries them (parseServiceSearch, the list branch). */
+type ListFilters = Pick<ServiceSearch, "stage" | "overdue" | "q" | "tech" | "type">;
 
-function ServiceList({
-  presetStage,
-  presetOverdue,
-}: {
-  presetStage?: Exclude<StageFilter, "all"> | undefined;
-  presetOverdue: boolean;
-}) {
+/** How long the search box waits before writing what was typed into the URL. */
+const SEARCH_URL_DELAY_MS = 300;
+
+function ServiceList({ filters }: { filters: ListFilters }) {
   const { session, profile } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -390,17 +410,56 @@ function ServiceList({
 
   // A technician (not admin) receives only their own tickets from the server.
   const isTech = !isOffice(profile);
-  // Owner, Oct 1: "The manager creates the tickets": New ticket, the Board (dispatch), delete
-  // and restore are a manager's; the to-invoice count shows to whoever sees invoices.
+  // Owner, Oct 1: delete and restore are a manager's; Oct 9: New ticket is the office's too
+  // (dispatchesTickets); the to-invoice count shows to whoever sees invoices.
   const manager = managesTickets(profile);
-  const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState<StageFilter>(presetStage ?? "all");
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+  const dispatcher = dispatchesTickets(profile);
+  // The filters are the URL's (owner, Oct 9: "the Tickets list keeps its filters and returns
+  // where you came from"): each change rewrites /service's search params in place, so opening a
+  // ticket and pressing Back lands on the same stage chip, technician, type and search text.
+  const stageFilter: StageFilter = filters.stage ?? "all";
+  const typeFilter: TypeFilter = filters.type ?? "all";
   // One technician's tickets (service study M7, owner Oct 5), office only.
-  const [techFilter, setTechFilter] = useState<TechFilter>(TECH_ALL);
-  // Overdue: open tickets whose day has passed (lib/work-counts.ts isOverdueTicket), preset by
-  // ?overdue=1 from the Customers page counts strip; cleared from its chip.
-  const [overdueOnly, setOverdueOnly] = useState(presetOverdue);
+  const techFilter: TechFilter = filters.tech ?? TECH_ALL;
+  // Overdue: open tickets whose day has passed (lib/work-counts.ts isOverdueTicket); ?overdue=1
+  // from the Customers page counts strip, or the Overdue chip (a toggle since Oct 9).
+  const overdueOnly = filters.overdue === 1;
+  const writeFilters = (next: ListFilters) =>
+    void navigate({ to: "/service", search: next, replace: true });
+  const patchFilters = (patch: Partial<Record<keyof ListFilters, unknown>>) => {
+    const next: ListFilters = { ...filters };
+    for (const [k, v] of Object.entries(patch) as [keyof ListFilters, unknown][]) {
+      if (v === undefined || v === null || v === "" || v === "all" || v === false) delete next[k];
+      else (next as Record<string, unknown>)[k] = v;
+    }
+    writeFilters(next);
+  };
+  const setStageFilter = (v: StageFilter) => patchFilters({ stage: v });
+  const setTypeFilter = (v: TypeFilter) => patchFilters({ type: v });
+  const setTechFilter = (v: TechFilter) => patchFilters({ tech: v });
+  const setOverdueOnly = (v: boolean) => patchFilters({ overdue: v ? 1 : undefined });
+  // The search box types locally and lands in the URL a moment later (a URL write per keystroke
+  // would fight the caret); a q arriving from the URL (Back) refills the box.
+  const [search, setSearch] = useState(filters.q ?? "");
+  const sentQ = useRef(filters.q ?? "");
+  useEffect(() => {
+    const q = filters.q ?? "";
+    if (q !== sentQ.current) {
+      sentQ.current = q;
+      setSearch(q);
+    }
+  }, [filters.q]);
+  useEffect(() => {
+    const q = search.trim();
+    if (q === sentQ.current) return;
+    const t = setTimeout(() => {
+      sentQ.current = q;
+      patchFilters({ q });
+    }, SEARCH_URL_DELAY_MS);
+    return () => clearTimeout(t);
+    // patchFilters closes over the current filters; the timer re-arms on each keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
   const today = localYmd(new Date());
   // "Mine" starts off for everyone (owner, Oct 9: "make sure when the owner/manager clicks
   // service it isnt filtered to just mine"; it used to start on for anyone ticked Technician).
@@ -476,10 +535,8 @@ function ServiceList({
     overdueOnly;
   const clearFilters = () => {
     setSearch("");
-    setStageFilter("all");
-    setOverdueOnly(false);
-    setTypeFilter("all");
-    setTechFilter(TECH_ALL);
+    sentQ.current = "";
+    writeFilters({});
     setMineOn(false);
   };
   const newTicket = () => void navigate({ to: "/service", search: { new: 1 } });
@@ -509,7 +566,7 @@ function ServiceList({
               </Link>
             </Button>
           )}
-          {manager && (
+          {dispatcher && (
             <Button size="lg" className="text-base font-semibold" onClick={newTicket}>
               <Plus className="mr-2 h-5 w-5" /> New ticket
             </Button>
@@ -600,19 +657,29 @@ function ServiceList({
                     {STAGE_LABELS[s]}
                   </Chip>
                 ))}
-                {overdueOnly && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    className="h-7 rounded-full px-3 text-xs"
-                    title="Only open tickets whose day has passed. Click to show all."
-                    onClick={() => setOverdueOnly(false)}
-                  >
-                    Overdue <X className="ml-1 h-3 w-3" aria-hidden />
-                    <span className="sr-only">(clear)</span>
-                  </Button>
-                )}
+                {/* A toggle (owner, Oct 9): it used to show only once ?overdue=1 had switched
+                  it on, so the filter could not be turned on from the list itself. */}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={overdueOnly ? "destructive" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  aria-pressed={overdueOnly}
+                  title={
+                    overdueOnly
+                      ? "Only open tickets whose day has passed. Click to show all."
+                      : "Show only open tickets whose day has passed."
+                  }
+                  onClick={() => setOverdueOnly(!overdueOnly)}
+                >
+                  Overdue
+                  {overdueOnly && (
+                    <>
+                      <X className="ml-1 h-3 w-3" aria-hidden />
+                      <span className="sr-only">(clear)</span>
+                    </>
+                  )}
+                </Button>
                 {!isTech && (
                   <>
                     <span className="mx-1 h-5 w-px bg-border" aria-hidden />
@@ -638,7 +705,7 @@ function ServiceList({
               <p className="text-muted-foreground">
                 {isTech ? "No tickets assigned to you yet." : "No tickets yet."}
               </p>
-              {manager && (
+              {dispatcher && (
                 <Button variant="outline" className="mt-4" onClick={newTicket}>
                   Open the first ticket
                 </Button>
@@ -895,21 +962,43 @@ function TicketLoader({ id, closeout }: { id: string; closeout: boolean }) {
     queryFn: () => getFn({ data: { id } }),
     enabled: !!session,
   });
-  if (job.error)
-    return (
-      <div className="space-y-3">
-        <BackToList />
-        <p className="text-sm text-destructive">Could not open the ticket: {errText(job.error)}</p>
-      </div>
-    );
-  if (!job.data)
+  // Nothing to show yet: the error (or the spinner) is the page.
+  if (!job.data) {
+    if (job.error)
+      return (
+        <div className="space-y-3">
+          <BackToList />
+          <p className="text-sm text-destructive">
+            Could not open the ticket: {errText(job.error)}
+          </p>
+        </div>
+      );
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading the ticket…
       </p>
     );
-  if (closeout) return <CloseoutScreen key={job.data.id} job={job.data} />;
-  return <TicketEditor key={job.data.id} job={job.data} />;
+  }
+  // A failed background refetch (owner, Oct 9): the ticket already on screen stays, with one
+  // line saying the refresh failed — it used to be replaced by the error alone.
+  const stale = job.error ? (
+    <p className="text-sm text-destructive" data-line="refresh-failed">
+      Could not refresh: {errText(job.error)}
+    </p>
+  ) : null;
+  if (closeout)
+    return (
+      <>
+        {stale}
+        <CloseoutScreen key={job.data.id} job={job.data} />
+      </>
+    );
+  return (
+    <>
+      {stale}
+      <TicketEditor key={job.data.id} job={job.data} />
+    </>
+  );
 }
 
 /** A new ticket starting from another ticket's customer side (see seedFromTicket). */
@@ -1086,12 +1175,30 @@ function NewForAccount({
   return <TicketEditor job={null} seed={seed} />;
 }
 
+/**
+ * Back to where the ticket was opened from (owner, Oct 9): the Tech Board at the week it showed
+ * (`?from=board&week=`), the Awaiting invoice queue (`?from=invoices`), else the Tickets list —
+ * whose filters live in the URL, so the browser's Back lands on them too.
+ */
 function BackToList() {
+  const { from, week }: { from?: TicketFrom | string; week?: string } = useSearch({
+    strict: false,
+  });
   return (
     <Button asChild variant="ghost" size="sm" className="-ml-2">
-      <Link to="/service">
-        <ArrowLeft className="mr-1 h-4 w-4" /> Tickets
-      </Link>
+      {from === "board" ? (
+        <Link to="/service/board" search={week ? { week } : {}}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> Tech Board
+        </Link>
+      ) : from === "invoices" ? (
+        <Link to="/service/invoices" search={{ tab: "to-invoice" }}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> Awaiting invoice
+        </Link>
+      ) : (
+        <Link to="/service" search={{}}>
+          <ArrowLeft className="mr-1 h-4 w-4" /> Tickets
+        </Link>
+      )}
     </Button>
   );
 }
@@ -1120,7 +1227,13 @@ interface Draft {
   notes: string;
 }
 
-const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =>
+/**
+ * The form's starting values: the saved ticket's, or blanks. A new ticket starts unassigned
+ * (owner, Oct 9): it used to default the technician to its creator whenever they carried the
+ * Technician tick, so with the required date it landed Scheduled for them and started their
+ * follow-up. The Board's "+" still prefills `?tech=&date=` (TicketEditor).
+ */
+const draftFrom = (job: ServiceJobWithTech | null): Draft =>
   job
     ? {
         customer: job.account_id
@@ -1155,7 +1268,7 @@ const draftFrom = (job: ServiceJobWithTech | null, meId: string | null): Draft =
         labor_rate_kind: "standard",
         po_number: "",
         job_number: "",
-        technician_id: meId ?? "",
+        technician_id: "",
         scheduled_date: "",
         arrival_window: "",
         centerpoint_ticket: "",
@@ -1294,9 +1407,11 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
     },
     onError: (e: Error) => toast.error(e.message || "Could not claim the ticket"),
   });
-  // Owner, Oct 1: dispatch (technician, crew), every rate (crew $/hour, labor rate), Repeat (a
-  // new ticket) and Delete are a manager's; officeOrAdmin is visibility and layout only.
+  // Owner, Oct 1: every rate (crew $/hour, labor rate), the named crew and Delete are a
+  // manager's; officeOrAdmin is visibility and layout only. Owner, Oct 9: the technician, the
+  // date, the arrival window and Repeat are the office's too (dispatchesTickets), logged.
   const manager = managesTickets(profile);
+  const dispatcher = dispatchesTickets(profile);
   const jobStage = job ? asStage(job.stage) : null;
   // Invoiced / Closed are the office's; a technician's ticket there is read-only for them (the
   // server refuses a technician's save of those stages).
@@ -1311,7 +1426,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   // A new ticket from the Tech Board's "+" arrives with ?tech=<id>&date=YYYY-MM-DD.
   const prefill: { tech?: string; date?: string } = useSearch({ strict: false });
   const [draft, setDraft] = useState<Draft>(() => {
-    const d = draftFrom(job, !job && profile?.technician ? profile.id : null);
+    const d = draftFrom(job);
     if (job) return d;
     return {
       ...d,
@@ -1709,9 +1824,9 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
   const crewNames = (crewQ.data ?? []).filter((r) => r.sort !== 0).map((r) => r.name);
   // Every ticket has a date (owner, Oct 1): the office cannot create or save one without.
   const dateMissing = !draft.scheduled_date;
-  // Once a ticket has a date, only an admin or a manager moves it (owner, Oct 1; the server
-  // refuses anyone else with "Only a manager can move the date").
-  const dateLocked = !!job?.scheduled_date && !seesEveryone(profile);
+  // Once a ticket has a date, the office or a manager moves it (owner, Oct 1 / Oct 9; the server
+  // refuses a technician with "Only the office or a manager can move the date").
+  const dateLocked = !!job?.scheduled_date && !dispatchesTickets(profile);
   const dateInput = (
     <div className="space-y-1">
       <Input
@@ -1727,7 +1842,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           if (!dateLocked) set("scheduled_date", e.target.value);
         }}
       />
-      {dateLocked && !ro && <p className="text-xs text-muted-foreground">Managers move dates</p>}
+      {dateLocked && !ro && <p className="text-xs text-muted-foreground">The office moves dates</p>}
       {dateMissing && !ro && <p className="text-xs text-destructive">{TICKET_DATE_REQUIRED}</p>}
     </div>
   );
@@ -1934,17 +2049,21 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           </div>
         )}
       </div>
-      {manager ? (
+      {dispatcher ? (
+        // The office picks the technician (owner, Oct 9); the crew and its $ / hour stay a
+        // manager's (owner, Oct 1), so a non-manager gets the select alone.
         <div className="space-y-2 sm:max-w-[460px]">
           <div className="flex items-end justify-between gap-2">
             <Label htmlFor="ticket-tech">
-              Technician{crew && crew.others.length > 0 ? "s" : ""}
+              Technician{manager && crew && crew.others.length > 0 ? "s" : ""}
             </Label>
-            {showRate && <span className="mr-11 w-28 text-xs text-muted-foreground">$ / hour</span>}
+            {manager && showRate && (
+              <span className="mr-11 w-28 text-xs text-muted-foreground">$ / hour</span>
+            )}
           </div>
-          {techRow}
-          {crewRows}
-          {crewQ.error && (
+          {manager ? techRow : techSelect("h-9")}
+          {manager && crewRows}
+          {manager && crewQ.error && (
             <p className="text-xs text-destructive">
               Could not load the crew: {errText(crewQ.error)}
             </p>
@@ -1952,7 +2071,8 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
           {techError}
         </div>
       ) : (
-        // Anyone but a manager reads who is on the ticket (owner, Oct 1: the manager dispatches).
+        // A technician-only user reads who is on the ticket (owner, Oct 1 / Oct 9: the office
+        // dispatches).
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">Technician</p>
@@ -1968,7 +2088,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
               {/* Owner, Oct 8: "nothing to show its mine now" — say so, and offer Claim here
                 (the non-manager's view) when nobody has it yet. */}
               {job && job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}
-              {job && !job.technician_id && !manager && canClaim(profile) && (
+              {job && !job.technician_id && !dispatcher && canClaim(profile) && (
                 <Button
                   type="button"
                   size="sm"
@@ -1995,7 +2115,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             <p className="text-xs text-muted-foreground">
               {job?.technician_id === profile?.id
                 ? "Change it on the close-out."
-                : "A manager dispatches the ticket."}
+                : "The office dispatches the ticket."}
             </p>
           </div>
         </div>
@@ -2189,7 +2309,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
                   ))}
                 </SelectContent>
               </Select>
-              {manager && repeatable && (
+              {dispatcher && repeatable && (
                 <Button asChild variant="outline">
                   <Link
                     to="/service"
@@ -2304,6 +2424,10 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
         <div className={stacked ? STACKED_PANES : SIDE_PANES}>
           <div className="min-w-0">{ticketForm}</div>
           <aside className={stacked ? STACKED_ASIDE : SIDE_ASIDE} aria-label="Ticket sections">
+            {/* Owner, Oct 9: at Done the "Needs authorization" card leads the column — the next
+              step on the ticket, not the last block to scroll to. Marking authorized and making
+              the invoice stay two steps, done by different people (invoice-block.tsx). */}
+            {jobStage === "done" && <InvoiceBlock job={job} />}
             <AerialSection job={job} canEdit={canEdit} />
             <InspectionSection job={job} canEdit={canEdit} officeOrAdmin={officeOrAdmin} />
             <TicketRepairs jobId={job.id} ticketNumber={job.number} canEdit={canEdit} />
@@ -2311,7 +2435,7 @@ function TicketEditor({ job, seed }: { job: ServiceJobWithTech | null; seed?: Se
             {/* Owner (Oct 1): purchase orders sit under Materials — material bought for the job. */}
             <PurchaseOrdersSection jobId={job.id} />
             <TicketFieldSections job={job} officeOrAdmin={officeOrAdmin} repairs={false} />
-            <InvoiceBlock job={job} />
+            {jobStage !== "done" && <InvoiceBlock job={job} />}
           </aside>
         </div>
       ) : (
@@ -2482,6 +2606,12 @@ function CustomerBlock(props: {
           accountId={accountId}
           value={props.siteId}
           required
+          // Owner, Oct 9 ("go with the property added from ticket form add"): a customer with
+          // no property gets "Add property" here, the form prefilled from the customer's own
+          // address (a customer just quick-added with one is not typed twice); the saved
+          // property is picked on the ticket. Until Oct 9 properties were added on the
+          // Customers page only (Sep 30).
+          allowAdd
           invalid={!!props.siteMessage}
           disabled={props.disabled}
           className="bg-background"

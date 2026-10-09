@@ -4,10 +4,13 @@
  * ["account", id] query the ticket and the bid already read). `required` drops the "No site"
  * choice (a ticket for a customer with several sites); otherwise the site stays optional.
  *
- * `allowAdd` (the opportunity, owner Oct 2: every opportunity names a site): a customer with no
- * site gets "Add site", which opens the Customers page's own site form (crm/site-form.tsx) in a
- * dialog; the saved site is picked. Only for those who may add sites (Customers access, which
- * admins and managers have); anyone else sees the "No sites on file" line alone.
+ * `allowAdd` (the opportunity, owner Oct 2: every opportunity names a site; the ticket form,
+ * owner Oct 9: "go with the property added from ticket form add"): a customer with no property
+ * gets a prominent "Add property", which opens the Customers page's own property form
+ * (crm/site-form.tsx) in a dialog, started at the customer's physical address (a customer just
+ * quick-added with one is not typed twice); the saved property is picked. Only for those who
+ * may add properties (Customers access, which admins and managers have); anyone else sees the
+ * "No properties on file" line alone.
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -18,7 +21,7 @@ import { useAuth } from "@/lib/auth-store";
 import { getAccount, siteAddressLine, type AccountDetail, type SiteRow } from "@/lib/crm.functions";
 import { siteOptionLabel } from "@/lib/county-codes";
 import { useCountyCodes } from "@/components/crm/use-county-codes";
-import { SiteForm } from "@/components/crm/site-form";
+import { SiteForm, type SiteAddressPrefill } from "@/components/crm/site-form";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -60,6 +63,18 @@ export function SiteSelect(props: {
     enabled: !!session,
   });
   const sites = detail.data?.sites ?? [];
+  // A new property starts at the customer's own address (owner, Oct 9), when it has one.
+  const account = detail.data?.account;
+  const prefill: SiteAddressPrefill | undefined =
+    account && (account.address1 || account.city || account.zip)
+      ? {
+          address1: account.address1 ?? "",
+          address2: account.address2 ?? "",
+          city: account.city ?? "",
+          state: account.state ?? "",
+          zip: account.zip ?? "",
+        }
+      : undefined;
   // The site's JBK county code after the address (the shared, cached list).
   const codes = useCountyCodes().data;
   // The whole code row: "0108 Kenton, KY" (0108 alone is Kenton, KY or Putman, TN).
@@ -79,10 +94,10 @@ export function SiteSelect(props: {
         <p className="text-xs text-muted-foreground">No properties on file for this customer.</p>
         {mayAdd && (
           <>
+            {/* Prominent (owner, Oct 9): the next thing to do when the customer has none. */}
             <Button
               type="button"
               size="sm"
-              variant="outline"
               disabled={props.disabled}
               onClick={() => setAdding(true)}
             >
@@ -100,6 +115,7 @@ export function SiteSelect(props: {
                 <SiteForm
                   accountId={props.accountId}
                   site={null}
+                  prefill={prefill}
                   onDone={(changed, row) => {
                     setAdding(false);
                     if (!changed || !row) return;

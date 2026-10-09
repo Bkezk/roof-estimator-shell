@@ -134,7 +134,9 @@ describe("where it is used", () => {
     expect(page).toContain(
       '{job && job.technician_id === profile?.id && <Badge variant="secondary">You</Badge>}',
     );
-    expect(page).toContain("{job && !job.technician_id && !manager && canClaim(profile) && (");
+    // Since Oct 9 the dispatch box is the office's too (dispatchesTickets), so the non-dispatcher
+    // branch is where Claim lives.
+    expect(page).toContain("{job && !job.technician_id && !dispatcher && canClaim(profile) && (");
     // The line reads the TICKET's technician, not the page draft's (a claim changes the ticket
     // under a draft built when the page opened — "it just says unassigned and you").
     expect(page).toContain("const assignedId = job ? job.technician_id : draft.technician_id;");

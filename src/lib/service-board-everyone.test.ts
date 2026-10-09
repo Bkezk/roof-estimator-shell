@@ -32,8 +32,8 @@ describe("the Tech Board shows to everyone; dispatch stays a manager's", () => {
       /\{ title: "Tech Board", to: "\/service\/board", icon: CalendarDays, show: everyone \}/,
     );
   });
-  it("drag, drop, the cell '+' and New ticket are under `dispatch` = managesTickets", () => {
-    expect(board).toContain("const dispatch = managesTickets(profile);");
+  it("drag, drop, the cell '+' and New ticket are under `dispatch` (managesTickets then; dispatchesTickets — the office too — since Oct 9)", () => {
+    expect(board).toContain("const dispatch = dispatchesTickets(profile);");
     expect(board).toMatch(
       /const startDrag = [\s\S]*?if \(!dispatch\) \{\s*e\.preventDefault\(\);\s*return;\s*\}/,
     );

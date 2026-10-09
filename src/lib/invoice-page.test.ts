@@ -132,8 +132,8 @@ describe("Awaiting invoice (was: To invoice)", () => {
     expect(tabs).toContain("title={AWAITING_INVOICE_TITLE}");
     expect(tabs).toContain("aria-label={`${toInvoice} awaiting invoice`}");
   });
-  it("the tooltip says what it means", () => {
-    expect(AWAITING_INVOICE_TITLE).toBe("Tickets marked Done with no finalised invoice yet");
+  it("the tooltip says what it means (Authorized since M9; the queue filtered Done until Oct 9)", () => {
+    expect(AWAITING_INVOICE_TITLE).toBe("Tickets marked Authorized with no finalised invoice yet");
   });
 });
 

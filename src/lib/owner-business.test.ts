@@ -301,7 +301,8 @@ describe("the click-throughs", () => {
   });
   it("every tile goes to the list filtered to what it counts", () => {
     expect(BUSINESS_HREFS).toEqual({
-      toInvoice: "/service/invoices?tab=to-invoice",
+      // The Done tickets it counts (the Awaiting invoice queue is the Authorized ones; Oct 9).
+      toInvoice: "/service?stage=done",
       unpaid: "/service/invoices?status=unpaid",
       invoiced: "/service/invoices",
       pipeline: "/opportunities?status=allopen",

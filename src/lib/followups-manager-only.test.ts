@@ -165,12 +165,12 @@ describe("5. Dates: managers move them; every move is logged", () => {
       "...(id && fields.expected_close === undefined ? {} : { expected_close: expected })",
     );
   });
-  it("the forms lock a stored date for non-managers with a hint", () => {
+  it("the forms lock a stored date with a hint: a ticket's for a technician (the office moves it since Oct 9), an opportunity's for non-managers", () => {
     const ticket = read("src/components/service-page.tsx");
     expect(ticket).toMatch(
-      /const dateLocked = !!job\?\.scheduled_date && !seesEveryone\(profile\);/,
+      /const dateLocked = !!job\?\.scheduled_date && !dispatchesTickets\(profile\);/,
     );
-    expect(ticket).toContain("Managers move dates");
+    expect(ticket).toContain("The office moves dates");
     const opp = read("src/components/opportunities-page.tsx");
     expect(opp).toMatch(/const closeLocked = !!opp\?\.expected_close && !seesEveryone\(profile\);/);
     expect(opp).toContain("Managers move dates");

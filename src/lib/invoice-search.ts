@@ -4,7 +4,7 @@
  *
  *   ?id=<invoice uuid>   that invoice on its own full-width page (owner, Oct 1: "the invoice is
  *                        cramped into a little dropdown and difficult to edit")
- *   ?tab=to-invoice      the list's "Awaiting invoice" queue (Done tickets with no final invoice)
+ *   ?tab=to-invoice      the list's "Awaiting invoice" queue (Authorized tickets, no final invoice)
  *   ?status=<status>     the list on one status chip (draft / final / sent / paid / void), or
  *                        "unpaid" = final + sent (the Owner view's Unpaid tile, Oct 8)
  *
@@ -36,7 +36,8 @@ export function invoiceSearch(s: Record<string, unknown>): InvoiceSearch {
 
 /**
  * The tooltip of the "Awaiting invoice (N)" chip on the Invoices list and of the count on the
- * Invoices tab (owner, Oct 1, asked what "To invoice" meant): tickets at stage Done, since
- * finalising an invoice moves a ticket to Invoiced.
+ * Invoices tab (owner, Oct 1, asked what "To invoice" meant): tickets at stage Authorized (M9,
+ * owner Oct 5: a Done ticket is reviewed first), since finalising an invoice moves a ticket to
+ * Invoiced.
  */
-export const AWAITING_INVOICE_TITLE = "Tickets marked Done with no finalised invoice yet";
+export const AWAITING_INVOICE_TITLE = "Tickets marked Authorized with no finalised invoice yet";

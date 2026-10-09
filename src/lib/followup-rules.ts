@@ -9,12 +9,13 @@
  *   sync (followups.server.ts syncFollowup: the item is closed, won, lost, reassigned, or its date
  *   moves) is system behaviour and never goes through this check.
  * - dateMoveProblem: once a ticket's date or an opportunity's expected close is stored, only an
- *   admin or a manager may change it ("manager and admins can move dates … reps cannot").
+ *   admin or a manager may change it ("manager and admins can move dates … reps cannot") — a
+ *   ticket's date also the office (owner, Oct 9; `kind: "ticket"`, logged).
  * - dateMoveNote: the line logged on the item when its date moves, so every push is on record.
  * - followupStateText: "Due Fri, Oct 3" / "Overdue 3 days" / "Snoozed until …" / "Reminders
  *   every N days" for a row on Work Overview.
  */
-import { seesEveryone, type AccessLike } from "@/lib/access";
+import { dispatchesTickets, seesEveryone, type AccessLike } from "@/lib/access";
 import { localYmd, ymdParts } from "@/lib/my-work";
 
 export const FOLLOWUP_MANAGER_ONLY = "Only a manager can snooze or close a follow-up";
@@ -23,21 +24,31 @@ export const FOLLOWUP_MANAGER_ONLY = "Only a manager can snooze or close a follo
 export const canManageFollowup = (p: AccessLike | null | undefined): boolean => seesEveryone(p);
 
 export const DATE_MOVE_MANAGER_ONLY = "Only a manager can move the date";
+/** A ticket's date (owner, Oct 9): the office moves it too; a technician-only user does not. */
+export const DATE_MOVE_OFFICE_ONLY = "Only the office or a manager can move the date";
 
 /**
  * Owner, Oct 1: "manager and admins can move dates … reps cannot." A ticket's date or an
  * opportunity's expected close is set by whoever creates the item; once stored, changing it is
  * an admin's or a manager's. Null = allowed: nothing sent (undefined), no stored date yet
  * (creating, or an old undated item getting its first date), the same day, or a manager.
+ *
+ * `kind: "ticket"` (owner, Oct 9: "lets make office users able to create, dispatch, and move a
+ * tickets date but make that activity logged"): a ticket's date is also the office's to move
+ * (`dispatchesTickets`); the move is logged on the ticket's Timeline and in its History by the
+ * database. An opportunity's expected close keeps the Oct 1 rule.
  */
 export function dateMoveProblem(input: {
   profile: AccessLike | null | undefined;
   oldYmd: string | null | undefined;
   newYmd: string | null | undefined;
+  kind?: "ticket" | "opportunity";
 }): string | null {
   if (input.newYmd === undefined) return null;
   if (!input.oldYmd) return null;
   if ((input.newYmd ?? null) === input.oldYmd) return null;
+  if (input.kind === "ticket")
+    return dispatchesTickets(input.profile) ? null : DATE_MOVE_OFFICE_ONLY;
   return seesEveryone(input.profile) ? null : DATE_MOVE_MANAGER_ONLY;
 }
 

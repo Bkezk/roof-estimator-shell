@@ -1,7 +1,7 @@
 /**
- * Pure helpers for the ticket form's assignment grid and the Invoices page's "To invoice" queue
- * (docs/service-module-design.md §5.1 step 4, §5.4). Days are local calendar days (YYYY-MM-DD),
- * never UTC midnight.
+ * Pure helpers for the ticket form's assignment grid, the Tech Board's dispatch and the Invoices
+ * page's "Awaiting invoice" queue (docs/service-module-design.md §5.1 step 4, §5.2, §5.4). Days
+ * are local calendar days (YYYY-MM-DD), never UTC midnight.
  */
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -81,7 +81,69 @@ interface DoneJob {
 /** When a Done ticket was done: its completed_at, else its last update. */
 export const doneAt = (j: DoneJob) => j.completed_at ?? j.updated_at;
 
-/** Tickets waiting to be invoiced (stage Done), the longest waiting first. */
-export function toInvoice<T extends DoneJob>(jobs: readonly T[]): T[] {
-  return jobs.filter((j) => j.stage === "done").sort((a, b) => doneAt(a).localeCompare(doneAt(b)));
+/**
+ * Since when an Authorized ticket has been waiting for its invoice: the day it entered the stage
+ * (stage_changed_at), else when the work was done (an older row from before 20261006180000).
+ */
+export const waitingSince = (j: DoneJob & { stage_changed_at?: string | null }) =>
+  j.stage_changed_at ?? doneAt(j);
+
+/** The stage a ticket waits at for its invoice: Authorized (M9, owner Oct 5). */
+export const AWAITING_INVOICE_STAGE = "authorized";
+
+/**
+ * Tickets waiting to be invoiced, the longest waiting first. Authorized, not Done (owner, Oct 5,
+ * M9: the owner reviews a Done ticket, the manager invoices the Authorized one). Until Oct 9
+ * this kept "done" while listAwaitingInvoice returned the Authorized rows, so the queue page
+ * was always empty under a badge that counted N.
+ */
+export function toInvoice<T extends DoneJob & { stage_changed_at?: string | null }>(
+  jobs: readonly T[],
+): T[] {
+  return jobs
+    .filter((j) => j.stage === AWAITING_INVOICE_STAGE)
+    .sort((a, b) => waitingSince(a).localeCompare(waitingSince(b)));
+}
+
+/** `ymd` moved `n` calendar days (the Board's cross-week drop: ±7), no time zone involved. */
+export function shiftDays(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return toYmd(new Date(y ?? 1970, (m ?? 1) - 1, (d ?? 1) + n));
+}
+
+/**
+ * The stage after a dispatch (assignServiceJob and the Board's optimistic view): an Open or
+ * Scheduled ticket is Scheduled with a technician and a day, Open without; Done and later are
+ * left alone. A date-only move of a Scheduled ticket therefore stays Scheduled — it never
+ * bounces through Open (owner, Oct 9: cross-week reschedule in one drag).
+ */
+export function assignedStage(
+  current: string,
+  technicianId: string | null,
+  scheduledDate: string | null,
+): string {
+  if (current !== "open" && current !== "scheduled") return current;
+  return technicianId && scheduledDate ? "scheduled" : "open";
+}
+
+interface RailJob {
+  scheduled_date: string | null;
+  created_at: string;
+}
+
+/**
+ * The Tech Board's Unassigned rail order (owner, Oct 9): by day — overdue first (the day has
+ * passed), then today, then the coming days — and undated tickets last; within a day the oldest
+ * created first. It used to be oldest created first overall, so a ticket due today sat under
+ * one opened earlier for next month. Pure: ascending days already put overdue before today
+ * before the coming days, so no "today" is needed.
+ */
+export function sortUnassigned<T extends RailJob>(jobs: readonly T[]): T[] {
+  return [...jobs].sort((a, b) => {
+    if (a.scheduled_date && !b.scheduled_date) return -1;
+    if (!a.scheduled_date && b.scheduled_date) return 1;
+    if (a.scheduled_date && b.scheduled_date && a.scheduled_date !== b.scheduled_date)
+      return a.scheduled_date.localeCompare(b.scheduled_date);
+    return a.created_at.localeCompare(b.created_at);
+  });
 }

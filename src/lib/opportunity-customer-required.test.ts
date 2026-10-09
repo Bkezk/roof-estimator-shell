@@ -281,7 +281,9 @@ describe("2. the site: SiteSelect's Add site opens the Customers page's site for
   it("SiteSelect: allowAdd (default off) offers Add site for a customer with none; the saved site is picked", () => {
     const src = read("src/components/crm/site-select.tsx");
     expect(src).toContain("allowAdd?: boolean;");
-    expect(src).toContain('import { SiteForm } from "@/components/crm/site-form";');
+    expect(src).toContain(
+      'import { SiteForm, type SiteAddressPrefill } from "@/components/crm/site-form";',
+    );
     expect(src).toContain('const mayAdd = !!props.allowAdd && can("customers");');
     expect(src).toMatch(/\{mayAdd && \(/);
     expect(src).toContain("Add site");
@@ -291,8 +293,11 @@ describe("2. the site: SiteSelect's Add site opens the Customers page's site for
     const page = read("src/components/opportunities-page.tsx");
     const block = page.slice(page.indexOf("function OppCustomerBlock("));
     expect(block).toMatch(/<SiteSelect\s+id="opp-site"[\s\S]*?allowAdd/);
-    // The ticket's site box does not.
-    expect(read("src/components/service-page.tsx")).not.toContain("allowAdd");
+    // The ticket's property box does too since Oct 9 (owner: "go with the property added from
+    // ticket form add"; tickets-batch-oct9.test.ts).
+    expect(read("src/components/service-page.tsx")).toMatch(
+      /<SiteSelect\s+id="ticket-site"[\s\S]*?allowAdd/,
+    );
   });
 });
 
