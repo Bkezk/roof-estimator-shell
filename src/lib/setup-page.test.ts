@@ -115,10 +115,10 @@ describe("the sidebar", () => {
 });
 
 describe("the Inventory page", () => {
-  it("no longer shows Vehicles & drivers (the opened-box rule stays)", () => {
+  it("no longer shows Vehicles & drivers (nor, since Oct 9, the opened-box rule — inventory-tabs.test.ts)", () => {
     expect(inventory).not.toContain("VehicleDriversCard");
     expect(inventory).not.toContain("vehicle-drivers-card");
-    expect(inventory).toContain('{role === "admin" && <SettingsCard rule={rule} />}');
+    expect(inventory).not.toContain("SettingsCard");
   });
 });
 

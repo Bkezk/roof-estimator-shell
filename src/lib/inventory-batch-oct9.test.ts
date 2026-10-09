@@ -59,8 +59,9 @@ const fns = read("src/lib/inventory.functions.ts");
 const between = (src: string, from: string, to: string) =>
   src.slice(src.indexOf(from), src.indexOf(to, src.indexOf(from)));
 const dialog = between(page, "function RecordDialog(", "function LedgerTable(");
-const ledger = between(page, "function LedgerTable(", "function ReconcileCard(");
-const setCountButton = between(page, "function SetCountButton(", "function SettingsCard(");
+const ledger = between(page, "function LedgerTable(", "function FixOnReconcile(");
+// The last function in the file (the Settings card after it went on Oct 9).
+const setCountButton = page.slice(page.indexOf("function SetCountButton("));
 
 const ADMIN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const MGR = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -178,7 +179,7 @@ describe("B1 · listMovements pages the ledger", () => {
   });
 });
 
-describe("B1 · the History card says how much is shown, pages on Show older and filters by Where", () => {
+describe("B1 · the History tab says how much is shown, pages on Show older and filters by Where", () => {
   it("the header is honest: 'latest N shown' while there may be more, else 'N entries'", () => {
     expect(page).toContain(
       "const hasOlder = movesQ.isFetched && lastPage.length >= MOVEMENTS_PAGE;",
@@ -336,7 +337,7 @@ describe("B4 · Set count on every stock row", () => {
     });
     expect(reconcileAdjustment(row, 0, COUNT_NOTE)?.qty).toBe(-7);
     expect(reconcileAdjustment(row, 7, COUNT_NOTE)).toBeNull();
-    // The Reconcile card keeps its own note by default.
+    // The Reconcile tab keeps its own note by default.
     expect(reconcileAdjustment({ ...row, on_hand: -2 }, 0)?.note).toBe(RECONCILE_NOTE);
   });
   it("the button is on each row (phone card and table) for canAccess(estimate): admins and managers pass, a technician does not", () => {
@@ -348,16 +349,17 @@ describe("B4 · Set count on every stock row", () => {
     );
     expect(setCountButton).toContain("await addFn({ data: payload });");
     expect(setCountButton).toContain("disabled={!payload || busy}");
-    expect(setCountButton).toContain("Counted ({packUnitLabel(2, r.unit)})");
+    // Owner, Oct 9 (later the same day): the Reconcile tab's words — "Really on the shelf now",
+    // the unit after the box, Save count (inventory-tabs.test.ts pins the rest).
+    expect(setCountButton).toContain("Really on the {placeWord(r.location_id)} now");
+    expect(setCountButton).toContain("{packUnitLabel(2, r.unit)}</span>");
     expect(canAccess({ role: "admin", access: [] }, "estimate")).toBe(true);
     expect(canAccess({ role: "manager", access: [] }, "estimate")).toBe(true);
     expect(canAccess({ role: "user", access: ["service"], technician: true }, "estimate")).toBe(
       false,
     );
-    // The Reconcile card is untouched.
-    expect(page).toContain(
-      '{seesEveryone(profile) && <ReconcileCard canSetCount={canAccess(profile, "estimate")} />}',
-    );
+    // The Reconcile tab keeps the same gate (seesEveryone shows the tab; canSetCount the box).
+    expect(page).toContain('{tab === "reconcile" && <ReconcileTab canSetCount={canSetCount} />}');
   });
 });
 

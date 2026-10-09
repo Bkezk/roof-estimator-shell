@@ -10,9 +10,18 @@
  * always "Take from inventory" against a job. For a tech, "Take from" starts on the vehicle they
  * drive and their open ticket (service design §6 A, §11); the ticket page's "Log material" link
  * lands here with ?job=<ticket>, the estimator's leftovers link with ?bid=<bid>. Adjustments and
- * write-offs are not offered here — the server still accepts them from estimators. Admins set
- * the opened-box rule at the bottom of the page; who drives each vehicle is on Setup ›
- * Vehicles & drivers (owner, Oct 5).
+ * write-offs are not offered here — the server still accepts them from estimators. Who drives
+ * each vehicle is on Setup › Vehicles & drivers (owner, Oct 5).
+ *
+ * Three views, one row of tabs under the heading, ?tab= (owner, Oct 9: "make the history and
+ * reconcile different tabs within the inventory page and only visible to managers and owners"):
+ * Stock is the table everyone sees, with Take from / Put in; History and Reconcile show for
+ * admins and managers (seesEveryone) and anyone else lands on Stock whatever the URL says. Each
+ * tab's queries run only while it is shown; the query keys are unchanged so the close-out's and
+ * the Record dialog's invalidations still land. The opened-box rule (owner, Oct 9: "is this box
+ * necessary here?") is gone: nothing ever converted a quantity with it — the dialog takes whole
+ * packs and pieces exactly — so the admin card and its server functions were removed (the
+ * inventory_settings table stays, unread).
  *
  * Owner, Oct 9 (after a review): History pages through the whole ledger and says how much is
  * shown; a Put-in's remembered job is an unmistakable "Left over from …" line (leftovers off one
@@ -29,6 +38,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import {
+  Boxes,
   ChevronLeft,
   ChevronRight,
   History,
@@ -44,19 +54,21 @@ import {
 import { Link } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth-store";
 import { canAccess, seesEveryone } from "@/lib/access";
+import { cn } from "@/lib/utils";
+import { type InventoryTab } from "@/lib/inventory-search";
 import { getReconciliation } from "@/lib/inventory-reconcile.functions";
 import {
   cellName,
-  CLEAN_LINE,
   COUNT_NOTE,
   fmtQty as fmtSigned,
   fmtWhen as fmtOfficeWhen,
   parseCounted,
+  placeWord,
   reconcileAdjustment,
-  reconciliationSummary,
   shiftWeek,
   weekStartOf,
   type NegativeCell,
+  type Reconciliation,
 } from "@/lib/inventory-reconcile";
 import { listItemNumbers, listPriceTargets } from "@/lib/admin-item-numbers.functions";
 import type { ItemNumberRow, PriceTarget } from "@/lib/admin-item-numbers.functions";
@@ -66,16 +78,13 @@ import { STATUS_LABELS, asBidStatus } from "@/lib/bid-status";
 import {
   addMovement,
   deleteMovement,
-  getInventorySettings,
   listJobOptions,
   listLocations,
   listMovements,
   listStock,
   MOVEMENTS_PAGE,
   myServiceDefaults,
-  OPENED_BOX_LABELS,
   REASON_LABELS,
-  setOpenedBoxRule,
   SHOP_LOCATION_ID,
   transferStock,
   undoMovement,
@@ -85,7 +94,6 @@ import {
   type JobOption,
   type MovementReason,
   type MovementRow,
-  type OpenedBoxRule,
   type StockRow,
 } from "@/lib/inventory.functions";
 import { STAGE_LABELS, type ServiceStage } from "@/lib/service.functions";
@@ -204,11 +212,24 @@ function productOptions(targets: PriceTarget[], itemNumbers: ItemNumberRow[]): P
 const productLabel = (o: { name: string; variant: string }) =>
   o.variant ? `${o.name} · ${o.variant}` : o.name;
 
+/** The three views, in tab order; the Service page's tabs are the model (service-tabs.tsx). */
+const TABS: readonly { tab: InventoryTab; title: string; icon: typeof Package }[] = [
+  { tab: "stock", title: "Stock", icon: Boxes },
+  { tab: "history", title: "History", icon: History },
+  { tab: "reconcile", title: "Reconcile", icon: Scale },
+];
+
 export function InventoryPage(props: {
+  /** ?tab= (inventory-search.ts); nothing = Stock. */
+  tab?: InventoryTab | undefined;
   initialBidId?: string | undefined;
   initialServiceJobId?: string | undefined;
 }) {
   const { role, profile } = useAuth();
+  // History and Reconcile are for admins and managers (owner, Oct 9); anyone else is on Stock
+  // whatever the URL says, and never sees the tab row.
+  const canSeeAll = seesEveryone(profile);
+  const tab: InventoryTab = canSeeAll ? (props.tab ?? "stock") : "stock";
   const qc = useQueryClient();
   const stockFn = useServerFn(listStock);
   const movesFn = useServerFn(listMovements);
@@ -217,7 +238,6 @@ export function InventoryPage(props: {
   const itemNosFn = useServerFn(listItemNumbers);
   const jobsFn = useServerFn(listJobOptions);
   const defaultsFn = useServerFn(myServiceDefaults);
-  const settingsFn = useServerFn(getInventorySettings);
   const locationsFn = useServerFn(listLocations);
   const undoFn = useServerFn(undoMovement);
   const stockQ = useQuery({ queryKey: ["inventory-stock"], queryFn: () => stockFn() });
@@ -227,10 +247,12 @@ export function InventoryPage(props: {
   });
   // History: the newest page from the cache (the close-out and the estimator invalidate this
   // key too), older pages appended on "Show older" and dropped whenever the first page re-reads,
-  // so the pages never overlap (owner, Oct 9: it showed 300 and called that every entry).
+  // so the pages never overlap (owner, Oct 9: it showed 300 and called that every entry). Read
+  // only while the History tab is shown.
   const movesQ = useQuery({
     queryKey: ["inventory-movements"],
     queryFn: () => movesFn({ data: {} }),
+    enabled: tab === "history",
   });
   const [older, setOlder] = useState<MovementRow[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -250,7 +272,6 @@ export function InventoryPage(props: {
     queryKey: ["inventory-my-defaults", profile?.id ?? ""],
     queryFn: () => defaultsFn(),
   });
-  const settingsQ = useQuery({ queryKey: ["inventory-settings"], queryFn: () => settingsFn() });
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
@@ -294,7 +315,6 @@ export function InventoryPage(props: {
     }
   };
   const canSetCount = canAccess(profile, "estimate");
-  const rule = settingsQ.data?.opened_box_rule ?? "half";
   const locations = useMemo(() => locationsQ.data ?? [], [locationsQ.data]);
   const locationName = (id: string) => locations.find((l) => l.id === id)?.name ?? id;
   const jobs = useMemo(() => jobsQ.data ?? [], [jobsQ.data]);
@@ -318,7 +338,6 @@ export function InventoryPage(props: {
     /** A job key ("service:<id>" / "bid:<id>"), "__pick__" to show the picker, else last used. */
     job: string | null;
   } | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
   // A tech who drives one vehicle sees it first; "Everywhere" stays one tap away.
   useEffect(() => {
     if (myVehicle) setWhere((w) => (w === "all" ? myVehicle : w));
@@ -393,224 +412,254 @@ export function InventoryPage(props: {
             to put some back.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => open("consumed")}>
-            <PackageMinus className="mr-1 h-4 w-4" /> Take from inventory
-          </Button>
-          <Button onClick={() => open("leftover")}>
-            <PackagePlus className="mr-1 h-4 w-4" /> Put in inventory
-          </Button>
-        </div>
+        {tab === "stock" && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => open("consumed")}>
+              <PackageMinus className="mr-1 h-4 w-4" /> Take from inventory
+            </Button>
+            <Button onClick={() => open("leftover")}>
+              <PackagePlus className="mr-1 h-4 w-4" /> Put in inventory
+            </Button>
+          </div>
+        )}
       </div>
 
-      <Card>
-        <CardContent className="space-y-3 pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              className="h-10 max-w-sm"
-              placeholder="Search product or item #…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            {locations.length > 1 && (
-              <Select value={where} onValueChange={setWhere}>
-                <SelectTrigger className="h-10 w-[260px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.name}
-                      {l.id === myVehicle ? " (my vehicle)" : ""}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="all">Everywhere</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-            <label className="flex items-center gap-1.5 text-sm">
-              <input type="checkbox" checked={zeros} onChange={(e) => setZeros(e.target.checked)} />
-              Show products at zero
-            </label>
-            <span className="text-xs text-muted-foreground">
-              {rows.length} of {zeros ? shown.length : inStock} product(s)
-            </span>
-          </div>
-          {stockQ.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : shown.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nothing {where === "all" ? "in inventory" : `at ${locationName(where)}`} yet. Tap{" "}
-              <b>Put in inventory</b> to record the first material.
-            </p>
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {filter
-                ? `Nothing matches “${q.trim()}”.`
-                : "Everything is at zero. Tick “Show products at zero” to see the list."}
-            </p>
-          ) : (
-            <>
-              {/* Phone: one card per product with big buttons. */}
-              <ul className="space-y-2 md:hidden">
-                {rows.map((r) => {
-                  const d = displayStock(r.on_hand, r.unit, r.piece);
-                  return (
-                    <li
-                      key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
-                      className="rounded-md border p-3"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{cellName(r)}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {[
-                              r.label ? r.row_label : null,
-                              r.label
-                                ? null
-                                : priceColLabel(r.price_col) !== "—"
-                                  ? r.price_col
-                                  : null,
-                              r.category,
-                              locationName(r.location_id),
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                            {r.item_nos.length > 0 && (
-                              <span className="ml-1 font-mono">#{r.item_nos.join(", #")}</span>
-                            )}
-                          </p>
-                        </div>
-                        <p
-                          className={`whitespace-nowrap text-lg font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
-                        >
-                          {fmtQty(d.amount)} <span className="text-xs font-normal">{d.unit}</span>
-                        </p>
-                      </div>
-                      <div
-                        className={`mt-2 grid gap-2 ${canSetCount ? "grid-cols-3" : "grid-cols-2"}`}
+      {canSeeAll && (
+        <nav aria-label="Inventory views" className="flex flex-wrap gap-1 border-b">
+          {TABS.map((t) => (
+            <Link
+              key={t.tab}
+              to="/inventory"
+              // Stock is the default, so its link carries no ?tab=.
+              search={t.tab === "stock" ? {} : { tab: t.tab }}
+              aria-current={tab === t.tab ? "page" : undefined}
+              className={cn(
+                "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium",
+                tab === t.tab
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <t.icon className="h-4 w-4" />
+              {t.title}
+            </Link>
+          ))}
+        </nav>
+      )}
+
+      {tab === "stock" && (
+        <Card>
+          <CardContent className="space-y-3 pt-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Input
+                className="h-10 max-w-sm"
+                placeholder="Search product or item #…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+              {locations.length > 1 && (
+                <Select value={where} onValueChange={setWhere}>
+                  <SelectTrigger className="h-10 w-[260px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.name}
+                        {l.id === myVehicle ? " (my vehicle)" : ""}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="all">Everywhere</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              <label className="flex items-center gap-1.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={zeros}
+                  onChange={(e) => setZeros(e.target.checked)}
+                />
+                Show products at zero
+              </label>
+              <span className="text-xs text-muted-foreground">
+                {rows.length} of {zeros ? shown.length : inStock} product(s)
+              </span>
+            </div>
+            {stockQ.isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : shown.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Nothing {where === "all" ? "in inventory" : `at ${locationName(where)}`} yet. Tap{" "}
+                <b>Put in inventory</b> to record the first material.
+              </p>
+            ) : rows.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {filter
+                  ? `Nothing matches “${q.trim()}”.`
+                  : "Everything is at zero. Tick “Show products at zero” to see the list."}
+              </p>
+            ) : (
+              <>
+                {/* Phone: one card per product with big buttons. */}
+                <ul className="space-y-2 md:hidden">
+                  {rows.map((r) => {
+                    const d = displayStock(r.on_hand, r.unit, r.piece);
+                    return (
+                      <li
+                        key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
+                        className="rounded-md border p-3"
                       >
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={r.on_hand <= 0}
-                          onClick={() => open("consumed", r)}
-                        >
-                          <PackageMinus className="mr-1 h-4 w-4" /> Take
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => open("leftover", r)}>
-                          <PackagePlus className="mr-1 h-4 w-4" /> Put in
-                        </Button>
-                        {canSetCount && (
-                          <SetCountButton
-                            row={r}
-                            locationName={locationName(r.location_id)}
-                            onSet={refresh}
-                          />
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-              {/* Desktop table. */}
-              <div className="hidden overflow-x-auto md:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Colour / size</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Item #</TableHead>
-                      <TableHead className="text-right">On hand</TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Last entry</TableHead>
-                      <TableHead className={canSetCount ? "w-[340px]" : "w-[250px]"} />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((r) => {
-                      const piece = r.piece;
-                      const d = displayStock(r.on_hand, r.unit, piece);
-                      return (
-                        <TableRow
-                          key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
-                        >
-                          <TableCell className="text-sm font-medium">
-                            {cellName(r)}
-                            {r.label && (
-                              <span className="block text-xs font-normal text-muted-foreground">
-                                {r.row_label}
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {r.category}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {r.item_nos.join(", ")}
-                          </TableCell>
-                          <TableCell
-                            className={`whitespace-nowrap text-right text-sm font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{cellName(r)}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {[
+                                r.label ? r.row_label : null,
+                                r.label
+                                  ? null
+                                  : priceColLabel(r.price_col) !== "—"
+                                    ? r.price_col
+                                    : null,
+                                r.category,
+                                locationName(r.location_id),
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                              {r.item_nos.length > 0 && (
+                                <span className="ml-1 font-mono">#{r.item_nos.join(", #")}</span>
+                              )}
+                            </p>
+                          </div>
+                          <p
+                            className={`whitespace-nowrap text-right text-lg font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
                           >
                             {fmtQty(d.amount)} <span className="text-xs font-normal">{d.unit}</span>
-                            {piece && (
-                              <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-                                ({describeStock(r.on_hand, r.unit, null)})
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-xs">
-                            {locationName(r.location_id)}
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                            {r.last_at ? fmtWhen(r.last_at) : ""}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={r.on_hand <= 0}
-                                onClick={() => open("consumed", r)}
-                              >
-                                Take from inventory
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => open("leftover", r)}
-                              >
-                                Put in inventory
-                              </Button>
-                              {canSetCount && (
-                                <SetCountButton
-                                  row={r}
-                                  locationName={locationName(r.location_id)}
-                                  onSet={refresh}
-                                />
+                            {r.on_hand < 0 && canSeeAll && <FixOnReconcile />}
+                          </p>
+                        </div>
+                        <div
+                          className={`mt-2 grid gap-2 ${canSetCount ? "grid-cols-3" : "grid-cols-2"}`}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={r.on_hand <= 0}
+                            onClick={() => open("consumed", r)}
+                          >
+                            <PackageMinus className="mr-1 h-4 w-4" /> Take
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => open("leftover", r)}>
+                            <PackagePlus className="mr-1 h-4 w-4" /> Put in
+                          </Button>
+                          {canSetCount && (
+                            <SetCountButton
+                              row={r}
+                              locationName={locationName(r.location_id)}
+                              onSet={refresh}
+                            />
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {/* Desktop table. */}
+                <div className="hidden overflow-x-auto md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Product</TableHead>
+                        <TableHead>Colour / size</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Item #</TableHead>
+                        <TableHead className="text-right">On hand</TableHead>
+                        <TableHead>Location</TableHead>
+                        <TableHead>Last entry</TableHead>
+                        <TableHead className={canSetCount ? "w-[340px]" : "w-[250px]"} />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rows.map((r) => {
+                        const piece = r.piece;
+                        const d = displayStock(r.on_hand, r.unit, piece);
+                        return (
+                          <TableRow
+                            key={`${r.location_id}|${r.screen_id}|${r.row_label}|${r.price_col}`}
+                          >
+                            <TableCell className="text-sm font-medium">
+                              {cellName(r)}
+                              {r.label && (
+                                <span className="block text-xs font-normal text-muted-foreground">
+                                  {r.row_label}
+                                </span>
                               )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                            </TableCell>
+                            <TableCell className="text-xs">{priceColLabel(r.price_col)}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">
+                              {r.category}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">
+                              {r.item_nos.join(", ")}
+                            </TableCell>
+                            <TableCell
+                              className={`whitespace-nowrap text-right text-sm font-semibold tabular-nums ${r.on_hand < 0 ? "text-destructive" : ""}`}
+                            >
+                              {fmtQty(d.amount)}{" "}
+                              <span className="text-xs font-normal">{d.unit}</span>
+                              {piece && (
+                                <span className="ml-1 text-[11px] font-normal text-muted-foreground">
+                                  ({describeStock(r.on_hand, r.unit, null)})
+                                </span>
+                              )}
+                              {r.on_hand < 0 && canSeeAll && <FixOnReconcile />}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs">
+                              {locationName(r.location_id)}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                              {r.last_at ? fmtWhen(r.last_at) : ""}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={r.on_hand <= 0}
+                                  onClick={() => open("consumed", r)}
+                                >
+                                  Take from inventory
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => open("leftover", r)}
+                                >
+                                  Put in inventory
+                                </Button>
+                                {canSetCount && (
+                                  <SetCountButton
+                                    row={r}
+                                    locationName={locationName(r.location_id)}
+                                    onSet={refresh}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between text-left"
-            onClick={() => setHistoryOpen((o) => !o)}
-          >
+      {tab === "history" && (
+        <Card data-card="history">
+          <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <History className="h-4 w-4" /> History
               <span className="text-xs font-normal text-muted-foreground">
@@ -619,17 +668,12 @@ export function InventoryPage(props: {
                   : `${moves.length} entr${moves.length === 1 ? "y" : "ies"}`}
               </span>
             </CardTitle>
-            <span className="text-xs text-muted-foreground">{historyOpen ? "Hide" : "Show"}</span>
-          </button>
-          {historyOpen && (
             <CardDescription>
               Every entry, newest first{hasOlder ? " — the latest first; Show older adds more" : ""}
               . On hand is the sum of these. Your own entries from the last 24 hours can be undone
               here.
             </CardDescription>
-          )}
-        </CardHeader>
-        {historyOpen && (
+          </CardHeader>
           <CardContent className="space-y-3">
             <LedgerTable
               rows={moves}
@@ -654,12 +698,10 @@ export function InventoryPage(props: {
               </Button>
             )}
           </CardContent>
-        )}
-      </Card>
+        </Card>
+      )}
 
-      {seesEveryone(profile) && <ReconcileCard canSetCount={canAccess(profile, "estimate")} />}
-
-      {role === "admin" && <SettingsCard rule={rule} />}
+      {tab === "reconcile" && <ReconcileTab canSetCount={canSetCount} />}
 
       {dialog && (
         <RecordDialog
@@ -675,7 +717,6 @@ export function InventoryPage(props: {
           jobs={jobs}
           jobsLoaded={jobsQ.isFetched}
           myJobIds={myJobs.map((j) => j.id)}
-          rule={rule}
           onClose={() => setDialog(null)}
           onSaved={(saved) => {
             refresh();
@@ -1010,7 +1051,6 @@ function RecordDialog(props: {
   jobsLoaded: boolean;
   /** My open tickets (service job ids), listed first. */
   myJobIds: string[];
-  rule: OpenedBoxRule;
   onClose: () => void;
   onSaved: (saved: { id: number; message: string }) => void;
 }) {
@@ -1229,7 +1269,7 @@ function RecordDialog(props: {
           <DialogDescription>
             {consumed
               ? "Takes material from the shop or a service vehicle — for a job, to load a vehicle, or to bring it back to the shop."
-              : `Puts material in the shop or on a service vehicle — leftovers from a job, something bought or delivered, stock moved from the shop, or what came back off a vehicle. ${OPENED_BOX_LABELS[props.rule]}.`}
+              : "Puts material in the shop or on a service vehicle — leftovers from a job, something bought or delivered, stock moved from the shop, or what came back off a vehicle."}
           </DialogDescription>
         </DialogHeader>
         {savedCount > 0 && (
@@ -1609,25 +1649,43 @@ function LedgerTable(props: {
 }
 
 /**
- * Reconcile (owner, Oct 9; admins and managers): where negative stock came from, and the place to
- * fix it. The report (inventory-reconcile.ts): each cell below zero with the entry that took it
- * there and every taking entry since (who / ticket / when) — current state whatever week is
- * picked — then the picked Monday–Sunday week's "Short:" entries and what was fixed. Set count
- * records ONE `adjustment` through addMovement so on hand becomes what was counted; there is no
- * dismiss — the only way off the list is a corrected count. Who may set a count is addMovement's
- * own rule (Estimate access or admin — a manager has it through canAccess); others see the list
- * and a line to ask an admin.
+ * The stock table's red count, for admins and managers: a link to the Reconcile tab, which says
+ * what took the count below zero and holds the fix (owner, Oct 9).
  */
-function ReconcileCard(props: { canSetCount: boolean }) {
+function FixOnReconcile() {
+  return (
+    <Link
+      to="/inventory"
+      search={{ tab: "reconcile" }}
+      className="block text-xs font-normal underline underline-offset-2"
+      data-fix-on-reconcile
+    >
+      Fix on Reconcile
+    </Link>
+  );
+}
+
+/**
+ * Reconcile (owner, Oct 9; admins and managers; its own tab since the same day — "a bit confusing
+ * on what its showing and what the buttons do"): the counts the app shows below zero and where
+ * each went wrong, in three plainly titled blocks. (a) "Below zero now": every cell below zero —
+ * current state whatever week is picked — with the entries that took it there (who / ticket /
+ * when / how much; inventory-reconcile.ts walks the ledger) and the fix: the real count and Save
+ * count, which records ONE `adjustment` through addMovement so on hand becomes what was counted.
+ * There is no dismiss — the only way off the list is a corrected count. (b) "Logged with none in
+ * the app": the picked Monday–Sunday week's "Short:" entries, a tech logging material the app
+ * said was not there; (c) "Fixed": the week's corrected cells. Who may save a count is
+ * addMovement's own rule (Estimate access or admin — a manager has it through canAccess); others
+ * see the list and a line to ask. The query runs only while this tab is shown: the tab mounts it.
+ */
+function ReconcileTab(props: { canSetCount: boolean }) {
   const fn = useServerFn(getReconciliation);
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [weekStart, setWeekStart] = useState(() => weekStartOf(new Date()));
   const thisWeek = weekStartOf(new Date());
   const q = useQuery({
     queryKey: ["inventory-reconcile", weekStart],
     queryFn: () => fn({ data: { weekStart } }),
-    enabled: open,
   });
   const r = q.data;
   const refreshAll = () => {
@@ -1635,134 +1693,191 @@ function ReconcileCard(props: { canSetCount: boolean }) {
     void qc.invalidateQueries({ queryKey: ["inventory-stock"] });
     void qc.invalidateQueries({ queryKey: ["inventory-movements"] });
   };
+  // The two weekly blocks name their week: "this week", or the picked week's days.
+  const weekWord =
+    weekStart === thisWeek ? "this week" : r ? `the week of ${r.weekLabel}` : "that week";
+  // Each block's body: loading, else the report; an error shows once, above the blocks.
+  const body = (render: (rep: Reconciliation) => React.ReactNode) =>
+    q.isPending ? <p className="text-muted-foreground">Loading…</p> : r ? render(r) : null;
+  const blockTitle = (title: React.ReactNode, explain: string) => (
+    <div>
+      <h3 className="font-semibold">{title}</h3>
+      <p className="text-xs text-muted-foreground">{explain}</p>
+    </div>
+  );
   return (
     <Card data-card="reconcile">
       <CardHeader className="pb-2">
-        <button
-          type="button"
-          className="flex w-full items-center justify-between text-left"
-          onClick={() => setOpen((o) => !o)}
-        >
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Scale className="h-4 w-4" /> Reconcile
-            <span className="text-xs font-normal text-muted-foreground">admins and managers</span>
-          </CardTitle>
-          <span className="text-xs text-muted-foreground">{open ? "Hide" : "Show"}</span>
-        </button>
-        {open && (
-          <CardDescription>
-            Where a count below zero came from — the entry that took it below zero and every taking
-            entry since, with who, which ticket and when — and the week&apos;s short entries. Type
-            what is really there and Set count to fix it.
-          </CardDescription>
-        )}
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Scale className="h-4 w-4" /> Reconcile
+        </CardTitle>
+        <CardDescription>
+          Counts the app shows below zero, and where each one went wrong. Type what is really on the
+          shelf or truck and save it — that is the only way a line leaves this list.
+        </CardDescription>
       </CardHeader>
-      {open && (
-        <CardContent className="space-y-4 text-sm">
-          <div className="flex flex-wrap items-center gap-2" data-week-picker>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label="Previous week"
-              onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="min-w-[9rem] text-center font-medium">
-              {r ? r.weekLabel : "…"}
-              {weekStart === thisWeek && (
-                <span className="ml-1 text-xs font-normal text-muted-foreground">(this week)</span>
-              )}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label="Next week"
-              disabled={weekStart >= thisWeek}
-              onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
+      <CardContent className="space-y-6 text-sm">
+        {q.error && (
+          <p className="text-destructive">
+            {q.error instanceof Error ? q.error.message : "Could not load the report"}
+          </p>
+        )}
+        <section className="space-y-3" data-block="below-zero">
+          {blockTitle(
+            "Below zero now",
+            "Every place and item the app counts below zero today, whatever week is picked, and the entries that took it there.",
+          )}
+          {body((rep) =>
+            rep.negatives.length === 0 ? (
+              <p className="text-muted-foreground">Nothing is below zero right now.</p>
+            ) : (
+              <>
+                {!props.canSetCount && (
+                  <p className="text-muted-foreground">
+                    Ask an admin or a manager to save the count.
+                  </p>
+                )}
+                {rep.negatives.map((n) => (
+                  <NegativeRow
+                    key={`${n.location_id}|${n.screen_id}|${n.row_label}|${n.price_col}`}
+                    cell={n}
+                    canSetCount={props.canSetCount}
+                    onSet={refreshAll}
+                  />
+                ))}
+              </>
+            ),
+          )}
+        </section>
+        <section className="space-y-3" data-block="short">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            {blockTitle(
+              <>Logged with none in the app — {weekWord}</>,
+              "A tech logged material the app said was not there. The count at that place went below zero; fix it above or on the Stock tab.",
+            )}
+            <div className="flex flex-wrap items-center gap-2" data-week-picker>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Previous week"
+                onClick={() => setWeekStart((w) => shiftWeek(w, -1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="min-w-[9rem] text-center font-medium">
+                {r ? r.weekLabel : "…"}
+                {weekStart === thisWeek && (
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">
+                    (this week)
+                  </span>
+                )}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-label="Next week"
+                disabled={weekStart >= thisWeek}
+                onClick={() => setWeekStart((w) => shiftWeek(w, 1))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
-          {q.isLoading && <p className="text-muted-foreground">Loading…</p>}
-          {q.error && (
-            <p className="text-destructive">
-              {q.error instanceof Error ? q.error.message : "Could not load the report"}
-            </p>
+          {body((rep) =>
+            rep.shortEntries.length === 0 ? (
+              <p className="text-muted-foreground">
+                Nothing was logged with none in the app {weekWord}.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>When</TableHead>
+                      <TableHead>Who</TableHead>
+                      <TableHead>Ticket</TableHead>
+                      <TableHead>Where</TableHead>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="text-right">Change</TableHead>
+                      <TableHead>Note</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rep.shortEntries.map((e, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="whitespace-nowrap text-xs">
+                          {fmtOfficeWhen(e.at)}
+                        </TableCell>
+                        <TableCell className="text-xs">{e.by_name ?? "(unknown)"}</TableCell>
+                        <TableCell className="text-xs">
+                          {e.service_job_id ? (
+                            <Link
+                              to="/service"
+                              search={{ id: e.service_job_id }}
+                              className="underline underline-offset-2"
+                            >
+                              {e.service_job_name ?? e.service_job_id}
+                            </Link>
+                          ) : (
+                            ""
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs">{e.location_name}</TableCell>
+                        <TableCell className="text-xs">{e.name}</TableCell>
+                        <TableCell className="whitespace-nowrap text-right text-xs font-semibold tabular-nums text-destructive">
+                          {fmtSigned(e.qty)} {packUnitLabel(e.qty, e.unit)}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{e.note}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ),
           )}
-          {r && !r.negatives.length && !r.shortEntries.length && (
-            <p className="text-muted-foreground">{CLEAN_LINE}</p>
-          )}
-          {r && (r.negatives.length > 0 || r.shortEntries.length > 0) && (
-            <p className="text-muted-foreground">{reconciliationSummary(r)}</p>
-          )}
-          {r && r.negatives.length > 0 && !props.canSetCount && (
-            <p className="text-muted-foreground">Ask an admin to set the count.</p>
-          )}
-          {r?.negatives.map((n) => (
-            <NegativeRow
-              key={`${n.location_id}|${n.screen_id}|${n.row_label}|${n.price_col}`}
-              cell={n}
-              canSetCount={props.canSetCount}
-              onSet={refreshAll}
-            />
-          ))}
-          {r && r.shortEntries.length > 0 && (
-            <div>
-              <div className="font-medium">Short entries this week</div>
-              <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
-                {r.shortEntries.map((s, i) => (
+        </section>
+        <section className="space-y-3" data-block="fixed">
+          {blockTitle(<>Fixed {weekWord}</>, "Counts that were below zero and were corrected.")}
+          {body((rep) =>
+            rep.fixed.length === 0 ? (
+              <p className="text-muted-foreground">Nothing was fixed {weekWord}.</p>
+            ) : (
+              <ul className="space-y-0.5 pl-4 text-muted-foreground">
+                {rep.fixed.map((f, i) => (
                   <li key={i}>
-                    {fmtOfficeWhen(s.at)} · {s.location_name} · {s.name} · {fmtSigned(s.qty)}{" "}
-                    {s.unit} · {s.by_name ?? "(unknown)"}
-                    {s.service_job_id ? (
-                      <>
-                        {" · "}
-                        <Link
-                          to="/service"
-                          search={{ id: s.service_job_id }}
-                          className="underline underline-offset-2"
-                        >
-                          ticket {s.service_job_name ?? s.service_job_id}
-                        </Link>
-                      </>
-                    ) : null}
-                    {s.note && <div className="pl-4 text-xs">{s.note}</div>}
+                    <span className="font-medium text-foreground">
+                      {f.location_name} · {f.name}
+                    </span>
+                    : went below zero {fmtOfficeWhen(f.wentBelowAt)}, counted back to{" "}
+                    {fmtQty(f.on_hand)} {packUnitLabel(f.on_hand, f.unit)}{" "}
+                    {fmtOfficeWhen(f.fixedAt)}
                   </li>
                 ))}
               </ul>
-            </div>
+            ),
           )}
-          {r && r.fixed.length > 0 && (
-            <div>
-              <div className="font-medium">Fixed this week</div>
-              <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
-                {r.fixed.map((f, i) => (
-                  <li key={i}>
-                    {f.location_name} · {f.name}: below zero {fmtOfficeWhen(f.wentBelowAt)}, back to{" "}
-                    {fmtQty(f.on_hand)} {f.unit} {fmtOfficeWhen(f.fixedAt)}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </CardContent>
-      )}
+        </section>
+      </CardContent>
     </Card>
   );
 }
 
-/** One cell below zero: its story, and the Counted box + Set count that ends it. */
+/**
+ * One cell below zero: what the app shows and since when, the entries that took it there, and
+ * the fix — the real count and Save count, which ends it.
+ */
 function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: () => void }) {
   const n = props.cell;
   const addFn = useServerFn(addMovement);
-  // The box's TEXT (owner, Oct 9: a blank box must not enable Set count; a typed "0" must).
+  // The box's TEXT (owner, Oct 9: a blank box must not enable Save count; a typed "0" must).
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const counted = parseCounted(text);
   const payload = counted === null ? null : reconcileAdjustment(n, counted);
+  const place = placeWord(n.location_id);
+  const boxId = `count-${n.location_id}-${n.screen_id}-${n.row_label}-${n.price_col}`;
   const setCount = async () => {
     if (!payload || counted === null) return;
     setBusy(true);
@@ -1780,21 +1895,81 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
     }
   };
   return (
-    <div data-negative-cell>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <div className="font-medium">
+    <div className="space-y-2 rounded-md border p-3" data-negative-cell>
+      <div>
+        <p className="font-semibold">
           {n.location_name} · {n.name}:{" "}
           <span className="text-destructive">
-            {fmtSigned(n.on_hand)} {n.unit}
-          </span>{" "}
-          <span className="text-xs font-normal text-muted-foreground">
-            below zero since {fmtOfficeWhen(n.firstBelowZeroAt)}
+            app shows {fmtSigned(n.on_hand)} {packUnitLabel(n.on_hand, n.unit)}
           </span>
-        </div>
-        {props.canSetCount && (
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Counted ({n.unit})</Label>
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Went below zero {fmtOfficeWhen(n.firstBelowZeroAt)}
+        </p>
+      </div>
+      <div className="overflow-x-auto" data-contributors>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          What took it there
+        </p>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>When</TableHead>
+              <TableHead>Who</TableHead>
+              <TableHead>Ticket</TableHead>
+              <TableHead className="text-right">Change</TableHead>
+              <TableHead>Note</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {n.contributors.map((c, i) => (
+              <TableRow key={i}>
+                <TableCell className="whitespace-nowrap text-xs">{fmtOfficeWhen(c.at)}</TableCell>
+                <TableCell className="text-xs">{c.by_name ?? "(unknown)"}</TableCell>
+                <TableCell className="text-xs">
+                  {c.service_job_id ? (
+                    <Link
+                      to="/service"
+                      search={{ id: c.service_job_id }}
+                      className="underline underline-offset-2"
+                    >
+                      {c.service_job_name ?? c.service_job_id}
+                    </Link>
+                  ) : (
+                    ""
+                  )}
+                </TableCell>
+                <TableCell
+                  className={`whitespace-nowrap text-right text-xs font-semibold tabular-nums ${c.qty < 0 ? "text-destructive" : ""}`}
+                >
+                  {fmtSigned(c.qty)} {packUnitLabel(c.qty, n.unit)}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {c.short && (
+                    <span
+                      className="mr-1 rounded bg-destructive/10 px-1 py-0.5 text-[10px] font-medium text-destructive"
+                      data-short-badge
+                    >
+                      logged with none in the app
+                    </span>
+                  )}
+                  {REASON_LABELS[c.reason as MovementReason] ?? c.reason}
+                  {c.note ? ` — ${c.note}` : ""}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        {n.more > 0 && <p className="mt-1 text-xs text-muted-foreground">+{n.more} more</p>}
+      </div>
+      {props.canSetCount && (
+        <div className="space-y-1" data-fix-row>
+          <Label htmlFor={boxId} className="text-xs">
+            Really on the {place} now
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
             <Input
+              id={boxId}
               type="number"
               inputMode="decimal"
               step="any"
@@ -1804,42 +1979,25 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
               value={text}
               onChange={(e) => setText(e.target.value)}
               disabled={busy}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && payload && !busy) void setCount();
+              }}
             />
+            <span className="text-xs text-muted-foreground">{packUnitLabel(2, n.unit)}</span>
             <Button
               type="button"
               size="sm"
               disabled={!payload || busy}
               onClick={() => void setCount()}
             >
-              Set count
+              Save count
             </Button>
           </div>
-        )}
-      </div>
-      <ul className="mt-1 space-y-0.5 pl-4 text-muted-foreground">
-        {n.contributors.map((c, i) => (
-          <li key={i}>
-            {fmtOfficeWhen(c.at)} · {fmtSigned(c.qty)} {n.unit} ·{" "}
-            {REASON_LABELS[c.reason as MovementReason] ?? c.reason}
-            {" · "}
-            {c.by_name ?? "(unknown)"}
-            {c.service_job_id ? (
-              <>
-                {" · "}
-                <Link
-                  to="/service"
-                  search={{ id: c.service_job_id }}
-                  className="underline underline-offset-2"
-                >
-                  ticket {c.service_job_name ?? c.service_job_id}
-                </Link>
-              </>
-            ) : null}
-            {c.short && <span className="ml-1 font-medium text-destructive">SHORT</span>}
-          </li>
-        ))}
-        {n.more > 0 && <li>+{n.more} more</li>}
-      </ul>
+          <p className="text-xs text-muted-foreground">
+            Records one adjustment so the app matches your count.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1847,8 +2005,9 @@ function NegativeRow(props: { cell: NegativeCell; canSetCount: boolean; onSet: (
 /**
  * Set count on a stock row (owner, Oct 9: counting a shelf DOWN was impossible — nothing sent an
  * adjustment for a cell at or above zero). A popover with one box in the stock unit (packs, as
- * every adjustment is) and a button; on-hand becomes what was typed through the same
- * reconcileAdjustment → addMovement path the Reconcile card uses, with its own note. Shown to
+ * every adjustment is) and Save count (the Reconcile tab's words, owner Oct 9); on-hand becomes
+ * what was typed through the same reconcileAdjustment → addMovement path the Reconcile tab uses,
+ * with its own note. Shown to
  * canAccess(profile, "estimate") (admins and managers pass); the server keeps its own rule.
  */
 function SetCountButton(props: { row: StockRow; locationName: string; onSet: () => void }) {
@@ -1897,9 +2056,7 @@ function SetCountButton(props: { row: StockRow; locationName: string; onSet: () 
           {props.locationName} · now {describeStock(r.on_hand, r.unit, null)}
           {r.piece ? ` (${describeStock(r.on_hand, r.unit, r.piece)})` : ""}
         </p>
-        <Label className="text-xs text-muted-foreground">
-          Counted ({packUnitLabel(2, r.unit)})
-        </Label>
+        <Label className="text-xs">Really on the {placeWord(r.location_id)} now</Label>
         <div className="flex items-center gap-2">
           <Input
             autoFocus
@@ -1916,64 +2073,23 @@ function SetCountButton(props: { row: StockRow; locationName: string; onSet: () 
               if (e.key === "Enter" && payload && !busy) void setCount();
             }}
           />
+          <span className="text-xs text-muted-foreground">{packUnitLabel(2, r.unit)}</span>
           <Button
             type="button"
             size="sm"
             disabled={!payload || busy}
             onClick={() => void setCount()}
           >
-            Set count
+            Save count
           </Button>
         </div>
         {counted !== null && !payload && (
           <p className="text-xs text-muted-foreground">That is the count already.</p>
         )}
+        <p className="text-xs text-muted-foreground">
+          Records one adjustment so the app matches your count.
+        </p>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function SettingsCard(props: { rule: OpenedBoxRule }) {
-  const qc = useQueryClient();
-  const setFn = useServerFn(setOpenedBoxRule);
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Settings (admin)</CardTitle>
-        <CardDescription>
-          How an opened box or bag counts when leftovers are added. Earlier entries keep what was
-          recorded.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="max-w-md space-y-1">
-          <Label>Opened box or bag</Label>
-          <Select
-            value={props.rule}
-            onValueChange={(v) =>
-              void setFn({ data: { rule: v as OpenedBoxRule } })
-                .then(() => {
-                  toast.success("Saved");
-                  void qc.invalidateQueries({ queryKey: ["inventory-settings"] });
-                })
-                .catch((e: unknown) =>
-                  toast.error(e instanceof Error ? e.message : "Could not save"),
-                )
-            }
-          >
-            <SelectTrigger className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(OPENED_BOX_LABELS) as OpenedBoxRule[]).map((k) => (
-                <SelectItem key={k} value={k}>
-                  {OPENED_BOX_LABELS[k]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

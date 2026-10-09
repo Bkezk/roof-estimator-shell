@@ -11,7 +11,7 @@
  * entry that pushed the running sum below zero — and every taking entry after it — is the list of
  * who took what on which ticket. The negatives are current state (whatever week is picked); the
  * "Short:" entries and the fixes follow the picked Monday–Sunday week. Pure: the server function
- * (inventory-reconcile.functions.ts) feeds it rows and the Inventory page's Reconcile card renders
+ * (inventory-reconcile.functions.ts) feeds it rows and the Inventory page's Reconcile tab renders
  * what it returns. The only way off the list is a corrected count (reconcileAdjustment → the
  * existing addMovement); there is no dismiss.
  */
@@ -350,7 +350,7 @@ export function buildReconciliation(input: {
 
 export const CLEAN_LINE = "Nothing is below zero and no short entries this week.";
 
-/** The one-line summary the card opens with. */
+/** The report in one line (tests and callers; the tab shows each block's own empty line). */
 export function reconciliationSummary(r: Reconciliation): string {
   if (!r.negatives.length && !r.shortEntries.length) return CLEAN_LINE;
   const parts = [
@@ -361,7 +361,14 @@ export function reconciliationSummary(r: Reconciliation): string {
   return `${parts.join(", ")}.`;
 }
 
-/** The note the Reconcile card's Set count writes on its adjustment entry. */
+/**
+ * Where a count is really taken (owner, Oct 9: "Really on the shelf now" / "Really on the truck
+ * now"): the shop is a shelf, every other location is a service vehicle.
+ */
+export const placeWord = (locationId: string): "shelf" | "truck" =>
+  locationId === "shop" ? "shelf" : "truck";
+
+/** The note the Reconcile tab's Save count writes on its adjustment entry. */
 export const RECONCILE_NOTE = "Reconciled on Inventory › Reconcile";
 /** The note the stock table's per-row Set count writes (owner, Oct 9: counting a shelf down). */
 export const COUNT_NOTE = "Counted on Inventory";
@@ -382,7 +389,7 @@ export function parseCounted(text: string): number | null {
  * Set count: ONE `adjustment` entry through the existing addMovement so the cell's on-hand at that
  * location becomes what was counted (adjustments carry their sign and are in the stock unit —
  * packs, not pieces — like every adjustment the server accepts). Null when the typed count is not
- * a change (the server refuses a zero quantity) or not a number. The Reconcile card and the stock
+ * a change (the server refuses a zero quantity) or not a number. The Reconcile tab and the stock
  * table's per-row Set count (owner, Oct 9) share it; only the note differs.
  */
 export function reconcileAdjustment(

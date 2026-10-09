@@ -1,8 +1,9 @@
 /**
- * Inventory › Reconcile, the managers' card (owner, Oct 9: "a menu for managers/admins on the
- * inventory tab so they can go in and manually reconcile things rather than just an email"):
+ * Inventory › Reconcile, the managers' tab (owner, Oct 9: "a menu for managers/admins on the
+ * inventory tab so they can go in and manually reconcile things rather than just an email"; a tab
+ * of its own, with plainer words, later the same day — inventory-tabs.test.ts pins the words):
  * getReconciliation's gate and output through the fake database (the week parameter, the paged
- * ledger read), the card's pins — week picker, the Counted box + Set count that records an
+ * ledger read), the tab's pins — week picker, the count box + Save count that records an
  * `adjustment` through addMovement, who sees the box, no Dismiss — and that the dropped email
  * path (cron route, workflow) is really gone.
  */
@@ -144,18 +145,19 @@ describe("who may Set count (addMovement's own rule, not widened)", () => {
     expect(canAccess({ role: "user", access: ["service"], technician: true }, "estimate")).toBe(
       false,
     );
-    // The card itself is for admins and managers only.
+    // The tab itself is for admins and managers only.
     expect(seesEveryone({ role: "user", access: ["estimate"] })).toBe(false);
   });
 });
 
-describe("the Inventory page's Reconcile card", () => {
+describe("the Inventory page's Reconcile tab", () => {
   const c = read("src/components/inventory-page.tsx");
 
-  it("is shown to seesEveryone only, with the Set count gate from canAccess(estimate)", () => {
-    expect(c).toContain(
-      '{seesEveryone(profile) && <ReconcileCard canSetCount={canAccess(profile, "estimate")} />}',
-    );
+  it("is shown to seesEveryone only (the tab gate), with the Save count gate from canAccess(estimate)", () => {
+    expect(c).toContain("const canSeeAll = seesEveryone(profile);");
+    expect(c).toContain('const tab: InventoryTab = canSeeAll ? (props.tab ?? "stock") : "stock";');
+    expect(c).toContain('{tab === "reconcile" && <ReconcileTab canSetCount={canSetCount} />}');
+    expect(c).toContain('const canSetCount = canAccess(profile, "estimate");');
     expect(c).toContain('import { canAccess, seesEveryone } from "@/lib/access";');
     expect(c).toContain('<Card data-card="reconcile">');
     expect(c).toContain('<Scale className="h-4 w-4" /> Reconcile');
@@ -173,10 +175,10 @@ describe("the Inventory page's Reconcile card", () => {
     expect(c).toContain("useState(() => weekStartOf(new Date()))");
   });
 
-  it("each negative cell has a blank Counted box (decimal, in the cell's unit) and Set count → addMovement with reconcileAdjustment's payload", () => {
+  it("each negative cell has a blank count box (decimal, the cell's unit after it) and Save count → addMovement with reconcileAdjustment's payload", () => {
     const row = c.slice(c.indexOf("function NegativeRow("), c.indexOf("function SetCountButton("));
     expect(row).toContain("const addFn = useServerFn(addMovement);");
-    // The box tracks its text (owner, Oct 9): blank = no payload, so Set count stays off.
+    // The box tracks its text (owner, Oct 9): blank = no payload, so Save count stays off.
     expect(row).toContain("const counted = parseCounted(text);");
     expect(row).toContain(
       "const payload = counted === null ? null : reconcileAdjustment(n, counted);",
@@ -185,10 +187,12 @@ describe("the Inventory page's Reconcile card", () => {
     expect(row).toContain('type="number"');
     expect(row).toContain('inputMode="decimal"');
     expect(row).toContain('step="any"');
-    expect(row).toContain("Counted ({n.unit})");
+    expect(row).toContain("Really on the {place} now");
+    expect(row).toContain("{packUnitLabel(2, n.unit)}</span>");
     expect(row).toContain("{props.canSetCount && (");
     expect(row).toContain("disabled={!payload || busy}");
-    expect(row).toContain("Set count");
+    expect(row).toMatch(/>\s*Save count\s*<\/Button>/);
+    expect(row).not.toMatch(/>\s*Set count\s*</);
     // After it answers: the toast names the new count; every stock view refreshes.
     expect(row).toContain(
       "toast.success(`${n.location_name} · ${n.name} set to ${fmtQty(counted)} ${n.unit}`);",
@@ -200,26 +204,35 @@ describe("the Inventory page's Reconcile card", () => {
     expect(row).toContain(
       'toast.error(e instanceof Error ? e.message : "Could not set the count", {',
     );
-    // Those who may not set a count see the list and a line to ask an admin.
-    expect(c).toContain("Ask an admin to set the count.");
+    // Those who may not save a count see the list and a line to ask.
+    expect(c).toContain("Ask an admin or a manager to save the count.");
   });
 
   it("no Dismiss: the only way off the list is a corrected count", () => {
-    const card = c.slice(c.indexOf("function ReconcileCard("), c.indexOf("function SettingsCard("));
-    expect(card).not.toMatch(/dismiss/i);
+    const tab = c.slice(c.indexOf("function ReconcileTab("), c.indexOf("function SetCountButton("));
+    expect(tab).not.toMatch(/dismiss/i);
     expect(c.replace(/\s+\*?\s*/g, " ")).toContain(
-      "there is no dismiss — the only way off the list is a corrected count",
+      "There is no dismiss — the only way off the list is a corrected count",
     );
   });
 
-  it("lists the week's short entries (when, place, item, qty, who, ticket link, note), the fixes and the clean line", () => {
-    expect(c).toContain("Short entries this week");
-    expect(c).toContain("search={{ id: s.service_job_id }}");
+  it("lists the week's short entries (when, who, ticket link, place, item, change, note), the fixes, and each block's own empty line", () => {
+    expect(c).toContain("Logged with none in the app — {weekWord}");
+    expect(c).toContain("search={{ id: e.service_job_id }}");
     expect(c).toContain("search={{ id: c.service_job_id }}");
-    expect(c).toContain('{s.note && <div className="pl-4 text-xs">{s.note}</div>}');
-    expect(c).toContain("Fixed this week");
-    expect(c).toContain('<p className="text-muted-foreground">{CLEAN_LINE}</p>');
-    expect(c).toContain("{n.more > 0 && <li>+{n.more} more</li>}");
+    expect(c).toContain(
+      '<TableCell className="text-xs text-muted-foreground">{e.note}</TableCell>',
+    );
+    expect(c).toContain("<>Fixed {weekWord}</>");
+    // One summary line for everything is gone: each block says when it is empty.
+    expect(c).not.toContain("CLEAN_LINE");
+    expect(c).not.toContain("reconciliationSummary");
+    expect(c).toContain("Nothing is below zero right now.");
+    expect(c).toContain("Nothing was logged with none in the app {weekWord}.");
+    expect(c).toContain("Nothing was fixed {weekWord}.");
+    expect(c).toContain(
+      '{n.more > 0 && <p className="mt-1 text-xs text-muted-foreground">+{n.more} more</p>}',
+    );
   });
 });
 

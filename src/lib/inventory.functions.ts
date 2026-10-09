@@ -911,43 +911,6 @@ export const myServiceDefaults = createServerFn({ method: "GET" })
     };
   });
 
-export type OpenedBoxRule = "half" | "full" | "ignore";
-export const OPENED_BOX_LABELS: Record<OpenedBoxRule, string> = {
-  half: "Count an opened box / bag as half",
-  full: "Count an opened box / bag as a full one",
-  ignore: "Do not count opened boxes / bags",
-};
-
-export const getInventorySettings = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ opened_box_rule: OpenedBoxRule }> => {
-    const { data, error } = await context.supabase
-      .from("inventory_settings")
-      .select("opened_box_rule")
-      .eq("id", 1)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    return { opened_box_rule: (data?.opened_box_rule as OpenedBoxRule) ?? "half" };
-  });
-
-export const setOpenedBoxRule = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .validator((d) => z.object({ rule: z.enum(["half", "full", "ignore"]) }).parse(d))
-  .handler(async ({ data, context }) => {
-    const { data: me } = await context.supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", context.userId)
-      .maybeSingle();
-    if (me?.role !== "admin") throw new Error("Forbidden: admin access required");
-    const { error } = await context.supabase
-      .from("inventory_settings")
-      .update({ opened_box_rule: data.rule, updated_at: new Date().toISOString() })
-      .eq("id", 1);
-    if (error) throw new Error(error.message);
-    return { ok: true };
-  });
-
 /** Admin-only: remove a mistaken entry (the ledger otherwise only grows). */
 export const deleteMovement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
