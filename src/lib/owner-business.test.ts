@@ -4,7 +4,7 @@
  * search for the Unpaid tile's click-through, and the screens.
  */
 import { readFileSync } from "node:fs";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-start", async () => ({
   createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
@@ -180,6 +180,10 @@ describe("businessNumbers", () => {
 });
 
 describe("listOwnerBusiness (server)", () => {
+  // The viewer's day is honoured only within a day of the real Eastern date (work-counts.ts
+  // viewerToday), so the clock is pinned to the fixtures' day; the pin broke on Oct 12.
+  beforeAll(() => vi.useFakeTimers({ now: new Date("2026-10-08T15:00:00Z"), toFake: ["Date"] }));
+  afterAll(() => vi.useRealTimers());
   const ME = "00000000-0000-4000-8000-000000000001";
   const world = (role: string) =>
     fakeSupabase(

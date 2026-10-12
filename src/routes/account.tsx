@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
@@ -255,6 +256,12 @@ function NotificationsCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        {/* The whole inbox, grouped by day, with Mark unread (owner, Oct 12). */}
+        <Button asChild variant="outline" size="sm">
+          <Link to="/notifications">
+            <Inbox /> Notifications
+          </Link>
+        </Button>
         {prefs.isError ? (
           <p className="text-sm text-destructive">{errText(prefs.error)}</p>
         ) : (

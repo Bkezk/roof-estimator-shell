@@ -18,6 +18,7 @@ import { Route as FollowupsRouteImport } from './routes/followups'
 import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MyWorkRouteImport } from './routes/my-work'
+import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OpportunitiesRouteImport } from './routes/opportunities'
 import { Route as ProposalRouteImport } from './routes/proposal'
 import { Route as ProspectRouteImport } from './routes/prospect'
@@ -85,6 +86,11 @@ const LoginRoute = LoginRouteImport.update({
 const MyWorkRoute = MyWorkRouteImport.update({
   id: '/my-work',
   path: '/my-work',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NotificationsRoute = NotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OpportunitiesRoute = OpportunitiesRouteImport.update({
@@ -213,6 +219,7 @@ export interface FileRoutesByFullPath {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/my-work': typeof MyWorkRoute
+  '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -247,6 +254,7 @@ export interface FileRoutesByTo {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/my-work': typeof MyWorkRoute
+  '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -282,6 +290,7 @@ export interface FileRoutesById {
   '/inventory': typeof InventoryRoute
   '/login': typeof LoginRoute
   '/my-work': typeof MyWorkRoute
+  '/notifications': typeof NotificationsRoute
   '/opportunities': typeof OpportunitiesRoute
   '/proposal': typeof ProposalRoute
   '/prospect': typeof ProspectRoute
@@ -318,6 +327,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/my-work'
+    | '/notifications'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -352,6 +362,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/my-work'
+    | '/notifications'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -386,6 +397,7 @@ export interface FileRouteTypes {
     | '/inventory'
     | '/login'
     | '/my-work'
+    | '/notifications'
     | '/opportunities'
     | '/proposal'
     | '/prospect'
@@ -421,6 +433,7 @@ export interface RootRouteChildren {
   InventoryRoute: typeof InventoryRoute
   LoginRoute: typeof LoginRoute
   MyWorkRoute: typeof MyWorkRoute
+  NotificationsRoute: typeof NotificationsRoute
   OpportunitiesRoute: typeof OpportunitiesRoute
   ProposalRoute: typeof ProposalRoute
   ProspectRoute: typeof ProspectRoute
@@ -506,6 +519,13 @@ declare module '@tanstack/react-router' {
       path: '/my-work'
       fullPath: '/my-work'
       preLoaderRoute: typeof MyWorkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/notifications': {
+      id: '/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof NotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/opportunities': {
@@ -697,6 +717,7 @@ const rootRouteChildren: RootRouteChildren = {
   InventoryRoute: InventoryRoute,
   LoginRoute: LoginRoute,
   MyWorkRoute: MyWorkRoute,
+  NotificationsRoute: NotificationsRoute,
   OpportunitiesRoute: OpportunitiesRoute,
   ProposalRoute: ProposalRoute,
   ProspectRoute: ProspectRoute,
