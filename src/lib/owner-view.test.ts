@@ -2,24 +2,36 @@
  * Owner, Oct 1: "have a view that allows him to see who is doing what they should be doing, when
  * they should be doing it" — "just ensure no one can see it but them." The Owner view on My Work:
  * pure rules (owner-view.ts), the List's bucket preset (my-work.ts), and source checks that the
- * toggle renders only for admins and the server function refuses anyone else.
+ * toggle renders only for admins and the server function refuses anyone else. Since the owner's
+ * later Oct 12 decision the view counts draft bids too (kind "bid"): the pure rules and the real
+ * server functions against the in-memory stand-in (src/test/fake-supabase.ts), at the end.
  */
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@tanstack/react-start", async () => ({
+  createServerFn: (await import("@/test/fake-supabase")).fakeCreateServerFn,
+}));
+vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
 
 import {
+  bidItem,
   groupWork,
   mergeWork,
   parseBucketPreset,
   presetGroups,
+  taskItem,
+  type BidIn,
   type TicketIn,
   type WorkItem,
 } from "@/lib/my-work";
 import {
   activityLabel,
   bucketCounts,
+  detailGroups,
   digestLine,
   doneThisWeek,
+  dueTotal,
   effectiveView,
   lastActivity,
   myWorkHref,
@@ -33,7 +45,15 @@ import {
   workingDaysBetween,
   type OwnerRow,
 } from "@/lib/owner-view";
+import {
+  getOwnerPersonDetail,
+  listOwnerView,
+  type OwnerPersonDetail,
+  type OwnerViewResult,
+} from "@/lib/owner-view.functions";
+import { fakeSupabase } from "@/test/fake-supabase";
 
+type Row = Record<string, unknown>;
 const read = (p: string) => readFileSync(p, "utf8");
 const ADMIN = { role: "admin" };
 const MANAGER = { role: "manager" };
@@ -110,8 +130,14 @@ describe("bucketCounts: due today and overdue per person, as My Work buckets the
       ],
       today,
     );
-    expect(c["bob"]).toEqual({ today: { tickets: 2, tasks: 1, followups: 1 }, overdue: 0 });
-    expect(c["ann"]).toEqual({ today: { tickets: 0, tasks: 0, followups: 1 }, overdue: 0 });
+    expect(c["bob"]).toEqual({
+      today: { tickets: 2, tasks: 1, followups: 1, bids: 0 },
+      overdue: 0,
+    });
+    expect(c["ann"]).toEqual({
+      today: { tickets: 0, tasks: 0, followups: 1, bids: 0 },
+      overdue: 0,
+    });
   });
   it("overdue = before today; a Done ticket is never overdue; later / no date ignored", () => {
     const c = bucketCounts(
@@ -125,7 +151,10 @@ describe("bucketCounts: due today and overdue per person, as My Work buckets the
       ],
       today,
     );
-    expect(c["bob"]).toEqual({ today: { tickets: 0, tasks: 0, followups: 0 }, overdue: 2 });
+    expect(c["bob"]).toEqual({
+      today: { tickets: 0, tasks: 0, followups: 0, bids: 0 },
+      overdue: 2,
+    });
   });
   it("agrees with mergeWork: a ticket's own follow-up rides on the ticket (counted once)", () => {
     const t: TicketIn = {
@@ -258,7 +287,7 @@ const row = (over: Partial<OwnerRow>): OwnerRow => ({
   id: "x",
   name: "X",
   role: "User",
-  dueToday: { tickets: 0, tasks: 0, followups: 0 },
+  dueToday: { tickets: 0, tasks: 0, followups: 0, bids: 0 },
   overdue: 0,
   overdueOpps: 0,
   doneThisWeek: 0,
@@ -276,12 +305,13 @@ describe("digestLine, totals, sort, links", () => {
         dueTickets: 3,
         dueTasks: 1,
         dueFollowups: 2,
+        dueBids: 1,
         overdue: 4,
         openOpps: 5,
         oppValue: 120000.4,
       }),
     ).toBe(
-      "Today: 3 tickets, 1 task, 2 follow-ups due · 4 overdue across the team · 5 open opportunities worth $120,000",
+      "Today: 3 tickets, 1 task, 2 follow-ups, 1 bid due · 4 overdue across the team · 5 open opportunities worth $120,000",
     );
   });
   it("no value: the 'worth' part is left out", () => {
@@ -290,24 +320,34 @@ describe("digestLine, totals, sort, links", () => {
         dueTickets: 0,
         dueTasks: 0,
         dueFollowups: 1,
+        dueBids: 2,
         overdue: 0,
         openOpps: 1,
         oppValue: 0,
       }),
     ).toBe(
-      "Today: 0 tickets, 0 tasks, 1 follow-up due · 0 overdue across the team · 1 open opportunity",
+      "Today: 0 tickets, 0 tasks, 1 follow-up, 2 bids due · 0 overdue across the team · 1 open opportunity",
     );
   });
   it("totals add every row", () => {
     const t = ownerTotals([
-      row({ dueToday: { tickets: 1, tasks: 2, followups: 0 }, overdue: 3, overdueOpps: 1 }),
-      row({ dueToday: { tickets: 0, tasks: 0, followups: 4 }, openOpps: 2, oppValue: 50 }),
+      row({
+        dueToday: { tickets: 1, tasks: 2, followups: 0, bids: 1 },
+        overdue: 3,
+        overdueOpps: 1,
+      }),
+      row({
+        dueToday: { tickets: 0, tasks: 0, followups: 4, bids: 2 },
+        openOpps: 2,
+        oppValue: 50,
+      }),
       row({ doneThisWeek: 6 }),
     ]);
     expect(t).toEqual({
       dueTickets: 1,
       dueTasks: 2,
       dueFollowups: 4,
+      dueBids: 3,
       overdue: 3,
       overdueOpps: 1,
       openOpps: 2,
@@ -426,5 +466,260 @@ describe("Source: admin-only on the client and the server", () => {
     expect(read("src/components/app-sidebar.tsx")).not.toMatch(
       /title:\s*"Owner"|my-work?view=owner|view: "owner"/,
     );
+  });
+});
+
+// ---- draft bids (owner, later Oct 12: "the Owner view counts draft bids too") -----------------
+//
+// Before this the view skipped kind "bid" explicitly (OWNER_VIEW_SKIPS_KIND) and listOwnerView
+// never read the bids table. Now a draft bid is a dated item like any other: due today → the
+// row's Due today (its own "bids" part), past its due date → Overdue, no due date → nowhere
+// (Later on Work Overview). Its person is who started it (created_by). Done this week and Open
+// opportunities are untouched: a bid is neither.
+
+const TODAY = "2026-10-12"; // a Monday
+const ANN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const EST = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"; // the estimator who starts bids
+const ACC = "55555555-5555-4555-8555-555555555555";
+
+const bid = (over: Partial<BidIn> = {}): BidIn => ({
+  id: "b-today",
+  name: "Gym reroof bid",
+  status: "draft",
+  due_date: TODAY,
+  account_name: "Bell County Schools",
+  created_by: EST,
+  ...over,
+});
+const call = (over: Partial<Parameters<typeof taskItem>[0]> = {}) =>
+  taskItem({
+    id: "k1",
+    title: "Call back",
+    due_date: TODAY,
+    status: "open",
+    building_id: null,
+    assignee: EST,
+    assignee_name: null,
+    ...over,
+  });
+
+describe("draft bids count (owner, later Oct 12): Due today, Overdue, the detail, the digest", () => {
+  const due = bidItem(bid())!;
+  const late = bidItem(bid({ id: "b-late", due_date: "2026-10-01" }))!;
+  const undated = bidItem(bid({ id: "b-none", due_date: null }))!;
+  const future = bidItem(bid({ id: "b-week", due_date: "2026-10-15" }))!;
+  const nobody = bidItem(bid({ id: "b-nobody", created_by: null }))!;
+
+  it("a draft due today is a Due today bid; one past its due date is Overdue", () => {
+    expect(bucketCounts([due, late], TODAY)).toEqual({
+      [EST]: { today: { tickets: 0, tasks: 0, followups: 0, bids: 1 }, overdue: 1 },
+    });
+    // Alongside the other kinds, each in its own part; the total adds every part.
+    const c = bucketCounts([due, late, call()], TODAY)[EST]!;
+    expect(c.today).toEqual({ tickets: 0, tasks: 1, followups: 0, bids: 1 });
+    expect(dueTotal(c.today)).toBe(2);
+    expect(c.overdue).toBe(1);
+  });
+  it("no due date, due later this week or no maker: counted nowhere", () => {
+    expect(bucketCounts([undated, future, nobody], TODAY)).toEqual({});
+    // A submitted / won / lost bid is no item at all (my-work.ts bidItem), so it cannot count.
+    for (const status of ["submitted", "won", "lost"]) expect(bidItem(bid({ status }))).toBeNull();
+  });
+  it("the detail lists the same bids: Today and Overdue with the Bid kind and the estimator link", () => {
+    const g = detailGroups(EST, [due, late, undated, future, call()], [], TODAY);
+    // On one day a task comes before a bid (my-work.ts KIND_ORDER / DETAIL_ORDER).
+    expect(g.today.map((i) => i.key)).toEqual(["task:k1", "bid:b-today"]);
+    expect(g.today[1]).toMatchObject({
+      kind: "bid",
+      title: "Gym reroof bid",
+      where: "Bell County Schools",
+      date: TODAY,
+      status: "Draft",
+      href: "/estimate?bid=b-today",
+    });
+    expect(g.overdue.map((i) => i.key)).toEqual(["bid:b-late"]);
+    // The lengths are the row's numbers, as everywhere on the view.
+    const b = bucketCounts([due, late, undated, future, call()], TODAY)[EST]!;
+    expect(g.today.length).toBe(dueTotal(b.today));
+    expect(g.overdue.length).toBe(b.overdue);
+    // Someone else's detail never shows them.
+    expect(detailGroups(ANN, [due, late], [], TODAY)).toEqual({ today: [], overdue: [] });
+  });
+  it("the totals and the digest carry the bids due; overdue bids are in the one overdue number", () => {
+    const t = ownerTotals([
+      row({ dueToday: { tickets: 0, tasks: 0, followups: 0, bids: 1 }, overdue: 1 }),
+      row({ dueToday: { tickets: 1, tasks: 0, followups: 0, bids: 2 } }),
+    ]);
+    expect(t.dueBids).toBe(3);
+    expect(digestLine(t)).toBe(
+      "Today: 1 ticket, 0 tasks, 0 follow-ups, 3 bids due · 1 overdue across the team · 0 open opportunities",
+    );
+  });
+  it("the component shows the bids part, adds them to the Total row and wears the sky Bid chip", () => {
+    const view = read("src/components/owner-view.tsx");
+    expect(view).toContain('if (d.bids) parts.push(`${d.bids} bid${d.bids === 1 ? "" : "s"}`);');
+    expect(view).toContain(
+      "{totals.dueTickets + totals.dueTasks + totals.dueFollowups + totals.dueBids}",
+    );
+    // The chip is Work Overview's (my-work-page.tsx), dark-paired, and no longer "never shown".
+    const cls = view.slice(
+      view.indexOf("const DETAIL_KIND_CLASS"),
+      view.indexOf('/** "Wed, Sep 30"'),
+    );
+    expect(cls).toMatch(
+      /bid:\s*"border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",/,
+    );
+    expect(cls).not.toContain("Never shown");
+    expect(read("src/lib/owner-view.ts")).not.toContain("OWNER_VIEW_SKIPS_KIND");
+  });
+});
+
+describe("listOwnerView / getOwnerPersonDetail read the draft bids (the real functions, fake client)", () => {
+  const bidRow = (over: Row = {}): Row => ({
+    id: "b-today",
+    name: "Gym reroof bid",
+    status: "draft",
+    due_date: TODAY,
+    account_id: ACC,
+    created_by: EST,
+    deleted_at: null,
+    ...over,
+  });
+  const tables = (): Record<string, Row[]> => ({
+    profiles: [
+      {
+        id: ANN,
+        role: "admin",
+        access: [],
+        technician: false,
+        full_name: "Ann Admin",
+        email: "a@x",
+      },
+      {
+        id: EST,
+        role: "user",
+        access: ["estimate"],
+        technician: false,
+        full_name: "Eve Estimator",
+        email: "eve@x",
+      },
+    ],
+    crm_accounts: [{ id: ACC, name: "Bell County Schools" }],
+    bids: [
+      bidRow(),
+      bidRow({ id: "b-late", name: "Late bid", due_date: "2026-10-01" }),
+      bidRow({ id: "b-none", name: "Undated bid", due_date: null }),
+      bidRow({ id: "b-week", name: "Later bid", due_date: "2026-10-15" }),
+      bidRow({ id: "b-nobody", name: "Imported bid", created_by: null }),
+      bidRow({ id: "b-sub", name: "Submitted bid", status: "submitted" }),
+      bidRow({ id: "b-won", name: "Won bid", status: "won", due_date: "2026-10-01" }),
+      bidRow({ id: "b-lost", name: "Lost bid", status: "lost", due_date: "2026-10-01" }),
+      bidRow({ id: "b-gone", name: "Deleted bid", deleted_at: "2026-10-11T00:00:00Z" }),
+    ],
+    service_jobs: [],
+    tasks: [],
+    crm_followups: [],
+    crm_opportunities: [],
+    service_job_events: [],
+    crm_contact_log: [],
+    service_time_entries: [],
+    audit_log: [],
+  });
+  const run = <T>(fn: unknown, data: Row, userId = ANN) =>
+    (fn as (a: { data: Row; context: unknown }) => Promise<T>)({
+      data,
+      context: { supabase: fakeSupabase(tables()).db, userId },
+    });
+  // The server trusts a sent day only within a day of the real one (work-counts.ts viewerToday).
+  const useClock = () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${TODAY}T15:00:00Z`));
+    return () => vi.useRealTimers();
+  };
+
+  it("the estimator's row: 1 bid due today, 1 overdue; nothing else moves; the admin's row is empty", async () => {
+    const stop = useClock();
+    try {
+      const r = await run<OwnerViewResult>(listOwnerView, { today: TODAY });
+      expect(r.today).toBe(TODAY);
+      const eve = r.rows.find((x) => x.id === EST)!;
+      expect(eve.dueToday).toEqual({ tickets: 0, tasks: 0, followups: 0, bids: 1 });
+      expect(eve.overdue).toBe(1);
+      expect(eve).toMatchObject({ overdueOpps: 0, doneThisWeek: 0, openOpps: 0, oppValue: 0 });
+      // The undated, later, maker-less, submitted / won / lost and deleted bids count nowhere.
+      const ann = r.rows.find((x) => x.id === ANN)!;
+      expect(ann.dueToday).toEqual({ tickets: 0, tasks: 0, followups: 0, bids: 0 });
+      expect(ann.overdue).toBe(0);
+      const t = ownerTotals(r.rows);
+      expect(t).toMatchObject({ dueBids: 1, overdue: 1 });
+      expect(digestLine(t)).toBe(
+        "Today: 0 tickets, 0 tasks, 0 follow-ups, 1 bid due · 1 overdue across the team · 0 open opportunities",
+      );
+      // Most overdue first: Eve above Ann.
+      expect(r.rows.map((x) => x.id)).toEqual([EST, ANN]);
+    } finally {
+      stop();
+    }
+  });
+  it("the estimator's detail: the bid due today under Today, the late one under Overdue, each a Bid that opens the estimator", async () => {
+    const stop = useClock();
+    try {
+      const d = await run<OwnerPersonDetail>(getOwnerPersonDetail, { userId: EST, today: TODAY });
+      expect(d.today.map((i) => i.key)).toEqual(["bid:b-today"]);
+      expect(d.today[0]).toMatchObject({
+        kind: "bid",
+        title: "Gym reroof bid",
+        where: "Bell County Schools", // the customer, read from crm_accounts
+        date: TODAY,
+        status: "Draft",
+        href: "/estimate?bid=b-today",
+        assigneeId: EST,
+      });
+      expect(d.overdue.map((i) => i.key)).toEqual(["bid:b-late"]);
+      expect(d.doneThisWeek).toEqual([]);
+      // The admin started none (the maker-less bid is nobody's).
+      const a = await run<OwnerPersonDetail>(getOwnerPersonDetail, { userId: ANN, today: TODAY });
+      expect(a.today).toEqual([]);
+      expect(a.overdue).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+  it("still admin-only: a non-admin is refused before any bid is read", async () => {
+    await expect(run(listOwnerView, { today: TODAY }, EST)).rejects.toThrow(
+      "Forbidden: admin only",
+    );
+    await expect(run(getOwnerPersonDetail, { userId: EST, today: TODAY }, EST)).rejects.toThrow(
+      "Forbidden: admin only",
+    );
+    const src = read("src/lib/owner-view.functions.ts");
+    expect(src.indexOf("Forbidden: admin only")).toBeLessThan(src.indexOf('from("bids")'));
+  });
+  it("the queries read bids the way listMyWork does: the same columns and filters, one read each, 1,000 rows", () => {
+    const src = read("src/lib/owner-view.functions.ts");
+    const mine = read("src/lib/my-work.functions.ts");
+    const cols = '.select("id, name, status, due_date, account_id, created_by")';
+    expect(mine).toContain(cols);
+    expect(src.match(/\.from\("bids"\)/g)).toHaveLength(2); // listOwnerView, getOwnerPersonDetail
+    const list = src.slice(
+      src.indexOf("export const listOwnerView"),
+      src.indexOf("export const getOwnerPersonDetail"),
+    );
+    const detail = src.slice(src.indexOf("export const getOwnerPersonDetail"));
+    for (const part of [list, detail]) {
+      const q = part.slice(part.indexOf('.from("bids")'));
+      const block = q.slice(0, q.indexOf(".limit(LIMIT)"));
+      expect(block).toContain(cols);
+      expect(block).toContain('.is("deleted_at", null)');
+      expect(block).toContain('.eq("status", "draft")');
+      expect(block).toContain('.order("due_date", { ascending: true, nullsFirst: false })');
+    }
+    // Everyone's for the table; that person's for the detail.
+    expect(list).not.toContain('.eq("created_by", userId)');
+    expect(detail).toContain('.eq("created_by", userId)');
+    expect(src).toContain("const LIMIT = 1000;");
+    // The rows go through mergeWork as kind "bid" (my-work.ts bidItems), not a path of their own.
+    expect(list).toContain('bids: must("Bids", bids),');
+    expect(detail).toContain("bids: bidRows.map((b) => ({");
   });
 });

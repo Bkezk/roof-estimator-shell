@@ -8,6 +8,11 @@
  * in that window gets one newest-row lookup per source. `audit_log` is read defensively: until
  * that table exists (or if it cannot be read) it counts as no rows.
  *
+ * Draft bids (owner, Oct 12: the Owner view counts them too) are read the way Work Overview's
+ * `listMyWork` reads them — the same columns and filters (status draft, not deleted, by due date),
+ * every draft since the viewer is the admin — and go through `mergeWork` as kind "bid", whose
+ * person is created_by. A submitted / won / lost bid is never read.
+ *
  * `getOwnerPersonDetail` is the expanded row (one person's items and last five actions), loaded
  * on demand; the same admin check comes first.
  */
@@ -92,48 +97,58 @@ export const listOwnerView = createServerFn({ method: "GET" })
     const weekTo = zonedTime(addDays(week.end, 1), "00:00").toISOString();
     const since = new Date(now.getTime() - ACTIVITY_DAYS * 86_400_000).toISOString();
 
-    const [profiles, tickets, tasks, followups, opps, doneTickets, doneTasks] = await Promise.all([
-      sb.from("profiles").select("id, full_name, email, role, technician, access"),
-      sb
-        .from("service_jobs")
-        .select(
-          "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
-        )
-        .is("deleted_at", null)
-        .in("stage", [...WORK_TICKET_STAGES])
-        .not("technician_id", "is", null)
-        .limit(LIMIT),
-      sb
-        .from("tasks")
-        .select("id, title, due_date, status, building_id, assignee, assignee_name")
-        .neq("status", "done")
-        .not("assignee", "is", null)
-        .limit(LIMIT),
-      // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
-      sb.from("crm_followups").select("*").eq("status", "open").limit(LIMIT),
-      sb
-        .from("crm_opportunities")
-        .select("id, assignee_id, status, expected_close, est_value")
-        .is("deleted_at", null)
-        .in("status", [...OPEN_OPP_STATUSES])
-        .not("assignee_id", "is", null)
-        .limit(LIMIT),
-      sb
-        .from("service_jobs")
-        .select("technician_id, stage, completed_at")
-        .is("deleted_at", null)
-        .in("stage", [...DONE_TICKET_STAGES])
-        .gte("completed_at", weekFrom)
-        .lt("completed_at", weekTo)
-        .limit(LIMIT),
-      sb
-        .from("tasks")
-        .select("assignee, status, done_at")
-        .eq("status", "done")
-        .gte("done_at", weekFrom)
-        .lt("done_at", weekTo)
-        .limit(LIMIT),
-    ]);
+    const [profiles, tickets, tasks, followups, opps, doneTickets, doneTasks, bids] =
+      await Promise.all([
+        sb.from("profiles").select("id, full_name, email, role, technician, access"),
+        sb
+          .from("service_jobs")
+          .select(
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id",
+          )
+          .is("deleted_at", null)
+          .in("stage", [...WORK_TICKET_STAGES])
+          .not("technician_id", "is", null)
+          .limit(LIMIT),
+        sb
+          .from("tasks")
+          .select("id, title, due_date, status, building_id, assignee, assignee_name")
+          .neq("status", "done")
+          .not("assignee", "is", null)
+          .limit(LIMIT),
+        // Every column: snoozed_until may not exist yet (see my-work.functions.ts).
+        sb.from("crm_followups").select("*").eq("status", "open").limit(LIMIT),
+        sb
+          .from("crm_opportunities")
+          .select("id, assignee_id, status, expected_close, est_value")
+          .is("deleted_at", null)
+          .in("status", [...OPEN_OPP_STATUSES])
+          .not("assignee_id", "is", null)
+          .limit(LIMIT),
+        sb
+          .from("service_jobs")
+          .select("technician_id, stage, completed_at")
+          .is("deleted_at", null)
+          .in("stage", [...DONE_TICKET_STAGES])
+          .gte("completed_at", weekFrom)
+          .lt("completed_at", weekTo)
+          .limit(LIMIT),
+        sb
+          .from("tasks")
+          .select("assignee, status, done_at")
+          .eq("status", "done")
+          .gte("done_at", weekFrom)
+          .lt("done_at", weekTo)
+          .limit(LIMIT),
+        // Every draft bid, as listMyWork reads them for Everyone (owner, Oct 12). The counts only
+        // need the day and the maker, so the customer's name is not looked up here.
+        sb
+          .from("bids")
+          .select("id, name, status, due_date, account_id, created_by")
+          .is("deleted_at", null)
+          .eq("status", "draft")
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(LIMIT),
+      ]);
     const people = must("Profiles", profiles);
     const followupRows = must("Follow-ups", followups);
     const items = mergeWork(
@@ -150,6 +165,7 @@ export const listOwnerView = createServerFn({ method: "GET" })
           item_id: f.item_id,
           assignee_id: f.assignee_id,
         })),
+        bids: must("Bids", bids),
       },
       (iso) => localYmd(new Date(iso)),
     );
@@ -285,7 +301,7 @@ async function loadLastActivity(
 // ---- one person's detail (the expanded row) ------------------------------------------------
 
 export interface OwnerPersonDetail {
-  /** Their Work Overview items due today — what the row's Due today counts. */
+  /** Their Work Overview items due today (draft bids included) — what the row's Due today counts. */
   today: DetailItem[];
   /** Their overdue Work Overview items and opportunities past expected close — the row's Overdue. */
   overdue: DetailItem[];
@@ -330,7 +346,7 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     // Untyped for the activity reads: audit_log may not exist yet (read defensively).
     const raw = sb as unknown as SupabaseClient;
 
-    const [tickets, tasks, followups, opps, doneTickets, doneTasks] = await Promise.all([
+    const [tickets, tasks, followups, opps, doneTickets, doneTasks, bids] = await Promise.all([
       sb
         .from("service_jobs")
         .select(
@@ -379,6 +395,15 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
         .gte("done_at", weekFrom)
         .lt("done_at", weekTo)
         .limit(LIMIT),
+      // The draft bids this person started (owner, Oct 12), as listMyWork reads one person's.
+      sb
+        .from("bids")
+        .select("id, name, status, due_date, account_id, created_by")
+        .is("deleted_at", null)
+        .eq("status", "draft")
+        .eq("created_by", userId)
+        .order("due_date", { ascending: true, nullsFirst: false })
+        .limit(LIMIT),
     ]);
     const ticketRows = must("Tickets", tickets) as TicketIn[];
     const taskRows = must("Tasks", tasks);
@@ -386,15 +411,16 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
     const oppRows = must("Opportunities", opps);
     const doneTicketRows = must("Done tickets", doneTickets);
     const doneTaskRows = must("Done tasks", doneTasks);
+    const bidRows = must("Bids", bids);
 
     const activity = await loadPersonActivity(raw, userId);
 
-    // Labels: buildings (tasks), customers (follow-ups, opportunities), ticket numbers and
+    // Labels: buildings (tasks), customers (follow-ups, opportunities, bids), ticket numbers and
     // opportunity titles (activity lines). Best effort: an unreadable label is left blank.
     const buildingIds = uniq(
       [...taskRows, ...doneTaskRows, ...activity.tasks].map((t) => t.building_id),
     );
-    const accountIds = uniq([...followupRows, ...oppRows].map((r) => r.account_id));
+    const accountIds = uniq([...followupRows, ...oppRows, ...bidRows].map((r) => r.account_id));
     const ticketIds = uniq([
       ...activity.events.map((e) => e.service_job_id),
       ...activity.contacts.filter((c) => c.kind === "ticket").map((c) => c.item_id),
@@ -436,6 +462,10 @@ export const getOwnerPersonDetail = createServerFn({ method: "GET" })
           item_id: f.item_id,
           assignee_id: f.assignee_id,
           account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
+        })),
+        bids: bidRows.map((b) => ({
+          ...b,
+          account_name: b.account_id ? (accountName.get(b.account_id) ?? null) : null,
         })),
       },
       toYmd,

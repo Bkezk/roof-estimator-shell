@@ -11,16 +11,21 @@
  *
  * Definitions (every day is the office's calendar day, America/New_York):
  *   Due today       Work Overview items in the Today bucket (`bucketOf`): open / scheduled tickets
- *                   scheduled today, open tasks due today, open follow-ups due today — the same
- *                   items Work Overview lists for that person (a ticket's own follow-up rides on it).
- *   Overdue         Work Overview items in the Overdue bucket (a Done ticket never is) plus open
+ *                   scheduled today, open tasks due today, open follow-ups due today and, since the
+ *                   owner's Oct 12 decision, draft bids due today (kind "bid": the person is who
+ *                   started it, created_by) — the same items Work Overview lists for that person
+ *                   (a ticket's own follow-up rides on it). A draft bid without a due date counts
+ *                   nowhere (it sits under Later).
+ *   Overdue         Work Overview items in the Overdue bucket (a Done ticket never is; a draft bid
+ *                   past its due date is) plus open
  *                   opportunities assigned to them past expected close (`isOverdueOpp`) that
  *                   have NO open follow-up of theirs: an opportunity with one is already on My
  *                   Work as that follow-up's row (its due date is the expected close), so it is
  *                   counted there, once (audit, Oct 2: an overdue opportunity counted twice —
  *                   Owner said 2 while the Work Overview list it links to showed 1).
  *   Done this week  tickets in done / invoiced / closed whose completed_at falls in this Mon–Sun
- *                   week, plus tasks marked done (done_at) in that week.
+ *                   week, plus tasks marked done (done_at) in that week. A bid is neither: a
+ *                   submitted / won / lost bid is not counted anywhere here.
  *   Open opps       opportunities assigned to them, status open / contacted / quoted; the
  *                   number opens the Opportunities list filtered to that person
  *                   (`oppsHref`: ?status=allopen&assignee=<id>).
@@ -106,28 +111,27 @@ export interface DueCounts {
   tickets: number;
   tasks: number;
   followups: number;
+  /** Draft bids due today (owner, Oct 12: the Owner view counts them too). */
+  bids: number;
 }
 
 export interface PersonBuckets {
   today: DueCounts;
-  /** Work Overview items in the Overdue bucket (tickets, tasks, follow-ups). */
+  /** Work Overview items in the Overdue bucket (tickets, tasks, follow-ups, draft bids). */
   overdue: number;
 }
 
 const emptyBuckets = (): PersonBuckets => ({
-  today: { tickets: 0, tasks: 0, followups: 0 },
+  today: { tickets: 0, tasks: 0, followups: 0, bids: 0 },
   overdue: 0,
 });
 
 /**
- * Draft bids (Work Overview kind "bid", owner Oct 12) are NOT the Owner view's: its columns are
- * tickets, tasks and follow-ups (plus the opportunity figures), and listOwnerView never loads
- * bids. `bucketCounts` and `detailGroups` skip the kind explicitly, so a bid row handed to them
- * can never move a Due today / Overdue number.
+ * Which Due today number each Work Overview kind moves. Draft bids (kind "bid", owner Oct 12) are
+ * counted since the owner's decision of the same day: a draft due today is a Due today bid, one
+ * past its due date is Overdue, one with no due date is nowhere (Later, like everything undated).
  */
-export const OWNER_VIEW_SKIPS_KIND = "bid" as const satisfies WorkKind;
-
-const DUE_KEY: Record<Exclude<WorkKind, typeof OWNER_VIEW_SKIPS_KIND>, keyof DueCounts> = {
+const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
   ticket: "tickets",
   inspection: "tickets",
   task: "tasks",
@@ -135,12 +139,13 @@ const DUE_KEY: Record<Exclude<WorkKind, typeof OWNER_VIEW_SKIPS_KIND>, keyof Due
   // An unassigned opportunity has no person, so it never reaches a per-person count; the key is
   // here only so the table covers every kind.
   opportunity: "followups",
+  bid: "bids",
 };
 
 /**
  * Due today and overdue per person (`assigneeId`), from Work Overview items (`mergeWork`), bucketed
  * exactly as Work Overview's List does (`bucketOf`) so a number and the list it opens agree.
- * Draft bids are not counted (OWNER_VIEW_SKIPS_KIND).
+ * Every kind counts, draft bids included (their person is created_by).
  */
 export function bucketCounts(
   items: Pick<WorkItem, "kind" | "date" | "done" | "assigneeId">[],
@@ -148,7 +153,7 @@ export function bucketCounts(
 ): Record<string, PersonBuckets> {
   const out: Record<string, PersonBuckets> = {};
   for (const it of items) {
-    if (!it.assigneeId || it.kind === OWNER_VIEW_SKIPS_KIND) continue;
+    if (!it.assigneeId) continue;
     const b = bucketOf(it, today);
     if (b !== "today" && b !== "overdue") continue;
     const c = (out[it.assigneeId] ??= emptyBuckets());
@@ -358,6 +363,8 @@ export interface OwnerTotals {
   dueTickets: number;
   dueTasks: number;
   dueFollowups: number;
+  /** Draft bids due today across the team (owner, Oct 12). */
+  dueBids: number;
   overdue: number;
   openOpps: number;
   /** Sum of est_value over the open opportunities (0 = none known). */
@@ -368,8 +375,9 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 
 /**
- * "Today: 3 tickets, 2 tasks, 1 follow-up due · 4 overdue across the team · 5 open opportunities
- * worth $120,000" — the "worth" part only when some open opportunity carries a value.
+ * "Today: 3 tickets, 2 tasks, 1 follow-up, 1 bid due · 4 overdue across the team · 5 open
+ * opportunities worth $120,000" — the "worth" part only when some open opportunity carries a
+ * value. Overdue is one number: draft bids past their due date are in it like everything else.
  */
 export function digestLine(t: OwnerTotals): string {
   const opps = plural(t.openOpps, "open opportunity", "open opportunities");
@@ -377,6 +385,7 @@ export function digestLine(t: OwnerTotals): string {
     plural(t.dueTickets, "ticket"),
     plural(t.dueTasks, "task"),
     plural(t.dueFollowups, "follow-up"),
+    plural(t.dueBids, "bid"),
   ].join(", ");
   return [
     `Today: ${due} due`,
@@ -404,7 +413,7 @@ export interface OwnerRow {
   stale: boolean;
 }
 
-export const dueTotal = (d: DueCounts) => d.tickets + d.tasks + d.followups;
+export const dueTotal = (d: DueCounts) => d.tickets + d.tasks + d.followups + d.bids;
 
 /** Most overdue first, then by name. */
 export function sortOwnerRows<T extends Pick<OwnerRow, "overdue" | "name">>(rows: T[]): T[] {
@@ -419,6 +428,7 @@ export function ownerTotals(rows: OwnerRow[]): OwnerSums {
     dueTickets: 0,
     dueTasks: 0,
     dueFollowups: 0,
+    dueBids: 0,
     overdue: 0,
     overdueOpps: 0,
     openOpps: 0,
@@ -429,6 +439,7 @@ export function ownerTotals(rows: OwnerRow[]): OwnerSums {
     t.dueTickets += r.dueToday.tickets;
     t.dueTasks += r.dueToday.tasks;
     t.dueFollowups += r.dueToday.followups;
+    t.dueBids += r.dueToday.bids;
     t.overdue += r.overdue;
     t.overdueOpps += r.overdueOpps;
     t.openOpps += r.openOpps;
@@ -541,11 +552,11 @@ function compareDetail(a: DetailItem, b: DetailItem): number {
 }
 
 /**
- * One person's Today and Overdue items: their Work Overview items (`mergeWork`) bucketed by `bucketOf`
- * exactly as `bucketCounts` does, plus their open opportunities past expected close in Overdue
- * that have no open follow-up of theirs (`followups`, as `oppCounts`): an opportunity with one is
- * listed once, as the follow-up's row (it opens the opportunity too). So today.length = the
- * row's Due today and overdue.length = the row's Overdue.
+ * One person's Today and Overdue items: their Work Overview items (`mergeWork`, draft bids
+ * included) bucketed by `bucketOf` exactly as `bucketCounts` does, plus their open opportunities
+ * past expected close in Overdue that have no open follow-up of theirs (`followups`, as
+ * `oppCounts`): an opportunity with one is listed once, as the follow-up's row (it opens the
+ * opportunity too). So today.length = the row's Due today and overdue.length = the row's Overdue.
  */
 export function detailGroups(
   userId: string,
@@ -558,7 +569,7 @@ export function detailGroups(
   const due: DetailItem[] = [];
   const late: DetailItem[] = [];
   for (const it of items) {
-    if (it.assigneeId !== userId || it.kind === OWNER_VIEW_SKIPS_KIND) continue;
+    if (it.assigneeId !== userId) continue;
     const b = bucketOf(it, today);
     if (b === "today") due.push(it);
     else if (b === "overdue") late.push(it);

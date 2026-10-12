@@ -12,7 +12,8 @@
  *
  * Rows start collapsed; clicking a person's row (or its chevron) expands it in place (owner,
  * Oct 1: "a bit more detail per person"): their Today / Overdue / Done this week items — exactly
- * the ones the numbers count — and their last five actions, loaded on demand per person
+ * the ones the numbers count, draft bids among them since Oct 12 (the Bid chip, opening the
+ * estimator) — and their last five actions, loaded on demand per person
  * (`getOwnerPersonDetail`, cached 60 s). The detail slides open and closed (height and opacity,
  * 200 ms, none under prefers-reduced-motion) with a skeleton of its cards while it loads —
  * `DetailRow` below — and never changes the table's width (owner, Oct 1: "collapsed but take
@@ -74,12 +75,13 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const linkCls = "font-semibold tabular-nums underline-offset-4 hover:underline";
 
-/** "2 tickets · 1 task" — the non-zero parts of a Due today number. */
+/** "2 tickets · 1 task · 1 bid" — the non-zero parts of a Due today number (draft bids too). */
 function dueParts(d: DueCounts): string {
   const parts: string[] = [];
   if (d.tickets) parts.push(`${d.tickets} ticket${d.tickets === 1 ? "" : "s"}`);
   if (d.tasks) parts.push(`${d.tasks} task${d.tasks === 1 ? "" : "s"}`);
   if (d.followups) parts.push(`${d.followups} follow-up${d.followups === 1 ? "" : "s"}`);
+  if (d.bids) parts.push(`${d.bids} bid${d.bids === 1 ? "" : "s"}`);
   return parts.join(" · ");
 }
 
@@ -295,7 +297,7 @@ export function OwnerView() {
                   <TableCell />
                   <TableCell className="text-right">
                     <Link {...myWorkHref("all", "today")} className={linkCls}>
-                      {totals.dueTickets + totals.dueTasks + totals.dueFollowups}
+                      {totals.dueTickets + totals.dueTasks + totals.dueFollowups + totals.dueBids}
                     </Link>
                   </TableCell>
                   <TableCell
@@ -444,8 +446,8 @@ const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
     "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
   opportunity:
     "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
-  // Never shown here (the Owner view counts no bids; owner-view.ts bucketCounts): the table
-  // covers every kind so the type stays whole.
+  // Draft bids due today / overdue (owner, Oct 12): sky, the same chip as Work Overview's
+  // (my-work-page.tsx KIND_CLASS), dark-paired; the row's link opens the estimator (`href`).
   bid: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
 };
 

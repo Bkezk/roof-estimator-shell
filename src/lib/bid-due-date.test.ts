@@ -14,7 +14,8 @@
  *  4. Work Overview: draft bids as kind "bid" by due date — Overdue / This week / Later, never
  *     Unassigned / Needs authorization / to-invoice; a submitted / won / lost bid never listed;
  *     only for callers with Estimate access; Mine / one person = the drafts they started, Everyone
- *     = every draft. The Owner view counts no bids (explicitly).
+ *     = every draft. The Owner view counts them too (owner, later Oct 12): a draft due today is a
+ *     Due today bid, one past its due date is Overdue, one with no due date is nowhere.
  *
  * The real server functions run against the in-memory stand-in (src/test/fake-supabase.ts).
  */
@@ -54,7 +55,7 @@ import {
   type WorkItem,
 } from "@/lib/my-work";
 import { listMyWork, type MyWorkResult } from "@/lib/my-work.functions";
-import { OWNER_VIEW_SKIPS_KIND, bucketCounts, detailGroups } from "@/lib/owner-view";
+import { bucketCounts, detailGroups } from "@/lib/owner-view";
 import { bidOverdueDays, isOverdueBid } from "@/lib/work-counts";
 import { fakeSupabase } from "@/test/fake-supabase";
 
@@ -567,11 +568,13 @@ describe("4. the page and the Owner view", () => {
     expect(page).toContain("{KIND_LABELS[item.kind]}");
     expect(read("src/components/owner-view.tsx")).toMatch(/bid:\s*"border-sky-300[^"]*dark:/);
   });
-  it("the Owner view counts no bids: skipped explicitly in Due today / Overdue and the detail groups", () => {
-    expect(OWNER_VIEW_SKIPS_KIND).toBe("bid");
+  it("the Owner view counts draft bids (owner, later Oct 12): Due today / Overdue and the detail groups", () => {
     const late = bidItem(bid({ due_date: "2026-10-01" }))!;
     const due = bidItem(bid({ id: "b2", due_date: TODAY }))!;
-    expect(bucketCounts([late, due], TODAY)).toEqual({});
+    const undated = bidItem(bid({ id: "b3", due_date: null }))!;
+    expect(bucketCounts([late, due, undated], TODAY)).toEqual({
+      [EST]: { today: { tickets: 0, tasks: 0, followups: 0, bids: 1 }, overdue: 1 },
+    });
     const task = taskItem({
       id: "k1",
       title: "Call",
@@ -581,14 +584,16 @@ describe("4. the page and the Owner view", () => {
       assignee: EST,
       assignee_name: null,
     });
-    expect(bucketCounts([late, due, task], TODAY)[EST]).toEqual({
-      today: { tickets: 0, tasks: 1, followups: 0 },
-      overdue: 0,
+    expect(bucketCounts([late, due, undated, task], TODAY)[EST]).toEqual({
+      today: { tickets: 0, tasks: 1, followups: 0, bids: 1 },
+      overdue: 1,
     });
-    const groups = detailGroups(EST, [late, due, task], [], TODAY);
-    expect(groups.today.map((i) => i.key)).toEqual(["task:k1"]);
-    expect(groups.overdue).toEqual([]);
-    // And its server function never loads them.
-    expect(read("src/lib/owner-view.functions.ts")).not.toContain('from("bids")');
+    // The detail lists the same items, tasks before bids on a day; the undated one is nowhere.
+    const groups = detailGroups(EST, [late, due, undated, task], [], TODAY);
+    expect(groups.today.map((i) => i.key)).toEqual(["task:k1", "bid:b2"]);
+    expect(groups.today[1]).toMatchObject({ kind: "bid", href: "/estimate?bid=b2" });
+    expect(groups.overdue.map((i) => i.key)).toEqual([`bid:${BID}`]);
+    // And its server function loads them (owner-view.test.ts runs it against the fake client).
+    expect(read("src/lib/owner-view.functions.ts")).toContain('from("bids")');
   });
 });
