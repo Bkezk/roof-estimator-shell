@@ -95,7 +95,7 @@ describe("where it applies", () => {
       "i.tickets.filter((t) => isOverdueTicket(t, i.today))",
     );
   });
-  it("Work Overview files a Done ticket under Done, never Overdue, whatever its day", () => {
+  it("Work Overview puts a Done ticket in no group — never Overdue, whatever its day (Oct 12: no Done group)", () => {
     const done = ticketItem({
       id: "t",
       number: 1,
@@ -108,7 +108,7 @@ describe("where it applies", () => {
       scheduled_date: PAST,
       technician_id: "tech",
     });
-    expect(bucketOf(done, TODAY)).toBe("done");
+    expect(bucketOf(done, TODAY)).toBeNull();
     expect(bucketOf({ ...done, done: false }, TODAY)).toBe("overdue");
   });
   it("the red tag and the list badge read the one rule; the tile's label does not say otherwise", () => {

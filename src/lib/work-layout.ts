@@ -36,7 +36,8 @@ const isBucket = (v: unknown): v is WorkBucket =>
  * A column the stored order lacks takes its default place among the columns that are there:
  * after the nearest default predecessor present, else before the nearest default successor,
  * else at the end (owner, Oct 9: a layout saved before "Waiting" existed gets it after Later,
- * before No date, as the default has it — appending put it last, after Done).
+ * before Needs authorization, as the default has it — appending put it last, after Done). A
+ * column that no longer exists (Oct 12: the No date group) is an unknown name, dropped.
  */
 export function normalizeWorkLayout(raw: unknown): WorkLayout {
   const r = (raw ?? {}) as { order?: unknown; hidden?: unknown };

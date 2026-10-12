@@ -139,8 +139,6 @@ describe("Unassigned work on Work Overview", () => {
       "week",
       "later",
       "waiting",
-      "nodate",
-      "done",
     ]);
     expect(listGroups([], TODAY).map((g) => g.bucket)).not.toContain("unassigned");
     expect(listGroups([], TODAY, { unassigned: true })[0]!.items).toEqual([]);

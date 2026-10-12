@@ -78,22 +78,15 @@ describe("defaultWho: Everyone for admins and managers, Mine for anyone else", (
   });
 });
 
-describe("List: every heading, always, in the same order (five since Oct 6: no Today; six since Oct 9: Waiting)", () => {
+describe("List: every heading, always, in the same order (five since Oct 6: no Today; six since Oct 9: Waiting; four since Oct 12: no No date, no Done)", () => {
   const today = "2026-10-01";
-  it("an empty list still has the six groups, each with (0) and its empty line", () => {
+  it("an empty list still has the four groups, each with (0) and its empty line", () => {
     const groups = listGroups([], today);
-    expect(groups.map((g) => g.label)).toEqual([
-      "Overdue",
-      "This week",
-      "Later",
-      "Waiting",
-      "No date",
-      "Done — waiting on the office",
-    ]);
+    expect(groups.map((g) => g.label)).toEqual(["Overdue", "This week", "Later", "Waiting"]);
     expect(groups.every((g) => g.items.length === 0)).toBe(true);
     for (const g of groups) expect(BUCKET_EMPTY[g.bucket]).toMatch(/\.$/);
   });
-  it("only Later and No date filled: the other four are still there, empty", () => {
+  it("only Later filled (the undated task sits there too, Oct 12): the other three are still there, empty", () => {
     const items = mergeWork({
       tickets: [],
       tasks: [
@@ -122,10 +115,8 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
     expect(groups.map((g) => [g.bucket, g.items.length])).toEqual([
       ["overdue", 0],
       ["week", 0],
-      ["later", 1],
+      ["later", 2],
       ["waiting", 0],
-      ["nodate", 1],
-      ["done", 0],
     ]);
   });
   it("the tab to start on: the preset, else the first group with anything, else This week", () => {

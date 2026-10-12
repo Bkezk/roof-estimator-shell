@@ -226,8 +226,10 @@ describe("My Work grouping", () => {
     expect(bucketOf({ date: "2026-10-01", done: false }, today)).toBe("week");
     expect(bucketOf({ date: "2026-10-03", done: false }, today)).toBe("week");
     expect(bucketOf({ date: "2026-10-04", done: false }, today)).toBe("later");
-    expect(bucketOf({ date: null, done: false }, today)).toBe("nodate");
-    expect(bucketOf({ date: "2026-09-01", done: true }, today)).toBe("done");
+    // Owner, Oct 12: no No date group — an undated item sits under Later.
+    expect(bucketOf({ date: null, done: false }, today)).toBe("later");
+    // Owner, Oct 12: no Done group either — a finished item has no group at all.
+    expect(bucketOf({ date: "2026-09-01", done: true }, today)).toBeNull();
   });
 
   it("returns the non-empty groups in order", () => {
@@ -243,21 +245,16 @@ describe("My Work grouping", () => {
       },
       utcDay,
     );
+    // Owner, Oct 12: the Done ticket (b) is not listed at all — no Done group.
+    expect(items.map((i) => i.key)).not.toContain("ticket:b");
     const groups = groupWork(items, today);
-    // Owner, Oct 6: no Today group — today's task sits in This week.
-    expect(groups.map((g) => g.label)).toEqual([
-      "Overdue",
-      "This week",
-      "Later",
-      "No date",
-      "Done — waiting on the office",
-    ]);
+    // Owner, Oct 6: no Today group — today's task sits in This week. Oct 12: no No date group —
+    // the undated ticket sits in Later, after the dated one.
+    expect(groups.map((g) => g.label)).toEqual(["Overdue", "This week", "Later"]);
     expect(groups.map((g) => g.items.map((i) => i.key))).toEqual([
       ["task:k1"],
       ["task:k9"],
-      ["ticket:a"],
-      ["ticket:c"],
-      ["ticket:b"],
+      ["ticket:a", "ticket:c"],
     ]);
   });
 });

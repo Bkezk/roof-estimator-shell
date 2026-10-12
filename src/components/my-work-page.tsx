@@ -1,8 +1,9 @@
 /**
  * Work Overview (owner, Sep 30): the signed-in person's own tickets (as lead technician), open tasks
- * and open follow-ups in one list, grouped Overdue / This week / Later / Waiting / No date (a Done
- * ticket last, never overdue; Waiting since Oct 9: a follow-up on hold), or on a month calendar
- * where a click on a day lists that day.
+ * and open follow-ups in one list, grouped Overdue / This week / Later / Waiting (Waiting since
+ * Oct 9: a follow-up on hold; since Oct 12 no "No date" group — an undated item sits under Later —
+ * and no "Done" group — a Done ticket is finished work, not listed), or on a month calendar where
+ * a click on a day lists that day.
  * Every signed-in user lands here. Admins and managers also get a "Show" picker (Mine /
  * Everyone / one person); the server returns only the caller's own items to anyone else.
  *

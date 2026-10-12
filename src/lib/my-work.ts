@@ -38,13 +38,20 @@ const OPP_STATUS_LABELS: Record<string, string> = {
   quoted: "Quoted",
 };
 
-/** The ticket stages Work Overview lists (Invoiced / Closed are the office's, not anyone's to-do). */
-export const WORK_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/**
+ * The ticket stages Work Overview lists: Open and Scheduled — the work still to be done. A Done
+ * ticket is finished work (owner, Oct 12: the "Done — waiting on the office" group is gone, for
+ * everyone): it is not listed at all; the authorizer sees it under Needs authorization through
+ * its "Authorize ticket #…" follow-up. Authorized / Invoiced / Closed are the office's, not
+ * anyone's to-do (the Authorized ones wait under "Authorized — to invoice" for whoever invoices).
+ */
+export const WORK_TICKET_STAGES = ["open", "scheduled"] as const;
 /**
  * The stages a ticket without a technician is "Unassigned" in (owner, Oct 12): Open or
  * Scheduled — work still to be done, so it needs a person. A Done ticket nobody is on (closed
- * out by the office, or its technician removed) is finished work waiting on the office: it sits
- * under Done, never under Unassigned and never flagged overdue there (#6013, #6012, #6002 did).
+ * out by the office, or its technician removed) is finished work waiting on the office: never
+ * under Unassigned and never flagged overdue there (#6013, #6012, #6002 did) — the same two
+ * stages as WORK_TICKET_STAGES.
  */
 export const UNASSIGNED_TICKET_STAGES = ["open", "scheduled"] as const;
 /**
@@ -238,7 +245,10 @@ export interface WorkItem {
   /** The day it belongs to (YYYY-MM-DD, the viewer's local day); null = no date. */
   date: string | null;
   status: string;
-  /** Finished on the person's side (a Done ticket): never overdue. */
+  /**
+   * Finished on the person's side (a Done ticket): never overdue, and not placed in any group —
+   * `bucketOf` gives null and `groupWork` drops it (owner, Oct 12: no Done group).
+   */
   done: boolean;
   href: string;
   assigneeId: string | null;
@@ -317,7 +327,7 @@ export function ticketItem(
     where: joinWhere(t.customer_name, t.site_name, t.site_address),
     // The ticket's day; an undated ticket (from before dates were required) takes its open
     // follow-up's due day, so a row whose state line reads "Overdue 3 days" sits under Overdue,
-    // not under No date (owner, Oct 1: "why does this show no date but overdue?").
+    // not under Later as undated (owner, Oct 1: "why does this show no date but overdue?").
     date:
       t.scheduled_date ?? (followup && followup.status === "open" ? toYmd(followup.due_at) : null),
     status: STAGE_LABELS[t.stage] ?? t.stage,
@@ -498,20 +508,15 @@ export function compareWork(a: WorkItem, b: WorkItem): number {
 /**
  * Every row as one sorted list. A ticket's follow-up timer is dropped when that ticket is already
  * on the list for the same person: the ticket row carries it (its state line, Snooze / Close).
- * The other way round for a Done ticket under review (owner, Oct 6): when the rows hold its open
- * "Authorize ticket #…" follow-up (kind "invoice"), that row is the one to act on, under Needs
- * authorization, and the ticket's own Done row is dropped — the authorizer on the Everyone view
- * saw the ticket twice, once in each group.
+ * Only Open / Scheduled tickets are listed (WORK_TICKET_STAGES): a Done ticket is finished work
+ * (owner, Oct 12: no Done group), so a row the server still sends in that stage is dropped here;
+ * its open "Authorize ticket #…" follow-up (kind "invoice") is the authorizer's row to act on,
+ * under Needs authorization — the one place the ticket shows.
  */
 export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = localYmd): WorkItem[] {
   const names = rows.names ?? {};
-  const underReview = new Set(
-    rows.followups.filter((f) => f.kind === "invoice" && f.status === "open").map((f) => f.item_id),
-  );
-  const listedTickets = rows.tickets.filter(
-    (t) =>
-      (WORK_TICKET_STAGES as readonly string[]).includes(t.stage) &&
-      !(t.stage === "done" && underReview.has(t.id)),
+  const listedTickets = rows.tickets.filter((t) =>
+    (WORK_TICKET_STAGES as readonly string[]).includes(t.stage),
   );
   const ticketTimers = new Map<string, FollowupIn>();
   for (const f of rows.followups)
@@ -542,16 +547,7 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
 // ---- grouping ------------------------------------------------------------------------------
 
 export type WorkBucket =
-  | "unassigned"
-  | "authorize"
-  | "invoice"
-  | "overdue"
-  | "today"
-  | "week"
-  | "later"
-  | "waiting"
-  | "nodate"
-  | "done";
+  "unassigned" | "authorize" | "invoice" | "overdue" | "today" | "week" | "later" | "waiting";
 
 export const BUCKET_LABELS: Record<WorkBucket, string> = {
   // Owner, Oct 7: nobody's work first — it needs a person before it needs a date.
@@ -566,8 +562,6 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   later: "Later",
   // Owner, Oct 9: a held follow-up (snoozed_until ahead) waits here, out of Overdue / This week.
   waiting: "Waiting",
-  nodate: "No date",
-  done: "Done — waiting on the office",
 };
 
 /**
@@ -581,20 +575,23 @@ export const BUCKET_HELP: Record<WorkBucket, string> = {
     "Scheduled tickets whose day has passed and opportunities past their expected close. The assignee is reminded on the Reminders schedule.",
   today: "Due today.",
   week: "Due later this week.",
-  later: "Due after this week.",
+  // Owner, Oct 12: no "No date" group — an undated item (from before dates were required) sits here.
+  later: "Due after this week, or with no date yet.",
   waiting:
     "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
   authorize:
     "Tickets the technician has completed. The authorizer reviews the close-out and marks them Authorized; reminders repeat until then.",
   invoice:
     "Authorized tickets waiting for an invoice, with how long they have waited. Shown to the people who invoice.",
-  nodate: "Items with no scheduled day or due date.",
-  done: "Tickets you completed that are waiting on authorization or an invoice. Nothing for you to do here.",
 };
 
 // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done";
-// Oct 9: Waiting after Later, before No date; Oct 12: "Authorized — to invoice" right after
-// Needs authorization (the next step of the same flow).
+// Oct 9: Waiting after Later; Oct 12: "Authorized — to invoice" right after Needs authorization
+// (the next step of the same flow); the "No date" group removed — tickets require a date,
+// opportunities default an expected close and tasks get a date and time, so it was nearly always
+// empty; an undated item sits under Later — and the "Done — waiting on the office" group removed
+// for everyone: a Done ticket is finished work, not listed (its authorizer sees it under Needs
+// authorization through its Authorize follow-up).
 const BUCKET_ORDER: WorkBucket[] = [
   "unassigned",
   "overdue",
@@ -604,8 +601,6 @@ const BUCKET_ORDER: WorkBucket[] = [
   "waiting",
   "authorize",
   "invoice",
-  "nodate",
-  "done",
 ];
 /**
  * The List's groups (owner, Oct 6: "get rid of the today section in the work overview list,
@@ -623,12 +618,15 @@ export type BucketIn = Pick<
   followup?: Pick<WorkFollowup, "status" | "snoozed_until"> | null;
 };
 
-/** The List's bucket for an item: `bucketOf`, with today folded into This week. */
+/**
+ * The List's bucket for an item: `bucketOf`, with today folded into This week; null for a finished
+ * (Done) item, which the List drops.
+ */
 export const listBucketOf = (
   item: BucketIn,
   today: string,
   toYmd: (iso: string) => string = localYmd,
-): WorkBucket => {
+): WorkBucket | null => {
   const b = bucketOf(item, today, toYmd);
   return b === "today" ? "week" : b;
 };
@@ -648,9 +646,10 @@ export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
 
 /**
  * Where an item sits relative to `today` (YYYY-MM-DD): before today = Overdue; today; later this
- * week (through Saturday); Later; No date. A Done ticket is finished work, never overdue: it has
- * its own last group (owner, Oct 12, item 11: "overdue" means an Open / Scheduled ticket past its
- * day — the one rule, with work-counts.ts isOverdueTicket). An Authorized ticket waits under
+ * week (through Saturday); Later (an item with no date too — owner, Oct 12: no "No date" group).
+ * A Done ticket is finished work, never overdue and in no group at all — null (owner, Oct 12: no
+ * "Done — waiting on the office" group; item 11: "overdue" means an Open / Scheduled ticket past
+ * its day — the one rule, with work-counts.ts isOverdueTicket). An Authorized ticket waits under
  * "Authorized — to invoice", whatever its date. A follow-up on hold (owner, Oct 9: snoozed_until
  * ahead of today) waits under Waiting whatever its date, so a held item is never counted overdue
  * while it waits.
@@ -659,16 +658,17 @@ export function bucketOf(
   item: BucketIn,
   today: string,
   toYmd: (iso: string) => string = localYmd,
-): WorkBucket {
+): WorkBucket | null {
   // A Done ticket is finished work, whoever is or is not on it (owner, Oct 12: Done tickets with
-  // no technician sat under Unassigned, flagged overdue): Done before Unassigned.
-  if (item.done) return "done";
+  // no technician sat under Unassigned, flagged overdue): finished before Unassigned, and placed
+  // nowhere.
+  if (item.done) return null;
   // Nobody's work sits under Unassigned whatever its date (overdue or not): the fix is a person.
   if (item.unassigned) return "unassigned";
   if (item.needsAuth) return "authorize";
   if (item.toInvoice) return "invoice";
   if (isHeldOn(item.followup, today, toYmd)) return "waiting";
-  if (!item.date) return "nodate";
+  if (!item.date) return "later";
   if (item.date < today) return "overdue";
   if (item.date === today) return "today";
   if (item.date <= endOfWeek(today)) return "week";
@@ -681,7 +681,10 @@ export interface WorkGroup {
   items: WorkItem[];
 }
 
-/** The List view: non-empty groups in order, each sorted by `compareWork` (due first). */
+/**
+ * The List view: non-empty groups in order, each sorted by `compareWork` (due first). A finished
+ * (Done) item has no group and is left out.
+ */
 export function groupWork(
   items: WorkItem[],
   today: string,
@@ -690,6 +693,7 @@ export function groupWork(
   const by = new Map<WorkBucket, WorkItem[]>();
   for (const it of items) {
     const b = listBucketOf(it, today, toYmd);
+    if (!b) continue;
     const list = by.get(b) ?? [];
     list.push(it);
     by.set(b, list);
@@ -704,7 +708,9 @@ export function groupWork(
 /**
  * The List's headings (owner, Oct 1: "how many sub headings are there? I see Later and No date
  * only"): every List group, always, in the same order — an empty one shows "(0)" and this line.
- * (Five since Oct 6: Today is folded into This week; six since Oct 9: Waiting.)
+ * (Five since Oct 6: Today is folded into This week; six since Oct 9: Waiting; four since Oct 12:
+ * the No date group is gone, an undated item sits under Later, and so is the Done group — a Done
+ * ticket is not listed.)
  */
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   unassigned: "Everything has someone on it.",
@@ -715,8 +721,6 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   week: "Nothing due this week.",
   later: "Nothing scheduled later.",
   waiting: "Nothing on hold.",
-  nodate: "Everything has a date.",
-  done: "Nothing waiting on the office.",
 };
 
 /**

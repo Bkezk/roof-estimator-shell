@@ -117,7 +117,7 @@ describe("Work Overview: a held item waits", () => {
     hold_count: 1,
     ...over,
   });
-  it("the Waiting bucket sits after Later, before Needs authorization and No date", () => {
+  it("the Waiting bucket sits after Later, before Needs authorization", () => {
     expect(LIST_BUCKETS).toEqual([
       "unassigned",
       "overdue",
@@ -126,8 +126,6 @@ describe("Work Overview: a held item waits", () => {
       "waiting",
       "authorize",
       "invoice",
-      "nodate",
-      "done",
     ]);
     expect(BUCKET_LABELS.waiting).toBe("Waiting");
     expect(BUCKET_EMPTY.waiting).toBe("Nothing on hold.");
@@ -136,8 +134,6 @@ describe("Work Overview: a held item waits", () => {
       "This week",
       "Later",
       "Waiting",
-      "No date",
-      "Done — waiting on the office",
     ]);
   });
   it("an overdue item on hold moves out of Overdue into Waiting; back on the hold's day", () => {
@@ -160,11 +156,11 @@ describe("Work Overview: a held item waits", () => {
       ),
     ).toBe("overdue");
   });
-  it("Unassigned, Needs authorization and Done still win; a held ticket row waits too", () => {
+  it("Unassigned and Needs authorization still win, a finished item has no group; a held ticket row waits too", () => {
     const held = followupItem(fu(), {}, utcDay);
     expect(bucketOf({ ...held, needsAuth: true }, TODAY, utcDay)).toBe("authorize");
     expect(bucketOf({ ...held, unassigned: true }, TODAY, utcDay)).toBe("unassigned");
-    expect(bucketOf({ ...held, done: true }, TODAY, utcDay)).toBe("done");
+    expect(bucketOf({ ...held, done: true }, TODAY, utcDay)).toBeNull();
     const items = mergeWork(
       {
         tickets: [
@@ -219,19 +215,19 @@ describe("Work Overview: a held item waits", () => {
     expect(backFromHold({ ...ended, status: "closed" }, TODAY, utcDay)).toBe(false);
     expect(backFromHold(null, TODAY, utcDay)).toBe(false);
   });
-  it("a layout saved before Waiting existed gets it after Later, before No date", () => {
+  it("a layout saved before Waiting existed gets it after Later, before Needs authorization", () => {
+    // Such a layout still names "nodate" and "done" (the groups removed Oct 12): dropped.
     const old = normalizeWorkLayout({
       order: ["unassigned", "overdue", "week", "later", "authorize", "nodate", "done"],
-      hidden: ["nodate"],
+      hidden: ["authorize"],
     });
     expect(old.order).toEqual(LIST_BUCKETS);
-    expect(old.hidden).toEqual(["nodate"]);
+    expect(old.hidden).toEqual(["authorize"]);
     const moved = normalizeWorkLayout({
       order: ["done", "later", "unassigned", "overdue", "week", "authorize", "nodate"],
       hidden: [],
     });
     expect(moved.order).toEqual([
-      "done",
       "later",
       "waiting",
       "unassigned",
@@ -239,7 +235,6 @@ describe("Work Overview: a held item waits", () => {
       "week",
       "authorize",
       "invoice",
-      "nodate",
     ]);
   });
 });

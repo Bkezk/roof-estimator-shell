@@ -26,9 +26,10 @@ const groups = (...b: WorkBucket[]) => b.map((bucket) => ({ bucket, n: 0 }));
 const order = (l: WorkLayout) => l.order.join(",");
 
 describe("the default layout", () => {
-  it("is the owner's order: Unassigned, Overdue, This week, Later, Waiting, Needs authorization, Authorized — to invoice, No date, Done", () => {
-    // Waiting (owner, Oct 9: a follow-up on hold) after Later, before No date; "Authorized — to
-    // invoice" (owner, Oct 12) right after Needs authorization.
+  it("is the owner's order: Unassigned, Overdue, This week, Later, Waiting, Needs authorization, Authorized — to invoice", () => {
+    // Waiting (owner, Oct 9: a follow-up on hold) after Later; "Authorized — to invoice" (owner,
+    // Oct 12) right after Needs authorization; No date and Done gone (owner, Oct 12: an undated
+    // item sits under Later, a Done ticket is not listed).
     expect([...DEFAULT_WORK_LAYOUT_ORDER]).toEqual([
       "unassigned",
       "overdue",
@@ -37,8 +38,6 @@ describe("the default layout", () => {
       "waiting",
       "authorize",
       "invoice",
-      "nodate",
-      "done",
     ]);
     expect(DEFAULT_WORK_LAYOUT_ORDER).toBe(LIST_BUCKETS);
     expect(isDefaultWorkLayout(defaultWorkLayout())).toBe(true);
@@ -47,15 +46,14 @@ describe("the default layout", () => {
     expect(normalizeWorkLayout(null)).toEqual(defaultWorkLayout());
     expect(normalizeWorkLayout("junk")).toEqual(defaultWorkLayout());
     const partial = normalizeWorkLayout({
-      order: ["done", "bogus", "done", "week"],
-      hidden: ["nodate", "x"],
+      order: ["invoice", "bogus", "done", "invoice", "week"],
+      hidden: ["waiting", "x"],
     });
     // A missing column takes its default place among the ones there (Oct 9): after the nearest
-    // default predecessor present, else before the nearest default successor.
-    expect(order(partial)).toBe(
-      "done,unassigned,overdue,week,later,waiting,authorize,invoice,nodate",
-    );
-    expect(partial.hidden).toEqual(["nodate"]);
+    // default predecessor present, else before the nearest default successor. ("done", a group
+    // that is gone, is an unknown name like "bogus".)
+    expect(order(partial)).toBe("invoice,unassigned,overdue,week,later,waiting,authorize");
+    expect(partial.hidden).toEqual(["waiting"]);
     expect(isDefaultWorkLayout(partial)).toBe(false);
   });
   it("a layout saved before Waiting existed gets it after Later, not at the end", () => {
@@ -63,9 +61,8 @@ describe("the default layout", () => {
       order: ["unassigned", "overdue", "week", "later", "authorize", "nodate", "done"],
       hidden: ["authorize"],
     });
-    expect(order(saved)).toBe(
-      "unassigned,overdue,week,later,waiting,authorize,invoice,nodate,done",
-    );
+    // ("nodate" and "done", the groups removed Oct 12, are dropped like any unknown name.)
+    expect(order(saved)).toBe("unassigned,overdue,week,later,waiting,authorize,invoice");
     expect(saved.hidden).toEqual(["authorize"]);
   });
   it("a layout saved before Authorized — to invoice existed gets it after Needs authorization (Oct 12)", () => {
@@ -73,18 +70,14 @@ describe("the default layout", () => {
       order: ["unassigned", "overdue", "week", "later", "waiting", "authorize", "nodate", "done"],
       hidden: ["waiting"],
     });
-    expect(order(saved)).toBe(
-      "unassigned,overdue,week,later,waiting,authorize,invoice,nodate,done",
-    );
+    expect(order(saved)).toBe("unassigned,overdue,week,later,waiting,authorize,invoice");
     expect(saved.hidden).toEqual(["waiting"]);
     // Needs authorization moved to the front: the new column follows it there.
     const moved = normalizeWorkLayout({
       order: ["authorize", "unassigned", "overdue", "week", "later", "waiting", "nodate", "done"],
       hidden: [],
     });
-    expect(order(moved)).toBe(
-      "authorize,invoice,unassigned,overdue,week,later,waiting,nodate,done",
-    );
+    expect(order(moved)).toBe("authorize,invoice,unassigned,overdue,week,later,waiting");
   });
 });
 
@@ -92,12 +85,18 @@ describe("arranging the columns", () => {
   const all = groups(...LIST_BUCKETS);
   it("applies the order and sets the hidden ones aside for the restore chips", () => {
     const l: WorkLayout = {
-      order: ["done", "unassigned", "overdue", "week", "later", "authorize", "nodate"],
-      hidden: ["nodate", "authorize"],
+      order: ["invoice", "unassigned", "overdue", "week", "later", "authorize", "waiting"],
+      hidden: ["waiting", "authorize"],
     };
     const { shown, hidden } = applyWorkLayout(all, l);
-    expect(shown.map((g) => g.bucket)).toEqual(["done", "unassigned", "overdue", "week", "later"]);
-    expect(hidden.map((g) => g.bucket)).toEqual(["authorize", "nodate"]);
+    expect(shown.map((g) => g.bucket)).toEqual([
+      "invoice",
+      "unassigned",
+      "overdue",
+      "week",
+      "later",
+    ]);
+    expect(hidden.map((g) => g.bucket)).toEqual(["authorize", "waiting"]);
     // A group the list does not have (Needs authorization for a non-authorizer) is simply absent.
     const few = applyWorkLayout(groups("overdue", "week"), l);
     expect(few.shown.map((g) => g.bucket)).toEqual(["overdue", "week"]);
@@ -109,38 +108,30 @@ describe("arranging the columns", () => {
   });
   it("drag a heading onto another column: before one ahead of it, after one behind it", () => {
     const d = defaultWorkLayout();
-    expect(order(moveBucket(d, "done", "unassigned"))).toBe(
-      "done,unassigned,overdue,week,later,waiting,authorize,invoice,nodate",
+    expect(order(moveBucket(d, "invoice", "unassigned"))).toBe(
+      "invoice,unassigned,overdue,week,later,waiting,authorize",
     );
-    expect(order(moveBucket(d, "unassigned", "done"))).toBe(
-      "overdue,week,later,waiting,authorize,invoice,nodate,done,unassigned",
+    expect(order(moveBucket(d, "unassigned", "invoice"))).toBe(
+      "overdue,week,later,waiting,authorize,invoice,unassigned",
     );
     expect(order(moveBucket(d, "authorize", "overdue"))).toBe(
-      "unassigned,authorize,overdue,week,later,waiting,invoice,nodate,done",
+      "unassigned,authorize,overdue,week,later,waiting,invoice",
     );
     expect(order(moveBucket(d, "overdue", "later"))).toBe(
-      "unassigned,week,later,overdue,waiting,authorize,invoice,nodate,done",
+      "unassigned,week,later,overdue,waiting,authorize,invoice",
     );
     expect(moveBucket(d, "week", "week")).toBe(d);
   });
   it("the X hides a column, a chip brings it back, and the last column cannot be hidden", () => {
-    let l = hideBucket(defaultWorkLayout(), "nodate");
-    expect(l.hidden).toEqual(["nodate"]);
-    expect(hideBucket(l, "nodate")).toBe(l);
-    for (const b of [
-      "unassigned",
-      "overdue",
-      "week",
-      "later",
-      "waiting",
-      "authorize",
-      "invoice",
-    ] as WorkBucket[])
+    let l = hideBucket(defaultWorkLayout(), "waiting");
+    expect(l.hidden).toEqual(["waiting"]);
+    expect(hideBucket(l, "waiting")).toBe(l);
+    for (const b of ["unassigned", "overdue", "week", "later", "authorize"] as WorkBucket[])
       l = hideBucket(l, b);
-    expect(l.hidden).toHaveLength(8);
-    expect(hideBucket(l, "done")).toBe(l);
+    expect(l.hidden).toHaveLength(6);
+    expect(hideBucket(l, "invoice")).toBe(l);
     expect(showBucket(l, "overdue").hidden).not.toContain("overdue");
-    // Back comes "nodate" in its own place, not at the end.
+    // Back comes "week" in its own place, not at the end.
     const back = showBucket(hideBucket(defaultWorkLayout(), "week"), "week");
     expect(back).toEqual(defaultWorkLayout());
   });
@@ -155,7 +146,7 @@ describe("the layout follows the user", () => {
   }
   it("is cached per user in the browser; the default clears the cache", () => {
     const s = new FakeStorage();
-    const l = hideBucket(defaultWorkLayout(), "done");
+    const l = hideBucket(defaultWorkLayout(), "invoice");
     writeStoredWorkLayout(s, "u1", l);
     expect(readStoredWorkLayout(s, "u1")).toEqual(l);
     expect(readStoredWorkLayout(s, "u2")).toBeNull();

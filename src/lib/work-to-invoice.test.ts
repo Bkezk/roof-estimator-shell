@@ -94,15 +94,7 @@ describe("the bucket", () => {
   });
   it("shows for whoever invoices, empty or not; never for anyone else unless something is in it", () => {
     const forInvoicer = listGroups([], TODAY, { invoice: true }).map((g) => g.bucket);
-    expect(forInvoicer).toEqual([
-      "overdue",
-      "week",
-      "later",
-      "waiting",
-      "invoice",
-      "nodate",
-      "done",
-    ]);
+    expect(forInvoicer).toEqual(["overdue", "week", "later", "waiting", "invoice"]);
     expect(listGroups([], TODAY).map((g) => g.bucket)).not.toContain("invoice");
     // The authorizer's column and this one, in that order, for someone who is both.
     expect(listGroups([], TODAY, { authorize: true, invoice: true }).map((g) => g.bucket)).toEqual([
@@ -112,8 +104,6 @@ describe("the bucket", () => {
       "waiting",
       "authorize",
       "invoice",
-      "nodate",
-      "done",
     ]);
     const withOne = listGroups([ticketItem(ticket(), {}, null, utcDay)], TODAY, {});
     expect(withOne.find((g) => g.bucket === "invoice")!.items).toHaveLength(1);
@@ -125,11 +115,11 @@ describe("the bucket", () => {
         hidden: [],
       }).order,
     ).toEqual(LIST_BUCKETS);
-    // Needs authorization moved to the front: the new column follows it there (and No date, whose
-    // nearest default predecessor present is then the new column, follows that).
+    // Needs authorization moved to the front: the new column follows it there. (A saved "nodate"
+    // or "done" — the groups removed Oct 12 — is dropped like any unknown name.)
     expect(
       normalizeWorkLayout({ order: ["done", "authorize", "week"], hidden: [] }).order.join(","),
-    ).toBe("done,authorize,invoice,nodate,unassigned,overdue,week,later,waiting");
+    ).toBe("authorize,invoice,unassigned,overdue,week,later,waiting");
   });
 });
 

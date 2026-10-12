@@ -30,12 +30,13 @@ const task = (id: string, due: string | null) => ({
 });
 
 describe("the List without Today", () => {
-  it("has six groups: Overdue, This week, Later, Waiting, No date, Done", () => {
+  it("has four groups: Overdue, This week, Later, Waiting", () => {
     // Unassigned (Oct 7) and Needs authorization (Oct 5) lead, each shown only to those it is for.
     // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and
     // Done" — the default; each user may drag their own order (lib/work-layout.ts). Oct 9:
-    // Waiting (a follow-up on hold) after Later, before No date. Oct 12: "Authorized — to
-    // invoice" after Needs authorization, for whoever sees invoices.
+    // Waiting (a follow-up on hold) after Later. Oct 12: "Authorized — to invoice" after Needs
+    // authorization, for whoever sees invoices; no No date group any more (an undated item sits
+    // under Later) and no Done group (a Done ticket is not listed).
     expect(LIST_BUCKETS).toEqual([
       "unassigned",
       "overdue",
@@ -44,16 +45,12 @@ describe("the List without Today", () => {
       "waiting",
       "authorize",
       "invoice",
-      "nodate",
-      "done",
     ]);
     expect(listGroups([], today).map((g) => g.label)).toEqual([
       "Overdue",
       "This week",
       "Later",
       "Waiting",
-      "No date",
-      "Done — waiting on the office",
     ]);
   });
   it("today's items are in This week, first, then the rest of the week by date", () => {

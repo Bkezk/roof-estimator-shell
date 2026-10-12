@@ -6,9 +6,10 @@
  *    above the columns, in order; columns with items stay columns. Hidden (×) columns stay out
  *    entirely and keep their own "Hidden: … Reset layout" row. The fold never touches a layout.
  * 2. A ⓘ (lucide Info) with a tooltip beside every column title, tab and chip: BUCKET_HELP.
- * 3. A Done ticket is never Unassigned: not in the unassigned query (Open / Scheduled only), under
- *    Done whatever its technician (or under Needs authorization through its Authorize follow-up —
- *    one row, never both), never flagged overdue.
+ * 3. A Done ticket is never Unassigned: not in the unassigned query (Open / Scheduled only), never
+ *    flagged overdue. Since later that day it is not listed anywhere (the Done group is gone, for
+ *    everyone): the authorizer sees it once, under Needs authorization through its Authorize
+ *    follow-up.
  */
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ import {
   WORK_TICKET_STAGES,
   bucketOf,
   flagUnassigned,
+  groupWork,
   listBucketOf,
   listGroups,
   mergeWork,
@@ -77,15 +79,13 @@ describe("1. empty columns fold into chips", () => {
       group("week"),
       group("later", [task("far", "2026-12-01")]),
       group("waiting"),
-      group("nodate"),
-      group("done"),
     ];
     const { columns, empty } = splitEmptyGroups(groups);
     expect(columns.map((g) => g.bucket)).toEqual(["overdue", "later"]);
-    expect(empty.map((g) => g.bucket)).toEqual(["unassigned", "week", "waiting", "nodate", "done"]);
+    expect(empty.map((g) => g.bucket)).toEqual(["unassigned", "week", "waiting"]);
     // The same group objects, nothing copied or re-sorted.
     expect(columns[0]).toBe(groups[1]);
-    expect(empty.map((g) => g.items.length)).toEqual([0, 0, 0, 0, 0]);
+    expect(empty.map((g) => g.items.length)).toEqual([0, 0, 0]);
   });
   it("everything empty: no columns, every group a chip; everything filled: no chips", () => {
     const all = listGroups([], TODAY, { authorize: true, invoice: true, unassigned: true });
@@ -112,13 +112,7 @@ describe("1. empty columns fold into chips", () => {
     const { columns, empty } = splitEmptyGroups(shown);
     expect(hidden.map((g) => g.bucket)).toEqual(["waiting"]);
     expect(columns.map((g) => g.bucket)).toEqual(["week"]);
-    expect(empty.map((g) => g.bucket)).toEqual([
-      "unassigned",
-      "overdue",
-      "later",
-      "nodate",
-      "done",
-    ]);
+    expect(empty.map((g) => g.bucket)).toEqual(["unassigned", "overdue", "later"]);
     expect(empty.map((g) => g.bucket)).not.toContain("waiting");
     // The fold reads the layout and never writes it.
     expect(layout).toEqual(hideBucket(defaultWorkLayout(), "waiting"));
@@ -147,15 +141,13 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
         "Scheduled tickets whose day has passed and opportunities past their expected close. The assignee is reminded on the Reminders schedule.",
       today: "Due today.",
       week: "Due later this week.",
-      later: "Due after this week.",
+      later: "Due after this week, or with no date yet.",
       waiting:
         "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
       authorize:
         "Tickets the technician has completed. The authorizer reviews the close-out and marks them Authorized; reminders repeat until then.",
       invoice:
         "Authorized tickets waiting for an invoice, with how long they have waited. Shown to the people who invoice.",
-      nodate: "Items with no scheduled day or due date.",
-      done: "Tickets you completed that are waiting on authorization or an invoice. Nothing for you to do here.",
     });
   });
 });
@@ -275,10 +267,10 @@ const ticket = (over: Partial<TicketIn> = {}): TicketIn => ({
 });
 
 describe("3. a Done ticket with no technician is never Unassigned (pure rules)", () => {
-  it("the unassigned stages are Open and Scheduled — the overdue stages, not the listed ones", () => {
+  it("the unassigned stages are Open and Scheduled — the overdue stages, and (since the Done group went) the listed ones", () => {
     expect([...UNASSIGNED_TICKET_STAGES]).toEqual(["open", "scheduled"]);
     expect([...UNASSIGNED_TICKET_STAGES]).toEqual([...OVERDUE_TICKET_STAGES]);
-    expect([...WORK_TICKET_STAGES]).toContain("done");
+    expect([...WORK_TICKET_STAGES]).toEqual(["open", "scheduled"]);
   });
   it("unassignedItems drops it (keeps an Open or Scheduled one)", () => {
     const items = unassignedItems(
@@ -295,23 +287,29 @@ describe("3. a Done ticket with no technician is never Unassigned (pure rules)",
     );
     expect(items.map((i) => i.key)).toEqual(["ticket:open", "ticket:sched"]);
   });
-  it("bucketOf / listBucketOf: Done wins over Unassigned, and it is never overdue", () => {
+  it("bucketOf / listBucketOf: a finished item has no group (never Unassigned, never overdue); groupWork drops it", () => {
     const done = ticketItem(ticket(), {}, null, utcDay);
     expect(done).toMatchObject({ done: true, assigneeId: null, date: "2026-10-01" });
-    expect(bucketOf(done, TODAY, utcDay)).toBe("done");
-    expect(listBucketOf(done, TODAY, utcDay)).toBe("done");
-    // Even marked unassigned by mistake, a done item sits under Done and is not flagged.
+    expect(bucketOf(done, TODAY, utcDay)).toBeNull();
+    expect(listBucketOf(done, TODAY, utcDay)).toBeNull();
+    // Even marked unassigned by mistake, a done item is placed nowhere and is not flagged.
     const marked = { ...done, unassigned: true, since: "2026-09-20" };
-    expect(bucketOf(marked, TODAY, utcDay)).toBe("done");
+    expect(bucketOf(marked, TODAY, utcDay)).toBeNull();
     expect(unassignedOverdue(marked, TODAY, 0)).toBe(false);
     expect(flagUnassigned([marked], TODAY, 0)[0]!.flag).toBe(false);
+    expect(groupWork([marked], TODAY, utcDay)).toEqual([]);
+    expect(
+      listGroups([marked], TODAY, { unassigned: true, toYmd: utcDay }).every(
+        (g) => g.items.length === 0,
+      ),
+    ).toBe(true);
     // An Open ticket nobody is on is still Unassigned and still flagged past the timer.
     const open = { ...ticketItem(ticket({ stage: "open" }), {}, null, utcDay), unassigned: true };
     expect(bucketOf(open, TODAY, utcDay)).toBe("unassigned");
     expect(unassignedOverdue(open, TODAY)).toBe(true);
     const src = read("src/lib/my-work.ts");
     const fn = src.slice(src.indexOf("export function bucketOf"));
-    expect(fn.indexOf('if (item.done) return "done";')).toBeLessThan(
+    expect(fn.indexOf("if (item.done) return null;")).toBeLessThan(
       fn.indexOf('if (item.unassigned) return "unassigned";'),
     );
   });
@@ -382,6 +380,13 @@ describe("3. listMyWork, through the fake client", () => {
           scheduled_date: "2026-10-05",
         }),
         job({ id: "j-done-ted", number: 6002, technician_id: TECH }),
+        job({
+          id: "j-sched-ted",
+          number: 6003,
+          stage: "scheduled",
+          scheduled_date: "2026-10-14",
+          technician_id: TECH,
+        }),
       ],
       tasks: [],
       crm_followups: [],
@@ -412,26 +417,23 @@ describe("3. listMyWork, through the fake client", () => {
     return { r, items, by, where };
   };
 
-  it("Everyone (a manager): the Done ticket nobody is on sits under Done, not Unassigned, not overdue", async () => {
-    const { r, by, where } = await run(MANAGER, "all");
-    // The server: Open / Scheduled only in the unassigned rows; the Done one with the tickets.
+  it("Everyone (a manager): a Done ticket is listed nowhere — nobody's or Ted's; Unassigned holds the Scheduled one", async () => {
+    const { r, by, where, items } = await run(MANAGER, "all");
+    // The server: Open / Scheduled only, in the unassigned rows and in the tickets.
     expect(r.unassigned!.tickets.map((t) => t.id)).toEqual(["j-open-nobody"]);
-    expect(r.tickets.map((t) => t.id).sort()).toEqual(["j-done-nobody", "j-done-ted"]);
-    // The page: once, under Done; Unassigned holds the Scheduled one, flagged (past its day).
-    expect(where("ticket:j-done-nobody")).toEqual(["done"]);
-    expect(by["done"]!.map((i) => i.key).sort()).toEqual([
-      "ticket:j-done-nobody",
-      "ticket:j-done-ted",
-    ]);
+    expect(r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);
+    // The page: the Done tickets are in no group (Oct 12: no Done group); Unassigned holds the
+    // Scheduled one nobody is on, flagged (past its day); Ted's Scheduled one is in This week.
+    expect(where("ticket:j-done-nobody")).toEqual([]);
+    expect(where("ticket:j-done-ted")).toEqual([]);
+    expect(items.map((i) => i.key).sort()).toEqual(["ticket:j-open-nobody", "ticket:j-sched-ted"]);
+    expect(by["done"]).toBeUndefined();
     expect(by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
     expect(by["unassigned"]![0]!.flag).toBe(true);
     expect(by["overdue"] ?? []).toEqual([]);
-    const done = by["done"]!.find((i) => i.key === "ticket:j-done-nobody")!;
-    expect(done.flag).toBeUndefined();
-    expect(done.unassigned).toBeUndefined();
-    expect(done.done).toBe(true);
+    expect(by["week"]!.map((i) => i.key)).toEqual(["ticket:j-sched-ted"]);
   });
-  it("with its Authorize follow-up open: one row, under Needs authorization, and Done is empty of it", async () => {
+  it("with its Authorize follow-up open: the authorizer sees it once, under Needs authorization", async () => {
     tables["crm_followups"] = [authorizeFollowup];
     // The authorizer's own view (Mine).
     const mine = await run(BRANDON);
@@ -439,24 +441,26 @@ describe("3. listMyWork, through the fake client", () => {
     expect(mine.where("followup:f-auth")).toEqual(["authorize"]);
     expect(mine.where("ticket:j-done-nobody")).toEqual([]);
     expect(mine.by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
-    // Everyone: the ticket is in the rows, but its Authorize row is the one listed — never both.
+    // Everyone: the ticket is not even in the rows; its Authorize row is the one listed.
     const all = await run(MANAGER, "all");
-    expect(all.r.tickets.map((t) => t.id)).toContain("j-done-nobody");
+    expect(all.r.tickets.map((t) => t.id)).not.toContain("j-done-nobody");
     expect(all.where("followup:f-auth")).toEqual(["authorize"]);
     expect(all.where("ticket:j-done-nobody")).toEqual([]);
-    expect(all.by["done"]!.map((i) => i.key)).toEqual(["ticket:j-done-ted"]);
+    expect(all.by["done"]).toBeUndefined();
     expect(all.by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
   });
-  it("Mine and one person's view carry their own work only; a technician gets no unassigned rows", async () => {
+  it("Mine and one person's view carry their own open work only; a technician gets no unassigned rows", async () => {
     const mine = await run(MANAGER);
     expect(mine.r.tickets).toEqual([]);
     expect(mine.r.unassigned!.tickets.map((t) => t.id)).toEqual(["j-open-nobody"]);
     const ted = await run(MANAGER, TECH);
-    expect(ted.r.tickets.map((t) => t.id)).toEqual(["j-done-ted"]);
+    expect(ted.r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);
+    expect(ted.where("ticket:j-done-ted")).toEqual([]);
     const tech = await run(TECH);
     expect(tech.r.unassigned).toBeNull();
-    expect(tech.r.tickets.map((t) => t.id)).toEqual(["j-done-ted"]);
+    expect(tech.r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);
     expect(tech.where("ticket:j-done-nobody")).toEqual([]);
+    expect(tech.where("ticket:j-done-ted")).toEqual([]);
   });
   it("the queries, pinned", () => {
     const fn = read("src/lib/my-work.functions.ts");
@@ -464,15 +468,12 @@ describe("3. listMyWork, through the fake client", () => {
     expect(unassigned).toContain('.in("stage", [...UNASSIGNED_TICKET_STAGES])');
     expect(unassigned).toContain('.is("technician_id", null)');
     expect(unassigned).not.toContain("WORK_TICKET_STAGES");
-    const done = fn.slice(fn.indexOf("const dq ="), fn.indexOf("let kq ="));
-    expect(done).toContain('scope === "all"');
-    expect(done).toContain('.eq("stage", "done")');
-    expect(done).toContain('.is("technician_id", null)');
-    expect(fn).toContain(
-      "tickets: [...(tickets.data ?? []), ...(doneNobody.data ?? [])] as TicketIn[],",
-    );
-    expect(fn).toContain(
-      "if (doneNobody.error) throw new Error(`Done tickets: ${doneNobody.error.message}`);",
-    );
+    // The listed tickets: Open / Scheduled (WORK_TICKET_STAGES); no Done query of any kind.
+    const listed = fn.slice(fn.indexOf("let tq ="), fn.indexOf("let kq ="));
+    expect(listed).toContain('.in("stage", [...WORK_TICKET_STAGES])');
+    expect(listed).not.toContain('.eq("stage", "done")');
+    expect(fn).not.toContain("const dq =");
+    expect(fn).not.toContain("doneNobody");
+    expect(fn).toContain("tickets: (tickets.data ?? []) as TicketIn[],");
   });
 });
