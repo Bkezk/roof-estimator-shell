@@ -32,7 +32,14 @@ const setMyNotifyPrefs =
     if (!row) return [];
     if (args["p_email"] !== null) row["notify_email"] = args["p_email"];
     if (args["p_push"] !== null) row["notify_push"] = args["p_push"];
-    return [{ notify_email: row["notify_email"], notify_push: row["notify_push"] }];
+    if (args["p_leads"] !== null) row["notify_leads"] = args["p_leads"];
+    return [
+      {
+        notify_email: row["notify_email"],
+        notify_push: row["notify_push"],
+        notify_leads: row["notify_leads"] ?? false,
+      },
+    ];
   };
 
 function env(rpcs: Record<string, FakeRpc> = { set_my_notify_prefs: setMyNotifyPrefs(TECH) }) {
@@ -53,7 +60,7 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
     const e = env();
     await e.call({ notify_email: false });
     expect(e.rpcCalls).toEqual([
-      { fn: "set_my_notify_prefs", args: { p_email: false, p_push: null } },
+      { fn: "set_my_notify_prefs", args: { p_email: false, p_push: null, p_leads: null } },
     ]);
     expect(e.writes.filter((w) => w.table === "profiles")).toEqual([]);
     expect(e.tables["profiles"]![0]).toMatchObject({ notify_email: false, notify_push: true });
@@ -64,8 +71,8 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
     await e.call({ notify_push: false });
     await e.call({ notify_email: false, notify_push: true });
     expect(e.rpcCalls.map((c) => c.args)).toEqual([
-      { p_email: null, p_push: false },
-      { p_email: false, p_push: true },
+      { p_email: null, p_push: false, p_leads: null },
+      { p_email: false, p_push: true, p_leads: null },
     ]);
     expect(e.tables["profiles"]![0]).toMatchObject({ notify_email: false, notify_push: true });
   });
@@ -96,6 +103,7 @@ describe("setNotifyPrefs saves through set_my_notify_prefs", () => {
     await expect(env().call({ notify_email: false })).resolves.toEqual({
       notify_email: false,
       notify_push: true,
+      notify_leads: false,
     });
   });
 });
@@ -141,10 +149,10 @@ describe("migration 20261002180000_notify_prefs.sql", () => {
     expect(sql).not.toMatch(/create function/);
   });
 
-  it("is typed", () => {
+  it("is typed (the three-argument form of 20261012160000_notify_leads.sql, which the app calls)", () => {
     const types = readFileSync("src/integrations/supabase/types.ts", "utf8");
     expect(types).toContain(
-      "set_my_notify_prefs: {\n        Args: { p_email: boolean | null; p_push: boolean | null };\n        Returns: { notify_email: boolean; notify_push: boolean }[];\n      };",
+      "set_my_notify_prefs: {\n        Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null };\n        Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean }[];\n      };",
     );
   });
 });

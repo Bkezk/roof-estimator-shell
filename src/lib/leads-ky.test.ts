@@ -355,7 +355,7 @@ class CappedDb {
     return new CappedQuery(this);
   }
   async rpc(name: string) {
-    return { data: name === "prospect_user_ids" ? ["u1"] : null, error: null };
+    return { data: name === "lead_notice_user_ids" ? ["u1"] : null, error: null };
   }
 }
 class CappedQuery {

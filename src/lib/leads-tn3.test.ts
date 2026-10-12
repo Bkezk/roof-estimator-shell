@@ -319,7 +319,7 @@ class FakeDb {
     return new FakeQuery(this, table);
   }
   async rpc(name: string) {
-    return { data: name === "prospect_user_ids" ? ["u1", "u2"] : null, error: null };
+    return { data: name === "lead_notice_user_ids" ? ["u1", "u2"] : null, error: null };
   }
 }
 class FakeQuery {

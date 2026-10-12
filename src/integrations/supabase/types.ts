@@ -2327,6 +2327,7 @@ export type Database = {
           id: string;
           notify_email: boolean;
           notify_push: boolean;
+          notify_leads: boolean;
           role: string;
           technician: boolean;
           theme: string;
@@ -2343,6 +2344,7 @@ export type Database = {
           id: string;
           notify_email?: boolean;
           notify_push?: boolean;
+          notify_leads?: boolean;
           role?: string;
           technician?: boolean;
           theme?: string;
@@ -2359,6 +2361,7 @@ export type Database = {
           id?: string;
           notify_email?: boolean;
           notify_push?: boolean;
+          notify_leads?: boolean;
           role?: string;
           technician?: boolean;
           theme?: string;
@@ -4292,8 +4295,8 @@ export type Database = {
       set_my_theme: { Args: { p_theme: string }; Returns: undefined };
       set_my_work_layout: { Args: { p_layout: Json | null }; Returns: undefined };
       set_my_notify_prefs: {
-        Args: { p_email: boolean | null; p_push: boolean | null };
-        Returns: { notify_email: boolean; notify_push: boolean }[];
+        Args: { p_email: boolean | null; p_push: boolean | null; p_leads: boolean | null };
+        Returns: { notify_email: boolean; notify_push: boolean; notify_leads: boolean }[];
       };
       building_county_counts_storm: {
         Args: never;
@@ -4308,6 +4311,7 @@ export type Database = {
         Returns: number;
       };
       prospect_user_ids: { Args: never; Returns: string[] };
+      lead_notice_user_ids: { Args: never; Returns: string[] };
       stamp_storm_fetch: { Args: { note: string }; Returns: undefined };
       stamp_lead_fetch: {
         Args: { note: string; problems?: string[] | null };

@@ -29,8 +29,6 @@ import {
 
 import { useAuth } from "@/lib/auth-store";
 import {
-  PAGE_LABELS,
-  ROLE_LABELS,
   isOffice,
   managesTickets,
   seesOpportunitiesList,
@@ -585,8 +583,9 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <SidebarMenu>
-          {/* Owner, Sep 28: the name is the account link (info, password, notifications) so
-              the menu has one item fewer. */}
+          {/* Owner, Sep 28: the account link (info, password, notifications) sits in the footer
+              so the menu has one item fewer. Owner, Oct 12: it reads "My account"; the name is
+              the small second line (the footer row was already two lines). */}
           {profile && (
             <SidebarMenuItem>
               <SidebarMenuButton
@@ -599,13 +598,9 @@ export function AppSidebar() {
                   <UserRound className="h-4 w-4 shrink-0" />
                   {!collapsed && (
                     <span className="min-w-0 text-xs leading-tight">
-                      <span className="block truncate font-medium text-foreground">
-                        {profile.full_name || profile.email}
-                      </span>
+                      <span className="block truncate font-medium text-foreground">My account</span>
                       <span className="block truncate text-muted-foreground">
-                        {profile.role !== "user"
-                          ? ROLE_LABELS[profile.role]
-                          : profile.access.map((p) => PAGE_LABELS[p]).join(" · ") || "No pages"}
+                        {profile.full_name || profile.email}
                       </span>
                     </span>
                   )}

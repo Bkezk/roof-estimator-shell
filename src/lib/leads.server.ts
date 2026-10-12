@@ -3109,7 +3109,11 @@ export async function saveLeadRows(
   const newRoof = fresh.filter((r) => r.is_roof);
   let notified = 0;
   if (newRoof.length) {
-    const { data: ids } = await admin.rpc("prospect_user_ids");
+    // Owner, Oct 12: lead notices are opt-in. lead_notice_user_ids (migration
+    // 20261012160000_notify_leads.sql) is prospect_user_ids narrowed to profiles.notify_leads,
+    // so the list handed to notify() already leaves out everyone with the switch off: no inbox
+    // row, email or push for them. (Storm notices still go to prospect_user_ids.)
+    const { data: ids } = await admin.rpc("lead_notice_user_ids");
     if (ids?.length) {
       const top = newRoof
         .slice(0, 3)

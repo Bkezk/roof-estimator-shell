@@ -6,7 +6,6 @@ import { Inbox } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/integrations/supabase/client";
-import { PAGE_LABELS } from "@/lib/access";
 import { useAuth } from "@/lib/auth-store";
 import { getNotifyPrefs, sendTestNotification, setNotifyPrefs } from "@/lib/followups.functions";
 import {
@@ -78,12 +77,8 @@ function AccountPage() {
               <span className="text-muted-foreground">Email: </span>
               {profile.email}
             </p>
-            <p>
-              <span className="text-muted-foreground">Pages: </span>
-              {profile.role === "admin"
-                ? "all"
-                : profile.access.map((p) => PAGE_LABELS[p]).join(", ") || "none yet"}
-            </p>
+            {/* Owner, Oct 12: the list of pages this login can open is gone from here (it is
+                the sidebar, after all); an admin still sees it under Users & access. */}
             <p className="text-xs text-muted-foreground">
               An admin changes names, roles and pages under Admin › Users &amp; access.
             </p>
@@ -146,7 +141,12 @@ function AccountPage() {
 }
 
 const PREFS_KEY = ["notify-prefs"] as const;
-type Prefs = { notify_email: boolean; notify_push: boolean; devices: number };
+type Prefs = {
+  notify_email: boolean;
+  notify_push: boolean;
+  notify_leads: boolean;
+  devices: number;
+};
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -166,8 +166,11 @@ function NotificationsCard() {
   const prefs = useQuery({ queryKey: PREFS_KEY, queryFn: () => getFn(), enabled: !!session });
 
   const save = useMutation({
-    mutationFn: (patch: { notify_email?: boolean; notify_push?: boolean }) =>
-      setFn({ data: patch }),
+    mutationFn: (patch: {
+      notify_email?: boolean;
+      notify_push?: boolean;
+      notify_leads?: boolean;
+    }) => setFn({ data: patch }),
     onMutate: (patch) => {
       const before = qc.getQueryData<Prefs>(PREFS_KEY);
       if (before) qc.setQueryData<Prefs>(PREFS_KEY, { ...before, ...patch });
@@ -290,6 +293,22 @@ function NotificationsCard() {
                 checked={p?.notify_push ?? false}
                 disabled={!p}
                 onCheckedChange={(v) => save.mutate({ notify_push: v })}
+              />
+            </div>
+            {/* Owner, Oct 12: lead notices (the bid-board stream) are opt-in, off by default;
+                saved through the same prefs function as the two switches above. */}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <Label htmlFor="notify-leads">Lead notices</Label>
+                <p className="text-xs text-muted-foreground">
+                  New leads from the bid boards. Off unless you work them.
+                </p>
+              </div>
+              <Switch
+                id="notify-leads"
+                checked={p?.notify_leads ?? false}
+                disabled={!p}
+                onCheckedChange={(v) => save.mutate({ notify_leads: v })}
               />
             </div>
           </>

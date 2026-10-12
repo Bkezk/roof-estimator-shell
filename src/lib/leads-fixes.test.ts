@@ -206,7 +206,7 @@ class FakeDb {
   }
   async rpc(name: string, args: Rec = {}) {
     this.rpcs.push({ name, args });
-    return { data: name === "prospect_user_ids" ? ["u1"] : null, error: null };
+    return { data: name === "lead_notice_user_ids" ? ["u1"] : null, error: null };
   }
 }
 class FakeQuery {
