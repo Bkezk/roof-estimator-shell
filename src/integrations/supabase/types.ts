@@ -4415,7 +4415,11 @@ export type Database = {
           technician: boolean;
         }[];
       };
-      /** 20261005150000_ticket_authorizer.sql: who reviews Done tickets (ids). */
+      /**
+       * 20261005150000_ticket_authorizer.sql: who reviews Done tickets (ids), the first owning
+       * the Authorize follow-up; since 20261012170000_managers_authorize.sql the named
+       * authorizer, then every other admin and manager.
+       */
       ticket_authorizers: {
         Args: never;
         Returns: string[];

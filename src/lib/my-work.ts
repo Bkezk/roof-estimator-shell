@@ -47,9 +47,10 @@ const OPP_STATUS_LABELS: Record<string, string> = {
 /**
  * The ticket stages Work Overview lists: Open and Scheduled — the work still to be done. A Done
  * ticket is finished work (owner, Oct 12: the "Done — waiting on the office" group is gone, for
- * everyone): it is not listed at all; the authorizer sees it under Needs authorization through
- * its "Authorize ticket #…" follow-up. Authorized / Invoiced / Closed are the office's, not
- * anyone's to-do (the Authorized ones wait under "Authorized — to invoice" for whoever invoices).
+ * everyone): it is not listed at all here; it waits under Needs authorization for every admin and
+ * manager (`toAuthorizeItems`), the named authorizer's row being its "Authorize ticket #…"
+ * follow-up. Authorized / Invoiced / Closed are the office's, not anyone's to-do (the Authorized
+ * ones wait under "Authorized — to invoice" for whoever invoices).
  */
 export const WORK_TICKET_STAGES = ["open", "scheduled"] as const;
 /**
@@ -66,6 +67,14 @@ export const UNASSIGNED_TICKET_STAGES = ["open", "scheduled"] as const;
  * Sage): the row shows how long it has waited, as the Invoices queue does.
  */
 export const TO_INVOICE_STAGE = "authorized";
+/**
+ * The stage whose tickets wait to be authorized (owner, Oct 12: "make managers able to
+ * authorize, apparently they do that sometimes"): listed for every admin and manager
+ * (`managesTickets`) under "Needs authorization", whatever `who` asks for — the queue is the
+ * office's. The named authorizer (ticket_authorizers()[0]) owns the "Authorize ticket #…"
+ * follow-up and its reminders; everyone else sees the ticket row, with how long it has waited.
+ */
+export const TO_AUTHORIZE_STAGE = "done";
 
 const STAGE_LABELS: Record<string, string> = {
   open: "Open",
@@ -136,6 +145,8 @@ export interface TicketIn {
   created_at?: string | null;
   /** When it reached its stage (sent for Authorized tickets: "Waiting N days" to invoice). */
   stage_changed_at?: string | null;
+  /** When its close-out was finished (sent for Done tickets: "Waiting N days" to authorize). */
+  completed_at?: string | null;
 }
 
 export interface TaskIn {
@@ -165,6 +176,12 @@ export interface FollowupIn {
   item_id: string;
   assignee_id: string;
   account_name?: string | null;
+  /**
+   * An opportunity follow-up's opportunity status (open / contacted / quoted; owner, Oct 12: the
+   * assigned row read "Open" whatever the status, while an unassigned row showed the real one).
+   * Null / absent when unknown: the row reads "Open" as before.
+   */
+  opportunity_status?: string | null;
   /** Reminder cadence and a running hold (Work Overview's follow-up state line). */
   every_days?: number | null;
   snoozed_until?: string | null;
@@ -256,6 +273,12 @@ export interface WorkRows {
    * sees invoices, whatever `who` asks for (the queue is the office's, not one person's).
    */
   toInvoice?: TicketIn[] | null;
+  /**
+   * The Done tickets waiting to be authorized (owner, Oct 12): sent only to an admin or a
+   * manager, whatever `who` asks for. A ticket whose Authorize follow-up is among `followups` is
+   * listed once, as that follow-up row (`mergeWork`).
+   */
+  toAuthorize?: TicketIn[] | null;
 }
 
 // ---- items ---------------------------------------------------------------------------------
@@ -281,8 +304,9 @@ export interface WorkItem {
   /** The open follow-up timer on this item (a ticket's, or the follow-up row itself). */
   followup: WorkFollowup | null;
   /**
-   * A Done ticket's review timer ("Authorize ticket #…", follow-up kind "invoice"): it sits under
-   * "Needs authorization" (M9, owner Oct 5).
+   * Waiting to be authorized, under "Needs authorization" (M9, owner Oct 5): a Done ticket's
+   * review timer ("Authorize ticket #…", follow-up kind "invoice"), or — for an admin or a
+   * manager who does not hold that timer (owner, Oct 12) — the Done ticket's own row.
    */
   needsAuth?: boolean;
   /** Nobody's yet (a ticket without a technician, an opportunity without an assignee). */
@@ -293,7 +317,10 @@ export interface WorkItem {
   flag?: boolean;
   /** An Authorized ticket waiting for its invoice: under "Authorized — to invoice" (Oct 12). */
   toInvoice?: boolean;
-  /** When it reached Authorized (ISO), for "Waiting N days" (`waitingDays`). */
+  /**
+   * When it reached Authorized, or was completed (ISO), for "Waiting N days" (`waitingDays`) on a
+   * to-invoice or a Needs authorization row.
+   */
   waitingSince?: string | null;
 }
 
@@ -401,6 +428,44 @@ export function toInvoiceItems(
     .sort(compareWork);
 }
 
+/**
+ * A Done ticket as a Needs authorization row (owner, Oct 12: every admin and manager sees the
+ * queue, not only the named authorizer). Not `done`: the ticket is finished on the technician's
+ * side, but authorizing it is this viewer's to-do, so it is placed (under "Needs authorization",
+ * whatever its date) rather than dropped. Waiting since its close-out (completed_at), else since
+ * it entered the stage. Null for any other stage: the server filters, this keeps the rule here.
+ */
+export function toAuthorizeItem(
+  t: TicketIn,
+  names: Record<string, string> = {},
+  toYmd: (iso: string) => string = localYmd,
+): WorkItem | null {
+  if (t.stage !== TO_AUTHORIZE_STAGE) return null;
+  return {
+    ...ticketItem(t, names, null, toYmd),
+    done: false,
+    needsAuth: true,
+    waitingSince: authorizeWaitingSince(t),
+  };
+}
+
+/** When a Done ticket started waiting for its authorization: its close-out, else its stage stamp. */
+export const authorizeWaitingSince = (
+  t: Pick<TicketIn, "completed_at" | "stage_changed_at">,
+): string | null => t.completed_at ?? t.stage_changed_at ?? null;
+
+/** The Done tickets the server sent as Needs authorization rows (`toAuthorizeItem`), sorted. */
+export function toAuthorizeItems(
+  rows: TicketIn[] | null | undefined,
+  names: Record<string, string> = {},
+  toYmd: (iso: string) => string = localYmd,
+): WorkItem[] {
+  return (rows ?? [])
+    .map((t) => toAuthorizeItem(t, names, toYmd))
+    .filter((x): x is WorkItem => x !== null)
+    .sort(compareWork);
+}
+
 export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkItem {
   return {
     key: `task:${t.id}`,
@@ -431,7 +496,9 @@ export function followupItem(
     title: f.title,
     where: joinWhere(f.account_name),
     date: toYmd(f.due_at),
-    status: "Open",
+    // An opportunity's row reads its real status (Open / Contacted / Quoted — the Opportunities
+    // page's labels, as the Unassigned rows do; owner, Oct 12); a follow-up itself is "Open".
+    status: f.kind === "opportunity" ? oppStatusLabel(f.opportunity_status) : "Open",
     done: false,
     // Only an in-app path (the follow-up's own link); anything else stays on Work Overview.
     href: f.url.startsWith("/") && !f.url.startsWith("//") ? f.url : "/my-work",
@@ -469,6 +536,10 @@ export function bidItem(b: BidIn, names: Record<string, string> = {}): WorkItem 
 export function bidItems(rows: BidIn[] | null | undefined, names: Record<string, string> = {}) {
   return (rows ?? []).map((b) => bidItem(b, names)).filter((x): x is WorkItem => x !== null);
 }
+
+/** An opportunity's status as its row shows it; unknown → "Open" (an open follow-up's default). */
+const oppStatusLabel = (status: string | null | undefined): string =>
+  status ? (OPP_STATUS_LABELS[status] ?? status) : "Open";
 
 /** An unassigned open opportunity as a row: its expected close is its day. */
 export function opportunityItem(o: OppIn, toYmd: (iso: string) => string = localYmd): WorkItem {
@@ -563,8 +634,10 @@ export function compareWork(a: WorkItem, b: WorkItem): number {
  * on the list for the same person: the ticket row carries it (its state line, Snooze / Close).
  * Only Open / Scheduled tickets are listed (WORK_TICKET_STAGES): a Done ticket is finished work
  * (owner, Oct 12: no Done group), so a row the server still sends in that stage is dropped here;
- * its open "Authorize ticket #…" follow-up (kind "invoice") is the authorizer's row to act on,
- * under Needs authorization — the one place the ticket shows.
+ * under Needs authorization it shows once — as its open "Authorize ticket #…" follow-up (kind
+ * "invoice") when that row is among the viewer's follow-ups (the named authorizer's row, with
+ * Snooze / Close and the reminder line), else as the Done ticket row the server sent an admin or
+ * manager in `toAuthorize` (owner, Oct 12: managers authorize too).
  */
 export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = localYmd): WorkItem[] {
   const names = rows.names ?? {};
@@ -594,12 +667,38 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
   // ticket already on the list (a manager who is also its technician) is listed once.
   const seen = new Set([...assignedKeys, ...unassigned.map((u) => u.key)]);
   const toInvoice = toInvoiceItems(rows.toInvoice, names, toYmd).filter((t) => !seen.has(t.key));
+  // The Done tickets waiting to be authorized (owner, Oct 12), for every admin and manager. One
+  // row per ticket: its Authorize follow-up when that is listed (the named authorizer's row —
+  // Snooze / Close, the reminder line — which then also says how long the ticket has waited),
+  // else the ticket row itself.
+  const authorizeTimer = new Map<string, string>();
+  for (const f of rows.followups)
+    if (f.kind === "invoice" && f.status === "open")
+      authorizeTimer.set(f.item_id, `followup:${f.id}`);
+  const waitingByTimer = new Map<string, string | null>();
+  const toAuthorize: WorkItem[] = [];
+  for (const t of rows.toAuthorize ?? []) {
+    const item = toAuthorizeItem(t, names, toYmd);
+    if (!item) continue;
+    const timerKey = authorizeTimer.get(t.id);
+    if (timerKey) waitingByTimer.set(timerKey, item.waitingSince ?? null);
+    else if (!seen.has(item.key)) toAuthorize.push(item);
+  }
+  const followupsOut = followups.map((i) =>
+    waitingByTimer.has(i.key) ? { ...i, waitingSince: waitingByTimer.get(i.key) ?? null } : i,
+  );
   // Draft bids by due date (owner, Oct 12), for a caller with Estimate access; the server
   // already scoped them to the viewer's people (created_by).
   const bids = bidItems(rows.bids, names);
-  return [...tickets, ...tasks, ...followups, ...unassigned, ...toInvoice, ...bids].sort(
-    compareWork,
-  );
+  return [
+    ...tickets,
+    ...tasks,
+    ...followupsOut,
+    ...unassigned,
+    ...toInvoice,
+    ...toAuthorize,
+    ...bids,
+  ].sort(compareWork);
 }
 
 // ---- grouping ------------------------------------------------------------------------------
@@ -637,8 +736,9 @@ export const BUCKET_HELP: Record<WorkBucket, string> = {
   later: "Due after this week, or with no date yet (a bid without a due date too).",
   waiting:
     "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
+  // Owner, Oct 12: "make managers able to authorize" — every admin and manager sees the queue.
   authorize:
-    "Tickets the technician has completed. The authorizer reviews the close-out and marks them Authorized; reminders repeat until then.",
+    "Tickets the technician has completed. Any admin or manager can review the close-out and mark them Authorized; the named authorizer gets the reminders.",
   invoice:
     "Authorized tickets waiting for an invoice, with how long they have waited. Shown to the people who invoice.",
 };
@@ -784,8 +884,8 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
 /**
  * The List groups in order, empty ones included, each sorted by `compareWork`. "Unassigned" comes
  * first, for everyone but a technician-only user (`opts.unassigned`; owner, Oct 7) or when
- * something is in it; "Needs authorization" next, only for the person who authorizes
- * (`opts.authorize`) or when something is in it (a manager looking at that person's work);
+ * something is in it; "Needs authorization" next, only for whoever authorizes — every admin and
+ * manager since Oct 12 (`opts.authorize`) — or when something is in it;
  * "Authorized — to invoice" only for whoever sees invoices (`opts.invoice`) or when something is
  * in it — everyone else never has the column, not even among the layout's hidden chips.
  */

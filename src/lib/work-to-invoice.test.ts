@@ -231,9 +231,9 @@ describe("the server (listMyWork)", () => {
     const page = read("src/components/my-work-page.tsx");
     expect(page).toContain("invoice={!!q.data?.invoicer}");
     expect(page).toContain("listGroups(items, today, { authorize, invoice, unassigned })");
-    expect(page).toContain(
-      "{item.toInvoice && <WaitingToInvoice since={item.waitingSince ?? null} today={today} />}",
-    );
+    // The Waiting line (shared since Oct 12 with the Needs authorization rows).
+    expect(page).toContain("{(item.toInvoice || item.needsAuth) && (");
+    expect(page).toContain("<WaitingSince since={item.waitingSince ?? null} today={today} />");
     // Nine columns at most now.
     expect(page).toContain('9: "xl:grid-cols-9"');
     expect(page).toContain("GRID_COLS[Math.min(9, Math.max(1, count))]");

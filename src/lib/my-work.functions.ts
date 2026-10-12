@@ -14,8 +14,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { canAccess, isOffice, seesEveryone, seesInvoices } from "@/lib/access";
+import { canAccess, isOffice, managesTickets, seesEveryone, seesInvoices } from "@/lib/access";
 import {
+  TO_AUTHORIZE_STAGE,
   TO_INVOICE_STAGE,
   UNASSIGNED_OVERDUE_DAYS_DEFAULT,
   UNASSIGNED_TICKET_STAGES,
@@ -48,7 +49,11 @@ export interface MyWorkResult {
   canPick: boolean;
   /** Whose items came back: "all" or the profile ids. */
   scope: string[] | "all";
-  /** Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? */
+  /**
+   * Does the caller review Done tickets (the Needs authorization tab; M9, owner Oct 5)? Since
+   * Oct 12 every admin and manager (`managesTickets`; ticket_authorizers() names them all once
+   * 20261012170000_managers_authorize.sql is applied, and the flag says so even before).
+   */
   authorizer: boolean;
   /**
    * Nobody's work (owner, Oct 7): Open / Scheduled tickets without a technician (a Done one is
@@ -67,6 +72,14 @@ export interface MyWorkResult {
    * for an invoicer whatever `who` asks for (the queue is the office's); [] for anyone else.
    */
   toInvoice: TicketIn[];
+  /**
+   * The Done tickets waiting to be authorized (owner, Oct 12: "make managers able to authorize"),
+   * longest waiting first, for an admin or a manager whatever `who` asks for (the queue is the
+   * office's); [] for anyone else. The page lists each once under Needs authorization — as its
+   * Authorize follow-up row when that is among `followups`, else as the ticket row (my-work.ts
+   * mergeWork).
+   */
+  toAuthorize: TicketIn[];
   /**
    * Draft bids by due date (owner, Oct 12: "at the origination of bids we should have a bid due
    * date required so we can also have those show on this week, overdue, etc"), for a caller with
@@ -201,6 +214,23 @@ export const listMyWork = createServerFn({ method: "GET" })
           .order("stage_changed_at", { ascending: true, nullsFirst: false })
           .limit(LIMIT)
       : Promise.resolve({ data: [] as TicketIn[], error: null });
+    // The Done tickets, for every admin and manager (owner, Oct 12: "make managers able to
+    // authorize, apparently they do that sometimes"; managesTickets — the Invoice block's "Mark
+    // authorized" gate). Whatever `who` asks for, like the to-invoice queue. Longest waiting
+    // first: by the close-out stamp (completed_at), then the stage stamp (20261006180000).
+    const reviewer = managesTickets(me);
+    const aTickets = reviewer
+      ? sb
+          .from("service_jobs")
+          .select(
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, completed_at, stage_changed_at",
+          )
+          .is("deleted_at", null)
+          .eq("stage", TO_AUTHORIZE_STAGE)
+          .order("completed_at", { ascending: true, nullsFirst: false })
+          .order("stage_changed_at", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : Promise.resolve({ data: [] as TicketIn[], error: null });
 
     // Draft bids by due date (owner, Oct 12), for Estimate access only — the page the bids live
     // on (RLS bids_authenticated_all is the same gate). Mine / one person: the drafts that person
@@ -220,20 +250,33 @@ export const listMyWork = createServerFn({ method: "GET" })
     const bRows = bq ?? Promise.resolve({ data: [] as BidRow[], error: null });
 
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days, toInvoice, bids] =
-      await Promise.all([
-        tq,
-        kq,
-        fq,
-        sb.rpc("ticket_authorizers"),
-        uTickets,
-        uOpps,
-        uTasks,
-        uDays,
-        iTickets,
-        bRows,
-      ]);
+    const [
+      tickets,
+      tasks,
+      followups,
+      auth,
+      unTickets,
+      unOpps,
+      unTasks,
+      days,
+      toInvoice,
+      toAuthorize,
+      bids,
+    ] = await Promise.all([
+      tq,
+      kq,
+      fq,
+      sb.rpc("ticket_authorizers"),
+      uTickets,
+      uOpps,
+      uTasks,
+      uDays,
+      iTickets,
+      aTickets,
+      bRows,
+    ]);
     if (toInvoice.error) throw new Error(`Tickets to invoice: ${toInvoice.error.message}`);
+    if (toAuthorize.error) throw new Error(`Tickets to authorize: ${toAuthorize.error.message}`);
     if (bids.error) throw new Error(`Bids: ${bids.error.message}`);
     const unassignedOverdueDays =
       !days.error && typeof days.data?.unassigned_overdue_days === "number"
@@ -242,8 +285,10 @@ export const listMyWork = createServerFn({ method: "GET" })
     if (unTickets.error) throw new Error(`Unassigned tickets: ${unTickets.error.message}`);
     if (unOpps.error) throw new Error(`Unassigned opportunities: ${unOpps.error.message}`);
     if (unTasks.error) throw new Error(`Unassigned tasks: ${unTasks.error.message}`);
+    // Every admin and manager authorizes (owner, Oct 12); the rpc still answers for anyone it
+    // names (it names only admins and managers, so the two agree once the migration is applied).
     const authorizer =
-      !auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId);
+      reviewer || (!auth.error && (auth.data ?? []).some((id: unknown) => id === context.userId));
     if (tickets.error) throw new Error(`Tickets: ${tickets.error.message}`);
     if (tasks.error) throw new Error(`Tasks: ${tasks.error.message}`);
     if (followups.error) throw new Error(`Follow-ups: ${followups.error.message}`);
@@ -266,7 +311,14 @@ export const listMyWork = createServerFn({ method: "GET" })
         ].filter((x): x is string => !!x),
       ),
     ];
-    const [buildings, accounts, people] = await Promise.all([
+    // An opportunity follow-up's row shows the opportunity's real status (owner, Oct 12: it
+    // always read "Open"); best effort too — a caller who may not read opportunities gets none.
+    const oppIds = [
+      ...new Set(
+        (followups.data ?? []).filter((f) => f.kind === "opportunity").map((f) => f.item_id),
+      ),
+    ];
+    const [buildings, accounts, people, opps] = await Promise.all([
       buildingIds.length
         ? sb.from("buildings").select("id, name, address1, city").in("id", buildingIds)
         : Promise.resolve({
@@ -276,7 +328,11 @@ export const listMyWork = createServerFn({ method: "GET" })
         ? sb.from("crm_accounts").select("id, name").in("id", accountIds)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
       canPick ? loadPeople(sb) : Promise.resolve([] as WorkPerson[]),
+      oppIds.length
+        ? sb.from("crm_opportunities").select("id, status").in("id", oppIds)
+        : Promise.resolve({ data: [] as { id: string; status: string }[] }),
     ]);
+    const oppStatus = new Map((opps.data ?? []).map((o) => [o.id, o.status]));
     const buildingLabel = new Map(
       (buildings.data ?? []).map((b) => [
         b.id,
@@ -314,6 +370,7 @@ export const listMyWork = createServerFn({ method: "GET" })
         held_by_name: f.held_by_name ?? null,
         hold_count: f.hold_count ?? 0,
         account_name: f.account_id ? (accountName.get(f.account_id) ?? null) : null,
+        opportunity_status: f.kind === "opportunity" ? (oppStatus.get(f.item_id) ?? null) : null,
       })),
       names,
       people,
@@ -337,6 +394,7 @@ export const listMyWork = createServerFn({ method: "GET" })
       unassignedOverdueDays,
       invoicer,
       toInvoice: (toInvoice.data ?? []) as TicketIn[],
+      toAuthorize: (toAuthorize.data ?? []) as TicketIn[],
       bids: (bids.data ?? []).map((b): BidIn => ({
         id: b.id,
         name: b.name,

@@ -272,9 +272,9 @@ export function ServiceRatesSettings() {
                 <p className="text-xs text-muted-foreground">
                   {/* Nothing picked: who it falls to (QA audit bug 6, owner Oct 6). */}
                   {fallback ? <>{fallback}. </> : null}
-                  Gets &quot;ready for your review&quot; when a ticket is Done and the Needs
-                  authorization tab on Work Overview. Any manager can still mark a ticket
-                  Authorized.
+                  Owns the &quot;Authorize ticket&quot; reminder when a ticket is Done. Every admin
+                  and manager is told the ticket is done, sees it under Needs authorization on Work
+                  Overview and can mark it Authorized.
                 </p>
               </div>
               <div className="space-y-1">

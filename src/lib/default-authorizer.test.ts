@@ -60,7 +60,10 @@ describe("the Setup › Service rates picker's help text", () => {
 describe("the migration", () => {
   const raw = read(`${DIR}/${FILE}`);
   const sql = flat(raw);
-  it("exists, is the last word on ticket_authorizers(), and lower-cases the email", () => {
+  // Since Oct 12 the last definer is 20261012170000_managers_authorize.sql (every other admin
+  // and manager follows the named person; managers-authorize.test.ts) — this file is still the
+  // one that set Brandon as the default, and its trigger stands.
+  it("exists, defines ticket_authorizers() (the managers migration redefines it after), and lower-cases the email", () => {
     expect(raw).not.toBe("");
     const defs = readdirSync(DIR)
       .filter((f) => f.endsWith(".sql"))
@@ -70,7 +73,9 @@ describe("the migration", () => {
           "create or replace function public.ticket_authorizers(",
         ),
       );
-    expect(defs.at(-1)).toBe(FILE);
+    expect(defs).toContain(FILE);
+    expect(defs.at(-1)).toBe("20261012170000_managers_authorize.sql");
+    expect(defs.indexOf(FILE)).toBe(defs.length - 2);
     expect(sql).toContain("lower(p.email) = 'brandon@flatroofonline.com'");
     expect(sql).toContain("lower(new.email) = 'brandon@flatroofonline.com'");
     expect(raw).not.toMatch(/= 'Brandon@/);

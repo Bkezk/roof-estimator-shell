@@ -106,7 +106,9 @@ describe("a ticket reaching Done", () => {
     expect(syncFollowup.mock.calls[0]![0]).toMatchObject({ assigneeId: "admin-2" });
     // The code leans on the database's order; the comment says so.
     const src = readFileSync("src/lib/ticket-events.server.ts", "utf8");
-    expect(src).toContain("settings → Brandon → admins by created_at");
+    expect(src).toContain(
+      "settings → Brandon → then every other admin and manager by created_at, id",
+    );
   });
 
   it("opened by a technician: the invoice follow-up goes to the first office user", async () => {

@@ -1,6 +1,6 @@
 /**
  * What happens when a ticket changes stage — SERVER ONLY (load inside handlers). Owner, Sep 27:
- * maximise automation. Since Oct 5 (M9, the Authorized stage): reaching Done tells the authorizer
+ * maximise automation. Since Oct 5 (M9, the Authorized stage): reaching Done tells the authorizers
  * (Setup › Service rates, else every admin) "ready for your review" ONCE (owner, Oct 12, item 2:
  * the follow-up opened in the same step used to send a second "ready for your review") and opens
  * an "Authorize ticket #…" follow-up for them (Work Overview's Needs authorization tab), which
@@ -53,7 +53,12 @@ async function rosterName(sb: Client, id: string): Promise<string | null> {
   return u ? (u.full_name ?? "").trim() || u.email : null;
 }
 
-/** Who reviews Done tickets (20261005150000_ticket_authorizer.sql); [] until it is applied. */
+/**
+ * Who reviews Done tickets (20261005150000_ticket_authorizer.sql); [] until it is applied. The
+ * first owns the Authorize follow-up; since 20261012170000_managers_authorize.sql the rest are
+ * every other admin and manager (owner, Oct 12: "make managers able to authorize"). Every id is
+ * kept — the Done notice goes to all of them.
+ */
 export async function authorizerIds(sb: Client): Promise<string[]> {
   const { data, error } = await sb.rpc("ticket_authorizers");
   if (error) return [];
@@ -83,8 +88,9 @@ export async function afterTicketStage(
   const becameDone = row.stage === "done" && prevStage !== "done" && live;
   const becameAuthorized = row.stage === "authorized" && prevStage !== "authorized" && live;
   // M9 (owner, Oct 5): the owner reviews a Done ticket ("Brandon … will be the go to person to
-  // authorize"): the set authorizer, else every admin (ticket_authorizers). Until that migration
-  // is applied, or if it names nobody, the office as before.
+  // authorize"): the set authorizer, else Brandon, then (Oct 12: "make managers able to
+  // authorize") every other admin and manager (ticket_authorizers). Until that migration is
+  // applied, or if it names nobody, the office as before.
   const authorizers = row.stage === "done" && live ? await authorizerIds(admin) : [];
   const reviewers = authorizers.length ? authorizers : office.map((u) => u.id);
   if (row.stage === "done" && live && !reviewers.length)
@@ -92,6 +98,8 @@ export async function afterTicketStage(
       `afterTicketStage: ticket #${row.number} is done but nobody authorizes it (no authorizer, no admin, no office user), so no "ready for your review" notice was sent and no "Authorize ticket" follow-up was opened`,
     );
   if (becameDone) {
+    // Every authorizer the database names but the actor — the whole list, never truncated (a
+    // manager who is not the named authorizer is told too; owner, Oct 12).
     const others = reviewers.filter((id) => id !== actor.id);
     // The one Done notice (owner, Oct 12, item 2): the follow-up opened below is `quiet`, so the
     // first authorizer is not told a second time by its "assigned" notice.
@@ -131,9 +139,12 @@ export async function afterTicketStage(
   // The review timer (follow-up kind "invoice"): open while the ticket sits at Done, closed
   // otherwise; on the authorizer's Work Overview under "Needs authorization". One follow-up per
   // ticket (syncFollowup keys on it), so one assignee: the first authorizer. The order is the
-  // database's (settings → Brandon → admins by created_at, id; 20261006210000_default_authorizer
-  // .sql) — QA audit bug 6 (owner, Oct 6): it was unordered, so with two admins and nothing set
-  // the item flipped between them on any save. The rpc missing or empty: the office, as before.
+  // database's (settings → Brandon → then every other admin and manager by created_at, id;
+  // 20261006210000_default_authorizer.sql, 20261012170000_managers_authorize.sql) — QA audit bug
+  // 6 (owner, Oct 6): it was unordered, so with two admins and nothing set the item flipped
+  // between them on any save. The other admins and managers see the same ticket on Work Overview
+  // under Needs authorization without a follow-up of their own (my-work.functions.ts toAuthorize).
+  // The rpc missing or empty: the office, as before.
   const assignee =
     authorizers[0] ??
     (row.created_by && office.some((u) => u.id === row.created_by) ? row.created_by : null) ??

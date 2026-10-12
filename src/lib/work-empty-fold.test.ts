@@ -145,8 +145,9 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
       later: "Due after this week, or with no date yet (a bid without a due date too).",
       waiting:
         "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
+      // Oct 12: managers authorize too (managers-authorize.test.ts).
       authorize:
-        "Tickets the technician has completed. The authorizer reviews the close-out and marks them Authorized; reminders repeat until then.",
+        "Tickets the technician has completed. Any admin or manager can review the close-out and mark them Authorized; the named authorizer gets the reminders.",
       invoice:
         "Authorized tickets waiting for an invoice, with how long they have waited. Shown to the people who invoice.",
     });
@@ -418,16 +419,23 @@ describe("3. listMyWork, through the fake client", () => {
     return { r, items, by, where };
   };
 
-  it("Everyone (a manager): a Done ticket is listed nowhere — nobody's or Ted's; Unassigned holds the Scheduled one", async () => {
+  it("Everyone (a manager): a Done ticket is never Unassigned or overdue — nobody's or Ted's; Unassigned holds the Scheduled one", async () => {
     const { r, by, where, items } = await run(MANAGER, "all");
     // The server: Open / Scheduled only, in the unassigned rows and in the tickets.
     expect(r.unassigned!.tickets.map((t) => t.id)).toEqual(["j-open-nobody"]);
     expect(r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);
-    // The page: the Done tickets are in no group (Oct 12: no Done group); Unassigned holds the
-    // Scheduled one nobody is on, flagged (past its day); Ted's Scheduled one is in This week.
-    expect(where("ticket:j-done-nobody")).toEqual([]);
-    expect(where("ticket:j-done-ted")).toEqual([]);
-    expect(items.map((i) => i.key).sort()).toEqual(["ticket:j-open-nobody", "ticket:j-sched-ted"]);
+    // The page: the Done tickets are in no Done group (Oct 12: none) and never Unassigned; a
+    // manager sees them only under Needs authorization (later that day: managers authorize too,
+    // managers-authorize.test.ts). Unassigned holds the Scheduled one nobody is on, flagged (past
+    // its day); Ted's Scheduled one is in This week.
+    expect(where("ticket:j-done-nobody")).toEqual(["authorize"]);
+    expect(where("ticket:j-done-ted")).toEqual(["authorize"]);
+    expect(items.map((i) => i.key).sort()).toEqual([
+      "ticket:j-done-nobody",
+      "ticket:j-done-ted",
+      "ticket:j-open-nobody",
+      "ticket:j-sched-ted",
+    ]);
     expect(by["done"]).toBeUndefined();
     expect(by["unassigned"]!.map((i) => i.key)).toEqual(["ticket:j-open-nobody"]);
     expect(by["unassigned"]![0]!.flag).toBe(true);
@@ -456,7 +464,8 @@ describe("3. listMyWork, through the fake client", () => {
     expect(mine.r.unassigned!.tickets.map((t) => t.id)).toEqual(["j-open-nobody"]);
     const ted = await run(MANAGER, TECH);
     expect(ted.r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);
-    expect(ted.where("ticket:j-done-ted")).toEqual([]);
+    // The manager still has the Done queue (not Ted's work: the office's), nowhere else.
+    expect(ted.where("ticket:j-done-ted")).toEqual(["authorize"]);
     const tech = await run(TECH);
     expect(tech.r.unassigned).toBeNull();
     expect(tech.r.tickets.map((t) => t.id)).toEqual(["j-sched-ted"]);

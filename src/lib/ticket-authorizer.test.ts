@@ -172,11 +172,13 @@ describe("the setting and the database", () => {
     expect(sql).toContain("where s.id = 1 and p.role in ('admin', 'manager')");
     expect(sql).toContain("security definer");
   });
-  // QA audit bug 6 (owner, Oct 6): 20261006210000_default_authorizer.sql is the last word on
+  // QA audit bug 6 (owner, Oct 6): 20261006210000_default_authorizer.sql ordered
   // ticket_authorizers(): the set person, else Brandon (Brandon@flatroofonline.com) once he is
   // an admin or manager, else every admin ordered by created_at, id — so the "Needs
-  // authorization" follow-up no longer flips between two admins on every save.
-  it("its last definer is 20261006210000, which keeps the set person first and orders the admins", () => {
+  // authorization" follow-up no longer flips between two admins on every save. Since Oct 12
+  // (20261012170000_managers_authorize.sql, the last definer — managers-authorize.test.ts) the
+  // named person still comes first and every other admin and manager follows.
+  it("its last definer is 20261012170000, which keeps the set person first and orders the rest", () => {
     const dir = "supabase/migrations";
     const defs = readdirSync(dir)
       .filter((f) => f.endsWith(".sql"))
@@ -186,13 +188,16 @@ describe("the setting and the database", () => {
           "create or replace function public.ticket_authorizers(",
         ),
       );
+    expect(defs).toContain("20261006210000_default_authorizer.sql");
     const last = defs.at(-1)!;
-    expect(last).toBe("20261006210000_default_authorizer.sql");
+    expect(last).toBe("20261012170000_managers_authorize.sql");
     const body = flat(read(`${dir}/${last}`));
     expect(body).toContain("where s.id = 1 and p.role in ('admin', 'manager')");
     expect(body).toContain("lower(p.email) = 'brandon@flatroofonline.com'");
-    expect(body).toContain("where p.role = 'admin' and not exists (select 1 from chosen)");
-    expect(body).toContain("order by created_at, id");
+    expect(body).toContain(
+      "where p.role in ('admin', 'manager') and not exists (select 1 from named n where n.id = p.id)",
+    );
+    expect(body).toContain("order by rank, created_at, id");
     expect(body).toContain("security definer set search_path = public");
     expect(body).toContain(
       "grant execute on function public.ticket_authorizers() to authenticated, service_role;",

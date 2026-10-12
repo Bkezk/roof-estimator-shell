@@ -268,8 +268,11 @@ function WorkRow({
             (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
           {item.flag && <span className="font-medium text-destructive">Overdue</span>}
           {/* An Authorized ticket (owner, Oct 12): how long it has waited for its invoice — the
-            Invoices queue's number. Opening the ticket shows "Make the invoice". */}
-          {item.toInvoice && <WaitingToInvoice since={item.waitingSince ?? null} today={today} />}
+            Invoices queue's number. Opening the ticket shows "Make the invoice". A Done ticket
+            under Needs authorization (Oct 12: managers authorize too): since its close-out. */}
+          {(item.toInvoice || item.needsAuth) && (
+            <WaitingSince since={item.waitingSince ?? null} today={today} />
+          )}
         </div>
         {f && <FollowupState f={f} today={today} />}
       </a>
@@ -295,8 +298,11 @@ function WorkRow({
   );
 }
 
-/** "Waiting 3 days" for an Authorized ticket (my-work.ts waitingDays); nothing without a stamp. */
-function WaitingToInvoice({ since, today }: { since: string | null; today: string }) {
+/**
+ * "Waiting 3 days" for an Authorized ticket (to invoice) or a Done one (to authorize) — my-work.ts
+ * waitingDays; nothing without a stamp.
+ */
+function WaitingSince({ since, today }: { since: string | null; today: string }) {
   const days = waitingDays(since, today);
   if (days === null) return null;
   return (
