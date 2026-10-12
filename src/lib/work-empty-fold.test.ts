@@ -221,7 +221,9 @@ describe("the page: chips above the columns, a ⓘ on every title and chip, the 
   });
   it("every column title and every phone tab carries the ⓘ", () => {
     const desktop = list.slice(list.indexOf("{columns.map((g) => ("), list.indexOf("lg:hidden"));
-    expect(desktop).toContain('<span className="min-w-0 break-words">{g.label}</span>');
+    expect(desktop).toContain(
+      '<span className="min-w-0 break-words" title="Drag to move this column">',
+    );
     expect(desktop).toContain("<BucketHelp bucket={g.bucket} label={g.label} />");
     expect(desktop).toContain("<GripVertical"); // the drag handle stays
     expect(desktop).toContain("draggable");

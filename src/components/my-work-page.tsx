@@ -528,7 +528,6 @@ function ListView({
               <h2
                 id={`work-col-${g.bucket}`}
                 draggable
-                title="Drag to move this column"
                 onDragStart={(e) => {
                   e.dataTransfer.effectAllowed = "move";
                   e.dataTransfer.setData("text/plain", g.bucket);
@@ -540,11 +539,15 @@ function ListView({
                 }`}
               >
                 <span className="flex min-w-0 items-center gap-1">
+                  {/* The browser's hover text sits on the grip and the title only, not on the
+                      whole heading, so it never covers the ⓘ tooltip (owner, Oct 12). */}
                   <GripVertical
                     className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 break-words">{g.label}</span>
+                  <span className="min-w-0 break-words" title="Drag to move this column">
+                    {g.label}
+                  </span>
                   <BucketHelp bucket={g.bucket} label={g.label} />
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
