@@ -31,9 +31,12 @@ import { toast } from "sonner";
 import { Loader2, Play, Save } from "lucide-react";
 
 import {
+  CRON_STALE_LINE,
   dispatchRemindersIfDue,
   getCrmSettings,
   notificationHealth,
+  reminderRunSummary,
+  scheduledRunStale,
   setCrmSettings,
   type CrmSettingsInput,
 } from "@/lib/followups.functions";
@@ -187,7 +190,8 @@ export function RemindersSettings() {
   const run = useMutation({
     mutationFn: () => runFn(),
     onSuccess: (r) => {
-      if (r.ran) toast.success(`Reminders ran: ${r.reminded} sent`);
+      // Owner, Oct 12 (item 8): the whole pass — reminders, escalations, task notices, failures.
+      if (r.ran) toast.success(`Reminders ran: ${reminderRunSummary(r)}`);
       else
         toast.info("Skipped: the last pass ran under 10 minutes ago. Try again in a few minutes.");
       void qc.invalidateQueries({ queryKey: ["notification-health"] });
@@ -393,9 +397,9 @@ export function RemindersSettings() {
         </CardHeader>
         <CardContent className="space-y-4">
           {run.data && (
-            <p className="text-sm">
+            <p className="text-sm" data-health="last-run-here">
               Last run from here: {run.data.ran ? "ran" : "skipped (ran under 10 minutes ago)"} ·{" "}
-              {run.data.reminded} reminded
+              {reminderRunSummary(run.data)}
             </p>
           )}
           {health.error ? (
@@ -409,9 +413,42 @@ export function RemindersSettings() {
           ) : (
             <>
               <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
-                <dt className="text-muted-foreground">Last reminder pass</dt>
-                <dd>
-                  {health.data.last_dispatch_at ? whenTime(health.data.last_dispatch_at) : "Never"}
+                {/* Owner, Oct 12 (item 8): the scheduled job's own stamp (the cron route alone
+                    writes last_cron_at), apart from any pass — the app's load-time pass used to
+                    hide a dead job behind a fresh "Last reminder pass". */}
+                <dt className="text-muted-foreground">Last scheduled run</dt>
+                <dd className="space-y-1" data-health="last-cron">
+                  <span>
+                    {health.data.last_cron_at ? whenTime(health.data.last_cron_at) : "Never"}
+                  </span>
+                  {scheduledRunStale(health.data.last_cron_at, new Date()) && (
+                    <p
+                      className="text-xs text-amber-700 dark:text-amber-400"
+                      data-health="cron-stale"
+                    >
+                      {CRON_STALE_LINE}
+                    </p>
+                  )}
+                </dd>
+                <dt className="text-muted-foreground">Last reminder pass (any)</dt>
+                <dd className="space-y-1">
+                  <span>
+                    {health.data.last_dispatch_at
+                      ? whenTime(health.data.last_dispatch_at)
+                      : "Never"}
+                  </span>
+                  {/* Owner, Oct 12 (item 10a): a reminder that failed to send is put back and
+                      retried on the next pass; this says how many are waiting for that. */}
+                  {health.data.last_dispatch_failed > 0 && (
+                    <p
+                      className="text-xs text-amber-700 dark:text-amber-400"
+                      data-health="failed-sends"
+                    >
+                      {health.data.last_dispatch_failed} reminder
+                      {health.data.last_dispatch_failed === 1 ? "" : "s"} failed to send on the last
+                      pass — they retry on the next pass
+                    </p>
+                  )}
                 </dd>
                 <dt className="text-muted-foreground">Email configured</dt>
                 <dd className="space-y-1">

@@ -74,6 +74,14 @@ interface SyncArgs {
    * "… reopened: <title>", not "… assigned to you" (audit, Oct 2).
    */
   reopened?: boolean;
+  /**
+   * The caller has already told the assignee about this item in this same step, so a follow-up
+   * started here sends no "assigned" notice (owner, Oct 12, item 2: the first authorizer heard a
+   * Done ticket twice — "… is done — ready for your review" from ticket-events, then "Authorize
+   * Ticket #… — ready for your review" from here). The timer and its reminders are unchanged; a
+   * later hand-over to someone else ("reassigned") still announces.
+   */
+  quiet?: boolean;
 }
 
 const KIND_LABEL = { opportunity: "Opportunity", invoice: "To invoice", ticket: "Ticket" } as const;
@@ -240,9 +248,12 @@ export async function syncFollowup(a: SyncArgs, sb: Client): Promise<SyncResult>
   return open ? "reassigned" : "started";
 }
 
-/** Tell the new assignee (never the person who made the change). */
+/**
+ * Tell the new assignee (never the person who made the change, and not when the caller already
+ * did in this step — `quiet`).
+ */
 async function announce(a: SyncArgs, followupId: string, due: Date, every: number, admin: Client) {
-  if (!a.assigneeId || a.assigneeId === a.actorId) return;
+  if (!a.assigneeId || a.assigneeId === a.actorId || a.quiet) return;
   const n = startNotice({
     kind: a.kind,
     title: a.title,

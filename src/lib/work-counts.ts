@@ -7,7 +7,11 @@
  * tile's number and the list it opens agree.
  *
  *   Open tickets           live, stage open / scheduled / done (not invoiced / closed)
- *   Overdue tickets        open tickets whose scheduled_date is before today
+ *   Overdue tickets        Open / Scheduled tickets whose scheduled_date is before today — never a
+ *                          Done ticket (owner, Oct 12, item 11: Done is finished work waiting to
+ *                          be authorized and invoiced; it is "waiting", not overdue). One rule for
+ *                          the tiles, the red Overdue tag, the Tickets list's Overdue filter, the
+ *                          Owner view's Past due and Work Overview's Overdue group.
  *   Open opportunities     live, status not closing (not won / lost / no response)
  *   Overdue opportunities  open opportunities whose expected_close is before today
  *
@@ -39,11 +43,18 @@ export const parseTodayInput = (d: unknown): { today?: string } => {
 
 /** Ticket stages that are still work (the same three as Work Overview and the Tech Board load). */
 export const OPEN_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/**
+ * The stages a ticket can be overdue at (owner, Oct 12): its day has passed and the work has
+ * not been done. Done, Authorized, Invoiced and Closed are never overdue.
+ */
+export const OVERDUE_TICKET_STAGES = ["open", "scheduled"] as const;
 /** Opportunity statuses that are not closing (OPP_CLOSING: won / lost / no_response). */
 export const OPEN_OPP_STATUSES = ["open", "contacted", "quoted"] as const;
 
 export const isOpenTicketStage = (stage: string): boolean =>
   (OPEN_TICKET_STAGES as readonly string[]).includes(stage);
+export const isOverdueTicketStage = (stage: string): boolean =>
+  (OVERDUE_TICKET_STAGES as readonly string[]).includes(stage);
 export const isOpenOppStatus = (status: string): boolean =>
   (OPEN_OPP_STATUSES as readonly string[]).includes(status);
 
@@ -54,11 +65,14 @@ export function isOverdue(dateYmd: string | null | undefined, todayYmd: string):
   return !!dateYmd && YMD.test(dateYmd) && dateYmd < todayYmd;
 }
 
-/** An open ticket whose day has passed (the Overdue tickets tile and the list's Overdue filter). */
+/**
+ * An Open / Scheduled ticket whose day has passed (the Overdue tickets tile, the red tag, the
+ * list's Overdue filter, the Owner view's Past due). A Done ticket is never overdue (Oct 12).
+ */
 export const isOverdueTicket = (
   j: { stage: string; scheduled_date: string | null },
   todayYmd: string,
-): boolean => isOpenTicketStage(j.stage) && isOverdue(j.scheduled_date, todayYmd);
+): boolean => isOverdueTicketStage(j.stage) && isOverdue(j.scheduled_date, todayYmd);
 
 /** An open opportunity past its expected close (the tile and the list's Overdue filter). */
 export const isOverdueOpp = (
@@ -116,8 +130,9 @@ function daysBetween(fromYmd: string, toYmd: string): number {
 }
 
 /**
- * The red "Overdue" tag on a ticket (owner, Oct 2): how many days past its day an open ticket is,
- * or null when it is not overdue — exactly the rule of the Overdue filter and tile.
+ * The red "Overdue" tag on a ticket (owner, Oct 2): how many days past its day an Open / Scheduled
+ * ticket is, or null when it is not overdue — exactly the rule of the Overdue filter and tile
+ * (isOverdueTicket; a Done ticket shows no tag).
  */
 export function ticketOverdueDays(
   j: { stage: string; scheduled_date: string | null },

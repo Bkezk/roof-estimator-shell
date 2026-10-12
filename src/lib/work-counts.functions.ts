@@ -10,6 +10,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.har
 import {
   OPEN_OPP_STATUSES,
   OPEN_TICKET_STAGES,
+  OVERDUE_TICKET_STAGES,
   parseTodayInput,
   viewerToday,
   type WorkCounts,
@@ -22,22 +23,23 @@ export const getWorkCounts = createServerFn({ method: "GET" })
   .handler(async ({ data, context }): Promise<WorkCounts & { today: string }> => {
     const sb = context.supabase;
     const today = viewerToday(data.today);
-    const tickets = () =>
+    const tickets = (stages: readonly string[] = OPEN_TICKET_STAGES) =>
       sb
         .from("service_jobs")
         .select("id", { count: "exact", head: true })
         .is("deleted_at", null)
-        .in("stage", [...OPEN_TICKET_STAGES]);
+        .in("stage", [...stages]);
     const opps = () =>
       sb
         .from("crm_opportunities")
         .select("id", { count: "exact", head: true })
         .is("deleted_at", null)
         .in("status", [...OPEN_OPP_STATUSES]);
-    // `lt` leaves out rows with no date (never overdue).
+    // `lt` leaves out rows with no date (never overdue). Overdue tickets: Open / Scheduled only
+    // (owner, Oct 12: a Done ticket waits to be invoiced; it is not overdue).
     const [openT, overdueT, openO, overdueO] = await Promise.all([
       tickets(),
-      tickets().lt("scheduled_date", today),
+      tickets(OVERDUE_TICKET_STAGES).lt("scheduled_date", today),
       opps(),
       opps().lt("expected_close", today),
     ]);

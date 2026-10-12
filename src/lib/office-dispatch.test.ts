@@ -18,7 +18,10 @@ vi.mock("@/lib/notify.server", () => ({
   serverClient: async (fallback: unknown) => fallback,
   notify: vi.fn(async () => 0),
 }));
-vi.mock("@/lib/ticket-events.server", () => ({ afterTicketStage: vi.fn(async () => {}) }));
+vi.mock("@/lib/ticket-events.server", () => ({
+  afterTicketStage: vi.fn(async () => {}),
+  afterTicketDispatch: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/service-crew.server", () => ({
   syncCrewLead: vi.fn(async () => {}),
   writeCrew: vi.fn(async () => 0),

@@ -397,6 +397,8 @@ export const saveServiceJob = createServerFn({ method: "POST" })
         .select("technician_id, stage, scheduled_date")
         .eq("id", id)
         .maybeSingle();
+      // (technician_id and scheduled_date also feed the technician's reassigned / date-moved
+      // notices after the save — ticket-events.server.ts afterTicketDispatch.)
       if (cErr) throw new Error(cErr.message);
       if (!cur) throw new Error("Ticket not found");
       // A technician edits only their own ticket (RLS says the same; this gives a clear message).
@@ -442,7 +444,7 @@ export const saveServiceJob = createServerFn({ method: "POST" })
       // Crew rows are a manager's to write (RLS service_job_techs_manage); nobody else's save
       // touches them (the technician did not change either).
       const saved = manager ? await saveCrew(sb, row, crew) : row;
-      await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
+      await syncTicketFollowup(saved, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
       return withTechName(sb, saved);
     }
     const createProblem = stageProblem(p, stage);
@@ -521,16 +523,23 @@ async function logTicketDateMove(
 
 /** Stages at which the assignee's follow-up timer ends (Done: the tech's part is finished). */
 const TICKET_CLOSING: readonly ServiceStage[] = ["done", "authorized", "invoiced", "closed"];
-/** Keep the ticket's follow-up timer in step with its technician and stage (design §11). */
+/**
+ * Keep the ticket's follow-up timer in step with its technician and stage (design §11). With
+ * `before` (the technician and day as they were, from the paths that may change them: the save,
+ * the Board's drop) the technician hears of a reassignment or a moved day (owner, Oct 12, item
+ * 9; ticket-events.server.ts afterTicketDispatch) — once, from here, whichever path it was.
+ */
 async function syncTicketFollowup(
   row: ServiceJobRow,
   actor: { id: string; name: string | null },
   sb: SupabaseClient<Database>,
   prevStage: string | null,
+  before?: { technician_id: string | null; scheduled_date: string | null },
 ): Promise<void> {
   const { syncFollowup } = await import("@/lib/followups.server");
-  const { afterTicketStage } = await import("@/lib/ticket-events.server");
+  const { afterTicketStage, afterTicketDispatch } = await import("@/lib/ticket-events.server");
   await afterTicketStage(row, prevStage, actor, sb);
+  if (before) await afterTicketDispatch(row, before, actor, sb);
   await syncFollowup(
     {
       kind: "ticket",
@@ -614,7 +623,7 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     const sb = context.supabase;
     const { data: cur, error: cErr } = await sb
       .from("service_jobs")
-      .select("stage, scheduled_date")
+      .select("stage, scheduled_date, technician_id")
       .eq("id", data.id)
       .maybeSingle();
     if (cErr) throw new Error(cErr.message);
@@ -649,7 +658,8 @@ export const assignServiceJob = createServerFn({ method: "POST" })
     // Row 0 of a named crew mirrors the technician (the board shows and moves the lead).
     const { syncCrewLead } = await import("@/lib/service-crew.server");
     await syncCrewLead(sb, row.id, row.technician_id);
-    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage);
+    // The technician's reassigned / date-moved notice rides on `cur` (owner, Oct 12).
+    await syncTicketFollowup(row, { id: context.userId, name: nameOf(p) }, sb, cur.stage, cur);
     return withTechName(sb, row);
   });
 

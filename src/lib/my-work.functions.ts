@@ -14,8 +14,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { isOffice, seesEveryone } from "@/lib/access";
+import { isOffice, seesEveryone, seesInvoices } from "@/lib/access";
 import {
+  TO_INVOICE_STAGE,
   UNASSIGNED_OVERDUE_DAYS_DEFAULT,
   WORK_TICKET_STAGES,
   visibleUserIds,
@@ -56,6 +57,13 @@ export interface MyWorkResult {
   unassigned: UnassignedRows | null;
   /** Setup's "needs assignment" timer: unassigned work is flagged overdue after this many days. */
   unassignedOverdueDays: number;
+  /** Does the caller invoice (`seesInvoices`)? Then the "Authorized — to invoice" column shows. */
+  invoicer: boolean;
+  /**
+   * The Authorized tickets waiting for their invoice (owner, Oct 12), longest waiting first,
+   * for an invoicer whatever `who` asks for (the queue is the office's); [] for anyone else.
+   */
+  toInvoice: TicketIn[];
 }
 
 const LIMIT = 1000;
@@ -162,18 +170,37 @@ export const listMyWork = createServerFn({ method: "GET" })
     const uDays = showUnassigned
       ? sb.from("crm_settings").select("unassigned_overdue_days").eq("id", 1).maybeSingle()
       : Promise.resolve({ data: null, error: null });
+    // The Authorized tickets, for whoever invoices (owner, Oct 12: "Authorized — to invoice" on
+    // Work Overview; seesInvoices, the Invoice block's own rule). Whatever `who` asks for: the
+    // queue is the office's, not a technician's — the same reading as Unassigned. Longest
+    // waiting first (stage_changed_at, 20261006180000), with or without a technician.
+    const invoicer = seesInvoices(me);
+    const iTickets = invoicer
+      ? sb
+          .from("service_jobs")
+          .select(
+            "id, number, customer_name, site_name, site_address, description, service_type, stage, scheduled_date, technician_id, stage_changed_at",
+          )
+          .is("deleted_at", null)
+          .eq("stage", TO_INVOICE_STAGE)
+          .order("stage_changed_at", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : Promise.resolve({ data: [] as TicketIn[], error: null });
 
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days] = await Promise.all([
-      tq,
-      kq,
-      fq,
-      sb.rpc("ticket_authorizers"),
-      uTickets,
-      uOpps,
-      uTasks,
-      uDays,
-    ]);
+    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days, toInvoice] =
+      await Promise.all([
+        tq,
+        kq,
+        fq,
+        sb.rpc("ticket_authorizers"),
+        uTickets,
+        uOpps,
+        uTasks,
+        uDays,
+        iTickets,
+      ]);
+    if (toInvoice.error) throw new Error(`Tickets to invoice: ${toInvoice.error.message}`);
     const unassignedOverdueDays =
       !days.error && typeof days.data?.unassigned_overdue_days === "number"
         ? days.data.unassigned_overdue_days
@@ -273,6 +300,8 @@ export const listMyWork = createServerFn({ method: "GET" })
           }
         : null,
       unassignedOverdueDays,
+      invoicer,
+      toInvoice: (toInvoice.data ?? []) as TicketIn[],
     };
   });
 

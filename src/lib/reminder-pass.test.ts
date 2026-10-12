@@ -97,9 +97,12 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
         error: null,
       };
     }
-    if (name === "stamp_dispatch") {
+    // stamp_dispatch_result (Oct 12) stamps the pass's failed count with the time; the older
+    // stamp_dispatch stays for an app built before that migration.
+    if (name === "stamp_dispatch" || name === "stamp_dispatch_result") {
       const s = (db["crm_settings"] ??= [{ id: 1, last_dispatch_at: null }]);
       s[0]!["last_dispatch_at"] = new Date().toISOString();
+      if (name === "stamp_dispatch_result") s[0]!["last_dispatch_failed"] = args?.["p_failed"];
       return { data: null, error: null };
     }
     // Without the service key the pass claims through this function
@@ -197,6 +200,7 @@ describe("(a) one failing follow-up does not stop the pass or the task notices",
         followup("f2", "rep-2", { next_remind_at: iso(-1 * HOUR) }),
       ],
     };
+    const due1 = String(db["crm_followups"]![0]!["next_remind_at"]);
     let calls = 0;
     use(db, {
       rpc: (name) =>
@@ -215,11 +219,16 @@ describe("(a) one failing follow-up does not stop the pass or the task notices",
     // The task notices ran anyway, and are reported.
     expect(taskNotices).toHaveBeenCalledTimes(1);
     expect(body["tasks"]).toMatchObject({ tasks_checked: 2, tasks_errors: 0 });
-    // The failure is recorded on its row and in the server log; its claim stands (no retry).
+    // The failure is recorded on its row and in the server log. Owner, Oct 12 (item 10a): the
+    // claim is put back, so the reminder is still due and the next pass retries it (it used to
+    // stand, and the reminder waited every_days).
     const f1 = db["crm_followups"]!.find((r) => r["id"] === "f1")!;
     expect(f1["dispatch_errors"]).toBe(1);
     expect(String(f1["last_dispatch_error"])).toContain("transient: connection reset");
-    expect(Date.parse(String(f1["next_remind_at"]))).toBeGreaterThan(Date.now());
+    expect(f1["next_remind_at"]).toBe(due1);
+    expect(Date.parse(String(f1["next_remind_at"]))).toBeLessThan(Date.now());
+    expect(f1["reminders_sent"]).toBe(0);
+    expect(db["crm_settings"]?.[0]?.["last_dispatch_failed"]).toBe(1);
     expect(errorLog).toHaveBeenCalledWith(expect.stringContaining("follow-up f1"));
   });
 

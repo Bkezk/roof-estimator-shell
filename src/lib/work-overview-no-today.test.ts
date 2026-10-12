@@ -34,7 +34,8 @@ describe("the List without Today", () => {
     // Unassigned (Oct 7) and Needs authorization (Oct 5) lead, each shown only to those it is for.
     // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and
     // Done" — the default; each user may drag their own order (lib/work-layout.ts). Oct 9:
-    // Waiting (a follow-up on hold) after Later, before No date.
+    // Waiting (a follow-up on hold) after Later, before No date. Oct 12: "Authorized — to
+    // invoice" after Needs authorization, for whoever sees invoices.
     expect(LIST_BUCKETS).toEqual([
       "unassigned",
       "overdue",
@@ -42,6 +43,7 @@ describe("the List without Today", () => {
       "later",
       "waiting",
       "authorize",
+      "invoice",
       "nodate",
       "done",
     ]);

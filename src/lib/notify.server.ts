@@ -234,7 +234,9 @@ export async function notify(userIds: string[], msg: Outgoing, sb: Client): Prom
     }
     if (p.notify_push) {
       const mine = (subs ?? []).filter((s) => s.user_id === p.id);
-      if (!mine.length) patch.push_error = "no device has push turned on";
+      // No device with push on is not a failure (owner, Oct 12, item 10b): nothing is recorded,
+      // so Admin › Reminders' Recent failures lists real email / push errors only. (It used to
+      // write "no device has push turned on" to push_error; the Oct 12 migration clears those.)
       let sent = 0;
       for (const s of mine) {
         const r = await sendPush(s, {
@@ -275,7 +277,11 @@ export interface DispatchResult {
   reminded: number;
   /** Untouched-item escalations delivered. */
   escalated: number;
-  /** Steps that failed (claim, reminder or escalation); each is logged and recorded on its row. */
+  /**
+   * Steps that failed (claim, reminder or escalation); each is logged and recorded on its row. A
+   * reminder or escalation that failed to send after its claim is put back (owner, Oct 12, item
+   * 10a: `unclaimReminder`), so the next pass retries it.
+   */
   failed: number;
   /** Due follow-ups or escalations another pass claimed first (the cron and a page load at once). */
   skipped: number;
@@ -288,30 +294,50 @@ const isMissingRpc = (e: { code?: string; message?: string }) =>
   e.code === "PGRST202" || /Could not find the function/i.test(e.message ?? "");
 
 /**
- * Claim a due reminder (see dispatchDueReminders): true when this pass won it. Through
- * followup_claim_reminder when the pass runs as a signed-in user (it refuses the follow-up's own
- * assignee: false, and another pass sends it); a direct conditional update with the service key,
- * or before 20261002140000_followup_guard.sql is applied.
+ * An rpc the generated types do not list yet (the Oct 12 migration's functions; the types file's
+ * Functions block is another agent's to regenerate). The call is the same PostgREST call.
+ */
+const rawRpc = (
+  sb: Client,
+  fn: string,
+  args?: Record<string, unknown>,
+): Promise<{ data: unknown; error: { code?: string; message: string } | null }> =>
+  (
+    sb as unknown as {
+      rpc: (
+        fn: string,
+        args?: Record<string, unknown>,
+      ) => Promise<{ data: unknown; error: { code?: string; message: string } | null }>;
+    }
+  ).rpc(fn, args);
+
+/**
+ * Claim a due reminder (see dispatchDueReminders): `won` when this pass got it, with `next` the
+ * next_remind_at the claim wrote when this code wrote it (the direct update), or null when the
+ * database function did (it uses its own clock). Through followup_claim_reminder when the pass
+ * runs as a signed-in user (it refuses the follow-up's own assignee: false, and another pass
+ * sends it); a direct conditional update with the service key, or before
+ * 20261002140000_followup_guard.sql is applied.
  */
 async function claimReminder(
   admin: Client,
   f: FollowupRow,
   now: Date,
   viaRpc: boolean,
-): Promise<boolean> {
+): Promise<{ won: boolean; next: string | null }> {
   if (viaRpc) {
     const r = await admin.rpc("followup_claim_reminder", {
       p_id: f.id,
       p_expected: f.next_remind_at,
     });
-    if (!r.error) return r.data === true;
+    if (!r.error) return { won: r.data === true, next: null };
     if (!isMissingRpc(r.error)) throw new Error(r.error.message);
   }
-  const next = new Date(now.getTime() + f.every_days * 86400000);
+  const next = new Date(now.getTime() + f.every_days * 86400000).toISOString();
   const { data: won, error } = await admin
     .from("crm_followups")
     .update({
-      next_remind_at: next.toISOString(),
+      next_remind_at: next,
       reminders_sent: f.reminders_sent + 1,
       last_reminded_at: now.toISOString(),
     })
@@ -320,7 +346,72 @@ async function claimReminder(
     .eq("next_remind_at", f.next_remind_at)
     .select("id");
   if (error) throw new Error(error.message);
-  return !!won?.length;
+  return { won: !!won?.length, next };
+}
+
+/**
+ * Put a claimed reminder back after its send failed (owner, Oct 12, item 10a), so the next pass
+ * retries it instead of waiting every_days: next_remind_at, reminders_sent and last_reminded_at
+ * return to what the pass read — only where the row still holds what the claim wrote (the
+ * claim's own optimistic lock, the other way round), so a reminder another pass or a hand-made
+ * change has moved since is left alone. Through followup_unclaim_reminder when the pass runs as
+ * a signed-in user (the database refuses their direct write of the reminder fields); the direct
+ * conditional update with the service key. Never throws: a restore that could not be made is
+ * logged, and the reminder waits for its next turn, as before.
+ */
+async function unclaimReminder(
+  admin: Client,
+  f: FollowupRow,
+  claimedNext: string | null,
+  viaRpc: boolean,
+): Promise<boolean> {
+  try {
+    let expected = claimedNext;
+    if (expected === null) {
+      // The database function set next_remind_at by its own clock: read what it wrote. Only a
+      // row still carrying this pass's claim (reminders_sent one up) is put back.
+      const { data: cur, error } = await admin
+        .from("crm_followups")
+        .select("next_remind_at, reminders_sent, status")
+        .eq("id", f.id)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!cur || cur.status !== "open" || cur.reminders_sent !== f.reminders_sent + 1)
+        return false;
+      expected = cur.next_remind_at;
+    }
+    if (viaRpc) {
+      const r = await rawRpc(admin, "followup_unclaim_reminder", {
+        p_id: f.id,
+        p_expected: expected,
+        p_next: f.next_remind_at,
+        p_sent: f.reminders_sent,
+        p_last: f.last_reminded_at,
+      });
+      if (!r.error) return r.data === true;
+      if (!isMissingRpc(r.error)) throw new Error(r.error.message);
+      // Before the Oct 12 migration: the direct write below (refused for a signed-in user by
+      // the follow-up guard, which is then logged).
+    }
+    const { data: back, error } = await admin
+      .from("crm_followups")
+      .update({
+        next_remind_at: f.next_remind_at,
+        reminders_sent: f.reminders_sent,
+        last_reminded_at: f.last_reminded_at,
+      })
+      .eq("id", f.id)
+      .eq("status", "open")
+      .eq("next_remind_at", expected)
+      .select("id");
+    if (error) throw new Error(error.message);
+    return !!back?.length;
+  } catch (e) {
+    console.error(
+      `Reminder pass: follow-up ${f.id} (${f.title}) failed to send and could not be put back for a retry — ${errText(e)}`,
+    );
+    return false;
+  }
 }
 
 /**
@@ -388,11 +479,14 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   };
   for (const f of due ?? []) {
     // 1. Claim (see above). Lost to another pass: skip. Could not claim: record, skip.
+    let claimedNext: string | null = null;
     try {
-      if (!(await claimReminder(admin, f, now, claimViaRpc))) {
+      const claim = await claimReminder(admin, f, now, claimViaRpc);
+      if (!claim.won) {
         out.skipped++;
         continue;
       }
+      claimedNext = claim.next;
     } catch (e) {
       out.failed++;
       await recordFailure(admin, f, "claim", e);
@@ -434,7 +528,10 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
       );
       out.reminded++;
     } catch (e) {
+      // The send failed after the claim: put the reminder back so the next pass retries it
+      // (owner, Oct 12, item 10a), record the failure, count it.
       out.failed++;
+      await unclaimReminder(admin, f, claimedNext, claimViaRpc);
       await recordFailure(admin, f, "reminder", e);
     }
   }
@@ -448,8 +545,15 @@ export async function dispatchDueReminders(sb: Client): Promise<DispatchResult> 
   }
 
   // SECURITY DEFINER stamp (it arms the app's ten-minute throttle): the pass may run as an
-  // office user who cannot edit settings, or as the service role (20261002090000).
-  const { error: stampErr } = await admin.rpc("stamp_dispatch");
+  // office user who cannot edit settings, or as the service role (20261002090000). Since Oct 12
+  // the stamp also keeps how many sends failed on this pass (crm_settings.last_dispatch_failed;
+  // Admin › Reminders says "N reminders failed to send on the last pass — they retry on the next
+  // pass"); before that migration is applied, the plain stamp.
+  const stamped = await rawRpc(admin, "stamp_dispatch_result", { p_failed: out.failed });
+  const stampErr =
+    stamped.error && isMissingRpc(stamped.error)
+      ? (await admin.rpc("stamp_dispatch")).error
+      : stamped.error;
   if (stampErr)
     console.error("Reminder pass: could not stamp last_dispatch_at —", stampErr.message);
   return out;
@@ -600,6 +704,21 @@ async function escalateUntouched(admin: Client, now: Date, out: DispatchResult):
       out.escalated++;
     } catch (e) {
       out.failed++;
+      // The send failed after the claim: escalated_at goes back to what this pass read, only
+      // where it still holds this pass's stamp, so the next pass escalates again (Oct 12, 10a).
+      try {
+        const table = u.kind === "opportunity" ? "crm_opportunities" : "service_jobs";
+        const { error: backErr } = await admin
+          .from(table)
+          .update({ escalated_at: prev })
+          .eq("id", u.item_id)
+          .eq("escalated_at", now.toISOString());
+        if (backErr) throw new Error(backErr.message);
+      } catch (e2) {
+        console.error(
+          `Reminder pass: ${key} (${u.title}) failed to escalate and could not be put back for a retry — ${errText(e2)}`,
+        );
+      }
       await record("escalation", e);
     }
   }

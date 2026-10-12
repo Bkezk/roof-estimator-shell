@@ -58,6 +58,7 @@ import {
   compareWork,
   defaultBucket,
   presetBucket,
+  waitingDays,
   ymdParts,
   BUCKET_EMPTY,
   BUCKET_LABELS,
@@ -136,11 +137,13 @@ const GRID_COLS: Record<number, string> = {
   5: "xl:grid-cols-5",
   6: "xl:grid-cols-6",
   7: "xl:grid-cols-7",
-  // Eight since Oct 9 (Waiting): every column an admin can show at once.
+  // Eight since Oct 9 (Waiting); nine since Oct 12 (Authorized — to invoice): every column an
+  // admin can show at once.
   8: "xl:grid-cols-8",
+  9: "xl:grid-cols-9",
 };
 const listGridClass = (count: number): string =>
-  GRID_COLS[Math.min(8, Math.max(1, count))] ?? "xl:grid-cols-8";
+  GRID_COLS[Math.min(9, Math.max(1, count))] ?? "xl:grid-cols-9";
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (read as a calendar day, no time zone shift). */
 const dayLabel = (ymd: string) => {
@@ -255,6 +258,9 @@ function WorkRow({
           {/* Nobody's and past its day, or waiting longer than Setup's "needs assignment" timer
             (owner, Oct 7): say so on the row, since it sits under Unassigned, not Overdue. */}
           {item.flag && <span className="font-medium text-destructive">Overdue</span>}
+          {/* An Authorized ticket (owner, Oct 12): how long it has waited for its invoice — the
+            Invoices queue's number. Opening the ticket shows "Make the invoice". */}
+          {item.toInvoice && <WaitingToInvoice since={item.waitingSince ?? null} today={today} />}
         </div>
         {f && <FollowupState f={f} today={today} />}
       </a>
@@ -280,6 +286,17 @@ function WorkRow({
   );
 }
 
+/** "Waiting 3 days" for an Authorized ticket (my-work.ts waitingDays); nothing without a stamp. */
+function WaitingToInvoice({ since, today }: { since: string | null; today: string }) {
+  const days = waitingDays(since, today);
+  if (days === null) return null;
+  return (
+    <span className="font-medium" data-line="waiting">
+      Waiting {days} day{days === 1 ? "" : "s"}
+    </span>
+  );
+}
+
 function ListView({
   items,
   today,
@@ -288,6 +305,7 @@ function ListView({
   preset,
   onClearPreset,
   authorize = false,
+  invoice = false,
   unassigned = false,
   layout,
   onLayout,
@@ -298,6 +316,8 @@ function ListView({
   today: string;
   /** The caller reviews Done tickets: the Needs authorization tab shows, empty or not (M9). */
   authorize?: boolean;
+  /** The caller invoices (seesInvoices): "Authorized — to invoice" shows, empty or not (Oct 12). */
+  invoice?: boolean;
   /** Everyone but a technician-only user: the Unassigned group shows, empty or not (Oct 7). */
   unassigned?: boolean;
   showWho: boolean;
@@ -319,8 +339,8 @@ function ListView({
   // to move it, the X in a heading hides that column, the "Hidden" chips bring one back, and
   // "Reset layout" restores the default order (lib/work-layout.ts).
   const groups = useMemo(
-    () => listGroups(items, today, { authorize, unassigned }),
-    [items, today, authorize, unassigned],
+    () => listGroups(items, today, { authorize, invoice, unassigned }),
+    [items, today, authorize, invoice, unassigned],
   );
   const keep = preset ? presetBucket(preset) : null;
   const { shown, hidden } = useMemo(
@@ -1023,6 +1043,7 @@ export function MyWorkPage(props: {
           preset={props.bucket}
           onClearPreset={() => props.onBucket(null)}
           authorize={!!q.data?.authorizer}
+          invoice={!!q.data?.invoicer}
           unassigned={!!q.data?.unassigned}
           layout={layout}
           onLayout={onLayout}

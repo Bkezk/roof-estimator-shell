@@ -5,7 +5,7 @@
  * hands in plain rows and the viewer's day; everything here is arithmetic, so it is tested
  * without a database. Money is read from the invoices as they stand — nothing is estimated.
  */
-import { OPEN_OPP_STATUSES } from "@/lib/work-counts";
+import { OPEN_OPP_STATUSES, isOverdueTicket } from "@/lib/work-counts";
 
 export interface BizTicket {
   stage: string;
@@ -74,7 +74,7 @@ export interface BusinessNumbers {
     lostThisMonth: number;
   };
   stale: {
-    /** Open / Scheduled tickets past their scheduled day. */
+    /** Open / Scheduled tickets past their scheduled day (work-counts.ts isOverdueTicket). */
     pastDue: number;
     untouchedTickets: number | null;
     untouchedOpps: number | null;
@@ -144,12 +144,9 @@ export function businessNumbers(i: BusinessIn): BusinessNumbers {
     (OPEN_OPP_STATUSES as readonly string[]).includes(o.status),
   );
   const closing = openOpps.filter((o) => inRange(o.expected_close, month));
-  const pastDue = i.tickets.filter(
-    (t) =>
-      (t.stage === "open" || t.stage === "scheduled") &&
-      !!t.scheduled_date &&
-      t.scheduled_date < i.today,
-  ).length;
+  // The one "overdue ticket" rule (owner, Oct 12, item 11): Open / Scheduled past its day; a
+  // Done ticket is waiting to be invoiced, never overdue.
+  const pastDue = i.tickets.filter((t) => isOverdueTicket(t, i.today)).length;
   return {
     today: i.today,
     at: i.now,

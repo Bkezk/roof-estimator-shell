@@ -26,8 +26,9 @@ const groups = (...b: WorkBucket[]) => b.map((bucket) => ({ bucket, n: 0 }));
 const order = (l: WorkLayout) => l.order.join(",");
 
 describe("the default layout", () => {
-  it("is the owner's order: Unassigned, Overdue, This week, Later, Waiting, Needs authorization, No date, Done", () => {
-    // Waiting (owner, Oct 9: a follow-up on hold) after Later, before No date.
+  it("is the owner's order: Unassigned, Overdue, This week, Later, Waiting, Needs authorization, Authorized — to invoice, No date, Done", () => {
+    // Waiting (owner, Oct 9: a follow-up on hold) after Later, before No date; "Authorized — to
+    // invoice" (owner, Oct 12) right after Needs authorization.
     expect([...DEFAULT_WORK_LAYOUT_ORDER]).toEqual([
       "unassigned",
       "overdue",
@@ -35,6 +36,7 @@ describe("the default layout", () => {
       "later",
       "waiting",
       "authorize",
+      "invoice",
       "nodate",
       "done",
     ]);
@@ -50,7 +52,9 @@ describe("the default layout", () => {
     });
     // A missing column takes its default place among the ones there (Oct 9): after the nearest
     // default predecessor present, else before the nearest default successor.
-    expect(order(partial)).toBe("done,unassigned,overdue,week,later,waiting,authorize,nodate");
+    expect(order(partial)).toBe(
+      "done,unassigned,overdue,week,later,waiting,authorize,invoice,nodate",
+    );
     expect(partial.hidden).toEqual(["nodate"]);
     expect(isDefaultWorkLayout(partial)).toBe(false);
   });
@@ -59,8 +63,28 @@ describe("the default layout", () => {
       order: ["unassigned", "overdue", "week", "later", "authorize", "nodate", "done"],
       hidden: ["authorize"],
     });
-    expect(order(saved)).toBe("unassigned,overdue,week,later,waiting,authorize,nodate,done");
+    expect(order(saved)).toBe(
+      "unassigned,overdue,week,later,waiting,authorize,invoice,nodate,done",
+    );
     expect(saved.hidden).toEqual(["authorize"]);
+  });
+  it("a layout saved before Authorized — to invoice existed gets it after Needs authorization (Oct 12)", () => {
+    const saved = normalizeWorkLayout({
+      order: ["unassigned", "overdue", "week", "later", "waiting", "authorize", "nodate", "done"],
+      hidden: ["waiting"],
+    });
+    expect(order(saved)).toBe(
+      "unassigned,overdue,week,later,waiting,authorize,invoice,nodate,done",
+    );
+    expect(saved.hidden).toEqual(["waiting"]);
+    // Needs authorization moved to the front: the new column follows it there.
+    const moved = normalizeWorkLayout({
+      order: ["authorize", "unassigned", "overdue", "week", "later", "waiting", "nodate", "done"],
+      hidden: [],
+    });
+    expect(order(moved)).toBe(
+      "authorize,invoice,unassigned,overdue,week,later,waiting,nodate,done",
+    );
   });
 });
 
@@ -86,16 +110,16 @@ describe("arranging the columns", () => {
   it("drag a heading onto another column: before one ahead of it, after one behind it", () => {
     const d = defaultWorkLayout();
     expect(order(moveBucket(d, "done", "unassigned"))).toBe(
-      "done,unassigned,overdue,week,later,waiting,authorize,nodate",
+      "done,unassigned,overdue,week,later,waiting,authorize,invoice,nodate",
     );
     expect(order(moveBucket(d, "unassigned", "done"))).toBe(
-      "overdue,week,later,waiting,authorize,nodate,done,unassigned",
+      "overdue,week,later,waiting,authorize,invoice,nodate,done,unassigned",
     );
     expect(order(moveBucket(d, "authorize", "overdue"))).toBe(
-      "unassigned,authorize,overdue,week,later,waiting,nodate,done",
+      "unassigned,authorize,overdue,week,later,waiting,invoice,nodate,done",
     );
     expect(order(moveBucket(d, "overdue", "later"))).toBe(
-      "unassigned,week,later,overdue,waiting,authorize,nodate,done",
+      "unassigned,week,later,overdue,waiting,authorize,invoice,nodate,done",
     );
     expect(moveBucket(d, "week", "week")).toBe(d);
   });
@@ -110,9 +134,10 @@ describe("arranging the columns", () => {
       "later",
       "waiting",
       "authorize",
+      "invoice",
     ] as WorkBucket[])
       l = hideBucket(l, b);
-    expect(l.hidden).toHaveLength(7);
+    expect(l.hidden).toHaveLength(8);
     expect(hideBucket(l, "done")).toBe(l);
     expect(showBucket(l, "overdue").hidden).not.toContain("overdue");
     // Back comes "nodate" in its own place, not at the end.

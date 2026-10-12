@@ -151,9 +151,13 @@ describe("clock in / clock out stamp the technician's own day, not UTC's", () =>
   });
 
   it("done at 8:30 pm Central on Oct 1: the labor entry carries the phone's day", async () => {
+    // An inspection with a signature: the server's close-out check (owner, Oct 12) has nothing
+    // to refuse, so the test stays about the day stamp.
     const { tables, context } = world({
       field_status: "on_site",
       on_site_at: "2026-10-01T22:00:00Z",
+      service_type: "inspection",
+      signature_path: "sig.png",
     });
     await call(setFieldStatus, { id: JOB, to: "done", day: "2026-10-01" }, context);
     const labor = tables["service_time_entries"]!.find((e) => e["kind"] === "labor");

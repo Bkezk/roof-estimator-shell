@@ -125,7 +125,7 @@ function fakeSupabase(db: Tables, opts: FakeOpts = {}) {
         error: null,
       };
     }
-    if (name === "stamp_dispatch") {
+    if (name === "stamp_dispatch" || name === "stamp_dispatch_result") {
       settings["last_dispatch_at"] = new Date().toISOString();
       return { data: null, error: null };
     }
@@ -327,9 +327,12 @@ describe("one failing escalation does not stop the next", () => {
     expect(r).toMatchObject({ escalated: 1, failed: 1 });
     expect(db["notifications"]!.filter((n) => n["kind"] === "untouched")).toHaveLength(2); // job-2 → 2 bosses
     expect(String(db["crm_followups"]![0]!["last_dispatch_error"])).toContain("escalation");
-    // Not retried on the next pass (a missed escalation beats a duplicate); due again at day 5.5.
+    // Owner, Oct 12 (item 10a): the failed one's escalated_at is put back, so the next pass
+    // escalates it (it used to wait for day 5.5); the one that went out is not sent again.
+    expect(db["service_jobs"]!.find((j) => j["id"] === JOB)!["escalated_at"]).toBeNull();
     vi.setSystemTime(T0 + 3 * DAY);
-    expect((await dispatchDueReminders(client)).escalated).toBe(0);
+    expect((await dispatchDueReminders(client)).escalated).toBe(1);
+    expect(db["notifications"]!.filter((n) => n["kind"] === "untouched")).toHaveLength(4);
   });
 });
 

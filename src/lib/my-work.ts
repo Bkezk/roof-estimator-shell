@@ -1,7 +1,9 @@
 /**
  * Work Overview (owner, Sep 30): one list and calendar of a person's own assignable work — service
  * tickets they lead (open / scheduled / done), open tasks assigned to them, and their open
- * follow-ups — merged and sorted by date. Pure helpers only (no I/O): the server function in
+ * follow-ups — merged and sorted by date. Since Oct 12 (owner item 3) whoever invoices
+ * (`seesInvoices`) also gets the Authorized tickets, under "Authorized — to invoice"
+ * (`toInvoiceItems`; the server sends them only to those viewers). Pure helpers only (no I/O): the server function in
  * my-work.functions.ts reads the rows, the page in components/my-work-page.tsx renders them.
  *
  * "Users should only see their own stuff except for managers who see everything":
@@ -38,6 +40,12 @@ const OPP_STATUS_LABELS: Record<string, string> = {
 
 /** The ticket stages Work Overview lists (Invoiced / Closed are the office's, not anyone's to-do). */
 export const WORK_TICKET_STAGES = ["open", "scheduled", "done"] as const;
+/**
+ * The stage whose tickets wait to be invoiced (owner, Oct 12): listed for whoever sees invoices
+ * (`seesInvoices`), under "Authorized — to invoice". Not a reminder timer (accounting is in
+ * Sage): the row shows how long it has waited, as the Invoices queue does.
+ */
+export const TO_INVOICE_STAGE = "authorized";
 
 const STAGE_LABELS: Record<string, string> = {
   open: "Open",
@@ -106,6 +114,8 @@ export interface TicketIn {
   technician_id: string | null;
   /** When it was entered (sent for unassigned tickets: the "needs assignment" timer). */
   created_at?: string | null;
+  /** When it reached its stage (sent for Authorized tickets: "Waiting N days" to invoice). */
+  stage_changed_at?: string | null;
 }
 
 export interface TaskIn {
@@ -202,6 +212,11 @@ export interface WorkRows {
   /** Display names by profile id (for "Everyone" / another person's view). */
   names?: Record<string, string>;
   unassigned?: UnassignedRows | null;
+  /**
+   * The Authorized tickets waiting for their invoice (owner, Oct 12): sent only to a viewer who
+   * sees invoices, whatever `who` asks for (the queue is the office's, not one person's).
+   */
+  toInvoice?: TicketIn[] | null;
 }
 
 // ---- items ---------------------------------------------------------------------------------
@@ -234,6 +249,10 @@ export interface WorkItem {
   since?: string | null;
   /** Flagged overdue: past its day, or unassigned longer than Setup allows (`unassignedOverdue`). */
   flag?: boolean;
+  /** An Authorized ticket waiting for its invoice: under "Authorized — to invoice" (Oct 12). */
+  toInvoice?: boolean;
+  /** When it reached Authorized (ISO), for "Waiting N days" (`waitingDays`). */
+  waitingSince?: string | null;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -300,7 +319,44 @@ export function ticketItem(
     assigneeId: t.technician_id,
     assigneeName: t.technician_id ? (names[t.technician_id] ?? null) : null,
     followup: followup ? workFollowup(followup) : null,
+    ...(t.stage === TO_INVOICE_STAGE
+      ? { toInvoice: true, waitingSince: t.stage_changed_at ?? null }
+      : {}),
   };
+}
+
+/**
+ * Whole days an Authorized ticket has waited for its invoice: from the day it reached the stage
+ * to `today` (the viewer's days) — the same number the Invoices queue's Waiting column shows
+ * (service-schedule.ts daysSince). Null without a stamp (a row from before 20261006180000).
+ */
+export function waitingDays(
+  since: string | null | undefined,
+  today: string,
+  toYmd: (iso: string) => string = localYmd,
+): number | null {
+  if (!since) return null;
+  const from = toYmd(since);
+  if (!YMD.test(from)) return null;
+  const [fy, fm, fd] = ymdParts(from);
+  const [ty, tm, td] = ymdParts(today);
+  return Math.max(0, Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000));
+}
+
+/**
+ * The "Authorized — to invoice" rows (owner, Oct 12): the Authorized tickets the server sent to
+ * a viewer who sees invoices. Any other stage in the list is ignored (the server filters; this
+ * keeps the rule in one place).
+ */
+export function toInvoiceItems(
+  rows: TicketIn[] | null | undefined,
+  names: Record<string, string> = {},
+  toYmd: (iso: string) => string = localYmd,
+): WorkItem[] {
+  return (rows ?? [])
+    .filter((t) => t.stage === TO_INVOICE_STAGE)
+    .map((t) => ticketItem(t, names, null, toYmd))
+    .sort(compareWork);
 }
 
 export function taskItem(t: TaskIn, names: Record<string, string> = {}): WorkItem {
@@ -464,7 +520,11 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
   const unassigned = unassignedItems(rows.unassigned, toYmd).filter(
     (u) => !assignedKeys.has(u.key),
   );
-  return [...tickets, ...tasks, ...followups, ...unassigned].sort(compareWork);
+  // The Authorized tickets waiting for their invoice (owner, Oct 12), for whoever invoices; a
+  // ticket already on the list (a manager who is also its technician) is listed once.
+  const seen = new Set([...assignedKeys, ...unassigned.map((u) => u.key)]);
+  const toInvoice = toInvoiceItems(rows.toInvoice, names, toYmd).filter((t) => !seen.has(t.key));
+  return [...tickets, ...tasks, ...followups, ...unassigned, ...toInvoice].sort(compareWork);
 }
 
 // ---- grouping ------------------------------------------------------------------------------
@@ -472,6 +532,7 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
 export type WorkBucket =
   | "unassigned"
   | "authorize"
+  | "invoice"
   | "overdue"
   | "today"
   | "week"
@@ -485,6 +546,8 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
   unassigned: "Unassigned",
   // M9 (owner, Oct 5): "a Needs authorization tab on the work overview page".
   authorize: "Needs authorization",
+  // Owner, Oct 12 (item 3): the Authorized tickets, for whoever invoices; no reminder timer.
+  invoice: "Authorized — to invoice",
   overdue: "Overdue",
   today: "Today",
   week: "This week",
@@ -496,7 +559,8 @@ export const BUCKET_LABELS: Record<WorkBucket, string> = {
 };
 
 // Owner, Oct 7: "Unassigned, overdue, this week, later, needs authorization, no date, and Done";
-// Oct 9: Waiting after Later, before No date.
+// Oct 9: Waiting after Later, before No date; Oct 12: "Authorized — to invoice" right after
+// Needs authorization (the next step of the same flow).
 const BUCKET_ORDER: WorkBucket[] = [
   "unassigned",
   "overdue",
@@ -505,6 +569,7 @@ const BUCKET_ORDER: WorkBucket[] = [
   "later",
   "waiting",
   "authorize",
+  "invoice",
   "nodate",
   "done",
 ];
@@ -517,7 +582,10 @@ const BUCKET_ORDER: WorkBucket[] = [
 export const LIST_BUCKETS: WorkBucket[] = BUCKET_ORDER.filter((b) => b !== "today");
 
 /** What `bucketOf` reads of an item (the follow-up only for a running hold). */
-export type BucketIn = Pick<WorkItem, "date" | "done" | "needsAuth" | "unassigned"> & {
+export type BucketIn = Pick<
+  WorkItem,
+  "date" | "done" | "needsAuth" | "unassigned" | "toInvoice"
+> & {
   followup?: Pick<WorkFollowup, "status" | "snoozed_until"> | null;
 };
 
@@ -547,8 +615,11 @@ export const endOfWeek = (today: string) => addDays(today, 6 - weekday(today));
 /**
  * Where an item sits relative to `today` (YYYY-MM-DD): before today = Overdue; today; later this
  * week (through Saturday); Later; No date. A Done ticket is finished work, never overdue: it has
- * its own last group. A follow-up on hold (owner, Oct 9: snoozed_until ahead of today) waits
- * under Waiting whatever its date, so a held item is never counted overdue while it waits.
+ * its own last group (owner, Oct 12, item 11: "overdue" means an Open / Scheduled ticket past its
+ * day — the one rule, with work-counts.ts isOverdueTicket). An Authorized ticket waits under
+ * "Authorized — to invoice", whatever its date. A follow-up on hold (owner, Oct 9: snoozed_until
+ * ahead of today) waits under Waiting whatever its date, so a held item is never counted overdue
+ * while it waits.
  */
 export function bucketOf(
   item: BucketIn,
@@ -558,6 +629,7 @@ export function bucketOf(
   // Nobody's work sits under Unassigned whatever its date (overdue or not): the fix is a person.
   if (item.unassigned) return "unassigned";
   if (item.needsAuth) return "authorize";
+  if (item.toInvoice) return "invoice";
   if (item.done) return "done";
   if (isHeldOn(item.followup, today, toYmd)) return "waiting";
   if (!item.date) return "nodate";
@@ -601,6 +673,7 @@ export function groupWork(
 export const BUCKET_EMPTY: Record<WorkBucket, string> = {
   unassigned: "Everything has someone on it.",
   authorize: "Nothing waiting for your review.",
+  invoice: "Nothing waiting to be invoiced.",
   overdue: "Nothing overdue.",
   today: "Nothing due today.",
   week: "Nothing due this week.",
@@ -614,20 +687,29 @@ export const BUCKET_EMPTY: Record<WorkBucket, string> = {
  * The List groups in order, empty ones included, each sorted by `compareWork`. "Unassigned" comes
  * first, for everyone but a technician-only user (`opts.unassigned`; owner, Oct 7) or when
  * something is in it; "Needs authorization" next, only for the person who authorizes
- * (`opts.authorize`) or when something is in it (a manager looking at that person's work).
+ * (`opts.authorize`) or when something is in it (a manager looking at that person's work);
+ * "Authorized — to invoice" only for whoever sees invoices (`opts.invoice`) or when something is
+ * in it — everyone else never has the column, not even among the layout's hidden chips.
  */
 export function listGroups(
   items: WorkItem[],
   today: string,
-  opts: { authorize?: boolean; unassigned?: boolean; toYmd?: (iso: string) => string } = {},
+  opts: {
+    authorize?: boolean;
+    invoice?: boolean;
+    unassigned?: boolean;
+    toYmd?: (iso: string) => string;
+  } = {},
 ): WorkGroup[] {
   const filled = new Map(groupWork(items, today, opts.toYmd).map((g) => [g.bucket, g]));
   return LIST_BUCKETS.filter((b) =>
     b === "authorize"
       ? opts.authorize || filled.has("authorize")
-      : b === "unassigned"
-        ? opts.unassigned || filled.has("unassigned")
-        : true,
+      : b === "invoice"
+        ? opts.invoice || filled.has("invoice")
+        : b === "unassigned"
+          ? opts.unassigned || filled.has("unassigned")
+          : true,
   ).map((b) => filled.get(b) ?? { bucket: b, label: BUCKET_LABELS[b], items: [] });
 }
 

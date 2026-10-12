@@ -71,7 +71,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-store";
-import { isOffice } from "@/lib/access";
+import { isOffice, managesTickets } from "@/lib/access";
 import { closeoutDestination } from "@/lib/closeout-destination";
 import {
   REPAIR_TAGS,
@@ -130,7 +130,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { completeGaps, type CheckRead, type CompleteGaps } from "@/lib/closeout-check";
+import {
+  CLOSEOUT_ADD_MISSING,
+  completeGaps,
+  type CheckRead,
+  type CompleteGaps,
+} from "@/lib/closeout-check";
 import { CLOSEOUT_TEXT_FIELDS, mergeSaved } from "@/lib/job-cache";
 import {
   PHASE_PHOTO_ROLES,
@@ -696,10 +701,13 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
 
   const busy = complete.isPending;
   const finished = FINISHED.includes(job.stage);
+  // Owner, Oct 12 (item 7): "Complete anyway" is a manager's (managesTickets, the server's rule
+  // in setFieldStatus); a technician sees the list with Complete disabled until it is whole.
+  const manager = managesTickets(profile);
 
   // M2 (owner, Oct 5): Complete first lists what is missing — a repair without its Before /
   // After photo, no time, no signature (not the notes: skippable, owner Oct 9) — with "Go back"
-  // and "Complete anyway". The same queries (and cache) the Repairs section reads.
+  // and, for a manager, "Complete anyway". The same queries (and cache) the Repairs section reads.
   const repairsFn = useServerFn(listJobRepairs);
   const photosFn = useServerFn(listJobPhotos);
   // Owner, Oct 9 (S13): fresh for 30 s, so coming back from the camera does not re-read
@@ -1128,6 +1136,11 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                   </ul>
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              {!manager && (
+                <p className="text-sm text-muted-foreground" data-line="add-missing">
+                  {CLOSEOUT_ADD_MISSING}
+                </p>
+              )}
               <AlertDialogFooter>
                 <AlertDialogCancel className="h-12">Go back</AlertDialogCancel>
                 {unread && (
@@ -1146,15 +1159,27 @@ function CloseoutForm({ job }: { job: ServiceJobWithTech }) {
                     Retry
                   </Button>
                 )}
-                <AlertDialogAction
-                  className="h-12"
-                  onClick={() => {
-                    setMissing([]);
-                    complete.mutate();
-                  }}
-                >
-                  Complete anyway
-                </AlertDialogAction>
+                {manager ? (
+                  <AlertDialogAction
+                    className="h-12"
+                    onClick={() => {
+                      setMissing([]);
+                      complete.mutate();
+                    }}
+                  >
+                    Complete anyway
+                  </AlertDialogAction>
+                ) : (
+                  <Button
+                    type="button"
+                    className="h-12"
+                    disabled
+                    title={missing.join("; ")}
+                    data-action="complete-blocked"
+                  >
+                    Complete
+                  </Button>
+                )}
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>

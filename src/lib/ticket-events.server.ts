@@ -1,10 +1,18 @@
 /**
  * What happens when a ticket changes stage — SERVER ONLY (load inside handlers). Owner, Sep 27:
  * maximise automation. Since Oct 5 (M9, the Authorized stage): reaching Done tells the authorizer
- * (Setup › Service rates, else every admin) "ready for your review" and opens an "Authorize
- * ticket #…" follow-up for them (Work Overview's Needs authorization tab), which closes when the
- * ticket leaves Done. Reaching Authorized tells the office "ready to invoice".
+ * (Setup › Service rates, else every admin) "ready for your review" ONCE (owner, Oct 12, item 2:
+ * the follow-up opened in the same step used to send a second "ready for your review") and opens
+ * an "Authorize ticket #…" follow-up for them (Work Overview's Needs authorization tab), which
+ * closes when the ticket leaves Done. Reaching Authorized tells the office "ready to invoice".
+ *
+ * Also here (owner, Oct 12, item 9; `afterTicketDispatch`): the technician's own notices when
+ * a ticket is taken from them ("Ticket #N was reassigned") or its day moves ("Ticket #N moved to
+ * <day>"), from every path that changes the technician or the date (saveServiceJob,
+ * assignServiceJob — the Tech Board's drops — and claimServiceJob through syncTicketFollowup).
+ * No notice to the person who made the change, none for a PO or for Closed (owner).
  */
+import { longDay } from "@/lib/followup-rules";
 import { notify, serverClient, type Client } from "@/lib/notify.server";
 import { syncFollowup } from "@/lib/followups.server";
 
@@ -32,6 +40,17 @@ async function officeUsers(sb: Client): Promise<{ id: string; technician: boolea
   const { data, error } = await sb.rpc("technician_options");
   if (error) console.error(`afterTicketStage: technician_options failed — ${error.message}`);
   return (data ?? []).filter((u) => !u.technician).map((u) => ({ id: u.id, technician: false }));
+}
+
+/** A roster user's display name (technician_options), or null when not on it. */
+async function rosterName(sb: Client, id: string): Promise<string | null> {
+  const { data, error } = await sb.rpc("technician_options");
+  if (error) {
+    console.error(`afterTicketDispatch: technician_options failed — ${error.message}`);
+    return null;
+  }
+  const u = (data ?? []).find((r) => r.id === id);
+  return u ? (u.full_name ?? "").trim() || u.email : null;
 }
 
 /** Who reviews Done tickets (20261005150000_ticket_authorizer.sql); [] until it is applied. */
@@ -74,6 +93,8 @@ export async function afterTicketStage(
     );
   if (becameDone) {
     const others = reviewers.filter((id) => id !== actor.id);
+    // The one Done notice (owner, Oct 12, item 2): the follow-up opened below is `quiet`, so the
+    // first authorizer is not told a second time by its "assigned" notice.
     if (others.length)
       await notify(
         others,
@@ -131,7 +152,78 @@ export async function afterTicketStage(
       dueDate: null,
       actorId: actor.id,
       actorName: actor.name,
+      // The assignee is among the reviewers told above (authorizers[0], or an office user when
+      // there is no authorizer): no second "ready for your review" in the step the ticket became
+      // Done. A later hand-over (another authorizer set while it sits at Done) still announces.
+      quiet: becameDone,
     },
     admin,
   );
+}
+
+/** What a dispatch path knew of the ticket before its write (technician and day). */
+export interface DispatchBefore {
+  technician_id: string | null;
+  scheduled_date: string | null;
+}
+
+/**
+ * The technician's notices after a dispatch or a date move (owner, Oct 12, item 9). Exactly one
+ * per change, from the one place every path reaches (service.functions.ts syncTicketFollowup):
+ *   - the technician changed from A to B: A hears "Ticket #N was reassigned" (kind `reassigned`,
+ *     naming B and the ticket; B hears "Ticket assigned to you" from the follow-up as before);
+ *     taken off to nobody: nothing beyond that (owner: "reassigned" wording, not "taken off you");
+ *   - the technician stayed and the day moved: they hear "Ticket #N moved to <long day>" (kind
+ *     `date_moved`) — unless they moved it themselves.
+ * Never to the person who made the change; nothing for a deleted ticket. Best effort: a failed
+ * notice is logged, the dispatch itself is already saved.
+ */
+export async function afterTicketDispatch(
+  row: JobRow & { scheduled_date: string | null },
+  before: DispatchBefore,
+  actor: { id: string; name: string | null },
+  sb: Client,
+): Promise<void> {
+  if (row.deleted_at) return;
+  const who = actor.name ?? "The office";
+  const url = `/service?id=${row.id}`;
+  try {
+    const admin = await serverClient(sb);
+    const techChanged = (before.technician_id ?? null) !== (row.technician_id ?? null);
+    if (techChanged) {
+      // A → B: A is told; from nobody, or to nobody, there is no "reassigned" to tell.
+      if (before.technician_id && row.technician_id && before.technician_id !== actor.id) {
+        const newTech = (await rosterName(admin, row.technician_id)) ?? "another technician";
+        await notify(
+          [before.technician_id],
+          {
+            kind: "reassigned",
+            title: `Ticket #${row.number} was reassigned`,
+            body: `${who} reassigned ${ticketTitle(row)} to ${newTech}. It is off your list.`,
+            url,
+          },
+          admin,
+        );
+      }
+      return;
+    }
+    const dateChanged = (before.scheduled_date ?? null) !== (row.scheduled_date ?? null);
+    if (!dateChanged || !row.scheduled_date || !row.technician_id) return;
+    if (row.technician_id === actor.id) return;
+    const from = before.scheduled_date ? ` from ${longDay(before.scheduled_date)}` : "";
+    await notify(
+      [row.technician_id],
+      {
+        kind: "date_moved",
+        title: `Ticket #${row.number} moved to ${longDay(row.scheduled_date)}`,
+        body: `${who} moved ${ticketTitle(row)}${from} to ${longDay(row.scheduled_date)}.`,
+        url,
+      },
+      admin,
+    );
+  } catch (e) {
+    console.error(
+      `afterTicketDispatch: ticket #${row.number} — the technician's notice was not sent: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }

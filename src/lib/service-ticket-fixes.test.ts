@@ -31,7 +31,10 @@ vi.mock("@tanstack/react-start", () => ({
   },
 }));
 vi.mock("@/integrations/supabase/auth-middleware.hardened", () => ({ requireSupabaseAuth: {} }));
-vi.mock("@/lib/ticket-events.server", () => ({ afterTicketStage: vi.fn(async () => {}) }));
+vi.mock("@/lib/ticket-events.server", () => ({
+  afterTicketStage: vi.fn(async () => {}),
+  afterTicketDispatch: vi.fn(async () => {}),
+}));
 vi.mock("@/lib/followups.server", () => ({ syncFollowup: vi.fn(async () => "none") }));
 vi.mock("@/lib/service-crew.server", () => ({
   syncCrewLead: vi.fn(async () => {}),

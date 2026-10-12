@@ -62,7 +62,8 @@ function env(company: string | null = "Acme Roofing Co.") {
           };
         if (fn === "crm_untouched" || fn === "escalation_recipients")
           return { data: [], error: null };
-        if (fn === "stamp_dispatch") return { data: null, error: null };
+        if (fn === "stamp_dispatch" || fn === "stamp_dispatch_result")
+          return { data: null, error: null };
         return undefined;
       },
     },

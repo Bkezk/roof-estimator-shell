@@ -48,9 +48,14 @@ describe("open sets", () => {
     expect([...OPEN_OPP_STATUSES]).toEqual(["open", "contacted", "quoted"]);
     for (const s of ["won", "lost", "no_response"]) expect(isOpenOppStatus(s)).toBe(false);
   });
-  it("overdue rows are open rows whose date has passed", () => {
+  it("overdue rows are Open / Scheduled rows whose date has passed — never a Done ticket (owner, Oct 12)", () => {
+    expect(isOverdueTicket({ stage: "open", scheduled_date: "2026-09-29" }, TODAY)).toBe(true);
     expect(isOverdueTicket({ stage: "scheduled", scheduled_date: "2026-09-29" }, TODAY)).toBe(true);
-    expect(isOverdueTicket({ stage: "done", scheduled_date: "2026-09-29" }, TODAY)).toBe(true);
+    // Done is finished work waiting to be authorized and invoiced: "waiting", not overdue.
+    expect(isOverdueTicket({ stage: "done", scheduled_date: "2026-09-29" }, TODAY)).toBe(false);
+    expect(isOverdueTicket({ stage: "authorized", scheduled_date: "2026-09-29" }, TODAY)).toBe(
+      false,
+    );
     expect(isOverdueTicket({ stage: "invoiced", scheduled_date: "2026-09-29" }, TODAY)).toBe(false);
     expect(isOverdueTicket({ stage: "open", scheduled_date: TODAY }, TODAY)).toBe(false);
     expect(isOverdueOpp({ status: "quoted", expected_close: "2026-09-01" }, TODAY)).toBe(true);

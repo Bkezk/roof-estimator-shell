@@ -9,6 +9,10 @@
  * The answer reports both ({ followups: {...} | { error }, tasks: {...} | { error } }). `ok` is
  * false when anything failed (a whole pass, or single sends, which are logged and recorded on
  * their rows); the status is 500 only when a whole pass could not run.
+ *
+ * This route alone stamps crm_settings.last_cron_at (stamp_cron, Oct 12): the app's own pass
+ * stamps last_dispatch_at too, so Admin › Reminders could not tell whether the scheduled job was
+ * running at all. `cron_stamped` in the answer says whether the stamp landed.
  */
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -59,8 +63,30 @@ async function run(request: Request): Promise<Response> {
     tasks = { error: errText(e) };
   }
 
+  // The scheduled run's own stamp (last_cron_at), after both passes, whatever they did: it says
+  // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
+  // applied yet; logged, never a failure of the run.
+  let cronStamped = false;
+  try {
+    const { error } = await (
+      supabaseAdmin as unknown as {
+        rpc: (fn: string) => Promise<{ error: { message: string } | null }>;
+      }
+    ).rpc("stamp_cron");
+    if (error) throw new Error(error.message);
+    cronStamped = true;
+  } catch (e) {
+    console.error("Cron reminders: could not stamp last_cron_at —", errText(e));
+  }
+
   return Response.json(
-    { ok: !passFailed && sendsFailed === 0, followups, tasks, at: new Date().toISOString() },
+    {
+      ok: !passFailed && sendsFailed === 0,
+      followups,
+      tasks,
+      cron_stamped: cronStamped,
+      at: new Date().toISOString(),
+    },
     { status: passFailed ? 500 : 200 },
   );
 }

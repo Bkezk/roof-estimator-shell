@@ -19,21 +19,21 @@ describe("ticketOverdueDays", () => {
     expect(ticketOverdueDays({ stage: "open", scheduled_date: "2026-10-01" }, TODAY)).toBe(1);
     expect(ticketOverdueDays({ stage: "scheduled", scheduled_date: "2026-09-25" }, TODAY)).toBe(7);
     // Across a month and a DST change: still calendar days.
-    expect(ticketOverdueDays({ stage: "done", scheduled_date: "2026-08-31" }, "2026-11-02")).toBe(
-      63,
-    );
+    expect(
+      ticketOverdueDays({ stage: "scheduled", scheduled_date: "2026-08-31" }, "2026-11-02"),
+    ).toBe(63);
   });
 
-  it("is null for today, the future, no date, or a closed stage", () => {
+  it("is null for today, the future, no date, or a stage past Scheduled (Done is never overdue — owner, Oct 12)", () => {
     expect(ticketOverdueDays({ stage: "open", scheduled_date: TODAY }, TODAY)).toBeNull();
     expect(ticketOverdueDays({ stage: "open", scheduled_date: "2026-10-03" }, TODAY)).toBeNull();
     expect(ticketOverdueDays({ stage: "open", scheduled_date: null }, TODAY)).toBeNull();
-    for (const stage of ["invoiced", "closed"])
+    for (const stage of ["done", "authorized", "invoiced", "closed"])
       expect(ticketOverdueDays({ stage, scheduled_date: "2026-09-01" }, TODAY)).toBeNull();
   });
 
   it("agrees with the Overdue filter on every case", () => {
-    const stages = ["open", "scheduled", "done", "invoiced", "closed"];
+    const stages = ["open", "scheduled", "done", "authorized", "invoiced", "closed"];
     const dates = [null, "2026-09-01", "2026-10-01", TODAY, "2026-10-03"];
     for (const stage of stages)
       for (const scheduled_date of dates) {

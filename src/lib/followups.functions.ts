@@ -22,6 +22,7 @@ import {
   isMissingRpc,
 } from "@/lib/followup-holds";
 import { canManageFollowup, FOLLOWUP_MANAGER_ONLY } from "@/lib/followup-rules";
+import { localHm } from "@/lib/tasks";
 
 export type FollowupRow = Database["public"]["Tables"]["crm_followups"]["Row"];
 export type NotificationRow = Database["public"]["Tables"]["notifications"]["Row"];
@@ -481,31 +482,110 @@ export const setCrmSettings = createServerFn({ method: "POST" })
     if (error) throw new Error(error.message);
   });
 
+/** What a reminder pass run from the app did (dispatchRemindersIfDue; the Admin toast). */
+export interface ReminderRunResult {
+  /** False when the last pass ran under ten minutes ago, or the caller may not run one. */
+  ran: boolean;
+  reminded: number;
+  escalated: number;
+  /** Task notices sent (created / due today / overdue; tasks-notify.server.ts). */
+  taskNotices: number;
+  /** Sends that failed, reminders and task notices together; a reminder retries next pass. */
+  failed: number;
+  /** Why the task notices did not run on this pass (no server key on the preview), or null. */
+  taskProblem: string | null;
+}
+
+const notRun = (): ReminderRunResult => ({
+  ran: false,
+  reminded: 0,
+  escalated: 0,
+  taskNotices: 0,
+  failed: 0,
+  taskProblem: null,
+});
+
+/** The Admin "Run reminders now" toast: "2 reminded · 0 escalated · 1 task notices · 0 failed". */
+export function reminderRunSummary(r: Omit<ReminderRunResult, "ran">): string {
+  const line = `${r.reminded} reminded · ${r.escalated} escalated · ${r.taskNotices} task notices · ${r.failed} failed`;
+  return r.taskProblem ? `${line} · task notices skipped: ${r.taskProblem}` : line;
+}
+
+export const TASK_NOTICES_NEED_KEY =
+  "the server key (SUPABASE_SERVICE_ROLE_KEY) is not set on this server; the scheduled job sends them";
+
+/**
+ * The scheduled job's office hours (.github/workflows/reminders.yml: every 30 minutes, 8am–7pm
+ * Eastern). Admin › Reminders turns amber when it has not run for over two hours inside them.
+ */
+export const CRON_OFFICE_HOURS = { from: 8, to: 19, tz: "America/New_York" } as const;
+export const CRON_STALE_HOURS = 2;
+export const CRON_STALE_LINE = "The scheduled job has not run in over 2 hours during office hours";
+
+/**
+ * Is the scheduled run overdue (owner, Oct 12, item 8)? Yes when `now` is inside office hours,
+ * at least two hours after they open (the overnight gap before the first run of the day is
+ * expected, not a failure), and the last run (crm_settings.last_cron_at, stamped by the cron
+ * route alone) is missing or over two hours old. Outside office hours: never.
+ */
+export function scheduledRunStale(lastCronAt: string | null | undefined, now: Date): boolean {
+  const hour = Number(localHm(now, CRON_OFFICE_HOURS.tz).slice(0, 2));
+  if (hour < CRON_OFFICE_HOURS.from + CRON_STALE_HOURS || hour >= CRON_OFFICE_HOURS.to)
+    return false;
+  if (!lastCronAt) return true;
+  const last = Date.parse(lastCronAt);
+  return !Number.isFinite(last) || now.getTime() - last > CRON_STALE_HOURS * 3600_000;
+}
+
 /**
  * The lazy dispatcher: an office user's app calls this on load; if the last pass is older than
- * ten minutes it fires the due reminders. The cron route does the same on a schedule.
+ * ten minutes it fires the due reminders, then the task notices (owner, Oct 12, item 8: they used
+ * to go out from the scheduled job alone, so with it down a task's "due today" never came). The
+ * cron route does the same on a schedule and is the one that stamps last_cron_at. Returns what
+ * ran, for the Admin toast (reminderRunSummary).
  */
 export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }): Promise<{ ran: boolean; reminded: number; escalated: number }> => {
+  .handler(async ({ context }): Promise<ReminderRunResult> => {
     const p = await me(context);
-    if (!officeLike(p)) return { ran: false, reminded: 0, escalated: 0 };
+    if (!officeLike(p)) return notRun();
     const { data: s } = await context.supabase
       .from("crm_settings")
       .select("last_dispatch_at")
       .eq("id", 1)
       .maybeSingle();
     const last = s?.last_dispatch_at ? Date.parse(s.last_dispatch_at) : 0;
-    if (Date.now() - last < 10 * 60 * 1000) return { ran: false, reminded: 0, escalated: 0 };
+    if (Date.now() - last < 10 * 60 * 1000) return notRun();
+    const out: ReminderRunResult = { ...notRun(), ran: true };
     try {
       const { dispatchDueReminders } = await import("@/lib/notify.server");
       const r = await dispatchDueReminders(context.supabase);
-      return { ran: true, reminded: r.reminded, escalated: r.escalated };
+      out.reminded = r.reminded;
+      out.escalated = r.escalated;
+      out.failed = r.failed;
     } catch (e) {
       // Never take the app down over a reminder pass; the Reminders settings page shows it.
       console.error("Reminder dispatch failed", e);
-      return { ran: false, reminded: 0, escalated: 0 };
+      return notRun();
     }
+    // The task notices read every open task and stamp it: the service-role client, as the cron
+    // route uses (a signed-in user's client reads and writes only their own tasks under RLS).
+    // Without the key (the preview) they are skipped, and the result says so.
+    try {
+      const { hasServiceRole } = await import("@/lib/notify.server");
+      if (!hasServiceRole()) out.taskProblem = TASK_NOTICES_NEED_KEY;
+      else {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { dispatchTaskNotices } = await import("@/lib/tasks-notify.server");
+        const t = await dispatchTaskNotices(supabaseAdmin as unknown as SupabaseClient<Database>);
+        out.taskNotices = t.tasks_created + t.tasks_morning + t.tasks_overdue;
+        out.failed += t.tasks_errors;
+      }
+    } catch (e) {
+      console.error("Task notice dispatch failed", e);
+      out.taskProblem = e instanceof Error ? e.message : String(e);
+    }
+    return out;
   });
 
 /** Admin: delivery health — the last pass, the email key, recent failures. */
@@ -515,7 +595,12 @@ export const notificationHealth = createServerFn({ method: "GET" })
     async ({
       context,
     }): Promise<{
+      /** The last reminder pass, from the app or the scheduled job (stamp_dispatch). */
       last_dispatch_at: string | null;
+      /** The last SCHEDULED run (the cron route alone stamps it; Oct 12). Null before that migration. */
+      last_cron_at: string | null;
+      /** How many sends failed on the last pass; they retry on the next (Oct 12, item 10a). */
+      last_dispatch_failed: number;
       email_configured: boolean;
       /** "APP_URL not set" / "NOTIFY_FROM_EMAIL not set": reminder emails are held back. */
       email_problem: string | null;
@@ -535,8 +620,26 @@ export const notificationHealth = createServerFn({ method: "GET" })
       if (p.role !== "admin") throw new Error("Forbidden: admin access required");
       const { emailConfigured, emailConfigProblem, appUrl, fromAddress } =
         await import("@/lib/notify.server");
-      const [{ data: s }, { data: fails }, { data: taskFails }] = await Promise.all([
-        context.supabase.from("crm_settings").select("last_dispatch_at").eq("id", 1).maybeSingle(),
+      // The stamps: last_cron_at and last_dispatch_failed arrive with the Oct 12 migration; until
+      // it is applied the named select fails and the older column is read alone.
+      const stamps = async () => {
+        const both = await context.supabase
+          .from("crm_settings")
+          .select("last_dispatch_at, last_cron_at, last_dispatch_failed")
+          .eq("id", 1)
+          .maybeSingle();
+        if (!both.error) return both.data;
+        const one = await context.supabase
+          .from("crm_settings")
+          .select("last_dispatch_at")
+          .eq("id", 1)
+          .maybeSingle();
+        return one.data ? { ...one.data, last_cron_at: null, last_dispatch_failed: 0 } : null;
+      };
+      // Real failures only: a user with push on and no device is not one (Oct 12, item 10b;
+      // notify() no longer records it, and the migration clears the old rows).
+      const [s, { data: fails }, { data: taskFails }] = await Promise.all([
+        stamps(),
         context.supabase
           .from("notifications")
           .select("id, created_at, title, email_error, push_error")
@@ -552,6 +655,8 @@ export const notificationHealth = createServerFn({ method: "GET" })
       ]);
       return {
         last_dispatch_at: s?.last_dispatch_at ?? null,
+        last_cron_at: s?.last_cron_at ?? null,
+        last_dispatch_failed: Number(s?.last_dispatch_failed ?? 0) || 0,
         email_configured: emailConfigured(),
         email_problem: emailConfigProblem(),
         app_url: appUrl(),

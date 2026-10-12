@@ -125,6 +125,7 @@ describe("Work Overview: a held item waits", () => {
       "later",
       "waiting",
       "authorize",
+      "invoice",
       "nodate",
       "done",
     ]);
@@ -237,6 +238,7 @@ describe("Work Overview: a held item waits", () => {
       "overdue",
       "week",
       "authorize",
+      "invoice",
       "nodate",
     ]);
   });
@@ -660,6 +662,7 @@ function passClient(tables: Record<string, Row[]>, untouched: Row[]): Client {
           notify_push: false,
         })),
       stamp_dispatch: () => null,
+      stamp_dispatch_result: () => null,
     },
   });
   return env.db as unknown as Client;

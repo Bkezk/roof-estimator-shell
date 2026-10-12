@@ -182,7 +182,8 @@ describe("List: every heading, always, in the same order (five since Oct 6: no T
       page.indexOf("function ListView"),
       page.indexOf("function CalendarView"),
     );
-    expect(list).toContain("listGroups(items, today, { authorize, unassigned })");
+    // Oct 12: `invoice` (Authorized — to invoice, for whoever sees invoices) joins the flags.
+    expect(list).toContain("listGroups(items, today, { authorize, invoice, unassigned })");
     expect(list).not.toContain("groupWork(");
     expect(list).not.toContain("presetGroups(");
     // Desktop (lg+): every group a column, all in view at once — no clicking between them.

@@ -15,6 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { canAccess, isOffice, managesTickets } from "@/lib/access";
+import { closeoutGaps, closeoutRefusal } from "@/lib/closeout-check";
 import { fieldEditProblem } from "@/lib/field-edit-lock";
 import { catalogTemplate, templatesForViewer } from "@/lib/ticket-money";
 import { REPAIR_TAG_VALUES } from "@/lib/repair-tags";
@@ -319,6 +320,29 @@ export const setFieldStatus = createServerFn({ method: "POST" })
       // that stage, but its close-out is still recorded — completed_at is stamped once, so the
       // ticket page's Close-out fold says "Done <date>" instead of "not closed out yet".
       if (finished && job.completed_at) return job;
+      // Owner, Oct 12 (item 7): the close-out's completeness is the server's rule too, the same
+      // one the screen shows (closeout-check.ts closeoutGaps). A technician's Complete is refused
+      // while a repair lacks its Before / After photo, no time is logged (unless an On site
+      // stamp supplies it) or there is no signature; the gaps come back in the message. A manager
+      // completes anyway. A ticket the office already finished is only stamped (above).
+      if (!finished && !managesTickets(p)) {
+        const [repairs, photos, time] = await Promise.all([
+          sb.from("service_job_repairs").select("id, name").eq("service_job_id", job.id),
+          sb.from("service_job_photos").select("repair_id, role").eq("service_job_id", job.id),
+          sb.from("service_time_entries").select("hours").eq("service_job_id", job.id),
+        ]);
+        const readErr = repairs.error ?? photos.error ?? time.error;
+        if (readErr) throw new Error(`Could not check the close-out: ${readErr.message}`);
+        const gaps = closeoutGaps({
+          service_type: job.service_type,
+          signature_path: job.signature_path,
+          on_site_at: job.on_site_at,
+          repairs: repairs.data ?? [],
+          photos: photos.data ?? [],
+          time: time.data ?? [],
+        });
+        if (gaps.length) throw new Error(closeoutRefusal(gaps));
+      }
       patch = finished
         ? { field_status: null, completed_at: now }
         : { field_status: null, completed_at: now, stage: "done" };

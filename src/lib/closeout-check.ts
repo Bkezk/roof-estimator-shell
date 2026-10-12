@@ -1,9 +1,11 @@
 /**
  * What a close-out is missing when the technician presses Complete (service study M2, owner
  * Oct 5). CenterPoint will not tick a repair without problem and resolution photos ("Photo
- * Required 0 / 4"); the portal's Complete checked nothing. This is a warning, not a wall: the
- * screen lists what is missing with "Go back" and "Complete anyway". Pure, so it is tested
- * without the screen.
+ * Required 0 / 4"); the portal's Complete checked nothing. The screen lists what is missing
+ * with "Go back" and, for a manager, "Complete anyway". Since Oct 12 (owner item 7) the server
+ * runs the same rules (`closeoutGaps`, service-field.functions.ts setFieldStatus "done"): a
+ * technician's Complete is refused while anything is missing (the list comes back in the
+ * message, `closeoutRefusal`); a manager's goes through. Pure, so it is tested without the screen.
  */
 
 export interface CheckRepair {
@@ -85,6 +87,40 @@ function readGap(what: string, read: CheckRead<unknown>): string {
     ? `Could not check the ${what} — no signal (${errMsg(read.error)})`
     : `Still loading the ${what}`;
 }
+
+/** The close-out's rows as the server reads them (closeoutGaps). */
+export interface CloseoutRows {
+  service_type: string;
+  signature_path: string | null;
+  /** An older ticket's On site stamp: Complete adds its labor itself, so no time check. */
+  on_site_at: string | null;
+  repairs: CheckRepair[];
+  photos: CheckPhoto[];
+  time: { hours: number | string }[];
+}
+
+/**
+ * The same gap list from rows already in hand (the server's check, Oct 12): exactly what
+ * `completeGaps` gives the screen once its three reads have answered.
+ */
+export function closeoutGaps(rows: CloseoutRows): string[] {
+  return completeGaps({
+    finished: false,
+    service_type: rows.service_type,
+    signature_path: rows.signature_path,
+    on_site_at: rows.on_site_at,
+    repairs: { data: rows.repairs, error: null },
+    photos: { data: rows.photos, error: null },
+    time: { data: rows.time, error: null },
+  }).gaps;
+}
+
+export const CLOSEOUT_INCOMPLETE = "The close-out is not complete";
+/** The server's refusal of a technician's Complete: the gaps, and what to do (no wall of text). */
+export const closeoutRefusal = (gaps: readonly string[]): string =>
+  `${CLOSEOUT_INCOMPLETE}: ${gaps.join("; ")}. Add what is missing, then press Complete again.`;
+/** The screen's line under the list for a technician (a manager sees Complete anyway instead). */
+export const CLOSEOUT_ADD_MISSING = "Add what is missing, then press Complete again.";
 
 /**
  * Complete's list from the screen's three reads (owner, Oct 9: Complete passed with no checks

@@ -154,6 +154,16 @@ export function finalizeStageProblem(stage: string | null | undefined): string |
 }
 
 /**
+ * Does finalising an invoice leave the ticket's stage alone (owner, Oct 12, item 6)? A Closed
+ * ticket stays Closed when a second invoice on it is finalised — it used to go back to Invoiced.
+ * An Authorized or Invoiced ticket is set (or kept) Invoiced, pointing at the new invoice. The
+ * database guard says the same (set_ticket_stage_from_invoice, the Oct 12 migration).
+ */
+export function invoiceKeepsTicketStage(stage: string | null | undefined): boolean {
+  return stage === "closed";
+}
+
+/**
  * Finalise a draft: the one routine behind Finalize and Send on a draft (audit, Oct 2: Send
  * skipped the no-lines check and left the ticket's follow-up open). Refuses an invoice with no
  * lines, or on a ticket not yet Authorized (finalizeStageProblem), before anything is written;
@@ -190,8 +200,10 @@ async function finalizeDraft(
     .select("*")
     .single();
   if (error) throw new Error(error.message);
-  // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc).
-  await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
+  // The ticket goes Invoiced, also when a sales / project manager finalises (the rpc) — unless
+  // it is Closed already: a second invoice never reopens it (owner, Oct 12, item 6).
+  if (!invoiceKeepsTicketStage(b.job.stage))
+    await ticketStageFromInvoice(sb, b.invoice.service_job_id, "invoiced", updated.id);
   await stageEvent(sb, b.invoice.service_job_id, b.job.stage, actor);
   await closeTicketFollowup(sb, b.job, actor, "stage invoiced");
   return updated;

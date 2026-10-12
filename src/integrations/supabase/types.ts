@@ -959,6 +959,8 @@ export type Database = {
         Row: {
           id: number;
           last_dispatch_at: string | null;
+          last_cron_at: string | null;
+          last_dispatch_failed: number;
           opportunity_close_days: number;
           opportunity_every_days: number;
           opportunity_first_days: number;
@@ -974,6 +976,8 @@ export type Database = {
         Insert: {
           id?: number;
           last_dispatch_at?: string | null;
+          last_cron_at?: string | null;
+          last_dispatch_failed?: number;
           opportunity_close_days?: number;
           opportunity_every_days?: number;
           opportunity_first_days?: number;
@@ -989,6 +993,8 @@ export type Database = {
         Update: {
           id?: number;
           last_dispatch_at?: string | null;
+          last_cron_at?: string | null;
+          last_dispatch_failed?: number;
           opportunity_close_days?: number;
           opportunity_every_days?: number;
           opportunity_first_days?: number;
