@@ -84,6 +84,8 @@ export interface StageEventLike {
   kind: string;
   stage?: string | null;
   at: string;
+  /** Who set it (the timeline's by_name); the strip says "by <name>" under the date (Oct 12). */
+  by_name?: string | null;
 }
 
 /**
@@ -162,17 +164,46 @@ export function statusActors(
   return out;
 }
 
-/** The ticket's stage strip: every stage in board order (Open → Closed), the current one marked. */
+/**
+ * Who LAST set each ticket stage (the timeline's 'stage' rows carry by_name, written by the
+ * service_jobs_stage_log trigger); a stage never reached, or set by nobody known, is absent.
+ */
+export function stageActors(
+  events: readonly StageEventLike[],
+): Partial<Record<ServiceStage, string>> {
+  const latest: Partial<Record<ServiceStage, string>> = {};
+  const out: Partial<Record<ServiceStage, string>> = {};
+  for (const e of events) {
+    if (e.kind !== "stage" || !e.stage) continue;
+    if (!(SERVICE_STAGES as readonly string[]).includes(e.stage)) continue;
+    const s = e.stage as ServiceStage;
+    if (later(latest[s], e.at) !== e.at && latest[s]) continue;
+    latest[s] = e.at;
+    const who = (e.by_name ?? "").trim();
+    if (who) out[s] = who;
+    else delete out[s];
+  }
+  return out;
+}
+
+/**
+ * The ticket's stage strip: every stage in board order (Open → Closed), the current one marked,
+ * each reached stage dated and, when the timeline names them, "by <name>" (owner, Oct 12: the
+ * same line the opportunity strip shows, so who dispatched, completed, authorized and invoiced
+ * is read at a glance).
+ */
 export function ticketStageStrip(
   current: string | null | undefined,
   events: readonly StageEventLike[],
 ): StripCell[] {
   const dates = stageDates(events);
+  const actors = stageActors(events);
   return SERVICE_STAGES.map((s) => ({
     key: s,
     label: STAGE_LABELS[s],
     at: dates[s] ?? null,
     current: s === current,
+    ...(actors[s] ? { by: actors[s] } : {}),
   }));
 }
 
