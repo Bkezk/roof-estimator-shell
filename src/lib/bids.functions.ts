@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Json } from "@/integrations/supabase/types";
-import { asBidStatus, BID_STATUSES, bidStatusStamps } from "@/lib/bid-status";
+import { asBidStatus, BID_STATUSES, bidDueDateProblem, bidStatusStamps } from "@/lib/bid-status";
 import { liveLockHeldElsewhere } from "@/lib/bid-locks.functions";
 import { duplicateBidRow } from "@/lib/duplicate-bid";
 import { syncOpportunityFromBid } from "@/lib/opportunities.functions";
@@ -85,6 +85,17 @@ const saveBidSchema = z.object({
   status: z.enum(BID_STATUSES).optional(),
   /** Why the bid was lost (only meaningful with status "lost"; null clears it). */
   lostReason: z.string().trim().max(300).nullable().optional(),
+  /**
+   * When the bid must go out (bids.due_date, YYYY-MM-DD; owner, Oct 12). Required on a new bid
+   * (no id): the save is refused with BID_DUE_REQUIRED without it. On an existing bid: absent =
+   * leave as is; a day replaces it; null clears it — allowed only on a won / lost bid
+   * (bidDueDateProblem). A bid from before due dates existed saves without one.
+   */
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "The bid due date must be a day (YYYY-MM-DD)")
+    .nullable()
+    .optional(),
   /** The saving tab's edit-lock session key (see bid-locks); a live lock elsewhere refuses the save. */
   sessionKey: z.string().min(8).max(80).optional(),
   /**
@@ -132,6 +143,7 @@ export const saveBid = createServerFn({ method: "POST" })
       ...(data.takeoffId !== undefined ? { takeoff_id: data.takeoffId } : {}),
       ...(data.accountId !== undefined ? { account_id: data.accountId } : {}),
       ...(data.siteId !== undefined ? { site_id: data.siteId } : {}),
+      ...(data.dueDate !== undefined ? { due_date: data.dueDate } : {}),
     };
     if (data.id) {
       const other = await liveLockHeldElsewhere(context.supabase, data.id, data.sessionKey);
@@ -141,12 +153,21 @@ export const saveBid = createServerFn({ method: "POST" })
         );
       const { data: cur, error: cErr } = await context.supabase
         .from("bids")
-        .select("updated_at, updated_by_name, status, submitted_at")
+        .select("updated_at, updated_by_name, status, submitted_at, due_date")
         .eq("id", data.id)
         .maybeSingle();
       if (cErr) throw new Error(cErr.message);
       if (data.expectUpdatedAt && cur && bidSaveIsStale(data.expectUpdatedAt, cur.updated_at))
         throw new Error(BID_STALE_MESSAGE(cur.updated_by_name, cur.updated_at));
+      // The due date may be changed any time, and cleared only on a won / lost bid (owner, Oct
+      // 12); a bid that never had one is not held up.
+      const dueProblem = bidDueDateProblem({
+        isNew: false,
+        dueDate: data.dueDate,
+        status: data.status ?? cur?.status,
+        hadDueDate: !!cur?.due_date,
+      });
+      if (dueProblem) throw new Error(dueProblem);
       // The status stamps (owner, Oct 12): status_changed_at on a change, submitted_at the first
       // time it is submitted (never overwritten).
       const statusChanged = !!data.status && !!cur && asBidStatus(cur.status) !== data.status;
@@ -163,6 +184,10 @@ export const saveBid = createServerFn({ method: "POST" })
       return bid;
     }
     const status = data.status ?? "draft";
+    // A new bid needs its due date (owner, Oct 12: "at the origination of bids we should have a
+    // bid due date required"): the estimator asks first; this is the final guard.
+    const dueProblem = bidDueDateProblem({ isNew: true, dueDate: data.dueDate, status });
+    if (dueProblem) throw new Error(dueProblem);
     const { data: bid, error } = await context.supabase
       .from("bids")
       .insert({ ...payload, status, ...bidStatusStamps(null, status) })

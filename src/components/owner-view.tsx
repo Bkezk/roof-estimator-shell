@@ -444,6 +444,9 @@ const DETAIL_KIND_CLASS: Record<DetailKind, string> = {
     "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
   opportunity:
     "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
+  // Never shown here (the Owner view counts no bids; owner-view.ts bucketCounts): the table
+  // covers every kind so the type stays whole.
+  bid: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
 };
 
 /** "Wed, Sep 30" for a YYYY-MM-DD day (a calendar day, no time zone shift). */

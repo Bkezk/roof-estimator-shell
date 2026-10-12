@@ -309,10 +309,12 @@ export type Database = {
           created_by: string | null;
           data: Json;
           deleted_at: string | null;
+          due_date: string | null;
           grand_total: number;
           lost_reason: string | null;
           id: string;
           name: string;
+          notified_due_at: string | null;
           opportunity_id: string | null;
           roof_id: string | null;
           site_id: string | null;
@@ -330,10 +332,12 @@ export type Database = {
           created_by?: string | null;
           data?: Json;
           deleted_at?: string | null;
+          due_date?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
           id?: string;
           name: string;
+          notified_due_at?: string | null;
           opportunity_id?: string | null;
           roof_id?: string | null;
           site_id?: string | null;
@@ -351,10 +355,12 @@ export type Database = {
           created_by?: string | null;
           data?: Json;
           deleted_at?: string | null;
+          due_date?: string | null;
           grand_total?: number;
           lost_reason?: string | null;
           id?: string;
           name?: string;
+          notified_due_at?: string | null;
           opportunity_id?: string | null;
           roof_id?: string | null;
           site_id?: string | null;

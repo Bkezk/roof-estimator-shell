@@ -24,6 +24,9 @@ vi.mock("@/lib/notify.server", () => ({
 }));
 const taskNotices = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/tasks-notify.server", () => ({ dispatchTaskNotices: taskNotices }));
+// "Bid due tomorrow" (owner, Oct 12) runs beside the task notices (bid-due-notice.test.ts).
+const bidNotices = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/bids-notify.server", () => ({ dispatchBidDueNotices: bidNotices }));
 const admin = vi.hoisted(() => ({ marker: "admin-client" }));
 vi.mock("@/integrations/supabase/client.server", () => ({ supabaseAdmin: admin }));
 
@@ -70,6 +73,13 @@ beforeEach(() => {
     tasks_silent: 0,
     tasks_errors: 1,
   });
+  bidNotices.mockReset();
+  bidNotices.mockResolvedValue({
+    bids_checked: 1,
+    bids_notified: 1,
+    bids_silent: 0,
+    bids_errors: 1,
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -83,12 +93,15 @@ describe("dispatchRemindersIfDue", () => {
     expect(reminders).toHaveBeenCalledTimes(1);
     expect(taskNotices).toHaveBeenCalledTimes(1);
     expect(taskNotices.mock.calls[0]![0]).toBe(admin); // the cron route's client, not the caller's
+    expect(bidNotices).toHaveBeenCalledTimes(1);
+    expect(bidNotices.mock.calls[0]![0]).toBe(admin);
     expect(r).toEqual({
       ran: true,
       reminded: 2,
       escalated: 1,
       taskNotices: 4,
-      failed: 2, // one reminder, one task notice
+      bidNotices: 1,
+      failed: 3, // one reminder, one task notice, one bid notice
       taskProblem: null,
     });
   });
@@ -96,6 +109,7 @@ describe("dispatchRemindersIfDue", () => {
     hasKey.value = false;
     const r = await call<ReminderRunResult>(dispatchRemindersIfDue, world(null));
     expect(taskNotices).not.toHaveBeenCalled();
+    expect(bidNotices).not.toHaveBeenCalled();
     expect(r.ran).toBe(true);
     expect(r.reminded).toBe(2);
     expect(r.taskProblem).toBe(TASK_NOTICES_NEED_KEY);
@@ -123,26 +137,28 @@ describe("dispatchRemindersIfDue", () => {
 });
 
 describe("the Admin toast", () => {
-  it("reads 'N reminded · N escalated · N task notices · N failed'", () => {
+  it("reads 'N reminded · N escalated · N task notices · N bid notices · N failed'", () => {
     expect(
       reminderRunSummary({
         reminded: 2,
         escalated: 1,
         taskNotices: 4,
+        bidNotices: 1,
         failed: 0,
         taskProblem: null,
       }),
-    ).toBe("2 reminded · 1 escalated · 4 task notices · 0 failed");
+    ).toBe("2 reminded · 1 escalated · 4 task notices · 1 bid notices · 0 failed");
     expect(
       reminderRunSummary({
         reminded: 0,
         escalated: 0,
         taskNotices: 0,
+        bidNotices: 0,
         failed: 0,
         taskProblem: TASK_NOTICES_NEED_KEY,
       }),
     ).toBe(
-      `0 reminded · 0 escalated · 0 task notices · 0 failed · task notices skipped: ${TASK_NOTICES_NEED_KEY}`,
+      `0 reminded · 0 escalated · 0 task notices · 0 bid notices · 0 failed · task notices skipped: ${TASK_NOTICES_NEED_KEY}`,
     );
     const page = read("src/components/reminders-settings.tsx");
     expect(page).toContain("toast.success(`Reminders ran: ${reminderRunSummary(r)}`)");

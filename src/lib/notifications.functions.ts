@@ -154,6 +154,8 @@ export const KIND_LABELS: Readonly<Record<string, string>> = {
   task: "Task",
   task_today: "Task",
   task_overdue: "Task",
+  // "Bid due tomorrow" (bids-notify.server.ts; owner, Oct 12).
+  bid_due: "Bid due",
   storm: "Storm",
   lead: "Lead",
   bid: "Lead",
@@ -179,6 +181,7 @@ export const KIND_LABEL_ORDER: readonly string[] = [
   "Ready to invoice",
   "Mention",
   "Task",
+  "Bid due",
   "Storm",
   "Lead",
   "Reassigned",

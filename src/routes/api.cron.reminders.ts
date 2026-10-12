@@ -1,12 +1,14 @@
 /**
- * POST /api/cron/reminders — fires the due follow-up reminders (notify.server.ts) and the task
- * notices (tasks-notify.server.ts). Called on a
+ * POST /api/cron/reminders — fires the due follow-up reminders (notify.server.ts), the task
+ * notices (tasks-notify.server.ts) and the "Bid due tomorrow" notices (bids-notify.server.ts;
+ * owner, Oct 12). Called on a
  * schedule with `Authorization: Bearer <LOVABLE_CRON_SECRET>` (Lovable Cloud's cron, or the
  * GitHub Actions workflow .github/workflows/reminders.yml). The app also runs the same pass,
  * throttled, whenever an office user loads it, so reminders go out even with no cron set up.
  *
- * The two passes are independent: the task notices run whatever happened to the follow-ups.
- * The answer reports both ({ followups: {...} | { error }, tasks: {...} | { error } }). `ok` is
+ * The passes are independent: the task and bid notices run whatever happened to the follow-ups.
+ * The answer reports each ({ followups: {...} | { error }, tasks: {...} | { error }, bids: {...}
+ * | { error } }). `ok` is
  * false when anything failed (a whole pass, or single sends, which are logged and recorded on
  * their rows); the status is 500 only when a whole pass could not run.
  *
@@ -16,6 +18,7 @@
  */
 import { createFileRoute } from "@tanstack/react-router";
 
+import type { BidNoticeResult } from "@/lib/bids-notify.server";
 import { authenticateCron } from "@/lib/cron-auth";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -63,7 +66,21 @@ async function run(request: Request): Promise<Response> {
     tasks = { error: errText(e) };
   }
 
-  // The scheduled run's own stamp (last_cron_at), after both passes, whatever they did: it says
+  // "Bid due tomorrow" (bids-notify.server.ts; owner, Oct 12): one notice per draft bid to
+  // whoever started it, the day before its due date.
+  let bids: BidNoticeResult | { error: string };
+  try {
+    const { dispatchBidDueNotices } = await import("@/lib/bids-notify.server");
+    const b = await dispatchBidDueNotices(supabaseAdmin);
+    sendsFailed += b.bids_errors;
+    bids = b;
+  } catch (e) {
+    passFailed = true;
+    console.error("Cron reminders: the bid due notice pass failed", e);
+    bids = { error: errText(e) };
+  }
+
+  // The scheduled run's own stamp (last_cron_at), after the passes, whatever they did: it says
   // the job runs, not that every send landed. Missing function = the Oct 12 migration is not
   // applied yet; logged, never a failure of the run.
   let cronStamped = false;
@@ -84,6 +101,7 @@ async function run(request: Request): Promise<Response> {
       ok: !passFailed && sendsFailed === 0,
       followups,
       tasks,
+      bids,
       cron_stamped: cronStamped,
       at: new Date().toISOString(),
     },

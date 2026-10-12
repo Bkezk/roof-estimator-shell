@@ -490,9 +490,11 @@ export interface ReminderRunResult {
   escalated: number;
   /** Task notices sent (created / due today / overdue; tasks-notify.server.ts). */
   taskNotices: number;
-  /** Sends that failed, reminders and task notices together; a reminder retries next pass. */
+  /** "Bid due tomorrow" notices sent (bids-notify.server.ts; owner, Oct 12). */
+  bidNotices: number;
+  /** Sends that failed, reminders, task and bid notices together; each retries next pass. */
   failed: number;
-  /** Why the task notices did not run on this pass (no server key on the preview), or null. */
+  /** Why the task / bid notices did not run on this pass (no server key on the preview), or null. */
   taskProblem: string | null;
 }
 
@@ -501,13 +503,17 @@ const notRun = (): ReminderRunResult => ({
   reminded: 0,
   escalated: 0,
   taskNotices: 0,
+  bidNotices: 0,
   failed: 0,
   taskProblem: null,
 });
 
-/** The Admin "Run reminders now" toast: "2 reminded · 0 escalated · 1 task notices · 0 failed". */
+/**
+ * The Admin "Run reminders now" toast: "2 reminded · 0 escalated · 1 task notices · 1 bid
+ * notices · 0 failed".
+ */
 export function reminderRunSummary(r: Omit<ReminderRunResult, "ran">): string {
-  const line = `${r.reminded} reminded · ${r.escalated} escalated · ${r.taskNotices} task notices · ${r.failed} failed`;
+  const line = `${r.reminded} reminded · ${r.escalated} escalated · ${r.taskNotices} task notices · ${r.bidNotices} bid notices · ${r.failed} failed`;
   return r.taskProblem ? `${line} · task notices skipped: ${r.taskProblem}` : line;
 }
 
@@ -580,6 +586,11 @@ export const dispatchRemindersIfDue = createServerFn({ method: "POST" })
         const t = await dispatchTaskNotices(supabaseAdmin as unknown as SupabaseClient<Database>);
         out.taskNotices = t.tasks_created + t.tasks_morning + t.tasks_overdue;
         out.failed += t.tasks_errors;
+        // "Bid due tomorrow" (owner, Oct 12), the same client, right after the task notices.
+        const { dispatchBidDueNotices } = await import("@/lib/bids-notify.server");
+        const b = await dispatchBidDueNotices(supabaseAdmin as unknown as SupabaseClient<Database>);
+        out.bidNotices = b.bids_notified;
+        out.failed += b.bids_errors;
       }
     } catch (e) {
       console.error("Task notice dispatch failed", e);

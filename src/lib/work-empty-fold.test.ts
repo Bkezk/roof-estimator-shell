@@ -138,10 +138,11 @@ describe("2. BUCKET_HELP: one or two plain sentences per column", () => {
       unassigned:
         "Tickets and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
       overdue:
-        "Scheduled tickets whose day has passed and opportunities past their expected close. The assignee is reminded on the Reminders schedule.",
+        "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
       today: "Due today.",
-      week: "Due later this week.",
-      later: "Due after this week, or with no date yet.",
+      week: "Tickets, tasks, follow-ups and draft bids due later this week.",
+      // Oct 12: draft bids by due date join the groups (bid-due-date.test.ts).
+      later: "Due after this week, or with no date yet (a bid without a due date too).",
       waiting:
         "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
       authorize:

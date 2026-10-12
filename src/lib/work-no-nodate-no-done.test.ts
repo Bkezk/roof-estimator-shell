@@ -97,7 +97,9 @@ describe("the groups (owner, Oct 12): no No date, no Done", () => {
     ]);
   });
   it("Later's help says it takes the undated items", () => {
-    expect(BUCKET_HELP.later).toBe("Due after this week, or with no date yet.");
+    expect(BUCKET_HELP.later).toBe(
+      "Due after this week, or with no date yet (a bid without a due date too).",
+    );
   });
 });
 

@@ -1,7 +1,8 @@
 /**
  * Work Overview (owner, Sep 30): one list and calendar of a person's own assignable work — service
- * tickets they lead (open / scheduled / done), open tasks assigned to them, and their open
- * follow-ups — merged and sorted by date. Since Oct 12 (owner item 3) whoever invoices
+ * tickets they lead (open / scheduled / done), open tasks assigned to them, their open
+ * follow-ups and, since Oct 12, the draft bids they started, by due date (`bidItem`) — merged
+ * and sorted by date. Since Oct 12 (owner item 3) whoever invoices
  * (`seesInvoices`) also gets the Authorized tickets, under "Authorized — to invoice"
  * (`toInvoiceItems`; the server sends them only to those viewers). Pure helpers only (no I/O): the server function in
  * my-work.functions.ts reads the rows, the page in components/my-work-page.tsx renders them.
@@ -11,8 +12,9 @@
  * else's work or everyone's; anyone else always gets their own, whatever they ask for.
  */
 import { seesEveryone } from "@/lib/access";
+import { asBidStatus, STATUS_LABELS as BID_STATUS_LABELS } from "@/lib/bid-status";
 
-export type WorkKind = "ticket" | "inspection" | "task" | "followup" | "opportunity";
+export type WorkKind = "ticket" | "inspection" | "task" | "followup" | "opportunity" | "bid";
 
 export const KIND_LABELS: Record<WorkKind, string> = {
   ticket: "Ticket",
@@ -20,15 +22,19 @@ export const KIND_LABELS: Record<WorkKind, string> = {
   task: "Task",
   followup: "Follow-up",
   opportunity: "Opportunity",
+  // Owner, Oct 12: draft bids by their due date ("so we can also have those show on this week,
+  // overdue, etc").
+  bid: "Bid",
 };
 
-/** Same-day order: tickets, inspections, tasks, follow-ups, opportunities. */
+/** Same-day order: tickets, inspections, tasks, follow-ups, opportunities, bids. */
 const KIND_ORDER: Record<WorkKind, number> = {
   ticket: 0,
   inspection: 1,
   task: 2,
   followup: 3,
   opportunity: 4,
+  bid: 5,
 };
 
 /** An open opportunity's status as the row shows it (the Opportunities page's labels). */
@@ -219,10 +225,29 @@ export interface UnassignedRows {
   tasks?: TaskIn[];
 }
 
+/**
+ * A draft bid (owner, Oct 12): listed by its due date for the person who made it (created_by);
+ * the server sends them only to a caller with Estimate access, and only drafts — a submitted,
+ * won or lost bid is not anyone's to-do.
+ */
+export interface BidIn {
+  id: string;
+  name: string;
+  status: string;
+  /** When it must go out (YYYY-MM-DD); null on a bid from before due dates existed → Later. */
+  due_date: string | null;
+  /** The linked customer (crm_accounts), when known. */
+  account_name?: string | null;
+  /** Who started it: the row's person. */
+  created_by: string | null;
+}
+
 export interface WorkRows {
   tickets: TicketIn[];
   tasks: TaskIn[];
   followups: FollowupIn[];
+  /** Draft bids with their due date (owner, Oct 12); absent for a caller without Estimate access. */
+  bids?: BidIn[] | null;
   /** Display names by profile id (for "Everyone" / another person's view). */
   names?: Record<string, string>;
   unassigned?: UnassignedRows | null;
@@ -417,6 +442,34 @@ export function followupItem(
   };
 }
 
+/**
+ * A draft bid as a row (owner, Oct 12): its due date is its day (none → Later, like everything
+ * else), it opens in the estimator, and its person is whoever started it. Never Unassigned,
+ * never Needs authorization, never to-invoice: a plain dated item that is Overdue once its due
+ * day has passed. Only a draft: anything else returns null and is not listed.
+ */
+export function bidItem(b: BidIn, names: Record<string, string> = {}): WorkItem | null {
+  if (asBidStatus(b.status) !== "draft") return null;
+  return {
+    key: `bid:${b.id}`,
+    kind: "bid",
+    title: b.name,
+    where: joinWhere(b.account_name),
+    date: b.due_date,
+    status: BID_STATUS_LABELS.draft,
+    done: false,
+    href: `/estimate?bid=${b.id}`,
+    assigneeId: b.created_by,
+    assigneeName: b.created_by ? (names[b.created_by] ?? null) : null,
+    followup: null,
+  };
+}
+
+/** Every draft among the server's bid rows as items (`bidItem`); the rest are dropped. */
+export function bidItems(rows: BidIn[] | null | undefined, names: Record<string, string> = {}) {
+  return (rows ?? []).map((b) => bidItem(b, names)).filter((x): x is WorkItem => x !== null);
+}
+
 /** An unassigned open opportunity as a row: its expected close is its day. */
 export function opportunityItem(o: OppIn, toYmd: (iso: string) => string = localYmd): WorkItem {
   return {
@@ -541,7 +594,12 @@ export function mergeWork(rows: WorkRows, toYmd: (iso: string) => string = local
   // ticket already on the list (a manager who is also its technician) is listed once.
   const seen = new Set([...assignedKeys, ...unassigned.map((u) => u.key)]);
   const toInvoice = toInvoiceItems(rows.toInvoice, names, toYmd).filter((t) => !seen.has(t.key));
-  return [...tickets, ...tasks, ...followups, ...unassigned, ...toInvoice].sort(compareWork);
+  // Draft bids by due date (owner, Oct 12), for a caller with Estimate access; the server
+  // already scoped them to the viewer's people (created_by).
+  const bids = bidItems(rows.bids, names);
+  return [...tickets, ...tasks, ...followups, ...unassigned, ...toInvoice, ...bids].sort(
+    compareWork,
+  );
 }
 
 // ---- grouping ------------------------------------------------------------------------------
@@ -572,11 +630,11 @@ export const BUCKET_HELP: Record<WorkBucket, string> = {
   unassigned:
     "Tickets and opportunities with nobody on them yet. Claim one to take it; they turn red after the number of days set on Admin › Reminders.",
   overdue:
-    "Scheduled tickets whose day has passed and opportunities past their expected close. The assignee is reminded on the Reminders schedule.",
+    "Scheduled tickets whose day has passed, opportunities past their expected close, and draft bids past their due date. The assignee is reminded on the Reminders schedule.",
   today: "Due today.",
-  week: "Due later this week.",
+  week: "Tickets, tasks, follow-ups and draft bids due later this week.",
   // Owner, Oct 12: no "No date" group — an undated item (from before dates were required) sits here.
-  later: "Due after this week, or with no date yet.",
+  later: "Due after this week, or with no date yet (a bid without a due date too).",
   waiting:
     "Follow-ups on hold until a date — a manager's Snooze, or a logged contact with “They asked to try again on”. Reminders pause until then, and the item comes back with a “Back from hold” badge.",
   authorize:

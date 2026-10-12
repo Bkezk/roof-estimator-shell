@@ -116,6 +116,8 @@ const KIND_CLASS: Record<WorkKind, string> = {
     "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
   opportunity:
     "border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200",
+  // Draft bids by due date (owner, Oct 12): sky, the one colour no other kind uses.
+  bid: "border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-200",
 };
 const KIND_DOT: Record<WorkKind, string> = {
   ticket: "bg-blue-500",
@@ -123,6 +125,7 @@ const KIND_DOT: Record<WorkKind, string> = {
   task: "bg-amber-500",
   followup: "bg-emerald-500",
   opportunity: "bg-rose-500",
+  bid: "bg-sky-500",
 };
 /** A calendar item's left bar: its kind's badge colour. */
 const KIND_BAR: Record<WorkKind, string> = {
@@ -131,6 +134,7 @@ const KIND_BAR: Record<WorkKind, string> = {
   task: "border-l-amber-500",
   followup: "border-l-emerald-500",
   opportunity: "border-l-rose-500",
+  bid: "border-l-sky-500",
 };
 
 /** How many columns the desktop List grid needs for the columns shown (one to eight). */

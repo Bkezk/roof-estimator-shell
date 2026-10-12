@@ -14,12 +14,16 @@
  *                          Owner view's Past due and Work Overview's Overdue group.
  *   Open opportunities     live, status not closing (not won / lost / no response)
  *   Overdue opportunities  open opportunities whose expected_close is before today
+ *   Overdue bids           DRAFT bids whose due_date is before today (owner, Oct 12): the Bids
+ *                          page's red "Overdue N days" and Work Overview's Overdue group; a
+ *                          submitted / won / lost bid is never overdue
  *
  * "Today" is the viewer's calendar day, sent by the browser (lib/my-work.ts localYmd, the day My
  * Work uses), as YYYY-MM-DD; without one, the office's day (America/New_York, lib/tasks.ts
  * localYmd). Audit, Oct 2: the counts, the Owner view and the Opportunities list used the
  * Eastern day while Work Overview used the browser's, so at 23:30 in Chicago they disagreed.
  */
+import { asBidStatus } from "@/lib/bid-status";
 import { localYmd as easternYmd } from "@/lib/tasks";
 
 /**
@@ -147,4 +151,21 @@ export function oppOverdueDays(
   todayYmd: string,
 ): number | null {
   return isOverdueOpp(o, todayYmd) ? daysBetween(o.expected_close!, todayYmd) : null;
+}
+
+/**
+ * A draft bid past its due date (owner, Oct 12). Only a draft: a submitted bid is with the
+ * customer, a won / lost one is finished — none of them is late, whatever the day says.
+ */
+export const isOverdueBid = (
+  b: { status: string | null; due_date: string | null | undefined },
+  todayYmd: string,
+): boolean => asBidStatus(b.status) === "draft" && isOverdue(b.due_date, todayYmd);
+
+/** Days a draft bid is past its due date (the Bids page's red tag), or null when it is not. */
+export function bidOverdueDays(
+  b: { status: string | null; due_date: string | null | undefined },
+  todayYmd: string,
+): number | null {
+  return isOverdueBid(b, todayYmd) ? daysBetween(b.due_date!, todayYmd) : null;
 }

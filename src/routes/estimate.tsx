@@ -151,8 +151,10 @@ import type { EngineAdminData } from "@/lib/engine/adapters";
 import { attachedWithLabel, attachedWithOptions } from "@/lib/engine/adapters";
 import {
   BID_STATUSES,
+  BID_NO_DUE_HINT,
   STATUS_LABELS,
   asBidStatus,
+  bidDueDateProblem,
   fromOpportunityLine,
   type BidStatus,
 } from "@/lib/bid-status";
@@ -633,6 +635,13 @@ function EstimatePage() {
   const [bidStatus, setBidStatus] = useState<BidStatus>("draft");
   const [lostReason, setLostReason] = useState<string | null>(null);
   const [askLost, setAskLost] = useState(false);
+  // When the bid must go out (bids.due_date, on the row — not in the data blob; owner, Oct 12):
+  // required on the first save, changeable any time after, cleared only on a won / lost bid
+  // (bid-status.ts bidDueDateProblem). "" = none.
+  const [bidDueDate, setBidDueDate] = useState("");
+  // Set when a save was refused for want of a due date: the box is ringed until it is filled.
+  const [dueDateMissing, setDueDateMissing] = useState(false);
+  const dueDateRef = useRef<HTMLInputElement>(null);
   // Picking Lost asks why (the same dialog the Bids list uses); anything else clears the reason.
   const changeStatus = (v: string) => {
     const st = asBidStatus(v);
@@ -1145,6 +1154,8 @@ function EstimatePage() {
     setBidName(loadedBid.name);
     setBidStatus(asBidStatus(loadedBid.status));
     setLostReason(loadedBid.lost_reason ?? null);
+    setBidDueDate(loadedBid.due_date ?? "");
+    setDueDateMissing(false);
     hydratedFor.current = loadedBid.id;
     setHydrationStamp((n) => n + 1);
   }, [loadedBid]);
@@ -1188,6 +1199,7 @@ function EstimatePage() {
       setBidName(sources.map((b) => b.name.trim() || "Untitled").join(" + "));
       setBidStatus("draft");
       setLostReason(null);
+      setBidDueDate("");
       // No hydration stamp on purpose: the combined bid stays "unsaved" until it is saved.
       toast.success(`Combined ${sources.length} bids — review the steps in the notice, then save.`);
     } catch (e) {
@@ -1345,6 +1357,7 @@ function EstimatePage() {
       setBidName(takeoffRow.name.trim() || "Untitled bid");
       setBidStatus("draft");
       setLostReason(null);
+      setBidDueDate("");
       if (takeoffRow.building_id) setLinkedBuildingId(takeoffRow.building_id);
       // Unsaved on purpose, like a combined bid: nothing exists until the estimator saves.
       toast.success(
@@ -1401,6 +1414,7 @@ function EstimatePage() {
       setBidName(name.trim() || "Untitled bid");
       setBidStatus("draft");
       setLostReason(null);
+      setBidDueDate("");
       // Unsaved on purpose, like a bid from a takeoff: nothing exists until the estimator saves.
       toast.success(
         `Bid started from PlanSwift: ${seed.sections.length} section${seed.sections.length === 1 ? "" : "s"}. Read the notice for what still needs placing, then save.`,
@@ -2163,6 +2177,22 @@ function EstimatePage() {
       toast.error(`Read only: ${bidLock.holder?.name ?? "another user"} is editing this bid.`);
       return false;
     }
+    // The bid due date (owner, Oct 12): a new bid needs one before its first save; an existing
+    // bid may change it any time and clear it only once won / lost. The same rule runs on the
+    // server (saveBid); here it is said plainly and the box is ringed and focused.
+    const dueProblem = bidDueDateProblem({
+      isNew: !bidId,
+      dueDate: bidDueDate || null,
+      status: bidStatus,
+      hadDueDate: !!loadedBid?.due_date,
+    });
+    if (dueProblem) {
+      setDueDateMissing(true);
+      toast.error(dueProblem);
+      dueDateRef.current?.scrollIntoView({ block: "center" });
+      dueDateRef.current?.focus();
+      return false;
+    }
     // Unusual numbers: ask first; "Save anyway" comes back here with them acknowledged.
     let ack = sanityAcknowledged;
     if (opts?.acknowledge) {
@@ -2210,6 +2240,8 @@ function EstimatePage() {
           grandTotal,
           status: bidStatus,
           lostReason: bidStatus === "lost" ? lostReason : null,
+          // The due date rides on the row (null = none; the server refuses a new bid without one).
+          dueDate: bidDueDate || null,
           ...(linkedBuildingId ? { buildingId: linkedBuildingId } : {}),
           ...(linkedTakeoffId ? { takeoffId: linkedTakeoffId } : {}),
           // Only a link changed in this session is sent (null unlinks); absent = left as is.
@@ -2219,7 +2251,10 @@ function EstimatePage() {
         },
       });
       qc.invalidateQueries({ queryKey: ["bids"] });
+      // Draft bids sit on Work Overview by due date (owner, Oct 12).
+      qc.invalidateQueries({ queryKey: ["my-work"] });
       toast.success("Bid saved");
+      setDueDateMissing(false);
       if (row?.updated_at) loadedUpdatedAt.current = row.updated_at;
       lastSavedJson.current = savedJson;
       dirtyRef.current = false;
@@ -6143,6 +6178,45 @@ function EstimatePage() {
       />
       <div id="bid-total-panel" className="space-y-3 lg:sticky lg:top-4 lg:self-start">
         <div className="flex flex-wrap items-end gap-2">
+          {/* Owner, Oct 12: "at the origination of bids we should have a bid due date required so
+            we can also have those show on this week, overdue, etc" — the row's due_date, beside
+            Status. Required on the first save (handleSave rings it and says so); a bid from before
+            due dates existed is not blocked but gets the amber hint until one is set. */}
+          <div className="min-w-0 space-y-1" data-field="bid-due">
+            <Label htmlFor="bid-due-date" className="text-xs">
+              Bid due
+            </Label>
+            <Input
+              id="bid-due-date"
+              ref={dueDateRef}
+              type="date"
+              className={`h-9 w-[9.5rem] ${dueDateMissing ? "border-destructive ring-2 ring-destructive/40" : ""}`}
+              value={bidDueDate}
+              onChange={(e) => {
+                setBidDueDate(e.target.value);
+                if (e.target.value) setDueDateMissing(false);
+              }}
+              disabled={readOnly}
+              required={!bidId}
+              aria-invalid={dueDateMissing || undefined}
+              aria-describedby={
+                dueDateMissing || (bidId && !bidDueDate) ? "bid-due-hint" : undefined
+              }
+              title="When the bid must go out. Draft bids sit on Work Overview by this day."
+            />
+            {dueDateMissing ? (
+              <p id="bid-due-hint" className="text-[11px] font-medium text-destructive">
+                Give the bid a due date before saving
+              </p>
+            ) : (
+              bidId &&
+              !bidDueDate && (
+                <p id="bid-due-hint" className="text-[11px] text-amber-700 dark:text-amber-400">
+                  {BID_NO_DUE_HINT}
+                </p>
+              )
+            )}
+          </div>
           <div className="min-w-0 flex-1 space-y-1">
             <Label className="text-xs">Status</Label>
             <Select value={bidStatus} onValueChange={changeStatus} disabled={readOnly}>

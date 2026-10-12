@@ -14,13 +14,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.hardened";
 import type { Database } from "@/integrations/supabase/types";
-import { isOffice, seesEveryone, seesInvoices } from "@/lib/access";
+import { canAccess, isOffice, seesEveryone, seesInvoices } from "@/lib/access";
 import {
   TO_INVOICE_STAGE,
   UNASSIGNED_OVERDUE_DAYS_DEFAULT,
   UNASSIGNED_TICKET_STAGES,
   WORK_TICKET_STAGES,
   visibleUserIds,
+  type BidIn,
   type FollowupIn,
   type OppIn,
   type TaskIn,
@@ -66,6 +67,13 @@ export interface MyWorkResult {
    * for an invoicer whatever `who` asks for (the queue is the office's); [] for anyone else.
    */
   toInvoice: TicketIn[];
+  /**
+   * Draft bids by due date (owner, Oct 12: "at the origination of bids we should have a bid due
+   * date required so we can also have those show on this week, overdue, etc"), for a caller with
+   * Estimate access ([] for anyone else): the drafts started by the people in scope (created_by),
+   * every draft for Everyone. A submitted / won / lost bid is never sent.
+   */
+  bids: BidIn[];
 }
 
 const LIMIT = 1000;
@@ -194,8 +202,25 @@ export const listMyWork = createServerFn({ method: "GET" })
           .limit(LIMIT)
       : Promise.resolve({ data: [] as TicketIn[], error: null });
 
+    // Draft bids by due date (owner, Oct 12), for Estimate access only — the page the bids live
+    // on (RLS bids_authenticated_all is the same gate). Mine / one person: the drafts that person
+    // started (created_by); Everyone: every draft. due_date arrives with
+    // 20261012140000_bid_due_date.sql; a draft without one (older) is listed under Later.
+    const estimator = canAccess(me, "estimate");
+    let bq = estimator
+      ? sb
+          .from("bids")
+          .select("id, name, status, due_date, account_id, created_by")
+          .is("deleted_at", null)
+          .eq("status", "draft")
+          .order("due_date", { ascending: true, nullsFirst: false })
+          .limit(LIMIT)
+      : null;
+    if (bq && scope !== "all") bq = bq.in("created_by", scope);
+    const bRows = bq ?? Promise.resolve({ data: [] as BidRow[], error: null });
+
     // ticket_authorizers: 20261005150000_ticket_authorizer.sql; until it is applied, nobody.
-    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days, toInvoice] =
+    const [tickets, tasks, followups, auth, unTickets, unOpps, unTasks, days, toInvoice, bids] =
       await Promise.all([
         tq,
         kq,
@@ -206,8 +231,10 @@ export const listMyWork = createServerFn({ method: "GET" })
         uTasks,
         uDays,
         iTickets,
+        bRows,
       ]);
     if (toInvoice.error) throw new Error(`Tickets to invoice: ${toInvoice.error.message}`);
+    if (bids.error) throw new Error(`Bids: ${bids.error.message}`);
     const unassignedOverdueDays =
       !days.error && typeof days.data?.unassigned_overdue_days === "number"
         ? days.data.unassigned_overdue_days
@@ -235,6 +262,7 @@ export const listMyWork = createServerFn({ method: "GET" })
         [
           ...(followups.data ?? []).map((f) => f.account_id),
           ...(unOpps.data ?? []).map((o) => o.account_id),
+          ...(bids.data ?? []).map((b) => b.account_id),
         ].filter((x): x is string => !!x),
       ),
     ];
@@ -309,8 +337,22 @@ export const listMyWork = createServerFn({ method: "GET" })
       unassignedOverdueDays,
       invoicer,
       toInvoice: (toInvoice.data ?? []) as TicketIn[],
+      bids: (bids.data ?? []).map((b): BidIn => ({
+        id: b.id,
+        name: b.name,
+        status: b.status,
+        due_date: b.due_date,
+        account_name: b.account_id ? (accountName.get(b.account_id) ?? null) : null,
+        created_by: b.created_by,
+      })),
     };
   });
+
+/** The bid columns Work Overview reads (`listMyWork`). */
+type BidRow = Pick<
+  Database["public"]["Tables"]["bids"]["Row"],
+  "id" | "name" | "status" | "due_date" | "account_id" | "created_by"
+>;
 
 /**
  * Everyone an admin or a manager can pick: `work_people()` (SECURITY DEFINER; profiles RLS hides

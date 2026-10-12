@@ -36,6 +36,8 @@ import {
   fromOpportunityLine,
   type BidStatus,
 } from "@/lib/bid-status";
+import { localYmd } from "@/lib/my-work";
+import { bidOverdueDays } from "@/lib/work-counts";
 import {
   bidsInYear,
   FOLDER_GROUP_LABELS,
@@ -132,13 +134,25 @@ const customerOf = (bid: { data: unknown; account?: { name: string } | null }): 
   return d?.customer?.name?.trim() ?? "";
 };
 
-type BidSort = "updated" | "customer" | "name" | "total" | "created";
+/** "Oct 20, 2026" for a YYYY-MM-DD day (a calendar day: no time zone shift). */
+const dueLabel = (ymd: string) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y!, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+};
+
+type BidSort = "updated" | "customer" | "name" | "total" | "created" | "due";
 const SORT_LABELS: Record<BidSort, string> = {
   updated: "Last saved",
   customer: "Customer A–Z",
   name: "Bid name A–Z",
   total: "Total, high to low",
   created: "Newest first",
+  // Owner, Oct 12: the bid due date; a bid without one sorts last.
+  due: "Due date, soonest first",
 };
 /** Order rows within a status group; ties fall back to the last-saved order. */
 function sortBids<
@@ -149,10 +163,18 @@ function sortBids<
     grand_total: unknown;
     created_at: string;
     updated_at: string;
+    due_date?: string | null;
   },
 >(rows: T[], by: BidSort): T[] {
   const cmp = (a: T, b: T): number => {
     switch (by) {
+      case "due": {
+        const da = a.due_date ?? null;
+        const db = b.due_date ?? null;
+        if (!da && db) return 1;
+        if (da && !db) return -1;
+        return (da ?? "").localeCompare(db ?? "");
+      }
       case "customer": {
         const ca = customerOf(a);
         const cb = customerOf(b);
@@ -391,8 +413,11 @@ function BidsPage() {
   };
 
   /** One bid's card, in the list and in the folder view (owner, Oct 7). */
+  // The viewer's day, for the Due tag (lib/my-work.ts localYmd — the day Work Overview uses).
+  const today = localYmd(new Date());
   const renderBid = (bid: (typeof bids)[number]) => {
     const st = asBidStatus(bid.status);
+    const overdueDays = bidOverdueDays(bid, today);
     return (
       <div
         key={bid.id}
@@ -449,6 +474,26 @@ function BidsPage() {
           </div>
         </div>
         <div className="flex items-center gap-6">
+          {/* The bid due date (owner, Oct 12), red with the day count when a draft is past it
+            (work-counts.ts bidOverdueDays: a submitted / won / lost bid is never overdue). */}
+          <span
+            className="min-w-[7.5rem] text-right text-xs tabular-nums text-muted-foreground"
+            data-col="due"
+            title="When the bid must go out (set in the estimator). Draft bids sit on Work Overview by this day."
+          >
+            {bid.due_date ? (
+              <>
+                Due {dueLabel(bid.due_date)}
+                {overdueDays !== null && (
+                  <span className="mt-0.5 block font-semibold text-destructive" data-line="overdue">
+                    Overdue {overdueDays} day{overdueDays === 1 ? "" : "s"}
+                  </span>
+                )}
+              </>
+            ) : (
+              "No due date"
+            )}
+          </span>
           {/* Stored at save time — the estimator recomputes live, so an engine change
     (or an empty-data row) can differ from this until the bid is re-saved. */}
           <span

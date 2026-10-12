@@ -119,7 +119,15 @@ const emptyBuckets = (): PersonBuckets => ({
   overdue: 0,
 });
 
-const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
+/**
+ * Draft bids (Work Overview kind "bid", owner Oct 12) are NOT the Owner view's: its columns are
+ * tickets, tasks and follow-ups (plus the opportunity figures), and listOwnerView never loads
+ * bids. `bucketCounts` and `detailGroups` skip the kind explicitly, so a bid row handed to them
+ * can never move a Due today / Overdue number.
+ */
+export const OWNER_VIEW_SKIPS_KIND = "bid" as const satisfies WorkKind;
+
+const DUE_KEY: Record<Exclude<WorkKind, typeof OWNER_VIEW_SKIPS_KIND>, keyof DueCounts> = {
   ticket: "tickets",
   inspection: "tickets",
   task: "tasks",
@@ -132,6 +140,7 @@ const DUE_KEY: Record<WorkKind, keyof DueCounts> = {
 /**
  * Due today and overdue per person (`assigneeId`), from Work Overview items (`mergeWork`), bucketed
  * exactly as Work Overview's List does (`bucketOf`) so a number and the list it opens agree.
+ * Draft bids are not counted (OWNER_VIEW_SKIPS_KIND).
  */
 export function bucketCounts(
   items: Pick<WorkItem, "kind" | "date" | "done" | "assigneeId">[],
@@ -139,7 +148,7 @@ export function bucketCounts(
 ): Record<string, PersonBuckets> {
   const out: Record<string, PersonBuckets> = {};
   for (const it of items) {
-    if (!it.assigneeId) continue;
+    if (!it.assigneeId || it.kind === OWNER_VIEW_SKIPS_KIND) continue;
     const b = bucketOf(it, today);
     if (b !== "today" && b !== "overdue") continue;
     const c = (out[it.assigneeId] ??= emptyBuckets());
@@ -518,6 +527,7 @@ const DETAIL_ORDER: Record<DetailKind, number> = {
   task: 2,
   followup: 3,
   opportunity: 4,
+  bid: 5,
 };
 
 /** Oldest date first (no date last), then kind, then title. */
@@ -548,7 +558,7 @@ export function detailGroups(
   const due: DetailItem[] = [];
   const late: DetailItem[] = [];
   for (const it of items) {
-    if (it.assigneeId !== userId) continue;
+    if (it.assigneeId !== userId || it.kind === OWNER_VIEW_SKIPS_KIND) continue;
     const b = bucketOf(it, today);
     if (b === "today") due.push(it);
     else if (b === "overdue") late.push(it);

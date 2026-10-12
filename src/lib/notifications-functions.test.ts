@@ -235,6 +235,7 @@ describe("the shared helpers", () => {
     expect(kindLabel("task")).toBe("Task");
     expect(kindLabel("task_today")).toBe("Task");
     expect(kindLabel("task_overdue")).toBe("Task");
+    expect(kindLabel("bid_due")).toBe("Bid due"); // "Bid due tomorrow" (owner, Oct 12)
     expect(kindLabel("storm")).toBe("Storm");
     expect(kindLabel("lead")).toBe("Lead");
     expect(kindLabel("reassigned")).toBe("Reassigned");
@@ -243,7 +244,7 @@ describe("the shared helpers", () => {
     expect(kindLabel("test")).toBe("Other");
     expect(kindLabel("")).toBe("Other");
     expect(kindLabel(null)).toBe("Other");
-    expect(new Set(Object.values(KIND_LABELS)).size).toBe(12);
+    expect(new Set(Object.values(KIND_LABELS)).size).toBe(13);
   });
   it("chips: one per label present, in the owner's order, carrying the raw kinds", () => {
     expect(
